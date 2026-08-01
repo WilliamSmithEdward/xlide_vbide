@@ -191,6 +191,20 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial nint GetParent(nint window);
 
+    /// <summary>
+    /// State of a key at the point the message being processed was posted, which is what a key
+    /// handler needs: asking for the state now would report where the modifier is by the time the
+    /// message is dealt with, not where it was when the key was struck.
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    public static partial short GetKeyState(int key);
+
+    public const int VkShift = 0x10;
+    public const int VkControl = 0x11;
+
+    /// <summary>Mask for the high-order bit of a key state, which is set while the key is down.</summary>
+    public const short KeyDownMask = unchecked((short)0x8000);
+
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);
 

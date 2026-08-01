@@ -161,15 +161,20 @@ internal sealed class AddInSession : IDisposable
                 return;
             }
 
-            // The surface goes in beside the pane, as a child of whatever the pane's own parent is.
+            // The surface is a peer of the document area, not of the documents inside it.
             //
-            // That parent is the editor's document area, and being inside it is what keeps the
-            // surface off everything that is not a code pane: the window manager clips a child to
-            // its parent, so the toolbars, the docked panels and the splitters between them cannot
-            // be covered however wrong the rectangle is. Parenting to the frame instead made the
-            // surface a sibling of the toolbars, which is exactly what it then drew over.
-            var host = Win32.GetParent(pane.Window);
-            if (host == 0)
+            // Put among the panes, it was a sibling of them, and the editor raises a pane whenever
+            // it activates one. That happens before anything can react, so switching module showed
+            // the pane being activated, scrollbars and all, until the surface was raised again. It
+            // is a race that cannot be won from the outside: the editor is always first.
+            //
+            // A child of the frame is not in that fight at all. Activating a pane reorders the
+            // document area's children and leaves the frame's children alone, so nothing ever comes
+            // between the surface and the panes it covers. It is positioned on the document area's
+            // rectangle, so it still covers exactly that and nothing else.
+            var documentArea = Win32.GetParent(pane.Window);
+            var host = Win32.GetAncestor(pane.Window, Win32.GaRoot);
+            if (documentArea == 0 || host == 0)
             {
                 return;
             }
@@ -183,24 +188,23 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface = null;
             }
 
-            _editorSurface ??= EditorSurface.Create(host, default);
             if (_editorSurface is null)
             {
-                return;
+                _editorSurface = EditorSurface.Create(host, default);
+                if (_editorSurface is null)
+                {
+                    return;
+                }
+
+                _editorSurface.KeyPressed = OnSurfaceKey;
             }
 
-            // The surface covers the whole document area, not the rectangle of one pane.
-            //
-            // Sizing it to a pane meant it had to be moved and re-raised every time the editor
-            // activated a different one, and the editor paints the pane it is activating before any
-            // of that can happen. The result was the old pane flashing into view on every module
-            // switch, and a surface that could be left underneath whatever had just been raised.
-            // Covering the area once removes both: switching modules becomes a message to a surface
-            // that never moved and was never uncovered.
+            // The surface covers the whole document area, not the rectangle of one pane. Switching
+            // module is then a message to a surface that never moved and was never uncovered.
             //
             // The native panes keep running underneath, unchanged and never seen. They remain the
             // text of record, the compile target, and what the debugger drives.
-            _editorSurface.Follow(ClientBounds(host), visible: true);
+            _editorSurface.Follow(ClientAreaIn(documentArea, host), visible: true);
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
@@ -210,6 +214,57 @@ internal sealed class AddInSession : IDisposable
         catch (Exception ex)
         {
             Log.Error("editor surface: could not follow the active pane", ex);
+        }
+    }
+
+    /// <summary>
+    /// Handles a key the editor owns, pressed while the surface has focus.
+    ///
+    /// The surface covers the pane the editor would have received these through, so without this
+    /// they stop working: F5 no longer runs anything, and the browser underneath treats it as a
+    /// request to reload the page, which throws away the document the developer is editing.
+    ///
+    /// A recognised key is always claimed, whether or not the command it names could run. Passing
+    /// an unavailable F5 on to the document would reload it, which is a worse answer than nothing
+    /// happening.
+    /// </summary>
+    private bool OnSurfaceKey(uint virtualKey)
+    {
+        var shift = (Win32.GetKeyState(Win32.VkShift) & Win32.KeyDownMask) != 0;
+        var control = (Win32.GetKeyState(Win32.VkControl) & Win32.KeyDownMask) != 0;
+
+        var command = VbeCommands.ForKey(virtualKey, shift, control);
+        if (command == 0)
+        {
+            return false;
+        }
+
+        // The editor runs the procedure its own caret is in, and steps and breakpoints all act on
+        // the line its own caret is on. The developer's caret is in the surface, so the two are put
+        // back in step here, at the one moment it matters.
+        SyncCaretToPane();
+
+        VbeCommands.Execute(_editor, command);
+        return true;
+    }
+
+    /// <summary>Puts the native pane's caret where the surface's caret is.</summary>
+    private void SyncCaretToPane()
+    {
+        var surface = _editorSurface;
+        if (surface?.Module is not { } module)
+        {
+            return;
+        }
+
+        try
+        {
+            using var pane = FindCodePane(module);
+            pane?.Invoke("SetSelection", surface.CaretLine, surface.CaretColumn, surface.CaretLine, surface.CaretColumn);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"caret: could not be moved to {module}({surface.CaretLine},{surface.CaretColumn})", ex);
         }
     }
 
@@ -310,19 +365,42 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// A window's client area, in the coordinates a child of it is positioned in.
+    /// One window's client area expressed in another's client coordinates, which is the space a
+    /// child of the second is positioned in.
     ///
-    /// A client rectangle always starts at the origin, so this needs no conversion and carries no
-    /// assumption about borders, captions, or scaling. An earlier version worked the origin out
-    /// from the window and client rectangles and placed the surface a toolbar's height too high,
-    /// which is what put it over the toolbar.
+    /// The window manager does the mapping. Working the origin out from window and client
+    /// rectangles means assuming symmetric borders and that nothing but a caption and a menu sits
+    /// above the client area, and each of those is wrong somewhere: maximised windows,
+    /// right-to-left layouts, and per-monitor scaling break a different one. The arithmetic version
+    /// of this put the surface a toolbar's height too high, which is how it came to cover the
+    /// toolbar.
     /// </summary>
-    private static unsafe PixelRect ClientBounds(nint window)
+    private static unsafe PixelRect ClientAreaIn(nint window, nint target)
     {
         Rect client;
-        return Win32.GetClientRect(window, &client)
-            ? new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top)
-            : default;
+        if (!Win32.GetClientRect(window, &client))
+        {
+            return default;
+        }
+
+        var corners = stackalloc Point[2];
+        corners[0] = new Point { X = client.Left, Y = client.Top };
+        corners[1] = new Point { X = client.Right, Y = client.Bottom };
+
+        // The call reports a failure and a legitimate zero shift identically, so the last error is
+        // cleared first and consulted only when it returns zero.
+        Marshal.SetLastSystemError(0);
+        if (Win32.MapWindowPoints(window, target, corners, 2) == 0 && Marshal.GetLastSystemError() != 0)
+        {
+            return default;
+        }
+
+        // Normalised, because a right-to-left parent mirrors the mapping and swaps the corners.
+        return new PixelRect(
+            Math.Min(corners[0].X, corners[1].X),
+            Math.Min(corners[0].Y, corners[1].Y),
+            Math.Max(corners[0].X, corners[1].X),
+            Math.Max(corners[0].Y, corners[1].Y));
     }
 
     /// <summary>Height the panel asks for, in the units the editor's layout uses.</summary>

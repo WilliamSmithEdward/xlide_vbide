@@ -177,6 +177,26 @@ internal sealed unsafe class DispatchObject : IDisposable
         return FromVariant(value);
     }
 
+    /// <summary>Calls a method that takes numbers and returns another automation object.</summary>
+    public DispatchObject? CallObject(string name, params ReadOnlySpan<int> arguments)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        // Numbers own nothing, so there is nothing to release per argument.
+        var variants = new ComVariant[arguments.Length];
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            variants[i] = ComVariant.Create(arguments[i]);
+        }
+
+        using var value = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, variants);
+        return FromVariant(value);
+    }
+
     /// <summary>Calls a method that returns nothing and takes no arguments.</summary>
     public void Invoke(string name)
     {

@@ -41,8 +41,10 @@ internal sealed class WebView2Surface : IDisposable
     private ControllerCompletedHandler? _controllerHandler;
     private NavigationCompletedHandler? _navigationHandler;
     private WebMessageReceivedHandler? _messageHandler;
+    private AcceleratorKeyPressedHandler? _acceleratorHandler;
     private EventRegistrationToken _navigationCompletedToken;
     private EventRegistrationToken _webMessageReceivedToken;
+    private EventRegistrationToken _acceleratorKeyPressedToken;
 
     private PixelRect _bounds;
     private bool _disposed;
@@ -79,6 +81,12 @@ internal sealed class WebView2Surface : IDisposable
     /// browser's own callback, so the handler does only enough work to hand the message on.
     /// </summary>
     public Action<string>? MessageReceived { get; set; }
+
+    /// <summary>
+    /// Asked about each accelerator key before the page sees it. Return true to claim the key, which
+    /// stops the document acting on it as well.
+    /// </summary>
+    public Func<uint, bool>? AcceleratorPressed { get; set; }
 
     /// <summary>Sizes the browser to the window's client area.</summary>
     public void SetBounds(PixelRect bounds)
@@ -370,7 +378,74 @@ internal sealed class WebView2Surface : IDisposable
 
         SubscribeNavigationCompleted();
         SubscribeWebMessageReceived();
+        SubscribeAcceleratorKeyPressed();
         Navigate();
+    }
+
+    /// <summary>
+    /// Subscribes to accelerator keys. This is on the controller rather than the content surface,
+    /// because it is about the browser's place in the host's keyboard handling rather than about
+    /// the document.
+    /// </summary>
+    private void SubscribeAcceleratorKeyPressed()
+    {
+        var controller = _controller;
+        if (controller is null)
+        {
+            return;
+        }
+
+        _acceleratorHandler = new AcceleratorKeyPressedHandler(OnAcceleratorKeyPressed);
+        var callback = CreateCallback(_acceleratorHandler, WebViewIid.AcceleratorKeyPressedHandler);
+        if (callback == 0)
+        {
+            Log.Error("webview: could not expose the accelerator callback to the browser");
+            return;
+        }
+
+        try
+        {
+            var hr = controller.Target.AddAcceleratorKeyPressed(callback, out _acceleratorKeyPressedToken);
+            if (hr < 0)
+            {
+                Log.Error($"webview: add_AcceleratorKeyPressed returned 0x{hr:X8}");
+            }
+        }
+        finally
+        {
+            Marshal.Release(callback);
+        }
+    }
+
+    private void OnAcceleratorKeyPressed(nint sender, nint argsPointer)
+    {
+        var handler = AcceleratorPressed;
+        if (handler is null)
+        {
+            return;
+        }
+
+        using var args = ComHandle<ICoreWebView2AcceleratorKeyPressedEventArgs>.Borrow(argsPointer);
+        if (args is null)
+        {
+            return;
+        }
+
+        // Key down only. Every key raises this twice, and acting on both runs the command twice.
+        if (args.Target.GetKeyEventKind(out var kind) < 0 || kind != KeyEventKind.KeyDown)
+        {
+            return;
+        }
+
+        if (args.Target.GetVirtualKey(out var key) < 0)
+        {
+            return;
+        }
+
+        if (handler(key))
+        {
+            args.Target.PutHandled(1);
+        }
     }
 
     private void SubscribeNavigationCompleted()
@@ -700,6 +775,13 @@ internal sealed class WebView2Surface : IDisposable
 
         _disposed = true;
         MessageReceived = null;
+        AcceleratorPressed = null;
+
+        if (_controller is not null && _acceleratorKeyPressedToken.Value != 0)
+        {
+            _controller.Target.RemoveAcceleratorKeyPressed(_acceleratorKeyPressedToken);
+            _acceleratorKeyPressedToken = default;
+        }
 
         // Subscriptions come off first, while the objects they were made against are still alive.
         var view = _webView;
@@ -736,7 +818,17 @@ internal sealed class WebView2Surface : IDisposable
         _controllerHandler = null;
         _navigationHandler = null;
         _messageHandler = null;
+        _acceleratorHandler = null;
     }
+}
+
+/// <summary>Which half of a keystroke the browser is reporting.</summary>
+internal static class KeyEventKind
+{
+    public const int KeyDown = 0;
+    public const int KeyUp = 1;
+    public const int SystemKeyDown = 2;
+    public const int SystemKeyUp = 3;
 }
 
 /// <summary>Receives the environment once the loader has created it.</summary>
@@ -802,6 +894,29 @@ internal sealed partial class NavigationCompletedHandler : ICoreWebView2Navigati
         catch (Exception ex)
         {
             Log.Error("webview: the navigation callback failed", ex);
+        }
+
+        return HResult.Ok;
+    }
+}
+
+/// <summary>Delivers each accelerator key before the page sees it.</summary>
+[GeneratedComClass]
+internal sealed partial class AcceleratorKeyPressedHandler : ICoreWebView2AcceleratorKeyPressedEventHandler
+{
+    private readonly Action<nint, nint> _pressed;
+
+    public AcceleratorKeyPressedHandler(Action<nint, nint> pressed) => _pressed = pressed;
+
+    public int Invoke(nint sender, nint args)
+    {
+        try
+        {
+            _pressed(sender, args);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("webview: the accelerator callback failed", ex);
         }
 
         return HResult.Ok;

@@ -535,6 +535,62 @@ internal partial interface ICoreWebView2WebMessageReceivedEventArgs
     int TryGetWebMessageAsString(out nint text);
 }
 
+/// <summary>
+/// A key the browser treats as an accelerator: function keys, and anything with a modifier.
+///
+/// The browser raises this before the page sees the key, which is what makes it usable for
+/// commands that belong to the host rather than to the document. A page that has taken focus
+/// otherwise swallows every one of them, and the host's own keyboard shortcuts stop working for as
+/// long as the user is typing in it.
+/// </summary>
+[GeneratedComInterface]
+[Guid("9f760f8a-fb79-42be-9990-7b56900fa9c7")]
+internal partial interface ICoreWebView2AcceleratorKeyPressedEventArgs
+{
+    [PreserveSig]
+    int GetKeyEventKind(out int keyEventKind);
+
+    [PreserveSig]
+    int GetVirtualKey(out uint virtualKey);
+
+    [PreserveSig]
+    int GetKeyEventLParam(out int lParam);
+
+    [PreserveSig]
+    int GetPhysicalKeyStatus(out PhysicalKeyStatus status);
+
+    [PreserveSig]
+    int GetHandled(out int handled);
+
+    /// <summary>
+    /// Marks the key as dealt with, which stops the browser passing it on to the page. Set for
+    /// every key the host claims, or the document acts on it as well.
+    /// </summary>
+    [PreserveSig]
+    int PutHandled(int handled);
+}
+
+/// <summary>Callback raised for each accelerator key.</summary>
+[GeneratedComInterface]
+[Guid("b29c7e28-fa79-41a8-8e44-65811c76dcb2")]
+internal partial interface ICoreWebView2AcceleratorKeyPressedEventHandler
+{
+    [PreserveSig]
+    int Invoke(nint sender, nint args);
+}
+
+/// <summary>Win32 key state as the browser reports it. Layout matches the API exactly.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct PhysicalKeyStatus
+{
+    public uint RepeatCount;
+    public uint ScanCode;
+    public int IsExtendedKey;
+    public int IsMenuKeyDown;
+    public int WasKeyDown;
+    public int IsKeyReleased;
+}
+
 /// <summary>Callback raised for each message the page posts.</summary>
 [GeneratedComInterface]
 [Guid("57213f19-00e6-49fa-8e07-898ea01ecbd2")]
@@ -551,6 +607,8 @@ internal static class WebViewIid
     public static readonly Guid ControllerCompletedHandler = new("6c4819f3-c9b7-4260-8127-c9f5bde7f68c");
     public static readonly Guid NavigationCompletedHandler = new("d33a35bf-1c49-4f98-93ab-006e0533fe1c");
     public static readonly Guid NavigationCompletedEventArgs = new("30d68b7d-20d9-4752-a9ca-ec8448fbb5c1");
+    public static readonly Guid AcceleratorKeyPressedHandler = new("b29c7e28-fa79-41a8-8e44-65811c76dcb2");
+    public static readonly Guid AcceleratorKeyPressedEventArgs = new("9f760f8a-fb79-42be-9990-7b56900fa9c7");
     public static readonly Guid WebMessageReceivedHandler = new("57213f19-00e6-49fa-8e07-898ea01ecbd2");
     public static readonly Guid WebMessageReceivedEventArgs = new("0f99a40c-e962-4207-9e92-e3d542eff849");
     public static readonly Guid Environment = new("b96d755e-0319-4e92-a296-23436f46a1fc");

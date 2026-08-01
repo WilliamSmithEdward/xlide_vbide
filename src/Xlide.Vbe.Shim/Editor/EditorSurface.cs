@@ -52,6 +52,24 @@ internal sealed class EditorSurface : IDisposable
     public Action<string, string>? TextChanged { get; set; }
 
     /// <summary>
+    /// Asked about each key the editor might own, before the document sees it. Return true to
+    /// claim it.
+    /// </summary>
+    public Func<uint, bool>? KeyPressed { get; set; }
+
+    /// <summary>
+    /// Where the caret is in the surface, one-based.
+    ///
+    /// Kept here rather than pushed into the editor as it moves. The editor's own caret only has to
+    /// agree at the moment something reads it, which is when a command runs, and moving it on every
+    /// cursor movement would put an automation call on the path of every arrow key.
+    /// </summary>
+    public int CaretLine { get; private set; } = 1;
+
+    /// <summary>Caret column in the surface, one-based.</summary>
+    public int CaretColumn { get; private set; } = 1;
+
+    /// <summary>
     /// Creates the surface over the editor frame. Returns null when the editing bundle is not
     /// present, which is an ordinary state: the add-in works without it and shows the native pane.
     /// </summary>
@@ -95,6 +113,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         surface._browser.MessageReceived = surface.OnMessage;
+        surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
 
         Log.Info($"editor surface: created, serving from {root}");
         return surface;
@@ -193,6 +212,19 @@ internal sealed class EditorSurface : IDisposable
                     _loaded = true;
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
                     Flush();
+                    break;
+
+                case "selectionChanged":
+                    if (document.RootElement.TryGetProperty("startLine", out var line)
+                        && line.TryGetInt32(out var caretLine))
+                    {
+                        CaretLine = caretLine;
+                        CaretColumn = document.RootElement.TryGetProperty("startColumn", out var column)
+                            && column.TryGetInt32(out var caretColumn)
+                            ? caretColumn
+                            : 1;
+                    }
+
                     break;
 
                 case "contentChanged":
