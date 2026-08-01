@@ -15,6 +15,10 @@ namespace Xlide.Vbe.Shim.WebView;
 /// Both callbacks come back on the thread that started the work, which is the host user interface
 /// thread, delivered through the message loop Excel is already running. Nothing here may block
 /// waiting for them, because the loop that delivers them is the loop that would be blocked.
+///
+/// Everything on this type runs on that one thread, including the message callbacks. There is no
+/// synchronisation here and none is wanted: an apartment-bound object protected by a lock hides
+/// the fact that a call from another thread was already wrong before the lock was reached.
 /// </summary>
 internal sealed class WebView2Surface : IDisposable
 {
@@ -26,10 +30,19 @@ internal sealed class WebView2Surface : IDisposable
     private ComHandle<ICoreWebView2Controller>? _controller;
     private ComHandle<ICoreWebView2>? _webView;
 
+    /// <summary>
+    /// The same content surface asked for a later revision of its interface, or null on a runtime
+    /// that predates it. Everything the shell document does not need goes through this: the folder
+    /// mapping and the message channel both arrived after the first revision.
+    /// </summary>
+    private ComHandle<ICoreWebView2_3>? _view;
+
     private EnvironmentCompletedHandler? _environmentHandler;
     private ControllerCompletedHandler? _controllerHandler;
     private NavigationCompletedHandler? _navigationHandler;
+    private WebMessageReceivedHandler? _messageHandler;
     private EventRegistrationToken _navigationCompletedToken;
+    private EventRegistrationToken _webMessageReceivedToken;
 
     private PixelRect _bounds;
     private bool _disposed;
@@ -55,6 +68,13 @@ internal sealed class WebView2Surface : IDisposable
         return surface.BeginEnvironment() ? surface : null;
     }
 
+    /// <summary>
+    /// Raised with the text of each message the page posts through
+    /// window.chrome.webview.postMessage. Invoked on the host user interface thread, inside the
+    /// browser's own callback, so the handler does only enough work to hand the message on.
+    /// </summary>
+    public Action<string>? MessageReceived { get; set; }
+
     /// <summary>Sizes the browser to the window's client area.</summary>
     public void SetBounds(PixelRect bounds)
     {
@@ -79,6 +99,100 @@ internal sealed class WebView2Surface : IDisposable
 
     /// <summary>Gives keyboard focus to the browser.</summary>
     public void Focus() => _controller?.Target.MoveFocus(MoveFocusReason.Programmatic);
+
+    /// <summary>
+    /// Serves <paramref name="folderPath"/> under <paramref name="hostName"/>, so its contents are
+    /// reachable at https://hostName/... inside this browser and nowhere else.
+    ///
+    /// The access kind is DENY_CORS rather than ALLOW. Both serve the folder to the document loaded
+    /// from the mapped host; ALLOW additionally serves it to requests from any other origin the
+    /// browser ever loads, which would make a directory inside the install readable by an arbitrary
+    /// page. Nothing the editor surface does needs that.
+    ///
+    /// The mapping is a property of the content surface and survives navigation, so it is set once
+    /// rather than before each navigation.
+    /// </summary>
+    /// <returns>False when the runtime is too old to map folders, or when the browser refused.</returns>
+    public bool SetContentRoot(string hostName, string folderPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+
+        var view = _view;
+        if (view is null)
+        {
+            Log.Warn($"webview: cannot map {hostName}, this runtime has no folder mapping");
+            return false;
+        }
+
+        var hr = view.Target.SetVirtualHostNameToFolderMapping(hostName, folderPath, HostResourceAccessKind.DenyCors);
+        if (hr < 0)
+        {
+            Log.Error($"webview: SetVirtualHostNameToFolderMapping({hostName}) returned 0x{hr:X8}");
+            return false;
+        }
+
+        Log.Info($"webview: {hostName} maps to {folderPath}");
+        return true;
+    }
+
+    /// <summary>Navigates the surface to an address.</summary>
+    /// <returns>False when the browser is not up yet, or when it refused the address.</returns>
+    public bool NavigateToUrl(string url)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(url);
+
+        var view = _view;
+        if (view is null)
+        {
+            Log.Warn($"webview: cannot navigate to {url}, no content surface");
+            return false;
+        }
+
+        var hr = view.Target.Navigate(url);
+        if (hr < 0)
+        {
+            Log.Error($"webview: Navigate({url}) returned 0x{hr:X8}");
+            return false;
+        }
+
+        Log.Info($"webview: navigating to {url}");
+        return true;
+    }
+
+    /// <summary>
+    /// Posts a message to the page, where it arrives as the data of a message event on
+    /// window.chrome.webview.
+    ///
+    /// Sent as a string, not as JSON, which is what makes the channel symmetric: the page posts
+    /// text and receives text, and the JSON lives inside that text in both directions. Posting as
+    /// JSON would deliver a parsed object one way and a string the other, and would also fail the
+    /// call outright on malformed input rather than letting the far side reject it.
+    ///
+    /// Nothing is queued. A message posted before the page exists is discarded by the browser, so
+    /// callers post in response to something the page did.
+    /// </summary>
+    /// <returns>False when the browser is not up yet, or when it refused the message.</returns>
+    public bool PostMessage(string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        var view = _view;
+        if (view is null)
+        {
+            Log.Warn("webview: a message was posted before the content surface existed, discarding it");
+            return false;
+        }
+
+        var hr = view.Target.PostWebMessageAsString(json);
+        if (hr < 0)
+        {
+            Log.Error($"webview: PostWebMessageAsString returned 0x{hr:X8}");
+            return false;
+        }
+
+        return true;
+    }
 
     private bool BeginEnvironment()
     {
@@ -232,7 +346,19 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
+        // The later revision is asked for once and kept. A runtime that predates it refuses the
+        // query, which is not a failure: the shell document still renders, and the two things that
+        // interface carries are the two things the shell document does not use.
+        _view = _webView.As<ICoreWebView2_3>(WebViewIid.WebView3);
+        if (_view is null)
+        {
+            Log.Warn(
+                "webview: this runtime is older than the folder mapping and the message channel, " +
+                "so the editor bundle cannot be served and the page cannot talk to the shim");
+        }
+
         SubscribeNavigationCompleted();
+        SubscribeWebMessageReceived();
         Navigate();
     }
 
@@ -261,7 +387,101 @@ internal sealed class WebView2Surface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Subscribes to messages from the page. The event sits past the point the first revision of
+    /// the view interface is declared to, so this needs the later one and does nothing without it.
+    /// </summary>
+    private void SubscribeWebMessageReceived()
+    {
+        var view = _view;
+        if (view is null)
+        {
+            return;
+        }
+
+        _messageHandler = new WebMessageReceivedHandler(OnWebMessageReceived);
+        var callback = CreateCallback(_messageHandler, WebViewIid.WebMessageReceivedHandler);
+        if (callback == 0)
+        {
+            Log.Error("webview: could not expose the message callback to the browser");
+            return;
+        }
+
+        try
+        {
+            var hr = view.Target.AddWebMessageReceived(callback, out _webMessageReceivedToken);
+            if (hr < 0)
+            {
+                Log.Error($"webview: add_WebMessageReceived returned 0x{hr:X8}");
+                return;
+            }
+
+            Log.Info("webview: listening for messages from the page");
+        }
+        finally
+        {
+            // The browser holds its own reference for as long as the subscription lasts.
+            Marshal.Release(callback);
+        }
+    }
+
+    /// <summary>
+    /// Sends the surface to whichever of the two documents is actually installed, and says which.
+    /// The editor bundle is built by a separate project and is legitimately absent from a working
+    /// tree that has not produced it yet; the shell document is what keeps the pane diagnosable
+    /// until it appears.
+    /// </summary>
     private void Navigate()
+    {
+        if (NavigateToEditorBundle())
+        {
+            return;
+        }
+
+        NavigateToShellDocument();
+    }
+
+    private bool NavigateToEditorBundle()
+    {
+        if (_view is null)
+        {
+            Log.Info("webview: no folder mapping on this runtime, using the shell document");
+            return false;
+        }
+
+        var directory = ShimModule.Directory;
+        if (directory is null)
+        {
+            return false;
+        }
+
+        var entry = WebViewPaths.EditorEntryDocument(directory);
+        if (!File.Exists(entry))
+        {
+            Log.Info($"webview: no editor bundle at {entry}, using the shell document");
+            return false;
+        }
+
+        // The mapping has to be in place before the navigation, not after: the address only
+        // resolves because of it.
+        if (!SetContentRoot(WebViewPaths.EditorHostName, WebViewPaths.EditorContentRoot(directory)))
+        {
+            return false;
+        }
+
+        if (!NavigateToUrl(WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName)))
+        {
+            // The mapping outlives a failed navigation and would shadow the host name for anything
+            // that came later, so it is taken back rather than left behind.
+            _view.Target.ClearVirtualHostNameToFolderMapping(WebViewPaths.EditorHostName);
+            return false;
+        }
+
+        Log.Info("webview: serving the editor bundle");
+        return true;
+    }
+
+    private void NavigateToShellDocument()
     {
         var view = _webView;
         if (view is null)
@@ -271,9 +491,8 @@ internal sealed class WebView2Surface : IDisposable
 
         var document = LoadShellDocument();
 
-        // The document is pushed rather than fetched. A file URL would put the surface in an origin
-        // that blocks module scripts and storage, which the real editor surface needs; the surface
-        // will move to a virtual host name mapped to the UI directory when it does.
+        // This document is pushed rather than fetched. It has no bundle to be served alongside, and
+        // a file URL would put it in an origin that blocks module scripts and storage.
         var hr = view.Target.NavigateToString(document);
         if (hr < 0)
         {
@@ -281,7 +500,7 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
-        Log.Info("webview: navigation started");
+        Log.Info("webview: navigation started, showing the shell document");
     }
 
     private void OnNavigationCompleted(nint sender, nint argsPointer)
@@ -302,6 +521,39 @@ internal sealed class WebView2Surface : IDisposable
 
         args.Target.GetWebErrorStatus(out var status);
         Log.Error($"webview: navigation failed with web error status {status}");
+    }
+
+    private void OnWebMessageReceived(nint sender, nint argsPointer)
+    {
+        using var args = ComHandle<ICoreWebView2WebMessageReceivedEventArgs>.Borrow(argsPointer);
+        if (args is null)
+        {
+            Log.Error("webview: a page message arrived without arguments");
+            return;
+        }
+
+        var message = ReadMessage(args.Target);
+        if (message is null)
+        {
+            Log.Error("webview: a page message could not be read as text");
+            return;
+        }
+
+        MessageReceived?.Invoke(message);
+    }
+
+    /// <summary>
+    /// Reads a message as text whichever way the page posted it. A posted string comes back from
+    /// the first call; a posted object fails it and is only available as its JSON form.
+    /// </summary>
+    private static string? ReadMessage(ICoreWebView2WebMessageReceivedEventArgs args)
+    {
+        if (args.TryGetWebMessageAsString(out var text) >= 0 && text != 0)
+        {
+            return TakeString(text);
+        }
+
+        return args.GetWebMessageAsJson(out var json) >= 0 && json != 0 ? TakeString(json) : null;
     }
 
     private string LoadShellDocument()
@@ -334,19 +586,29 @@ internal sealed class WebView2Surface : IDisposable
     private string? ReadBrowserVersion()
     {
         var environment = _environment;
-        if (environment is null || environment.Target.GetBrowserVersionString(out var text) < 0 || text == 0)
-        {
-            return null;
-        }
+        return environment is not null
+            && environment.Target.GetBrowserVersionString(out var text) >= 0
+            && text != 0
+            ? TakeString(text)
+            : null;
+    }
 
+    /// <summary>
+    /// Copies a string the browser returned and frees the original.
+    ///
+    /// Every string handed back through an out parameter here is allocated with the task allocator
+    /// and owned by the caller. Nothing else frees it, and one leaked per message would be a leak
+    /// for the life of the host process.
+    /// </summary>
+    private static string? TakeString(nint value)
+    {
         try
         {
-            return Marshal.PtrToStringUni(text);
+            return Marshal.PtrToStringUni(value);
         }
         finally
         {
-            // The string is allocated by the browser with the task allocator and owned by us.
-            Marshal.FreeCoTaskMem(text);
+            Marshal.FreeCoTaskMem(value);
         }
     }
 
@@ -408,7 +670,9 @@ internal sealed class WebView2Surface : IDisposable
         }
 
         _disposed = true;
+        MessageReceived = null;
 
+        // Subscriptions come off first, while the objects they were made against are still alive.
         var view = _webView;
         if (view is not null && _navigationCompletedToken.Value != 0)
         {
@@ -416,9 +680,19 @@ internal sealed class WebView2Surface : IDisposable
             _navigationCompletedToken = default;
         }
 
+        if (_view is not null && _webMessageReceivedToken.Value != 0)
+        {
+            _view.Target.RemoveWebMessageReceived(_webMessageReceivedToken);
+            _webMessageReceivedToken = default;
+        }
+
         // Closing the controller is what actually tears down the browser processes. Releasing the
         // references alone would leave them running until the host exits.
         _controller?.Target.Close();
+
+        // Its own reference, taken by the query that produced it, and released here exactly once.
+        _view?.Dispose();
+        _view = null;
 
         _webView?.Dispose();
         _webView = null;
@@ -432,6 +706,7 @@ internal sealed class WebView2Surface : IDisposable
         _environmentHandler = null;
         _controllerHandler = null;
         _navigationHandler = null;
+        _messageHandler = null;
     }
 }
 
@@ -498,6 +773,32 @@ internal sealed partial class NavigationCompletedHandler : ICoreWebView2Navigati
         catch (Exception ex)
         {
             Log.Error("webview: the navigation callback failed", ex);
+        }
+
+        return HResult.Ok;
+    }
+}
+
+/// <summary>
+/// Delivers each message the page posts. The browser calls this on the host user interface thread
+/// and treats a failure as the page's problem, so the exception never gets past here.
+/// </summary>
+[GeneratedComClass]
+internal sealed partial class WebMessageReceivedHandler : ICoreWebView2WebMessageReceivedEventHandler
+{
+    private readonly Action<nint, nint> _received;
+
+    public WebMessageReceivedHandler(Action<nint, nint> received) => _received = received;
+
+    public int Invoke(nint sender, nint args)
+    {
+        try
+        {
+            _received(sender, args);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("webview: the message callback failed", ex);
         }
 
         return HResult.Ok;

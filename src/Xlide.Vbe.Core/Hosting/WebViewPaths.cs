@@ -27,6 +27,27 @@ public static class WebViewPaths
     public const string ShellDocumentRelativePath = @"ui\shell\index.html";
 
     /// <summary>
+    /// Virtual host name the editor bundle is served from.
+    ///
+    /// The name is mapped inside one browser instance and resolves nowhere else, so it must be one
+    /// that can never become a real address. The .local suffix is reserved for link-local name
+    /// resolution and is not registrable, which makes a collision with something the user's network
+    /// or the public namespace owns impossible rather than unlikely.
+    /// </summary>
+    public const string EditorHostName = "xlide.local";
+
+    /// <summary>Path of the editor bundle relative to the shim directory.</summary>
+    /// <remarks>
+    /// The bundle is a build output of the editor project, deployed beside the shim the same way
+    /// the shell document is. It is absent from a working tree that has not built it, which is why
+    /// every caller checks before mapping it.
+    /// </remarks>
+    public const string EditorContentRelativePath = @"ui\editor\dist";
+
+    /// <summary>Document the editor bundle is entered through.</summary>
+    public const string EditorEntryFileName = "index.html";
+
+    /// <summary>
     /// Browser profile directory for the current user. Derived from the local application data
     /// path rather than read from the environment so it can be asserted in a test.
     /// </summary>
@@ -51,5 +72,42 @@ public static class WebViewPaths
         ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
 
         return Path.Combine(shimDirectory, ShellDocumentRelativePath);
+    }
+
+    /// <summary>
+    /// Folder mapped to the virtual host name. This is a directory, not a file: the mapping serves
+    /// everything under it, so it is the whole bundle rather than its entry document.
+    /// </summary>
+    public static string EditorContentRoot(string shimDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
+
+        return Path.Combine(shimDirectory, EditorContentRelativePath);
+    }
+
+    /// <summary>
+    /// Full path of the editor's entry document. Its presence is what decides whether the bundle
+    /// is worth mapping: mapping a folder that is not there succeeds and produces a blank pane on
+    /// navigation instead of a diagnosable failure.
+    /// </summary>
+    public static string EditorEntryDocument(string shimDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
+
+        return Path.Combine(EditorContentRoot(shimDirectory), EditorEntryFileName);
+    }
+
+    /// <summary>
+    /// Address the mapped bundle is entered through.
+    ///
+    /// The scheme is HTTPS rather than file, and that is the entire point of the mapping. A file
+    /// URL is an opaque origin: module scripts, storage, and fetch are all refused there. A mapped
+    /// host name gives a normal secure origin, so the bundle behaves the way it does in a browser.
+    /// </summary>
+    public static string EditorEntryUrl(string hostName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostName);
+
+        return $"https://{hostName}/{EditorEntryFileName}";
     }
 }

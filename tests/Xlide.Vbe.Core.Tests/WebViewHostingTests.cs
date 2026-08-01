@@ -58,6 +58,95 @@ public class WebViewPathsTests
         Assert.Throws<ArgumentException>(() => WebViewPaths.LoaderLibrary("  "));
         Assert.Throws<ArgumentException>(() => WebViewPaths.ShellDocument("  "));
         Assert.Throws<ArgumentException>(() => WebViewPaths.UserDataFolder("  "));
+        Assert.Throws<ArgumentException>(() => WebViewPaths.EditorContentRoot("  "));
+        Assert.Throws<ArgumentException>(() => WebViewPaths.EditorEntryDocument("  "));
+        Assert.Throws<ArgumentException>(() => WebViewPaths.EditorEntryUrl("  "));
+    }
+}
+
+/// <summary>
+/// The editor bundle is served from a folder mapped to a virtual host name rather than pushed as a
+/// string or opened through a file URL. What that mapping needs is a directory, an entry document
+/// to prove the directory is worth mapping, and an address that agrees with the host name.
+/// </summary>
+public class EditorContentRootTests
+{
+    private const string ShimDirectory = @"C:\Program Files\xlide";
+
+    [Fact]
+    public void TheContentRootIsExpectedBesideTheShim()
+    {
+        // Beside the shim, not beside the host executable: that directory is Office's.
+        Assert.Equal(@"C:\Program Files\xlide\ui\editor\dist", WebViewPaths.EditorContentRoot(ShimDirectory));
+    }
+
+    [Fact]
+    public void TheContentRootIsAFolderAndTheEntryDocumentSitsInsideIt()
+    {
+        // The mapping serves a directory. Handing it the entry document would map a path that is
+        // not a folder, which succeeds and then serves nothing.
+        var root = WebViewPaths.EditorContentRoot(ShimDirectory);
+        var entry = WebViewPaths.EditorEntryDocument(ShimDirectory);
+
+        Assert.Equal(Path.Combine(root, WebViewPaths.EditorEntryFileName), entry);
+        Assert.Equal(root, Path.GetDirectoryName(entry));
+    }
+
+    [Fact]
+    public void TheEntryDocumentIsTheFileWhosePresenceDecidesWhichSurfaceLoads()
+    {
+        Assert.Equal(@"C:\Program Files\xlide\ui\editor\dist\index.html", WebViewPaths.EditorEntryDocument(ShimDirectory));
+    }
+
+    [Fact]
+    public void TheContentRootIsSeparateFromTheShellDocument()
+    {
+        // The shell document is the fallback for an install where the bundle never shipped. If the
+        // two shared a directory, a partial install would serve one as the other.
+        Assert.NotEqual(
+            Path.GetDirectoryName(WebViewPaths.ShellDocument(ShimDirectory)),
+            WebViewPaths.EditorContentRoot(ShimDirectory));
+    }
+
+    [Fact]
+    public void TheEntryUrlIsSecureHttpOnTheMappedHostName()
+    {
+        // Not file:. That scheme is an opaque origin, where module scripts, storage, and fetch are
+        // all refused, which is the whole reason the mapping exists.
+        Assert.Equal("https://xlide.local/index.html", WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName));
+    }
+
+    [Fact]
+    public void TheEntryUrlNamesTheHostItIsBuiltFrom()
+    {
+        var url = WebViewPaths.EditorEntryUrl("example.invalid");
+
+        Assert.Equal("https://example.invalid/index.html", url);
+        Assert.StartsWith("https://", url, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheEntryUrlAndTheEntryDocumentAgreeOnTheFileName()
+    {
+        // One constant, two consumers: the mapping serves the file the address asks for.
+        Assert.EndsWith(
+            "/" + WebViewPaths.EditorEntryFileName,
+            WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName),
+            StringComparison.Ordinal);
+
+        Assert.Equal(
+            WebViewPaths.EditorEntryFileName,
+            Path.GetFileName(WebViewPaths.EditorEntryDocument(ShimDirectory)));
+    }
+
+    [Fact]
+    public void TheHostNameCannotCollideWithARealAddress()
+    {
+        // The name resolves only inside this browser. A registrable suffix would make the same name
+        // resolvable elsewhere, so it uses the one reserved for link-local resolution.
+        Assert.EndsWith(".local", WebViewPaths.EditorHostName, StringComparison.Ordinal);
+        Assert.DoesNotContain("/", WebViewPaths.EditorHostName, StringComparison.Ordinal);
+        Assert.DoesNotContain(":", WebViewPaths.EditorHostName, StringComparison.Ordinal);
     }
 }
 

@@ -55,6 +55,8 @@ readable from inside the host process.
 | Registration | Working, per user, no administrator rights. One source of truth, unit tested |
 | Docked tool window | Working. The editor sites our control through the documented tool window mechanism |
 | Browser surface | Working. WebView2 hosted in the tool window, navigated, observed on screen |
+| Content root and message bridge | Working. Serves a folder under a virtual host name and exchanges messages with the page, falling back to the built-in document when no bundle is present |
+| Code pane tracking | Working. Panes are identified by component, located, and followed as the editor is rearranged |
 | Installer | Working. One 3.92 MB executable, install and clean uninstall verified by round trip |
 | Development loop | Working. Full check in 1.35s; instance reuse brings a repeat check to 0.24s |
 | Language engine sidecar | In progress |
