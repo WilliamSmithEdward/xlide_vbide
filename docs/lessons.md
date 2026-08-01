@@ -106,3 +106,60 @@ offsets. This avoids any dependency on member ordering in a particular typelib b
 failure mode that produces memory corruption rather than an error. The cost is irrelevant for
 control-plane calls. Paths that run per keystroke will use early binding, measured rather than
 assumed.
+
+## 10. The editor will not size a tool window, in any state
+
+Setting `Width` or `Height` on a tool window throws whether it is floating or docked, before and
+after it is made visible. Docking one produces a band six pixels high whose client area measures a
+negative height, so a panel inside it is invisible; and when the user resizes a floating one, the
+contents do not follow.
+
+Evidence: measured on Excel 365, `GenericPane 'xlide' rect 0,2082 5120x6 client 5120x-28`, with
+`COMException` from both dimension setters and `Height` reading back as the height of the whole
+frame.
+
+Consequence: the editor's own tool windows are not somewhere a panel can live. Every panel is
+rendered in the editing surface, which owns its own layout. The tool window, the ActiveX control
+that hosted it, and their registration were removed rather than kept.
+
+## 11. A surface among the panes loses a race it cannot win
+
+The editor raises a code pane whenever it activates one, which is every time the user picks a
+different module. A surface that is a sibling of the panes has to be raised again afterwards, and
+the editor gets there first: the pane being activated is painted, scrollbars and all, before
+anything outside the process can react.
+
+Consequence: the surface is a child of the frame, positioned on the document area. Activating a
+pane reorders the document area's children and leaves the frame's alone, so nothing comes between
+them. This is structural rather than a faster reaction.
+
+## 12. The editor rewrites what it is given
+
+Handing a module its source respells keywords and normalises spacing, so the text it holds
+afterwards is not the text that was sent. Every later comparison then sees a difference that is the
+editor's doing rather than the developer's.
+
+Consequence: the module is read straight back after every write and its version adopted, applied as
+one edit so the undo stack and the caret survive. The module is the source of truth; the surface is
+a view of it.
+
+## 13. Whether a command is available is not the execution state
+
+`Reset` looked like a reliable reading of whether execution was stopped, and it is enabled in
+design mode as well, so the stopped-line marker appeared before anything had run. `VBProject.Mode`
+reports it directly and is neither localised nor inferred.
+
+Running also does not block the call that starts it: the command returns and the code runs
+afterwards, so the state at the moment of the command is always "not running yet". A single check
+found nothing every time. The state is watched for a while after instead.
+
+## 14. A capture process that is not scaling-aware silently crops
+
+The harness measured the editor at two thirds of its real size on a scaled display and made a
+bitmap that size; the window then rendered into it at full size. Every capture lost its right and
+bottom edges, which is where the panel is, and the missing panel was read as a panel that did not
+work rather than as an image that had been cut.
+
+Consequence: the capture declares per-monitor awareness before measuring anything. It also takes
+the largest visible window of the frame class rather than the first, because the editor owns small
+windows of that class which are not the frame.

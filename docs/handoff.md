@@ -118,11 +118,31 @@ Frozen lookup tables built from field initialisers read generated arrays declare
 of a partial class, and got null. Building them inside a nested type forces the outer type to
 initialise first, which is guaranteed rather than incidental.
 
-### The editor refuses to size a tool window
+### The editor refuses to size a tool window, in any state
 
-Setting `Width` or `Height` on a tool window through the object model throws, before and after it is
-made visible. The window opens small and the user resizes it. Docking it into the editor's own
-layout is the real answer and has not been attempted.
+Setting `Width` or `Height` throws whether the window floats or is docked. Docking one produces a
+band six pixels high with a negative client area, and its contents do not follow when the user
+resizes it. Its own tool windows are therefore not somewhere a panel can live, and the product's
+panels are rendered in the editing surface instead. The tool window and its ActiveX control were
+removed rather than kept.
+
+### A surface among the panes loses a race it cannot win
+
+The editor raises a pane whenever it activates one, before anything outside the process can react.
+The surface is a child of the frame, positioned on the document area, so activating a pane cannot
+reorder it. Structural, rather than a faster reaction.
+
+### The editor rewrites the source it is handed
+
+Giving a module its text respells keywords and normalises spacing, so what it holds afterwards is
+not what was sent. Read it straight back and adopt its version, or the two drift apart from the
+first keystroke.
+
+### Whether a command is enabled is not the execution state
+
+`Reset` is enabled in design mode as well, so it cannot mean "stopped". `VBProject.Mode` reports it
+directly. And running does not block the call that starts it, so the state has to be watched for a
+while afterwards rather than checked once.
 
 ## 5. Editor internals, measured
 
@@ -144,16 +164,29 @@ Full detail in [editor-windows.md](editor-windows.md); re-measure with
 ```text
 EXCEL.EXE
   Xlide.Vbe.Shim.dll         native, no runtime loaded into the host
-    AddInSession             owns everything that must be released before shutdown
+    AddInSession             owns everything released before shutdown, and the editing contract
     CodePaneTracker          which panes exist, where they are, what they show
-    EditorSurface            overlay over a pane, hosting the editing bundle
-    ToolWindowHost           the ActiveX control the editor sites in a docked window
-    PanelBus                 carries findings to whatever panel is showing
+    EditorSurface            the window over the document area, and the protocol with the page
+    OverlayWindow            the window itself, and the two timers the session runs on
+    VbeCommands              runs the editor's own commands through its command bars
     AnalysisService          owns the engine and converts offsets to line and column
-  WebView2 processes         the panel and the editing surface
+  WebView2 process           the editing surface
 
 xlide-engine.exe             language engine, named pipe, JSON-RPC one object per line
+
+ui/editor/src
+  main.ts                    boots the editor and the shell
+  shell.ts                   tab strip, problems panel, splitters
+  explorer.ts                the project tree
+  toolbar.ts                 the command bar, and which commands belong to whom
+  format.ts                  indentation and canonical keyword spelling
+  bridge.ts                  every message in both directions
+  vba.ts, theme.ts           the language and the themes
 ```
+
+Everything the developer sees is in the surface. The editor's own project explorer and properties
+windows are closed at start-up, because a hidden window cannot be uncovered by anything the editor
+does later, and closing them gives the document area their space.
 
 Two rules hold the whole thing together. Nothing expensive runs in the host process. Every COM
 object has exactly one owner that releases it exactly once, and everything is released before the
@@ -180,29 +213,48 @@ between structured nodes and the raw-statement fallback enumerated exhaustively.
 again if it is not in the repository; it was produced by reading
 `xlide_vscode\src\analyzer\parser\`.
 
-## 8. Open and known
+## 8. The rule that decides the design
 
-- **The editing surface does not lay out its content.** It is created, positioned over the pane,
-  raised above its siblings, and serves its bundle; the page's ready handshake does not reach the
-  add-in. The panel's handshake does arrive, so the channel works. Suspect compositing in a hidden
-  or non-activated window, or the content security policy in the bundle's document. This is the
-  single highest-value thing to fix.
-- The tool window opens small, because the editor refuses to size it.
+**The module is the source of truth. The surface is a view of it.**
+
+The compiler, the debugger, the workbook that gets saved and the analyzer all read the module, and
+nothing reads the surface, so an edit that has not reached the module has not happened. Everything
+in the editing path follows from this: edits are written back, the module is read straight back
+afterwards because the editor rewrites what it is given, and when the two differ the module wins.
+The one exception is an edit the developer has not finished, which is never overwritten.
+
+Anything added here should be able to answer: what happens when these two disagree, and how does it
+get back in step without the developer losing work.
+
+## 9. Open and known
+
+- **The editing surface takes about two seconds to appear**, of which the whole cost is fetching,
+  parsing and evaluating a 3.2 MB bundle; constructing the editor is fifty milliseconds of it. The
+  page reports this itself, so the number is in the log on every run. Options not yet tried:
+  splitting the bundle, warming the surface during host start-up, or serving it in a form the
+  browser can cache compiled.
+- **Panels cannot be rearranged.** The layout is a fixed explorer, editor and panel with draggable
+  dividers. Dragging one panel to another edge, or stacking panels as tabs, is not built.
+- **The Immediate, Locals and Watch windows are still the editor's own**, so they do not match the
+  rest. They are left alone deliberately: there is nothing to replace them with yet, and taking
+  them away would remove the feature rather than restyle it.
+- **The forms designer is untouched.**
+- Breakpoints are remembered rather than read: the editor exposes no way to enumerate them. Every
+  route to toggling one goes through the same bookkeeping, so the surface and the editor agree in
+  practice, but a breakpoint set some other way would be real and undrawn.
 - Nothing is signed, so the installer draws a Windows Security warning. This blocks public release
   and nothing else.
-- Bidirectional text sync between the surface and the code module is designed but not written.
 
-## 9. What to do next, in order
+## 10. What to do next, in order
 
-1. Finish the editing surface handshake and then bidirectional sync. Everything else in the editor
-   experience depends on it.
-2. Show diagnostics as squiggles on that surface. The findings already exist and carry the right
-   positions; `EditorSurface.ShowDiagnostics` is written and unused.
-3. Continue the port: the parser, then symbols, then the rules, each behind the differential gate.
-4. Settings, formatting, and indentation. There is no configuration surface at all yet.
-5. The remaining panels: code explorer, test runner, references.
-6. Debugging and the forms designer, each after a spike.
-7. Signing and an update mechanism, before any public release.
+1. Cut the surface start-up. Two seconds is the first thing anyone will notice.
+2. Make the panels rearrangeable: drag to an edge, stack as tabs.
+3. Replace the Immediate window, driving the editor's own hidden one as the evaluator.
+4. Continue the port: the parser, then symbols, then the rules, each behind the differential gate.
+5. Settings, so the formatting options are the developer's rather than the defaults.
+6. Completion and tooltips, backfilled from referenced type libraries.
+7. The forms designer, after a spike.
+8. Signing and an update mechanism, before any public release.
 
 ## 10. Conventions
 
