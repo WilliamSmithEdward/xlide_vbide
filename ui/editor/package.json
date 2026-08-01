@@ -1,0 +1,17 @@
+{
+  "name": "xlide-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Monaco editor surface hosted in the xlide WebView2 tool window.",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "monaco-editor": "^0.56.0",
+    "typescript": "^7.0.2"
+  }
+}

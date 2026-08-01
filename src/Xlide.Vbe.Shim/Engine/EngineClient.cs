@@ -1,0 +1,257 @@
+using System.Diagnostics;
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json;
+using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Engine;
+using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Interop;
+
+namespace Xlide.Vbe.Shim.Engine;
+
+/// <summary>
+/// Owns the analysis engine: starts it, talks to it, and makes sure it dies with us.
+///
+/// The engine runs in its own process so a slow or failing analysis cannot stall the thread the
+/// user is typing on. That isolation is only real if the process is genuinely disposable, so
+/// nothing here waits on it from the host user interface thread and every call has a deadline.
+///
+/// A missing or broken engine is not an error the user should see. The add-in works without
+/// analysis; it simply has less to say.
+/// </summary>
+internal sealed class EngineClient : IAsyncDisposable
+{
+    private readonly string _executablePath;
+    private readonly string _pipeName;
+
+    private Process? _process;
+    private NamedPipeClientStream? _pipe;
+    private StreamWriter? _writer;
+    private StreamReader? _reader;
+    private KillOnCloseJob? _job;
+    private int _nextId = 1;
+
+    private EngineClient(string executablePath)
+    {
+        _executablePath = executablePath;
+
+        // Unique per add-in instance: two hosts open at once must not share a pipe.
+        _pipeName = $"xlide-{Environment.ProcessId}-{Guid.NewGuid():N}";
+    }
+
+    public bool IsRunning => _process is { HasExited: false } && _pipe is { IsConnected: true };
+
+    /// <summary>
+    /// Starts the engine and connects to it, or returns null when it cannot be started. A null
+    /// result is an ordinary outcome and is logged, not thrown.
+    /// </summary>
+    public static async Task<EngineClient?> StartAsync(string executablePath, CancellationToken cancellation)
+    {
+        if (!File.Exists(executablePath))
+        {
+            Log.Warn($"engine: not present at {executablePath}, continuing without analysis");
+            return null;
+        }
+
+        var client = new EngineClient(executablePath);
+
+        try
+        {
+            await client.LaunchAsync(cancellation).ConfigureAwait(false);
+            Log.Info($"engine: connected on {client._pipeName}");
+            return client;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("engine: could not be started", ex);
+            await client.DisposeAsync().ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private async Task LaunchAsync(CancellationToken cancellation)
+    {
+        var startInfo = new ProcessStartInfo(_executablePath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        startInfo.ArgumentList.Add("--pipe");
+        startInfo.ArgumentList.Add(_pipeName);
+
+        _process = Process.Start(startInfo) ?? throw new InvalidOperationException("The engine did not start.");
+
+        // Tie the engine to this process at the operating system level. If the host is terminated
+        // rather than closed, and nothing here gets to run, the engine still goes with it: a
+        // background process outliving its only client is a process nobody will ever clean up.
+        _job = KillOnCloseJob.Create();
+        _job?.Assign(_process);
+
+        DrainAsync(_process.StandardError, "engine stderr");
+        DrainAsync(_process.StandardOutput, "engine");
+
+        _pipe = new NamedPipeClientStream(".", _pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        using var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        connectTimeout.CancelAfter(TimeSpan.FromSeconds(20));
+
+        await _pipe.ConnectAsync(connectTimeout.Token).ConfigureAwait(false);
+
+        _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
+        _reader = new StreamReader(_pipe, new UTF8Encoding(false));
+
+        await CallAsync("initialize", new Dictionary<string, object>(), cancellation).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads a child stream to the log so it cannot fill its buffer and block the child.</summary>
+    private static void DrainAsync(StreamReader stream, string label) =>
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await stream.ReadLineAsync().ConfigureAwait(false) is { } line)
+                {
+                    if (line.Length > 0)
+                    {
+                        Log.Info($"{label}: {line}");
+                    }
+                }
+            }
+            catch (IOException)
+            {
+                // The child exited. Nothing to report.
+            }
+        });
+
+    /// <summary>Replaces everything the engine knows about a project.</summary>
+    public Task OpenProjectAsync(string projectId, int generation, EngineModule[] modules, CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["generation"] = generation,
+            ["modules"] = modules,
+        };
+
+        return CallAsync("project/open", payload, cancellation);
+    }
+
+    /// <summary>Analyses one module and returns its findings.</summary>
+    public async Task<EngineDiagnostics?> DiagnoseAsync(
+        string projectId,
+        int generation,
+        string moduleName,
+        string moduleType,
+        string source,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["documentKey"] = $"{projectId}/{moduleName}",
+            ["projectId"] = projectId,
+            ["generation"] = generation,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+        };
+
+        var result = await CallAsync("textDocument/diagnostics", payload, cancellation).ConfigureAwait(false);
+        if (result is null)
+        {
+            return null;
+        }
+
+        return result.Value.Deserialize(EngineJsonContext.Default.EngineDiagnostics);
+    }
+
+    private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
+    {
+        var writer = _writer;
+        var reader = _reader;
+
+        if (writer is null || reader is null)
+        {
+            return null;
+        }
+
+        var id = Interlocked.Increment(ref _nextId);
+
+        var request = new Dictionary<string, object>
+        {
+            ["jsonrpc"] = "2.0",
+            ["id"] = id,
+            ["method"] = method,
+            ["params"] = parameters,
+        };
+
+        var line = JsonSerializer.Serialize(request, EngineJsonContext.Default.DictionaryStringObject);
+
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        deadline.CancelAfter(TimeSpan.FromSeconds(30));
+
+        await writer.WriteLineAsync(line.AsMemory(), deadline.Token).ConfigureAwait(false);
+
+        // One request is outstanding at a time, so the next line is this call's answer. A pipeline
+        // would need correlation by identifier; nothing here benefits from one.
+        var response = await reader.ReadLineAsync(deadline.Token).ConfigureAwait(false);
+        if (response is null)
+        {
+            throw new IOException("The engine closed the connection.");
+        }
+
+        using var document = JsonDocument.Parse(response);
+
+        if (document.RootElement.TryGetProperty("error", out var error))
+        {
+            var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
+            Log.Warn($"engine: {method} refused: {message}");
+            return null;
+        }
+
+        return document.RootElement.TryGetProperty("result", out var result) ? result.Clone() : null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (IsRunning)
+            {
+                using var quick = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await CallAsync("shutdown", new Dictionary<string, object>(), quick.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception)
+        {
+            // Shutting down politely is a courtesy. The job object below is the guarantee.
+        }
+
+        _writer?.Dispose();
+        _reader?.Dispose();
+        _pipe?.Dispose();
+
+        try
+        {
+            if (_process is { HasExited: false })
+            {
+                _process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (Exception)
+        {
+            // Already gone.
+        }
+
+        _process?.Dispose();
+        _job?.Dispose();
+
+        _writer = null;
+        _reader = null;
+        _pipe = null;
+        _process = null;
+        _job = null;
+    }
+}

@@ -124,6 +124,26 @@ internal sealed unsafe class DispatchObject : IDisposable
         };
     }
 
+    /// <summary>
+    /// Reads a property that takes two numbers and returns text. This is how a code module hands
+    /// over a range of lines, which is the only way to read a module's source in one call rather
+    /// than one call per line.
+    /// </summary>
+    public string? GetStringIndexed(string name, int first, int second)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var a = ComVariant.Create(first);
+        using var b = ComVariant.Create(second);
+        using var value = InvokeCore(dispId, InvokeKind.PropertyGet | InvokeKind.Method, [a, b]);
+
+        return VariantToString(value);
+    }
+
     /// <summary>Reads a property that returns another automation object.</summary>
     public DispatchObject? GetObject(string name)
     {

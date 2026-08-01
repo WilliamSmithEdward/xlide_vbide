@@ -4,6 +4,7 @@ using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
+using Xlide.Vbe.Shim.Engine;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -20,6 +21,7 @@ internal sealed class AddInSession : IDisposable
     private readonly DispatchObject? _addIn;
     private DispatchObject? _toolWindow;
     private CodePaneTracker? _codePanes;
+    private AnalysisService? _analysis;
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -44,6 +46,44 @@ internal sealed class AddInSession : IDisposable
         ReportOpenProjects();
         CreateToolWindow();
         TrackCodePanes();
+        StartAnalysis();
+    }
+
+    /// <summary>
+    /// Brings up the analysis engine and reports what it finds.
+    ///
+    /// Started, not awaited. The host is still finishing its own start-up at this point and nothing
+    /// here is worth delaying that for; findings arrive when they arrive.
+    /// </summary>
+    private void StartAnalysis()
+    {
+        try
+        {
+            _analysis = new AnalysisService(_editor);
+            _analysis.FindingsReady += findings =>
+            {
+                Log.Info($"analysis: {findings.Count} finding(s)");
+
+                // Until the surface renders them, the log is where they surface. Capped, because a
+                // project with thousands of findings would otherwise write a novel on every pass.
+                foreach (var finding in findings.Take(20))
+                {
+                    Log.Info($"  {finding.Module}({finding.StartLine},{finding.StartColumn}) " +
+                             $"{finding.Severity} {finding.Code}: {finding.Message}");
+                }
+
+                if (findings.Count > 20)
+                {
+                    Log.Info($"  and {findings.Count - 20} more");
+                }
+            };
+
+            _analysis.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("analysis: could not be started", ex);
+        }
     }
 
     /// <summary>
@@ -86,6 +126,18 @@ internal sealed class AddInSession : IDisposable
 
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.
+        //
+        // The engine goes before any of it. It is a separate process answering on another thread,
+        // and letting it run on would mean a reply arriving after the objects meant to handle it
+        // are gone. The wait is bounded because the host is shutting down and a hung engine must
+        // not hold it there; the job object guarantees the process dies regardless.
+        if (_analysis is not null)
+        {
+            var analysis = _analysis;
+            _analysis = null;
+            analysis.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3));
+        }
+
         _codePanes?.Dispose();
         _codePanes = null;
 
