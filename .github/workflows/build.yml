@@ -1,0 +1,61 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: 1
+
+jobs:
+  build:
+    # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
+    # publishing needs the platform linker, which the Windows runner image already carries.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore -c Release
+
+      # These cover everything that does not need a host: registration, layout arithmetic, edit
+      # reconciliation, protocol handling. The editor is exercised separately, on a machine that
+      # has one.
+      - name: Test
+        run: dotnet test --no-build -c Release --logger "trx;LogFileName=results.trx"
+
+      - name: Publish the native shim
+        run: dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Release -r win-x64
+
+      - name: Check that the shim is a native server
+        shell: pwsh
+        run: |
+          $shim = 'artifacts/publish/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
+          if (-not (Test-Path $shim)) { throw "No shim was published at $shim." }
+
+          $size = (Get-Item $shim).Length / 1MB
+          Write-Host ('Shim is {0:N2} MB.' -f $size)
+
+          # A runtime-hosted build would drag a runtime alongside it. Catching that here keeps the
+          # no-runtime-on-the-user's-machine promise from regressing quietly.
+          $runtime = Get-ChildItem (Split-Path $shim) -Filter 'hostfxr.dll' -ErrorAction SilentlyContinue
+          if ($runtime) { throw 'A runtime was published next to the shim. The build is no longer ahead-of-time.' }
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shim
+          path: artifacts/publish/Xlide.Vbe.Shim/release_win-x64/
+          if-no-files-found: error
