@@ -12,6 +12,14 @@ internal struct Rect
     public int Bottom;
 }
 
+/// <summary>Win32 POINT. Layout matches exactly and is passed by pointer to the API.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct Point
+{
+    public int X;
+    public int Y;
+}
+
 /// <summary>Win32 SIZE, used for the scroll extent argument the in-place site passes by value.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct Size
@@ -109,6 +117,8 @@ internal static unsafe partial class Win32
     public const uint WmNcCreate = 0x0081;
     public const uint WmNcDestroy = 0x0082;
 
+    public const uint SwpNoSize = 0x0001;
+    public const uint SwpNoMove = 0x0002;
     public const uint SwpNoZOrder = 0x0004;
     public const uint SwpNoActivate = 0x0010;
 
@@ -166,6 +176,23 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool IsWindow(nint window);
+
+    /// <summary>
+    /// Converts a screen rectangle into a window's client coordinates, which is the space a child
+    /// of that window is positioned in.
+    ///
+    /// Two points are mapped rather than one, because this also has to survive a right-to-left
+    /// layout: mapping the corners lets the caller normalise, where mapping an origin and adding a
+    /// size would place the rectangle on the wrong side.
+    /// </summary>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial int MapWindowPoints(nint from, nint to, Point* points, uint count);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial nint GetParent(nint window);
+
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    public static partial nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);
 
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     public static partial nint SetWindowLongPtr(nint window, int index, nint value);

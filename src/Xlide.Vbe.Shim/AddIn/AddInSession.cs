@@ -161,21 +161,46 @@ internal sealed class AddInSession : IDisposable
                 return;
             }
 
-            // The surface is a sibling of the pane inside the editor frame, so its rectangle has to
-            // be expressed in the frame's coordinates rather than the screen's.
-            var frame = Win32.GetAncestor(pane.Window, Win32.GaRoot);
-            if (frame == 0)
+            // The surface goes in beside the pane, as a child of whatever the pane's own parent is.
+            //
+            // That parent is the editor's document area, and being inside it is what keeps the
+            // surface off everything that is not a code pane: the window manager clips a child to
+            // its parent, so the toolbars, the docked panels and the splitters between them cannot
+            // be covered however wrong the rectangle is. Parenting to the frame instead made the
+            // surface a sibling of the toolbars, which is exactly what it then drew over.
+            var host = Win32.GetParent(pane.Window);
+            if (host == 0)
             {
                 return;
             }
 
-            _editorSurface ??= EditorSurface.Create(frame, default);
+            // A pane can be reparented, by being undocked or by the editor rebuilding its layout.
+            // The surface belongs to one parent, so a change means a new one rather than a move.
+            if (_editorSurface is not null && _editorSurface.Host != host)
+            {
+                Log.Info("editor surface: the document area changed, rebuilding");
+                _editorSurface.Dispose();
+                _editorSurface = null;
+            }
+
+            _editorSurface ??= EditorSurface.Create(host, default);
             if (_editorSurface is null)
             {
                 return;
             }
 
-            _editorSurface.Follow(ToFrameCoordinates(frame, pane.Bounds), visible: true);
+            // The surface covers the whole document area, not the rectangle of one pane.
+            //
+            // Sizing it to a pane meant it had to be moved and re-raised every time the editor
+            // activated a different one, and the editor paints the pane it is activating before any
+            // of that can happen. The result was the old pane flashing into view on every module
+            // switch, and a surface that could be left underneath whatever had just been raised.
+            // Covering the area once removes both: switching modules becomes a message to a surface
+            // that never moved and was never uncovered.
+            //
+            // The native panes keep running underneath, unchanged and never seen. They remain the
+            // text of record, the compile target, and what the debugger drives.
+            _editorSurface.Follow(ClientBounds(host), visible: true);
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
@@ -285,35 +310,23 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Converts a screen rectangle into the frame's client coordinates, which is what positioning a
-    /// child of the frame requires.
+    /// A window's client area, in the coordinates a child of it is positioned in.
+    ///
+    /// A client rectangle always starts at the origin, so this needs no conversion and carries no
+    /// assumption about borders, captions, or scaling. An earlier version worked the origin out
+    /// from the window and client rectangles and placed the surface a toolbar's height too high,
+    /// which is what put it over the toolbar.
     /// </summary>
-    private static unsafe PixelRect ToFrameCoordinates(nint frame, PixelRect screen)
+    private static unsafe PixelRect ClientBounds(nint window)
     {
-        Rect frameRect;
-        if (!Win32.GetWindowRect(frame, &frameRect))
-        {
-            return screen;
-        }
-
-        // The frame's client area starts inside its border, and the difference is what a child is
-        // positioned relative to. Measuring both rectangles gives it without assuming a border size.
         Rect client;
-        if (!Win32.GetClientRect(frame, &client))
-        {
-            return screen;
-        }
-
-        var borderX = ((frameRect.Right - frameRect.Left) - (client.Right - client.Left)) / 2;
-        var originX = frameRect.Left + borderX;
-        var originY = frameRect.Bottom - borderX - (client.Bottom - client.Top);
-
-        return new PixelRect(
-            screen.Left - originX,
-            screen.Top - originY,
-            screen.Right - originX,
-            screen.Bottom - originY);
+        return Win32.GetClientRect(window, &client)
+            ? new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top)
+            : default;
     }
+
+    /// <summary>Height the panel asks for, in the units the editor's layout uses.</summary>
+    private const int PanelHeight = 260;
 
     /// <summary>
     /// Gives the tool window a usable size, if the editor lets us.
@@ -323,14 +336,25 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private static void TrySize(DispatchObject window, int width, int height)
     {
+        // Set independently. A docked window belongs to a band that owns one of its dimensions and
+        // refuses that one while accepting the other, so setting them together loses the second to
+        // the first one's refusal.
         try
         {
-            window.SetInt32("Width", width);
             window.SetInt32("Height", height);
         }
         catch (Exception ex)
         {
-            Log.Info($"tool window: kept its own size ({ex.GetType().Name})");
+            Log.Info($"tool window: kept its own height ({ex.GetType().Name})");
+        }
+
+        try
+        {
+            window.SetInt32("Width", width);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"tool window: kept its own width ({ex.GetType().Name})");
         }
     }
 
@@ -467,10 +491,17 @@ internal sealed class AddInSession : IDisposable
             window.SetBool("Visible", true);
             Log.Info("tool window: visible");
 
-            // Sized after it is shown, because the editor refuses the dimensions of a window that
-            // is not yet on screen. It creates one barely larger than an icon, which is unusable
-            // for a list; after this the editor remembers whatever size the user settles on.
-            TrySize(window, 460, 620);
+            // Left where the editor puts it, and deliberately not docked.
+            //
+            // The editor refuses to size a tool window in either state: setting Width or Height
+            // throws whether it is floating or docked, and a docked one is given a band six pixels
+            // high with a negative client area, so docking makes it invisible rather than usable.
+            // Measured, not assumed: see docs/lessons.md.
+            //
+            // This window is therefore not where the product's panels belong. They live in the
+            // surface, which owns its own layout completely. This one stays as the foothold the
+            // editor gives an add-in, and as somewhere to report that the add-in is loaded.
+            TrySize(window, 460, PanelHeight);
         }
         catch (COMException ex)
         {

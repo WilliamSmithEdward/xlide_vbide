@@ -19,7 +19,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// </summary>
 internal sealed class EditorSurface : IDisposable
 {
-    private readonly nint _frame;
+    private readonly nint _host;
 
     private OverlayWindow? _overlay;
     private WebView2Surface? _browser;
@@ -40,7 +40,10 @@ internal sealed class EditorSurface : IDisposable
 
     private bool _loaded;
 
-    private EditorSurface(nint frame) => _frame = frame;
+    private EditorSurface(nint host) => _host = host;
+
+    /// <summary>The window this surface is a child of, which is the editor's document area.</summary>
+    public nint Host => _host;
 
     /// <summary>The component currently shown, or null when nothing is.</summary>
     public string? Module => _module;
@@ -52,7 +55,7 @@ internal sealed class EditorSurface : IDisposable
     /// Creates the surface over the editor frame. Returns null when the editing bundle is not
     /// present, which is an ordinary state: the add-in works without it and shows the native pane.
     /// </summary>
-    public static EditorSurface? Create(nint frame, PixelRect bounds)
+    public static EditorSurface? Create(nint host, PixelRect bounds)
     {
         var directory = ShimModule.Directory;
         if (directory is null)
@@ -67,9 +70,9 @@ internal sealed class EditorSurface : IDisposable
             return null;
         }
 
-        var surface = new EditorSurface(frame);
+        var surface = new EditorSurface(host);
 
-        surface._overlay = OverlayWindow.Create(frame, bounds);
+        surface._overlay = OverlayWindow.Create(host, bounds);
         if (surface._overlay is null)
         {
             return null;
@@ -188,7 +191,7 @@ internal sealed class EditorSurface : IDisposable
             {
                 case "ready":
                     _loaded = true;
-                    Log.Info("editor surface: ready");
+                    Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
                     Flush();
                     break;
 
@@ -207,6 +210,24 @@ internal sealed class EditorSurface : IDisposable
         {
             Log.Warn("editor surface: a message from the page was not valid");
         }
+    }
+
+    /// <summary>
+    /// Renders what the page reported about its own start-up, so the cost of putting a surface over
+    /// a pane is a measured number in the log rather than an impression.
+    /// </summary>
+    private static string DescribeTimings(JsonElement message)
+    {
+        if (!message.TryGetProperty("timings", out var timings) || timings.ValueKind != JsonValueKind.Object)
+        {
+            return string.Empty;
+        }
+
+        var script = timings.TryGetProperty("scriptMs", out var s) && s.TryGetInt32(out var scriptMs) ? scriptMs : -1;
+        var create = timings.TryGetProperty("createMs", out var c) && c.TryGetInt32(out var createMs) ? createMs : -1;
+        var total = timings.TryGetProperty("totalMs", out var t) && t.TryGetInt32(out var totalMs) ? totalMs : -1;
+
+        return $" in {total}ms (bundle {script}ms, editor {create}ms)";
     }
 
     private void Post(string json)

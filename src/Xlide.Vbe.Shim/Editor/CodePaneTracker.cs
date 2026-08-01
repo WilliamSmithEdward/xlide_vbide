@@ -319,12 +319,40 @@ internal sealed class CodePaneTracker : IDisposable
         return length <= 0 ? string.Empty : new string(buffer, 0, length);
     }
 
+    /// <summary>
+    /// The pane's client area in screen coordinates: the part that shows text, without the pane's
+    /// own borders.
+    ///
+    /// The client area rather than the window rectangle, because a pane maximised inside the
+    /// editor's document area has a window rectangle that reaches outside it. Its own borders and
+    /// the space its caption would occupy sit above and to the left of the area anything is drawn
+    /// in. A surface placed on the window rectangle is pushed up out of view by exactly that much,
+    /// and shows the module scrolled down by the first couple of lines.
+    /// </summary>
     private static unsafe PixelRect ReadBounds(nint window)
     {
-        Rect rect;
-        return Win32.GetWindowRect(window, &rect)
-            ? new PixelRect(rect.Left, rect.Top, rect.Right, rect.Bottom)
-            : default;
+        Rect client;
+        if (!Win32.GetClientRect(window, &client))
+        {
+            return default;
+        }
+
+        var corners = stackalloc Point[2];
+        corners[0] = new Point { X = client.Left, Y = client.Top };
+        corners[1] = new Point { X = client.Right, Y = client.Bottom };
+
+        // A destination of zero means the screen.
+        Marshal.SetLastSystemError(0);
+        if (Win32.MapWindowPoints(window, 0, corners, 2) == 0 && Marshal.GetLastSystemError() != 0)
+        {
+            return default;
+        }
+
+        return new PixelRect(
+            Math.Min(corners[0].X, corners[1].X),
+            Math.Min(corners[0].Y, corners[1].Y),
+            Math.Max(corners[0].X, corners[1].X),
+            Math.Max(corners[0].Y, corners[1].Y));
     }
 
     public void Dispose()

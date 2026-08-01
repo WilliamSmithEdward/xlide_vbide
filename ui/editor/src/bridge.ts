@@ -47,8 +47,24 @@ export type HostMessage =
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "revealLine"; line: number };
 
+/**
+ * Where the page's start-up time went, measured from navigation start.
+ *
+ * Reported rather than inferred. The surface sits over a code pane, so every millisecond here is
+ * time the developer spends looking at a pane that has not been replaced yet, and the only way to
+ * know which stage owns it is to have the page say so.
+ */
+export interface BootTimings {
+  /** Fetching, parsing and evaluating the bundle: the module body runs at this mark. */
+  scriptMs: number;
+  /** Constructing the editor widget. */
+  createMs: number;
+  /** Everything, to the moment this message is posted. */
+  totalMs: number;
+}
+
 export type ClientMessage =
-  | { type: "ready" }
+  | { type: "ready"; timings?: BootTimings }
   | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullText: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number };
@@ -129,8 +145,8 @@ export class EditorBridge {
     return this.themePinned;
   }
 
-  start(): void {
-    this.transport.post({ type: "ready" });
+  start(timings?: BootTimings): void {
+    this.transport.post(timings ? { type: "ready", timings } : { type: "ready" });
   }
 
   dispose(): void {

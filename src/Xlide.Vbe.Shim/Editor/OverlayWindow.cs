@@ -24,6 +24,16 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private nint _handle;
     private GCHandle _self;
 
+    /// <summary>
+    /// Where the overlay was last put, so an unchanged position costs nothing.
+    ///
+    /// Window events arrive for anything that moves anywhere in the editor, and most of them leave
+    /// the pane exactly where it was. Repositioning anyway would resize the browser and force a
+    /// relayout of the document on every one of them.
+    /// </summary>
+    private PixelRect _placed;
+    private bool _shown;
+
     private OverlayWindow()
     {
     }
@@ -91,14 +101,30 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
         if (!visible)
         {
-            Win32.ShowWindow(_handle, Win32.SwHide);
+            if (_shown)
+            {
+                _shown = false;
+                Win32.ShowWindow(_handle, Win32.SwHide);
+            }
+
             return;
         }
 
-        // Raised to the top of its siblings, not left where it was created. The document area and
-        // the docked panes are siblings too, and a surface that keeps its original position in the
-        // stack renders behind the very pane it is meant to cover, which looks exactly like a
-        // surface that failed to load.
+        // Raising and moving are separated deliberately.
+        //
+        // The overlay has to be raised on every call, whether or not it has moved. Its siblings are
+        // the code panes, and the editor puts a pane on top of its siblings whenever it activates
+        // one, which happens every time the user picks a different module. Skipping the raise
+        // because the rectangle had not changed let the newly activated pane cover the surface, and
+        // the surface looked like it had vanished.
+        //
+        // Moving is the expensive half: it resizes the browser and relayouts the document. Window
+        // events arrive for anything that moves anywhere in the editor and most leave the pane
+        // exactly where it was, so that half is skipped when nothing changed.
+        var moved = !_shown || !bounds.Equals(_placed);
+
+        var flags = Win32.SwpNoActivate | (moved ? 0 : Win32.SwpNoMove | Win32.SwpNoSize);
+
         Win32.SetWindowPos(
             _handle,
             Win32.HwndTop,
@@ -106,9 +132,19 @@ internal sealed unsafe class OverlayWindow : IDisposable
             bounds.Top,
             bounds.Width,
             bounds.Height,
-            Win32.SwpNoActivate);
+            flags);
 
-        Win32.ShowWindow(_handle, Win32.SwShowNoActivate);
+        if (moved)
+        {
+            _placed = bounds;
+            Log.Info($"overlay: placed at {bounds.Left},{bounds.Top} {bounds.Width}x{bounds.Height} in its parent");
+        }
+
+        if (!_shown)
+        {
+            _shown = true;
+            Win32.ShowWindow(_handle, Win32.SwShowNoActivate);
+        }
     }
 
     private static bool EnsureClassRegistered()

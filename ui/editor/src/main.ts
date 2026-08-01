@@ -35,6 +35,11 @@ globalThis.MonacoEnvironment = {
   getWorker: () => new Worker(new URL("./editor.worker.js", document.baseURI), { type: "module" }),
 };
 
+// Taken at the top of the module body, which esbuild places after every import has been evaluated.
+// So this is the cost of fetching, parsing and running the whole bundle, and it is the number that
+// decides whether the surface is worth putting over a pane at all.
+const scriptMs = performance.now();
+
 function boot(): void {
   const container = document.getElementById("container");
   if (!container) {
@@ -66,6 +71,8 @@ function boot(): void {
     fixedOverflowWidgets: true,
   });
 
+  const createMs = performance.now();
+
   const transport = webView2Transport();
   const bridge = new EditorBridge(editor, transport ?? demoTransport());
 
@@ -75,7 +82,11 @@ function boot(): void {
     console.log("[xlide demo] window.chrome.webview absent, running the loopback demo");
   }
 
-  bridge.start();
+  bridge.start({
+    scriptMs: Math.round(scriptMs),
+    createMs: Math.round(createMs - scriptMs),
+    totalMs: Math.round(performance.now()),
+  });
 }
 
 if (document.readyState === "loading") {
