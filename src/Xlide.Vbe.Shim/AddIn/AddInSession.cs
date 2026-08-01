@@ -90,6 +90,25 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
+    /// Gives the tool window a usable size, if the editor lets us.
+    ///
+    /// A docked window ignores this, which is correct: its size belongs to the layout the user
+    /// arranged. Only a floating one takes it, which is the case that starts out too small to read.
+    /// </summary>
+    private static void TrySize(DispatchObject window, int width, int height)
+    {
+        try
+        {
+            window.SetInt32("Width", width);
+            window.SetInt32("Height", height);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"tool window: kept its own size ({ex.GetType().Name})");
+        }
+    }
+
+    /// <summary>
     /// Starts watching where the editor puts its code panes. Nothing is drawn over them yet; this
     /// establishes the map an editor surface will be positioned by, and proves it stays correct
     /// while the user rearranges the editor.
@@ -209,6 +228,11 @@ internal sealed class AddInSession : IDisposable
 
             window.SetBool("Visible", true);
             Log.Info("tool window: visible");
+
+            // Sized after it is shown, because the editor refuses the dimensions of a window that
+            // is not yet on screen. It creates one barely larger than an icon, which is unusable
+            // for a list; after this the editor remembers whatever size the user settles on.
+            TrySize(window, 460, 620);
         }
         catch (COMException ex)
         {

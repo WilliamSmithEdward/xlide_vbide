@@ -144,6 +144,19 @@ internal sealed unsafe class DispatchObject : IDisposable
         return VariantToString(value);
     }
 
+    /// <summary>Writes a numeric property.</summary>
+    public void SetInt32(string name, int value)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var argument = ComVariant.Create(value);
+        using var result = InvokeCore(dispId, InvokeKind.PropertyPut, [argument]);
+    }
+
     /// <summary>Reads a property that returns another automation object.</summary>
     public DispatchObject? GetObject(string name)
     {
