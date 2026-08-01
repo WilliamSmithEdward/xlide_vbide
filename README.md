@@ -71,6 +71,12 @@ open host takes about a quarter of a second.
 | `tests/` | Unit tests. None of them need Excel |
 | `docs/` | Architecture, decisions, and findings |
 
+## Picking this up
+
+[docs/handoff.md](docs/handoff.md) is written for someone starting cold: machine setup, how to run
+everything, the behaviour of the host that cost real time to discover, what is open, and what to do
+next in order.
+
 ## Notes on the design
 
 [docs/decisions.md](docs/decisions.md) records the choices that would be expensive to reverse, with

@@ -3,6 +3,9 @@
 Behaviour discovered by running against real Excel, with the evidence that established it. Each
 entry cost real debugging time and is not obvious from documentation.
 
+For a shorter list aimed at someone starting work, see [handoff.md](handoff.md). This file is the
+long form, with the evidence.
+
 Environment for all entries: Excel 365 x64 build 16.0.20228.20124, VBA 7.1, Windows 11, .NET 10.
 
 ## 1. A host started through automation does not load add-ins
@@ -60,7 +63,43 @@ Building it requires the C++ toolchain for the native linker, and the linker loo
 `vswhere.exe` on `PATH`. Without it the build fails with the linker error text embedded in a command
 line, which reads as a linker problem rather than a discovery problem.
 
-## 6. Late binding removes a class of failure at the boundary
+## 6. A documented technique that appears not to work is usually marshalled wrong
+
+Reaching the host through its own window rather than the running object table was tried, appeared to
+fail completely, and was abandoned for a design that cost forty seconds per check. It had two bugs,
+neither of which reported anything:
+
+`GetClassName` was declared without specifying character width, so class names were read as ANSI
+from UTF-16 data. Every comparison failed while the function appeared to return text.
+
+`0xFFFFFFF0` was parsed by the scripting runtime as a signed value, so the call threw on conversion
+before reaching the API at all.
+
+Fixing both made the technique work first time, at 0.68 seconds. The lesson generalises: when a
+documented interop technique produces nothing, suspect the declaration before the technique.
+
+## 7. Reading the screen captures whatever is in front, not what was asked for
+
+Screen capture cannot block, which makes it the tempting way to take a screenshot. It captures
+whatever is actually on top, and a background process is not permitted to reliably raise a window,
+so the request to bring the target forward quietly does nothing.
+
+Evidence: a capture of the editor produced a flawless image of a web browser. Nothing in the output
+indicated a problem.
+
+Consequence: the window is asked to render itself, with the full-content flag so composited surfaces
+appear rather than leaving a hole, after checking that it is responding, because rendering blocks on
+a window that is not pumping messages.
+
+## 8. Inferring what a surface should show put the wrong document in it
+
+A browser surface chose its content by looking for the editing bundle on disk and falling back to
+the panel document. Once the bundle existed, the docked panel showed the editing surface.
+
+The failure presented as a rendering fault: a small, black, empty panel. It was the wrong document,
+correctly rendered. Content is now stated by whoever creates the surface.
+
+## 9. Late binding removes a class of failure at the boundary
 
 Calls into the editor object model go through dispatch by name rather than through compiled vtable
 offsets. This avoids any dependency on member ordering in a particular typelib build, which is a
