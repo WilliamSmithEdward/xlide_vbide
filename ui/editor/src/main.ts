@@ -85,6 +85,7 @@ function boot(): void {
     activateModule: (name) => bridge.activateModule(name),
     navigate: (module, line, column) => bridge.navigate(module, line, column),
     layoutChanged: () => editor.layout(),
+    command: (command) => bridge.runCommand(command),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

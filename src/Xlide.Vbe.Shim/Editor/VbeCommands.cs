@@ -149,6 +149,28 @@ internal static class VbeCommands
     }
 
     /// <summary>
+    /// The editor command a toolbar name means, or zero when it is not one of ours.
+    ///
+    /// Names rather than numbers cross the boundary, so the page never has to know the host's
+    /// identifiers and a host that numbers them differently changes nothing on the far side.
+    /// </summary>
+    public static int ForName(string name) => name switch
+    {
+        "run" => Command.Run,
+        "break" => Command.Break,
+        "reset" => Command.Reset,
+        "stepInto" => Command.StepInto,
+        "stepOver" => Command.StepOver,
+        "stepOut" => Command.StepOut,
+        "runToCursor" => Command.RunToCursor,
+        "toggleBreakpoint" => Command.ToggleBreakpoint,
+        "quickWatch" => Command.QuickWatch,
+        "addWatch" => Command.AddWatch,
+        "callStack" => Command.CallStack,
+        _ => 0,
+    };
+
+    /// <summary>
     /// The editor command a keystroke means, or zero when the editor does not own that key.
     ///
     /// These are the editor's own shortcuts, and they are claimed because the surface covers the

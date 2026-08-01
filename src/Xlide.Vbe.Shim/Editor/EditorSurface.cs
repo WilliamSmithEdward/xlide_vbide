@@ -63,6 +63,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer picks a finding and wants to be taken to it.</summary>
     public Action<string, int, int>? NavigateRequested { get; set; }
 
+    /// <summary>Raised when the developer chooses a command the editor owns.</summary>
+    public Action<string>? CommandRequested { get; set; }
+
     /// <summary>
     /// Asked about each key the editor might own, before the document sees it. Return true to
     /// claim it.
@@ -286,6 +289,15 @@ internal sealed class EditorSurface : IDisposable
 
                 case "navigate":
                     OnNavigate(document.RootElement);
+                    break;
+
+                case "command":
+                    if (document.RootElement.TryGetProperty("name", out var command)
+                        && command.GetString() is { Length: > 0 } commandName)
+                    {
+                        CommandRequested?.Invoke(commandName);
+                    }
+
                     break;
             }
         }

@@ -203,6 +203,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.KeyPressed = OnSurfaceKey;
                 _editorSurface.ModuleRequested = ShowModule;
                 _editorSurface.NavigateRequested = GoTo;
+                _editorSurface.CommandRequested = RunCommand;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -257,6 +258,23 @@ internal sealed class AddInSession : IDisposable
 
         VbeCommands.Execute(_editor, command);
         return true;
+    }
+
+    /// <summary>Runs a command the developer chose from the toolbar.</summary>
+    private void RunCommand(string name)
+    {
+        var command = VbeCommands.ForName(name);
+        if (command == 0)
+        {
+            Log.Info($"command: '{name}' is not one of ours");
+            return;
+        }
+
+        // Same as for a keystroke: the editor acts on its own caret, so the two are put in step
+        // first. A toolbar button also takes focus away from the surface, which is exactly when
+        // the two carets would otherwise be furthest apart.
+        SyncCaretToPane();
+        VbeCommands.Execute(_editor, command);
     }
 
     /// <summary>Puts the native pane's caret where the surface's caret is.</summary>

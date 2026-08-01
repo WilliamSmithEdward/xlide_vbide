@@ -9,6 +9,8 @@
  * concept of them.
  */
 
+import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
+
 export type FindingSeverity = "error" | "warning" | "info" | "hint";
 
 export interface ShellFinding {
@@ -27,6 +29,8 @@ export interface ShellHandlers {
   navigate(module: string, line: number, column: number): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
   layoutChanged(): void;
+  /** A toolbar command was chosen. */
+  command(command: ToolbarCommand): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -62,6 +66,8 @@ export class Shell {
   private readonly panelList: HTMLElement;
   private readonly panelCount: HTMLElement;
   private readonly panelToggle: HTMLButtonElement;
+  private readonly statusPosition: HTMLElement;
+  private readonly statusModule: HTMLElement;
 
   private modules: string[] = [];
   private active: string | null = null;
@@ -75,6 +81,10 @@ export class Shell {
     this.shell = root.querySelector("#shell") as HTMLElement;
     this.splitter = root.querySelector("#panel-splitter") as HTMLElement;
     this.tabStrip = root.querySelector("#tabs") as HTMLElement;
+    this.statusPosition = root.querySelector("#status-position") as HTMLElement;
+    this.statusModule = root.querySelector("#status-module") as HTMLElement;
+
+    buildToolbar(root.querySelector("#toolbar") as HTMLElement, (command) => handlers.command(command));
     this.panel = root.querySelector("#panel") as HTMLElement;
     this.panelList = root.querySelector("#panel-list") as HTMLElement;
     this.panelCount = root.querySelector("#panel-count") as HTMLElement;
@@ -109,7 +119,13 @@ export class Shell {
   setModules(modules: string[], active: string | null): void {
     this.modules = modules;
     this.active = active;
+    this.statusModule.textContent = active ?? "";
     this.renderTabs();
+  }
+
+  /** Shows where the caret is. */
+  setPosition(line: number, column: number): void {
+    this.statusPosition.textContent = `Ln ${line}, Col ${column}`;
   }
 
   /** Replaces the panel's contents. */

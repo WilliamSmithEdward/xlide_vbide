@@ -1,5 +1,6 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { Shell, ShellFinding } from "./shell.js";
+import type { ToolbarCommand } from "./toolbar.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID } from "./vba.js";
 
@@ -72,7 +73,8 @@ export type ClientMessage =
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string }
-  | { type: "navigate"; module: string; line: number; column: number };
+  | { type: "navigate"; module: string; line: number; column: number }
+  | { type: "command"; name: string };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -164,6 +166,25 @@ export class EditorBridge {
   /** Asks the host to go to a finding, in response to the developer picking it. */
   navigate(module: string, line: number, column: number): void {
     this.transport.post({ type: "navigate", module, line, column });
+  }
+
+  /**
+   * Runs a toolbar command.
+   *
+   * An editor command is run here; a host command is sent on. The editor's caret has to reach the
+   * host before a host command runs, because the host runs the procedure its own caret is in, and
+   * it is sent by the same selection message the caret already produces.
+   */
+  runCommand(command: ToolbarCommand): void {
+    if (command.target === "host") {
+      this.transport.post({ type: "command", name: command.id });
+      return;
+    }
+
+    // Focus first. An editor action taken while the button has focus operates on an editor that
+    // does not have it, and the ones that open a widget put it somewhere the developer cannot type.
+    this.editor.focus();
+    this.editor.getAction(command.id)?.run();
   }
 
   dispose(): void {
@@ -293,6 +314,7 @@ export class EditorBridge {
   }
 
   private onSelectionChanged(selection: monaco.Selection): void {
+    this.shell?.setPosition(selection.positionLineNumber, selection.positionColumn);
     this.transport.post({
       type: "selectionChanged",
       startLine: selection.startLineNumber,
