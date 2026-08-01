@@ -4,7 +4,14 @@ export const VBA_LANGUAGE_ID = "vba";
 
 // VBA is case insensitive. The Monarch tokenizer is told so with `ignoreCase`, which also makes
 // the `@keywords` case-block match without lowering every entry here.
-const KEYWORDS: readonly string[] = [
+/**
+ * Canonical spelling of every keyword.
+ *
+ * VBA is case insensitive and its own editor respells keywords as they are typed, so a module
+ * that has been through it is consistent. This list is what "consistent" means here, and the
+ * formatter uses it as well as the tokenizer.
+ */
+export const CANONICAL_KEYWORDS: readonly string[] = [
   "Sub", "Function", "End", "If", "Then", "Else", "ElseIf", "For", "Next", "Do", "Loop",
   "While", "Wend", "Select", "Case", "Dim", "Set", "Let", "Const", "Public", "Private",
   "Friend", "Static", "Option", "Explicit", "On", "Error", "Resume", "GoTo", "With",
@@ -19,7 +26,7 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
   ignoreCase: true,
   defaultToken: "",
   tokenPostfix: ".vba",
-  keywords: KEYWORDS as string[],
+  keywords: CANONICAL_KEYWORDS as string[],
 
   tokenizer: {
     root: [

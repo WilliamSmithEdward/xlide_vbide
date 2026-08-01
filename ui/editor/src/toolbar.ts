@@ -52,10 +52,30 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "editor.unfoldAll", target: "editor", icon: "unfold", label: "Unfold all" },
 ];
 
-export function buildToolbar(root: HTMLElement, run: (command: ToolbarCommand) => void): void {
+/**
+ * Builds the toolbar.
+ *
+ * `available` is asked about every editor command before its button is drawn. Monaco resolves an
+ * action id at run time and ignores an unknown one rather than reporting it, so a button for a
+ * feature that was not bundled looks identical to one that works and does nothing when pressed.
+ * Commands that cannot run are left out and named in the console, which is the difference between
+ * a toolbar and a row of decorations.
+ */
+export function buildToolbar(
+  root: HTMLElement,
+  run: (command: ToolbarCommand) => void,
+  available: (command: ToolbarCommand) => boolean = () => true,
+): void {
   root.replaceChildren();
 
+  const missing: string[] = [];
+
   for (const command of COMMANDS) {
+    if (command.target === "editor" && !available(command)) {
+      missing.push(command.id);
+      continue;
+    }
+
     if (command.separatorBefore) {
       const divider = document.createElement("span");
       divider.className = "toolbar-divider";
@@ -79,5 +99,9 @@ export function buildToolbar(root: HTMLElement, run: (command: ToolbarCommand) =
     button.appendChild(icon);
     button.addEventListener("click", () => run(command));
     root.appendChild(button);
+  }
+
+  if (missing.length > 0) {
+    console.warn(`[xlide] toolbar commands not available in this build: ${missing.join(", ")}`);
   }
 }

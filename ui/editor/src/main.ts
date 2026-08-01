@@ -11,6 +11,7 @@ import "monaco-editor/features/contextmenu/register.js";
 import "monaco-editor/features/cursorUndo/register.js";
 import "monaco-editor/features/find/register.js";
 import "monaco-editor/features/folding/register.js";
+import "monaco-editor/features/format/register.js";
 import "monaco-editor/features/gotoError/register.js";
 import "monaco-editor/features/gotoLine/register.js";
 import "monaco-editor/features/hover/register.js";
@@ -18,6 +19,7 @@ import "monaco-editor/features/indentation/register.js";
 import "monaco-editor/features/lineSelection/register.js";
 import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/multicursor/register.js";
+import "monaco-editor/features/quickCommand/register.js";
 import "monaco-editor/features/smartSelect/register.js";
 import "monaco-editor/features/tokenization/register.js";
 import "monaco-editor/features/wordHighlighter/register.js";
@@ -26,6 +28,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport } from "./bridge.js";
+import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
@@ -49,6 +52,7 @@ function boot(): void {
 
   registerVba();
   defineThemes();
+  registerFormatting(() => DEFAULT_FORMAT_OPTIONS);
 
   const editor = monaco.editor.create(container, {
     value: "",
@@ -86,6 +90,7 @@ function boot(): void {
     navigate: (module, line, column) => bridge.navigate(module, line, column),
     layoutChanged: () => editor.layout(),
     command: (command) => bridge.runCommand(command),
+    commandAvailable: (command) => editor.getAction(command.id) !== null,
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

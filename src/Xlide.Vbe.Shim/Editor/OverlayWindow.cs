@@ -19,8 +19,9 @@ internal sealed unsafe class OverlayWindow : IDisposable
 {
     private const string ClassName = "XlideEditorOverlay";
 
-    /// <summary>Identifier of the single timer this window uses. Scoped to the window.</summary>
-    private const nuint TimerId = 1;
+    /// <summary>Timer identifiers, scoped to this window.</summary>
+    private const nuint WriteTimerId = 1;
+    private const nuint PollTimerId = 2;
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();
 
@@ -58,28 +59,49 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>Raised when the window has been resized, so the surface can follow.</summary>
     public Action<PixelRect>? Resized { get; set; }
 
-    /// <summary>Raised once, on the host thread, after <see cref="StartTimer"/> elapses.</summary>
+    /// <summary>Raised once, on the host thread, after <see cref="StartWriteTimer"/> elapses.</summary>
     public Action? Elapsed { get; set; }
+
+    /// <summary>Raised repeatedly, on the host thread, while the poll timer runs.</summary>
+    public Action? Polled { get; set; }
 
     /// <summary>
     /// Starts or restarts a one-shot timer. Restarting is what makes it a debounce: each call
     /// pushes the deadline out, so a burst of keystrokes produces one callback rather than one per
     /// key.
     /// </summary>
-    public void StartTimer(uint milliseconds)
+    public void StartWriteTimer(uint milliseconds)
     {
         if (_handle != 0)
         {
-            Win32.SetTimer(_handle, TimerId, milliseconds, 0);
+            Win32.SetTimer(_handle, WriteTimerId, milliseconds, 0);
         }
     }
 
-    /// <summary>Cancels the timer if it is running.</summary>
-    public void StopTimer()
+    /// <summary>Cancels the one-shot timer if it is running.</summary>
+    public void StopWriteTimer()
     {
         if (_handle != 0)
         {
-            Win32.KillTimer(_handle, TimerId);
+            Win32.KillTimer(_handle, WriteTimerId);
+        }
+    }
+
+    /// <summary>Starts a repeating timer, or changes its interval.</summary>
+    public void StartPollTimer(uint milliseconds)
+    {
+        if (_handle != 0)
+        {
+            Win32.SetTimer(_handle, PollTimerId, milliseconds, 0);
+        }
+    }
+
+    /// <summary>Stops the repeating timer.</summary>
+    public void StopPollTimer()
+    {
+        if (_handle != 0)
+        {
+            Win32.KillTimer(_handle, PollTimerId);
         }
     }
 
@@ -247,12 +269,21 @@ internal sealed unsafe class OverlayWindow : IDisposable
                 case Win32.WmTimer:
                 {
                     var overlay = FromHandle(window);
-                    if (overlay is not null)
+                    if (overlay is null)
+                    {
+                        return 0;
+                    }
+
+                    if ((nuint)wParam == WriteTimerId)
                     {
                         // One shot. A window timer repeats until it is killed, and the work behind
                         // this only needs doing once per burst.
-                        overlay.StopTimer();
+                        overlay.StopWriteTimer();
                         overlay.Elapsed?.Invoke();
+                    }
+                    else if ((nuint)wParam == PollTimerId)
+                    {
+                        overlay.Polled?.Invoke();
                     }
 
                     return 0;
@@ -311,11 +342,13 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
         if (handle != 0)
         {
-            Win32.KillTimer(handle, TimerId);
+            Win32.KillTimer(handle, WriteTimerId);
+            Win32.KillTimer(handle, PollTimerId);
         }
 
         _handle = 0;
         Elapsed = null;
+        Polled = null;
 
         if (handle != 0 && Win32.IsWindow(handle))
         {

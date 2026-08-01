@@ -95,6 +95,30 @@ internal static class VbeCommands
         }
     }
 
+    /// <summary>
+    /// Whether a command can currently run.
+    ///
+    /// This is the only reliable read of the editor's execution state. Reset is available exactly
+    /// when there is something to reset, which is when execution is stopped or paused, and it says
+    /// so without depending on the language the host is running in.
+    /// </summary>
+    public static bool IsEnabled(DispatchObject editor, int commandId)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+
+        try
+        {
+            using var bars = editor.GetObject("CommandBars");
+            using var control = bars is null ? null : Find(bars, commandId);
+            return control is not null && control.GetBool("Enabled");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"command: {commandId} availability could not be read", ex);
+            return false;
+        }
+    }
+
     /// <summary>Finds a control by identifier, looking at the likeliest bars first.</summary>
     private static DispatchObject? Find(DispatchObject bars, int commandId)
     {

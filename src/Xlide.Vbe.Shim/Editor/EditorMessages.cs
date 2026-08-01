@@ -69,6 +69,28 @@ public sealed record SetProjectsMessage(
     [property: JsonPropertyName("projects")] SurfaceProject[] Projects);
 
 /// <summary>
+/// The module's text as the editor now holds it, to be adopted without disturbing the developer.
+///
+/// Distinct from loading a document: loading replaces the model and resets the undo stack and the
+/// caret, which is right when the developer opens a different module and wrong when the text they
+/// are in the middle of typing has merely been normalised underneath them.
+/// </summary>
+public sealed record SyncDocumentMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("text")] string Text);
+
+/// <summary>The line execution is stopped on, or null when nothing is stopped.</summary>
+public sealed record SetCurrentLineMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("line")] int? Line);
+
+/// <summary>Every line in the shown module that carries a breakpoint.</summary>
+public sealed record SetBreakpointsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("lines")] int[] Lines);
+
+/// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
 /// rather than at build time.
@@ -81,6 +103,9 @@ public sealed record SetProjectsMessage(
 [JsonSerializable(typeof(SetModulesMessage))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
+[JsonSerializable(typeof(SyncDocumentMessage))]
+[JsonSerializable(typeof(SetCurrentLineMessage))]
+[JsonSerializable(typeof(SetBreakpointsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

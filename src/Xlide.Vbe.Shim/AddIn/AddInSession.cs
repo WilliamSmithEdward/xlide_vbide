@@ -206,6 +206,8 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.NavigateRequested = GoTo;
                 _editorSurface.CommandRequested = RunCommand;
                 _editorSurface.TextChanged = WriteModule;
+                _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
+                _editorSurface.Polled = PollDebugState;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -225,6 +227,12 @@ internal sealed class AddInSession : IDisposable
 
             PublishModules();
             PublishProjects();
+
+            // The editor moves and activates panes as it steps, so this is also a signal that
+            // execution may have moved on, and that the module may have been changed by something
+            // other than the developer.
+            UpdateDebugState();
+            ResyncFromModule();
         }
         catch (Exception ex)
         {
@@ -263,7 +271,17 @@ internal sealed class AddInSession : IDisposable
         _editorSurface?.FlushEdits();
         SyncCaretToPane();
 
+        // Toggling goes through the bookkeeping rather than straight at the command, so the
+        // breakpoint drawn on the surface and the one the editor holds stay the same set however
+        // the developer asked for it.
+        if (command == VbeCommands.Command.ToggleBreakpoint)
+        {
+            ToggleBreakpoint(_editorSurface?.CaretLine ?? 0);
+            return true;
+        }
+
         VbeCommands.Execute(_editor, command);
+        WatchDebugState();
         return true;
     }
 
@@ -291,7 +309,7 @@ internal sealed class AddInSession : IDisposable
         {
             using var found = FindComponent(component);
             using var module = found?.GetObject("CodeModule");
-            if (module is null)
+            if (found is null || module is null)
             {
                 Log.Warn($"write: {component} has no code module");
                 return;
@@ -310,6 +328,18 @@ internal sealed class AddInSession : IDisposable
                 module.Invoke("AddFromString", text);
             }
 
+            // Read straight back, because the editor rewrites what it is given. It respells
+            // keywords and normalises spacing as it takes a module in, so the text it now holds is
+            // not the text that was sent. Adopting its version here is what keeps the two the same
+            // document; without it every later comparison sees a difference that is the editor's
+            // doing and not the developer's, and the surface slowly drifts away from the truth.
+            var stored = ProjectReader.ReadSource(found);
+            if (stored is not null && stored != text)
+            {
+                Log.Info($"write: {component} was normalised by the editor, adopting its version");
+                _editorSurface?.Sync(component, stored);
+            }
+
             Log.Info($"write: {component}, {text.Length} character(s)");
 
             // The analyzer reads the module, so it has nothing new to say until the module has
@@ -320,6 +350,308 @@ internal sealed class AddInSession : IDisposable
         catch (Exception ex)
         {
             Log.Error($"write: {component} could not be updated", ex);
+        }
+    }
+
+    /// <summary>
+    /// Breakpoints the developer has set, by module.
+    ///
+    /// Kept here because the editor does not expose them. It has a command that toggles the one at
+    /// its caret and no way at all to ask which lines carry one, so the only way to draw them is to
+    /// remember every toggle that went through us. The surface is the only way to set one now that
+    /// the native panes are covered, so this stays in step in practice; a breakpoint set some other
+    /// way would be real and undrawn, which is why this is a record of what we did rather than a
+    /// claim about what the editor holds.
+    /// </summary>
+    private readonly Dictionary<string, SortedSet<int>> _breakpoints = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether execution was stopped last time it was looked at.</summary>
+    private bool _inBreak;
+
+    /// <summary>Project modes, as the editor numbers them.</summary>
+    private const int BreakMode = 1;
+    private const int DesignMode = 2;
+
+    /// <summary>How often the execution state is looked at while anything might be running.</summary>
+    private const uint DebugPollMilliseconds = 150;
+
+    /// <summary>
+    /// Polls left before watching stops.
+    ///
+    /// Running a procedure does not block the call that started it: the command returns and the
+    /// code runs afterwards, so the state at the moment the command was issued is always "not
+    /// running yet". Checking once found nothing every time, and the stopped line never appeared.
+    /// Watching for a while after is the only way to see the transition, and it stops on its own
+    /// so that a host sitting idle is not polled forever.
+    /// </summary>
+    private int _pollsRemaining;
+
+    /// <summary>
+    /// Whether VBA will accept a breakpoint on a line.
+    ///
+    /// Only executable statements can carry one. Asking the editor to set one anywhere else puts a
+    /// modal dialog on screen saying so, which is the host's answer to a question the developer did
+    /// not ask: they clicked a margin, and a dialog is not a reasonable reply to that. The line is
+    /// checked here so the common refusals never reach it.
+    ///
+    /// Declarations are excluded, not modifiers. A procedure can start with the same words a
+    /// module-level declaration does, and a breakpoint on the opening line of a procedure is
+    /// perfectly legal, so it is what follows the modifiers that decides.
+    /// </summary>
+    private static bool CanBreakOn(string? line)
+    {
+        var code = line?.Trim();
+        if (string.IsNullOrEmpty(code))
+        {
+            return false;
+        }
+
+        if (code.StartsWith('\'') || code.StartsWith("Rem ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (StartsWithWord(code, "Option", "Attribute", "Declare", "Dim", "Const", "Type", "Enum", "End Type", "End Enum"))
+        {
+            return false;
+        }
+
+        // A modifier followed by anything that is not a procedure is a declaration.
+        foreach (var modifier in (string[])["Public", "Private", "Friend", "Static", "Global"])
+        {
+            if (StartsWithWord(code, modifier))
+            {
+                var rest = code[modifier.Length..].TrimStart();
+                return StartsWithWord(rest, "Sub", "Function", "Property");
+            }
+        }
+
+        return true;
+    }
+
+    private static bool StartsWithWord(string text, params ReadOnlySpan<string> words)
+    {
+        foreach (var word in words)
+        {
+            if (!text.StartsWith(word, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // A whole word, so "Constant" is not "Const" and "Dimension" is not "Dim".
+            if (text.Length == word.Length || !char.IsLetterOrDigit(text[word.Length]) && text[word.Length] != '_')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Toggles a breakpoint on a line of the module currently shown.</summary>
+    private void ToggleBreakpoint(int line)
+    {
+        var module = _editorSurface?.Module;
+        if (module is null || line < 1)
+        {
+            return;
+        }
+
+        if (!CanBreakOn(_editorSurface?.LineAt(line)))
+        {
+            Log.Info($"breakpoint: {module}({line}) is not an executable statement");
+            return;
+        }
+
+        try
+        {
+            // The command acts on the caret, so the caret is put on the line first. Everything the
+            // developer typed goes with it: a breakpoint is set by line number, and writing the
+            // module afterwards would move it.
+            _editorSurface?.FlushEdits();
+
+            using var pane = FindCodePane(module);
+            if (pane is null)
+            {
+                return;
+            }
+
+            pane.Invoke("SetSelection", line, 1, line, 1);
+
+            if (!VbeCommands.Execute(_editor, VbeCommands.Command.ToggleBreakpoint))
+            {
+                return;
+            }
+
+            if (!_breakpoints.TryGetValue(module, out var lines))
+            {
+                lines = [];
+                _breakpoints[module] = lines;
+            }
+
+            if (!lines.Remove(line))
+            {
+                lines.Add(line);
+            }
+
+            _editorSurface?.ShowBreakpoints([.. lines]);
+            Log.Info($"breakpoint: {module}({line}) {(lines.Contains(line) ? "set" : "cleared")}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"breakpoint: {module}({line}) could not be toggled", ex);
+        }
+    }
+
+    /// <summary>Sends the surface the breakpoints belonging to the module it is showing.</summary>
+    private void PublishBreakpoints()
+    {
+        var module = _editorSurface?.Module;
+        if (module is null)
+        {
+            return;
+        }
+
+        _editorSurface?.ShowBreakpoints(
+            _breakpoints.TryGetValue(module, out var lines) ? [.. lines] : []);
+    }
+
+    /// <summary>
+    /// Works out whether execution is stopped, and marks the line it is stopped on.
+    ///
+    /// The project reports its own mode, which is the only reading of this that is neither
+    /// localised nor inferred. The first attempt used whether the reset command was available, and
+    /// that is enabled in design mode as well, so the marker appeared before anything had run.
+    ///
+    /// The line comes from the editor's own caret, which it moves onto the statement it stopped at.
+    /// There is no property for the current statement; this is the only thing that reports it.
+    /// </summary>
+    private void UpdateDebugState()
+    {
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            var mode = project?.GetInt32("Mode") ?? DesignMode;
+
+            if (mode != BreakMode)
+            {
+                if (_inBreak)
+                {
+                    _inBreak = false;
+                    _editorSurface?.ShowCurrentLine(null);
+                    Log.Info($"debug: mode {mode}, not stopped");
+                }
+
+                return;
+            }
+
+            using var pane = _editor.GetObject("ActiveCodePane");
+            if (pane is null)
+            {
+                return;
+            }
+
+            Span<int> selection = stackalloc int[4];
+            pane.InvokeInt32s("GetSelection", selection);
+
+            var line = selection[0];
+            if (line < 1)
+            {
+                return;
+            }
+
+            using var module = pane.GetObject("CodeModule");
+            using var component = module?.GetObject("Parent");
+            var name = component?.GetString("Name");
+
+            if (name is not null && name != _editorSurface?.Module)
+            {
+                ShowModuleInSurface(name);
+            }
+
+            _editorSurface?.ShowCurrentLine(line);
+            _editorSurface?.Reveal(line);
+
+            if (!_inBreak)
+            {
+                Log.Info($"debug: stopped at {name}({line})");
+            }
+
+            _inBreak = true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("debug: the execution state could not be read", ex);
+        }
+    }
+
+    /// <summary>Starts watching the execution state, for a while.</summary>
+    private void WatchDebugState()
+    {
+        // Twenty seconds of watching. Long enough for a procedure that does some work before it
+        // reaches a breakpoint, short enough that a run which never stops does not poll all day.
+        _pollsRemaining = (int)(20_000 / DebugPollMilliseconds);
+        _editorSurface?.Poll(DebugPollMilliseconds);
+        UpdateDebugState();
+    }
+
+    /// <summary>
+    /// Checks that the surface still agrees with the module, and adopts the module when it does
+    /// not.
+    ///
+    /// The module is the source of truth. It can change without the surface having asked: a macro
+    /// can rewrite it, an import can replace it, and the editor itself rewrites parts of it. When
+    /// that happens the surface is showing something that no longer exists, and every position it
+    /// reports is against the wrong text.
+    ///
+    /// An edit the developer has not finished is never overwritten. Their work outranks a
+    /// difference that has not been reconciled yet, and the write that is already scheduled will
+    /// reconcile it a moment later.
+    /// </summary>
+    private void ResyncFromModule()
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || surface.HasUnwrittenEdits)
+        {
+            return;
+        }
+
+        try
+        {
+            using var found = FindComponent(module);
+            var stored = found is null ? null : ProjectReader.ReadSource(found);
+
+            if (stored is not null && stored != surface.Text)
+            {
+                Log.Info($"resync: {module} changed underneath the surface, adopting the module");
+                surface.Sync(module, stored);
+                _analysis?.Reanalyse();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"resync: {module} could not be compared with the module", ex);
+        }
+    }
+
+    /// <summary>One tick of the execution watch.</summary>
+    private void PollDebugState()
+    {
+        UpdateDebugState();
+
+        // Watching continues for as long as execution is stopped, because the developer is about
+        // to step and every step moves the marker.
+        if (_inBreak)
+        {
+            _pollsRemaining = (int)(20_000 / DebugPollMilliseconds);
+            return;
+        }
+
+        if (--_pollsRemaining <= 0)
+        {
+            _editorSurface?.Poll(0);
         }
     }
 
@@ -338,6 +670,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface?.FlushEdits();
         SyncCaretToPane();
         VbeCommands.Execute(_editor, command);
+        WatchDebugState();
     }
 
     /// <summary>Puts the native pane's caret where the surface's caret is.</summary>
@@ -382,6 +715,7 @@ internal sealed class AddInSession : IDisposable
         // rather than waiting for the next analysis pass.
         PublishMarkersForShownModule();
         PublishFindingsToSurface();
+        PublishBreakpoints();
     }
 
     /// <summary>

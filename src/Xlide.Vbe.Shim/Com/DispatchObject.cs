@@ -261,6 +261,37 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Calls a method whose arguments are all numbers the callee writes into.
+    ///
+    /// This is how the editor reports where the caret is: it has no property for it, only a method
+    /// with four out parameters. The storage has to be ours and has to outlive the call, and each
+    /// descriptor points straight at one of the slots rather than at a second variant, because a
+    /// variant of a variant would only reach the callee through the dispatch layer's coercion and
+    /// whether that runs depends on how the callee implements Invoke.
+    /// </summary>
+    public void InvokeInt32s(string name, Span<int> results)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        fixed (int* values = results)
+        {
+            var variants = new ComVariant[results.Length];
+            for (var i = 0; i < results.Length; i++)
+            {
+                variants[i] = ComVariant.CreateRaw(VarEnum.VT_BYREF | VarEnum.VT_I4, (nint)(values + i));
+            }
+
+            // Nothing is freed for a by-reference variant: the storage is the caller's, which is
+            // this stack frame.
+            using var result = InvokeCore(dispId, InvokeKind.Method, variants);
+        }
+    }
+
+    /// <summary>
     /// Calls a method that takes one string and returns nothing, which is how a module is given
     /// its source.
     /// </summary>

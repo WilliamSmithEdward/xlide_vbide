@@ -43,6 +43,7 @@ export interface HostMarker extends HostRange {
 
 export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
+  | { type: "syncDocument"; moduleName: string; text: string }
   | { type: "setModules"; modules: string[]; active: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
@@ -201,6 +202,9 @@ export class EditorBridge {
       case "loadDocument":
         this.loadDocument(message.moduleName, message.text);
         return;
+      case "syncDocument":
+        this.syncDocument(message.moduleName, message.text);
+        return;
       case "setModules":
         this.shell?.setModules(message.modules, message.active);
         return;
@@ -270,6 +274,47 @@ export class EditorBridge {
     this.revision = 0;
     this.currentLine.clear();
     this.breakpoints.clear();
+  }
+
+  /**
+   * Adopts the host's version of the module in place.
+   *
+   * The host owns the text; this surface is a view of it. When the two differ the host is right,
+   * and the difference is usually its own doing: it respells keywords as it takes a module in.
+   *
+   * Applied as one edit rather than by setting the value, so the undo stack survives and the
+   * caret stays where the developer left it. Setting the value discards both, and doing that
+   * while somebody is typing moves them to the top of the module mid-word.
+   */
+  private syncDocument(moduleName: string, text: string): void {
+    const model = this.model();
+    if (!model || model.getValue() === text) {
+      return;
+    }
+
+    // A message for a module that is no longer shown is stale by definition.
+    const uri = monaco.Uri.parse(`xlide:/${encodeURIComponent(moduleName)}`);
+    if (model.uri.toString() !== uri.toString()) {
+      return;
+    }
+
+    const selections = this.editor.getSelections();
+
+    this.applyingHostEdit = true;
+    try {
+      model.pushEditOperations(
+        selections ?? null,
+        [{ range: model.getFullModelRange(), text, forceMoveMarkers: true }],
+        () => selections ?? null);
+    } finally {
+      this.applyingHostEdit = false;
+    }
+
+    if (selections) {
+      // Clamped by Monaco to the new text, so a position past the end lands at the end rather
+      // than being rejected.
+      this.editor.setSelections(selections);
+    }
   }
 
   private applyEdit(revision: number, changes: HostTextChange[]): void {

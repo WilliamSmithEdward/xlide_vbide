@@ -123,6 +123,7 @@ internal sealed class EditorSurface : IDisposable
 
         surface._overlay.Resized += size => surface._browser?.SetBounds(size);
         surface._overlay.Elapsed = surface.FlushEdits;
+        surface._overlay.Polled = () => surface.Polled?.Invoke();
 
         // Asked for the editing document, then left alone. Creating a browser is asynchronous in two
         // stages, so mapping the content root and navigating from here would run before the browser
@@ -162,12 +163,46 @@ internal sealed class EditorSurface : IDisposable
 
         // The text just arrived from the module, so there is nothing of the developer's to write.
         _unwritten = false;
-        _overlay?.StopTimer();
+        _overlay?.StopWriteTimer();
 
         Send("loadDocument", JsonSerializer.Serialize(
             new LoadDocumentMessage("loadDocument", moduleName, text),
             EditorMessageContext.Default.LoadDocumentMessage));
     }
+
+    /// <summary>
+    /// Adopts the editor's version of the module without disturbing what the developer is doing.
+    ///
+    /// The editor is the text of record and it rewrites what it is given: it respells keywords and
+    /// normalises spacing as it takes a module in. So the moment after an edit is written, the two
+    /// disagree, and every later comparison would see a difference that is not the developer's.
+    /// Adopting its version closes that immediately, at the one moment the difference is known to
+    /// be the editor's doing and not an edit in flight.
+    /// </summary>
+    public void Sync(string moduleName, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (_module != moduleName)
+        {
+            return;
+        }
+
+        _text = text;
+
+        if (_loaded)
+        {
+            Post(JsonSerializer.Serialize(
+                new SyncDocumentMessage("syncDocument", moduleName, text),
+                EditorMessageContext.Default.SyncDocumentMessage));
+        }
+    }
+
+    /// <summary>True when the developer has typed something that has not reached the module.</summary>
+    public bool HasUnwrittenEdits => _unwritten;
+
+    /// <summary>The surface's copy of the module text, or null when it is showing nothing.</summary>
+    public string? Text => _text;
 
     /// <summary>Replaces the squiggles shown on the module currently displayed.</summary>
     public void ShowDiagnostics(EditorMarker[] markers)
@@ -197,6 +232,83 @@ internal sealed class EditorSurface : IDisposable
         Send("setProjects", JsonSerializer.Serialize(
             new SetProjectsMessage("setProjects", projects),
             EditorMessageContext.Default.SetProjectsMessage));
+    }
+
+    /// <summary>
+    /// Marks the line execution is stopped on, or clears the mark.
+    ///
+    /// Not held for a page that is still loading: where execution was stopped seconds ago is not
+    /// where it is stopped now, and a stale arrow is worse than none.
+    /// </summary>
+    public void ShowCurrentLine(int? line)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SetCurrentLineMessage("setCurrentLine", line),
+            EditorMessageContext.Default.SetCurrentLineMessage));
+    }
+
+    /// <summary>Replaces the breakpoints shown on the module currently displayed.</summary>
+    public void ShowBreakpoints(int[] lines)
+    {
+        ArgumentNullException.ThrowIfNull(lines);
+
+        Send("setBreakpoints", JsonSerializer.Serialize(
+            new SetBreakpointsMessage("setBreakpoints", lines),
+            EditorMessageContext.Default.SetBreakpointsMessage));
+    }
+
+    /// <summary>Raised on every tick of the poll timer, on the host thread.</summary>
+    public Action? Polled { get; set; }
+
+    /// <summary>Starts or stops the poll timer, which is how execution state is watched.</summary>
+    public void Poll(uint milliseconds)
+    {
+        if (milliseconds == 0)
+        {
+            _overlay?.StopPollTimer();
+        }
+        else
+        {
+            _overlay?.StartPollTimer(milliseconds);
+        }
+    }
+
+    /// <summary>Raised when the developer clicks the glyph margin to toggle a breakpoint.</summary>
+    public Action<int>? BreakpointToggleRequested { get; set; }
+
+    /// <summary>
+    /// The text of a one-based line as the surface currently has it, or null when there is no such
+    /// line. This is the surface's copy, which is what the developer is looking at.
+    /// </summary>
+    public string? LineAt(int line)
+    {
+        if (_text is null || line < 1)
+        {
+            return null;
+        }
+
+        var start = 0;
+        for (var current = 1; ; current++)
+        {
+            var end = _text.IndexOf('\n', start);
+            if (current == line)
+            {
+                var text = end < 0 ? _text[start..] : _text[start..end];
+                return text.TrimEnd('\r');
+            }
+
+            if (end < 0)
+            {
+                return null;
+            }
+
+            start = end + 1;
+        }
     }
 
     /// <summary>Replaces the panel's contents, across every module.</summary>
@@ -234,7 +346,7 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public void FlushEdits()
     {
-        _overlay?.StopTimer();
+        _overlay?.StopWriteTimer();
 
         if (!_unwritten || _module is null || _text is null)
         {
@@ -323,7 +435,7 @@ internal sealed class EditorSurface : IDisposable
                         // and immediately before anything that has to see it.
                         _text = updated;
                         _unwritten = true;
-                        _overlay?.StartTimer(WriteDelayMilliseconds);
+                        _overlay?.StartWriteTimer(WriteDelayMilliseconds);
                     }
 
                     break;
@@ -339,6 +451,15 @@ internal sealed class EditorSurface : IDisposable
 
                 case "navigate":
                     OnNavigate(document.RootElement);
+                    break;
+
+                case "breakpointToggleRequested":
+                    if (document.RootElement.TryGetProperty("line", out var breakpointLine)
+                        && breakpointLine.TryGetInt32(out var toggled))
+                    {
+                        BreakpointToggleRequested?.Invoke(toggled);
+                    }
+
                     break;
 
                 case "command":

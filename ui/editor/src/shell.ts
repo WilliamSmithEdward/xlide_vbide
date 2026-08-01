@@ -32,6 +32,8 @@ export interface ShellHandlers {
   layoutChanged(): void;
   /** A toolbar command was chosen. */
   command(command: ToolbarCommand): void;
+  /** Whether an editor command exists in this build. Buttons for missing ones are not drawn. */
+  commandAvailable(command: ToolbarCommand): boolean;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -99,7 +101,10 @@ export class Shell {
       root.querySelector("#sidebar-tree") as HTMLElement,
       (name) => handlers.activateModule(name));
 
-    buildToolbar(root.querySelector("#toolbar") as HTMLElement, (command) => handlers.command(command));
+    buildToolbar(
+      root.querySelector("#toolbar") as HTMLElement,
+      (command) => handlers.command(command),
+      (command) => handlers.commandAvailable(command));
     this.panel = root.querySelector("#panel") as HTMLElement;
     this.panelList = root.querySelector("#panel-list") as HTMLElement;
     this.panelCount = root.querySelector("#panel-count") as HTMLElement;
