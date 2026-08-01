@@ -1,3 +1,6 @@
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
+using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 
@@ -14,6 +17,7 @@ internal sealed class AddInSession : IDisposable
 {
     private readonly DispatchObject _editor;
     private readonly DispatchObject? _addIn;
+    private DispatchObject? _toolWindow;
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -36,6 +40,7 @@ internal sealed class AddInSession : IDisposable
     public void HostStartupComplete()
     {
         ReportOpenProjects();
+        CreateToolWindow();
     }
 
     public void Stop()
@@ -50,7 +55,80 @@ internal sealed class AddInSession : IDisposable
 
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.
+        _toolWindow?.Dispose();
+        _toolWindow = null;
+
         Log.Info("session stopped");
+    }
+
+    /// <summary>
+    /// Asks the editor for a docked tool window sited on our control.
+    ///
+    /// The editor creates the control itself from its registered program identifier, so this call
+    /// is what makes the whole hosting arrangement start. Everything that can go wrong is on the
+    /// far side of it and reports nothing: an unregistered class, a missing interface, or a control
+    /// that refuses activation all produce the same failed call or an empty pane. The step-by-step
+    /// logging is the only view into which of those happened.
+    /// </summary>
+    private void CreateToolWindow()
+    {
+        if (_addIn is null)
+        {
+            Log.Warn("tool window: the editor supplied no add-in instance, so it cannot be created");
+            return;
+        }
+
+        try
+        {
+            Log.Info($"tool window: creating '{ProductIdentity.ToolWindowHostProgId}'");
+
+            using var windows = _editor.GetObject("Windows");
+            if (windows is null)
+            {
+                Log.Error("tool window: the editor exposed no window collection");
+                return;
+            }
+
+            // CreateToolWindow(AddInInst, ProgId, Caption, GuidPosition, ByRef DocObj) As Window.
+            // The editor's own type library declares the parameters as an add-in interface pointer,
+            // three strings, and an in-out automation pointer that receives the sited control.
+            //
+            // The add-in argument is a plain descriptor over a reference this session already owns,
+            // so it is deliberately not disposed: doing so would release a reference we did not add.
+            var addInInstance = ComVariant.CreateRaw(VarEnum.VT_DISPATCH, _addIn.Pointer);
+            using var progId = ComVariant.Create(ProductIdentity.ToolWindowHostProgId);
+            using var caption = ComVariant.Create(ProductIdentity.ToolWindowCaption);
+            using var position = ComVariant.Create(ProductIdentity.ToolWindowPositionGuid);
+
+            var window = windows.CallWithByRefObject(
+                "CreateToolWindow",
+                [addInInstance, progId, caption, position],
+                out var control);
+
+            // The control handed back is our own object seen through the editor. The editor keeps
+            // its own reference to it for as long as the window exists.
+            control?.Dispose();
+
+            if (window is null)
+            {
+                Log.Error("tool window: the editor returned no window");
+                return;
+            }
+
+            Log.Info("tool window: got window");
+            _toolWindow = window;
+
+            window.SetBool("Visible", true);
+            Log.Info("tool window: visible");
+        }
+        catch (COMException ex)
+        {
+            Log.Error($"tool window: the editor refused to create it, 0x{ex.HResult:X8}", ex);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("tool window: creation failed", ex);
+        }
     }
 
     /// <summary>
@@ -118,6 +196,10 @@ internal sealed class AddInSession : IDisposable
     public void Dispose()
     {
         Stop();
+
+        // Reverse acquisition order: the tool window was obtained from the editor, so it goes first.
+        _toolWindow?.Dispose();
+        _toolWindow = null;
         _addIn?.Dispose();
         _editor.Dispose();
     }

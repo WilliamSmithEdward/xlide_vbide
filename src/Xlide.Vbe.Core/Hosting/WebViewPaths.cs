@@ -1,0 +1,55 @@
+namespace Xlide.Vbe.Core.Hosting;
+
+/// <summary>
+/// Where the browser host reads from and writes to.
+///
+/// Two of these are load-bearing and neither is obvious from the outside:
+///
+/// The user data folder must be writable. WebView2 creates a profile, a cache, and lock files
+/// there on first use, so it can never be the install directory: that is under Program Files on a
+/// real installation and a per-user process cannot write to it. Failure is not a permission error
+/// the user sees, it is an environment that never completes creation.
+///
+/// The loader and the shell document sit next to the shim library, not next to the host executable.
+/// The host is EXCEL.EXE and its directory belongs to Office, so the usual base-directory notion is
+/// the wrong answer here. Callers pass the shim's own directory, which the shim resolves from its
+/// module handle.
+/// </summary>
+public static class WebViewPaths
+{
+    /// <summary>Folder name under the product data directory holding the browser profile.</summary>
+    public const string UserDataFolderName = "webview2";
+
+    /// <summary>File name of the native WebView2 loader shipped beside the shim.</summary>
+    public const string LoaderFileName = "WebView2Loader.dll";
+
+    /// <summary>Path of the shell document relative to the shim directory.</summary>
+    public const string ShellDocumentRelativePath = @"ui\shell\index.html";
+
+    /// <summary>
+    /// Browser profile directory for the current user. Derived from the local application data
+    /// path rather than read from the environment so it can be asserted in a test.
+    /// </summary>
+    public static string UserDataFolder(string localApplicationDataPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationDataPath);
+
+        return Path.Combine(localApplicationDataPath, ProductIdentity.DataFolderName, UserDataFolderName);
+    }
+
+    /// <summary>Full path of the native loader that must be present beside the shim.</summary>
+    public static string LoaderLibrary(string shimDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
+
+        return Path.Combine(shimDirectory, LoaderFileName);
+    }
+
+    /// <summary>Full path of the shell document the tool window renders.</summary>
+    public static string ShellDocument(string shimDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
+
+        return Path.Combine(shimDirectory, ShellDocumentRelativePath);
+    }
+}

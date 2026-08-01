@@ -216,12 +216,27 @@ Non-negotiable properties inherited from the analyzer's design:
 
 ## 9. Installation
 
-A single MSI built with WiX. It installs the shim, the engine, the UI bundles, and the WebView2
-bootstrapper check, then writes the per-user COM and add-in registration directly. No
-administrator rights, no separate runtime install, no post-install steps.
+One executable, `xlide-setup.exe`, which carries the product inside it and is itself compiled ahead
+of time. A user who has nothing installed can run it.
 
-Because an MSI does not auto-update, the product checks for updates itself and can apply them
-without the user hunting for a download.
+It installs under the user's own profile and writes only to the user's registry hive, so it never
+asks for administrator rights. That is not only a convenience: the editor resolves class
+registration through the user hive, so per-user is the correct scope rather than a reduced one.
+
+The installer reuses the same registration description that the product and its tests use, so there
+is no second copy of the registry layout to drift. This is why the installer is written in the same
+language as the product rather than in a packaging tool: correctness by construction beats a test
+that compares two descriptions.
+
+Uninstall is complete. It removes both class registrations, both program identifiers, the add-in
+entry, the entry in the installed programs list, the installed files, and the log and browser cache
+folders. Nothing of the user's is touched: their code lives in their workbooks and is never
+modified by installation or removal. The installer refuses to install or uninstall while the host
+is running, because overwriting a loaded library produces an installation that appears to succeed
+and silently does nothing until the next restart.
+
+Because this is not a managed package format, the product checks for updates itself and can apply
+one without the user hunting for a download.
 
 ## 10. Testing
 

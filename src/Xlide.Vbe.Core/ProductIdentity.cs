@@ -18,6 +18,17 @@ public static class ProductIdentity
     /// <summary>CLSID of the tool window host coclass.</summary>
     public const string ToolWindowHostClsid = "3DCD653C-57B6-4F7E-8704-7A14C5800152";
 
+    /// <summary>
+    /// Identity the editor uses to remember where our tool window was docked, its size, and whether
+    /// it was open. It is a plain string key, not a class identifier: the editor never resolves it
+    /// to anything. Changing it loses every user's docking layout, so it is fixed for the life of
+    /// the product.
+    /// </summary>
+    public const string ToolWindowPositionGuid = "{9A871AA0-C073-4627-9D20-278CEFD40A5F}";
+
+    /// <summary>Caption shown on the tab of the docked tool window.</summary>
+    public const string ToolWindowCaption = "xlide";
+
     /// <summary>Name shown in the VBE add-in manager.</summary>
     public const string FriendlyName = "xlide";
 

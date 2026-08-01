@@ -23,8 +23,57 @@
     <StackTraceSupport>true</StackTraceSupport>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!--
+      Which native loader to deploy. A publish names the runtime identifier; a plain build does not,
+      so the platform decides. Getting this wrong produces a library the host cannot load at all
+      rather than a build error.
+    -->
+    <WebView2LoaderRuntime Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</WebView2LoaderRuntime>
+    <WebView2LoaderRuntime Condition="'$(WebView2LoaderRuntime)' == '' and '$(Platform)' == 'x86'">win-x86</WebView2LoaderRuntime>
+    <WebView2LoaderRuntime Condition="'$(WebView2LoaderRuntime)' == ''">win-x64</WebView2LoaderRuntime>
+    <WebView2LoaderPath>$(PkgMicrosoft_Web_WebView2)\runtimes\$(WebView2LoaderRuntime)\native\WebView2Loader.dll</WebView2LoaderPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Xlide.Vbe.Core\Xlide.Vbe.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      The package is referenced for one file: the native WebView2Loader.dll under
+      runtimes\<rid>\native. Everything else in it is managed - the WinForms and WPF wrappers and
+      the .NET projection - and none of it can be used from an ahead-of-time compiled native
+      library. ExcludeAssets keeps all of that out of the compilation while still restoring the
+      package, and GeneratePathProperty gives the extracted location so the one file can be picked
+      out by hand.
+
+      The loader is deployed beside the shim rather than relied on to be discoverable. The runtime
+      itself is installed machine-wide and found by the loader, but the loader is not on any search
+      path the host process uses.
+    -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" ExcludeAssets="all" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(PkgMicrosoft_Web_WebView2)' != ''">
+    <None Include="$(WebView2LoaderPath)"
+          Link="WebView2Loader.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The browser surface is loaded from disk beside the shim, so the markup ships with it. -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\ui\shell\**\*"
+          LinkBase="ui\shell"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="VerifyWebView2Loader" AfterTargets="Build">
+    <Error Condition="!Exists('$(WebView2LoaderPath)')"
+           Text="The native WebView2 loader was not found at $(WebView2LoaderPath). Restore the Microsoft.Web.WebView2 package." />
+  </Target>
 
 </Project>

@@ -1,4 +1,9 @@
 <Solution>
+  <Folder Name="/installer/">
+    <Project Path="installer/Xlide.Setup/Xlide.Setup.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Xlide.Vbe.Core/Xlide.Vbe.Core.csproj" />
     <Project Path="src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj" />

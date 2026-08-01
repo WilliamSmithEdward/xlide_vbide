@@ -11,8 +11,6 @@ namespace Xlide.Vbe.Shim.Com;
 [GeneratedComClass]
 internal sealed partial class ClassFactory : IClassFactory
 {
-    private static readonly StrategyBasedComWrappers Wrappers = new();
-
     private readonly Func<object> _create;
 
     public ClassFactory(Func<object> create) => _create = create;
@@ -31,7 +29,7 @@ internal sealed partial class ClassFactory : IClassFactory
         try
         {
             var managed = _create();
-            var unknown = Wrappers.GetOrCreateComInterfaceForObject(managed, CreateComInterfaceFlags.None);
+            var unknown = ComRuntime.Wrappers.GetOrCreateComInterfaceForObject(managed, CreateComInterfaceFlags.None);
 
             try
             {

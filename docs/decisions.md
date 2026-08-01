@@ -89,14 +89,32 @@ of them drifting apart produces a bug that reproduces only on a machine nobody i
 All three derive from one type. A test asserts the installer authoring matches it in both
 directions, so an entry cannot be added to one without the other.
 
-## 7. Install is per user
+## 7. Install is per user, from a single executable we wrote
 
-Status: decided.
+Status: decided. Replaces an earlier choice of a packaged installer format.
 
 Writing class registration under the user hive needs no administrator rights, which removes the
-single largest obstacle to someone trying the product. The known limitation is that an elevated
-host does not see user-hive class registration; if that case ever matters, it is an additional
-machine-wide mode, not a replacement.
+single largest obstacle to someone trying the product. It is also the correct scope rather than a
+reduced one, because the editor resolves class registration through that hive.
+
+The installer is an ordinary program of ours, compiled ahead of time into one executable that
+carries the product inside it. Three things follow that a packaging format does not give:
+
+The registry layout has one definition, used by the product, the tests, and the installer. A
+packaging format needs its own copy of that layout in its own language, which then has to be kept
+in agreement by a test. Sharing the code removes the class of bug instead of detecting it.
+
+Installation is verifiable the same way everything else is, by running it. There is no separate
+toolchain to install before the installer can be built, which also keeps continuous integration
+simple.
+
+Self-update, which the product needs because nothing else will do it, is the same code path as
+install rather than a second mechanism.
+
+The trade accepted: no packaged-format deployment for administrators who require one, and no
+built-in transactional rollback. Per-user installation of a development tool is the case that
+matters, and the installation is small enough that its failure modes are enumerable. A packaged
+format can be added later around the same payload if a real need appears.
 
 ## 8. The integration harness owns its host instance
 

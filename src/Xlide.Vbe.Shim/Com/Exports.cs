@@ -1,9 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.AddIn;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.ToolWindow;
 
 namespace Xlide.Vbe.Shim.Com;
 
@@ -13,7 +13,6 @@ namespace Xlide.Vbe.Shim.Com;
 /// </summary>
 public static unsafe class Exports
 {
-    private static readonly StrategyBasedComWrappers Wrappers = new();
     private static readonly Guid AddInClsid = new(ProductIdentity.AddInClsid);
     private static readonly Guid ToolWindowHostClsid = new(ProductIdentity.ToolWindowHostClsid);
 
@@ -49,7 +48,7 @@ public static unsafe class Exports
             }
             else if (*classId == ToolWindowHostClsid)
             {
-                create = static () => new XlideAddIn();
+                create = static () => new ToolWindowHost();
             }
 
             if (create is null)
@@ -59,7 +58,7 @@ public static unsafe class Exports
             }
 
             var instance = new ClassFactory(create);
-            var unknown = Wrappers.GetOrCreateComInterfaceForObject(instance, CreateComInterfaceFlags.None);
+            var unknown = ComRuntime.Wrappers.GetOrCreateComInterfaceForObject(instance, CreateComInterfaceFlags.None);
 
             try
             {

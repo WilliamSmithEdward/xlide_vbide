@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Xlide.Vbe.Core.Registration;
 
 /// <summary>Registry hive a registration entry targets.</summary>
@@ -65,7 +67,15 @@ public static class RegistrationPlan
 
         // The tool window host is sited by the VBE as an ActiveX control, so it must advertise the
         // control category. An empty Control subkey is how that is declared.
-        entries.Add(new RegistryEntry($@"{classes}\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}\Control", null, string.Empty));
+        var toolWindowKey = $@"{classes}\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}";
+        entries.Add(new RegistryEntry($@"{toolWindowKey}\Control", null, string.Empty));
+
+        // A container is entitled to read the status bits from the registration instead of asking
+        // the object, and does so before the object exists. The value is decimal text, and the
+        // per-aspect subkey is what a container reads when it knows which aspect it wants.
+        var miscStatus = ControlMiscStatus.ToolWindowHost.ToString(CultureInfo.InvariantCulture);
+        entries.Add(new RegistryEntry($@"{toolWindowKey}\MiscStatus", null, miscStatus));
+        entries.Add(new RegistryEntry($@"{toolWindowKey}\MiscStatus\1", null, miscStatus));
 
         var addInsKey = AddInsKeyPath(bitness);
         entries.Add(new RegistryEntry($@"{addInsKey}\{ProductIdentity.AddInProgId}", "Description", ProductIdentity.Description));

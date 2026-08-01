@@ -1,0 +1,185 @@
+using System.Runtime.InteropServices;
+
+namespace Xlide.Vbe.Shim.Interop;
+
+/// <summary>Win32 rectangle. Layout matches RECT exactly and is passed by pointer to the API.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct Rect
+{
+    public int Left;
+    public int Top;
+    public int Right;
+    public int Bottom;
+}
+
+/// <summary>Win32 SIZE, used for the scroll extent argument the in-place site passes by value.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct Size
+{
+    public int Width;
+    public int Height;
+}
+
+/// <summary>
+/// OLE SIZEL. An embedded object's extent is expressed in HIMETRIC units, which are hundredths of
+/// a millimetre, not pixels.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct SizeL
+{
+    public int Width;
+    public int Height;
+}
+
+/// <summary>Win32 window class registration block, wide character variant.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct WndClassExW
+{
+    public uint Size;
+    public uint Style;
+    public nint WindowProc;
+    public int ClassExtra;
+    public int WindowExtra;
+    public nint Instance;
+    public nint Icon;
+    public nint Cursor;
+    public nint Background;
+    public char* MenuName;
+    public char* ClassName;
+    public nint SmallIcon;
+}
+
+/// <summary>
+/// Creation parameters delivered with WM_NCCREATE. Only the trailing pointer matters here: it
+/// carries the handle to the managed window object, which is the only chance to associate the two
+/// before the first message arrives.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct CreateStructW
+{
+    public nint CreateParams;
+    public nint Instance;
+    public nint Menu;
+    public nint Parent;
+    public int Height;
+    public int Width;
+    public int Y;
+    public int X;
+    public int Style;
+    public char* Name;
+    public char* Class;
+    public uint ExStyle;
+}
+
+/// <summary>Win32 message, as delivered to accelerator translation.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct Msg
+{
+    public nint Window;
+    public uint Message;
+    public nint WParam;
+    public nint LParam;
+    public uint Time;
+    public int PointX;
+    public int PointY;
+}
+
+/// <summary>
+/// The Win32 surface the tool window needs. Declared with source-generated marshalling so nothing
+/// is generated at run time, which is a requirement of ahead-of-time compilation.
+/// </summary>
+internal static unsafe partial class Win32
+{
+    public const int WsChild = unchecked((int)0x40000000);
+    public const int WsVisible = 0x10000000;
+    public const int WsClipChildren = 0x02000000;
+    public const int WsClipSiblings = 0x04000000;
+
+    public const uint CsHRedraw = 0x0002;
+    public const uint CsVRedraw = 0x0001;
+    public const uint CsDblClks = 0x0008;
+
+    public const int GwlpUserData = -21;
+
+    public const uint WmCreate = 0x0001;
+    public const uint WmDestroy = 0x0002;
+    public const uint WmSize = 0x0005;
+    public const uint WmSetFocus = 0x0007;
+    public const uint WmEraseBackground = 0x0014;
+    public const uint WmNcCreate = 0x0081;
+    public const uint WmNcDestroy = 0x0082;
+
+    public const uint SwpNoZOrder = 0x0004;
+    public const uint SwpNoActivate = 0x0010;
+
+    /// <summary>COLOR_BTNFACE + 1, the value a class background brush takes.</summary>
+    public const nint ColorButtonFace = 16;
+
+    /// <summary>IDC_ARROW.</summary>
+    public const int IdcArrow = 32512;
+
+    public const int ErrorClassAlreadyExists = 1410;
+
+    public const uint GetModuleHandleFromAddress = 0x00000004;
+    public const uint GetModuleHandleUnchangedRefCount = 0x00000002;
+
+    [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "RegisterClassExW")]
+    public static partial ushort RegisterClassEx(WndClassExW* windowClass);
+
+    [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "CreateWindowExW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial nint CreateWindowEx(
+        uint exStyle,
+        string className,
+        string? windowName,
+        int style,
+        int x,
+        int y,
+        int width,
+        int height,
+        nint parent,
+        nint menu,
+        nint instance,
+        nint param);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DestroyWindow(nint window);
+
+    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    public static partial nint DefWindowProc(nint window, uint message, nint wParam, nint lParam);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowPos(
+        nint window,
+        nint insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetClientRect(nint window, Rect* rect);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindow(nint window);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
+    public static partial nint SetWindowLongPtr(nint window, int index, nint value);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
+    public static partial nint GetWindowLongPtr(nint window, int index);
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadCursorW", SetLastError = true)]
+    public static partial nint LoadCursor(nint instance, nint cursorName);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleExW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetModuleHandleEx(uint flags, nint address, nint* module);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", SetLastError = true)]
+    public static partial uint GetModuleFileName(nint module, char* fileName, uint size);
+}

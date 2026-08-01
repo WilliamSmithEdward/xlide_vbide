@@ -4,8 +4,8 @@ A modern development experience for VBA, directly inside the Excel Visual Basic 
 
 xlide_vbide is a VBE add-in that upgrades the editor you already use: a modern code editing
 surface, live diagnostics with quick fixes, rich completion and navigation, refactoring, and
-test tooling, all rendered inside the VBE itself. It installs from a standard Windows MSI,
-requires no other runtimes or tools on the machine, and registers per-user without
+test tooling, all rendered inside the VBE itself. It installs from a single executable, requires
+no other runtimes or tools on the machine, and installs for the current user without
 administrator rights.
 
 ## Status
@@ -31,7 +31,7 @@ and a diagnostics rule set validated against the real VBE compiler, shared with 
 | `src/` | .NET add-in: VBE integration, tool windows, editor surface host |
 | `engine/` | Language engine sidecar: server wrapper and build of the XLIDE analyzer |
 | `ui/` | Web UI bundles rendered in WebView2 (editor surface, panels) |
-| `installer/` | WiX authoring for the MSI |
+| `installer/` | The single-file installer |
 | `tools/` | Development scripts and the Excel integration harness |
 | `tests/` | Unit and integration tests |
 | `docs/` | Architecture, decisions, developer guide |

@@ -17,7 +17,6 @@ namespace Xlide.Vbe.Shim.Com;
 /// </summary>
 internal sealed unsafe class DispatchObject : IDisposable
 {
-    private static readonly StrategyBasedComWrappers Wrappers = new();
     private static readonly Guid NullGuid = Guid.Empty;
 
     private nint _pointer;
@@ -33,6 +32,12 @@ internal sealed unsafe class DispatchObject : IDisposable
     public bool IsAlive => _pointer != 0;
 
     /// <summary>
+    /// The underlying automation pointer, borrowed. Callers pass it into another automation call
+    /// and never release it; this wrapper remains the owner.
+    /// </summary>
+    public nint Pointer => _pointer;
+
+    /// <summary>
     /// Takes ownership of a raw automation pointer. The pointer must already be AddRef'd for us,
     /// which is the case for anything COM hands to a callback or returns from a call.
     /// </summary>
@@ -43,7 +48,7 @@ internal sealed unsafe class DispatchObject : IDisposable
             return null;
         }
 
-        var managed = Wrappers.GetOrCreateObjectForComInstance(pointer, CreateObjectFlags.UniqueInstance);
+        var managed = ComRuntime.Wrappers.GetOrCreateObjectForComInstance(pointer, CreateObjectFlags.UniqueInstance);
         if (managed is not IDispatch dispatch)
         {
             Marshal.Release(pointer);
@@ -161,6 +166,85 @@ internal sealed unsafe class DispatchObject : IDisposable
         using var argument = ComVariant.Create(index);
         using var value = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [argument]);
         return FromVariant(value);
+    }
+
+    /// <summary>
+    /// Calls a method whose last parameter is an in-out automation object, and reports both the
+    /// method's return value and the object the callee wrote into that parameter.
+    ///
+    /// An out parameter cannot be expressed as a return value, so the storage has to be ours, has
+    /// to outlive the call, and has to be read afterwards. The descriptor points straight at an
+    /// interface slot rather than at a second variant, because that is how the parameter is
+    /// declared: a byref variant would reach the callee only through the dispatch layer's type
+    /// coercion, and whether that coercion runs depends on how the callee implements Invoke.
+    /// </summary>
+    public DispatchObject? CallWithByRefObject(
+        string name,
+        ReadOnlySpan<ComVariant> leadingArguments,
+        out DispatchObject? byRefResult)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        nint slot = 0;
+
+        var arguments = new ComVariant[leadingArguments.Length + 1];
+        leadingArguments.CopyTo(arguments);
+        arguments[^1] = ComVariant.CreateRaw(VarEnum.VT_BYREF | VarEnum.VT_DISPATCH, (nint)(&slot));
+
+        using var value = InvokeCore(dispId, InvokeKind.Method, arguments);
+
+        // Whatever the callee put in the slot, it counted for us.
+        byRefResult = Attach(slot);
+        return FromVariant(value);
+    }
+
+    /// <summary>Writes a boolean property.</summary>
+    public void SetBool(string name, bool value)
+    {
+        ObjectDisposedException.ThrowIf(_dispatch is null, this);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        var argument = ComVariant.Create(value);
+        try
+        {
+            // A property assignment is the one call shape that carries a named argument: the value
+            // being assigned is identified by a reserved dispatch identifier rather than by
+            // position.
+            var namedArgument = DispId.PropertyPut;
+            var parameters = default(DispatchParameters);
+            parameters.Arguments = (nint)(&argument);
+            parameters.ArgumentCount = 1;
+            parameters.NamedArguments = (nint)(&namedArgument);
+            parameters.NamedArgumentCount = 1;
+
+            var hr = _dispatch.Invoke(
+                dispId,
+                NullGuid,
+                0,
+                (ushort)InvokeKind.PropertyPut,
+                (nint)(&parameters),
+                0,
+                0,
+                0);
+
+            if (hr < 0)
+            {
+                Marshal.ThrowExceptionForHR(hr);
+            }
+        }
+        finally
+        {
+            argument.Dispose();
+        }
     }
 
     private static DispatchObject? FromVariant(in ComVariant value)

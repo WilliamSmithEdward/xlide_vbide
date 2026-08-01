@@ -1,3 +1,4 @@
+using System.Globalization;
 using Xlide.Vbe.Core.Registration;
 using Xunit;
 
@@ -77,6 +78,58 @@ public class RegistrationPlanTests
         // The editor sites this class as an ActiveX control. Without the Control key it refuses.
         var controlKey = $@"Software\Classes\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}\Control";
         Assert.Contains(Plan(), e => e.Path == controlKey);
+    }
+
+    [Fact]
+    public void ToolWindowHostAdvertisesTheSameStatusBitsItReportsAtRunTime()
+    {
+        // A container may read the bits from the registration before the object exists, or ask the
+        // object once it does. The control returns this same constant, so the two cannot disagree.
+        var key = $@"Software\Classes\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}\MiscStatus";
+        var entry = Plan().Single(e => e.Path == key && e.Name is null);
+
+        Assert.Equal(ControlMiscStatus.ToolWindowHost.ToString(CultureInfo.InvariantCulture), entry.Value);
+        Assert.False(entry.IsDword);
+    }
+
+    [Fact]
+    public void ToolWindowHostAdvertisesStatusBitsForTheContentAspectAsWell()
+    {
+        var key = $@"Software\Classes\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}\MiscStatus\1";
+        Assert.Contains(Plan(), e => e.Path == key);
+    }
+
+    [Fact]
+    public void ToolWindowHostIsInsideOutAndActivatesWhenVisible()
+    {
+        // Anything hosting live content has to be both. A control that is neither is drawn as a
+        // static picture until the user double-clicks it.
+        Assert.Equal(
+            ControlMiscStatus.InsideOut,
+            ControlMiscStatus.ToolWindowHost & ControlMiscStatus.InsideOut);
+
+        Assert.Equal(
+            ControlMiscStatus.ActivateWhenVisible,
+            ControlMiscStatus.ToolWindowHost & ControlMiscStatus.ActivateWhenVisible);
+    }
+
+    [Fact]
+    public void ToolWindowHostIsSitedBeforeItIsInitialised()
+    {
+        // Otherwise the control is asked to initialise while it has no route back to the container,
+        // which is the point at which it would need to find its parent window.
+        Assert.Equal(
+            ControlMiscStatus.SetClientSiteFirst,
+            ControlMiscStatus.ToolWindowHost & ControlMiscStatus.SetClientSiteFirst);
+    }
+
+    [Fact]
+    public void OnlyTheToolWindowHostIsRegisteredAsAControl()
+    {
+        // The add-in class is not a control and must not advertise itself as one, or it appears in
+        // control pickers throughout the host.
+        var addInControlKey = $@"Software\Classes\CLSID\{{{ProductIdentity.AddInClsid}}}\Control";
+        Assert.DoesNotContain(Plan(), e => e.Path.StartsWith(addInControlKey, StringComparison.Ordinal));
     }
 
     [Fact]
