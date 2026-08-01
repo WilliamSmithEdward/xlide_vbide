@@ -1,28 +1,51 @@
-# Build outputs
+# Build output
+artifacts/
 bin/
 obj/
 out/
 dist/
-*.msi
-*.wixpdb
 _publish/
+*.wixpdb
+
+# Packaged output. The installer and the engine executable are built, not stored:
+# the engine embeds a language runtime and is far too large to belong in history.
+*.msi
+*.exe
+*.blob
+sea-config.json
+
+# The installer's payload is staged from a fresh build immediately before packaging.
+# Committing it would put stale binaries in history and let a release ship them.
+installer/Xlide.Setup/payload/
 
 # Node
 node_modules/
 npm-debug.log*
+.npm/
 
-# IDE / editor state
+# IDE and editor state
 .vs/
 .vscode/
+.idea/
 *.user
 *.suo
+*.userprefs
 
-# Test and harness artifacts
+# Test and harness output
 TestResults/
-artifacts/
-*.received.*
 harness-runs/
+*.trx
+*.received.*
+tools/harness/fixtures/*.xlsx
+~$*.xls*
 
-# Local-only settings
+# Local-only configuration and anything holding credentials
 *.local.json
 .env
+*.pfx
+*.snk
+
+# Operating system noise
+Thumbs.db
+desktop.ini
+.DS_Store
