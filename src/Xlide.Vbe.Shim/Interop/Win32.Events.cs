@@ -85,4 +85,16 @@ internal static unsafe partial class Win32
 
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial nint GetWindow(nint window, uint command);
+
+    /// <summary>HWND_TOP. Places a window above its siblings.</summary>
+    public const nint HwndTop = 0;
+
+    public const int SwHide = 0;
+
+    /// <summary>SW_SHOWNOACTIVATE. Shows a window without taking focus from whatever has it.</summary>
+    public const int SwShowNoActivate = 4;
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ShowWindow(nint window, int command);
 }

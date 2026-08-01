@@ -1,10 +1,12 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Engine;
+using Xlide.Vbe.Shim.Interop;
 using Xlide.Vbe.Shim.UI;
 
 namespace Xlide.Vbe.Shim.AddIn;
@@ -23,6 +25,7 @@ internal sealed class AddInSession : IDisposable
     private DispatchObject? _toolWindow;
     private CodePaneTracker? _codePanes;
     private AnalysisService? _analysis;
+    private EditorSurface? _editorSurface;
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -90,6 +93,119 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
+    /// Keeps the editing surface over whichever pane is being edited.
+    ///
+    /// Created on first use rather than at start-up, because until a pane exists there is nothing to
+    /// cover and no rectangle to use. When no pane is visible the surface is hidden rather than
+    /// destroyed: rebuilding a browser costs far more than leaving one parked off screen.
+    /// </summary>
+    private void FollowActivePane(IReadOnlyList<CodePane> panes)
+    {
+        try
+        {
+            var pane = panes.FirstOrDefault(p => p.IsVisible);
+
+            if (pane.Window == 0)
+            {
+                _editorSurface?.Follow(default, visible: false);
+                return;
+            }
+
+            // The surface is a sibling of the pane inside the editor frame, so its rectangle has to
+            // be expressed in the frame's coordinates rather than the screen's.
+            var frame = Win32.GetAncestor(pane.Window, Win32.GaRoot);
+            if (frame == 0)
+            {
+                return;
+            }
+
+            _editorSurface ??= EditorSurface.Create(frame, default);
+            if (_editorSurface is null)
+            {
+                return;
+            }
+
+            _editorSurface.Follow(ToFrameCoordinates(frame, pane.Bounds), visible: true);
+
+            if (pane.Component is not null && pane.Component != _editorSurface.Module)
+            {
+                ShowModuleInSurface(pane.Component);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("editor surface: could not follow the active pane", ex);
+        }
+    }
+
+    /// <summary>Reads a module's text and hands it to the surface.</summary>
+    private void ShowModuleInSurface(string component)
+    {
+        using var projects = _editor.GetObject("VBProjects");
+        var count = projects?.GetInt32("Count") ?? 0;
+
+        for (var i = 1; i <= count; i++)
+        {
+            using var project = projects!.GetItem(i);
+            using var components = project?.GetObject("VBComponents");
+            if (components is null)
+            {
+                continue;
+            }
+
+            var componentCount = components.GetInt32("Count");
+            for (var j = 1; j <= componentCount; j++)
+            {
+                using var candidate = components.GetItem(j);
+                if (candidate?.GetString("Name") != component)
+                {
+                    continue;
+                }
+
+                var source = ProjectReader.ReadSource(candidate);
+                if (source is not null)
+                {
+                    _editorSurface?.Show(component, source);
+                    Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
+                }
+
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Converts a screen rectangle into the frame's client coordinates, which is what positioning a
+    /// child of the frame requires.
+    /// </summary>
+    private static unsafe PixelRect ToFrameCoordinates(nint frame, PixelRect screen)
+    {
+        Rect frameRect;
+        if (!Win32.GetWindowRect(frame, &frameRect))
+        {
+            return screen;
+        }
+
+        // The frame's client area starts inside its border, and the difference is what a child is
+        // positioned relative to. Measuring both rectangles gives it without assuming a border size.
+        Rect client;
+        if (!Win32.GetClientRect(frame, &client))
+        {
+            return screen;
+        }
+
+        var borderX = ((frameRect.Right - frameRect.Left) - (client.Right - client.Left)) / 2;
+        var originX = frameRect.Left + borderX;
+        var originY = frameRect.Bottom - borderX - (client.Bottom - client.Top);
+
+        return new PixelRect(
+            screen.Left - originX,
+            screen.Top - originY,
+            screen.Right - originX,
+            screen.Bottom - originY);
+    }
+
+    /// <summary>
     /// Gives the tool window a usable size, if the editor lets us.
     ///
     /// A docked window ignores this, which is correct: its size belongs to the layout the user
@@ -126,6 +242,8 @@ internal sealed class AddInSession : IDisposable
                     Log.Info($"  {pane.Component} at {pane.Bounds.Left},{pane.Bounds.Top} " +
                              $"{pane.Bounds.Width}x{pane.Bounds.Height}" + (pane.IsVisible ? string.Empty : " (hidden)"));
                 }
+
+                FollowActivePane(panes);
             };
 
             _codePanes.Start();

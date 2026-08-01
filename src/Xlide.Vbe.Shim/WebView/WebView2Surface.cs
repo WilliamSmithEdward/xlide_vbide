@@ -48,24 +48,28 @@ internal sealed class WebView2Surface : IDisposable
     private bool _disposed;
     private bool _reportedUnhandledMessage;
 
-    private WebView2Surface(nint parentWindow, PixelRect bounds)
+    /// <summary>What this surface exists to show. Decided by its creator, never inferred.</summary>
+    private readonly SurfaceContent _content;
+
+    private WebView2Surface(nint parentWindow, PixelRect bounds, SurfaceContent content)
     {
         _parentWindow = parentWindow;
         _bounds = bounds;
+        _content = content;
     }
 
     /// <summary>
     /// Begins creating a browser inside <paramref name="parentWindow"/>. Returns as soon as the
     /// work is started; nothing is rendered until the two callbacks have run.
     /// </summary>
-    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds)
+    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds, SurfaceContent content = SurfaceContent.Panel)
     {
         if (parentWindow == 0)
         {
             return null;
         }
 
-        var surface = new WebView2Surface(parentWindow, bounds);
+        var surface = new WebView2Surface(parentWindow, bounds, content);
         return surface.BeginEnvironment() ? surface : null;
     }
 
@@ -440,7 +444,10 @@ internal sealed class WebView2Surface : IDisposable
     /// </summary>
     private void Navigate()
     {
-        if (NavigateToEditorBundle())
+        // What a surface shows is decided by whoever created it, not inferred from what happens to
+        // be on disk. Guessing put the editing surface in the tool window, where the problems panel
+        // belongs, and the mistake looked like a rendering fault rather than a wrong document.
+        if (_content == SurfaceContent.Editor && NavigateToEditorBundle())
         {
             return;
         }
