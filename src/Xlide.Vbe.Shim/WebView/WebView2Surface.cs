@@ -46,6 +46,7 @@ internal sealed class WebView2Surface : IDisposable
 
     private PixelRect _bounds;
     private bool _disposed;
+    private bool _reportedUnhandledMessage;
 
     private WebView2Surface(nint parentWindow, PixelRect bounds)
     {
@@ -136,13 +137,19 @@ internal sealed class WebView2Surface : IDisposable
         return true;
     }
 
-    /// <summary>Navigates the surface to an address.</summary>
+    /// <summary>
+    /// Navigates the surface to an address.
+    ///
+    /// Goes through the first revision of the interface, which every runtime has. Only the mapping
+    /// that makes a virtual host name resolve needs the later one, so a caller that has already
+    /// mapped a root can navigate to it here without a second capability check.
+    /// </summary>
     /// <returns>False when the browser is not up yet, or when it refused the address.</returns>
     public bool NavigateToUrl(string url)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(url);
 
-        var view = _view;
+        var view = _webView;
         if (view is null)
         {
             Log.Warn($"webview: cannot navigate to {url}, no content surface");
@@ -539,7 +546,22 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
-        MessageReceived?.Invoke(message);
+        var handler = MessageReceived;
+        if (handler is null)
+        {
+            // Said once, not once per message: this runs on the host user interface thread and the
+            // log is a file append. One line proves the channel works and nothing is listening yet;
+            // the rest would only be the same line at whatever rate the page posts.
+            if (!_reportedUnhandledMessage)
+            {
+                _reportedUnhandledMessage = true;
+                Log.Info($"webview: the page is posting messages and nothing is listening, {message.Length} characters");
+            }
+
+            return;
+        }
+
+        handler(message);
     }
 
     /// <summary>

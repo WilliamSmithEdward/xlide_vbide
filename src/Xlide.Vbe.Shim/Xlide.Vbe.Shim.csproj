@@ -69,6 +69,17 @@
           LinkBase="ui\shell"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+
+    <!--
+      The editor bundle, served under a virtual host name rather than read as files, which is why it
+      has to sit at a known place beside the shim. It is built by a separate toolchain and may not
+      exist; the surface falls back to the shell document when it does not, so the glob deliberately
+      matches nothing rather than failing the build.
+    -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\ui\editor\dist\**\*"
+          LinkBase="ui\editor\dist"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="VerifyWebView2Loader" AfterTargets="Build">

@@ -229,10 +229,10 @@ internal partial interface ICoreWebView2
 /// to write the layout out.
 ///
 /// Seventy slots, in this order: the fifty-eight of ICoreWebView2, then the seven ICoreWebView2_2
-/// appends, then the five ICoreWebView2_3 appends. Slots this shim never calls carry a placeholder
-/// signature and a name that says so; the signature of a slot that is never called is irrelevant,
-/// its position is not. Slot numbers are marked every ten members so the list can be checked
-/// against the header without counting from the top.
+/// appends, then the five ICoreWebView2_3 appends. Slots with no use here carry a placeholder
+/// signature and a name that says so, because the signature of a slot that is never called does not
+/// matter and its position does. Slot numbers are marked every ten members so the list can be
+/// checked against the header without counting from the top.
 /// </summary>
 [GeneratedComInterface]
 [Guid("a0d6df20-3b92-416d-aa0c-437a9c727857")]
