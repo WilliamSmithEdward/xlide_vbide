@@ -5,6 +5,7 @@ using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Engine;
+using Xlide.Vbe.Shim.UI;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -64,8 +65,8 @@ internal sealed class AddInSession : IDisposable
             {
                 Log.Info($"analysis: {findings.Count} finding(s)");
 
-                // Until the surface renders them, the log is where they surface. Capped, because a
-                // project with thousands of findings would otherwise write a novel on every pass.
+                // The log keeps a bounded record for support. A project with thousands of findings
+                // would otherwise write a novel on every pass.
                 foreach (var finding in findings.Take(20))
                 {
                     Log.Info($"  {finding.Module}({finding.StartLine},{finding.StartColumn}) " +
@@ -76,6 +77,8 @@ internal sealed class AddInSession : IDisposable
                 {
                     Log.Info($"  and {findings.Count - 20} more");
                 }
+
+                PanelBus.PublishFindings(findings);
             };
 
             _analysis.Start();

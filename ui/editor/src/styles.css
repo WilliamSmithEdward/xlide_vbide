@@ -1,0 +1,36 @@
+/* Decoration classes referenced from bridge.ts. Monaco applies them to lines and to the glyph
+   margin, so they must exist in the bundled stylesheet rather than in the theme JSON. */
+
+.xlide-current-line {
+  background: rgba(255, 210, 74, 0.16);
+}
+
+.xlide-current-line-glyph::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  width: 0;
+  height: 0;
+  margin-top: -5px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid #ffd24a;
+}
+
+.xlide-breakpoint-glyph::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #e51400;
+}
+
+/* The current-line arrow must sit over the breakpoint dot when both land on one line. */
+.xlide-current-line-glyph::after {
+  z-index: 1;
+}

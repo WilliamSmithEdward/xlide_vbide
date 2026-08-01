@@ -5,122 +5,276 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>xlide</title>
 <!--
-  Placeholder surface for the docked tool window.
+  The problems panel, shown in the docked tool window.
 
   It is composed by the shim and pushed into the browser as a string, so it has no origin and can
-  load nothing from disk or the network. Everything it needs is in this one file. The token below
-  is replaced with the browser version before the document is handed over; seeing a real version
-  number is the proof that the environment, the controller, and the navigation all completed.
+  load nothing from disk or the network. Everything it needs is in this one file.
 -->
 <style>
+  /*
+    Colours follow the host rather than a palette of ours. A panel docked inside another application
+    looks wrong the moment it disagrees with the application around it.
+  */
   :root {
     color-scheme: light dark;
-
     --surface: #ffffff;
-    --surface-raised: #f5f5f7;
-    --border: #d9d9de;
-    --text: #1b1b1f;
-    --text-muted: #5f5f6b;
-    --accent: #2f6fed;
+    --surface-alt: #f3f3f3;
+    --border: #d7d7d7;
+    --text: #1f1f1f;
+    --text-dim: #6a6a6a;
+    --error: #b00020;
+    --warning: #8a6100;
+    --info: #0a5ea8;
+    --accent: #0a5ea8;
+    --hover: #e8f1fa;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
-      --surface: #1b1b1f;
-      --surface-raised: #232329;
-      --border: #35353d;
-      --text: #ececf1;
-      --text-muted: #9a9aa6;
-      --accent: #6f9dff;
+      --surface: #1f1f1f;
+      --surface-alt: #262626;
+      --border: #3a3a3a;
+      --text: #e6e6e6;
+      --text-dim: #9a9a9a;
+      --error: #f48771;
+      --warning: #cca700;
+      --info: #75beff;
+      --accent: #4daafc;
+      --hover: #2a2d2e;
     }
   }
 
   * { box-sizing: border-box; }
 
   html, body {
-    height: 100%;
-  }
-
-  body {
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    padding: 20px;
+    height: 100%;
     background: var(--surface);
     color: var(--text);
-    font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-    font-size: 13px;
-    line-height: 1.5;
-    -webkit-user-select: none;
-    user-select: none;
-    overflow: hidden;
+    font: 12px "Segoe UI", system-ui, sans-serif;
   }
 
-  h1 {
-    margin: 0;
-    font-size: 26px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+  body { display: flex; flex-direction: column; }
+
+  header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-alt);
+    flex: 0 0 auto;
   }
 
-  h1 .mark {
-    color: var(--accent);
-  }
+  header .title { font-weight: 600; }
+  header .count { color: var(--text-dim); }
 
-  p {
-    margin: 0;
-    color: var(--text-muted);
-    max-width: 46ch;
-  }
-
-  dl {
-    margin: 0;
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 6px 16px;
-    align-items: baseline;
-    padding: 12px 14px;
+  #filter {
+    margin-left: auto;
+    min-width: 0;
+    width: 40%;
+    padding: 3px 6px;
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface-raised);
+    border-radius: 3px;
   }
 
-  dt {
-    color: var(--text-muted);
-    white-space: nowrap;
+  #filter:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  main { flex: 1 1 auto; overflow: auto; }
+
+  ol { margin: 0; padding: 0; list-style: none; }
+
+  li {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 8px;
+    align-items: start;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
   }
 
-  dd {
-    margin: 0;
-    font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
-    font-size: 12px;
-    overflow-wrap: anywhere;
+  li:hover { background: var(--hover); }
+  li:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /*
+    Severity is carried by a glyph and by text as well as by colour, so it survives a display that
+    renders these hues poorly and a reader who cannot tell them apart.
+  */
+  .mark { font-weight: 700; line-height: 1.4; }
+  .error .mark { color: var(--error); }
+  .warning .mark { color: var(--warning); }
+  .information .mark { color: var(--info); }
+
+  .message { line-height: 1.4; overflow-wrap: anywhere; }
+
+  .where {
+    color: var(--text-dim);
+    font: 11px ui-monospace, Consolas, monospace;
+    margin-top: 2px;
   }
+
+  .empty {
+    padding: 24px 16px;
+    color: var(--text-dim);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .empty strong { display: block; color: var(--text); font-size: 13px; margin-bottom: 4px; }
 </style>
 </head>
 <body>
-  <h1><span class="mark">xlide</span></h1>
-  <p>The tool window host is sited and the browser surface is live. This placeholder is replaced by
-  the editor shell.</p>
-  <dl>
-    <dt>WebView2 runtime</dt>
-    <dd>{{WEBVIEW2_VERSION}}</dd>
-    <dt>User agent</dt>
-    <dd id="agent">unknown</dd>
-    <dt>Surface</dt>
-    <dd id="surface">unknown</dd>
-  </dl>
+
+<header>
+  <span class="title">Problems</span>
+  <span class="count" id="count">starting</span>
+  <input id="filter" type="search" placeholder="Filter" aria-label="Filter problems">
+</header>
+
+<main>
+  <ol id="list" aria-label="Problems"></ol>
+  <div class="empty" id="empty" hidden></div>
+</main>
+
 <script>
-  document.getElementById("agent").textContent = navigator.userAgent;
+  (function () {
+    'use strict';
 
-  function reportSurface() {
-    document.getElementById("surface").textContent =
-      window.innerWidth + " x " + window.innerHeight;
-  }
+    var findings = [];
+    var list = document.getElementById('list');
+    var empty = document.getElementById('empty');
+    var count = document.getElementById('count');
+    var filter = document.getElementById('filter');
 
-  reportSurface();
-  window.addEventListener("resize", reportSurface);
+    var host = window.chrome && window.chrome.webview ? window.chrome.webview : null;
+
+    function severityClass(severity) {
+      if (severity === 'error') { return 'error'; }
+      if (severity === 'warning') { return 'warning'; }
+      return 'information';
+    }
+
+    function severityMark(severity) {
+      if (severity === 'error') { return 'x'; }
+      if (severity === 'warning') { return '!'; }
+      return 'i';
+    }
+
+    function visible() {
+      var needle = filter.value.trim().toLowerCase();
+      if (!needle) { return findings; }
+
+      return findings.filter(function (f) {
+        return (f.message + ' ' + f.module + ' ' + (f.code || '')).toLowerCase().indexOf(needle) >= 0;
+      });
+    }
+
+    function render() {
+      var shown = visible();
+      list.textContent = '';
+
+      var errors = 0;
+      var warnings = 0;
+      findings.forEach(function (f) {
+        if (f.severity === 'error') { errors++; }
+        else if (f.severity === 'warning') { warnings++; }
+      });
+
+      count.textContent = findings.length === 0
+        ? 'none'
+        : errors + ' error' + (errors === 1 ? '' : 's') + ', ' + warnings + ' warning' + (warnings === 1 ? '' : 's');
+
+      if (shown.length === 0) {
+        empty.hidden = false;
+        empty.innerHTML = findings.length === 0
+          ? '<strong>Nothing to report</strong>The code that is open has no problems the analyzer can prove.'
+          : '<strong>No match</strong>No problem matches that filter.';
+        return;
+      }
+
+      empty.hidden = true;
+
+      // Built as one fragment: a project with hundreds of findings would otherwise lay the panel
+      // out once per row.
+      var fragment = document.createDocumentFragment();
+
+      shown.forEach(function (f) {
+        var row = document.createElement('li');
+        row.className = severityClass(f.severity);
+        row.tabIndex = 0;
+
+        var mark = document.createElement('span');
+        mark.className = 'mark';
+        mark.textContent = severityMark(f.severity);
+        mark.setAttribute('aria-label', f.severity);
+
+        var body = document.createElement('div');
+
+        var message = document.createElement('div');
+        message.className = 'message';
+        message.textContent = f.message;
+
+        var where = document.createElement('div');
+        where.className = 'where';
+        where.textContent = f.module + ' (' + f.line + ', ' + f.column + ')' + (f.code ? '   ' + f.code : '');
+
+        body.appendChild(message);
+        body.appendChild(where);
+        row.appendChild(mark);
+        row.appendChild(body);
+
+        function go() {
+          if (!host) { return; }
+          host.postMessage(JSON.stringify({
+            type: 'navigate', module: f.module, line: f.line, column: f.column
+          }));
+        }
+
+        row.addEventListener('dblclick', go);
+        row.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { go(); }
+        });
+
+        fragment.appendChild(row);
+      });
+
+      list.appendChild(fragment);
+    }
+
+    filter.addEventListener('input', render);
+
+    if (host) {
+      host.addEventListener('message', function (event) {
+        var payload = typeof event.data === 'string' ? event.data : null;
+        if (!payload) { return; }
+
+        var message;
+        try { message = JSON.parse(payload); } catch (e) { return; }
+
+        if (message && message.type === 'findings') {
+          findings = message.findings || [];
+          render();
+        }
+      });
+
+      host.postMessage(JSON.stringify({ type: 'ready' }));
+      count.textContent = 'waiting';
+    } else {
+      // Opened outside the host, which is how this panel is worked on without starting the editor.
+      findings = [
+        { module: 'BrokenModule', code: 'assignment-type-mismatch', severity: 'error', line: 5, column: 9,
+          message: 'Assignment to n expects Long, but got String literal "oops".' },
+        { module: 'Sheet1', code: 'unused-variable', severity: 'warning', line: 12, column: 5,
+          message: 'The variable total is declared and never used.' }
+      ];
+    }
+
+    render();
+  })();
 </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ using Xlide.Vbe.Core.Registration;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Interop;
+using Xlide.Vbe.Shim.UI;
 using Xlide.Vbe.Shim.WebView;
 
 namespace Xlide.Vbe.Shim.ToolWindow;
@@ -597,6 +598,13 @@ internal sealed unsafe partial class ToolWindowHost :
         window.Destroying = OnWindowDestroying;
 
         _surface = WebView2Surface.Start(window.Handle, window.ClientBounds());
+
+        // Register with the bus so analysis can reach whatever panel is showing. The two have
+        // unrelated lifetimes, so neither holds a reference to the other.
+        if (_surface is not null)
+        {
+            PanelBus.Attach(_surface);
+        }
         if (_surface is null)
         {
             Log.Error("tool window host: the browser surface could not be started");
