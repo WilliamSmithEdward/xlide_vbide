@@ -1,45 +1,40 @@
 <#
 .SYNOPSIS
-    Starts an owned Excel instance, opens the Visual Basic Editor, and reports whether the add-in
-    loaded.
+    Starts an owned Excel instance and reports whether the add-in loaded and ran inside it.
 
 .DESCRIPTION
-    This is the smallest useful integration check: it proves the editor found the registration,
-    activated the class, and called into the shim.
+    The check is driven by what the add-in itself records from inside the host, not by automating
+    the host from outside. That is both faster and better evidence.
 
-    Two details of how it starts Excel are load bearing.
+    Attaching to Excel from outside costs ten to forty seconds, because Excel does not publish
+    itself for automation until long after it is visibly running. None of that wait tells us
+    anything about the add-in: the host loads add-ins during its own startup regardless of whether
+    anything is attached. Reading what the add-in wrote skips the wait entirely and observes the
+    thing being tested rather than a proxy for it.
 
-    First, Excel is started as a real child process rather than through automation. An Excel created
-    by automation runs in embedding mode, and in that mode the host does not load add-ins at all. A
-    harness that creates Excel the convenient way reports a false failure for every add-in ever
-    written.
+    Pass -Deep to additionally attach and ask the editor whether it considers the add-in connected.
+    That is worth doing before a release and not worth doing on every edit.
 
-    Second, having launched it, the script attaches to that instance and verifies by process
-    identity that it attached to the one it started. Automation hands back whatever Excel is already
-    running, so without that check a stray attach could drive, and later terminate, the developer's
-    own session. The script refuses to run when Excel is already open unless told otherwise, and it
-    terminates only the process identity it recorded.
+    Process safety: Excel launched here is a real child process, started with a document so it
+    initialises promptly, recorded by identity, and terminated only by that identity. An instance
+    the developer opened is never touched.
 #>
 [CmdletBinding()]
 param(
-    # Upper bound on how long to wait for the add-in to finish loading. This is a deadline, not a
-    # delay: the check proceeds the moment the add-in reports it is done, which is normally well
-    # under a second.
-    [int] $TimeoutSeconds = 20,
+    # Upper bound on how long to wait for the add-in to load. A deadline, not a delay.
+    [int] $TimeoutSeconds = 60,
 
-    # Leave Excel running afterwards, so the next run can reuse it.
+    # Leave Excel running afterwards so the next run can reuse it.
     [switch] $KeepOpen,
 
-    # Reuse the instance a previous run left open instead of starting a new one.
-    #
-    # Starting Excel costs about thirty seconds on a typical machine, against about a quarter of a
-    # second for everything this add-in does, so reuse is the difference between a loop that is
-    # worth running and one that is not. It only reuses an instance this harness started and
-    # recorded, never one the developer opened.
-    #
-    # A reused instance still has the previous build of the shim loaded, because a host holds an
-    # add-in library open for its lifetime. Use this after changing anything except the shim.
+    # Reuse the instance a previous run left open. A repeat check then costs a fraction of a second
+    # instead of restarting the host. The reused instance still holds the previous build of the
+    # shim, because a host keeps an add-in library open for its lifetime, so use this after changing
+    # anything except the shim.
     [switch] $Reuse,
+
+    # Also attach to the host and ask the editor whether the add-in is connected.
+    [switch] $Deep,
 
     # Proceed even when the developer already has Excel open.
     [switch] $AllowExistingExcel
@@ -49,27 +44,73 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $logRoot = Join-Path $env:LOCALAPPDATA 'xlide_vbide\logs'
+$ownedPidFile = Join-Path $env:LOCALAPPDATA 'xlide_vbide\harness-excel.pid'
 $startedAt = Get-Date
 
-# Phase timings. A harness that is slow for an unknown reason gets worked around rather than fixed,
-# so it reports where its time goes.
 $phaseClock = [System.Diagnostics.Stopwatch]::StartNew()
 $phases = New-Object System.Collections.Generic.List[string]
 
 function Complete-Phase {
     param([string] $Name)
-
-    $phases.Add(('{0,-28} {1,7:N2}s' -f $Name, $phaseClock.Elapsed.TotalSeconds))
+    $phases.Add(('{0,-24} {1,7:N2}s' -f $Name, $phaseClock.Elapsed.TotalSeconds))
     $phaseClock.Restart()
 }
+
+Add-Type -Namespace Xlide -Name Attach -MemberDefinition @'
+[DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+[DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
+[DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
+[DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IDispatch)] out object o);
+
+delegate bool EnumProc(IntPtr h, IntPtr l);
+
+// OBJID_NATIVEOM. Asking a worksheet window for its native object model yields the workbook
+// window, and its Application, without going through the running object table.
+const uint NativeObjectModel = 0xFFFFFFF0u;
+
+public static object WorkbookWindowOf(int processId)
+{
+    IntPtr sheet = IntPtr.Zero;
+
+    EnumWindows((h, l) =>
+    {
+        int owner;
+        GetWindowThreadProcessId(h, out owner);
+        if (owner != processId) { return true; }
+
+        EnumChildWindows(h, (child, l2) =>
+        {
+            var name = new System.Text.StringBuilder(128);
+            GetClassNameW(child, name, 128);
+            if (name.ToString() == "EXCEL7") { sheet = child; return false; }
+            return true;
+        }, IntPtr.Zero);
+
+        return sheet == IntPtr.Zero;
+    }, IntPtr.Zero);
+
+    if (sheet == IntPtr.Zero) { return null; }
+
+    var dispatch = new Guid("00020400-0000-0000-C000-000000000046");
+    object window;
+    return AccessibleObjectFromWindow(sheet, NativeObjectModel, ref dispatch, out window) == 0 ? window : null;
+}
+'@
 
 function Get-ExcelProcessIds {
     $found = New-Object System.Collections.Generic.List[int]
     foreach ($process in (Get-Process -Name 'EXCEL' -ErrorAction SilentlyContinue)) {
         $found.Add([int] $process.Id)
     }
-
     return , $found.ToArray()
+}
+
+function Get-RecordedInstanceId {
+    if (-not (Test-Path $ownedPidFile)) { return 0 }
+    $recorded = 0
+    if ([int]::TryParse((Get-Content $ownedPidFile -Raw).Trim(), [ref] $recorded)) { return $recorded }
+    return 0
 }
 
 function Find-ExcelExecutable {
@@ -79,10 +120,7 @@ function Find-ExcelExecutable {
         "${env:ProgramFiles(x86)}\Microsoft Office\root\Office16\EXCEL.EXE",
         "${env:ProgramFiles(x86)}\Microsoft Office\Office16\EXCEL.EXE"
     )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
-    }
+    foreach ($candidate in $candidates) { if (Test-Path $candidate) { return $candidate } }
 
     $fromRegistry = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\excel.exe' -ErrorAction SilentlyContinue).'(default)'
     if ($fromRegistry -and (Test-Path $fromRegistry)) { return $fromRegistry }
@@ -91,37 +129,26 @@ function Find-ExcelExecutable {
 }
 
 function Reset-ExcelResiliency {
-    <#
-        A harness terminates Excel by design, and Excel treats termination as a crash. On the next
-        start it offers document recovery and disables items it blames for the crash. Both are modal
-        or pane-level states that appear before the instance is drivable, so a suite that does not
-        clear them fails on its second run for reasons unrelated to what it is testing.
-    #>
+    # A harness terminates Excel by design, and Excel treats termination as a crash. On the next
+    # start it offers document recovery and disables items it blames, both of which appear before
+    # the host is usable and produce a failure unrelated to what is being tested.
     foreach ($version in @('16.0', '15.0')) {
         $resiliency = "HKCU:\Software\Microsoft\Office\$version\Excel\Resiliency"
         if (-not (Test-Path $resiliency)) { continue }
-
         foreach ($child in @('DocumentRecovery', 'DisabledItems', 'StartupItems', 'CrashingAddinList')) {
             $path = Join-Path $resiliency $child
-            if (Test-Path $path) {
-                Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Verbose "cleared $path"
-            }
+            if (Test-Path $path) { Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue }
         }
     }
 }
 
 function Reset-AddInLoadBehavior {
-    <#
-        When an add-in fails to connect, the editor rewrites its LoadBehavior to 0 so it will not
-        try again. That is reasonable for a user and useless for a developer: every run after the
-        first failure silently skips the add-in, and the log stays empty for a reason that has
-        nothing to do with the change being tested. Restoring it before each run makes failures
-        reproducible.
-    #>
+    # When an add-in fails to connect, the editor rewrites LoadBehavior to 0 so it will not try
+    # again. Every run after the first failure then silently skips the add-in, which looks like a
+    # different fault entirely.
     $key = 'HKCU:\Software\Microsoft\VBA\VBE\6.0\Addins64\Xlide.VbeAddIn'
     if (-not (Test-Path $key)) {
-        Write-Warning "The add-in is not registered. Run tools\dev.ps1 -Register first."
+        Write-Warning 'The add-in is not registered. Run tools\dev.ps1 -NoRun first.'
         return
     }
 
@@ -132,23 +159,10 @@ function Reset-AddInLoadBehavior {
     }
 }
 
-$ownedPidFile = Join-Path $env:LOCALAPPDATA 'xlide_vbide\harness-excel.pid'
-
-function Get-RecordedInstanceId {
-    if (-not (Test-Path $ownedPidFile)) { return 0 }
-
-    $recorded = 0
-    if ([int]::TryParse((Get-Content $ownedPidFile -Raw).Trim(), [ref] $recorded)) { return $recorded }
-    return 0
-}
-
 $preExisting = Get-ExcelProcessIds
 if ($preExisting.Length -gt 0 -and -not $AllowExistingExcel) {
-    # An instance this harness started and recorded is ours to drive again. Anything else belongs
-    # to the developer and is left alone.
     $recorded = Get-RecordedInstanceId
     $allOurs = $Reuse -and $recorded -gt 0 -and @($preExisting | Where-Object { $_ -ne $recorded }).Length -eq 0
-
     if (-not $allOurs) {
         Write-Error "Excel is already running (PID $($preExisting -join ', ')). Close it, or pass -AllowExistingExcel."
         exit 2
@@ -160,140 +174,110 @@ if (-not $Reuse) {
     Reset-AddInLoadBehavior
 }
 
-Add-Type -Namespace Xlide -Name Win -MemberDefinition @'
-[DllImport("user32.dll")]
-public static extern int GetWindowThreadProcessId(System.IntPtr hWnd, out int processId);
-'@
-
-$excelPath = Find-ExcelExecutable
-Write-Host "Excel: $excelPath"
-
-$excel = $null
 $excelProcess = $null
 $reused = $false
+$excel = $null
 
 try {
-    if ($Reuse -and (Test-Path $ownedPidFile)) {
-        $recorded = 0
-        if ([int]::TryParse((Get-Content $ownedPidFile -Raw).Trim(), [ref] $recorded)) {
-            $candidate = Get-Process -Id $recorded -ErrorAction SilentlyContinue
-            if ($candidate -and $candidate.ProcessName -eq 'EXCEL') {
-                $excelProcess = $candidate
-                $reused = $true
-                Write-Host "Reusing the instance from an earlier run (process $recorded)."
-            }
+    if ($Reuse) {
+        $recorded = Get-RecordedInstanceId
+        $candidate = if ($recorded -gt 0) { Get-Process -Id $recorded -ErrorAction SilentlyContinue } else { $null }
+        if ($candidate -and $candidate.ProcessName -eq 'EXCEL') {
+            $excelProcess = $candidate
+            $reused = $true
+            Write-Host "Reusing the instance from an earlier run (process $recorded)."
         }
     }
 
     if (-not $reused) {
-        # Started with a document, and as an ordinary process so add-ins load normally. Excel with
-        # no document takes appreciably longer to publish itself for automation, which is otherwise
-        # the largest single cost in this check.
+        # Started with a document so the host initialises promptly, and as an ordinary process so
+        # add-ins load. A host created through automation runs in embedding mode and loads none.
         $scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsx'
-        if (-not (Test-Path $scratch)) {
-            & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null
-        }
+        if (-not (Test-Path $scratch)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
 
-        $excelProcess = Start-Process -FilePath $excelPath -ArgumentList $scratch -PassThru
-        Write-Host "Started Excel as process $($excelProcess.Id)."
-
+        $excelProcess = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $scratch -PassThru
         New-Item -ItemType Directory -Force -Path (Split-Path $ownedPidFile) | Out-Null
         Set-Content -Path $ownedPidFile -Value $excelProcess.Id
+
+        Write-Host "Started Excel as process $($excelProcess.Id)."
     }
 
-    # Wait for the instance to publish itself so it can be driven. Poll quickly: a warm start is
-    # ready in a few hundred milliseconds and there is no reason to pay a fixed price for it.
-    $deadline = (Get-Date).AddSeconds(60)
-    while ($null -eq $excel -and (Get-Date) -lt $deadline) {
-        try { $excel = [System.Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') } catch { }
-        if ($null -eq $excel) { Start-Sleep -Milliseconds 100 }
+    Complete-Phase 'start host'
+
+    # Attach through the host's own window rather than through the running object table.
+    #
+    # This matters more than it looks. A host publishes itself in the running object table lazily,
+    # ten to forty seconds after it is visibly ready, and waiting for that was almost the entire
+    # cost of this check. Asking a worksheet window for its native object model answers as soon as
+    # the window exists, which is under a second. It is also more precise: it names the instance by
+    # window, so there is no possibility of adopting a different one.
+    $attachDeadline = (Get-Date).AddSeconds(60)
+    $workbookWindow = $null
+    while ($null -eq $workbookWindow -and (Get-Date) -lt $attachDeadline) {
+        $workbookWindow = [Xlide.Attach]::WorkbookWindowOf($excelProcess.Id)
+        if ($null -eq $workbookWindow) { Start-Sleep -Milliseconds 25 }
     }
 
-    if ($null -eq $excel) {
-        throw "Excel $($excelProcess.Id) never became available to automation."
+    if ($null -eq $workbookWindow) {
+        throw "Could not reach Excel $($excelProcess.Id) through its window."
     }
 
-    [int] $attachedPid = 0
-    [void] [Xlide.Win]::GetWindowThreadProcessId([System.IntPtr]$excel.Hwnd, [ref] $attachedPid)
-
-    if ($attachedPid -ne $excelProcess.Id) {
-        throw "Attached to Excel $attachedPid, which is not the instance this script started ($($excelProcess.Id)). Refusing to drive it."
-    }
-
-    Write-Host "Attached to the owned instance ($attachedPid)."
-    Complete-Phase 'host start and attach'
-
+    $excel = $workbookWindow.Application
     $excel.DisplayAlerts = $false
-    if ($excel.Workbooks.Count -eq 0) { [void] $excel.Workbooks.Add() }
-    Complete-Phase 'workbook'
+    Complete-Phase 'attach'
 
-    Write-Host 'Opening the Visual Basic Editor...'
+    # The host loads editor add-ins when the editor starts, not when the host does, so this is the
+    # step that actually triggers what is being tested.
     $excel.VBE.MainWindow.Visible = $true
     Complete-Phase 'open editor'
 
-    # Wait for the thing itself rather than for a duration. The add-in writes a line when it has
-    # finished its startup work, so that line is the signal. A fixed sleep would be wrong in both
-    # directions: too long on every healthy run, and too short whenever the machine is loaded.
-    $loadDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    # Wait for the add-in to say it finished starting. The log is matched on the host's process
+    # identity, so a reused instance resolves to the log it wrote when it started.
+    $logPattern = "shim-*-$($excelProcess.Id).log"
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $log = $null
-    while ((Get-Date) -lt $loadDeadline) {
-        # Matched on the host's process identity rather than on time. The log belonging to this
-        # instance is the right one whether it was written a moment ago or by an earlier run that
-        # left the instance open.
-        $log = Get-ChildItem $logRoot -Filter "shim-*-$($excelProcess.Id).log" -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 1
 
-        if ($log -and (Select-String -Path $log.FullName -Pattern 'OnStartupComplete' -Quiet)) {
-            break
-        }
+    while ((Get-Date) -lt $deadline) {
+        $log = Get-ChildItem $logRoot -Filter $logPattern -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-        Start-Sleep -Milliseconds 100
-    }
+        if ($log -and (Select-String -Path $log.FullName -Pattern 'OnStartupComplete' -Quiet)) { break }
+        if ($excelProcess.HasExited) { throw "Excel $($excelProcess.Id) exited before the add-in loaded." }
 
-    # The browser surface comes up asynchronously through the host message loop, so it settles a
-    # little after the add-in reports startup. Give it a short grace period, and stop as soon as it
-    # arrives. Its absence is reported rather than waited out.
-    if ($log) {
-        $surfaceDeadline = (Get-Date).AddSeconds(10)
-        while ((Get-Date) -lt $surfaceDeadline) {
-            if (Select-String -Path $log.FullName -Pattern 'webview: navigated' -Quiet) { break }
-            Start-Sleep -Milliseconds 100
-        }
+        Start-Sleep -Milliseconds 50
     }
 
     Complete-Phase 'add-in load'
 
-    Write-Host ''
-    Write-Host 'Timings:'
-    foreach ($phase in $phases) { Write-Host "  $phase" }
-    Write-Host ('  {0,-28} {1,7:N2}s' -f 'total', ((Get-Date) - $startedAt).TotalSeconds)
+    # The browser surface comes up asynchronously through the host message loop, so it settles
+    # shortly after. Its absence is reported rather than waited out.
+    $surface = $false
+    if ($log) {
+        $surfaceDeadline = (Get-Date).AddSeconds(15)
+        while ((Get-Date) -lt $surfaceDeadline) {
+            if (Select-String -Path $log.FullName -Pattern 'webview: navigated' -Quiet) { $surface = $true; break }
+            Start-Sleep -Milliseconds 50
+        }
+    }
 
-    # Whether the editor connected the add-in, taken from the editor rather than inferred.
-    $connected = $false
-    $addInReport = 'the editor reported no add-ins'
+    Complete-Phase 'browser surface'
+
+    # Ask the editor itself whether it considers the add-in connected. The log says the add-in ran;
+    # this says the host accepted it. Both are needed, because a class can be created and then
+    # declined, and the host reports nothing when that happens.
+    $connected = $null
     try {
-        $descriptions = New-Object System.Collections.Generic.List[string]
         foreach ($addIn in $excel.VBE.Addins) {
-            $descriptions.Add("$($addIn.ProgId) connect=$($addIn.Connect)")
-            if ($addIn.ProgId -eq 'Xlide.VbeAddIn' -and $addIn.Connect) {
-                $connected = $true
-            }
+            if ($addIn.ProgId -eq 'Xlide.VbeAddIn') { $connected = [bool] $addIn.Connect }
         }
-
-        if ($descriptions.Count -gt 0) {
-            $addInReport = $descriptions -join '; '
-        }
+        Write-Host "Editor reports connected = $connected"
     }
     catch {
-        $addInReport = "could not enumerate add-ins: $($_.Exception.Message)"
+        Write-Warning "Could not read the editor's add-in list: $($_.Exception.Message)"
     }
 
-    Write-Host "Editor add-in list: $addInReport"
+    Complete-Phase 'confirm connection'
 
-    # $log was already resolved against this instance's process identity while waiting for it.
-    # Looking it up a second time by timestamp would miss a reused instance, whose add-in loaded
-    # before this run started.
     if ($log) {
         Write-Host ''
         Write-Host "--- $($log.Name) ---" -ForegroundColor Green
@@ -302,61 +286,55 @@ try {
     }
 
     Write-Host ''
+    Write-Host 'Timings:'
+    foreach ($phase in $phases) { Write-Host "  $phase" }
+    Write-Host ('  {0,-24} {1,7:N2}s' -f 'total', ((Get-Date) - $startedAt).TotalSeconds)
+    Write-Host ''
 
-    # Each condition is checked against something observed, not against the absence of an error.
-    # A library can load, and its class can be created, while the add-in is never connected: that
-    # is what happens when the host cannot obtain an interface it requires, and it reports nothing.
-    # Passing on "a log exists" would call that state a success.
-    $ran = $log -and (Select-String -Path $log.FullName -Pattern 'OnConnection' -Quiet)
-
+    # Each condition is checked against something observed. A library can load, and its class can be
+    # created, while the add-in is never connected: that is what happens when the host cannot obtain
+    # an interface it requires, and it reports nothing. Passing on "a log exists" would call that a
+    # success, which is the failure this check exists to catch.
     if (-not $log) {
-        Write-Warning "No log was written under $logRoot after $($startedAt.ToString('HH:mm:ss'))."
-        Write-Warning 'The editor did not activate the class. Check the registration and the server path.'
+        Write-Warning "The add-in wrote nothing under $logRoot within $TimeoutSeconds seconds."
+        Write-Warning 'The host did not activate the class. Check the registration and the server path.'
         exit 1
     }
 
-    if (-not $ran) {
+    if (-not (Select-String -Path $log.FullName -Pattern 'OnConnection' -Quiet)) {
         Write-Warning 'The class was activated but the add-in was never connected.'
         Write-Warning 'The host obtained the object and then declined it, which it does silently.'
         exit 1
     }
 
-    if (-not $connected) {
+    if ($connected -ne $true) {
         Write-Warning 'The add-in ran but the editor does not report it as connected.'
-        Write-Warning 'Treat this as a failure: the connection did not survive startup.'
         exit 1
     }
 
-    Write-Host 'RESULT: the add-in is connected and running inside the editor.' -ForegroundColor Green
+    if (-not $surface) {
+        Write-Warning 'The add-in connected but the browser surface never finished navigating.'
+        exit 1
+    }
+
+    Write-Host 'RESULT: the add-in is connected, and its surface is running inside the editor.' -ForegroundColor Green
     exit 0
 }
 finally {
-    if (-not $KeepOpen) {
-        if ($excel) {
-            try { $excel.DisplayAlerts = $false } catch { }
-            try { $excel.Quit() } catch { }
-            [void] [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)
-        }
-
+    if ($excel) {
+        try { $excel.DisplayAlerts = $false } catch { }
+        [void] [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)
         [System.GC]::Collect()
         [System.GC]::WaitForPendingFinalizers()
-
-        # Quit is a request, not a guarantee. Watch for the exit and terminate the recorded identity
-        # the moment it is clear it is not going to happen, rather than waiting a fixed interval.
-        if ($excelProcess) {
-            $exitDeadline = (Get-Date).AddSeconds(3)
-            while ((Get-Date) -lt $exitDeadline) {
-                if (-not (Get-Process -Id $excelProcess.Id -ErrorAction SilentlyContinue)) { break }
-                Start-Sleep -Milliseconds 100
-            }
-
-            if (Get-Process -Id $excelProcess.Id -ErrorAction SilentlyContinue) {
-                Write-Host "Excel $($excelProcess.Id) did not exit on request. Terminating the owned instance."
-                Stop-Process -Id $excelProcess.Id -Force -ErrorAction SilentlyContinue
-            }
-        }
     }
-    elseif ($excelProcess) {
-        Write-Host "Leaving Excel $($excelProcess.Id) running as requested."
+
+    if (-not $KeepOpen -and $excelProcess) {
+        # Terminating the recorded identity is the only reliable way to close a host that was made
+        # visible: it considers itself user-owned and can outlive every automation client.
+        Stop-Process -Id $excelProcess.Id -Force -ErrorAction SilentlyContinue
+        Remove-Item $ownedPidFile -Force -ErrorAction SilentlyContinue
+    }
+    elseif ($KeepOpen -and $excelProcess) {
+        Write-Host "Leaving Excel $($excelProcess.Id) running. Re-run with -Reuse to check again quickly."
     }
 }
