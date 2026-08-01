@@ -7,8 +7,8 @@ namespace Xlide.Vba.Analysis.Lexing;
 
 public static partial class KeywordTable
 {
-    /// <summary>Reserved identifiers. A name in this set can never be user defined.</summary>
-    private static readonly string[] ReservedWords =
+    /// <summary>Words the lexer reports as keywords and the editor capitalizes.</summary>
+    private static readonly string[] CasedWords =
     [
         "Abs",
         "AddressOf",
@@ -16,7 +16,6 @@ public static partial class KeywordTable
         "Any",
         "Array",
         "As",
-        "Attribute",
         "Boolean",
         "ByRef",
         "Byte",
@@ -98,7 +97,6 @@ public static partial class KeywordTable
         "LenB",
         "Let",
         "Like",
-        "LINEINPUT",
         "Lock",
         "Long",
         "LongLong",
@@ -152,6 +150,22 @@ public static partial class KeywordTable
         "Unlock",
         "Until",
         "Variant",
+        "Wend",
+        "While",
+        "With",
+        "WithEvents",
+        "Write",
+        "Xor",
+    ];
+
+    /// <summary>
+    /// Reserved for the implementation. Never a user-defined name, but not keyword-cased either:
+    /// these lex as identifiers.
+    /// </summary>
+    private static readonly string[] ImplementationWords =
+    [
+        "Attribute",
+        "LINEINPUT",
         "VB_Base",
         "VB_Control",
         "VB_Creatable",
@@ -176,12 +190,6 @@ public static partial class KeywordTable
         "VB_VarMemberFlags",
         "VB_VarProcData",
         "VB_VarUserMemId",
-        "Wend",
-        "While",
-        "With",
-        "WithEvents",
-        "Write",
-        "Xor",
     ];
 
     /// <summary>Not reserved, but capitalized by the editor where they are meaningful.</summary>

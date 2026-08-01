@@ -30,14 +30,16 @@ public static partial class KeywordTable
     private static FrozenDictionary<string, string> BuildCanonical()
     {
         var map = new Dictionary<string, string>(
-            ReservedWords.Length + ContextualWords.Length,
+            CasedWords.Length + ContextualWords.Length,
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var word in ReservedWords)
+        foreach (var word in CasedWords)
         {
             map[word] = word;
         }
 
+        // Cased words win a spelling conflict, because they are the closed set defined by the
+        // specification and a contextual word is only meaningful in one statement.
         foreach (var word in ContextualWords)
         {
             map.TryAdd(word, word);
@@ -46,8 +48,13 @@ public static partial class KeywordTable
         return map.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Everything that can never be a user-defined name: the cased keywords plus the words reserved
+    /// for the implementation. The second group is deliberately absent from the casing table, since
+    /// those words lex as identifiers even though they cannot be declared.
+    /// </summary>
     private static FrozenSet<string> BuildReserved() =>
-        ReservedWords.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        CasedWords.Concat(ImplementationWords).ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Canonical capitalization for a word, or null when it is not a keyword.</summary>
     public static string? Canonical(ReadOnlySpan<char> word) =>

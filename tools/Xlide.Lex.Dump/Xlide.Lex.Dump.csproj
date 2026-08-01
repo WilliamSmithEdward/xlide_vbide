@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Xlide.Lex.Dump</RootNamespace>
+    <AssemblyName>xlide-lexdump</AssemblyName>
+    <Description>Emits the ported lexer's token stream so it can be compared with the reference implementation.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Xlide.Vba.Analysis\Xlide.Vba.Analysis.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -27,6 +27,12 @@ public static class Lexer
         var line = 0;
         var lineStart = 0;
 
+        // Whether the previous token could end a value. A hash means different things in the two
+        // positions: after a value it is the type-declaration character for a double, and anywhere
+        // else it opens a date literal. Without this distinction, the suffix in "d# = x / 7#" opens
+        // a date that runs to the next hash and swallows the rest of the statement.
+        var afterValue = false;
+
         while (true)
         {
             var triviaStart = trivia.Count;
@@ -45,9 +51,11 @@ public static class Lexer
 
             var start = position;
             var character = start - lineStart;
-            var kind = ScanToken(source, ref position);
+            var kind = ScanToken(source, ref position, afterValue);
 
             tokens.Add(new Token(kind, start, position, line, character, triviaStart, trivia.Count - triviaStart));
+
+            afterValue = EndsAValue(kind, source, start);
 
             if (kind == TokenKind.Newline)
             {
@@ -75,7 +83,15 @@ public static class Lexer
                 position++;
             }
 
-            if (position < source.Length && source[position] == '_' && IsLineContinuation(source, position))
+            // A continuation is whitespace, then an underscore, then a line terminator. The
+            // whitespace is required: an underscore written directly against the previous token does
+            // not continue the line, it is just a stray character.
+            var hasLeadingWhitespace = position > start;
+
+            if (hasLeadingWhitespace
+                && position < source.Length
+                && source[position] == '_'
+                && IsLineContinuation(source, position))
             {
                 position++;
 
@@ -101,7 +117,20 @@ public static class Lexer
         }
     }
 
-    private static TokenKind ScanToken(string source, ref int position)
+    /// <summary>
+    /// True when a token of this kind can be the end of a value, which is what makes a following
+    /// hash a type-declaration character rather than the start of a date.
+    /// </summary>
+    private static bool EndsAValue(TokenKind kind, string source, int start) => kind switch
+    {
+        TokenKind.Identifier or TokenKind.BracketedIdentifier => true,
+        TokenKind.IntegerLiteral or TokenKind.FloatLiteral => true,
+        TokenKind.StringLiteral or TokenKind.DateLiteral => true,
+        TokenKind.Punctuation => source[start] == ')',
+        _ => false,
+    };
+
+    private static TokenKind ScanToken(string source, ref int position, bool afterValue)
     {
         var c = source[position];
 
@@ -130,7 +159,7 @@ public static class Lexer
 
         if (c == '#')
         {
-            return ScanHash(source, ref position);
+            return ScanHash(source, ref position, afterValue);
         }
 
         if (char.IsAsciiDigit(c))
@@ -181,12 +210,9 @@ public static class Lexer
             return TokenKind.Keyword;
         }
 
-        // A type suffix binds to the name it follows and is part of the token.
-        if (position < source.Length && IsTypeSuffix(source[position]))
-        {
-            position++;
-        }
-
+        // A type-declaration character following a name is deliberately left as its own token. It
+        // belongs to the name grammatically, but which characters are unambiguous in that position
+        // depends on context the lexer does not have, so the decision is the parser's to make.
         return TokenKind.Identifier;
     }
 
@@ -327,9 +353,18 @@ public static class Lexer
     /// A hash begins either a date literal or a conditional compilation directive. They are told
     /// apart by what follows: a directive is a hash immediately followed by a keyword.
     /// </summary>
-    private static TokenKind ScanHash(string source, ref int position)
+    private static TokenKind ScanHash(string source, ref int position, bool afterValue)
     {
         var start = position;
+
+        // Directly after a value this is the type-declaration character for a double, never the
+        // start of a date. Treating it as a date opener makes the scan run to the next hash on the
+        // line and swallow whatever lies between.
+        if (afterValue)
+        {
+            return HashAlone(start, ref position);
+        }
+
         var next = position + 1;
 
         if (next < source.Length && IsIdentifierStart(source[next]))
@@ -349,14 +384,14 @@ public static class Lexer
         }
 
         // A date literal runs to its closing hash on the same line.
-        position++;
+        var bodyStart = position + 1;
+        position = bodyStart;
 
         while (position < source.Length && source[position] != '#')
         {
             if (IsLineTerminator(source[position]))
             {
-                position = start + 1;
-                return TokenKind.Unknown;
+                return HashAlone(start, ref position);
             }
 
             position++;
@@ -364,12 +399,119 @@ public static class Lexer
 
         if (position >= source.Length)
         {
-            position = start + 1;
-            return TokenKind.Unknown;
+            return HashAlone(start, ref position);
+        }
+
+        // Only a body that reads as a date makes this pair a date literal. Otherwise the opening
+        // hash stands alone and whatever follows is lexed normally.
+        if (!IsDateBody(source.AsSpan(bodyStart, position - bodyStart)))
+        {
+            return HashAlone(start, ref position);
         }
 
         position++;
         return TokenKind.DateLiteral;
+    }
+
+    /// <summary>
+    /// Reports a hash that opened neither a directive nor a closed date literal. It is a symbol in
+    /// its own right, most often the type-declaration character for a double, so it is an operator
+    /// rather than unrecognised text.
+    /// </summary>
+    private static TokenKind HashAlone(int start, ref int position)
+    {
+        position = start + 1;
+        return TokenKind.Operator;
+    }
+
+    /// <summary>
+    /// English month names and abbreviations, which a date body may contain.
+    /// </summary>
+    private static readonly string[] MonthNames =
+    [
+        "january", "february", "march", "april", "may", "june", "july", "august",
+        "september", "october", "november", "december",
+        "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
+
+    /// <summary>
+    /// True when the text between a pair of hashes can be a date or time.
+    ///
+    /// This decides whether an opening hash was a date at all. It usually is not: file statements
+    /// write a file number as a hash followed by an expression, and pairing that hash with the next
+    /// one on the line swallows everything between them. So a hash only opens a date when what
+    /// follows actually reads as one.
+    ///
+    /// The check accepts the shape of a date rather than validating a real calendar date: runs of
+    /// digits, month names, and meridiem markers, separated by the characters dates use. It is
+    /// deliberately more permissive than the grammar and never less, so a genuine date is never
+    /// rejected. The comparison against the reference implementation is what holds it honest.
+    /// </summary>
+    private static bool IsDateBody(ReadOnlySpan<char> body)
+    {
+        var sawValue = false;
+
+        for (var i = 0; i < body.Length; i++)
+        {
+            var c = body[i];
+
+            if (IsWhitespace(c) || c is '/' or '-' or ',' or ':' or '.')
+            {
+                continue;
+            }
+
+            if (char.IsAsciiDigit(c))
+            {
+                while (i < body.Length && char.IsAsciiDigit(body[i]))
+                {
+                    i++;
+                }
+
+                i--;
+                sawValue = true;
+                continue;
+            }
+
+            if (!char.IsLetter(c))
+            {
+                return false;
+            }
+
+            var wordStart = i;
+            while (i < body.Length && char.IsLetter(body[i]))
+            {
+                i++;
+            }
+
+            var word = body[wordStart..i];
+            i--;
+
+            if (word.Equals("am", StringComparison.OrdinalIgnoreCase)
+                || word.Equals("pm", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var isMonth = false;
+            foreach (var month in MonthNames)
+            {
+                if (word.Equals(month, StringComparison.OrdinalIgnoreCase))
+                {
+                    isMonth = true;
+                    break;
+                }
+            }
+
+            if (!isMonth)
+            {
+                return false;
+            }
+
+            sawValue = true;
+        }
+
+        // An empty body is the empty date literal and is legal.
+        return sawValue || body.IsWhiteSpace() || body.Length == 0;
     }
 
     private static bool IsDirectiveWord(ReadOnlySpan<char> word) =>
@@ -497,7 +639,12 @@ public static class Lexer
 
     private static bool IsLineTerminator(char c) => c is '\r' or '\n';
 
-    private static bool IsIdentifierStart(char c) => char.IsLetter(c) || c == '_';
+    /// <summary>
+    /// An identifier starts with a letter, never with an underscore. An underscore is legal inside a
+    /// name but a name cannot begin with one, so a lone underscore that is not continuing a line is
+    /// not an identifier at all.
+    /// </summary>
+    private static bool IsIdentifierStart(char c) => char.IsLetter(c);
 
     private static bool IsIdentifierPart(char c) => char.IsLetterOrDigit(c) || c == '_';
 
