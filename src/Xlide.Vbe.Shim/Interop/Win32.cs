@@ -199,6 +199,23 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     public static partial short GetKeyState(int key);
 
+    /// <summary>
+    /// A timer that fires on the thread that owns the window.
+    ///
+    /// This is why it is a window timer rather than a managed one. Everything on the editor's
+    /// object model is apartment bound, so a callback on a pool thread cannot touch it, and
+    /// marshalling back would need a pump this code does not own. A window timer arrives through
+    /// the message loop the host is already running, on the only thread allowed to do the work.
+    /// </summary>
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial nuint SetTimer(nint window, nuint id, uint milliseconds, nint callback);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool KillTimer(nint window, nuint id);
+
+    public const uint WmTimer = 0x0113;
+
     public const int VkShift = 0x10;
     public const int VkControl = 0x11;
 

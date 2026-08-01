@@ -53,6 +53,21 @@ public sealed record SetFindingsMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("findings")] SurfaceFinding[] Findings);
 
+/// <summary>One component in a project, with the kind the editor reports for it.</summary>
+public sealed record SurfaceComponent(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] int Kind);
+
+/// <summary>One project and everything in it.</summary>
+public sealed record SurfaceProject(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("components")] SurfaceComponent[] Components);
+
+/// <summary>The whole project tree, for the explorer.</summary>
+public sealed record SetProjectsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("projects")] SurfaceProject[] Projects);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -65,6 +80,9 @@ public sealed record SetFindingsMessage(
 [JsonSerializable(typeof(RevealLineMessage))]
 [JsonSerializable(typeof(SetModulesMessage))]
 [JsonSerializable(typeof(SetFindingsMessage))]
+[JsonSerializable(typeof(SetProjectsMessage))]
+[JsonSerializable(typeof(SurfaceProject))]
+[JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]
 [JsonSerializable(typeof(EditorMarker))]
 public sealed partial class EditorMessageContext : JsonSerializerContext;

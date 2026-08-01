@@ -43,7 +43,17 @@ internal sealed class EditorSurface : IDisposable
     private readonly Dictionary<string, string> _pending = [];
     private readonly List<string> _pendingOrder = [];
 
+    /// <summary>
+    /// How long after the last keystroke the module is written back.
+    ///
+    /// Long enough that typing a word is one write rather than five, short enough that tabbing away
+    /// or reaching for the mouse has already saved. Anything that must see the text sooner flushes
+    /// explicitly rather than waiting for this.
+    /// </summary>
+    private const uint WriteDelayMilliseconds = 400;
+
     private string? _text;
+    private bool _unwritten;
     private bool _loaded;
 
     private EditorSurface(nint host) => _host = host;
@@ -112,6 +122,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         surface._overlay.Resized += size => surface._browser?.SetBounds(size);
+        surface._overlay.Elapsed = surface.FlushEdits;
 
         // Asked for the editing document, then left alone. Creating a browser is asynchronous in two
         // stages, so mapping the content root and navigating from here would run before the browser
@@ -149,6 +160,10 @@ internal sealed class EditorSurface : IDisposable
         _module = moduleName;
         _text = text;
 
+        // The text just arrived from the module, so there is nothing of the developer's to write.
+        _unwritten = false;
+        _overlay?.StopTimer();
+
         Send("loadDocument", JsonSerializer.Serialize(
             new LoadDocumentMessage("loadDocument", moduleName, text),
             EditorMessageContext.Default.LoadDocumentMessage));
@@ -172,6 +187,16 @@ internal sealed class EditorSurface : IDisposable
         Send("setModules", JsonSerializer.Serialize(
             new SetModulesMessage("setModules", modules, active),
             EditorMessageContext.Default.SetModulesMessage));
+    }
+
+    /// <summary>Replaces the project explorer's contents.</summary>
+    public void ShowProjects(SurfaceProject[] projects)
+    {
+        ArgumentNullException.ThrowIfNull(projects);
+
+        Send("setProjects", JsonSerializer.Serialize(
+            new SetProjectsMessage("setProjects", projects),
+            EditorMessageContext.Default.SetProjectsMessage));
     }
 
     /// <summary>Replaces the panel's contents, across every module.</summary>
@@ -198,6 +223,26 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RevealLineMessage("revealLine", line),
             EditorMessageContext.Default.RevealLineMessage));
+    }
+
+    /// <summary>
+    /// Writes the developer's edits back to the module now, if there are any.
+    ///
+    /// Called before anything that reads the module: running, stepping, switching module, or
+    /// shutting down. Without it the host compiles and runs the text as it was before the developer
+    /// started typing, which looks like an editor that does not save.
+    /// </summary>
+    public void FlushEdits()
+    {
+        _overlay?.StopTimer();
+
+        if (!_unwritten || _module is null || _text is null)
+        {
+            return;
+        }
+
+        _unwritten = false;
+        TextChanged?.Invoke(_module, _text);
     }
 
     /// <summary>Sends a message, or holds it until the page is ready for it.</summary>
@@ -272,8 +317,13 @@ internal sealed class EditorSurface : IDisposable
                         && document.RootElement.TryGetProperty("fullText", out var text)
                         && text.GetString() is { } updated)
                     {
+                        // Held, not written. Writing a module replaces every line of it, which
+                        // resets the project, so doing it per keystroke would reset the project on
+                        // every keystroke. The edit is written once the developer stops typing,
+                        // and immediately before anything that has to see it.
                         _text = updated;
-                        TextChanged?.Invoke(_module, updated);
+                        _unwritten = true;
+                        _overlay?.StartTimer(WriteDelayMilliseconds);
                     }
 
                     break;

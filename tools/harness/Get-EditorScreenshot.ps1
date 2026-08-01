@@ -70,6 +70,7 @@ Add-Type -Namespace Xlide -Name Shot -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+[DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr h);
 [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
 [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr h, uint id, ref Guid iid, [MarshalAs(UnmanagedType.IDispatch)] out object o);
@@ -103,19 +104,34 @@ public static bool IsResponsive(IntPtr window) { return !IsHungAppWindow(window)
 /// </summary>
 public static bool Render(IntPtr window, IntPtr dc) { return PrintWindow(window, dc, 0x00000002); }
 
-/// Finds a top-level window of the given class belonging to a process.
+/// <summary>
+/// Finds the largest visible top-level window of a class in a process.
+///
+/// Largest rather than first. A process can own several windows of one class, and the editor owns
+/// small ones of its frame class that are not the frame: taking the first match produced a capture
+/// 237 pixels wide of something that was not the editor.
+/// </summary>
 public static IntPtr TopLevel(int processId, string className)
 {
     IntPtr found = IntPtr.Zero;
+    long best = 0;
+
     EnumWindows((h, l) =>
     {
         int owner;
         GetWindowThreadProcessId(h, out owner);
         if (owner != processId) { return true; }
+        if (!IsWindowVisible(h)) { return true; }
 
         var name = new System.Text.StringBuilder(128);
         GetClassNameW(h, name, 128);
-        if (name.ToString() == className) { found = h; return false; }
+        if (name.ToString() != className) { return true; }
+
+        RECT r;
+        if (!GetWindowRect(h, out r)) { return true; }
+
+        long area = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+        if (area > best) { best = area; found = h; }
         return true;
     }, IntPtr.Zero);
 
@@ -216,6 +232,14 @@ try {
 
     if (-not $NoSampleCode) {
         $components = $excel.ActiveWorkbook.VBProject.VBComponents
+
+        # Removed first rather than added blindly. The workbook is macro-enabled, so a module can
+        # outlive a run, and renaming a new component to a name already in use throws.
+        foreach ($name in @('BrokenModule', 'CleanModule')) {
+            foreach ($existing in @($components)) {
+                if ($existing.Name -eq $name) { $components.Remove($existing) }
+            }
+        }
 
         $broken = $components.Add(1)
         $broken.Name = 'BrokenModule'

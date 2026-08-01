@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import type { ExplorerProject } from "./explorer.js";
 import type { Shell, ShellFinding } from "./shell.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
@@ -44,6 +45,7 @@ export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
   | { type: "setModules"; modules: string[]; active: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
+  | { type: "setProjects"; projects: ExplorerProject[] }
   | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
   | { type: "setTheme"; theme: XlideTheme }
   | { type: "setDiagnostics"; markers: HostMarker[] }
@@ -204,6 +206,9 @@ export class EditorBridge {
         return;
       case "setFindings":
         this.shell?.setFindings(message.findings);
+        return;
+      case "setProjects":
+        this.shell?.setProjects(message.projects);
         return;
       case "applyEdit":
         this.applyEdit(message.revision, message.changes);

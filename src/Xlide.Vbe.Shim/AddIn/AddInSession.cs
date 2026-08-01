@@ -66,6 +66,7 @@ internal sealed class AddInSession : IDisposable
     public void HostStartupComplete()
     {
         ReportOpenProjects();
+        HideReplacedWindows();
         TrackCodePanes();
         StartAnalysis();
     }
@@ -204,6 +205,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.ModuleRequested = ShowModule;
                 _editorSurface.NavigateRequested = GoTo;
                 _editorSurface.CommandRequested = RunCommand;
+                _editorSurface.TextChanged = WriteModule;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -215,10 +217,14 @@ internal sealed class AddInSession : IDisposable
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
+                // Before the document is replaced. Loading a module resets the surface, so an edit
+                // that has not been written yet would go with the document it belonged to.
+                _editorSurface.FlushEdits();
                 ShowModuleInSurface(pane.Component);
             }
 
             PublishModules();
+            PublishProjects();
         }
         catch (Exception ex)
         {
@@ -251,13 +257,70 @@ internal sealed class AddInSession : IDisposable
             return false;
         }
 
-        // The editor runs the procedure its own caret is in, and steps and breakpoints all act on
-        // the line its own caret is on. The developer's caret is in the surface, so the two are put
-        // back in step here, at the one moment it matters.
+        // The editor runs what the module holds, and the caret it uses is its own. Both are brought
+        // up to date here, at the one moment it matters: running code the developer has not
+        // finished typing is worse than a short pause before it starts.
+        _editorSurface?.FlushEdits();
         SyncCaretToPane();
 
         VbeCommands.Execute(_editor, command);
         return true;
+    }
+
+    /// <summary>
+    /// Writes what the developer typed back into the module.
+    ///
+    /// The module is the text of record. Everything else in the host reads it and nothing reads the
+    /// surface: the compiler, the debugger, the file the workbook saves, and the analyzer all go to
+    /// the module, so an edit that has not reached it has not happened. Before this existed, typing
+    /// in the surface changed nothing at all: the code would not run, would not save, and the
+    /// analyzer went on reporting defects in text the developer had already fixed.
+    ///
+    /// The whole module is replaced rather than the changed range applied. The host's own line
+    /// operations are one call per line and its line numbers shift under each other as they are
+    /// applied, so replacing once is both faster and the only version whose failure mode is a
+    /// module unchanged rather than a module half written.
+    ///
+    /// Writing resets the project, which discards any running state. That is what the host's own
+    /// editor does when a module is edited, so it is parity rather than a regression, and it is
+    /// why this is debounced rather than done per keystroke.
+    /// </summary>
+    private void WriteModule(string component, string text)
+    {
+        try
+        {
+            using var found = FindComponent(component);
+            using var module = found?.GetObject("CodeModule");
+            if (module is null)
+            {
+                Log.Warn($"write: {component} has no code module");
+                return;
+            }
+
+            var existing = module.GetInt32("CountOfLines");
+            if (existing > 0)
+            {
+                module.Invoke("DeleteLines", 1, existing);
+            }
+
+            // A module with nothing in it is a legitimate state, and asking the host to add an
+            // empty string to one is not.
+            if (text.Length > 0)
+            {
+                module.Invoke("AddFromString", text);
+            }
+
+            Log.Info($"write: {component}, {text.Length} character(s)");
+
+            // The analyzer reads the module, so it has nothing new to say until the module has
+            // been written. Without this the squiggles describe the text as it was before the
+            // developer started typing.
+            _analysis?.Reanalyse();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"write: {component} could not be updated", ex);
+        }
     }
 
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
@@ -270,9 +333,9 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        // Same as for a keystroke: the editor acts on its own caret, so the two are put in step
-        // first. A toolbar button also takes focus away from the surface, which is exactly when
-        // the two carets would otherwise be furthest apart.
+        // Same as for a keystroke. A toolbar button also takes focus away from the surface, which
+        // is exactly when the two are furthest apart.
+        _editorSurface?.FlushEdits();
         SyncCaretToPane();
         VbeCommands.Execute(_editor, command);
     }
@@ -360,6 +423,105 @@ internal sealed class AddInSession : IDisposable
         catch (Exception ex)
         {
             Log.Error("modules: the open panes could not be listed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Sends the surface the whole project tree, for its explorer.
+    ///
+    /// Every component, not only the ones with a pane open: this is what the developer navigates
+    /// by, so it has to show modules that have never been opened. Reading a component's pane would
+    /// create one, so nothing here touches CodeModule.
+    /// </summary>
+    private void PublishProjects()
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var projectCount = projects?.GetInt32("Count") ?? 0;
+
+            var tree = new List<SurfaceProject>(projectCount);
+            for (var i = 1; i <= projectCount; i++)
+            {
+                using var project = projects!.GetItem(i);
+                using var components = project?.GetObject("VBComponents");
+                if (project is null || components is null)
+                {
+                    continue;
+                }
+
+                var componentCount = components.GetInt32("Count");
+                var members = new List<SurfaceComponent>(componentCount);
+
+                for (var j = 1; j <= componentCount; j++)
+                {
+                    using var component = components.GetItem(j);
+                    if (component?.GetString("Name") is { Length: > 0 } name)
+                    {
+                        members.Add(new SurfaceComponent(name, component.GetInt32("Type")));
+                    }
+                }
+
+                tree.Add(new SurfaceProject(project.GetString("Name") ?? "VBAProject", [.. members]));
+            }
+
+            surface.ShowProjects([.. tree]);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("explorer: the project tree could not be read", ex);
+        }
+    }
+
+    /// <summary>
+    /// Closes the editor's own windows for the panels this product replaces.
+    ///
+    /// Closed rather than covered. The editor hides a tool window on request and a hidden window
+    /// cannot be uncovered by anything the editor does afterwards, which is the failure mode that
+    /// covering them would have: the editor raises its own windows on all sorts of occasions and
+    /// wins every one of those races. Closing them also gives the document area their space, which
+    /// is what the surface is measured against.
+    ///
+    /// The objects stay alive and the project is untouched, so anything reading them keeps working.
+    /// Only the windows for panels that exist in the surface are closed; a native window with no
+    /// replacement is left alone, because taking it away would remove the feature rather than
+    /// restyle it.
+    /// </summary>
+    private void HideReplacedWindows()
+    {
+        // Project explorer and properties. The Immediate, Locals and Watch windows stay: they are
+        // not replaced yet, and hiding them would take the feature away rather than restyle it.
+        ReadOnlySpan<int> replaced = [6, 7];
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is null || !replaced.Contains(window.GetInt32("Type")))
+                {
+                    continue;
+                }
+
+                if (window.GetBool("Visible"))
+                {
+                    window.SetBool("Visible", false);
+                    Log.Info($"window: closed the editor's own '{window.GetString("Caption")}'");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("window: the replaced windows could not be closed", ex);
         }
     }
 
@@ -554,6 +716,10 @@ internal sealed class AddInSession : IDisposable
             _analysis = null;
             analysis.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(3));
         }
+
+        // Before anything is torn down, and before the engine is stopped: whatever the developer
+        // typed last must reach the module, or closing the host loses it.
+        _editorSurface?.FlushEdits();
 
         _codePanes?.Dispose();
         _codePanes = null;

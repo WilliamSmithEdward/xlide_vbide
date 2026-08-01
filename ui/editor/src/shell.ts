@@ -9,6 +9,7 @@
  * concept of them.
  */
 
+import { Explorer, type ExplorerProject } from "./explorer.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
 
 export type FindingSeverity = "error" | "warning" | "info" | "hint";
@@ -54,7 +55,13 @@ const MIN_PANEL_HEIGHT = 60;
 /** The editor never gets less than this, however far the splitter is dragged. */
 const MIN_EDITOR_HEIGHT = 80;
 
-/** How far one arrow key moves the splitter. */
+/** Smallest useful project explorer: a component name without truncation. */
+const MIN_SIDEBAR_WIDTH = 120;
+
+/** The editor never gets less than this, however far the splitter is dragged. */
+const MIN_EDITOR_WIDTH = 240;
+
+/** How far one arrow key moves a splitter. */
 const KEYBOARD_STEP = 24;
 
 export class Shell {
@@ -68,12 +75,15 @@ export class Shell {
   private readonly panelToggle: HTMLButtonElement;
   private readonly statusPosition: HTMLElement;
   private readonly statusModule: HTMLElement;
+  private readonly sidebarSplitter: HTMLElement;
+  private readonly explorer: Explorer;
 
   private modules: string[] = [];
   private active: string | null = null;
   private findings: ShellFinding[] = [];
   private panelOpen = true;
   private panelHeight = 180;
+  private sidebarWidth = 260;
 
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
@@ -84,6 +94,11 @@ export class Shell {
     this.statusPosition = root.querySelector("#status-position") as HTMLElement;
     this.statusModule = root.querySelector("#status-module") as HTMLElement;
 
+    this.sidebarSplitter = root.querySelector("#sidebar-splitter") as HTMLElement;
+    this.explorer = new Explorer(
+      root.querySelector("#sidebar-tree") as HTMLElement,
+      (name) => handlers.activateModule(name));
+
     buildToolbar(root.querySelector("#toolbar") as HTMLElement, (command) => handlers.command(command));
     this.panel = root.querySelector("#panel") as HTMLElement;
     this.panelList = root.querySelector("#panel-list") as HTMLElement;
@@ -92,6 +107,7 @@ export class Shell {
 
     this.panelToggle.addEventListener("click", () => this.togglePanel());
     this.installSplitter();
+    this.installSidebarSplitter();
 
     // One listener on the strip rather than one per tab: the tabs are rebuilt whenever the set of
     // open modules changes, and per-tab listeners would have to be torn down with them.
@@ -120,7 +136,13 @@ export class Shell {
     this.modules = modules;
     this.active = active;
     this.statusModule.textContent = active ?? "";
+    this.explorer.setActive(active);
     this.renderTabs();
+  }
+
+  /** Replaces the project explorer's contents. */
+  setProjects(projects: ExplorerProject[]): void {
+    this.explorer.setProjects(projects);
   }
 
   /** Shows where the caret is. */
@@ -178,6 +200,53 @@ export class Shell {
 
       event.preventDefault();
     });
+  }
+
+  /** Makes the divider between the project explorer and the editor draggable. */
+  private installSidebarSplitter(): void {
+    this.sidebarSplitter.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      this.sidebarSplitter.setPointerCapture(event.pointerId);
+
+      const startX = event.clientX;
+      const startWidth = this.sidebarWidth;
+
+      const move = (moved: PointerEvent) => this.setSidebarWidth(startWidth + (moved.clientX - startX));
+      const end = (ended: PointerEvent) => {
+        this.sidebarSplitter.releasePointerCapture(ended.pointerId);
+        this.sidebarSplitter.removeEventListener("pointermove", move);
+        this.sidebarSplitter.removeEventListener("pointerup", end);
+        this.sidebarSplitter.removeEventListener("pointercancel", end);
+      };
+
+      this.sidebarSplitter.addEventListener("pointermove", move);
+      this.sidebarSplitter.addEventListener("pointerup", end);
+      this.sidebarSplitter.addEventListener("pointercancel", end);
+    });
+
+    this.sidebarSplitter.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowLeft") {
+        this.setSidebarWidth(this.sidebarWidth - KEYBOARD_STEP);
+      } else if (event.key === "ArrowRight") {
+        this.setSidebarWidth(this.sidebarWidth + KEYBOARD_STEP);
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+    });
+  }
+
+  private setSidebarWidth(width: number): void {
+    const largest = Math.max(MIN_SIDEBAR_WIDTH, this.shell.clientWidth - MIN_EDITOR_WIDTH);
+
+    this.sidebarWidth = Math.round(Math.min(largest, Math.max(MIN_SIDEBAR_WIDTH, width)));
+    this.shell.style.setProperty("--sidebar-width", `${this.sidebarWidth}px`);
+    this.handlers.layoutChanged();
   }
 
   private setPanelHeight(height: number): void {
@@ -286,7 +355,13 @@ export class Shell {
       this.panelList.appendChild(row);
     }
 
-    // A badge count per tab changes with the findings, so the strip is rebuilt too.
+    // Counts per component change with the findings, so both the strip and the tree are rebuilt.
+    const counts = new Map<string, number>();
+    for (const finding of this.findings) {
+      counts.set(finding.module, (counts.get(finding.module) ?? 0) + 1);
+    }
+
+    this.explorer.setProblemCounts(counts);
     this.renderTabs();
   }
 }

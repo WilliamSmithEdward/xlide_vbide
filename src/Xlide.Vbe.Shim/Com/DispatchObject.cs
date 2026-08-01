@@ -261,6 +261,26 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Calls a method that takes one string and returns nothing, which is how a module is given
+    /// its source.
+    /// </summary>
+    public void Invoke(string name, string argument)
+    {
+        ArgumentNullException.ThrowIfNull(argument);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        // The variant owns the string it was built from and frees it when it is cleared, so it is
+        // disposed here rather than after the call returns.
+        using var value = ComVariant.Create(argument);
+        using var result = InvokeCore(dispId, InvokeKind.Method, [value]);
+    }
+
+    /// <summary>
     /// Reads an indexed member, which is how automation collections expose their items. Editor
     /// collections are one-based.
     /// </summary>

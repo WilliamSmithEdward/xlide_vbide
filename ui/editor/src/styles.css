@@ -20,12 +20,118 @@ body {
   position: absolute;
   inset: 0;
   display: grid;
-  /* toolbar, tabs, editor, splitter, panel, status. The editor takes what is left. */
-  grid-template-rows: auto auto 1fr auto auto auto;
+  grid-template-rows: auto 1fr auto;
   min-height: 0;
 
-  /* The panel's height, which the splitter writes to. */
+  /* Written by the splitters. */
   --panel-height: 180px;
+  --sidebar-width: 260px;
+}
+
+#main {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) auto 1fr;
+  min-height: 0;
+  min-width: 0;
+}
+
+#workspace {
+  display: grid;
+  /* tabs, editor, splitter, panel. The editor takes what is left. */
+  grid-template-rows: auto 1fr auto auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.05));
+}
+
+#sidebar-head {
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+#sidebar-tree {
+  overflow: auto;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+
+#sidebar-splitter {
+  width: 5px;
+  cursor: col-resize;
+  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#sidebar-splitter:hover,
+#sidebar-splitter:focus-visible {
+  background: var(--vscode-focusBorder, #0078d4);
+  outline: none;
+}
+
+.tree-group {
+  padding: 4px 10px 2px 10px;
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 3px 10px 3px 22px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tree-item:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.tree-item.active {
+  background: var(--vscode-list-activeSelectionBackground, rgba(0, 120, 212, 0.35));
+}
+
+.tree-item:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.tree-item .codicon {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.tree-item .tree-badge {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: var(--vscode-editorError-foreground, #f14c4c);
+  color: #ffffff;
+}
+
+.tree-project {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-weight: 600;
 }
 
 #shell.panel-collapsed {

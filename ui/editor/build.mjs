@@ -24,15 +24,24 @@ const INDEX_HTML = `<!doctype html>
 <body>
 <div id="shell">
   <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
-  <div id="tabs" role="tablist" aria-label="Open modules"></div>
-  <div id="container"></div>
-  <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
-  <div id="panel">
-    <div id="panel-head">
-      <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-list">Problems</button>
-      <span id="panel-count">no problems</span>
+  <div id="main">
+    <div id="sidebar">
+      <div id="sidebar-head">Project</div>
+      <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
     </div>
-    <div id="panel-list" role="list"></div>
+    <div id="sidebar-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the project explorer" tabindex="0"></div>
+    <div id="workspace">
+      <div id="tabs" role="tablist" aria-label="Open modules"></div>
+      <div id="container"></div>
+      <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
+      <div id="panel">
+        <div id="panel-head">
+          <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-list">Problems</button>
+          <span id="panel-count">no problems</span>
+        </div>
+        <div id="panel-list" role="list"></div>
+      </div>
+    </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span></div>
 </div>

@@ -81,6 +81,38 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// Reading crosses into the host, so it happens on the caller's thread and produces plain data;
     /// everything after that is off it. Mixing the two is what turns an analysis pass into a stall.
     /// </summary>
+    /// <summary>
+    /// Re-runs analysis over everything the editor currently holds.
+    ///
+    /// Started rather than awaited, and called from the host thread after a module has been
+    /// written. Reading the projects has to happen on that thread because the object model is
+    /// apartment bound, but the engine round trip must not block it, so the read happens first and
+    /// the waiting happens elsewhere.
+    /// </summary>
+    public void Reanalyse()
+    {
+        if (_engine is not { IsRunning: true })
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await AnalyseEverythingAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // Shutting down.
+            }
+            catch (Exception ex)
+            {
+                Log.Error("engine: re-analysis failed", ex);
+            }
+        });
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;

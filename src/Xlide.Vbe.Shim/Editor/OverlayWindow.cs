@@ -18,6 +18,9 @@ namespace Xlide.Vbe.Shim.Editor;
 internal sealed unsafe class OverlayWindow : IDisposable
 {
     private const string ClassName = "XlideEditorOverlay";
+
+    /// <summary>Identifier of the single timer this window uses. Scoped to the window.</summary>
+    private const nuint TimerId = 1;
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();
 
@@ -54,6 +57,31 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
     /// <summary>Raised when the window has been resized, so the surface can follow.</summary>
     public Action<PixelRect>? Resized { get; set; }
+
+    /// <summary>Raised once, on the host thread, after <see cref="StartTimer"/> elapses.</summary>
+    public Action? Elapsed { get; set; }
+
+    /// <summary>
+    /// Starts or restarts a one-shot timer. Restarting is what makes it a debounce: each call
+    /// pushes the deadline out, so a burst of keystrokes produces one callback rather than one per
+    /// key.
+    /// </summary>
+    public void StartTimer(uint milliseconds)
+    {
+        if (_handle != 0)
+        {
+            Win32.SetTimer(_handle, TimerId, milliseconds, 0);
+        }
+    }
+
+    /// <summary>Cancels the timer if it is running.</summary>
+    public void StopTimer()
+    {
+        if (_handle != 0)
+        {
+            Win32.KillTimer(_handle, TimerId);
+        }
+    }
 
     /// <summary>Creates the overlay as a child of <paramref name="parent"/>.</summary>
     public static OverlayWindow? Create(nint parent, PixelRect bounds)
@@ -216,6 +244,20 @@ internal sealed unsafe class OverlayWindow : IDisposable
                     return 0;
                 }
 
+                case Win32.WmTimer:
+                {
+                    var overlay = FromHandle(window);
+                    if (overlay is not null)
+                    {
+                        // One shot. A window timer repeats until it is killed, and the work behind
+                        // this only needs doing once per burst.
+                        overlay.StopTimer();
+                        overlay.Elapsed?.Invoke();
+                    }
+
+                    return 0;
+                }
+
                 case Win32.WmEraseBackground:
                     // The browser paints every pixel. Erasing first would flash.
                     return 1;
@@ -266,7 +308,14 @@ internal sealed unsafe class OverlayWindow : IDisposable
     public void Dispose()
     {
         var handle = _handle;
+
+        if (handle != 0)
+        {
+            Win32.KillTimer(handle, TimerId);
+        }
+
         _handle = 0;
+        Elapsed = null;
 
         if (handle != 0 && Win32.IsWindow(handle))
         {
