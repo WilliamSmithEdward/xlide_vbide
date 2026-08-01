@@ -1,10 +1,27 @@
 # Build status
 
-Updated 2026-08-01.
+Updated 2026-08-01, second revision.
 
 ## What is proven
 
-The add-in loads and runs inside the Excel Visual Basic Editor.
+The add-in loads inside the Excel Visual Basic Editor, the editor sites our control in a docked
+tool window, a WebView2 browser surface renders inside that window, and the whole product installs
+and uninstalls from a single 3.92 MB executable.
+
+Verified installer round trip, all observed on this machine: install exits 0 and lands four files
+under `%LOCALAPPDATA%\Programs\xlide`; registration points at the installed copy; the installed
+copy connects and renders in a real editor; uninstall removes the install folder, the data folder,
+and every registry key, verified by enumeration afterwards.
+
+Verified load path, 1.35 seconds end to end with every phase measured: start host 0.25s, attach
+0.68s, open editor 0.15s, add-in load 0.01s, browser surface 0.23s, confirm connection 0.03s. The
+check passes only when three independent conditions are all observed: the add-in's own log shows a
+connection, the editor reports the add-in connected, and the browser surface finished navigating.
+
+Known cost of shipping unsigned during development: Windows Security warns that the installer's
+publisher cannot be confirmed. Signing is a release requirement, recorded in decisions.md.
+
+## The original proof
 
 Verified end to end by `tools/harness/Invoke-VbeLoadCheck.ps1` against Excel 365 x64
 (16.0.20228.20124, VBA 7.1) on Windows 11:
@@ -32,14 +49,15 @@ readable from inside the host process.
 
 | Component | State |
 | --- | --- |
-| Native COM server, ahead-of-time compiled | Working. 1.91 MB, exports `DllGetClassObject` and `DllCanUnloadNow`, no runtime deployed or loaded |
+| Native COM server, ahead-of-time compiled | Working. 2.12 MB, exports `DllGetClassObject` and `DllCanUnloadNow`, no runtime deployed or loaded |
 | Add-in lifetime contract | Working. Connect, startup, shutdown, and disconnect handled, with teardown ordered before host shutdown |
 | Editor object model access | Working, through a late-binding wrapper with single-ownership release |
 | Registration | Working, per user, no administrator rights. One source of truth, unit tested |
-| Development loop | Working. `tools/dev.ps1` builds, tests, publishes, registers, and verifies in a real editor |
-| Docked tool window and browser surface | In progress |
+| Docked tool window | Working. The editor sites our control through the documented tool window mechanism |
+| Browser surface | Working. WebView2 hosted in the tool window, navigated, observed on screen |
+| Installer | Working. One 3.92 MB executable, install and clean uninstall verified by round trip |
+| Development loop | Working. Full check in 1.35s; instance reuse brings a repeat check to 0.24s |
 | Language engine sidecar | In progress |
-| Installer | In progress |
 | Editor surface, designer, debugging | Designed, not started |
 
 ## How to run it

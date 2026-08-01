@@ -25,6 +25,10 @@ param(
     # Leave Excel running after the check.
     [switch] $KeepOpen,
 
+    # Reuse the Excel instance a previous -KeepOpen run left open. Only valid when the shim itself
+    # has not changed, because a host holds an add-in library open for its lifetime.
+    [switch] $Reuse,
+
     # Remove the registration and exit.
     [switch] $Unregister,
 
@@ -108,6 +112,7 @@ if ($NoRun) {
 Invoke-Step 'Load into the editor' {
     $checkArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'harness\Invoke-VbeLoadCheck.ps1'))
     if ($KeepOpen) { $checkArgs += '-KeepOpen' }
+    if ($Reuse) { $checkArgs += '-Reuse' }
 
     & powershell @checkArgs
 }

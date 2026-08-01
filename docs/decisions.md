@@ -116,7 +116,22 @@ built-in transactional rollback. Per-user installation of a development tool is 
 matters, and the installation is small enough that its failure modes are enumerable. A packaged
 format can be added later around the same payload if a real need appears.
 
-## 8. The integration harness owns its host instance
+## 8. Releases are signed
+
+Status: decided, not yet implemented. Blocks public release; does not block development.
+
+An unsigned installer triggers a Windows Security warning naming the executable as unpublishable
+("we can't confirm who published xlide-setup.exe"), observed on this machine during the first
+install round trip. Developers are the audience most likely to take that warning seriously, and
+the uninstaller re-launches itself from the temporary folder, which is a pattern reputation
+systems watch closely.
+
+The plan is Authenticode signing of the installer, the shim, and the engine executable in the
+release pipeline. Azure Trusted Signing is the current fit: subscription-based, no certificate
+files to protect, and it accrues SmartScreen reputation. Local development builds stay unsigned;
+nothing in the product may behave differently based on whether it is signed.
+
+## 9. The integration harness owns its host instance
 
 Status: decided and proven.
 
