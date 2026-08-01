@@ -35,9 +35,34 @@ both products.
 
 The cost is a protocol boundary and process lifetime management.
 
+## 3a. The analyzer is being ported to the product's own language
+
+Status: decided, in progress. Supersedes the reuse decision below, which stands as the description
+of what the port replaces and why the reused engine remains the reference.
+
+Reuse got a working, validated analyzer running in days rather than months, and that was the right
+call to make first. It carries one cost that cannot be optimised away: the engine ships a language
+runtime, which is ninety megabytes against an add-in of two. Nothing about that number is the
+analyzer's fault and nothing about it can be trimmed, because it is the runtime, not the code.
+
+A port removes it entirely. Compiled ahead of time the engine becomes single-digit megabytes with no
+runtime to start, which also removes start-up latency from the first keystroke after a project
+opens. Working over spans of the source rather than allocating strings per token is available in a
+way it is not in the original language, and matters on a per-keystroke path.
+
+The port is staged and gated, never a rewrite-and-hope. Each layer is ported bottom up, and every
+layer must agree with the existing implementation on a shared corpus before the next one starts. The
+existing engine stays in the repository as the reference implementation and the differential oracle:
+the question is never "does the port look right" but "does it answer identically". Above that sits
+the corpus of cases adjudicated against the real compiler, which is what makes the no-false-positive
+discipline testable rather than aspirational.
+
+Until a layer is ported and agreeing, the reused engine is what ships. There is no window in which
+the product depends on a half-ported analyzer.
+
 ## 3. The engine is reused rather than rewritten
 
-Status: decided.
+Status: superseded by 3a for the long term; still describes what ships today.
 
 The analyzer exists, is validated against the real compiler across a corpus of accepted and rejected
 cases, carries a rule set with recorded evidence per rule, and already meets per-keystroke latency
@@ -49,6 +74,46 @@ It ships as a self-contained executable so the user needs nothing installed.
 Reversing this later is cheap by construction: the protocol is the contract, so an engine in another
 language can replace it without the add-in changing. Rewriting is a performance decision to make
 against measurements, not in advance.
+
+## 3b. Referenced libraries are read from the host, not shipped as data
+
+Status: decided, not yet built.
+
+The analyzer carries a curated model of the spreadsheet object model: a couple of hundred types and
+several thousand members, hand-verified, with a subset marked complete enough to say a member does
+not exist. It is the reason completion and diagnostics are good on ordinary code.
+
+It says nothing at all about anything else a project references. A project that references a data
+access library, a scripting runtime, an XML parser, or another organisation's component gets no
+completion, no signature help, no hover, and no member checking against any of it. That is a large
+hole, and it is exactly the code most in need of help, because it is the code the developer knows
+least well.
+
+The metadata already exists on the machine. Every reference the editor resolves is a type library,
+and a type library is a queryable description of its own types, members, parameters, return types,
+and documentation strings. The editor reads them to drive its own completion. So rather than curate
+more data and ship it, the engine reads what the user's own project actually references, from the
+user's own machine, at the version they actually have.
+
+The mechanism: the project's reference collection gives each library's identity and path; the
+library is loaded and enumerated for its types and members; the result is projected into the same
+shape the curated model uses and handed to the analyzer as an additional source. Nothing about the
+analyzer changes, because it already accepts a host model. The curated model keeps precedence where
+the two overlap, since it is verified and carries completeness marks that a raw enumeration cannot.
+
+Three properties this has to have, or it makes things worse rather than better:
+
+Reading a library is slow and its result never changes, so it happens once per library version and
+is cached on disk, keyed by the library's identity and version. A project opening for the second
+time pays nothing.
+
+It must never be on the path of a keystroke. Enumeration happens in the engine's process, in the
+background, and completion works without it and improves when it arrives.
+
+Absence is not evidence. A member that is not found in an enumerated library means the enumeration
+is incomplete, never that the member does not exist. Only the curated model's completeness marks can
+support a diagnostic that says something is missing. This is the same rule the analyzer already
+applies to its own model and the reason it can be trusted; extending the data must not weaken it.
 
 ## 4. User interface is web-based, hosted in the editor's own windows
 

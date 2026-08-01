@@ -5,10 +5,16 @@
     </Project>
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/Xlide.Vba.Analysis/Xlide.Vba.Analysis.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="src/Xlide.Vbe.Core/Xlide.Vbe.Core.csproj" />
     <Project Path="src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Xlide.Vba.Analysis.Tests/Xlide.Vba.Analysis.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
     <Project Path="tests/Xlide.Vbe.Core.Tests/Xlide.Vbe.Core.Tests.csproj">
       <Platform Project="x64" />
     </Project>
