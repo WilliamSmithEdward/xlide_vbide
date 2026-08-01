@@ -1,0 +1,21 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Platforms>x64;x86</Platforms>
+    <ProductName>xlide_vbide</ProductName>
+    <Company>William Smith Edward</Company>
+    <Copyright>Copyright (c) 2026 William Smith Edward</Copyright>
+    <Version>0.1.0</Version>
+    <RepositoryUrl>https://github.com/WilliamSmithEdward/xlide_vbide</RepositoryUrl>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+</Project>

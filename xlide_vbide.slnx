@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Xlide.Vbe.Core/Xlide.Vbe.Core.csproj" />
+    <Project Path="src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Xlide.Vbe.Core.Tests/Xlide.Vbe.Core.Tests.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Xlide.Vbe.Register/Xlide.Vbe.Register.csproj">
+      <Platform Project="x64" />
+    </Project>
+  </Folder>
+</Solution>

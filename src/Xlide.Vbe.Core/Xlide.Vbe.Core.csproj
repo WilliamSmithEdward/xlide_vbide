@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <RootNamespace>Xlide.Vbe.Core</RootNamespace>
+    <Description>Host-independent logic for the xlide_vbide add-in. No COM, no Win32, no UI.</Description>
+  </PropertyGroup>
+
+</Project>

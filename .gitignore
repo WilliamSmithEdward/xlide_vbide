@@ -1,0 +1,28 @@
+# Build outputs
+bin/
+obj/
+out/
+dist/
+*.msi
+*.wixpdb
+_publish/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE / editor state
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Test and harness artifacts
+TestResults/
+artifacts/
+*.received.*
+harness-runs/
+
+# Local-only settings
+*.local.json
+.env

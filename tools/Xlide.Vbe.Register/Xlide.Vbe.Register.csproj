@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Xlide.Vbe.Register</RootNamespace>
+    <AssemblyName>xlide-register</AssemblyName>
+    <Description>Applies or removes the add-in registration. Used for development and by the installer verification test.</Description>
+    <PublishAot>false</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Xlide.Vbe.Core\Xlide.Vbe.Core.csproj" />
+  </ItemGroup>
+
+</Project>

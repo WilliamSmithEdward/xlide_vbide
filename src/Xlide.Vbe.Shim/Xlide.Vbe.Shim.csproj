@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Library</OutputType>
+    <RootNamespace>Xlide.Vbe.Shim</RootNamespace>
+    <AssemblyName>Xlide.Vbe.Shim</AssemblyName>
+    <Description>Native COM in-process server the Visual Basic Editor loads as an add-in.</Description>
+
+    <!-- Compiled ahead of time to a native library so no .NET runtime is loaded into Excel. -->
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <IsAotCompatible>true</IsAotCompatible>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- The VBE is a single-threaded apartment host. Nothing here may assume a thread pool. -->
+    <BuiltInComInteropSupport>false</BuiltInComInteropSupport>
+    <EnableComHosting>false</EnableComHosting>
+
+    <!-- Trim aggressively: this library ships inside a user-visible installer. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <StackTraceSupport>true</StackTraceSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Xlide.Vbe.Core\Xlide.Vbe.Core.csproj" />
+  </ItemGroup>
+
+</Project>
