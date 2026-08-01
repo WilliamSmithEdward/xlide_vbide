@@ -28,6 +28,16 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Text waiting for the page to become ready. Null once it has been sent.</summary>
     private string? _pending;
 
+    /// <summary>
+    /// Squiggles waiting for the page, held for the same reason the text is.
+    ///
+    /// Analysis finishes long before the page loads: the engine answers in tens of milliseconds and
+    /// the page takes hundreds, so the first pass always lands early. Dropping it left the module
+    /// showing no defects until something changed the text, which reads as an analyzer that found
+    /// nothing rather than a message that arrived too soon.
+    /// </summary>
+    private EditorMarker[]? _pendingMarkers;
+
     private bool _loaded;
 
     private EditorSurface(nint frame) => _frame = frame;
@@ -93,6 +103,13 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Shows a module's text.</summary>
     public void Show(string moduleName, string text)
     {
+        // Squiggles belong to the module they were computed for. Carrying held ones across a switch
+        // would decorate the new module at the old one's positions.
+        if (_module != moduleName)
+        {
+            _pendingMarkers = null;
+        }
+
         _module = moduleName;
         _pending = text;
 
@@ -110,29 +127,51 @@ internal sealed class EditorSurface : IDisposable
 
     private void Flush()
     {
-        if (_module is null || _pending is null)
+        if (_module is not null && _pending is not null)
         {
-            return;
+            Post(JsonSerializer.Serialize(
+                new LoadDocumentMessage("loadDocument", _module, _pending),
+                EditorMessageContext.Default.LoadDocumentMessage));
+
+            _pending = null;
         }
 
-        Post(JsonSerializer.Serialize(
-            new LoadDocumentMessage("loadDocument", _module, _pending),
-            EditorMessageContext.Default.LoadDocumentMessage));
-
-        _pending = null;
+        // After the text, never before. Loading a document resets the model, and markers set
+        // against the model being replaced are discarded with it.
+        if (_pendingMarkers is { } markers)
+        {
+            _pendingMarkers = null;
+            ShowDiagnostics(markers);
+        }
     }
 
     /// <summary>Replaces the squiggles shown on the module currently displayed.</summary>
     public void ShowDiagnostics(EditorMarker[] markers)
     {
+        ArgumentNullException.ThrowIfNull(markers);
+
         if (!_loaded)
         {
+            _pendingMarkers = markers;
             return;
         }
 
         Post(JsonSerializer.Serialize(
             new SetDiagnosticsMessage("setDiagnostics", markers),
             EditorMessageContext.Default.SetDiagnosticsMessage));
+    }
+
+    /// <summary>Scrolls a one-based line into view. Ignored until the page is ready.</summary>
+    public void Reveal(int line)
+    {
+        if (!_loaded || line < 1)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new RevealLineMessage("revealLine", line),
+            EditorMessageContext.Default.RevealLineMessage));
     }
 
     private void OnMessage(string payload)

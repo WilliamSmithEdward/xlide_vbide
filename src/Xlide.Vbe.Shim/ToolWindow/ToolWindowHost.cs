@@ -619,19 +619,38 @@ internal sealed unsafe partial class ToolWindowHost :
 
     private void OnWindowDestroying()
     {
-        _surface?.Dispose();
-        _surface = null;
+        DetachSurface();
     }
 
     private void DestroySurface()
     {
         // Disposing the window drives WM_DESTROY, which runs the callback above. Doing the browser
         // first means that path finds nothing left to do rather than racing it.
-        _surface?.Dispose();
-        _surface = null;
+        DetachSurface();
 
         _window?.Dispose();
         _window = null;
+    }
+
+    /// <summary>
+    /// Takes the surface off the bus and shuts it down.
+    ///
+    /// Unregistering comes first. The bus holds the surface to post to and would otherwise be left
+    /// pointing at a disposed one, which is a use-after-free reachable from a background analysis
+    /// pass rather than from anything happening here.
+    /// </summary>
+    private void DetachSurface()
+    {
+        var surface = _surface;
+        _surface = null;
+
+        if (surface is null)
+        {
+            return;
+        }
+
+        PanelBus.Detach(surface);
+        surface.Dispose();
     }
 
     /// <summary>

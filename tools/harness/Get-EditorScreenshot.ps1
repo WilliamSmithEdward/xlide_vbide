@@ -212,23 +212,37 @@ try {
 
     $excel.VBE.MainWindow.Visible = $true
 
-    # Wait for the add-in to finish, so the panel has something in it rather than being caught
-    # mid-load. Its absence is reported and the capture still happens.
+    # Wait for everything the capture is meant to show, not just the first thing that finishes.
+    #
+    # Waiting on analysis alone once produced a screenshot taken a full second before the editing
+    # surface had laid out, and the resulting image was read as proof that the surface was broken.
+    # It was not: it had not loaded yet. Every condition below is a separate line in the log, so a
+    # timeout says which part was missing rather than that something was.
     $logPattern = "shim-*-$($process.Id).log"
-    $settled = $false
-    while ((Get-Date) -lt $deadline) {
+    $required = [ordered] @{
+        'analysis'      = 'analysis: \d+ finding'
+        'panel'         = 'panel: ready'
+        'editorSurface' = 'editor surface: ready'
+    }
+
+    $missing = @($required.Keys)
+    while ((Get-Date) -lt $deadline -and $missing.Count -gt 0) {
         $log = Get-ChildItem $logRoot -Filter $logPattern -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
-        if ($log -and (Select-String -Path $log.FullName -Pattern 'analysis: \d+ finding|engine: .* produced' -Quiet)) {
-            $settled = $true
-            break
+        if ($log) {
+            $text = Get-Content $log.FullName -Raw -ErrorAction SilentlyContinue
+            if ($text) {
+                $missing = @($required.Keys | Where-Object { $text -notmatch $required[$_] })
+            }
         }
 
-        Start-Sleep -Milliseconds 100
+        if ($missing.Count -gt 0) { Start-Sleep -Milliseconds 50 }
     }
 
-    if (-not $settled) { Write-Warning 'The add-in did not report analysis before the deadline.' }
+    if ($missing.Count -gt 0) {
+        Write-Warning "Captured before these reported ready: $($missing -join ', '). The image below shows that state, not a finished one."
+    }
 
     # Maximise so the capture is not clipped by whatever else is on screen, and bring it forward so
     # reading the screen reads this window.
@@ -246,9 +260,10 @@ try {
     [void] [Xlide.Shot]::ShowWindow($editor, 3)
     [void] [Xlide.Shot]::SetForegroundWindow($editor)
 
-    # The browser surface paints asynchronously and there is no event that says a frame has been
-    # presented, so this is the one honest place for a fixed settle.
-    Start-Sleep -Milliseconds 900
+    # The surfaces have said they are ready, which means they have their content, not that a frame
+    # has been presented. There is no event for that, so this is the one honest fixed settle, and it
+    # is short because the conditions above now cover everything it used to be standing in for.
+    Start-Sleep -Milliseconds 300
 
     # A window that is not answering messages will not answer a render request either, and asking
     # anyway is how a harness hangs. Checked rather than risked.

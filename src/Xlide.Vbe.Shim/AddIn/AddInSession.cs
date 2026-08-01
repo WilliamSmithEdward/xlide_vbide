@@ -26,6 +26,14 @@ internal sealed class AddInSession : IDisposable
     private CodePaneTracker? _codePanes;
     private AnalysisService? _analysis;
     private EditorSurface? _editorSurface;
+
+    /// <summary>
+    /// The most recent findings for every module, kept so a module can be decorated the moment it
+    /// is shown. Analysis runs per project and the surface shows one module at a time, so without
+    /// this a module opened between two passes carries no squiggles until the next one.
+    /// </summary>
+    private IReadOnlyList<Finding> _findings = [];
+
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -48,9 +56,49 @@ internal sealed class AddInSession : IDisposable
     public void HostStartupComplete()
     {
         ReportOpenProjects();
+
+        // Subscribed before the panel can exist, so a double-click that lands during start-up is
+        // handled rather than dropped.
+        PanelBus.NavigateRequested = GoTo;
+
         CreateToolWindow();
         TrackCodePanes();
         StartAnalysis();
+    }
+
+    /// <summary>
+    /// Takes the user to a finding: the native pane is selected and the caret placed on it, and the
+    /// surface over that pane scrolls to match.
+    ///
+    /// The native pane is moved as well as the surface, because it stays the text of record and
+    /// what the debugger drives. Leaving it where it was would put the two out of step the first
+    /// time the user pressed F8.
+    /// </summary>
+    private void GoTo(string component, int line, int column)
+    {
+        try
+        {
+            using var pane = FindCodePane(component);
+            if (pane is null)
+            {
+                Log.Info($"navigate: no pane for {component}");
+                return;
+            }
+
+            pane.Invoke("Show");
+            pane.Invoke("SetSelection", line, column, line, column);
+
+            if (_editorSurface?.Module == component)
+            {
+                _editorSurface.Reveal(line);
+            }
+
+            Log.Info($"navigate: {component}({line},{column})");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"navigate: could not go to {component}({line},{column})", ex);
+        }
     }
 
     /// <summary>
@@ -66,6 +114,7 @@ internal sealed class AddInSession : IDisposable
             _analysis = new AnalysisService(_editor);
             _analysis.FindingsReady += findings =>
             {
+                _findings = findings;
                 Log.Info($"analysis: {findings.Count} finding(s)");
 
                 // The log keeps a bounded record for support. A project with thousands of findings
@@ -82,6 +131,7 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 PanelBus.PublishFindings(findings);
+                PublishMarkersForShownModule();
             };
 
             _analysis.Start();
@@ -138,8 +188,31 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    /// <summary>Reads a module's text and hands it to the surface.</summary>
+    /// <summary>Reads a module's text and hands it to the surface, with its squiggles.</summary>
     private void ShowModuleInSurface(string component)
+    {
+        using var found = FindComponent(component);
+        if (found is null)
+        {
+            return;
+        }
+
+        var source = ProjectReader.ReadSource(found);
+        if (source is null)
+        {
+            return;
+        }
+
+        _editorSurface?.Show(component, source);
+        Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
+
+        // The findings for this module were computed before it was opened, so they are applied here
+        // rather than waiting for the next analysis pass.
+        PublishMarkersForShownModule();
+    }
+
+    /// <summary>Finds a component by name across every open project, or null when there is none.</summary>
+    private DispatchObject? FindComponent(string component)
     {
         using var projects = _editor.GetObject("VBProjects");
         var count = projects?.GetInt32("Count") ?? 0;
@@ -156,22 +229,59 @@ internal sealed class AddInSession : IDisposable
             var componentCount = components.GetInt32("Count");
             for (var j = 1; j <= componentCount; j++)
             {
-                using var candidate = components.GetItem(j);
-                if (candidate?.GetString("Name") != component)
+                var candidate = components.GetItem(j);
+                if (candidate?.GetString("Name") == component)
                 {
-                    continue;
+                    return candidate;
                 }
 
-                var source = ProjectReader.ReadSource(candidate);
-                if (source is not null)
-                {
-                    _editorSurface?.Show(component, source);
-                    Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
-                }
-
-                return;
+                candidate?.Dispose();
             }
         }
+
+        return null;
+    }
+
+    /// <summary>Finds the code pane a component's module is displayed in, opening one if needed.</summary>
+    private DispatchObject? FindCodePane(string component)
+    {
+        using var found = FindComponent(component);
+        using var module = found?.GetObject("CodeModule");
+
+        // Reading CodePane on a module that has never been opened creates the pane, which is what
+        // makes navigating to a module the user has not opened work at all.
+        return module?.GetObject("CodePane");
+    }
+
+    /// <summary>
+    /// Sends the surface the squiggles belonging to whichever module it is showing.
+    ///
+    /// Findings arrive for a whole project and the surface shows one module, so they are filtered
+    /// here. A module with none is sent an empty set rather than skipped: that is what clears
+    /// squiggles the user has just fixed.
+    /// </summary>
+    private void PublishMarkersForShownModule()
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        if (surface is null || module is null)
+        {
+            return;
+        }
+
+        var markers = _findings
+            .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase))
+            .Select(f => new EditorMarker(
+                f.StartLine,
+                f.StartColumn,
+                f.EndLine,
+                f.EndColumn,
+                f.Severity,
+                f.Message,
+                f.Code))
+            .ToArray();
+
+        surface.ShowDiagnostics(markers);
     }
 
     /// <summary>
@@ -264,6 +374,10 @@ internal sealed class AddInSession : IDisposable
         _stopped = true;
         Log.Info("session stopping");
 
+        // The bus outlives the session, so a handler left on it would keep this one reachable and
+        // let a panel still on screen call into it after everything below has been released.
+        PanelBus.NavigateRequested = null;
+
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.
         //
@@ -280,6 +394,12 @@ internal sealed class AddInSession : IDisposable
 
         _codePanes?.Dispose();
         _codePanes = null;
+
+        // Before the editor tears its own windows down. The surface owns a browser and a window
+        // parented to the editor frame; leaving them for the host to destroy leaves browser
+        // processes with no parent and a window procedure in a library about to be unloaded.
+        _editorSurface?.Dispose();
+        _editorSurface = null;
 
         _toolWindow?.Dispose();
         _toolWindow = null;
