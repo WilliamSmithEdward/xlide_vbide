@@ -3,6 +3,7 @@ using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Editor;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -18,6 +19,7 @@ internal sealed class AddInSession : IDisposable
     private readonly DispatchObject _editor;
     private readonly DispatchObject? _addIn;
     private DispatchObject? _toolWindow;
+    private CodePaneTracker? _codePanes;
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -41,6 +43,35 @@ internal sealed class AddInSession : IDisposable
     {
         ReportOpenProjects();
         CreateToolWindow();
+        TrackCodePanes();
+    }
+
+    /// <summary>
+    /// Starts watching where the editor puts its code panes. Nothing is drawn over them yet; this
+    /// establishes the map an editor surface will be positioned by, and proves it stays correct
+    /// while the user rearranges the editor.
+    /// </summary>
+    private void TrackCodePanes()
+    {
+        try
+        {
+            _codePanes = new CodePaneTracker(_editor);
+            _codePanes.Changed += panes =>
+            {
+                Log.Info($"code panes: {panes.Count} open");
+                foreach (var pane in panes)
+                {
+                    Log.Info($"  {pane.Component} at {pane.Bounds.Left},{pane.Bounds.Top} " +
+                             $"{pane.Bounds.Width}x{pane.Bounds.Height}" + (pane.IsVisible ? string.Empty : " (hidden)"));
+                }
+            };
+
+            _codePanes.Start();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("code panes: tracking could not be started", ex);
+        }
     }
 
     public void Stop()
@@ -55,6 +86,9 @@ internal sealed class AddInSession : IDisposable
 
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.
+        _codePanes?.Dispose();
+        _codePanes = null;
+
         _toolWindow?.Dispose();
         _toolWindow = null;
 

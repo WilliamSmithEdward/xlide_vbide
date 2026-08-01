@@ -56,4 +56,33 @@ internal static unsafe partial class Win32
 
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial uint GetWindowThreadProcessId(nint window, uint* processId);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
+    public static partial int GetWindowText(nint window, char* buffer, int capacity);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetWindowRect(nint window, Rect* rect);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindowVisible(nint window);
+
+    /// <summary>
+    /// Enumerates every descendant of a window, not only its immediate children, which is why a
+    /// single call over the editor's frame reaches the panes regardless of how deeply the editor
+    /// nests them.
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EnumChildWindows(nint parent, nint callback, nint parameter);
+
+    /// <summary>GW_HWNDNEXT. Steps to the next window at the same level in z order.</summary>
+    public const uint GwHwndNext = 2;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial nint GetTopWindow(nint parent);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial nint GetWindow(nint window, uint command);
 }
