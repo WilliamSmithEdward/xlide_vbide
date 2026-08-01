@@ -9,6 +9,11 @@
     The file is generated rather than committed as a binary so its contents are reviewable, and it
     is the smallest thing Excel will accept: a content-type map, the package relationships, a
     workbook with one sheet, and an empty sheet.
+
+    It is macro-enabled. The plain worksheet format has nowhere to put a VBA project, and Excel
+    does not refuse to save one that has code in it: it saves the sheets and drops the code, with a
+    warning that is easy to dismiss. Anyone who saves this file while working in it would lose
+    whatever they were editing, which is the whole point of the fixture.
 #>
 [CmdletBinding()]
 param(
@@ -20,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $Path) {
     $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-    $Path = Join-Path $here 'fixtures\scratch.xlsx'
+    $Path = Join-Path $here 'fixtures\scratch.xlsm'
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -31,7 +36,8 @@ $parts = [ordered] @{
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
 <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
 <Default Extension="xml" ContentType="application/xml"/>
-<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>
 <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 </Types>
 '@

@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Shim.AddIn;
 using Xlide.Vbe.Shim.Diagnostics;
-using Xlide.Vbe.Shim.ToolWindow;
 
 namespace Xlide.Vbe.Shim.Com;
 
@@ -14,7 +13,6 @@ namespace Xlide.Vbe.Shim.Com;
 public static unsafe class Exports
 {
     private static readonly Guid AddInClsid = new(ProductIdentity.AddInClsid);
-    private static readonly Guid ToolWindowHostClsid = new(ProductIdentity.ToolWindowHostClsid);
 
     /// <summary>Hands COM a factory for one of our coclasses.</summary>
     [UnmanagedCallersOnly(EntryPoint = "DllGetClassObject")]
@@ -40,16 +38,9 @@ public static unsafe class Exports
             Log.Initialize();
             Log.Info($"DllGetClassObject for {*classId:B}");
 
-            Func<object>? create = null;
-
-            if (*classId == AddInClsid)
-            {
-                create = static () => new XlideAddIn();
-            }
-            else if (*classId == ToolWindowHostClsid)
-            {
-                create = static () => new ToolWindowHost();
-            }
+            Func<object>? create = *classId == AddInClsid
+                ? static () => new XlideAddIn()
+                : null;
 
             if (create is null)
             {

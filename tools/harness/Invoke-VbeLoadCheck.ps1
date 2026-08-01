@@ -192,7 +192,7 @@ try {
     if (-not $reused) {
         # Started with a document so the host initialises promptly, and as an ordinary process so
         # add-ins load. A host created through automation runs in embedding mode and loads none.
-        $scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsx'
+        $scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsm'
         if (-not (Test-Path $scratch)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
 
         $excelProcess = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $scratch -PassThru

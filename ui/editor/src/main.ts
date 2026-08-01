@@ -26,6 +26,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport } from "./bridge.js";
+import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 
@@ -74,7 +75,19 @@ function boot(): void {
   const createMs = performance.now();
 
   const transport = webView2Transport();
-  const bridge = new EditorBridge(editor, transport ?? demoTransport());
+
+  // The shell is built before the bridge, because the bridge routes host messages into it. The
+  // handlers close over the bridge, which does not exist yet, so they reach it through a variable
+  // that is assigned immediately below: nothing can call them before then, because both a tab and
+  // a finding need the host to have sent something first.
+  let bridge: EditorBridge;
+  const shell = new Shell(document.body, {
+    activateModule: (name) => bridge.activateModule(name),
+    navigate: (module, line, column) => bridge.navigate(module, line, column),
+    layoutChanged: () => editor.layout(),
+  });
+
+  bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
 
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 

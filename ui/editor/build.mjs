@@ -20,15 +20,20 @@ const INDEX_HTML = `<!doctype html>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self'">
 <title>xlide editor</title>
 <link rel="stylesheet" href="./editor.css">
-<style>
-  html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
-  body { background: #1e1e1e; }
-  @media (prefers-color-scheme: light) { body { background: #ffffff; } }
-  #container { position: absolute; inset: 0; }
-</style>
 </head>
 <body>
-<div id="container"></div>
+<div id="shell">
+  <div id="tabs" role="tablist" aria-label="Open modules"></div>
+  <div id="container"></div>
+  <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
+  <div id="panel">
+    <div id="panel-head">
+      <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-list">Problems</button>
+      <span id="panel-count">no problems</span>
+    </div>
+    <div id="panel-list" role="list"></div>
+  </div>
+</div>
 <script src="./editor.js"></script>
 </body>
 </html>

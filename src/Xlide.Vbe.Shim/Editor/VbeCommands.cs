@@ -16,8 +16,11 @@ namespace Xlide.Vbe.Shim.Editor;
 /// </summary>
 internal static class VbeCommands
 {
-    /// <summary>Command bar control type for a plain button, which is what a menu item is.</summary>
-    private const int ButtonControl = 1;
+    /// <summary>
+    /// Bars searched first, by their programmatic names, which are not localised the way captions
+    /// are. Every command this drives sits on one of these, so the search almost never goes further.
+    /// </summary>
+    private static readonly string[] PreferredBars = ["Debug", "Edit"];
 
     /// <summary>
     /// Identifiers of the editor commands this drives.
@@ -60,9 +63,13 @@ internal static class VbeCommands
                 return false;
             }
 
-            // Searched across every bar rather than a named one, because the same command appears on
-            // a menu and on a toolbar and either will do.
-            using var control = bars.CallObject("FindControl", ButtonControl, commandId);
+            // The bars are walked rather than searched.
+            //
+            // The collection has a search of its own, and it does not find any of these. It looks
+            // only at the top level of each bar unless told otherwise, and every command here is a
+            // menu item, which is one level further in. It also returned nothing rather than
+            // failing, so using it looked exactly like a host that has no Run command.
+            using var control = Find(bars, commandId);
             if (control is null)
             {
                 Log.Info($"command: {commandId} is not present in this host");
@@ -71,13 +78,14 @@ internal static class VbeCommands
 
             // A command that cannot run right now is not a failure worth reporting as one: Break is
             // disabled unless something is running, and Reset unless something is stopped.
-            if (control.GetInt32("Enabled") == 0)
+            if (!control.GetBool("Enabled"))
             {
                 Log.Info($"command: {commandId} is currently disabled");
                 return false;
             }
 
             control.Invoke("Execute");
+            Log.Info($"command: {commandId} executed");
             return true;
         }
         catch (Exception ex)
@@ -85,6 +93,59 @@ internal static class VbeCommands
             Log.Error($"command: {commandId} could not be executed", ex);
             return false;
         }
+    }
+
+    /// <summary>Finds a control by identifier, looking at the likeliest bars first.</summary>
+    private static DispatchObject? Find(DispatchObject bars, int commandId)
+    {
+        var count = bars.GetInt32("Count");
+
+        // Two passes: the bars that carry these commands, then everything else. The first pass
+        // almost always answers, and the second means a host that arranges its menus differently
+        // still works rather than silently doing nothing.
+        for (var pass = 0; pass < 2; pass++)
+        {
+            for (var i = 1; i <= count; i++)
+            {
+                using var bar = bars.GetItem(i);
+                if (bar is null)
+                {
+                    continue;
+                }
+
+                var preferred = Array.IndexOf(PreferredBars, bar.GetString("Name")) >= 0;
+                if (preferred != (pass == 0))
+                {
+                    continue;
+                }
+
+                if (FindOn(bar, commandId) is { } found)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static DispatchObject? FindOn(DispatchObject bar, int commandId)
+    {
+        using var controls = bar.GetObject("Controls");
+        var count = controls?.GetInt32("Count") ?? 0;
+
+        for (var i = 1; i <= count; i++)
+        {
+            var control = controls!.GetItem(i);
+            if (control?.GetInt32("Id") == commandId)
+            {
+                return control;
+            }
+
+            control?.Dispose();
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -50,28 +50,24 @@ internal sealed class WebView2Surface : IDisposable
     private bool _disposed;
     private bool _reportedUnhandledMessage;
 
-    /// <summary>What this surface exists to show. Decided by its creator, never inferred.</summary>
-    private readonly SurfaceContent _content;
-
-    private WebView2Surface(nint parentWindow, PixelRect bounds, SurfaceContent content)
+    private WebView2Surface(nint parentWindow, PixelRect bounds)
     {
         _parentWindow = parentWindow;
         _bounds = bounds;
-        _content = content;
     }
 
     /// <summary>
     /// Begins creating a browser inside <paramref name="parentWindow"/>. Returns as soon as the
     /// work is started; nothing is rendered until the two callbacks have run.
     /// </summary>
-    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds, SurfaceContent content = SurfaceContent.Panel)
+    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds)
     {
         if (parentWindow == 0)
         {
             return null;
         }
 
-        var surface = new WebView2Surface(parentWindow, bounds, content);
+        var surface = new WebView2Surface(parentWindow, bounds);
         return surface.BeginEnvironment() ? surface : null;
     }
 
@@ -512,50 +508,41 @@ internal sealed class WebView2Surface : IDisposable
     }
 
     /// <summary>
-    /// Sends the surface to whichever of the two documents is actually installed, and says which.
-    /// The editor bundle is built by a separate project and is legitimately absent from a working
-    /// tree that has not produced it yet; the shell document is what keeps the pane diagnosable
-    /// until it appears.
+    /// Sends the surface to the editing bundle.
+    ///
+    /// There is one document. An earlier version chose between this and a diagnostic page by
+    /// looking at what happened to be on disk, and once both existed it put the wrong one in the
+    /// wrong window; the failure presented as a rendering fault rather than as a wrong document.
+    /// A surface with nothing to show is a broken install, and it says so in the log rather than
+    /// rendering something that looks deliberate.
     /// </summary>
     private void Navigate()
     {
-        // What a surface shows is decided by whoever created it, not inferred from what happens to
-        // be on disk. Guessing put the editing surface in the tool window, where the problems panel
-        // belongs, and the mistake looked like a rendering fault rather than a wrong document.
-        if (_content == SurfaceContent.Editor && NavigateToEditorBundle())
-        {
-            return;
-        }
-
-        NavigateToShellDocument();
-    }
-
-    private bool NavigateToEditorBundle()
-    {
         if (_view is null)
         {
-            Log.Info("webview: no folder mapping on this runtime, using the shell document");
-            return false;
+            Log.Error("webview: this runtime is older than the folder mapping, so nothing can be served");
+            return;
         }
 
         var directory = ShimModule.Directory;
         if (directory is null)
         {
-            return false;
+            Log.Error("webview: the shim could not locate its own directory, so the bundle cannot be found");
+            return;
         }
 
         var entry = WebViewPaths.EditorEntryDocument(directory);
         if (!File.Exists(entry))
         {
-            Log.Info($"webview: no editor bundle at {entry}, using the shell document");
-            return false;
+            Log.Error($"webview: no editor bundle at {entry}, so there is nothing to show");
+            return;
         }
 
         // The mapping has to be in place before the navigation, not after: the address only
         // resolves because of it.
         if (!SetContentRoot(WebViewPaths.EditorHostName, WebViewPaths.EditorContentRoot(directory)))
         {
-            return false;
+            return;
         }
 
         if (!NavigateToUrl(WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName)))
@@ -563,33 +550,7 @@ internal sealed class WebView2Surface : IDisposable
             // The mapping outlives a failed navigation and would shadow the host name for anything
             // that came later, so it is taken back rather than left behind.
             _view.Target.ClearVirtualHostNameToFolderMapping(WebViewPaths.EditorHostName);
-            return false;
         }
-
-        Log.Info("webview: serving the editor bundle");
-        return true;
-    }
-
-    private void NavigateToShellDocument()
-    {
-        var view = _webView;
-        if (view is null)
-        {
-            return;
-        }
-
-        var document = LoadShellDocument();
-
-        // This document is pushed rather than fetched. It has no bundle to be served alongside, and
-        // a file URL would put it in an origin that blocks module scripts and storage.
-        var hr = view.Target.NavigateToString(document);
-        if (hr < 0)
-        {
-            Log.Error($"webview: NavigateToString returned 0x{hr:X8}");
-            return;
-        }
-
-        Log.Info("webview: navigation started, showing the shell document");
     }
 
     private void OnNavigationCompleted(nint sender, nint argsPointer)
@@ -658,33 +619,6 @@ internal sealed class WebView2Surface : IDisposable
         }
 
         return args.GetWebMessageAsJson(out var json) >= 0 && json != 0 ? TakeString(json) : null;
-    }
-
-    private string LoadShellDocument()
-    {
-        var directory = ShimModule.Directory;
-        var path = directory is null ? null : WebViewPaths.ShellDocument(directory);
-
-        if (path is null || !File.Exists(path))
-        {
-            Log.Warn($"webview: no shell document at {path ?? "an unknown location"}");
-            return ShellDocument.Missing(path ?? WebViewPaths.ShellDocumentRelativePath);
-        }
-
-        try
-        {
-            return ShellDocument.Compose(File.ReadAllText(path), ReadBrowserVersion());
-        }
-        catch (IOException ex)
-        {
-            Log.Error($"webview: could not read the shell document at {path}", ex);
-            return ShellDocument.Missing(path);
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            Log.Error($"webview: could not read the shell document at {path}", ex);
-            return ShellDocument.Missing(path);
-        }
     }
 
     private string? ReadBrowserVersion()

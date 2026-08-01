@@ -60,6 +60,7 @@ $logRoot = Join-Path $env:LOCALAPPDATA 'xlide_vbide\logs'
 Add-Type -AssemblyName System.Drawing
 
 Add-Type -Namespace Xlide -Name Shot -MemberDefinition @'
+[DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
 [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
 [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
 [DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
@@ -75,6 +76,21 @@ Add-Type -Namespace Xlide -Name Shot -MemberDefinition @'
 
 [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 delegate bool EnumProc(IntPtr h, IntPtr l);
+
+/// <summary>
+/// Measures windows in real pixels rather than in the scaled coordinates Windows invents for a
+/// process that has not said it understands scaling.
+///
+/// Without this the editor measures two thirds of its real size on a scaled display, the bitmap is
+/// made that size, and the window renders into it at full size: the right and bottom of every
+/// capture are silently cut off. It reads as missing user interface rather than as a cropped image,
+/// and it hid a panel that was working.
+/// </summary>
+public static void UseRealPixels()
+{
+    // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2. Fails harmlessly if already set.
+    SetProcessDpiAwarenessContext(new IntPtr(-4));
+}
 
 /// Reports whether a window will answer a render request at all.
 public static bool IsResponsive(IntPtr window) { return !IsHungAppWindow(window); }
@@ -157,6 +173,8 @@ public static object WorkbookWindowOf(int processId)
 }
 '@
 
+[Xlide.Shot]::UseRealPixels()
+
 # Terminating the host is normal here, and the host treats it as a crash. Clearing what it offers
 # on the next start keeps a second run from failing for a reason unrelated to what is being looked at.
 foreach ($version in @('16.0', '15.0')) {
@@ -176,7 +194,7 @@ if ((Test-Path $addInKey) -and (Get-ItemProperty $addInKey -Name LoadBehavior).L
 }
 
 $excelPath = "$env:ProgramFiles\Microsoft Office\root\Office16\EXCEL.EXE"
-$scratch = Join-Path $here 'fixtures\scratch.xlsx'
+$scratch = Join-Path $here 'fixtures\scratch.xlsm'
 if (-not (Test-Path $scratch)) { & (Join-Path $here 'New-ScratchWorkbook.ps1') | Out-Null }
 
 $process = Start-Process -FilePath $excelPath -ArgumentList $scratch -PassThru
@@ -220,9 +238,8 @@ try {
     # timeout says which part was missing rather than that something was.
     $logPattern = "shim-*-$($process.Id).log"
     $required = [ordered] @{
-        'analysis'      = 'analysis: \d+ finding'
-        'panel'         = 'panel: ready'
-        'editorSurface' = 'editor surface: ready'
+        'analysis' = 'analysis: \d+ finding'
+        'surface'  = 'editor surface: ready'
     }
 
     $missing = @($required.Keys)
@@ -298,35 +315,6 @@ try {
     }
 
     Write-Host ("Captured {0} ({1} x {2})" -f $OutFile, $width, $height) -ForegroundColor Green
-
-    # The panel is its own top-level window until it is docked, so rendering the frame misses it.
-    # Captured separately rather than left invisible.
-    $panel = [Xlide.Shot]::ByCaption($process.Id, "xlide")
-    if ($panel -ne [IntPtr]::Zero) {
-        $panelFile = [System.IO.Path]::ChangeExtension($OutFile, $null) + "panel.png"
-        $pr = New-Object Xlide.Shot+RECT
-        [void] [Xlide.Shot]::GetWindowRect($panel, [ref] $pr)
-        $pw = $pr.Right - $pr.Left
-        $ph = $pr.Bottom - $pr.Top
-
-        if ($pw -gt 0 -and $ph -gt 0) {
-            $pb = New-Object System.Drawing.Bitmap $pw, $ph
-            try {
-                $pg = [System.Drawing.Graphics]::FromImage($pb)
-                try {
-                    $pdc = $pg.GetHdc()
-                    try { [void] [Xlide.Shot]::Render($panel, $pdc) } finally { $pg.ReleaseHdc($pdc) }
-                }
-                finally { $pg.Dispose() }
-                $pb.Save($panelFile, [System.Drawing.Imaging.ImageFormat]::Png)
-                Write-Host ("Captured {0} ({1} x {2})" -f $panelFile, $pw, $ph) -ForegroundColor Green
-            }
-            finally { $pb.Dispose() }
-        }
-    }
-    else {
-        Write-Warning "The panel window was not found, so only the editor was captured."
-    }
 
     exit 0
 }

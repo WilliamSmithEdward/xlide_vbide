@@ -87,11 +87,8 @@ internal static class Program
 
         var classes = RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser);
         DeleteSubTreeIfPresent($@"{classes}\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteSubTreeIfPresent($@"{classes}\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}");
         DeleteSubTreeIfPresent($@"{classes}\{ProductIdentity.AddInProgId}");
-        DeleteSubTreeIfPresent($@"{classes}\{ProductIdentity.ToolWindowHostProgId}");
         DeleteSubTreeIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteSubTreeIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}");
     }
 
     private static void DeleteSubTreeIfPresent(string path)

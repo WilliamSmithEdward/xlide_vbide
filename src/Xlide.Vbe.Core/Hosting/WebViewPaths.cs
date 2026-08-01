@@ -10,7 +10,7 @@ namespace Xlide.Vbe.Core.Hosting;
 /// real installation and a per-user process cannot write to it. Failure is not a permission error
 /// the user sees, it is an environment that never completes creation.
 ///
-/// The loader and the shell document sit next to the shim library, not next to the host executable.
+/// The loader and the bundle sit next to the shim library, not next to the host executable.
 /// The host is EXCEL.EXE and its directory belongs to Office, so the usual base-directory notion is
 /// the wrong answer here. Callers pass the shim's own directory, which the shim resolves from its
 /// module handle.
@@ -22,9 +22,6 @@ public static class WebViewPaths
 
     /// <summary>File name of the native WebView2 loader shipped beside the shim.</summary>
     public const string LoaderFileName = "WebView2Loader.dll";
-
-    /// <summary>Path of the shell document relative to the shim directory.</summary>
-    public const string ShellDocumentRelativePath = @"ui\shell\index.html";
 
     /// <summary>
     /// Virtual host name the editor bundle is served from.
@@ -64,14 +61,6 @@ public static class WebViewPaths
         ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
 
         return Path.Combine(shimDirectory, LoaderFileName);
-    }
-
-    /// <summary>Full path of the shell document the tool window renders.</summary>
-    public static string ShellDocument(string shimDirectory)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(shimDirectory);
-
-        return Path.Combine(shimDirectory, ShellDocumentRelativePath);
     }
 
     /// <summary>

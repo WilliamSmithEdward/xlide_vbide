@@ -7,7 +7,6 @@ using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Engine;
 using Xlide.Vbe.Shim.Interop;
-using Xlide.Vbe.Shim.UI;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -21,8 +20,19 @@ namespace Xlide.Vbe.Shim.AddIn;
 internal sealed class AddInSession : IDisposable
 {
     private readonly DispatchObject _editor;
+
+    /// <summary>
+    /// The editor's own object for this add-in. Held because it is what the editor would want back
+    /// to create a tool window, and released at shutdown like everything else.
+    ///
+    /// No tool window is created. The editor will not size one in any state: setting a width or a
+    /// height throws whether the window floats or is docked, docking one produces a band six pixels
+    /// high with a negative client area, and its contents do not follow when the user resizes it.
+    /// A panel in one is either invisible or a stub floating over the code. The product's panels
+    /// live in the editing surface, which owns its own layout completely.
+    /// </summary>
     private readonly DispatchObject? _addIn;
-    private DispatchObject? _toolWindow;
+
     private CodePaneTracker? _codePanes;
     private AnalysisService? _analysis;
     private EditorSurface? _editorSurface;
@@ -56,12 +66,6 @@ internal sealed class AddInSession : IDisposable
     public void HostStartupComplete()
     {
         ReportOpenProjects();
-
-        // Subscribed before the panel can exist, so a double-click that lands during start-up is
-        // handled rather than dropped.
-        PanelBus.NavigateRequested = GoTo;
-
-        CreateToolWindow();
         TrackCodePanes();
         StartAnalysis();
     }
@@ -130,8 +134,8 @@ internal sealed class AddInSession : IDisposable
                     Log.Info($"  and {findings.Count - 20} more");
                 }
 
-                PanelBus.PublishFindings(findings);
                 PublishMarkersForShownModule();
+                PublishFindingsToSurface();
             };
 
             _analysis.Start();
@@ -197,6 +201,8 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 _editorSurface.KeyPressed = OnSurfaceKey;
+                _editorSurface.ModuleRequested = ShowModule;
+                _editorSurface.NavigateRequested = GoTo;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -210,6 +216,8 @@ internal sealed class AddInSession : IDisposable
             {
                 ShowModuleInSurface(pane.Component);
             }
+
+            PublishModules();
         }
         catch (Exception ex)
         {
@@ -234,6 +242,9 @@ internal sealed class AddInSession : IDisposable
         var control = (Win32.GetKeyState(Win32.VkControl) & Win32.KeyDownMask) != 0;
 
         var command = VbeCommands.ForKey(virtualKey, shift, control);
+        Log.Info($"key: 0x{virtualKey:X2}{(shift ? " shift" : string.Empty)}{(control ? " ctrl" : string.Empty)}"
+                 + $" -> {(command == 0 ? "not ours" : command.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
+
         if (command == 0)
         {
             return false;
@@ -289,6 +300,75 @@ internal sealed class AddInSession : IDisposable
         // The findings for this module were computed before it was opened, so they are applied here
         // rather than waiting for the next analysis pass.
         PublishMarkersForShownModule();
+        PublishFindingsToSurface();
+    }
+
+    /// <summary>
+    /// Tells the surface which modules the editor has open, for its tab strip.
+    ///
+    /// The list comes from the editor's own collection of open panes rather than from the project's
+    /// components, so the tabs are the modules the developer actually has open, not every module
+    /// that exists. Reading a component's pane would create one, which would put a tab up for a
+    /// module nobody opened.
+    /// </summary>
+    private void PublishModules()
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var panes = _editor.GetObject("CodePanes");
+            var count = panes?.GetInt32("Count") ?? 0;
+
+            var modules = new List<string>(count);
+            for (var i = 1; i <= count; i++)
+            {
+                using var pane = panes!.GetItem(i);
+                using var module = pane?.GetObject("CodeModule");
+                using var component = module?.GetObject("Parent");
+
+                if (component?.GetString("Name") is { Length: > 0 } name && !modules.Contains(name))
+                {
+                    modules.Add(name);
+                }
+            }
+
+            surface.ShowModules([.. modules], surface.Module);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("modules: the open panes could not be listed", ex);
+        }
+    }
+
+    /// <summary>Publishes every finding to the surface's panel, across all modules.</summary>
+    private void PublishFindingsToSurface()
+    {
+        _editorSurface?.ShowFindings([.. _findings.Select(f => new SurfaceFinding(
+            f.Module,
+            f.Code,
+            f.Message,
+            f.Severity,
+            f.StartLine,
+            f.StartColumn))]);
+    }
+
+    /// <summary>Brings a module's pane to the front, which the surface then follows.</summary>
+    private void ShowModule(string component)
+    {
+        try
+        {
+            using var pane = FindCodePane(component);
+            pane?.Invoke("Show");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"modules: {component} could not be shown", ex);
+        }
     }
 
     /// <summary>Finds a component by name across every open project, or null when there is none.</summary>
@@ -403,39 +483,6 @@ internal sealed class AddInSession : IDisposable
             Math.Max(corners[0].Y, corners[1].Y));
     }
 
-    /// <summary>Height the panel asks for, in the units the editor's layout uses.</summary>
-    private const int PanelHeight = 260;
-
-    /// <summary>
-    /// Gives the tool window a usable size, if the editor lets us.
-    ///
-    /// A docked window ignores this, which is correct: its size belongs to the layout the user
-    /// arranged. Only a floating one takes it, which is the case that starts out too small to read.
-    /// </summary>
-    private static void TrySize(DispatchObject window, int width, int height)
-    {
-        // Set independently. A docked window belongs to a band that owns one of its dimensions and
-        // refuses that one while accepting the other, so setting them together loses the second to
-        // the first one's refusal.
-        try
-        {
-            window.SetInt32("Height", height);
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"tool window: kept its own height ({ex.GetType().Name})");
-        }
-
-        try
-        {
-            window.SetInt32("Width", width);
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"tool window: kept its own width ({ex.GetType().Name})");
-        }
-    }
-
     /// <summary>
     /// Starts watching where the editor puts its code panes. Nothing is drawn over them yet; this
     /// establishes the map an editor surface will be positioned by, and proves it stays correct
@@ -476,10 +523,6 @@ internal sealed class AddInSession : IDisposable
         _stopped = true;
         Log.Info("session stopping");
 
-        // The bus outlives the session, so a handler left on it would keep this one reachable and
-        // let a panel still on screen call into it after everything below has been released.
-        PanelBus.NavigateRequested = null;
-
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.
         //
@@ -503,92 +546,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface?.Dispose();
         _editorSurface = null;
 
-        _toolWindow?.Dispose();
-        _toolWindow = null;
-
         Log.Info("session stopped");
-    }
-
-    /// <summary>
-    /// Asks the editor for a docked tool window sited on our control.
-    ///
-    /// The editor creates the control itself from its registered program identifier, so this call
-    /// is what makes the whole hosting arrangement start. Everything that can go wrong is on the
-    /// far side of it and reports nothing: an unregistered class, a missing interface, or a control
-    /// that refuses activation all produce the same failed call or an empty pane. The step-by-step
-    /// logging is the only view into which of those happened.
-    /// </summary>
-    private void CreateToolWindow()
-    {
-        if (_addIn is null)
-        {
-            Log.Warn("tool window: the editor supplied no add-in instance, so it cannot be created");
-            return;
-        }
-
-        try
-        {
-            Log.Info($"tool window: creating '{ProductIdentity.ToolWindowHostProgId}'");
-
-            using var windows = _editor.GetObject("Windows");
-            if (windows is null)
-            {
-                Log.Error("tool window: the editor exposed no window collection");
-                return;
-            }
-
-            // CreateToolWindow(AddInInst, ProgId, Caption, GuidPosition, ByRef DocObj) As Window.
-            // The editor's own type library declares the parameters as an add-in interface pointer,
-            // three strings, and an in-out automation pointer that receives the sited control.
-            //
-            // The add-in argument is a plain descriptor over a reference this session already owns,
-            // so it is deliberately not disposed: doing so would release a reference we did not add.
-            var addInInstance = ComVariant.CreateRaw(VarEnum.VT_DISPATCH, _addIn.Pointer);
-            using var progId = ComVariant.Create(ProductIdentity.ToolWindowHostProgId);
-            using var caption = ComVariant.Create(ProductIdentity.ToolWindowCaption);
-            using var position = ComVariant.Create(ProductIdentity.ToolWindowPositionGuid);
-
-            var window = windows.CallWithByRefObject(
-                "CreateToolWindow",
-                [addInInstance, progId, caption, position],
-                out var control);
-
-            // The control handed back is our own object seen through the editor. The editor keeps
-            // its own reference to it for as long as the window exists.
-            control?.Dispose();
-
-            if (window is null)
-            {
-                Log.Error("tool window: the editor returned no window");
-                return;
-            }
-
-            Log.Info("tool window: got window");
-            _toolWindow = window;
-
-            window.SetBool("Visible", true);
-            Log.Info("tool window: visible");
-
-            // Left where the editor puts it, and deliberately not docked.
-            //
-            // The editor refuses to size a tool window in either state: setting Width or Height
-            // throws whether it is floating or docked, and a docked one is given a band six pixels
-            // high with a negative client area, so docking makes it invisible rather than usable.
-            // Measured, not assumed: see docs/lessons.md.
-            //
-            // This window is therefore not where the product's panels belong. They live in the
-            // surface, which owns its own layout completely. This one stays as the foothold the
-            // editor gives an add-in, and as somewhere to report that the add-in is loaded.
-            TrySize(window, 460, PanelHeight);
-        }
-        catch (COMException ex)
-        {
-            Log.Error($"tool window: the editor refused to create it, 0x{ex.HResult:X8}", ex);
-        }
-        catch (Exception ex)
-        {
-            Log.Error("tool window: creation failed", ex);
-        }
     }
 
     /// <summary>
@@ -658,8 +616,6 @@ internal sealed class AddInSession : IDisposable
         Stop();
 
         // Reverse acquisition order: the tool window was obtained from the editor, so it goes first.
-        _toolWindow?.Dispose();
-        _toolWindow = null;
         _addIn?.Dispose();
         _editor.Dispose();
     }

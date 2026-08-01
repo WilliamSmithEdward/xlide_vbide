@@ -110,7 +110,7 @@ public static object WorkbookWindowOf(int processId)
 '@
 
 $excelPath = "$env:ProgramFiles\Microsoft Office\root\Office16\EXCEL.EXE"
-$scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsx'
+$scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsm'
 if (-not (Test-Path $scratch)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
 
 $process = Start-Process -FilePath $excelPath -ArgumentList $scratch -PassThru

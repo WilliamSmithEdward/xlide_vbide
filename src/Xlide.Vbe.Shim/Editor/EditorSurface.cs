@@ -25,19 +25,25 @@ internal sealed class EditorSurface : IDisposable
     private WebView2Surface? _browser;
     private string? _module;
 
-    /// <summary>Text waiting for the page to become ready. Null once it has been sent.</summary>
-    private string? _pending;
-
     /// <summary>
-    /// Squiggles waiting for the page, held for the same reason the text is.
+    /// Messages waiting for the page to be ready, newest per kind, in the order the kinds were
+    /// first sent.
     ///
-    /// Analysis finishes long before the page loads: the engine answers in tens of milliseconds and
-    /// the page takes hundreds, so the first pass always lands early. Dropping it left the module
-    /// showing no defects until something changed the text, which reads as an analyzer that found
-    /// nothing rather than a message that arrived too soon.
+    /// Everything the host has to say arrives before the page can hear it. The engine answers in
+    /// tens of milliseconds and the page takes a couple of seconds, so the module's text, its
+    /// squiggles, and the first findings are all produced while there is nothing listening.
+    /// Dropping them left a surface that was correctly positioned and permanently empty, which
+    /// reads as a rendering fault rather than as messages that arrived too early.
+    ///
+    /// Only the newest of each kind is kept, because each one replaces the last: there is no value
+    /// in replaying three sets of findings to a page that has seen none of them. Order is kept
+    /// because there is one dependency between kinds: loading a document resets the model, and
+    /// squiggles set against the model being replaced go with it.
     /// </summary>
-    private EditorMarker[]? _pendingMarkers;
+    private readonly Dictionary<string, string> _pending = [];
+    private readonly List<string> _pendingOrder = [];
 
+    private string? _text;
     private bool _loaded;
 
     private EditorSurface(nint host) => _host = host;
@@ -50,6 +56,12 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised when the surface reports the developer changed the text.</summary>
     public Action<string, string>? TextChanged { get; set; }
+
+    /// <summary>Raised when the developer picks a module from the tab strip.</summary>
+    public Action<string>? ModuleRequested { get; set; }
+
+    /// <summary>Raised when the developer picks a finding and wants to be taken to it.</summary>
+    public Action<string, int, int>? NavigateRequested { get; set; }
 
     /// <summary>
     /// Asked about each key the editor might own, before the document sees it. Return true to
@@ -103,8 +115,7 @@ internal sealed class EditorSurface : IDisposable
         // exists and quietly do nothing. The surface performs both once it is ready.
         surface._browser = WebView2Surface.Start(
             surface._overlay.Handle,
-            surface._overlay.ClientBounds(),
-            SurfaceContent.Editor);
+            surface._overlay.ClientBounds());
 
         if (surface._browser is null)
         {
@@ -125,46 +136,19 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Shows a module's text.</summary>
     public void Show(string moduleName, string text)
     {
-        // Squiggles belong to the module they were computed for. Carrying held ones across a switch
-        // would decorate the new module at the old one's positions.
+        // Squiggles belong to the module they were computed for. Carrying a held set across a
+        // switch would decorate the new module at the old one's positions.
         if (_module != moduleName)
         {
-            _pendingMarkers = null;
+            Drop("setDiagnostics");
         }
 
         _module = moduleName;
-        _pending = text;
+        _text = text;
 
-        // The page loads asynchronously and is almost always still loading when the first module
-        // arrives, so what to show is held rather than dropped and sent the moment it is ready.
-        // Discarding it left the surface correctly positioned and permanently blank, which reads as
-        // a rendering fault rather than a message that arrived too early.
-        if (!_loaded)
-        {
-            return;
-        }
-
-        Flush();
-    }
-
-    private void Flush()
-    {
-        if (_module is not null && _pending is not null)
-        {
-            Post(JsonSerializer.Serialize(
-                new LoadDocumentMessage("loadDocument", _module, _pending),
-                EditorMessageContext.Default.LoadDocumentMessage));
-
-            _pending = null;
-        }
-
-        // After the text, never before. Loading a document resets the model, and markers set
-        // against the model being replaced are discarded with it.
-        if (_pendingMarkers is { } markers)
-        {
-            _pendingMarkers = null;
-            ShowDiagnostics(markers);
-        }
+        Send("loadDocument", JsonSerializer.Serialize(
+            new LoadDocumentMessage("loadDocument", moduleName, text),
+            EditorMessageContext.Default.LoadDocumentMessage));
     }
 
     /// <summary>Replaces the squiggles shown on the module currently displayed.</summary>
@@ -172,18 +156,35 @@ internal sealed class EditorSurface : IDisposable
     {
         ArgumentNullException.ThrowIfNull(markers);
 
-        if (!_loaded)
-        {
-            _pendingMarkers = markers;
-            return;
-        }
-
-        Post(JsonSerializer.Serialize(
+        Send("setDiagnostics", JsonSerializer.Serialize(
             new SetDiagnosticsMessage("setDiagnostics", markers),
             EditorMessageContext.Default.SetDiagnosticsMessage));
     }
 
-    /// <summary>Scrolls a one-based line into view. Ignored until the page is ready.</summary>
+    /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.</summary>
+    public void ShowModules(string[] modules, string? active)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+
+        Send("setModules", JsonSerializer.Serialize(
+            new SetModulesMessage("setModules", modules, active),
+            EditorMessageContext.Default.SetModulesMessage));
+    }
+
+    /// <summary>Replaces the panel's contents, across every module.</summary>
+    public void ShowFindings(SurfaceFinding[] findings)
+    {
+        ArgumentNullException.ThrowIfNull(findings);
+
+        Send("setFindings", JsonSerializer.Serialize(
+            new SetFindingsMessage("setFindings", findings),
+            EditorMessageContext.Default.SetFindingsMessage));
+    }
+
+    /// <summary>
+    /// Scrolls a one-based line into view. Not held: where the developer wanted to be some seconds
+    /// before the page existed is not where they want to be now.
+    /// </summary>
     public void Reveal(int line)
     {
         if (!_loaded || line < 1)
@@ -194,6 +195,42 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RevealLineMessage("revealLine", line),
             EditorMessageContext.Default.RevealLineMessage));
+    }
+
+    /// <summary>Sends a message, or holds it until the page is ready for it.</summary>
+    private void Send(string kind, string json)
+    {
+        if (_loaded)
+        {
+            Post(json);
+            return;
+        }
+
+        if (!_pending.ContainsKey(kind))
+        {
+            _pendingOrder.Add(kind);
+        }
+
+        _pending[kind] = json;
+    }
+
+    private void Drop(string kind)
+    {
+        if (_pending.Remove(kind))
+        {
+            _pendingOrder.Remove(kind);
+        }
+    }
+
+    private void Flush()
+    {
+        foreach (var kind in _pendingOrder)
+        {
+            Post(_pending[kind]);
+        }
+
+        _pendingOrder.Clear();
+        _pending.Clear();
     }
 
     private void OnMessage(string payload)
@@ -232,9 +269,23 @@ internal sealed class EditorSurface : IDisposable
                         && document.RootElement.TryGetProperty("fullText", out var text)
                         && text.GetString() is { } updated)
                     {
+                        _text = updated;
                         TextChanged?.Invoke(_module, updated);
                     }
 
+                    break;
+
+                case "activateModule":
+                    if (document.RootElement.TryGetProperty("moduleName", out var requested)
+                        && requested.GetString() is { Length: > 0 } name)
+                    {
+                        ModuleRequested?.Invoke(name);
+                    }
+
+                    break;
+
+                case "navigate":
+                    OnNavigate(document.RootElement);
                     break;
             }
         }
@@ -242,6 +293,20 @@ internal sealed class EditorSurface : IDisposable
         {
             Log.Warn("editor surface: a message from the page was not valid");
         }
+    }
+
+    private void OnNavigate(JsonElement message)
+    {
+        if (!message.TryGetProperty("module", out var module)
+            || module.GetString() is not { Length: > 0 } component)
+        {
+            return;
+        }
+
+        var line = message.TryGetProperty("line", out var lineValue) && lineValue.TryGetInt32(out var l) ? l : 1;
+        var column = message.TryGetProperty("column", out var columnValue) && columnValue.TryGetInt32(out var c) ? c : 1;
+
+        NavigateRequested?.Invoke(component, line, column);
     }
 
     /// <summary>
@@ -283,6 +348,9 @@ internal sealed class EditorSurface : IDisposable
         _overlay = null;
 
         _module = null;
+        _text = null;
         _loaded = false;
+        _pending.Clear();
+        _pendingOrder.Clear();
     }
 }

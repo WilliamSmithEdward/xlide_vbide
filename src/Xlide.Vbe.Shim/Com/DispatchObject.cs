@@ -119,8 +119,35 @@ internal sealed unsafe class DispatchObject : IDisposable
             VarEnum.VT_I4 => value.As<int>(),
             VarEnum.VT_I2 => value.As<short>(),
             VarEnum.VT_INT => value.As<int>(),
+            VarEnum.VT_BOOL => value.As<bool>() ? 1 : 0,
             VarEnum.VT_EMPTY or VarEnum.VT_NULL => 0,
-            _ => Convert.ToInt32(value.As<object>(), System.Globalization.CultureInfo.InvariantCulture),
+
+            // Named rather than coerced. Reading a variant as object is not supported and throws
+            // "UnsupportedType", which says nothing about which member was read or what it held:
+            // a boolean property read through here failed with exactly that and looked like a
+            // marshalling fault rather than the wrong reader for the type.
+            _ => throw new InvalidOperationException(
+                $"'{name}' is a {value.VarType} and cannot be read as a number."),
+        };
+    }
+
+    /// <summary>
+    /// Reads a property as a boolean.
+    ///
+    /// Automation booleans are not the same width as a language boolean and true is not 1, so this
+    /// goes through the variant's own conversion rather than comparing a number.
+    /// </summary>
+    public bool GetBool(string name)
+    {
+        using var value = GetProperty(name);
+        return value.VarType switch
+        {
+            VarEnum.VT_BOOL => value.As<bool>(),
+            VarEnum.VT_I4 => value.As<int>() != 0,
+            VarEnum.VT_I2 => value.As<short>() != 0,
+            VarEnum.VT_EMPTY or VarEnum.VT_NULL => false,
+            _ => throw new InvalidOperationException(
+                $"'{name}' is a {value.VarType} and cannot be read as a boolean."),
         };
     }
 

@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import type { Shell, ShellFinding } from "./shell.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID } from "./vba.js";
 
@@ -40,6 +41,8 @@ export interface HostMarker extends HostRange {
 
 export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
+  | { type: "setModules"; modules: string[]; active: string | null }
+  | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
   | { type: "setTheme"; theme: XlideTheme }
   | { type: "setDiagnostics"; markers: HostMarker[] }
@@ -67,7 +70,9 @@ export type ClientMessage =
   | { type: "ready"; timings?: BootTimings }
   | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullText: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
-  | { type: "breakpointToggleRequested"; line: number };
+  | { type: "breakpointToggleRequested"; line: number }
+  | { type: "activateModule"; moduleName: string }
+  | { type: "navigate"; module: string; line: number; column: number };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -115,6 +120,7 @@ function fromMonacoRange(range: monaco.IRange): HostRange {
 export class EditorBridge {
   private readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly transport: HostTransport;
+  private readonly shell: Shell | null;
   private readonly disposables: monaco.IDisposable[] = [];
   private readonly currentLine: monaco.editor.IEditorDecorationsCollection;
   private readonly breakpoints: monaco.editor.IEditorDecorationsCollection;
@@ -126,9 +132,10 @@ export class EditorBridge {
   /** Once the host names a theme, the OS preference stops overriding it. */
   private themePinned = false;
 
-  constructor(editor: monaco.editor.IStandaloneCodeEditor, transport: HostTransport) {
+  constructor(editor: monaco.editor.IStandaloneCodeEditor, transport: HostTransport, shell: Shell | null = null) {
     this.editor = editor;
     this.transport = transport;
+    this.shell = shell;
     this.currentLine = editor.createDecorationsCollection([]);
     this.breakpoints = editor.createDecorationsCollection([]);
 
@@ -149,6 +156,16 @@ export class EditorBridge {
     this.transport.post(timings ? { type: "ready", timings } : { type: "ready" });
   }
 
+  /** Asks the host to show a module, in response to the developer picking its tab. */
+  activateModule(moduleName: string): void {
+    this.transport.post({ type: "activateModule", moduleName });
+  }
+
+  /** Asks the host to go to a finding, in response to the developer picking it. */
+  navigate(module: string, line: number, column: number): void {
+    this.transport.post({ type: "navigate", module, line, column });
+  }
+
   dispose(): void {
     for (const disposable of this.disposables) {
       disposable.dispose();
@@ -160,6 +177,12 @@ export class EditorBridge {
     switch (message.type) {
       case "loadDocument":
         this.loadDocument(message.moduleName, message.text);
+        return;
+      case "setModules":
+        this.shell?.setModules(message.modules, message.active);
+        return;
+      case "setFindings":
+        this.shell?.setFindings(message.findings);
         return;
       case "applyEdit":
         this.applyEdit(message.revision, message.changes);

@@ -226,11 +226,8 @@ internal static class Program
         DeleteKeyIfPresent($@"{RegistrationPlan.AddInsKeyPath(HostBitness.X64)}\{ProductIdentity.AddInProgId}");
         DeleteKeyIfPresent($@"{RegistrationPlan.AddInsKeyPath(HostBitness.X86)}\{ProductIdentity.AddInProgId}");
         DeleteKeyIfPresent($@"{classes}\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteKeyIfPresent($@"{classes}\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}");
         DeleteKeyIfPresent($@"{classes}\{ProductIdentity.AddInProgId}");
-        DeleteKeyIfPresent($@"{classes}\{ProductIdentity.ToolWindowHostProgId}");
         DeleteKeyIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.AddInClsid}}}");
-        DeleteKeyIfPresent($@"{classes}\WOW6432Node\CLSID\{{{ProductIdentity.ToolWindowHostClsid}}}");
     }
 
     private static void WriteUninstallEntry(string target, string uninstaller, int payloadBytes)

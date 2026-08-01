@@ -64,17 +64,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The browser surface is loaded from disk beside the shim, so the markup ships with it. -->
-    <None Include="$(MSBuildThisFileDirectory)..\..\ui\shell\**\*"
-          LinkBase="ui\shell"
-          CopyToOutputDirectory="PreserveNewest"
-          CopyToPublishDirectory="PreserveNewest" />
-
     <!--
       The editor bundle, served under a virtual host name rather than read as files, which is why it
       has to sit at a known place beside the shim. It is built by a separate toolchain and may not
-      exist; the surface falls back to the shell document when it does not, so the glob deliberately
-      matches nothing rather than failing the build.
+      exist yet in a working tree that has not produced it, so the glob deliberately matches nothing
+      rather than failing the build; the shim reports the absence at run time.
     -->
     <None Include="$(MSBuildThisFileDirectory)..\..\ui\editor\dist\**\*"
           LinkBase="ui\editor\dist"
