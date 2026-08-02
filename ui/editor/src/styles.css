@@ -355,6 +355,44 @@ span.prop-value.readonly {
   min-height: 0;
 }
 
+/* The empty workspace: what the editor area becomes when every tab is closed. It occupies the
+   editor's grid row so the layout does not move, and the shell class decides which of the two is
+   real. */
+
+#empty-view {
+  display: none;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+#shell.empty #container {
+  display: none;
+}
+
+#shell.empty #empty-view {
+  display: flex;
+}
+
+#empty-view-message {
+  text-align: center;
+  opacity: 0.55;
+  user-select: none;
+}
+
+#empty-view-message .codicon {
+  font-size: 44px;
+}
+
+#empty-view-message p {
+  margin: 8px 0 0 0;
+}
+
+#empty-view-message .empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
 #panel-splitter {
   height: 5px;
   cursor: row-resize;

@@ -8,6 +8,13 @@ public sealed record LoadDocumentMessage(
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("text")] string Text);
 
+/// <summary>
+/// Tells the surface there is nothing to show: every pane is closed. The surface stays on screen
+/// with its empty workspace rather than yielding the frame back to the native editor.
+/// </summary>
+public sealed record ClearDocumentMessage(
+    [property: JsonPropertyName("type")] string Type);
+
 /// <summary>One squiggle. Positions are one-based lines and columns, as the surface expects.</summary>
 public sealed record EditorMarker(
     [property: JsonPropertyName("startLine")] int StartLine,
@@ -163,6 +170,7 @@ public sealed record SetPropertiesMessage(
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(LoadDocumentMessage))]
+[JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(SetThemeMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]

@@ -211,6 +211,25 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
+    /// Shows nothing: every pane is closed, and the workspace says so instead of showing the last
+    /// module as if it were still open.
+    /// </summary>
+    public void Clear()
+    {
+        _module = null;
+        _text = null;
+        _unwritten = false;
+        _overlay?.StopWriteTimer();
+        Drop("setDiagnostics");
+
+        // The same kind as loading, deliberately: whichever of the two was said last is the truth
+        // a page that has not booted yet should wake up to.
+        Send("loadDocument", JsonSerializer.Serialize(
+            new ClearDocumentMessage("clearDocument"),
+            EditorMessageContext.Default.ClearDocumentMessage));
+    }
+
+    /// <summary>
     /// Adopts the editor's version of the module without disturbing what the developer is doing.
     ///
     /// The editor is the text of record and it rewrites what it is given: it respells keywords and

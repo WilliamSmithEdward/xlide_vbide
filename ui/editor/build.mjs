@@ -40,6 +40,13 @@ const INDEX_HTML = `<!doctype html>
     <div id="workspace">
       <div id="tabs" role="tablist" aria-label="Open modules"></div>
       <div id="container"></div>
+      <div id="empty-view" aria-hidden="true">
+        <div id="empty-view-message">
+          <span class="codicon codicon-files"></span>
+          <p>No module is open.</p>
+          <p class="empty-hint">Pick one in the explorer, or insert a new module from its right-click menu.</p>
+        </div>
+      </div>
       <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
       <div id="panel">
         <div id="panel-head">

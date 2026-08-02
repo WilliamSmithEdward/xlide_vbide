@@ -176,8 +176,7 @@ internal sealed class AddInSession : IDisposable
 
             if (pane.Window == 0)
             {
-                _surfaceShown = false;
-                _editorSurface?.Follow(default, visible: false);
+                OnNoVisiblePane();
                 return;
             }
 
@@ -333,6 +332,41 @@ internal sealed class AddInSession : IDisposable
 
         ExecuteEditorCommand(command);
         return true;
+    }
+
+    /// <summary>
+    /// Decides what no visible pane means, because it means two different things.
+    ///
+    /// During a switch there is a moment with no pane window at all: the editor keeps a window
+    /// only for the active pane, and the old one is gone before the new one exists. The open list
+    /// still counts both, so nothing is done and the next event resolves it. When the open list
+    /// itself is empty, the developer closed every tab, and the surface stays exactly where it is
+    /// showing its empty workspace: hiding it would hand the whole frame back to the native
+    /// editor, and a developer with no tabs open still owns an editor.
+    /// </summary>
+    private void OnNoVisiblePane()
+    {
+        if (_editorSurface is null || _frame == 0 || _documentArea == 0)
+        {
+            _surfaceShown = false;
+            _editorSurface?.Follow(default, visible: false);
+            return;
+        }
+
+        var open = ReadOpenModuleNames();
+        if (open is not { Count: 0 })
+        {
+            // A window gap mid-churn, or a pane list that is refusing: either way, not an empty
+            // editor. Everything stays as it is.
+            return;
+        }
+
+        Log.Info("editor surface: no panes open, showing the empty workspace");
+
+        _surfaceShown = true;
+        _editorSurface.Clear();
+        _editorSurface.ShowModules([], null);
+        RefreshSurfacePlacement();
     }
 
     /// <summary>
@@ -1474,14 +1508,25 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        // From the editor's pane collection, per item and tolerantly, and not from the tracker's
-        // window map. The windows cannot carry this list: with maximised panes the editor keeps a
-        // window only for the ACTIVE pane and destroys the others, so the map holds one entry
-        // however many panes are open, and a strip fed from it had one immortal tab. The
-        // collection knows every open pane; what it cannot be trusted with is a member that has
-        // just died, so one dead member is skipped rather than aborting the list, and a
-        // collection that refuses entirely changes nothing: the strip keeps its last picture and
-        // the tracker's recovery republishes it.
+        // A refusing collection changes nothing: the strip keeps its last picture and the
+        // tracker's recovery republishes it.
+        if (ReadOpenModuleNames() is { } modules)
+        {
+            surface.ShowModules([.. modules], surface.Module);
+        }
+    }
+
+    /// <summary>
+    /// The modules with open panes, or null when the pane collection refuses entirely.
+    ///
+    /// From the collection, per item and tolerantly, and never from the tracker's window map. The
+    /// windows cannot carry this list: with maximised panes the editor keeps a window only for
+    /// the ACTIVE pane and destroys the others, so the map holds one entry however many panes are
+    /// open. What the collection cannot be trusted with is a member that has just died, so a dead
+    /// member is skipped rather than taking the list with it.
+    /// </summary>
+    private List<string>? ReadOpenModuleNames()
+    {
         try
         {
             using var panes = _editor.GetObject("CodePanes");
@@ -1507,11 +1552,12 @@ internal sealed class AddInSession : IDisposable
                 }
             }
 
-            surface.ShowModules([.. modules], surface.Module);
+            return modules;
         }
         catch (Exception ex)
         {
-            Log.Info($"modules: the pane list would not answer ({ex.GetType().Name}); keeping the last strip");
+            Log.Info($"modules: the pane list would not answer ({ex.GetType().Name})");
+            return null;
         }
     }
 
@@ -1767,29 +1813,39 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void CloseModule(string component)
     {
-        if (CloseThroughObjectModel(component))
+        try
         {
-            return;
-        }
-
-        // The pane collection would not say, but the tracker already knows which window shows the
-        // module, and asking the window to close is exactly what its own close box does. This is
-        // what keeps closing alive while the collection is refusing everyone.
-        if (_codePanes is not null)
-        {
-            foreach (var pane in _codePanes.Panes)
+            if (CloseThroughObjectModel(component))
             {
-                if (string.Equals(pane.Component, component, StringComparison.OrdinalIgnoreCase)
-                    && Win32.IsWindow(pane.Window))
+                return;
+            }
+
+            // The pane collection would not say, but the tracker already knows which window shows
+            // the module, and asking the window to close is exactly what its own close box does.
+            // This is what keeps closing alive while the collection is refusing everyone.
+            if (_codePanes is not null)
+            {
+                foreach (var pane in _codePanes.Panes)
                 {
-                    Win32.PostMessage(pane.Window, Win32.WmClose, 0, 0);
-                    Log.Info($"module: asked {component}'s window to close");
-                    return;
+                    if (string.Equals(pane.Component, component, StringComparison.OrdinalIgnoreCase)
+                        && Win32.IsWindow(pane.Window))
+                    {
+                        Win32.PostMessage(pane.Window, Win32.WmClose, 0, 0);
+                        Log.Info($"module: asked {component}'s window to close");
+                        return;
+                    }
                 }
             }
-        }
 
-        Log.Info($"module: {component} has no open pane to close");
+            Log.Info($"module: {component} has no open pane to close");
+        }
+        finally
+        {
+            // Closing a pane makes the editor activate the next one, and activation takes the
+            // keyboard with it. Without this, the second Ctrl+W in a row went to a window the
+            // developer cannot see.
+            _editorSurface?.Focus();
+        }
     }
 
     /// <summary>Closes a module's pane through the editor's own pane list. False when it cannot.</summary>

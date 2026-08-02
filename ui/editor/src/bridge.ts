@@ -44,6 +44,7 @@ export interface HostMarker extends HostRange {
 
 export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
+  | { type: "clearDocument" }
   | { type: "syncDocument"; moduleName: string; text: string }
   | { type: "notice"; text: string }
   | { type: "editorCommand"; id: string }
@@ -298,6 +299,9 @@ export class EditorBridge {
       case "loadDocument":
         this.loadDocument(message.moduleName, message.text);
         return;
+      case "clearDocument":
+        this.clearDocument();
+        return;
       case "syncDocument":
         this.syncDocument(message.moduleName, message.text);
         return;
@@ -412,9 +416,30 @@ export class EditorBridge {
     return this.editor.getModel();
   }
 
+  /** Shows the empty workspace: every pane is closed and the editor should say so. */
+  private clearDocument(): void {
+    this.lastMarkers = [];
+    this.currentLine.clear();
+    this.breakpoints.clear();
+    this.breakpointHover.clear();
+
+    const existing = this.model();
+    this.applyingHostEdit = true;
+    try {
+      this.editor.setModel(null);
+      existing?.dispose();
+    } finally {
+      this.applyingHostEdit = false;
+    }
+
+    this.revision = 0;
+    this.shell?.setWorkspaceEmpty(true);
+  }
+
   private loadDocument(moduleName: string, text: string): void {
     // A different module's squiggles are not this one's.
     this.lastMarkers = [];
+    this.shell?.setWorkspaceEmpty(false);
 
     const existing = this.model();
     // A fresh model per module keeps the URI meaningful for markers and disposes the old

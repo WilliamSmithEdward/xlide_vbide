@@ -326,6 +326,16 @@ export class Shell {
     this.menubar.refresh();
   }
 
+  /**
+   * Shows or hides the empty workspace, which is what the editor area becomes when every tab is
+   * closed. The rest of the shell stays: the explorer is how a module gets opened again.
+   */
+  setWorkspaceEmpty(empty: boolean): void {
+    this.shell.classList.toggle("empty", empty);
+    this.statusModule.textContent = empty ? "" : this.statusModule.textContent;
+    this.handlers.layoutChanged();
+  }
+
   /** Replaces the properties panel with the selected component's properties. */
   setProperties(component: string, kind: string, properties: ShellProperty[]): void {
     this.propertiesComponent = component;
