@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Editor;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -24,14 +25,31 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     private AddInSession? _session;
 
     /// <summary>
+    /// The host pointers, retained past OnConnection so a shutdown the developer cancels can be
+    /// recovered from: OnBeginShutdown has already stopped the session by the time the save
+    /// prompt appears, and standing it up again needs what OnConnection was given.
+    /// </summary>
+    private nint _application;
+    private nint _addInInstance;
+
+    /// <summary>Alive between OnBeginShutdown and whatever the shutdown turns out to be.</summary>
+    private ShutdownWatchdog? _watchdog;
+    private int _watchdogTicks;
+
+    /// <summary>
     /// Releases the session if the host never called OnDisconnection. COM controls this object's
     /// lifetime, so the normal path is OnDisconnection and this is the safety net.
     /// </summary>
     public void Dispose()
     {
+        _watchdog?.Dispose();
+        _watchdog = null;
+
         var session = _session;
         _session = null;
         session?.Dispose();
+
+        ReleaseHostPointers();
     }
 
     public int OnConnection(nint application, ExtConnectMode connectMode, nint addInInstance, nint custom)
@@ -51,6 +69,15 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             }
 
             var addIn = DispatchObject.AttachBorrowed(addInInstance);
+
+            // Kept for a revival, with references of their own.
+            _application = application;
+            Marshal.AddRef(application);
+            if (addInInstance != 0)
+            {
+                _addInInstance = addInInstance;
+                Marshal.AddRef(addInInstance);
+            }
 
             _session = new AddInSession(editor, addIn);
             _session.Start();
@@ -93,6 +120,13 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             // Every hook, subclass, and event sink must be gone before the host starts tearing
             // itself down. This is the single most important line in the file.
             _session?.Stop();
+
+            // But the shutdown is not a done deal: the host asks about unsaved changes AFTER
+            // this, and Cancel abandons the whole thing with no callback to say so. The watchdog
+            // is the one thing left listening; its ticks only arrive if the host thread is still
+            // pumping, which is itself the news.
+            _watchdogTicks = 0;
+            _watchdog ??= ShutdownWatchdog.Create(OnWatchdogTick);
             return HResult.Ok;
         }
         catch (Exception ex)
@@ -102,17 +136,84 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
         }
     }
 
+    /// <summary>
+    /// A tick after OnBeginShutdown, on a host thread that is evidently still pumping. If the
+    /// editor's frame is standing, the developer cancelled the shutdown, and the session is
+    /// stood up again from the retained pointers, exactly as OnConnection stood it up. A real
+    /// shutdown never gets here: the thread stops pumping, and OnDisconnection retires the
+    /// watchdog anyway.
+    /// </summary>
+    private void OnWatchdogTick()
+    {
+        try
+        {
+            if (_application == 0)
+            {
+                RetireWatchdog();
+                return;
+            }
+
+            if (CodePaneTracker.FindFrame() == 0)
+            {
+                // No editor frame yet: either the teardown is mid-flight after all, or the
+                // frame is briefly gone. A few patient ticks tell the difference.
+                if (++_watchdogTicks >= 8)
+                {
+                    Log.Info("watchdog: no editor frame returned, standing down");
+                    RetireWatchdog();
+                }
+
+                return;
+            }
+
+            Log.Info("watchdog: the shutdown was cancelled, reviving the session");
+            RetireWatchdog();
+
+            var stopped = _session;
+            _session = null;
+            stopped?.Dispose();
+
+            var editor = DispatchObject.AttachBorrowed(_application);
+            if (editor is null)
+            {
+                Log.Error("watchdog: the retained editor pointer no longer answers");
+                return;
+            }
+
+            var addIn = _addInInstance != 0 ? DispatchObject.AttachBorrowed(_addInInstance) : null;
+
+            _session = new AddInSession(editor, addIn);
+            _session.Start();
+            _session.HostStartupComplete();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("watchdog: revival failed", ex);
+            RetireWatchdog();
+        }
+    }
+
+    private void RetireWatchdog()
+    {
+        _watchdog?.Dispose();
+        _watchdog = null;
+    }
+
     public int OnDisconnection(ExtDisconnectMode disconnectMode, nint custom)
     {
         try
         {
             Log.Info($"OnDisconnection, mode {disconnectMode}");
 
+            RetireWatchdog();
+
             var session = _session;
             _session = null;
 
             session?.Stop();
             session?.Dispose();
+
+            ReleaseHostPointers();
 
             Log.Info("disconnected cleanly");
             return HResult.Ok;
@@ -121,6 +222,21 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
         {
             Log.Error("OnDisconnection failed", ex);
             return HResult.Ok;
+        }
+    }
+
+    private void ReleaseHostPointers()
+    {
+        if (_application != 0)
+        {
+            Marshal.Release(_application);
+            _application = 0;
+        }
+
+        if (_addInInstance != 0)
+        {
+            Marshal.Release(_addInInstance);
+            _addInInstance = 0;
         }
     }
 

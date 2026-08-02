@@ -140,6 +140,9 @@ internal static unsafe partial class Win32
     /// <summary>IDC_ARROW.</summary>
     public const int IdcArrow = 32512;
 
+    /// <summary>HWND_MESSAGE: the parent that makes a window message-only.</summary>
+    public const nint HwndMessage = -3;
+
     public const int ErrorClassAlreadyExists = 1410;
 
     public const uint GetModuleHandleFromAddress = 0x00000004;
