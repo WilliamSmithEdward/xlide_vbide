@@ -8,6 +8,35 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
+## START HERE — 2026-08-02 01:40
+
+**State.** The add-in loads in the developer's own Excel (the day the registration became real —
+lesson 17) and the developer has confirmed live, in their session: the full surface, the
+Immediate panel, engine completions on `.` and at expression positions, live problems while
+typing, and the properties panel. Published 01:34 and awaiting their first look: hover
+(declaration + origin + docs) and call tips (active parameter tracked through parenthesized and
+parenless calls). All of it is engine-served through one channel; the shared project assembly is
+`engine/src/moduleContext.ts`, the providers are in `ui/editor/src/main.ts`.
+
+**Next task, user-directed: typing-ergonomics parity with xlide_vscode** (task #26).
+`F:\GitHub\xlide\xlide_vscode` is the ergonomics SPEC, mirrored "down to the small details" — the
+user's own words, with two named gaps: **auto-capitalization while typing** and **auto-inserting
+`End Sub`** after `Sub test`+Enter. Start by inventorying every typing-time behavior over there
+(on-type case correction, block closers, enter/indent rules, auto-closing pairs, snippet and
+signature triggers), then port each into the Monaco surface. Mind rule 2 below: our on-type edits
+and the module's own rewrites must not fight; the resync baseline is the module's read-back.
+
+**Before touching anything, know these three:**
+1. Registry writes from the agent shell are a MIRAGE (sandbox COW; lesson 17). Registration is
+   the developer running `tools\Register-DevShim.ps1` themselves; verify persistence with their
+   regedit, never with in-sandbox reads.
+2. Cross-thread work into the browser rides the overlay's action timer, never a posted message
+   (lesson 18); off-thread `PostWebMessage` fails `UI_E_WRONG_THREAD`. Log lines carry
+   `[host]`/`[tN]` — read them before theorizing.
+3. The deploy dance: the developer closes Excel and says so → `tools\dev.ps1 -NoRun` + robocopy
+   `ui\editor\dist` into the publish tree (engine changes also need
+   `node build.mjs --package` in `engine/`) → they reopen. The DLL is locked while Excel runs.
+
 Repository: `F:\GitHub\xlide\xlide_vbide`, public at
 <https://github.com/WilliamSmithEdward/xlide_vbide>. The tree is committed and pushed at the end
 of every session; `git log` names what each one did.
