@@ -55,7 +55,7 @@ interface PhysicalLine {
  * The offset names where the newline was inserted, which is the end of the line Enter was
  * pressed on; the caret in the result is an offset into the text as it stands after the edits.
  */
-export function smartEnterFor(params: SmartEnterParams): SmartEnterResult {
+export function smartEnterFor(params: SmartEnterParams & { source: string }): SmartEnterResult {
     const source = params.source;
     const lines = physicalLines(source);
     const openerIndex = lineIndexAt(lines, params.offset);
@@ -135,7 +135,7 @@ export function smartEnterFor(params: SmartEnterParams): SmartEnterResult {
  */
 export function canonicalCaseFor(
     seeded: readonly ModulePayload[],
-    params: CanonicalCaseParams,
+    params: CanonicalCaseParams & { source: string },
 ): TextEditPayload[] {
     const ctx = assembleContext(seeded, params);
     const caseContext: CanonicalCaseContext = {
@@ -193,7 +193,7 @@ export function canonicalCaseFor(
  * The paired rename when an edit touches a simple `For`/`For Each` iterator or its `Next` name:
  * the other side of the pair, respelled to match. At most one edit.
  */
-export function loopSyncFor(params: LoopSyncParams): TextEditPayload[] {
+export function loopSyncFor(params: LoopSyncParams & { source: string }): TextEditPayload[] {
     const edit = resolveLoopIteratorSyncEdit(params.source, params.offset);
     return edit ? [{ start: edit.span.start, end: edit.span.end, text: edit.newText }] : [];
 }

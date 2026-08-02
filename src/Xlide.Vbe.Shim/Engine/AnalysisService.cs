@@ -131,6 +131,31 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Streams a module's live text to the engine, whole or as edits. Fire-and-forget, but its
+    /// place in the pipe's order is registered before this returns, so a request made a moment
+    /// later is always about text the engine already holds.
+    /// </summary>
+    public void NotifyLiveText(string moduleName, string? source, EngineTextEdit[]? edits)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        engine.NotifyDidChange(home.ProjectId, moduleName, source, edits);
+    }
+
+    /// <summary>
     /// Asks the engine what can be typed at an offset into a module's live text, or null when
     /// there is no engine or it has not yet seen the module's project.
     /// </summary>
@@ -157,7 +182,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+        var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Items;
@@ -188,7 +213,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+        var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Hover;
@@ -219,7 +244,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+        var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Signature;
@@ -250,7 +275,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+        return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
             .ConfigureAwait(false);
     }
 
@@ -283,7 +308,7 @@ internal sealed class AnalysisService : IAsyncDisposable
         }
 
         var result = await engine.CanonicalCaseAsync(
-                home.ProjectId, moduleName, home.ModuleType, source, start, end, single, completeHeader, cancellation)
+                home.ProjectId, moduleName, home.ModuleType, null, start, end, single, completeHeader, cancellation)
             .ConfigureAwait(false);
 
         return result?.Edits;
@@ -314,7 +339,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        var result = await engine.LoopSyncAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+        var result = await engine.LoopSyncAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
             .ConfigureAwait(false);
 
         return result?.Edits;
@@ -344,7 +369,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             home = (_openProjects.First(), "standard");
         }
 
-        var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, source, cancellation)
+        var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, null, cancellation)
             .ConfigureAwait(false);
 
         return result?.Procedures;
@@ -394,7 +419,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                     snapshot.Generation,
                     module.ModuleName,
                     module.Type,
-                    module.Source,
+                    null,
                     _stopping.Token).ConfigureAwait(false);
 
                 if (result is null || result.Diagnostics.Length == 0)
@@ -478,7 +503,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                     _lastSeededGeneration,
                     moduleName,
                     home.ModuleType,
-                    source,
+                    null,
                     cancellation,
                     caretOffset)
                 .ConfigureAwait(false);

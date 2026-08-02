@@ -70,7 +70,8 @@ export interface DiagnosticsParams {
     documentKey: string;
     projectId?: string;
     generation?: number;
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     moduleName: string;
     moduleType?: string;
     documentType?: string;
@@ -109,8 +110,8 @@ export interface DiagnosticsResult {
 export interface CompletionParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now. */
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     /** UTF-16 offset of the caret into that source. */
     offset: number;
     moduleType?: string;
@@ -140,8 +141,8 @@ export interface CompletionResult {
 export interface HoverParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now. */
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     /** UTF-16 offset into that source. */
     offset: number;
     moduleType?: string;
@@ -170,8 +171,8 @@ export interface HoverResult {
 export interface SignatureHelpParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now. */
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     /** UTF-16 offset into that source. */
     offset: number;
     moduleType?: string;
@@ -212,8 +213,8 @@ export interface TextEditPayload {
 export interface SmartEnterParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now, newline included. */
-    source: string;
+    /** The module text just after the newline, when sent; the live copy otherwise. */
+    source?: string;
     /** UTF-16 offset at which the newline was inserted. */
     offset: number;
     moduleType?: string;
@@ -234,8 +235,8 @@ export interface SmartEnterResult {
 export interface CanonicalCaseParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now. */
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     start: number;
     end: number;
     single?: boolean;
@@ -255,8 +256,8 @@ export interface CanonicalCaseResult {
 export interface LoopSyncParams {
     projectId: string;
     moduleName: string;
-    /** The module text as the editor shows it right now. */
-    source: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
     /** UTF-16 offset just after the edit. */
     offset: number;
     moduleType?: string;
@@ -289,4 +290,17 @@ export interface OutlineProcedure {
 
 export interface OutlineResult {
     procedures: OutlineProcedure[];
+}
+
+/**
+ * textDocument/didChange: the live text of a module, kept engine-side so requests can carry an
+ * offset and nothing else. A full source replaces; edits apply to what is held, offsets into
+ * the text as it stood, in the bottom-up order the editor reports them. A notification: no id,
+ * no answer, ordered with everything else on the pipe.
+ */
+export interface DidChangeParams {
+    projectId: string;
+    moduleName: string;
+    source?: string;
+    edits?: TextEditPayload[];
 }

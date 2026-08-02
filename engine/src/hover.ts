@@ -10,7 +10,7 @@ import type { HoverParams, HoverPayload, ModulePayload } from './protocol';
 
 export function hoverFor(
     seeded: readonly ModulePayload[],
-    params: HoverParams,
+    params: HoverParams & { source: string },
 ): HoverPayload | null {
     const ctx = assembleContext(seeded, params);
 

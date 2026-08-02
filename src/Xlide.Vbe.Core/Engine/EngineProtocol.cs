@@ -120,6 +120,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineSignatureInfo))]
 [JsonSerializable(typeof(EngineSignatureHelp))]
 [JsonSerializable(typeof(EngineTextEdit))]
+[JsonSerializable(typeof(EngineTextEdit[]))]
 [JsonSerializable(typeof(EngineSmartEnter))]
 [JsonSerializable(typeof(EngineTextEdits))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

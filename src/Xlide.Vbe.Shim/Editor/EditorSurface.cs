@@ -350,6 +350,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised on the host thread when the typing has rested and the live text should be analysed.</summary>
     public Action? LiveAnalysisDue { get; set; }
 
+    /// <summary>
+    /// Raised on the host thread with each change to the shown module's text: (module, whole
+    /// text or null, edits or null). Whoever mirrors the text — the engine — listens here.
+    /// </summary>
+    public Action<string, string?, EngineTextEdit[]?>? LiveTextPushed { get; set; }
+
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
@@ -771,12 +777,14 @@ internal sealed class EditorSurface : IDisposable
                             ? text.GetString()
                             : null;
 
+                        EngineTextEdit[]? parsedEdits = null;
                         if (updated is null
                             && _text is { } current
                             && document.RootElement.TryGetProperty("changes", out var changeSet)
                             && changeSet.ValueKind == JsonValueKind.Array)
                         {
-                            updated = ApplyChanges(current, changeSet);
+                            parsedEdits = ParseChanges(current, changeSet);
+                            updated = parsedEdits is null ? null : ApplyEdits(current, parsedEdits);
                         }
 
                         if (updated is not null)
@@ -800,6 +808,12 @@ internal sealed class EditorSurface : IDisposable
                             // The findings shown must describe this text, not the text as of
                             // the last write: a deleted error must go, and it must go soon.
                             _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
+
+                            // The engine mirrors this text and answers requests from its copy,
+                            // so the change stream continues to it — small edits for a large
+                            // module, the whole text for a small one — ordered ahead of any
+                            // request about the text it makes.
+                            LiveTextPushed?.Invoke(_module!, parsedEdits is null ? updated : null, parsedEdits);
                         }
                     }
 
@@ -1028,15 +1042,14 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
-    /// Rebuilds the text from the page's change ranges, which arrive bottom-up so every earlier
-    /// range still means what it meant: the offsets are computed once, against the text the
-    /// ranges describe, and applied from the tail forward. Null when a range is malformed or
-    /// out of bounds, and the caller keeps the text it has rather than guessing.
+    /// Converts the page's change ranges to offsets, computed once against the text the ranges
+    /// describe. The ranges arrive bottom-up, and stay in that order. Null when a range is
+    /// malformed, and the caller keeps the text it has rather than guessing.
     /// </summary>
-    private static string? ApplyChanges(string text, JsonElement changes)
+    private static EngineTextEdit[]? ParseChanges(string text, JsonElement changes)
     {
         var lineStarts = TextPositions.LineStarts(text);
-        var updated = text;
+        var edits = new List<EngineTextEdit>(changes.GetArrayLength());
 
         foreach (var change in changes.EnumerateArray())
         {
@@ -1054,15 +1067,31 @@ internal sealed class EditorSurface : IDisposable
                 return null;
             }
 
-            var start = TextPositions.ToOffset(lineStarts, startLine, startColumn);
-            var end = TextPositions.ToOffset(lineStarts, endLine, endColumn);
+            edits.Add(new EngineTextEdit(
+                TextPositions.ToOffset(lineStarts, startLine, startColumn),
+                TextPositions.ToOffset(lineStarts, endLine, endColumn),
+                inserted));
+        }
 
-            if (start < 0 || end < start || end > updated.Length)
+        return [.. edits];
+    }
+
+    /// <summary>
+    /// Applies bottom-up edits from the tail forward, so every earlier offset still means what
+    /// it meant. Null when an edit is out of bounds.
+    /// </summary>
+    private static string? ApplyEdits(string text, EngineTextEdit[] edits)
+    {
+        var updated = text;
+
+        foreach (var edit in edits)
+        {
+            if (edit.Start < 0 || edit.End < edit.Start || edit.End > updated.Length)
             {
                 return null;
             }
 
-            updated = string.Concat(updated.AsSpan(0, start), inserted, updated.AsSpan(end));
+            updated = string.Concat(updated.AsSpan(0, edit.Start), edit.Text, updated.AsSpan(edit.End));
         }
 
         return updated;

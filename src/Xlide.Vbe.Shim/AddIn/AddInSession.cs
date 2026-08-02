@@ -147,6 +147,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
+        _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -2143,6 +2144,10 @@ internal sealed class AddInSession : IDisposable
 
         _writtenModules[component] = source;
         _editorSurface?.Show(component, source);
+
+        // The engine's live copy starts from what is being shown; the keystrokes stream from
+        // here as edits.
+        _analysis?.NotifyLiveText(component, source, null);
         Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
 
         // The findings for this module were computed before it was opened, so they are applied here

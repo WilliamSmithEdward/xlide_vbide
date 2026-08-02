@@ -282,6 +282,52 @@ try {
             'expected the Name property among the members');
     });
 
+    // didChange: the engine holds the live text, and a request carries an offset and nothing
+    // else. The notification has no id and gets no answer; the pipe's order is the contract.
+    const liveSource = GOOD_MODULE.replace('    n = 1', '    ThisWorkbook.');
+    const liveDot = liveSource.indexOf('ThisWorkbook.') + 'ThisWorkbook.'.length;
+    socket.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/didChange',
+        params: { projectId: 'Smoke', moduleName: 'GoodModule', source: liveSource },
+    })}\n`);
+
+    const offsetOnly = await call('textDocument/completion', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        offset: liveDot,
+        moduleType: 'standard',
+    });
+
+    check('an offset-only completion answers from the live text', () => {
+        assert.ok(offsetOnly.items.some((item) => item.label === 'Worksheets'),
+            'expected Worksheets from the live dot');
+    });
+
+    socket.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/didChange',
+        params: {
+            projectId: 'Smoke',
+            moduleName: 'GoodModule',
+            edits: [{ start: liveDot - 1, end: liveDot, text: '' }],
+        },
+    })}\n`);
+
+    const afterEdit = await call('textDocument/completion', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        offset: liveDot - 1,
+        moduleType: 'standard',
+    });
+
+    check('an edit notification moves the live text', () => {
+        // The edit deleted the dot: an answer still offering members would prove the engine
+        // held the old text.
+        assert.ok(!afterEdit.items.some((item) => item.label === 'Worksheets'),
+            'the dot is gone, so members must be too');
+    });
+
     // Hovers: the identifier under the cursor, described from the same project facts.
     const localHover = await call('textDocument/hover', {
         projectId: 'Smoke',

@@ -10,7 +10,7 @@ import type { ModulePayload, SignatureHelpParams, SignatureInfoPayload } from '.
 
 export function signatureHelpFor(
     seeded: readonly ModulePayload[],
-    params: SignatureHelpParams,
+    params: SignatureHelpParams & { source: string },
 ): SignatureInfoPayload | null {
     const ctx = assembleContext(seeded, params);
 

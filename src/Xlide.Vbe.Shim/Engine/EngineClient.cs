@@ -157,7 +157,7 @@ internal sealed class EngineClient : IAsyncDisposable
         int generation,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         CancellationToken cancellation,
         int? activeIncompleteExpressionOffset = null)
     {
@@ -168,8 +168,12 @@ internal sealed class EngineClient : IAsyncDisposable
             ["generation"] = generation,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         if (activeIncompleteExpressionOffset is { } activeOffset)
         {
@@ -190,7 +194,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int offset,
         CancellationToken cancellation)
     {
@@ -199,9 +203,13 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["offset"] = offset,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/completion", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineCompletions);
@@ -212,7 +220,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int offset,
         CancellationToken cancellation)
     {
@@ -221,9 +229,13 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["offset"] = offset,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/hover", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineHover);
@@ -234,7 +246,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int offset,
         CancellationToken cancellation)
     {
@@ -243,9 +255,13 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["offset"] = offset,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/signatureHelp", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSignatureHelp);
@@ -256,7 +272,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int offset,
         CancellationToken cancellation)
     {
@@ -265,9 +281,13 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["offset"] = offset,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/smartEnter", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSmartEnter);
@@ -278,7 +298,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int start,
         int end,
         bool single,
@@ -290,12 +310,16 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["start"] = start,
             ["end"] = end,
             ["single"] = single,
             ["completeHeader"] = completeHeader,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/canonicalCase", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
@@ -306,7 +330,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         string moduleName,
         string moduleType,
-        string source,
+        string? source,
         int offset,
         CancellationToken cancellation)
     {
@@ -315,9 +339,13 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
-            ["source"] = source,
             ["offset"] = offset,
         };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
 
         var result = await CallAsync("textDocument/loopSync", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
@@ -348,6 +376,70 @@ internal sealed class EngineClient : IAsyncDisposable
 
         var result = await CallAsync("textDocument/outline", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineOutline);
+    }
+
+    /// <summary>
+    /// Streams a module's live text, whole or as edits, as a notification: no id, no answer,
+    /// and its place in the pipe's order is its meaning. The same one-at-a-time gate the calls
+    /// use keeps it ordered among them, and the wait is registered before this returns, so a
+    /// request made a moment later cannot overtake the text it is about.
+    /// </summary>
+    public void NotifyDidChange(string projectId, string moduleName, string? source, EngineTextEdit[]? edits)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+        };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
+        else if (edits is not null && edits.Length > 0)
+        {
+            payload["edits"] = edits;
+        }
+        else
+        {
+            return;
+        }
+
+        var request = new Dictionary<string, object>
+        {
+            ["jsonrpc"] = "2.0",
+            ["method"] = "textDocument/didChange",
+            ["params"] = payload,
+        };
+
+        var line = JsonSerializer.Serialize(request, EngineJsonContext.Default.DictionaryStringObject);
+        _ = SendNotificationAsync(line);
+    }
+
+    private async Task SendNotificationAsync(string line)
+    {
+        var writer = _writer;
+        if (writer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _oneCall.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await writer.WriteLineAsync(line.AsMemory()).ConfigureAwait(false);
+            }
+            finally
+            {
+                _oneCall.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"engine: didChange could not be sent ({ex.GetType().Name})");
+        }
     }
 
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)

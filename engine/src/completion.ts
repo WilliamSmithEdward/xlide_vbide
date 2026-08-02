@@ -18,7 +18,7 @@ import type { CompletionItemPayload, CompletionParams, ModulePayload } from './p
 
 export function completionsFor(
     seeded: readonly ModulePayload[],
-    params: CompletionParams,
+    params: CompletionParams & { source: string },
 ): CompletionItemPayload[] {
     const ctx = assembleContext(seeded, params);
 
