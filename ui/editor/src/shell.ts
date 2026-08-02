@@ -62,7 +62,7 @@ export interface ShellHandlers {
   /** The developer closed a module's tab, however they did it. */
   closeModule(name: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
-  insertComponent(kind: number): void;
+  insertComponent(kind: number, project?: string): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -175,7 +175,7 @@ export class Shell {
       select: (name) => handlers.selectComponent(name),
       open: (name) => handlers.activateModule(name),
       context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
-      projectContext: (x, y) => this.projectMenu(x, y),
+      projectContext: (project, x, y) => this.workbookMenu(project, x, y),
     });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
@@ -957,11 +957,15 @@ export class Shell {
     showContextMenu(x, y, items);
   }
 
-  private projectMenu(x: number, y: number): void {
+  /**
+   * The workbook's menu, grouped the way the companion editor groups it: what can be created in
+   * the workbook first, then the dialogs that belong to the project itself.
+   */
+  private workbookMenu(project: string, x: number, y: number): void {
     showContextMenu(x, y, [
-      { label: "Insert Module", run: () => this.handlers.insertComponent(1) },
-      { label: "Insert Class Module", run: () => this.handlers.insertComponent(2) },
-      { label: "Insert UserForm", run: () => this.handlers.insertComponent(3) },
+      { label: "New Module", run: () => this.handlers.insertComponent(1, project) },
+      { label: "New Class Module", run: () => this.handlers.insertComponent(2, project) },
+      { label: "New UserForm", run: () => this.handlers.insertComponent(3, project) },
       {},
       { label: "References...", run: () => this.hostCommand("references") },
       { label: "Project Properties...", run: () => this.hostCommand("projectProperties") },

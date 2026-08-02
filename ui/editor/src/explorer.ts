@@ -5,9 +5,10 @@
  * window on request, and a hidden window cannot be uncovered by anything the host does later. The
  * project itself is untouched, so everything that reads it keeps working.
  *
- * Components are grouped the way the host groups them, because that grouping is what a VBA
- * developer already knows. The names of the groups are ours; the membership comes from the kind
- * the host reports for each component.
+ * Each workbook is its own unit, the way the companion editor's tree shows them: the workbook's
+ * file name at the root, its modules flat beneath it with their kind spelled out beside the name,
+ * ordered document, form, module, class. There is no project node and there are no grouping rows;
+ * the kind column carries what the groups used to say.
  */
 
 /** Component kinds, as the host numbers them. */
@@ -29,19 +30,26 @@ export interface ExplorerProject {
   components: ExplorerComponent[];
 }
 
-interface Group {
-  title: string;
-  kinds: number[];
+interface KindMeta {
+  /** The kind spelled the way the companion editor spells it beside a module's name. */
+  type: string;
   icon: string;
+  order: number;
 }
 
-/** Groups in the order they are shown, matching the order the host shows them in. */
-const GROUPS: Group[] = [
-  { title: "Excel Objects", kinds: [ComponentKind.Document], icon: "file-binary" },
-  { title: "Forms", kinds: [ComponentKind.Form, ComponentKind.ActiveXDesigner], icon: "window" },
-  { title: "Modules", kinds: [ComponentKind.StandardModule], icon: "file-code" },
-  { title: "Class Modules", kinds: [ComponentKind.ClassModule], icon: "symbol-class" },
-];
+const KIND_META: Record<number, KindMeta> = {
+  [ComponentKind.Document]: { type: "document", icon: "symbol-namespace", order: 0 },
+  [ComponentKind.Form]: { type: "userform", icon: "window", order: 1 },
+  [ComponentKind.ActiveXDesigner]: { type: "designer", icon: "window", order: 1 },
+  [ComponentKind.StandardModule]: { type: "standard", icon: "symbol-module", order: 2 },
+  [ComponentKind.ClassModule]: { type: "class", icon: "symbol-class", order: 3 },
+};
+
+const KIND_FALLBACK: KindMeta = { type: "module", icon: "symbol-module", order: 4 };
+
+function kindMeta(kind: number): KindMeta {
+  return KIND_META[kind] ?? KIND_FALLBACK;
+}
 
 export interface ExplorerHandlers {
   /** Single click: the component becomes the selection, and nothing opens. */
@@ -50,8 +58,8 @@ export interface ExplorerHandlers {
   open(name: string): void;
   /** Right click on a component: the menu for its class, at this position. */
   context(name: string, kind: number, x: number, y: number): void;
-  /** Right click on a project header. */
-  projectContext(x: number, y: number): void;
+  /** Right click on a workbook's row. */
+  projectContext(project: string, x: number, y: number): void;
 }
 
 export class Explorer {
@@ -62,6 +70,9 @@ export class Explorer {
   private active: string | null = null;
   private selected: string | null = null;
   private problemCounts = new Map<string, number>();
+
+  /** Which workbooks are open in the tree; one never seen before starts open. */
+  private readonly expanded = new Map<string, boolean>();
 
   constructor(root: HTMLElement, handlers: ExplorerHandlers) {
     this.root = root;
@@ -81,6 +92,13 @@ export class Explorer {
         this.render();
         this.handlers.select(name);
         this.handlers.open(name);
+        return;
+      }
+
+      const workbook = this.workbookAt(event);
+      if (workbook) {
+        this.expanded.set(workbook, !(this.expanded.get(workbook) ?? true));
+        this.render();
       }
     });
 
@@ -93,7 +111,7 @@ export class Explorer {
 
     this.root.addEventListener("keydown", (event) => {
       // A button already turns Enter into a click; this turns it into an open instead, so the
-      // keyboard can do everything the mouse can.
+      // keyboard can do everything the mouse can. A workbook row keeps the click, which toggles.
       if (event.key === "Enter") {
         const name = this.componentAt(event);
         if (name) {
@@ -118,10 +136,10 @@ export class Explorer {
         return;
       }
 
-      const project = (event.target as HTMLElement).closest(".tree-project") as HTMLElement | null;
-      if (project) {
+      const workbook = this.workbookAt(event);
+      if (workbook) {
         event.preventDefault();
-        this.handlers.projectContext(event.clientX, event.clientY);
+        this.handlers.projectContext(workbook, event.clientX, event.clientY);
       }
     });
   }
@@ -129,6 +147,11 @@ export class Explorer {
   private componentAt(event: Event): string | null {
     const item = (event.target as HTMLElement).closest("[data-component]") as HTMLElement | null;
     return item?.dataset.component ?? null;
+  }
+
+  private workbookAt(event: Event): string | null {
+    const row = (event.target as HTMLElement).closest("[data-project]") as HTMLElement | null;
+    return row?.dataset.project ?? null;
   }
 
   setProjects(projects: ExplorerProject[]): void {
@@ -151,38 +174,51 @@ export class Explorer {
     this.root.replaceChildren();
 
     for (const project of this.projects) {
-      const header = document.createElement("div");
-      header.className = "tree-project";
+      const isOpen = this.expanded.get(project.name) ?? true;
+      this.root.appendChild(this.workbookRow(project.name, isOpen));
 
-      const icon = document.createElement("span");
-      icon.className = "codicon codicon-folder-library";
-      icon.setAttribute("aria-hidden", "true");
+      if (!isOpen) {
+        continue;
+      }
 
-      header.append(icon, document.createTextNode(project.name));
-      this.root.appendChild(header);
-
-      for (const group of GROUPS) {
-        const members = project.components
-          .filter((component) => group.kinds.includes(component.kind))
-          .sort((a, b) => a.name.localeCompare(b.name));
-
-        if (members.length === 0) {
-          continue;
+      const members = [...project.components].sort((a, b) => {
+        const left = kindMeta(a.kind);
+        const right = kindMeta(b.kind);
+        if (left.order !== right.order) {
+          return left.order - right.order;
         }
+        return a.name.localeCompare(b.name);
+      });
 
-        const title = document.createElement("div");
-        title.className = "tree-group";
-        title.textContent = group.title;
-        this.root.appendChild(title);
-
-        for (const component of members) {
-          this.root.appendChild(this.item(component, group.icon));
-        }
+      for (const component of members) {
+        this.root.appendChild(this.item(component));
       }
     }
   }
 
-  private item(component: ExplorerComponent, icon: string): HTMLElement {
+  private workbookRow(name: string, isOpen: boolean): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tree-workbook";
+    button.dataset.project = name;
+    button.setAttribute("role", "treeitem");
+    button.setAttribute("aria-expanded", String(isOpen));
+
+    const chevron = document.createElement("span");
+    chevron.className = `codicon codicon-chevron-${isOpen ? "down" : "right"}`;
+    chevron.setAttribute("aria-hidden", "true");
+
+    const icon = document.createElement("span");
+    icon.className = "codicon codicon-file-code";
+    icon.setAttribute("aria-hidden", "true");
+
+    button.append(chevron, icon, document.createTextNode(name));
+    return button;
+  }
+
+  private item(component: ExplorerComponent): HTMLElement {
+    const meta = kindMeta(component.kind);
+
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tree-item"
@@ -194,10 +230,14 @@ export class Explorer {
     button.setAttribute("aria-selected", String(component.name === this.selected));
 
     const glyph = document.createElement("span");
-    glyph.className = `codicon codicon-${icon}`;
+    glyph.className = `codicon codicon-${meta.icon}`;
     glyph.setAttribute("aria-hidden", "true");
 
-    button.append(glyph, document.createTextNode(component.name));
+    const kind = document.createElement("span");
+    kind.className = "tree-kind";
+    kind.textContent = meta.type;
+
+    button.append(glyph, document.createTextNode(component.name), kind);
 
     const problems = this.problemCounts.get(component.name) ?? 0;
     if (problems > 0) {

@@ -97,8 +97,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer closes a module's tab.</summary>
     public Action<string>? ModuleCloseRequested { get; set; }
 
-    /// <summary>Raised when the developer asks for a new component: 1 module, 2 class, 3 form.</summary>
-    public Action<int>? ComponentInsertRequested { get; set; }
+    /// <summary>
+    /// Raised when the developer asks for a new component: (kind, workbook). Kind is 1 module,
+    /// 2 class, 3 form; the workbook names the project whose menu asked, or null for the active
+    /// one.
+    /// </summary>
+    public Action<int, string?>? ComponentInsertRequested { get; set; }
 
     /// <summary>Raised when the editor wants completions: request identifier, caret offset.</summary>
     public Action<int, int>? CompletionRequested { get; set; }
@@ -811,7 +815,11 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("kind", out var componentKind)
                         && componentKind.TryGetInt32(out var insertKind))
                     {
-                        ComponentInsertRequested?.Invoke(insertKind);
+                        var targetProject = document.RootElement.TryGetProperty("project", out var projectElement)
+                            ? projectElement.GetString()
+                            : null;
+
+                        ComponentInsertRequested?.Invoke(insertKind, targetProject);
                     }
 
                     break;

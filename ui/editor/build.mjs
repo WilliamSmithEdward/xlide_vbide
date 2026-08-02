@@ -47,7 +47,7 @@ const INDEX_HTML = `<!doctype html>
         <div id="empty-view-message">
           <span class="codicon codicon-files"></span>
           <p>No module is open.</p>
-          <p class="empty-hint">Pick one in the explorer, or insert a new module from its right-click menu.</p>
+          <p class="empty-hint">Pick one in the explorer, or right-click a workbook to add one.</p>
         </div>
       </div>
       <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>

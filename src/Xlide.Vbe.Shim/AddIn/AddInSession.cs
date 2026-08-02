@@ -2053,7 +2053,7 @@ internal sealed class AddInSession : IDisposable
                     }
                 }
 
-                tree.Add(new SurfaceProject(project.GetString("Name") ?? "VBAProject", [.. members]));
+                tree.Add(new SurfaceProject(WorkbookDisplayName(project), [.. members]));
             }
 
             surface.ShowProjects([.. tree]);
@@ -2062,6 +2062,66 @@ internal sealed class AddInSession : IDisposable
         {
             Log.Error("explorer: the project tree could not be read", ex);
         }
+    }
+
+    /// <summary>
+    /// What the developer calls a project: its workbook's file name. The project's own name is
+    /// almost always the default 'VBAProject', which distinguishes nothing; the file name is how
+    /// the companion editor's tree names workbooks too. A workbook never saved has no file name
+    /// and raises when asked for one, and keeps the project name instead.
+    /// </summary>
+    private static string WorkbookDisplayName(DispatchObject project)
+    {
+        try
+        {
+            if (project.GetString("FileName") is { Length: > 0 } fileName)
+            {
+                return Path.GetFileName(fileName);
+            }
+        }
+        catch (Exception)
+        {
+            // Unsaved: the property raises rather than answering empty.
+        }
+
+        return project.GetString("Name") ?? "VBAProject";
+    }
+
+    /// <summary>The project shown under a workbook name, or null when none matches.</summary>
+    private DispatchObject? FindProjectByDisplayName(string? displayName)
+    {
+        if (string.IsNullOrEmpty(displayName))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var count = projects?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                var project = projects!.GetItem(i);
+                if (project is null)
+                {
+                    continue;
+                }
+
+                if (string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return project;
+                }
+
+                project.Dispose();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"project: '{displayName}' could not be looked up ({ex.GetType().Name})");
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -2343,7 +2403,7 @@ internal sealed class AddInSession : IDisposable
     /// Through the project's own collection rather than a menu, because the operation is the
     /// documented one and it names what it made, which is what lets the new module open at once.
     /// </summary>
-    private void InsertComponent(int kind)
+    private void InsertComponent(int kind, string? projectName)
     {
         if (kind is not (1 or 2 or 3))
         {
@@ -2352,7 +2412,8 @@ internal sealed class AddInSession : IDisposable
 
         try
         {
-            using var project = _editor.GetObject("ActiveVBProject");
+            // The workbook the menu was opened on, when it was; the active project otherwise.
+            using var project = FindProjectByDisplayName(projectName) ?? _editor.GetObject("ActiveVBProject");
             using var components = project?.GetObject("VBComponents");
             using var added = components?.CallObject("Add", kind);
             var name = added?.GetString("Name");

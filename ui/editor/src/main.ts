@@ -118,7 +118,7 @@ function boot(): void {
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
     selectComponent: (name) => bridge.selectComponent(name),
     closeModule: (name) => bridge.closeModule(name),
-    insertComponent: (kind) => bridge.insertComponent(kind),
+    insertComponent: (kind, project) => bridge.insertComponent(kind, project),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

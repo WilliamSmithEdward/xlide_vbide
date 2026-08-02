@@ -149,7 +149,7 @@ export type ClientMessage =
   | { type: "editProperty"; component: string; name: string; value: string }
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string }
-  | { type: "insertComponent"; kind: number }
+  | { type: "insertComponent"; kind: number; project?: string }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
@@ -355,9 +355,12 @@ export class EditorBridge {
     this.transport.post({ type: "closeModule", name });
   }
 
-  /** Asks the host for a new component: 1 module, 2 class module, 3 form. */
-  insertComponent(kind: number): void {
-    this.transport.post({ type: "insertComponent", kind });
+  /**
+   * Asks the host for a new component: 1 module, 2 class module, 3 form. Named workbook when
+   * the request came from a workbook's own menu; the active project otherwise.
+   */
+  insertComponent(kind: number, project?: string): void {
+    this.transport.post({ type: "insertComponent", kind, ...(project ? { project } : {}) });
   }
 
   /** Asks the host to toggle the breakpoint on a line, same as clicking the margin. */
@@ -1061,14 +1064,24 @@ export function demoTransport(): HostTransport {
         send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1" });
         send({
           type: "setProjects",
-          projects: [{
-            name: "VBAProject",
-            components: [
-              { name: "Sheet1", kind: 100 },
-              { name: "ThisWorkbook", kind: 100 },
-              { name: "Module1", kind: 1 },
-            ],
-          }],
+          projects: [
+            {
+              name: "Book1.xlsm",
+              components: [
+                { name: "Sheet1", kind: 100 },
+                { name: "ThisWorkbook", kind: 100 },
+                { name: "Module1", kind: 1 },
+                { name: "SalesRow", kind: 2 },
+              ],
+            },
+            {
+              name: "Book2.xlsm",
+              components: [
+                { name: "ThisWorkbook", kind: 100 },
+                { name: "Helpers", kind: 1 },
+              ],
+            },
+          ],
         });
         send({
           type: "setDiagnostics",
