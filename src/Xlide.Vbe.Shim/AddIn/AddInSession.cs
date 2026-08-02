@@ -175,6 +175,11 @@ internal sealed class AddInSession : IDisposable
     /// <summary>The language facts last pushed to the page, so unchanged ones are not re-sent.</summary>
     private string? _lastLanguageFactsKey;
 
+    /// <summary>When the full pass last ran, and whether one is owed from a skipped turn.</summary>
+    private long _lastFullAnalysis;
+    private bool _fullAnalysisDeferred;
+    private const long FullAnalysisQuietMilliseconds = 3000;
+
     /// <summary>Which panes existed and showed when they were last logged. See TrackCodePanes.</summary>
     private string? _lastPaneComposition;
 
@@ -621,10 +626,21 @@ internal sealed class AddInSession : IDisposable
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
                      + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty));
 
-            // The analyzer reads the module, so it has nothing new to say until the module has
-            // been written. Without this the squiggles describe the text as it was before the
-            // developer started typing.
-            _analysis?.Reanalyse();
+            // The full pass re-reads every module, reseeds the engine, and diagnoses the whole
+            // project — work worth doing, but not per pause: the live pass keeps the shown
+            // module honest between full passes, and a full pass running is what a completion
+            // queues behind. It runs when the write was structural, or when its turn has come.
+            var now = Environment.TickCount64;
+            if (!wroteDiff || now - _lastFullAnalysis > FullAnalysisQuietMilliseconds)
+            {
+                _lastFullAnalysis = now;
+                _fullAnalysisDeferred = false;
+                _analysis?.Reanalyse();
+            }
+            else
+            {
+                _fullAnalysisDeferred = true;
+            }
         }
         catch (Exception ex)
         {
@@ -2043,6 +2059,15 @@ internal sealed class AddInSession : IDisposable
         if (surface is null || module is null || source is null || _analysis is not { } analysis)
         {
             return;
+        }
+
+        // A full pass skipped during the typing runs once things go quiet.
+        var now = Environment.TickCount64;
+        if (_fullAnalysisDeferred && now - _lastFullAnalysis > FullAnalysisQuietMilliseconds)
+        {
+            _lastFullAnalysis = now;
+            _fullAnalysisDeferred = false;
+            analysis.Reanalyse();
         }
 
         var lineStarts = TextPositions.LineStarts(source);

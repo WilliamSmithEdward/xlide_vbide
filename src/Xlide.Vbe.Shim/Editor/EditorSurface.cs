@@ -55,9 +55,16 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// How long the typing rests before the live analysis pass. Just inside the write delay, so
-    /// findings refresh from the text as typed without waiting for the module write-back.
+    /// findings refresh from the text as typed without waiting for the module write-back. A
+    /// large module waits longer: its pass costs more, and running it between keystrokes is
+    /// what a completion would otherwise queue behind. Leaving the line runs it at once.
     /// </summary>
     private const uint LiveAnalysisDelayMilliseconds = 350;
+    private const uint LiveAnalysisDelayLargeMilliseconds = 1500;
+    private const int LargeModuleCharacters = 200_000;
+
+    /// <summary>True when the text changed since the last live pass, the line-leave trigger's gate.</summary>
+    private bool _changedSinceLiveAnalysis;
 
     private string? _text;
     private bool _unwritten;
@@ -331,7 +338,11 @@ internal sealed class EditorSurface : IDisposable
         surface._browser.MessageReceived = surface.OnMessage;
         surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
         surface._overlay.LoaderTicked = () => surface.LoadingPulse?.Invoke();
-        surface._overlay.AnalysisDue = () => surface.LiveAnalysisDue?.Invoke();
+        surface._overlay.AnalysisDue = () =>
+        {
+            surface._changedSinceLiveAnalysis = false;
+            surface.LiveAnalysisDue?.Invoke();
+        };
 
         Log.Info($"editor surface: created, serving from {root}");
         return surface;
@@ -758,6 +769,14 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("startLine", out var line)
                         && line.TryGetInt32(out var caretLine))
                     {
+                        // Leaving an edited line settles it: the deferred pass runs now, while
+                        // staying on the line keeps the engine free for the completions and
+                        // call tips the typing is asking for.
+                        if (caretLine != CaretLine && _changedSinceLiveAnalysis)
+                        {
+                            _overlay?.StartAnalyseTimer(1);
+                        }
+
                         CaretLine = caretLine;
                         CaretColumn = document.RootElement.TryGetProperty("startColumn", out var column)
                             && column.TryGetInt32(out var caretColumn)
@@ -806,8 +825,12 @@ internal sealed class EditorSurface : IDisposable
                             _overlay?.StartWriteTimer(WriteDelayMilliseconds);
 
                             // The findings shown must describe this text, not the text as of
-                            // the last write: a deleted error must go, and it must go soon.
-                            _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
+                            // the last write: a deleted error must go, and it must go soon —
+                            // where soon costs little, and on the line's own goodbye otherwise.
+                            _changedSinceLiveAnalysis = true;
+                            _overlay?.StartAnalyseTimer(updated.Length >= LargeModuleCharacters
+                                ? LiveAnalysisDelayLargeMilliseconds
+                                : LiveAnalysisDelayMilliseconds);
 
                             // The engine mirrors this text and answers requests from its copy,
                             // so the change stream continues to it — small edits for a large
