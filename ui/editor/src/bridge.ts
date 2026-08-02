@@ -345,16 +345,17 @@ export class EditorBridge {
    * Asks the host to go to a place: a finding, or a procedure picked in the tree. The host
    * shows the module and moves the native caret; the surface's own caret is placed here, the
    * moment the module is the one showing, so the click ends with the cursor at the target and
-   * the editor focused, ready to type.
+   * the editor focused, ready to type. A procedure asks for its whole line, so where the block
+   * starts is visible at a glance.
    */
-  navigate(module: string, line: number, column: number): void {
-    this.pendingCaret = { module, line, column };
+  navigate(module: string, line: number, column: number, selectLine = false): void {
+    this.pendingCaret = { module, line, column, selectLine };
     this.transport.post({ type: "navigate", module, line, column });
     this.applyPendingCaret();
   }
 
   /** A caret waiting for its module to arrive; applied on the next matching loadDocument. */
-  private pendingCaret: { module: string; line: number; column: number } | null = null;
+  private pendingCaret: { module: string; line: number; column: number; selectLine: boolean } | null = null;
 
   /**
    * Places the waiting caret if the shown module is the one it belongs to. A load of any other
@@ -375,8 +376,12 @@ export class EditorBridge {
 
     this.pendingCaret = null;
     const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
-    const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
-    this.editor.setPosition({ lineNumber: line, column });
+    if (pending.selectLine) {
+      this.editor.setSelection(new monaco.Selection(line, 1, line, model.getLineMaxColumn(line)));
+    } else {
+      const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
+      this.editor.setPosition({ lineNumber: line, column });
+    }
     this.editor.revealLineInCenterIfOutsideViewport(line);
     this.editor.focus();
   }

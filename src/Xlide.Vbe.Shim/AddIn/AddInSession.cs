@@ -243,6 +243,11 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.Reveal(line);
             }
 
+            // Activating the native pane moved keyboard focus onto it, and the developer is not
+            // looking at it. Without this, every key after a navigation went to the covered
+            // pane: Ctrl+W closed nothing, typing typed nowhere visible.
+            _editorSurface?.Focus();
+
             Log.Info($"navigate: {component}({line},{column})");
         }
         catch (Exception ex)

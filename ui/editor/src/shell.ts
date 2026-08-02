@@ -37,8 +37,8 @@ export interface ShellProperty {
 export interface ShellHandlers {
   /** The developer picked a module from the tab strip. */
   activateModule(name: string): void;
-  /** The developer picked a finding, and wants to be taken to it. */
-  navigate(module: string, line: number, column: number): void;
+  /** The developer picked a finding or a procedure, and wants to be taken to it. */
+  navigate(module: string, line: number, column: number, selectLine?: boolean): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
   layoutChanged(): void;
   /** A toolbar command was chosen. */
@@ -179,7 +179,7 @@ export class Shell {
       context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
       outline: (module) => handlers.requestOutline(module),
-      openProcedure: (module, line) => handlers.navigate(module, line, 1),
+      openProcedure: (module, line) => handlers.navigate(module, line, 1, true),
     });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
@@ -240,7 +240,15 @@ export class Shell {
       this.handlers.activateModule(tab.dataset.module);
     });
 
-    // The middle button closes, the way every tabbed editor closes.
+    // The middle button closes, the way every tabbed editor closes — any tab, focused or not.
+    // The mousedown is claimed too, so the browser's middle-click autoscroll cannot swallow
+    // the click before it becomes an auxclick.
+    this.tabStrip.addEventListener("mousedown", (event) => {
+      if (event.button === 1 && (event.target as HTMLElement).closest("[data-module]")) {
+        event.preventDefault();
+      }
+    });
+
     this.tabStrip.addEventListener("auxclick", (event) => {
       if (event.button !== 1) {
         return;
@@ -252,6 +260,23 @@ export class Shell {
         this.handlers.closeModule(tab.dataset.module);
       }
     });
+
+    // Ctrl+W closes the active tab from anywhere in the surface. The host's key hook claims it
+    // first when it is listening; this is the page's own answer for every moment it is not, so
+    // the shortcut never depends on which corner of the surface has focus.
+    document.addEventListener("keydown", (event) => {
+      if (!event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      if (event.code !== "KeyW" && event.code !== "F4") {
+        return;
+      }
+
+      event.preventDefault();
+      if (this.active) {
+        this.handlers.closeModule(this.active);
+      }
+    }, { capture: true });
 
     this.tabStrip.addEventListener("contextmenu", (event) => {
       const tab = (event.target as HTMLElement).closest("[data-module]") as HTMLElement | null;
