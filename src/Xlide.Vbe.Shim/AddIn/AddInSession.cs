@@ -171,6 +171,9 @@ internal sealed class AddInSession : IDisposable
     /// <summary>True while the surface is up over an editor that has no panes anywhere.</summary>
     private bool _watchingEmpty;
 
+    /// <summary>The language facts last pushed to the page, so unchanged ones are not re-sent.</summary>
+    private string? _lastLanguageFactsKey;
+
     /// <summary>Which panes existed and showed when they were last logged. See TrackCodePanes.</summary>
     private string? _lastPaneComposition;
 
@@ -271,6 +274,15 @@ internal sealed class AddInSession : IDisposable
             _analysis = new AnalysisService(_editor);
             _analysis.LanguageFactsReady += (types, procedures) =>
             {
+                // Unchanged words are not sent: the page rebuilds its tokenizer on arrival,
+                // which re-tokenizes the whole module, and the lists rarely change.
+                var factsKey = string.Join('\n', types) + "\0" + string.Join('\n', procedures);
+                if (factsKey == _lastLanguageFactsKey)
+                {
+                    return;
+                }
+
+                _lastLanguageFactsKey = factsKey;
                 Log.Info($"analysis: language facts, {types.Count} type(s), {procedures.Count} procedure(s)");
                 _editorSurface?.RunOnHostThread(() =>
                     _editorSurface?.SetLanguageFacts([.. types], [.. procedures]));
@@ -1986,6 +1998,14 @@ internal sealed class AddInSession : IDisposable
                     if (surface.Module != module || !ReferenceEquals(surface.Text, source) && surface.Text != source)
                     {
                         Log.Info($"live: {module} answer was for older text, dropped");
+                        return;
+                    }
+
+                    // Unchanged findings are not republished: every publish redraws the panel
+                    // and the tree, and most pauses change nothing.
+                    var existing = _findings.Where(finding => finding.Module == module);
+                    if (existing.SequenceEqual(findings))
+                    {
                         return;
                     }
 

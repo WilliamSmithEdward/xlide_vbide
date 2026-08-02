@@ -221,14 +221,24 @@ function buildVbaMonarch(
   };
 }
 
+/** The words the tokenizer was last built around, so an unchanged push costs nothing. */
+let appliedFactsKey = " ";
+
 /**
- * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration,
- * so a class inserted a moment ago starts reading as a type without anything being reopened.
+ * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration —
+ * the whole module, on this thread — so the rebuild happens only when the words actually
+ * changed: the lists arrive after every analysis pass, and they are almost always the same.
  */
 export function updateVbaLanguageFacts(
   types: readonly string[],
   procedures: readonly string[],
 ): void {
+  const key = `${types.join("\n")} ${procedures.join("\n")}`;
+  if (key === appliedFactsKey) {
+    return;
+  }
+
+  appliedFactsKey = key;
   monaco.languages.setMonarchTokensProvider(VBA_LANGUAGE_ID, buildVbaMonarch(types, procedures));
 }
 
