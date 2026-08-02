@@ -24,8 +24,14 @@ import "monaco-editor/features/quickCommand/register.js";
 import "monaco-editor/features/smartSelect/register.js";
 // Suggest is the completion widget itself; snippet expands the placeholders completions insert.
 // A completion provider without these registered answers into a void.
+//
+// The suggest controller is imported by its own path, deliberately. The feature's register
+// module imports ONLY the inline-completions adapter and never the controller, so registering
+// the feature grows the bundle and changes nothing on screen; this was found by asking a
+// running editor for editor.action.triggerSuggest and being told there is no such action.
 import "monaco-editor/features/snippet/register.js";
 import "monaco-editor/features/suggest/register.js";
+import "monaco-editor/editor/contrib/suggest/browser/suggestController.js";
 import "monaco-editor/features/tokenization/register.js";
 import "monaco-editor/features/wordHighlighter/register.js";
 import "monaco-editor/features/wordOperations/register.js";
