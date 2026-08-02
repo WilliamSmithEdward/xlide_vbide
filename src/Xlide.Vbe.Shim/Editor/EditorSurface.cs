@@ -79,6 +79,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer enters a line in the Immediate panel.</summary>
     public Action<string>? EvaluateRequested { get; set; }
 
+    /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
+    public Action<string, bool>? PanelChanged { get; set; }
+
     /// <summary>
     /// Asked about each key the editor might own, before the document sees it. Return true to
     /// claim it.
@@ -497,6 +500,18 @@ internal sealed class EditorSurface : IDisposable
                         && breakpointLine.TryGetInt32(out var toggled))
                     {
                         BreakpointToggleRequested?.Invoke(toggled);
+                    }
+
+                    break;
+
+                case "panel":
+                    if (document.RootElement.TryGetProperty("name", out var panel)
+                        && panel.GetString() is { Length: > 0 } panelName)
+                    {
+                        var open = !document.RootElement.TryGetProperty("open", out var isOpen)
+                            || isOpen.ValueKind != JsonValueKind.False;
+
+                        PanelChanged?.Invoke(panelName, open);
                     }
 
                     break;

@@ -29,10 +29,10 @@ internal readonly record struct CodePane(nint Window, string? Component, PixelRe
 internal sealed class CodePaneTracker : IDisposable
 {
     /// <summary>Window class the editor uses for code panes, and for the Immediate window.</summary>
-    private const string PaneClass = "VbaWindow";
+    internal const string PaneClass = "VbaWindow";
 
     /// <summary>Window class of the editor's own frame.</summary>
-    private const string FrameClass = "wndclass_desked_gsk";
+    internal const string FrameClass = "wndclass_desked_gsk";
 
     private static CodePaneTracker? _enumerating;
 
@@ -200,6 +200,56 @@ internal sealed class CodePaneTracker : IDisposable
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// Every visible window of the pane class, anywhere under the editor frame.
+    ///
+    /// Enumerated rather than walked as direct children: the panes are not all at the same depth,
+    /// and asking only for direct children finds none of the docked ones.
+    /// </summary>
+    internal static unsafe HashSet<nint> VisiblePanes()
+    {
+        _visible = [];
+
+        try
+        {
+            var ours = Win32.GetCurrentProcessId();
+
+            nint frame = 0;
+            while ((frame = Win32.FindWindowEx(0, frame, FrameClass, null)) != 0)
+            {
+                Win32.GetWindowThreadProcessId(frame, out var owner);
+                if (owner != ours)
+                {
+                    continue;
+                }
+
+                Win32.EnumChildWindows(
+                    frame,
+                    (nint)(delegate* unmanaged<nint, nint, int>)&OnVisiblePane,
+                    0);
+            }
+
+            return _visible;
+        }
+        finally
+        {
+            _visible = null;
+        }
+    }
+
+    private static HashSet<nint>? _visible;
+
+    [UnmanagedCallersOnly]
+    private static int OnVisiblePane(nint window, nint parameter)
+    {
+        if (_visible is not null && Win32.IsWindowVisible(window) && ReadClassName(window) == PaneClass)
+        {
+            _visible.Add(window);
+        }
+
+        return 1;
     }
 
     private unsafe List<nint> FindPaneWindows()

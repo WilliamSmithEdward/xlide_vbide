@@ -36,6 +36,8 @@ internal sealed class AddInSession : IDisposable
     private CodePaneTracker? _codePanes;
     private AnalysisService? _analysis;
     private ImmediateEvaluator? _immediate;
+    private ImmediateReader? _immediateReader;
+    private bool _windowsHidden;
     private EditorSurface? _editorSurface;
 
     /// <summary>
@@ -79,7 +81,6 @@ internal sealed class AddInSession : IDisposable
     public void HostStartupComplete()
     {
         ReportOpenProjects();
-        HideReplacedWindows();
         TrackCodePanes();
         StartAnalysis();
     }
@@ -222,6 +223,12 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
                 _editorSurface.Polled = PollDebugState;
                 _editorSurface.EvaluateRequested = EvaluateImmediate;
+                _editorSurface.PanelChanged = OnPanelChanged;
+
+                // Now rather than at start-up. The editor answers that these windows are visible
+                // before it has created them, so hiding one then closes something with no window
+                // behind it and there is nothing to identify afterwards.
+                HideReplacedWindows();
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -406,6 +413,9 @@ internal sealed class AddInSession : IDisposable
 
     /// <summary>How often the execution state is looked at while anything might be running.</summary>
     private const uint DebugPollMilliseconds = 150;
+
+    /// <summary>How often the editor's Immediate window is read while it is being looked at.</summary>
+    private const uint ImmediatePollMilliseconds = 300;
 
     /// <summary>
     /// Polls left before watching stops.
@@ -620,14 +630,40 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
+    /// <summary>Whether the developer is looking at the Immediate panel.</summary>
+    private bool _watchingImmediate;
+
+    /// <summary>Remembers which panel is showing, and watches the output only when it is.</summary>
+    private void OnPanelChanged(string name, bool open)
+    {
+        _watchingImmediate = open && name == "immediate";
+        UpdatePolling();
+    }
+
     /// <summary>Starts watching the execution state, for a while.</summary>
     private void WatchDebugState()
     {
         // Twenty seconds of watching. Long enough for a procedure that does some work before it
         // reaches a breakpoint, short enough that a run which never stops does not poll all day.
         _pollsRemaining = (int)(20_000 / DebugPollMilliseconds);
-        _editorSurface?.Poll(DebugPollMilliseconds);
+        UpdatePolling();
         UpdateDebugState();
+    }
+
+    /// <summary>
+    /// Sets the poll rate from what is actually being watched, or stops polling.
+    ///
+    /// Two things want a timer and they want it at different rates. Stepping moves the stopped line
+    /// on every keystroke and has to keep up; the Immediate window only has to look live. Neither
+    /// runs when nothing is watching, so a host sitting idle is not polled at all.
+    /// </summary>
+    private void UpdatePolling()
+    {
+        var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
+            : _watchingImmediate ? ImmediatePollMilliseconds
+            : 0;
+
+        _editorSurface?.Poll(interval);
     }
 
     /// <summary>
@@ -684,6 +720,7 @@ internal sealed class AddInSession : IDisposable
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
     {
+        _immediateReader?.Poll();
         UpdateDebugState();
 
         // Watching continues for as long as execution is stopped, because the developer is about
@@ -696,7 +733,60 @@ internal sealed class AddInSession : IDisposable
 
         if (--_pollsRemaining <= 0)
         {
-            _editorSurface?.Poll(0);
+            _pollsRemaining = 0;
+            UpdatePolling();
+        }
+    }
+
+    /// <summary>
+    /// Starts reading the Immediate window, having worked out which window it is.
+    ///
+    /// The one that stopped being visible when it was closed is the one that was closed. Its class
+    /// is shared with the code panes and with the Locals and Watch windows, and its caption is
+    /// localised, so there is nothing else to tell it apart by. It keeps its handle once hidden,
+    /// which is what makes it readable afterwards.
+    /// </summary>
+    private void AttachImmediateReader(HashSet<nint> before)
+    {
+        before.ExceptWith(CodePaneTracker.VisiblePanes());
+
+        if (before.Count != 1)
+        {
+            Log.Info($"immediate: {before.Count} windows changed when it closed, cannot tell which it is");
+            return;
+        }
+
+        var window = before.First();
+        _immediateReader = ImmediateReader.Create(window);
+
+        if (_immediateReader is null)
+        {
+            Log.Info("immediate: Debug.Print output cannot be read on this host");
+            return;
+        }
+
+        // Whatever it already holds is from before this session and is not news.
+        _immediateReader.Reset();
+        _immediateReader.Appended = OnDebugOutput;
+
+        Log.Info($"immediate: reading Debug.Print from window 0x{window:X}");
+    }
+
+    /// <summary>
+    /// Shows what Debug.Print wrote.
+    ///
+    /// Split into lines rather than shown as one block, because the panel is a log and each line
+    /// is one thing the developer's code said.
+    /// </summary>
+    private void OnDebugOutput(string text)
+    {
+        foreach (var line in text.Split('\n'))
+        {
+            var trimmed = line.TrimEnd('\r');
+            if (trimmed.Length > 0)
+            {
+                _editorSurface?.ShowImmediateResult(trimmed, failed: false);
+            }
         }
     }
 
@@ -889,9 +979,18 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void HideReplacedWindows()
     {
-        // Project explorer and properties. The Immediate, Locals and Watch windows stay: they are
-        // not replaced yet, and hiding them would take the feature away rather than restyle it.
-        ReadOnlySpan<int> replaced = [6, 7];
+        if (_windowsHidden)
+        {
+            return;
+        }
+
+        _windowsHidden = true;
+
+        // Project explorer, properties, and the Immediate window, each of which the surface now
+        // has its own. The Locals and Watch windows stay: nothing replaces them yet, and hiding a
+        // window with no replacement removes the feature rather than restyling it.
+        const int immediateWindow = 5;
+        ReadOnlySpan<int> replaced = [immediateWindow, 6, 7];
 
         try
         {
@@ -906,17 +1005,47 @@ internal sealed class AddInSession : IDisposable
                     continue;
                 }
 
-                if (window.GetBool("Visible"))
+                if (window.GetInt32("Type") != immediateWindow)
                 {
-                    window.SetBool("Visible", false);
-                    Log.Info($"window: closed the editor's own '{window.GetString("Caption")}'");
+                    if (window.GetBool("Visible"))
+                    {
+                        window.SetBool("Visible", false);
+                        Log.Info($"window: closed the editor's own '{window.GetString("Caption")}'");
+                    }
+
+                    continue;
                 }
+
+                HideImmediateWindow(window);
             }
         }
         catch (Exception ex)
         {
             Log.Error("window: the replaced windows could not be closed", ex);
         }
+    }
+
+    /// <summary>
+    /// Closes the Immediate window and remembers which window it was.
+    ///
+    /// It is shown first, deliberately. Its class is shared with the code panes and with the Locals
+    /// and Watch windows and its caption is localised, so the only thing that identifies it is
+    /// which window stops being visible when it is closed. That comparison needs it to have been
+    /// visible, and the editor reports it as visible before it has created it.
+    ///
+    /// The window survives being hidden, keeping its handle and its contents, which is what makes
+    /// Debug.Print readable afterwards.
+    /// </summary>
+    private void HideImmediateWindow(DispatchObject window)
+    {
+        window.SetBool("Visible", true);
+
+        var before = CodePaneTracker.VisiblePanes();
+
+        window.SetBool("Visible", false);
+        Log.Info($"window: closed the editor's own '{window.GetString("Caption")}'");
+
+        AttachImmediateReader(before);
     }
 
     /// <summary>Publishes every finding to the surface's panel, across all modules.</summary>
@@ -1114,6 +1243,9 @@ internal sealed class AddInSession : IDisposable
         // Before anything is torn down, and before the engine is stopped: whatever the developer
         // typed last must reach the module, or closing the host loses it.
         _editorSurface?.FlushEdits();
+
+        _immediateReader?.Dispose();
+        _immediateReader = null;
 
         _codePanes?.Dispose();
         _codePanes = null;

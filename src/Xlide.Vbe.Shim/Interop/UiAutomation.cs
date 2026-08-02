@@ -1,0 +1,144 @@
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
+
+namespace Xlide.Vbe.Shim.Interop;
+
+/*
+ * Just enough of the accessibility API to read a control that draws its own text.
+ *
+ * The editor's Immediate window is custom drawn: it has no child edit control, and asking the
+ * window for its text answers with its caption. The only thing that can read it is the interface a
+ * screen reader would use, and that does read it, including while the window is hidden.
+ *
+ * Every interface here is declared flat, with a placeholder for each method that is not used, so
+ * the slots line up with the real vtable. A missing placeholder does not fail to compile and does
+ * not throw: it calls whatever member happens to occupy that slot, with the wrong arguments. The
+ * counts in the comments are what keeps that honest.
+ */
+
+/// <summary>IUIAutomation. Only element lookup and a true condition are used.</summary>
+[GeneratedComInterface]
+[Guid("30cbe57d-d9d0-452a-ab13-7ac5ac4825ee")]
+internal partial interface IUIAutomation
+{
+    // 1..3
+    [PreserveSig] int CompareElements(nint first, nint second, out int areSame);
+    [PreserveSig] int CompareRuntimeIds(nint first, nint second, out int areSame);
+    [PreserveSig] int GetRootElement(out nint root);
+
+    // 4
+    [PreserveSig] int ElementFromHandle(nint window, out nint element);
+
+    // 5..18
+    [PreserveSig] int ElementFromPoint(long point, out nint element);
+    [PreserveSig] int GetFocusedElement(out nint element);
+    [PreserveSig] int GetRootElementBuildCache(nint request, out nint element);
+    [PreserveSig] int ElementFromHandleBuildCache(nint window, nint request, out nint element);
+    [PreserveSig] int ElementFromPointBuildCache(long point, nint request, out nint element);
+    [PreserveSig] int GetFocusedElementBuildCache(nint request, out nint element);
+    [PreserveSig] int CreateTreeWalker(nint condition, out nint walker);
+    [PreserveSig] int GetControlViewWalker(out nint walker);
+    [PreserveSig] int GetContentViewWalker(out nint walker);
+    [PreserveSig] int GetRawViewWalker(out nint walker);
+    [PreserveSig] int GetRawViewCondition(out nint condition);
+    [PreserveSig] int GetControlViewCondition(out nint condition);
+    [PreserveSig] int GetContentViewCondition(out nint condition);
+    [PreserveSig] int CreateCacheRequest(out nint request);
+
+    // 19
+    [PreserveSig] int CreateTrueCondition(out nint condition);
+}
+
+/// <summary>IUIAutomationElement. Finding a descendant, and asking it for a pattern.</summary>
+[GeneratedComInterface]
+[Guid("d22108aa-8ac5-49a5-837b-37bbb3d7591e")]
+internal partial interface IUIAutomationElement
+{
+    // 1..2
+    [PreserveSig] int SetFocus();
+    [PreserveSig] int GetRuntimeId(out nint runtimeId);
+
+    // 3
+    [PreserveSig] int FindFirst(int scope, nint condition, out nint found);
+
+    // 4..13
+    [PreserveSig] int FindAll(int scope, nint condition, out nint found);
+    [PreserveSig] int FindFirstBuildCache(int scope, nint condition, nint request, out nint found);
+    [PreserveSig] int FindAllBuildCache(int scope, nint condition, nint request, out nint found);
+    [PreserveSig] int BuildUpdatedCache(nint request, out nint updated);
+    [PreserveSig] int GetCurrentPropertyValue(int propertyId, out ComVariantBlock value);
+    [PreserveSig] int GetCurrentPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
+    [PreserveSig] int GetCachedPropertyValue(int propertyId, out ComVariantBlock value);
+    [PreserveSig] int GetCachedPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
+    [PreserveSig] int GetCurrentPatternAs(int patternId, in Guid interfaceId, out nint pattern);
+    [PreserveSig] int GetCachedPatternAs(int patternId, in Guid interfaceId, out nint pattern);
+
+    // 14
+    [PreserveSig] int GetCurrentPattern(int patternId, out nint pattern);
+}
+
+/// <summary>IUIAutomationTextPattern. Only the whole-document range is needed.</summary>
+[GeneratedComInterface]
+[Guid("32eba289-3583-42c9-9c59-3b6d9a1e9b6a")]
+internal partial interface IUIAutomationTextPattern
+{
+    // 1..4
+    [PreserveSig] int RangeFromPoint(long point, out nint range);
+    [PreserveSig] int RangeFromChild(nint child, out nint range);
+    [PreserveSig] int GetSelection(out nint ranges);
+    [PreserveSig] int GetVisibleRanges(out nint ranges);
+
+    // 5
+    [PreserveSig] int GetDocumentRange(out nint range);
+}
+
+/// <summary>IUIAutomationTextRange. Only the text is needed.</summary>
+[GeneratedComInterface]
+[Guid("a543cc6a-f4ae-494b-8239-c814481187a8")]
+internal partial interface IUIAutomationTextRange
+{
+    // 1..9
+    [PreserveSig] int Clone(out nint range);
+    [PreserveSig] int Compare(nint other, out int areSame);
+    [PreserveSig] int CompareEndpoints(int endpoint, nint other, int otherEndpoint, out int result);
+    [PreserveSig] int ExpandToEnclosingUnit(int unit);
+    [PreserveSig] int FindAttribute(int attribute, ComVariantBlock value, int backward, out nint found);
+    [PreserveSig] int FindText(nint text, int backward, int ignoreCase, out nint found);
+    [PreserveSig] int GetAttributeValue(int attribute, out ComVariantBlock value);
+    [PreserveSig] int GetBoundingRectangles(out nint rectangles);
+    [PreserveSig] int GetEnclosingElement(out nint element);
+
+    // 10
+    [PreserveSig] int GetText(int maxLength, out nint text);
+}
+
+/// <summary>
+/// A variant sized for the vtable, never read.
+///
+/// Several methods above return one. They are placeholders, so this only has to be the right size:
+/// a variant is sixteen bytes on x64 and the layout after that does not matter to a slot that is
+/// never called.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+internal struct ComVariantBlock;
+
+/// <summary>Identifiers used with the interfaces above.</summary>
+internal static class UiAutomationIds
+{
+    /// <summary>CLSID_CUIAutomation.</summary>
+    public static readonly Guid AutomationClass = new("ff48dba4-60ef-4201-aa87-54103eef594e");
+
+    public static readonly Guid Automation = new("30cbe57d-d9d0-452a-ab13-7ac5ac4825ee");
+    public static readonly Guid Element = new("d22108aa-8ac5-49a5-837b-37bbb3d7591e");
+    public static readonly Guid TextPattern = new("32eba289-3583-42c9-9c59-3b6d9a1e9b6a");
+    public static readonly Guid TextRange = new("a543cc6a-f4ae-494b-8239-c814481187a8");
+
+    /// <summary>UIA_TextPatternId.</summary>
+    public const int TextPatternId = 10014;
+
+    /// <summary>TreeScope_Descendants.</summary>
+    public const int Descendants = 4;
+
+    /// <summary>The whole range, however long it is.</summary>
+    public const int WholeRange = -1;
+}

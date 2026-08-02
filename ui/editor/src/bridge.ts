@@ -80,7 +80,8 @@ export type ClientMessage =
   | { type: "activateModule"; moduleName: string }
   | { type: "navigate"; module: string; line: number; column: number }
   | { type: "command"; name: string }
-  | { type: "evaluate"; text: string };
+  | { type: "evaluate"; text: string }
+  | { type: "panel"; name: string; open: boolean };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -194,6 +195,11 @@ export class EditorBridge {
   /** Asks the host to show a module, in response to the developer picking its tab. */
   activateModule(moduleName: string): void {
     this.transport.post({ type: "activateModule", moduleName });
+  }
+
+  /** Tells the host which panel is showing, so it only watches what is being looked at. */
+  panelChanged(name: string, open: boolean): void {
+    this.transport.post({ type: "panel", name, open });
   }
 
   /** Asks the host to evaluate a line entered in the Immediate panel. */

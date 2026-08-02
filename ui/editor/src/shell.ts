@@ -36,6 +36,8 @@ export interface ShellHandlers {
   commandAvailable(command: ToolbarCommand): boolean;
   /** The developer entered a line in the Immediate panel. */
   evaluate(text: string): void;
+  /** Which panel is showing, and whether the panel is open at all. */
+  panelChanged(name: string, open: boolean): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -99,6 +101,7 @@ export class Shell {
   private panelOpen = true;
   private panelHeight = 180;
   private sidebarWidth = 260;
+  private shown = "problems";
 
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
@@ -219,6 +222,11 @@ export class Shell {
 
     this.problemsBody.hidden = name !== "problems";
     this.immediateBody.hidden = name !== "immediate";
+    this.shown = name;
+
+    // The host only watches what it has to. Reading the editor's Immediate window costs a call
+    // every time, and there is no reason to pay it while nobody is looking at the result.
+    this.handlers.panelChanged(name, this.panelOpen);
 
     if (name === "immediate") {
       this.immediateInput.focus();
@@ -406,6 +414,7 @@ export class Shell {
     this.panel.classList.toggle("collapsed", !this.panelOpen);
     this.shell.classList.toggle("panel-collapsed", !this.panelOpen);
     this.panelToggle.setAttribute("aria-expanded", String(this.panelOpen));
+    this.handlers.panelChanged(this.shown, this.panelOpen);
     this.handlers.layoutChanged();
   }
 
