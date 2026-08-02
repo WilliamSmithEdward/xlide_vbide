@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Com;
@@ -47,6 +48,13 @@ internal sealed class AddInSession : IDisposable
     /// this a module opened between two passes carries no squiggles until the next one.
     /// </summary>
     private IReadOnlyList<Finding> _findings = [];
+
+    /// <summary>
+    /// The VBE validates a line when the caret leaves it. While the developer is typing on a
+    /// line, verdicts touching it are held out of every publish; the caret settling elsewhere
+    /// releases the hold and republishes from the unfiltered findings above — no re-analysis.
+    /// </summary>
+    private readonly ActiveLineHold _activeLineHold = new();
 
     /// <summary>
     /// What each module read back as the last time this add-in wrote it.
@@ -148,6 +156,27 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
+
+        // The active-line hold: typing on a line hides the verdicts about it, and the caret
+        // settling anywhere else brings them back. Both handlers run on the host thread, and
+        // both republish only when the hold actually changed — a keystroke on an already-held
+        // line and a caret resting where it was cost nothing.
+        _editorSurface.LineTyped = line =>
+        {
+            if (_editorSurface?.Module is { } typedModule && _activeLineHold.Begin(typedModule, line))
+            {
+                PublishMarkersForShownModule();
+                PublishFindingsToSurface();
+            }
+        };
+        _editorSurface.CaretLineSettled = line =>
+        {
+            if (_activeLineHold.Release(_editorSurface?.Module, line))
+            {
+                PublishMarkersForShownModule();
+                PublishFindingsToSurface();
+            }
+        };
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -2182,6 +2211,9 @@ internal sealed class AddInSession : IDisposable
         _analysis?.NotifyLiveText(component, source, null);
         Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
 
+        // A hold belongs to the module it began in; the switch is the caret leaving the line.
+        _ = _activeLineHold.Release();
+
         // The findings for this module were computed before it was opened, so they are applied here
         // rather than waiting for the next analysis pass.
         PublishMarkersForShownModule();
@@ -2549,16 +2581,22 @@ internal sealed class AddInSession : IDisposable
         AttachImmediateReader(before);
     }
 
-    /// <summary>Publishes every finding to the surface's panel, across all modules.</summary>
+    /// <summary>
+    /// Publishes every finding to the surface's panel, across all modules — except the ones the
+    /// active-line hold is keeping back, so the panel and the badges never announce a verdict
+    /// about a line still being typed.
+    /// </summary>
     private void PublishFindingsToSurface()
     {
-        _editorSurface?.ShowFindings([.. _findings.Select(f => new SurfaceFinding(
-            f.Module,
-            f.Code,
-            f.Message,
-            f.Severity,
-            f.StartLine,
-            f.StartColumn))]);
+        _editorSurface?.ShowFindings([.. _findings
+            .Where(f => !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
+            .Select(f => new SurfaceFinding(
+                f.Module,
+                f.Code,
+                f.Message,
+                f.Severity,
+                f.StartLine,
+                f.StartColumn))]);
     }
 
     /// <summary>
@@ -2794,7 +2832,8 @@ internal sealed class AddInSession : IDisposable
         }
 
         var markers = _findings
-            .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase))
+            .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
+                && !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
             .Select(f => new EditorMarker(
                 f.StartLine,
                 f.StartColumn,

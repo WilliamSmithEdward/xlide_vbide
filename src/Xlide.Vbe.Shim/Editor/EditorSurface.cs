@@ -367,6 +367,17 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public Action<string, string?, EngineTextEdit[]?>? LiveTextPushed { get; set; }
 
+    /// <summary>
+    /// Raised when a change event was plain typing confined to one line — no newline in it,
+    /// every range on that line — with the 1-based line. This is what begins the hold that
+    /// keeps fresh verdicts off the line still being typed.
+    /// </summary>
+    public Action<int>? LineTyped { get; set; }
+
+    /// <summary>Raised on every caret update with the settled 1-based line, after the caret
+    /// properties reflect it. This is what releases the hold.</summary>
+    public Action<int>? CaretLineSettled { get; set; }
+
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
@@ -782,6 +793,10 @@ internal sealed class EditorSurface : IDisposable
                             && column.TryGetInt32(out var caretColumn)
                             ? caretColumn
                             : 1;
+
+                        // After the properties update, so whatever this triggers reads the
+                        // caret as settled, not as it was.
+                        CaretLineSettled?.Invoke(caretLine);
                     }
 
                     break;
@@ -837,6 +852,14 @@ internal sealed class EditorSurface : IDisposable
                             // module, the whole text for a small one — ordered ahead of any
                             // request about the text it makes.
                             LiveTextPushed?.Invoke(_module!, parsedEdits is null ? updated : null, parsedEdits);
+
+                            // Read from the raw change set rather than the parsed edits, because
+                            // small modules skip the parse and this must fire for them too.
+                            if (document.RootElement.TryGetProperty("changes", out var typedSet)
+                                && SingleLineTypedIn(typedSet) is { } typedLine)
+                            {
+                                LineTyped?.Invoke(typedLine);
+                            }
                         }
                     }
 
@@ -1097,6 +1120,41 @@ internal sealed class EditorSurface : IDisposable
         }
 
         return [.. edits];
+    }
+
+    /// <summary>
+    /// The one line a change event typed on, or null when it is anything else: a newline, a
+    /// paste across lines, a multi-cursor edit. Only plain typing begins the active-line hold,
+    /// because everything else is precisely the "leaving the line" a hold ends on.
+    /// </summary>
+    private static int? SingleLineTypedIn(JsonElement changes)
+    {
+        if (changes.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        int? line = null;
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (!change.TryGetProperty("startLine", out var startLineElement)
+                || !startLineElement.TryGetInt32(out var startLine)
+                || !change.TryGetProperty("endLine", out var endLineElement)
+                || !endLineElement.TryGetInt32(out var endLine)
+                || startLine != endLine
+                || (line is { } known && known != startLine)
+                || !change.TryGetProperty("text", out var replacement)
+                || replacement.GetString() is not { } inserted
+                || inserted.Contains('\n', StringComparison.Ordinal)
+                || inserted.Contains('\r', StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            line = startLine;
+        }
+
+        return line;
     }
 
     /// <summary>

@@ -294,3 +294,35 @@ Consequence: every sink that receives pushed state must be idempotent — identi
 nothing, not even a repaint — and any rebuild of a scrolling surface must put the scroll back.
 And when a UI loops, read the data cadence out of the log before theorising about state: if the
 data is constant, the bug is in the drawing.
+
+## 21. An answer that never came is not an answer of "nothing", and a line being typed is not ready for a verdict
+
+Two defects from the same afternoon, one root shape: treating an absence as a statement.
+
+The first: expanding a large class in the tree flashed its 1,565 procedures and then blanked
+them. The outline request's timeout resolved as an empty list, and while the editor spends
+seconds absorbing 918KB of module, a timed-out empty could land after the real answer and
+replace it. The fix is a vocabulary correction, throughout the pipeline: a timeout or a host
+failure resolves as null — "no answer" — and only a real answer, a real empty included, may
+replace what an unfolded list already shows. One request per module in flight with at most one
+trailing refresh, so answers cannot come home out of order at all. The engine memoises the
+outline against the exact source string, and the host stopped shipping the module's whole text
+with a request about text the engine's live copy already holds.
+
+The second: the analyzer red-squiggled `MsgBox ` for its argument count while the arguments
+were still being typed. The editor extension holds syntax-category findings on the caret's
+line, but a semantic verdict about a half-typed line is the same wrong in a different
+category. The model the VBE itself uses is the right one: a line is validated when the caret
+leaves it. `ActiveLineHold` (Core, pinned by its own tests) is the publish-side of that
+contract — typing on a line hides verdicts touching it from the squiggles, the panel, and
+the badges at once, because they publish from one filter point; the caret settling anywhere
+else republishes from the unfiltered cache with no re-analysis involved.
+
+Evidence: the shim log for the first (outline answers every second, then a
+show-transition where the late answers straddled the 2s timeout); the screenshot of
+`argument-count` on the line mid-keystroke for the second.
+
+Consequence: give "no answer" its own value the moment a channel gets a timeout, and never
+let it share a spelling with "empty". Hold verdicts about text mid-keystroke until the line
+is left — the VBE had this right for thirty years. And filter at the single point every
+surface publishes through, so squiggles, panel, and badges cannot disagree.
