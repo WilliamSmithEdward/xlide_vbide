@@ -88,6 +88,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer chooses a menu item, with the path to it.</summary>
     public Action<int[]>? MenuExecuteRequested { get; set; }
 
+    /// <summary>Raised when the developer edits a property: component, property name, new value.</summary>
+    public Action<string, string, string>? PropertyEditRequested { get; set; }
+
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
     public Action? Ready { get; set; }
 
@@ -289,6 +292,17 @@ internal sealed class EditorSurface : IDisposable
         Send("setChrome", JsonSerializer.Serialize(
             new SetChromeMessage("setChrome", menuBar),
             EditorMessageContext.Default.SetChromeMessage));
+    }
+
+    /// <summary>Replaces the properties panel's contents with the shown component's properties.</summary>
+    public void ShowProperties(string component, SurfacePropertyEntry[] properties)
+    {
+        ArgumentNullException.ThrowIfNull(component);
+        ArgumentNullException.ThrowIfNull(properties);
+
+        Send("setProperties", JsonSerializer.Serialize(
+            new SetPropertiesMessage("setProperties", component, properties),
+            EditorMessageContext.Default.SetPropertiesMessage));
     }
 
     /// <summary>Adds a line to the Immediate panel's output.</summary>
@@ -614,6 +628,19 @@ internal sealed class EditorSurface : IDisposable
                     if (PathOf(document.RootElement) is { Length: > 0 } executePath)
                     {
                         MenuExecuteRequested?.Invoke(executePath);
+                    }
+
+                    break;
+
+                case "editProperty":
+                    if (document.RootElement.TryGetProperty("component", out var owner)
+                        && owner.GetString() is { Length: > 0 } ownerName
+                        && document.RootElement.TryGetProperty("name", out var propertyName)
+                        && propertyName.GetString() is { Length: > 0 } property
+                        && document.RootElement.TryGetProperty("value", out var newValue)
+                        && newValue.GetString() is { } value)
+                    {
+                        PropertyEditRequested?.Invoke(ownerName, property, value);
                     }
 
                     break;

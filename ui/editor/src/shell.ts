@@ -24,6 +24,13 @@ export interface ShellFinding {
   column: number;
 }
 
+export interface ShellProperty {
+  name: string;
+  value: string;
+  /** Whether an edit will be attempted. The host can still refuse one, and says so. */
+  writable: boolean;
+}
+
 export interface ShellHandlers {
   /** The developer picked a module from the tab strip. */
   activateModule(name: string): void;
@@ -45,6 +52,8 @@ export interface ShellHandlers {
   menuExecute(path: number[]): void;
   /** Every menu closed, so focus belongs to the editor again. */
   menuClosed(): void;
+  /** The developer edited a property of the shown component. */
+  editProperty(component: string, name: string, value: string): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -70,6 +79,12 @@ const MIN_EDITOR_HEIGHT = 80;
 
 /** Smallest useful project explorer: a component name without truncation. */
 const MIN_SIDEBAR_WIDTH = 120;
+
+/** Smallest useful properties pane: the header and about two rows. */
+const MIN_PROPERTIES_HEIGHT = 64;
+
+/** The tree never gets less than this, however far the properties splitter is dragged. */
+const MIN_TREE_HEIGHT = 100;
 
 /** The editor never gets less than this, however far the splitter is dragged. */
 const MIN_EDITOR_WIDTH = 240;
@@ -111,6 +126,15 @@ export class Shell {
   private sidebarWidth = 260;
   private shown = "problems";
 
+  private readonly propertiesSection: HTMLElement;
+  private readonly propertiesHead: HTMLButtonElement;
+  private readonly propertiesList: HTMLElement;
+  private readonly propertiesSplitter: HTMLElement;
+  private propertiesComponent = "";
+  private properties: ShellProperty[] = [];
+  private propertiesOpen = true;
+  private propertiesHeight = 200;
+
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
 
@@ -131,6 +155,13 @@ export class Shell {
       execute: (path) => handlers.menuExecute(path),
       closed: () => handlers.menuClosed(),
     });
+
+    this.propertiesSection = root.querySelector("#properties") as HTMLElement;
+    this.propertiesHead = root.querySelector("#properties-head") as HTMLButtonElement;
+    this.propertiesList = root.querySelector("#properties-list") as HTMLElement;
+    this.propertiesSplitter = root.querySelector("#properties-splitter") as HTMLElement;
+    this.propertiesHead.addEventListener("click", () => this.togglePropertiesOpen());
+    this.installPropertiesSplitter();
 
     buildToolbar(
       root.querySelector("#toolbar") as HTMLElement,
@@ -203,6 +234,147 @@ export class Shell {
   /** Asks the host for the top-level menus. Called once the transport is up. */
   requestMenus(): void {
     this.menubar.refresh();
+  }
+
+  /** Replaces the properties panel with the shown component's properties. */
+  setProperties(component: string, properties: ShellProperty[]): void {
+    this.propertiesComponent = component;
+    this.properties = properties;
+    this.renderProperties();
+  }
+
+  /** Opens the properties section and puts focus in it, for the menu route to it. */
+  revealProperties(): void {
+    if (!this.propertiesOpen) {
+      this.togglePropertiesOpen();
+    }
+
+    this.propertiesList.querySelector<HTMLInputElement>("input")?.focus();
+  }
+
+  /**
+   * Makes the divider above the properties pane draggable, the same way as the other two.
+   * The pane is docked at the bottom of the sidebar, so dragging up makes it taller.
+   */
+  private installPropertiesSplitter(): void {
+    this.propertiesSplitter.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      event.preventDefault();
+      this.propertiesSplitter.setPointerCapture(event.pointerId);
+
+      const startY = event.clientY;
+      const startHeight = this.propertiesHeight;
+
+      const move = (moved: PointerEvent) => this.setPropertiesHeight(startHeight - (moved.clientY - startY));
+      const end = (ended: PointerEvent) => {
+        this.propertiesSplitter.releasePointerCapture(ended.pointerId);
+        this.propertiesSplitter.removeEventListener("pointermove", move);
+        this.propertiesSplitter.removeEventListener("pointerup", end);
+        this.propertiesSplitter.removeEventListener("pointercancel", end);
+      };
+
+      this.propertiesSplitter.addEventListener("pointermove", move);
+      this.propertiesSplitter.addEventListener("pointerup", end);
+      this.propertiesSplitter.addEventListener("pointercancel", end);
+    });
+
+    this.propertiesSplitter.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowUp") {
+        this.setPropertiesHeight(this.propertiesHeight + KEYBOARD_STEP);
+      } else if (event.key === "ArrowDown") {
+        this.setPropertiesHeight(this.propertiesHeight - KEYBOARD_STEP);
+      } else {
+        return;
+      }
+
+      event.preventDefault();
+    });
+  }
+
+  private setPropertiesHeight(height: number): void {
+    // Bounded against the sidebar, so the tree keeps a useful minimum and the pane cannot be
+    // dragged out through the top of it.
+    const sidebar = this.propertiesSection.parentElement as HTMLElement;
+    const largest = Math.max(MIN_PROPERTIES_HEIGHT, sidebar.clientHeight - MIN_TREE_HEIGHT);
+
+    this.propertiesHeight = Math.round(Math.min(largest, Math.max(MIN_PROPERTIES_HEIGHT, height)));
+    sidebar.style.setProperty("--properties-height", `${this.propertiesHeight}px`);
+  }
+
+  private togglePropertiesOpen(): void {
+    this.propertiesOpen = !this.propertiesOpen;
+    this.propertiesList.hidden = !this.propertiesOpen;
+    this.propertiesHead.setAttribute("aria-expanded", String(this.propertiesOpen));
+    this.propertiesSection.classList.toggle("collapsed", !this.propertiesOpen);
+
+    // A single collapsed row cannot be resized, so the handle goes with the body.
+    this.propertiesSplitter.hidden = !this.propertiesOpen || this.properties.length === 0;
+  }
+
+  private renderProperties(): void {
+    this.propertiesList.replaceChildren();
+    this.propertiesSection.hidden = this.properties.length === 0;
+    this.propertiesSplitter.hidden = this.properties.length === 0 || !this.propertiesOpen;
+
+    for (const property of this.properties) {
+      const row = document.createElement("div");
+      row.className = "prop-row";
+      row.setAttribute("role", "listitem");
+
+      const name = document.createElement("span");
+      name.className = "prop-name";
+      name.textContent = property.name;
+      name.title = property.name;
+
+      row.appendChild(name);
+
+      if (property.writable) {
+        const input = document.createElement("input");
+        input.className = "prop-value";
+        input.type = "text";
+        input.value = property.value;
+        input.spellcheck = false;
+        input.setAttribute("aria-label", `${property.name} of ${this.propertiesComponent}`);
+
+        // Committed when the developer is done, not per keystroke: Enter commits and stays,
+        // leaving commits, Escape puts the truth back.
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            this.commitProperty(property, input);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            input.value = property.value;
+            input.blur();
+          }
+        });
+        input.addEventListener("blur", () => this.commitProperty(property, input));
+
+        row.appendChild(input);
+      } else {
+        const value = document.createElement("span");
+        value.className = "prop-value readonly";
+        value.textContent = property.value;
+        value.title = property.value;
+        row.appendChild(value);
+      }
+
+      this.propertiesList.appendChild(row);
+    }
+  }
+
+  private commitProperty(property: ShellProperty, input: HTMLInputElement): void {
+    if (input.value === property.value) {
+      return;
+    }
+
+    // Remembered as sent, so blurring after Enter does not send the same edit twice. The host
+    // answers with the real state either way, which also corrects a refused edit.
+    property.value = input.value;
+    this.handlers.editProperty(this.propertiesComponent, property.name, input.value);
   }
 
   /** Appends a line to the Immediate panel's output. */

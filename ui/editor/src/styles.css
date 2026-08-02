@@ -64,7 +64,165 @@ body {
 #sidebar-tree {
   overflow: auto;
   min-height: 0;
+  flex: 1;
   padding-bottom: 8px;
+}
+
+/* The properties of the shown component, pinned under the tree the way an inspector sits under
+   an explorer. Its height is written by the splitter above it. */
+
+#properties {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  height: var(--properties-height, 200px);
+}
+
+#properties.collapsed {
+  height: auto;
+}
+
+#properties[hidden] {
+  display: none;
+}
+
+#properties-splitter {
+  flex: 0 0 auto;
+  height: 5px;
+  cursor: row-resize;
+  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#properties-splitter[hidden] {
+  display: none;
+}
+
+#properties-splitter:hover,
+#properties-splitter:focus-visible {
+  background: var(--vscode-focusBorder, #0078d4);
+  outline: none;
+}
+
+/* A visible grip on every splitter, so the resize affordance does not have to be guessed at. */
+
+#panel-splitter,
+#sidebar-splitter,
+#properties-splitter {
+  position: relative;
+}
+
+#panel-splitter::after,
+#properties-splitter::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 3px;
+  margin: -1.5px 0 0 -18px;
+  border-radius: 2px;
+  background: var(--vscode-editor-foreground, #d4d4d4);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+#sidebar-splitter::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 36px;
+  margin: -18px 0 0 -1.5px;
+  border-radius: 2px;
+  background: var(--vscode-editor-foreground, #d4d4d4);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+#panel-splitter:hover::after,
+#sidebar-splitter:hover::after,
+#properties-splitter:hover::after,
+#panel-splitter:focus-visible::after,
+#sidebar-splitter:focus-visible::after,
+#properties-splitter:focus-visible::after {
+  background: #ffffff;
+  opacity: 0.9;
+}
+
+#properties-head {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+#properties-head::before {
+  content: "\25be ";
+}
+
+#properties.collapsed #properties-head::before {
+  content: "\25b8 ";
+}
+
+#properties-head:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+#properties-list {
+  overflow-y: auto;
+  min-height: 0;
+  padding-bottom: 6px;
+}
+
+.prop-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 42%) 1fr;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 10px;
+}
+
+.prop-name {
+  font-size: 12px;
+  opacity: 0.75;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+input.prop-value {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 1px 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+input.prop-value:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+span.prop-value.readonly {
+  font-size: 12px;
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #sidebar-splitter {

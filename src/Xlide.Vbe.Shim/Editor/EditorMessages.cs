@@ -136,6 +136,21 @@ public sealed record SetChromeMessage(
     [property: JsonPropertyName("menuBar")] bool MenuBar);
 
 /// <summary>
+/// One property of the shown component, rendered for display. Writable says whether an edit will
+/// be attempted, not promised: the editor can still refuse one, and the refusal is reported.
+/// </summary>
+public sealed record SurfacePropertyEntry(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("value")] string Value,
+    [property: JsonPropertyName("writable")] bool Writable);
+
+/// <summary>The properties of the component the surface is showing.</summary>
+public sealed record SetPropertiesMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("component")] string Component,
+    [property: JsonPropertyName("properties")] SurfacePropertyEntry[] Properties);
+
+/// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
 /// rather than at build time.
@@ -157,6 +172,8 @@ public sealed record SetChromeMessage(
 [JsonSerializable(typeof(SetMenuMessage))]
 [JsonSerializable(typeof(SetChromeMessage))]
 [JsonSerializable(typeof(SurfaceMenuItem))]
+[JsonSerializable(typeof(SetPropertiesMessage))]
+[JsonSerializable(typeof(SurfacePropertyEntry))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

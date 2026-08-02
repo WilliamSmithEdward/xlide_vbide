@@ -99,6 +99,7 @@ function boot(): void {
     menuRequest: (path) => bridge.requestMenu(path),
     menuExecute: (path) => bridge.executeMenu(path),
     menuClosed: () => editor.focus(),
+    editProperty: (component, name, value) => bridge.editProperty(component, name, value),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

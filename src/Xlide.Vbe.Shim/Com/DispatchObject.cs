@@ -175,6 +175,23 @@ internal sealed unsafe class DispatchObject : IDisposable
     /// <summary>Writes a numeric property.</summary>
     public void SetInt32(string name, int value) => SetProperty(name, ComVariant.Create(value));
 
+    /// <summary>Writes a floating-point property.</summary>
+    public void SetDouble(string name, double value) => SetProperty(name, ComVariant.Create(value));
+
+    /// <summary>The variant type a property currently holds, which is how its kind is learned.</summary>
+    public VarEnum GetVarType(string name)
+    {
+        using var value = GetProperty(name);
+        return value.VarType;
+    }
+
+    /// <summary>Reads a property and renders it the way the language would print it.</summary>
+    public string GetDisplay(string name)
+    {
+        using var value = GetProperty(name);
+        return Display(value);
+    }
+
     /// <summary>Writes a text property.</summary>
     public void SetString(string name, string value)
     {
@@ -403,6 +420,23 @@ internal sealed unsafe class DispatchObject : IDisposable
         }
 
         using var argument = ComVariant.Create(index);
+        using var value = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [argument]);
+        return FromVariant(value);
+    }
+
+    /// <summary>Reads a named item from a collection that indexes by name as well as position.</summary>
+    public DispatchObject? GetItem(string name)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+
+        var dispId = GetDispId("Item");
+        if (dispId == DispId.Unknown)
+        {
+            dispId = DispId.Value;
+        }
+
+        // The variant owns the string it was built from and frees it when disposed.
+        using var argument = ComVariant.Create(name);
         using var value = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [argument]);
         return FromVariant(value);
     }

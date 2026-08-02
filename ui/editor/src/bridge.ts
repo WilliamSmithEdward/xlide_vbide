@@ -1,7 +1,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { ExplorerProject } from "./explorer.js";
 import type { MenuItem } from "./menubar.js";
-import type { Shell, ShellFinding } from "./shell.js";
+import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID } from "./vba.js";
@@ -58,7 +58,8 @@ export type HostMessage =
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "revealLine"; line: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
-  | { type: "setChrome"; menuBar: boolean };
+  | { type: "setChrome"; menuBar: boolean }
+  | { type: "setProperties"; component: string; properties: ShellProperty[] };
 
 /**
  * Where the page's start-up time went, measured from navigation start.
@@ -87,7 +88,8 @@ export type ClientMessage =
   | { type: "evaluate"; text: string }
   | { type: "panel"; name: string; open: boolean }
   | { type: "menu"; path: number[] }
-  | { type: "menuExecute"; path: number[] };
+  | { type: "menuExecute"; path: number[] }
+  | { type: "editProperty"; component: string; name: string; value: string };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -228,6 +230,11 @@ export class EditorBridge {
     this.transport.post({ type: "menuExecute", path });
   }
 
+  /** Asks the host to write a property the developer edited. */
+  editProperty(component: string, name: string, value: string): void {
+    this.transport.post({ type: "editProperty", component, name, value });
+  }
+
   /**
    * Runs a toolbar command.
    *
@@ -313,6 +320,9 @@ export class EditorBridge {
       case "setChrome":
         this.shell?.setMenuBarVisible(message.menuBar);
         return;
+      case "setProperties":
+        this.shell?.setProperties(message.component, message.properties);
+        return;
       default: {
         const unknown: never = message;
         console.warn("[xlide] unhandled host message", unknown);
@@ -338,6 +348,11 @@ export class EditorBridge {
   private runEditorCommand(id: string): void {
     if (id === "xlide.panel.immediate") {
       this.shell?.showImmediate();
+      return;
+    }
+
+    if (id === "xlide.panel.properties") {
+      this.shell?.revealProperties();
       return;
     }
 
@@ -708,6 +723,27 @@ export function demoTransport(): HostTransport {
         send({ type: "setBreakpoints", lines: [17, 30] });
         send({ type: "setCurrentLine", line: 17 });
         send({ type: "revealLine", line: 17 });
+        send({
+          type: "setProperties",
+          component: "Module1",
+          properties: [
+            { name: "Name", value: "Module1", writable: true },
+            { name: "StandardWidth", value: "8.43", writable: true },
+            { name: "Saved", value: "False", writable: false },
+          ],
+        });
+      }
+      if (message.type === "editProperty") {
+        send({ type: "notice", text: `${message.name} set to '${message.value}'` });
+        send({
+          type: "setProperties",
+          component: message.component,
+          properties: [
+            { name: "Name", value: message.name === "Name" ? message.value : "Module1", writable: true },
+            { name: "StandardWidth", value: message.name === "StandardWidth" ? message.value : "8.43", writable: true },
+            { name: "Saved", value: "False", writable: false },
+          ],
+        });
       }
       if (message.type === "breakpointToggleRequested") {
         // The real host owns the breakpoint set; the demo just echoes the single line back.

@@ -232,6 +232,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.PanelChanged = OnPanelChanged;
                 _editorSurface.MenuRequested = OnMenuRequested;
                 _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
+                _editorSurface.PropertyEditRequested = OnPropertyEdit;
 
                 // The moment the page is up is the moment the menu bar can be covered, and it is
                 // not a window event, so nothing else would recompute the bounds.
@@ -587,6 +588,216 @@ internal sealed class AddInSession : IDisposable
 
         _editorSurface?.ShowBreakpoints(
             _breakpoints.TryGetValue(module, out var lines) ? [.. lines] : []);
+    }
+
+    /// <summary>
+    /// Sends the surface the properties of the component it is showing.
+    ///
+    /// Read from the component's own property collection, which is the documented model behind the
+    /// editor's Properties window: a plain module carries only its name, a document component
+    /// carries the host object's properties, and a form carries the form's. A value that cannot be
+    /// read is shown as unavailable rather than dropped, so the panel's shape stays the shape of
+    /// the component.
+    /// </summary>
+    private void PublishProperties()
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        if (surface is null || module is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var found = FindComponent(module);
+            using var properties = found?.GetObject("Properties");
+            var count = properties?.GetInt32("Count") ?? 0;
+
+            var entries = new List<SurfacePropertyEntry>(count);
+            for (var i = 1; i <= count; i++)
+            {
+                using var property = properties!.GetItem(i);
+                if (property is null)
+                {
+                    continue;
+                }
+
+                string? name;
+                try
+                {
+                    name = property.GetString("Name");
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(name))
+                {
+                    entries.Add(DescribeProperty(name, property));
+                }
+            }
+
+            // The order the collection enumerates in is arbitrary; alphabetical is findable.
+            entries.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            surface.ShowProperties(module, [.. entries]);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"properties: {module} could not be read", ex);
+        }
+    }
+
+    /// <summary>
+    /// One property, rendered for the panel. Whether it is offered for editing comes from the type
+    /// it currently holds: values of simple types are editable, objects and the unreadable are not.
+    /// The editor can still refuse an edit, and that refusal is reported when it happens.
+    /// </summary>
+    private static SurfacePropertyEntry DescribeProperty(string name, DispatchObject property)
+    {
+        try
+        {
+            var type = property.GetVarType("Value");
+            var writable = type is VarEnum.VT_BSTR or VarEnum.VT_BOOL
+                or VarEnum.VT_I2 or VarEnum.VT_I4 or VarEnum.VT_INT
+                or VarEnum.VT_R4 or VarEnum.VT_R8 or VarEnum.VT_EMPTY;
+
+            return new SurfacePropertyEntry(name, property.GetDisplay("Value"), writable);
+        }
+        catch (Exception)
+        {
+            // Some values refuse to be read in some host states. The property still exists, and a
+            // row that says so beats a property that silently vanishes.
+            return new SurfacePropertyEntry(name, "(unavailable)", false);
+        }
+    }
+
+    /// <summary>
+    /// Writes a property the developer edited in the panel, in the type the property currently
+    /// holds. A refusal is reported in the editor's own words; a rename is adopted everywhere the
+    /// old name was a key.
+    /// </summary>
+    private void OnPropertyEdit(string component, string name, string value)
+    {
+        try
+        {
+            using var found = FindComponent(component);
+            using var properties = found?.GetObject("Properties");
+            using var property = properties?.GetItem(name);
+            if (found is null || property is null)
+            {
+                Log.Info($"properties: {component}.{name} no longer exists");
+                PublishProperties();
+                return;
+            }
+
+            if (!WriteProperty(property, value, out var complaint))
+            {
+                _editorSurface?.Notify($"{name}: {complaint}");
+                PublishProperties();
+                return;
+            }
+
+            Log.Info($"properties: {component}.{name} = '{value}'");
+
+            // Renaming changes the key everything else holds: the write baseline, the breakpoint
+            // record, the tabs, the explorer, and the name the surface files the document under.
+            var renamed = string.Equals(name, "Name", StringComparison.OrdinalIgnoreCase)
+                ? found.GetString("Name")
+                : null;
+
+            if (renamed is not null && !string.Equals(renamed, component, StringComparison.OrdinalIgnoreCase))
+            {
+                AdoptRename(component, renamed);
+            }
+            else
+            {
+                PublishProperties();
+            }
+        }
+        catch (Exception ex)
+        {
+            // The message is the editor's own thanks to the exception information the dispatch
+            // layer captures, and it is the answer to why the edit was refused.
+            Log.Error($"properties: {component}.{name} could not be set", ex);
+            _editorSurface?.Notify($"{name}: {ex.Message}");
+            PublishProperties();
+        }
+    }
+
+    /// <summary>
+    /// Writes a value into a property in the type the property holds now. False with a complaint
+    /// when the text cannot become that type; the write itself may still throw, and that is the
+    /// editor refusing rather than the value failing to parse.
+    /// </summary>
+    private static bool WriteProperty(DispatchObject property, string value, out string complaint)
+    {
+        complaint = string.Empty;
+
+        switch (property.GetVarType("Value"))
+        {
+            case VarEnum.VT_BOOL:
+                if (bool.TryParse(value, out var flag))
+                {
+                    property.SetBool("Value", flag);
+                    return true;
+                }
+
+                complaint = $"'{value}' is not True or False.";
+                return false;
+
+            case VarEnum.VT_I2 or VarEnum.VT_I4 or VarEnum.VT_INT:
+                if (int.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var number))
+                {
+                    property.SetInt32("Value", number);
+                    return true;
+                }
+
+                complaint = $"'{value}' is not a whole number.";
+                return false;
+
+            case VarEnum.VT_R4 or VarEnum.VT_R8:
+                if (double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var real))
+                {
+                    property.SetDouble("Value", real);
+                    return true;
+                }
+
+                complaint = $"'{value}' is not a number.";
+                return false;
+
+            case VarEnum.VT_BSTR or VarEnum.VT_EMPTY:
+                property.SetString("Value", value);
+                return true;
+
+            default:
+                complaint = "This property cannot be edited here.";
+                return false;
+        }
+    }
+
+    /// <summary>Moves every record keyed by a component's old name to its new one, then shows it.</summary>
+    private void AdoptRename(string oldName, string newName)
+    {
+        if (_writtenModules.Remove(oldName, out var baseline))
+        {
+            _writtenModules[newName] = baseline;
+        }
+
+        if (_breakpoints.Remove(oldName, out var lines))
+        {
+            _breakpoints[newName] = lines;
+        }
+
+        Log.Info($"properties: {oldName} renamed to {newName}");
+
+        // Shown under the new name, which also republishes markers, breakpoints and properties.
+        // The analyzer re-runs because its findings carry the old name until it does.
+        ShowModuleInSurface(newName);
+        PublishModules();
+        PublishProjects();
+        _analysis?.Reanalyse();
     }
 
     /// <summary>
@@ -954,6 +1165,10 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface?.RunEditorCommand("xlide.panel.immediate");
                 return true;
 
+            case VbeCommands.Command.PropertiesWindow:
+                _editorSurface?.RunEditorCommand("xlide.panel.properties");
+                return true;
+
             case VbeCommands.Command.ProjectExplorer:
                 _editorSurface?.Notify("The project explorer is part of the editor and always shown.");
                 return true;
@@ -1031,6 +1246,7 @@ internal sealed class AddInSession : IDisposable
         PublishMarkersForShownModule();
         PublishFindingsToSurface();
         PublishBreakpoints();
+        PublishProperties();
     }
 
     /// <summary>

@@ -120,6 +120,14 @@ has said plainly it must never be a production mechanism.
   0,0 after ready) and 11 menus read; dropdowns, submenus, separators, disabled/checked items,
   shortcut column, execution paths, Alt+letter, F10, arrows and Escape verified in the browser
   demo (demoTransport serves a canned tree).
+- The Properties window is replaced. A surface pane pinned under the explorer (resizable by a
+  gripped splitter, like the other two) shows the shown component's properties from its own
+  Properties collection: name for a plain module, the host object's properties for a document
+  component. Simple-typed values are editable in place; edits write in the type the property
+  holds; refusals are reported in the editor's own words; renaming a component rekeys the write
+  baseline and breakpoint record and reloads the document under the new name. View -> Properties
+  Window opens this pane. Verified live: the pane renders from the real collection; the edit
+  round trip is verified against the demo transport, and rename should be exercised by hand.
 - 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit
@@ -243,18 +251,26 @@ A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled s
    the page sees anything; Alt alone does not focus the bar (Alt+letter and F10 do); floating
    native toolbars are left alone and uncontested; disabled items are as fresh as the moment the
    menu opened, and an execute on a stale item answers with a notice.
-2. **~2.1 s surface start-up**, entirely bundle fetch/parse (editor construction is 50 ms). The
+2. **Right-click surfaces, per object class (user directive 2026-08-01).** Every context menu in
+   the product must be validated against the class of the thing clicked: a project, a standard
+   module, a class module, a form, a document component, a tab, the editor text, the breakpoint
+   margin and a properties row each get options that are logical for that class, and irrelevant
+   options are removed rather than shown disabled. Where an action exists only natively, drive
+   the native popup bar's item by position chain the way the menu bar does; otherwise use surface
+   commands. Today the only context menu anywhere is Monaco's own inside the editor; everything
+   else has none yet, so this lands as each surface grows one.
+3. **~2.1 s surface start-up**, entirely bundle fetch/parse (editor construction is 50 ms). The
    page reports its own timings in the ready message on every run. Untried: bundle splitting,
    warming during host start-up, cached compilation. (Task #17.)
-3. **Panels are fixed.** The user wants VS-style drag-to-any-edge / stack-as-tabs.
-4. **Locals, Watch, Object Browser are still native** (deliberate: no replacement yet; hiding
+4. **Panels are fixed.** The user wants VS-style drag-to-any-edge / stack-as-tabs.
+5. **Locals, Watch, Object Browser are still native** (deliberate: no replacement yet; hiding
    them would remove features). While any is open the surface retreats to document-area bounds,
    so the frame's pale line reappears — accepted trade, logged when it happens.
-5. **Debug.Print lands only while the Immediate panel is open** (poll-gated). The text still
+6. **Debug.Print lands only while the Immediate panel is open** (poll-gated). The text still
    exists in the hidden window; backfill-on-first-open is a small known gap.
-6. Stepping's current-line marker is implemented and log-verified, not yet pixel-verified in a
+7. Stepping's current-line marker is implemented and log-verified, not yet pixel-verified in a
    live break by the user.
-7. Forms designer untouched. Analyzer parser port (~3,400 lines) next in that track; lexer done.
+8. Forms designer untouched. Analyzer parser port (~3,400 lines) next in that track; lexer done.
    IntelliSense backfill from type libraries not started. No settings surface. Nothing signed.
 
 ## 10. Conventions and user directives (binding)

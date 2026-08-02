@@ -29,6 +29,11 @@ const INDEX_HTML = `<!doctype html>
     <div id="sidebar">
       <div id="sidebar-head">Project</div>
       <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
+      <div id="properties-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the properties panel" tabindex="0" hidden></div>
+      <div id="properties" hidden>
+        <button id="properties-head" type="button" aria-expanded="true" aria-controls="properties-list">Properties</button>
+        <div id="properties-list" role="list" aria-label="Properties of the shown component"></div>
+      </div>
     </div>
     <div id="sidebar-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the project explorer" tabindex="0"></div>
     <div id="workspace">
