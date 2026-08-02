@@ -341,9 +341,44 @@ export class EditorBridge {
     this.transport.post({ type: "evaluate", text });
   }
 
-  /** Asks the host to go to a finding, in response to the developer picking it. */
+  /**
+   * Asks the host to go to a place: a finding, or a procedure picked in the tree. The host
+   * shows the module and moves the native caret; the surface's own caret is placed here, the
+   * moment the module is the one showing, so the click ends with the cursor at the target and
+   * the editor focused, ready to type.
+   */
   navigate(module: string, line: number, column: number): void {
+    this.pendingCaret = { module, line, column };
     this.transport.post({ type: "navigate", module, line, column });
+    this.applyPendingCaret();
+  }
+
+  /** A caret waiting for its module to arrive; applied on the next matching loadDocument. */
+  private pendingCaret: { module: string; line: number; column: number } | null = null;
+
+  /**
+   * Places the waiting caret if the shown module is the one it belongs to. A load of any other
+   * module supersedes the navigation, and the wait is abandoned rather than left to fire on
+   * some later visit.
+   */
+  private applyPendingCaret(): void {
+    const pending = this.pendingCaret;
+    const model = this.model();
+    if (!pending || !model) {
+      return;
+    }
+
+    const uri = monaco.Uri.parse(`xlide:/${encodeURIComponent(pending.module)}`);
+    if (model.uri.toString() !== uri.toString()) {
+      return;
+    }
+
+    this.pendingCaret = null;
+    const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
+    const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
+    this.editor.setPosition({ lineNumber: line, column });
+    this.editor.revealLineInCenterIfOutsideViewport(line);
+    this.editor.focus();
   }
 
   /** Asks the host for a menu's items; [] is the bar itself. */
@@ -764,6 +799,7 @@ export class EditorBridge {
     }
 
     this.revision = 0;
+    this.pendingCaret = null;
     this.shell?.setWorkspaceEmpty(true);
   }
 
@@ -794,6 +830,14 @@ export class EditorBridge {
     this.revision = 0;
     this.currentLine.clear();
     this.breakpoints.clear();
+
+    // A navigation that asked for this module lands its caret now; one that asked for a
+    // different module has been superseded by this load and is dropped.
+    if (this.pendingCaret && this.pendingCaret.module === moduleName) {
+      this.applyPendingCaret();
+    } else {
+      this.pendingCaret = null;
+    }
   }
 
   /**
