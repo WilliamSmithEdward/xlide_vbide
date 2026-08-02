@@ -28,9 +28,10 @@ internal sealed class ImmediateEvaluator
     ///
     /// A VBA identifier has to start with a letter, so this cannot be given the leading underscores
     /// that would otherwise mark it as not the developer's. The name is chosen to be one nobody
-    /// would pick instead.
+    /// would pick instead. Internal because the session must treat this module as invisible: it
+    /// briefly exists, and nothing of it may reach a tab, the explorer, or the editor.
     /// </summary>
-    private const string ScratchModule = "XlideImmediateScratch";
+    internal const string ScratchModule = "XlideImmediateScratch";
 
     /// <summary>Procedure the module exposes, which is what gets run by name.</summary>
     private const string ScratchProcedure = "XlideImmediateRun";
@@ -120,7 +121,9 @@ internal sealed class ImmediateEvaluator
             // compiled procedure and the host is what knows how to call into it.
             var value = application.CallToString("Run", $"{ScratchModule}.{ScratchProcedure}");
 
-            return wantsValue ? new Result(value, Failed: false) : new Result("done", Failed: false);
+            // A statement that succeeded says nothing, which is what the editor's own Immediate
+            // window does: output belongs to the code (Debug.Print), not to the ceremony.
+            return wantsValue ? new Result(value, Failed: false) : new Result(string.Empty, Failed: false);
         }
         finally
         {

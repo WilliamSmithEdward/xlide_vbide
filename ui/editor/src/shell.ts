@@ -127,6 +127,9 @@ export class Shell {
   private readonly history: string[] = [];
   private historyIndex = 0;
 
+  /** True between submitting a line and its first answer, when focus belongs back at the prompt. */
+  private immediateAwaitingResult = false;
+
   private active: string | null = null;
   private findings: ShellFinding[] = [];
 
@@ -526,6 +529,13 @@ export class Shell {
 
     // Kept at the bottom, because the newest line is the answer to what was just asked.
     this.immediateLog.scrollTop = this.immediateLog.scrollHeight;
+
+    // The answer to a submitted line puts focus back at the prompt, and only that: output that
+    // arrives on its own must not yank focus away from wherever the developer is typing.
+    if (kind !== "echo" && this.immediateAwaitingResult) {
+      this.immediateAwaitingResult = false;
+      this.immediateInput.focus();
+    }
   }
 
   /** Brings the Immediate panel forward, opening the panel if it was collapsed. */
@@ -609,6 +619,7 @@ export class Shell {
     this.immediateInput.value = "";
 
     this.appendImmediate(text, "echo");
+    this.immediateAwaitingResult = true;
     this.handlers.evaluate(text);
   }
 

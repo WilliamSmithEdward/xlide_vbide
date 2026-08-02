@@ -16,6 +16,41 @@ body {
   background: var(--vscode-editor-background, #1e1e1e);
 }
 
+/* Scrollbars in the shell's own panels, drawn to the theme. The editor draws its own and is not
+   affected; everything else was showing the browser's stock light bars. */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, rgba(128, 128, 128, 0.35));
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(160, 160, 160, 0.5));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: var(--vscode-scrollbarSlider-activeBackground, rgba(180, 180, 180, 0.6));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 #shell {
   position: absolute;
   inset: 0;

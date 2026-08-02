@@ -141,10 +141,13 @@ internal sealed class ImmediateReader : IDisposable
     /// <summary>
     /// Reports whatever the window has gained since the last read.
     ///
-    /// The window is a scrolling buffer that the editor trims and the developer can clear, so what
-    /// it holds is not always what it held plus something. When the new text continues the old, the
-    /// difference is new output; when it does not, the buffer was cleared or trimmed and the whole
-    /// of it is treated as new rather than trying to work out which part survived.
+    /// Two readings are not trusted. An empty one is ignored outright: the window is hidden and
+    /// nobody can clear it, but a project reset makes it read as empty for a moment, and adopting
+    /// that moment as the baseline meant the next reading replayed the entire buffer as if it
+    /// were new. That replay is exactly how every old line reappeared under each evaluation. And
+    /// a reading that does not continue the old one is adopted silently rather than reported:
+    /// the buffer was trimmed, which part survived is unknowable, and showing all of it again is
+    /// worse than showing none of it.
     /// </summary>
     public void Poll()
     {
@@ -154,15 +157,18 @@ internal sealed class ImmediateReader : IDisposable
         }
 
         var current = ReadAll();
-        if (current is null || current == _seen)
+        if (current is null || current.Length == 0 || current == _seen)
         {
             return;
         }
 
-        var addition = current.StartsWith(_seen, StringComparison.Ordinal)
-            ? current[_seen.Length..]
-            : current;
+        if (!current.StartsWith(_seen, StringComparison.Ordinal))
+        {
+            _seen = current;
+            return;
+        }
 
+        var addition = current[_seen.Length..];
         _seen = current;
 
         if (addition.Length > 0)

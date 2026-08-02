@@ -70,6 +70,14 @@ internal sealed class AddInSession : IDisposable
     /// <summary>Automation object for the editor itself.</summary>
     public DispatchObject Editor => _editor;
 
+    /// <summary>
+    /// Whether a component is the evaluator's scratch module, which briefly exists during every
+    /// Immediate evaluation and must never reach a tab, the explorer, the properties panel, or
+    /// the editor: it surfacing is what made every evaluation flash the screen.
+    /// </summary>
+    private static bool IsScratchComponent(string? name) =>
+        string.Equals(name, ImmediateEvaluator.ScratchModule, StringComparison.OrdinalIgnoreCase);
+
     public void Start()
     {
         Log.Info("session starting");
@@ -172,10 +180,17 @@ internal sealed class AddInSession : IDisposable
     {
         try
         {
-            var pane = panes.FirstOrDefault(p => p.IsVisible);
+            var pane = panes.FirstOrDefault(p => p.IsVisible && !IsScratchComponent(p.Component));
 
             if (pane.Window == 0)
             {
+                // A visible pane that was filtered out is the evaluator's scratch module mid
+                // evaluation. Everything stays as it is; the pane is gone a moment later.
+                if (panes.Any(p => p.IsVisible))
+                {
+                    return;
+                }
+
                 OnNoVisiblePane();
                 return;
             }
@@ -1282,10 +1297,19 @@ internal sealed class AddInSession : IDisposable
         var evaluator = _immediate ??= new ImmediateEvaluator(_editor);
         var result = evaluator.Evaluate(line, _inBreak);
 
-        _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
+        // A successful statement says nothing, which is the native window's own manner. What the
+        // code printed arrives through the Debug.Print reader; the ceremony stays silent.
+        if (result.Failed || result.Text.Length > 0)
+        {
+            _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
+        }
 
         // Evaluating adds and removes a module, which the analyzer would otherwise report on.
         _analysis?.Reanalyse();
+
+        // Running the line took the host through pane churn that ends with a native pane active
+        // and the keyboard on it. The developer is mid-conversation with the prompt.
+        _editorSurface?.Focus();
     }
 
     /// <summary>Answers the surface's menu bar with the items the editor holds right now.</summary>
@@ -1541,7 +1565,9 @@ internal sealed class AddInSession : IDisposable
                     using var module = pane?.GetObject("CodeModule");
                     using var component = module?.GetObject("Parent");
 
-                    if (component?.GetString("Name") is { Length: > 0 } name && !modules.Contains(name))
+                    if (component?.GetString("Name") is { Length: > 0 } name
+                        && !IsScratchComponent(name)
+                        && !modules.Contains(name))
                     {
                         modules.Add(name);
                     }
@@ -1597,7 +1623,7 @@ internal sealed class AddInSession : IDisposable
                 for (var j = 1; j <= componentCount; j++)
                 {
                     using var component = components.GetItem(j);
-                    if (component?.GetString("Name") is { Length: > 0 } name)
+                    if (component?.GetString("Name") is { Length: > 0 } name && !IsScratchComponent(name))
                     {
                         members.Add(new SurfaceComponent(name, component.GetInt32("Type")));
                     }
