@@ -190,3 +190,73 @@ export interface SignatureInfoPayload {
 export interface SignatureHelpResult {
     signature: SignatureInfoPayload | null;
 }
+
+/** A text replacement, offsets into the request's source. An insertion has start === end. */
+export interface TextEditPayload {
+    start: number;
+    end: number;
+    text: string;
+}
+
+/**
+ * textDocument/smartEnter: what Enter should leave behind. The source is the text just after
+ * the newline went in; the offset names where it went in, which is the end of the line Enter
+ * was pressed on. Same liveness rule as completion.
+ */
+export interface SmartEnterParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now, newline included. */
+    source: string;
+    /** UTF-16 offset at which the newline was inserted. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface SmartEnterResult {
+    edits: TextEditPayload[];
+    /** Where the caret belongs in the text as it stands after the edits; null with no edits. */
+    caret: number | null;
+}
+
+/**
+ * textDocument/canonicalCase: the case corrections for a span. The single form corrects only
+ * the identifier ending at the span's end. completeHeader also finishes a bare procedure
+ * header's parentheses, and is only meaningful when the span is a whole line.
+ */
+export interface CanonicalCaseParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now. */
+    source: string;
+    start: number;
+    end: number;
+    single?: boolean;
+    completeHeader?: boolean;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface CanonicalCaseResult {
+    edits: TextEditPayload[];
+}
+
+/**
+ * textDocument/loopSync: when the edit at an offset touched a simple For/For Each iterator or
+ * its Next name, the paired rename for the other side.
+ */
+export interface LoopSyncParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now. */
+    source: string;
+    /** UTF-16 offset just after the edit. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface LoopSyncResult {
+    edits: TextEditPayload[];
+}

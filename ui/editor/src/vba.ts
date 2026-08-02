@@ -74,17 +74,26 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
   },
 };
 
+// The configuration below is the extension's own language-configuration JSON, transliterated:
+// its patterns spell case-insensitivity as [Xx] character classes because JSON has no flags,
+// and here they are the same expressions with /i. The behaviours are a contract shared with
+// Smart Enter, and they should only change together.
 export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = {
   comments: {
     lineComment: "'",
   },
-  brackets: [["(", ")"]],
+  brackets: [
+    ["(", ")"],
+    ["[", "]"],
+  ],
   autoClosingPairs: [
     { open: "(", close: ")" },
-    { open: '"', close: '"', notIn: ["string", "comment"] },
+    { open: "[", close: "]" },
+    { open: '"', close: '"', notIn: ["string"] },
   ],
   surroundingPairs: [
     { open: "(", close: ")" },
+    { open: "[", close: "]" },
     { open: '"', close: '"' },
   ],
   // VBA identifiers are letters, digits and underscore; the trailing type-declaration
@@ -92,16 +101,87 @@ export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = 
   wordPattern: /[A-Za-z_][A-Za-z0-9_]*/g,
 
   indentationRules: {
-    // Opens a block. Guards:
-    //  - `Declare [PtrSafe] Function|Sub` is a one line declaration, so it is excluded.
-    //  - `If ... Then <stmt>` is a one line If, so `Then` must end the line (a trailing
-    //    comment is allowed).
-    increaseIndentPattern:
-      /^(?!.*\bDeclare\b)\s*(?:(?:Public|Private|Friend|Global)\s+)?(?:(?:Static\s+)?(?:Sub|Function)\b|Property\s+(?:Get|Let|Set)\b|(?:Type|Enum)\s+\w+|If\b.*\bThen\s*(?:'.*)?$|ElseIf\b.*\bThen\s*(?:'.*)?$|Else\s*(?:'.*)?$|For\b|Do\b|While\b|With\b|Select\s+Case\b|Case\b)/i,
-    // Closes a block. Else/ElseIf/Case are in both patterns: the line itself pulls back one
-    // level, the following lines indent again.
-    decreaseIndentPattern: /^\s*(?:End\b|Next\b|Loop\b|Wend\b|Else\b|ElseIf\b|Case\b)/i,
+    // Opens a block. `Declare [PtrSafe] Function` never matches: the line starts with Declare,
+    // which is not among the modifiers. A one-line `If ... Then <stmt>` never matches: Then
+    // must end the line, give or take a trailing comment.
+    increaseIndentPattern: new RegExp(
+      "^[ \\t]*(?:(?:Public|Private|Friend|Global|Static)[ \\t]+)*(?:Sub|Function)[ \\t]+\\w"
+      + "|^[ \\t]*(?:(?:Public|Private|Friend)[ \\t]+)*Property[ \\t]+(?:Get|Let|Set)[ \\t]+\\w"
+      + "|^[ \\t]*If[ \\t]+\\S.+\\bThen[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*(?:For[ \\t]+Each[ \\t]+[A-Za-z_][A-Za-z0-9_]*[ \\t]+In[ \\t]+\\S.*"
+      + "|For[ \\t]+[A-Za-z_][A-Za-z0-9_]*[ \\t]*=.*\\bTo\\b.+)[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*Do(?:[ \\t]+(?:While|Until)[ \\t]+\\S.*)?[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*While[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*With[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*Select[ \\t]+Case[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*(?:Type|Enum)[ \\t]+\\w"
+      + "|^[ \\t]*#[ \\t]*If[ \\t]+\\S.+\\bThen[ \\t]*(?:'.*)?$",
+      "i",
+    ),
+    // Closes a block. Else/ElseIf/Case pull their own line back; the on-enter rules indent the
+    // lines that follow them again.
+    decreaseIndentPattern: new RegExp(
+      "^[ \\t]*(?:End[ \\t]+(?:Sub|Function|Property|If|With|Select|Type|Enum)"
+      + "|#[ \\t]*End[ \\t]*If\\b|Next\\b|Loop\\b|Wend\\b|Else\\b|ElseIf\\b|Case\\b)",
+      "i",
+    ),
   },
+
+  folding: {
+    markers: {
+      start: new RegExp(
+        "^[ \\t]*(?:(?:Public|Private|Friend|Global|Static)[ \\t]+)*(?:Sub|Function)[ \\t]+\\w"
+        + "|^[ \\t]*(?:(?:Public|Private|Friend)[ \\t]+)*Property[ \\t]+(?:Get|Let|Set)[ \\t]+\\w"
+        + "|^[ \\t]*(?:(?:Public|Private|Global)[ \\t]+)*(?:Type|Enum)[ \\t]+\\w",
+        "i",
+      ),
+      end: new RegExp("^[ \\t]*End[ \\t]+(?:Sub|Function|Property|Type|Enum)\\b", "i"),
+    },
+  },
+
+  onEnterRules: [
+    {
+      beforeText: /^[ \t]*If[ \t]+\S.+\bThen[ \t]*(?:'.*)?$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*Else(?:If\b.*\bThen)?[ \t]*(?:'.*)?$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*Case\b.+$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*(?:For[ \t]+Each[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+In[ \t]+\S.*|For[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=.*\bTo\b.+|Do(?:[ \t]+(?:While|Until)[ \t]+\S.*)?|While[ \t]+\S.*|With[ \t]+\S.*)[ \t]*(?:'.*)?$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*Select[ \t]+Case[ \t]+\S.*$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*(?:(?:Public|Private|Friend|Global|Static)[ \t]+)*(?:Sub|Function)[ \t]+\w.*$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*(?:(?:Public|Private|Friend)[ \t]+)*Property[ \t]+(?:Get|Let|Set)[ \t]+\w.*$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*(?:Type|Enum)[ \t]+\w.*$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      beforeText: /^[ \t]*#[ \t]*If[ \t]+\S.+\bThen[ \t]*(?:'.*)?$/i,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+    {
+      // A line continuation: the underscore at the end of a line, after a space.
+      beforeText: /.*[ \t]_$/,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    },
+  ],
 };
 
 export function registerVba(): void {

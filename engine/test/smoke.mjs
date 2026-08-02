@@ -302,6 +302,157 @@ try {
 
     check('outside any call there is no tip', () => assert.equal(noCallTip.signature, null));
 
+    // Smart Enter: the block completion, header parens, and continuations the extension does.
+    const applyEdits = (text, edits) => [...edits]
+        .sort((a, b) => b.start - a.start)
+        .reduce((out, edit) => out.slice(0, edit.start) + edit.text + out.slice(edit.end), text);
+
+    const subEnterSource = 'Option Explicit\r\n\r\nSub Test\r\n';
+    const subEnter = await call('textDocument/smartEnter', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: subEnterSource,
+        offset: subEnterSource.indexOf('Sub Test') + 'Sub Test'.length,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> smart enter on Sub Test: ${subEnter.edits.length} edit(s), caret ${subEnter.caret}`);
+    check('Enter after Sub Test completes the parens and inserts End Sub', () => {
+        const after = applyEdits(subEnterSource, subEnter.edits);
+        assert.equal(after, 'Option Explicit\r\n\r\nSub Test()\r\n\r\n\t\r\n\r\nEnd Sub');
+        assert.equal(after[subEnter.caret - 1], '\t', 'caret should sit at the end of the body line');
+    });
+
+    const withEnterSource = 'Sub Fine()\r\n    With Application\r\n\r\nEnd Sub\r\n';
+    const withEnter = await call('textDocument/smartEnter', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: withEnterSource,
+        offset: withEnterSource.indexOf('With Application') + 'With Application'.length,
+        moduleType: 'standard',
+    });
+
+    check('Enter after With inserts End With and seeds the member dot', () => {
+        const after = applyEdits(withEnterSource, withEnter.edits);
+        assert.ok(after.includes('    End With'), `got: ${JSON.stringify(after)}`);
+        assert.equal(after[withEnter.caret - 1], '.', 'caret should sit after the seeded dot');
+    });
+
+    const commentEnterSource = "' hello\r\n";
+    const commentEnter = await call('textDocument/smartEnter', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: commentEnterSource,
+        offset: commentEnterSource.indexOf("' hello") + "' hello".length,
+        moduleType: 'standard',
+    });
+
+    check('Enter at the end of a comment continues the apostrophes', () => {
+        assert.equal(commentEnter.edits.length, 1);
+        assert.equal(commentEnter.edits[0].text, "' ");
+    });
+
+    const closedAheadSource = 'Sub Alpha\r\n\r\nEnd Sub\r\n';
+    const closedAhead = await call('textDocument/smartEnter', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: closedAheadSource,
+        offset: closedAheadSource.indexOf('Sub Alpha') + 'Sub Alpha'.length,
+        moduleType: 'standard',
+    });
+
+    check('an already-closed block gets its parens and indent but no second closer', () => {
+        const after = applyEdits(closedAheadSource, closedAhead.edits);
+        assert.equal(after, 'Sub Alpha()\r\n\t\r\nEnd Sub\r\n');
+    });
+
+    const midlineSource = 'Sub Test\r\nleftover\r\n';
+    const midline = await call('textDocument/smartEnter', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: midlineSource,
+        offset: midlineSource.indexOf('Sub Test') + 'Sub Test'.length,
+        moduleType: 'standard',
+    });
+
+    check('Enter that pushed text down owes nothing', () => assert.equal(midline.edits.length, 0));
+
+    // Canonical case: keywords respelled, identifiers matched to their declarations.
+    const lowerLineSource = GOOD_MODULE.replace('    n = 1', '    dim m as long');
+    const lowerLineStart = lowerLineSource.indexOf('    dim m as long');
+    const lowerLine = await call('textDocument/canonicalCase', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: lowerLineSource,
+        start: lowerLineStart,
+        end: lowerLineStart + '    dim m as long'.length,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> canonical case on the lower-case line: ${lowerLine.edits.length} edit(s)`);
+    check('dim m as long recases to Dim m As Long', () => {
+        assert.deepEqual(lowerLine.edits.map((edit) => edit.text), ['Dim', 'As', 'Long']);
+    });
+
+    const runtimeCaseSource = GOOD_MODULE.replace('    n = 1', '    msgbox "hi"');
+    const runtimeCaseEnd = runtimeCaseSource.indexOf('msgbox') + 'msgbox'.length;
+    const runtimeCase = await call('textDocument/canonicalCase', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: runtimeCaseSource,
+        start: runtimeCaseEnd,
+        end: runtimeCaseEnd,
+        single: true,
+        moduleType: 'standard',
+    });
+
+    check('msgbox recases to MsgBox from the runtime surface', () => {
+        assert.equal(runtimeCase.edits.length, 1);
+        assert.equal(runtimeCase.edits[0].text, 'MsgBox');
+    });
+
+    const headerCaseSource = 'sub tester\r\n\r\nEnd Sub\r\n';
+    const headerCase = await call('textDocument/canonicalCase', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: headerCaseSource,
+        start: 0,
+        end: 'sub tester'.length,
+        completeHeader: true,
+        moduleType: 'standard',
+    });
+
+    check('leaving a bare header recases it and completes the parens', () => {
+        const after = applyEdits(headerCaseSource, headerCase.edits);
+        assert.ok(after.startsWith('Sub tester()'), `got: ${JSON.stringify(after)}`);
+    });
+
+    const canonicalNoop = await call('textDocument/canonicalCase', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE,
+        start: GOOD_MODULE.indexOf('    Dim n As Long'),
+        end: GOOD_MODULE.indexOf('    Dim n As Long') + '    Dim n As Long'.length,
+        moduleType: 'standard',
+    });
+
+    check('an already-canonical line produces no edits', () => assert.equal(canonicalNoop.edits.length, 0));
+
+    // Loop iterator sync: renaming the For side renames the Next side.
+    const loopSource = 'Sub Fine()\r\n    For i = 1 To 3\r\n        n = 1\r\n    Next j\r\nEnd Sub\r\n';
+    const loopSync = await call('textDocument/loopSync', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: loopSource,
+        offset: loopSource.indexOf('For i') + 'For i'.length,
+        moduleType: 'standard',
+    });
+
+    check('editing the For iterator renames its Next', () => {
+        const after = applyEdits(loopSource, loopSync.edits);
+        assert.ok(after.includes('Next i'), `got: ${JSON.stringify(after)}`);
+    });
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

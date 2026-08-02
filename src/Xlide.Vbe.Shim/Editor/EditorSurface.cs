@@ -109,6 +109,18 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks for the call tip at an offset: (requestId, offset).</summary>
     public Action<int, int>? SignatureHelpRequested { get; set; }
 
+    /// <summary>Raised when the page asks what Enter should leave behind: (requestId, offset).</summary>
+    public Action<int, int>? SmartEnterRequested { get; set; }
+
+    /// <summary>
+    /// Raised when the page asks for case corrections:
+    /// (requestId, start, end, single, completeHeader).
+    /// </summary>
+    public Action<int, int, int, bool, bool>? CanonicalCaseRequested { get; set; }
+
+    /// <summary>Raised when the page asks for the paired loop rename: (requestId, offset).</summary>
+    public Action<int, int>? LoopSyncRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -155,6 +167,51 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new SignatureHelpResultMessage("signatureHelpResult", requestId, signature),
             EditorMessageContext.Default.SignatureHelpResultMessage));
+    }
+
+    /// <summary>Answers one Smart Enter request. Never held: an answer outlives no keystroke.</summary>
+    public void ShowSmartEnter(int requestId, SurfaceTextEdit[] edits, int? caret)
+    {
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SmartEnterResultMessage("smartEnterResult", requestId, edits, caret),
+            EditorMessageContext.Default.SmartEnterResultMessage));
+    }
+
+    /// <summary>Answers one canonical-case request. Never held.</summary>
+    public void ShowCanonicalCase(int requestId, SurfaceTextEdit[] edits)
+    {
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new CanonicalCaseResultMessage("canonicalCaseResult", requestId, edits),
+            EditorMessageContext.Default.CanonicalCaseResultMessage));
+    }
+
+    /// <summary>Answers one loop-sync request. Never held.</summary>
+    public void ShowLoopSync(int requestId, SurfaceTextEdit[] edits)
+    {
+        ArgumentNullException.ThrowIfNull(edits);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new LoopSyncResultMessage("loopSyncResult", requestId, edits),
+            EditorMessageContext.Default.LoopSyncResultMessage));
     }
 
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
@@ -786,6 +843,50 @@ internal sealed class EditorSurface : IDisposable
                         && signatureOffset >= 0)
                     {
                         SignatureHelpRequested?.Invoke(signatureRequestId, signatureOffset);
+                    }
+
+                    break;
+
+                case "smartEnter":
+                    if (document.RootElement.TryGetProperty("id", out var smartEnterId)
+                        && smartEnterId.TryGetInt32(out var smartEnterRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var smartEnterOffsetElement)
+                        && smartEnterOffsetElement.TryGetInt32(out var smartEnterOffset)
+                        && smartEnterOffset >= 0)
+                    {
+                        SmartEnterRequested?.Invoke(smartEnterRequestId, smartEnterOffset);
+                    }
+
+                    break;
+
+                case "canonicalCase":
+                    if (document.RootElement.TryGetProperty("id", out var caseId)
+                        && caseId.TryGetInt32(out var caseRequestId)
+                        && document.RootElement.TryGetProperty("start", out var caseStartElement)
+                        && caseStartElement.TryGetInt32(out var caseStart)
+                        && document.RootElement.TryGetProperty("end", out var caseEndElement)
+                        && caseEndElement.TryGetInt32(out var caseEnd)
+                        && caseStart >= 0
+                        && caseEnd >= caseStart)
+                    {
+                        var single = document.RootElement.TryGetProperty("single", out var singleElement)
+                            && singleElement.ValueKind == JsonValueKind.True;
+                        var completeHeader = document.RootElement.TryGetProperty("completeHeader", out var headerElement)
+                            && headerElement.ValueKind == JsonValueKind.True;
+
+                        CanonicalCaseRequested?.Invoke(caseRequestId, caseStart, caseEnd, single, completeHeader);
+                    }
+
+                    break;
+
+                case "loopSync":
+                    if (document.RootElement.TryGetProperty("id", out var loopId)
+                        && loopId.TryGetInt32(out var loopRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var loopOffsetElement)
+                        && loopOffsetElement.TryGetInt32(out var loopOffset)
+                        && loopOffset >= 0)
+                    {
+                        LoopSyncRequested?.Invoke(loopRequestId, loopOffset);
                     }
 
                     break;

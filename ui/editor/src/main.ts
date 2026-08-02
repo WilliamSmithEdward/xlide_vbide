@@ -43,6 +43,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
+import { installTypingAutomation } from "./typing.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 
 // Stamped by the build; reported to the host so the log names the running bundle.
@@ -125,6 +126,11 @@ function boot(): void {
   // Reachable from a devtools console, which is how the page half of a host defect gets isolated
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
+
+  // Typing automation: Smart Enter block closers, canonical casing, loop-iterator sync. After
+  // the bridge, deliberately: the bridge's content listener registered first, so the text a
+  // request describes has always reached the host before the request asking about it does.
+  installTypingAutomation(editor, bridge);
 
   // Completions come from the host's engine: the analyzer that verified the Excel object model
   // decides what a receiver offers, and the page only renders the answer. Triggered on the dot

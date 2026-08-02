@@ -63,7 +63,23 @@ export type HostMessage =
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
   | { type: "completionResult"; id: number; items: HostCompletionItem[] }
   | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
-  | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null };
+  | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
+  | { type: "smartEnterResult"; id: number; edits: HostTextEdit[]; caret?: number | null }
+  | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
+  | { type: "loopSyncResult"; id: number; edits: HostTextEdit[] };
+
+/** A text replacement, UTF-16 offsets into the live source; an insertion has start === end. */
+export interface HostTextEdit {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** What Enter should leave behind: edits, and where the caret belongs once they apply. */
+export interface HostSmartEnterResult {
+  edits: HostTextEdit[];
+  caret: number | null;
+}
 
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
@@ -137,6 +153,9 @@ export type ClientMessage =
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
+  | { type: "smartEnter"; id: number; offset: number }
+  | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
+  | { type: "loopSync"; id: number; offset: number }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -235,9 +254,30 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Smart Enter requests awaiting their answers, by request identifier. */
+  private readonly pendingSmartEnters = new Map<number, {
+    resolve: (result: HostSmartEnterResult | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  /** Canonical-case requests awaiting their answers, by request identifier. */
+  private readonly pendingCanonicalCases = new Map<number, {
+    resolve: (edits: HostTextEdit[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  /** Loop-sync requests awaiting their answers, by request identifier. */
+  private readonly pendingLoopSyncs = new Map<number, {
+    resolve: (edits: HostTextEdit[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   private nextCompletionId = 1;
   private nextHoverId = 1;
   private nextSignatureId = 1;
+  private nextSmartEnterId = 1;
+  private nextCanonicalCaseId = 1;
+  private nextLoopSyncId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -381,6 +421,77 @@ export class EditorBridge {
   }
 
   /**
+   * Asks the host what the Enter that just went in should leave behind: block closers, header
+   * parens, comment and With continuations. Resolves null rather than rejecting: an Enter whose
+   * answer never comes is an ordinary Enter, which is what the developer already has.
+   */
+  requestSmartEnter(offset: number): Promise<HostSmartEnterResult | null> {
+    const id = this.nextSmartEnterId++;
+
+    return new Promise<HostSmartEnterResult | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingSmartEnters.delete(id);
+        resolve(null);
+      }, 2000);
+
+      this.pendingSmartEnters.set(id, { resolve, timer });
+      this.transport.post({ type: "smartEnter", id, offset });
+    });
+  }
+
+  /**
+   * Asks the host for the case corrections over a span. Resolves empty rather than rejecting: a
+   * recase that fails is a line left as typed, and the next pass over it will ask again.
+   */
+  requestCanonicalCase(
+    start: number,
+    end: number,
+    options: { single?: boolean; completeHeader?: boolean } = {},
+  ): Promise<HostTextEdit[]> {
+    const id = this.nextCanonicalCaseId++;
+
+    return new Promise<HostTextEdit[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingCanonicalCases.delete(id);
+        resolve([]);
+      }, 2000);
+
+      this.pendingCanonicalCases.set(id, { resolve, timer });
+      this.transport.post({
+        type: "canonicalCase",
+        id,
+        start,
+        end,
+        ...(options.single ? { single: true } : {}),
+        ...(options.completeHeader ? { completeHeader: true } : {}),
+      });
+    });
+  }
+
+  /**
+   * Asks the host for the paired loop-iterator rename after an edit. Resolves empty rather than
+   * rejecting: a pair that stays unsynced for a keystroke is corrected by the next one.
+   */
+  requestLoopSync(offset: number): Promise<HostTextEdit[]> {
+    const id = this.nextLoopSyncId++;
+
+    return new Promise<HostTextEdit[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingLoopSyncs.delete(id);
+        resolve([]);
+      }, 2000);
+
+      this.pendingLoopSyncs.set(id, { resolve, timer });
+      this.transport.post({ type: "loopSync", id, offset });
+    });
+  }
+
+  /** True while a host edit is being written into the model, so listeners can tell it from typing. */
+  get isApplyingHostEdit(): boolean {
+    return this.applyingHostEdit;
+  }
+
+  /**
    * Runs a toolbar command.
    *
    * An editor command is run here; a host command is sent on. The editor's caret has to reach the
@@ -498,6 +609,33 @@ export class EditorBridge {
         }
         return;
       }
+      case "smartEnterResult": {
+        const waiter = this.pendingSmartEnters.get(message.id);
+        if (waiter) {
+          this.pendingSmartEnters.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve({ edits: message.edits, caret: message.caret ?? null });
+        }
+        return;
+      }
+      case "canonicalCaseResult": {
+        const waiter = this.pendingCanonicalCases.get(message.id);
+        if (waiter) {
+          this.pendingCanonicalCases.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.edits);
+        }
+        return;
+      }
+      case "loopSyncResult": {
+        const waiter = this.pendingLoopSyncs.get(message.id);
+        if (waiter) {
+          this.pendingLoopSyncs.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.edits);
+        }
+        return;
+      }
       default: {
         const unknown: never = message;
         console.warn("[xlide] unhandled host message", unknown);
@@ -524,7 +662,7 @@ export class EditorBridge {
    * Writes a line into the host's log, because the page has no log of its own that support can
    * read. For the moments when the question is which side of the bridge went quiet.
    */
-  private trace(text: string): void {
+  trace(text: string): void {
     this.transport.post({ type: "trace", text });
   }
 
@@ -1007,6 +1145,17 @@ export function demoTransport(): HostTransport {
             activeParameter: 0,
           },
         });
+      }
+      // The demo has no engine; answering the typing requests empty keeps Enter an ordinary
+      // Enter and a keystroke an ordinary keystroke.
+      if (message.type === "smartEnter") {
+        send({ type: "smartEnterResult", id: message.id, edits: [], caret: null });
+      }
+      if (message.type === "loopSync") {
+        send({ type: "loopSyncResult", id: message.id, edits: [] });
+      }
+      if (message.type === "canonicalCase") {
+        send({ type: "canonicalCaseResult", id: message.id, edits: [] });
       }
       if (message.type === "completion") {
         send({

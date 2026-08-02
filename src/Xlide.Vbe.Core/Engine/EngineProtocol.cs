@@ -63,6 +63,21 @@ public sealed record EngineSignatureInfo(
 public sealed record EngineSignatureHelp(
     [property: JsonPropertyName("signature")] EngineSignatureInfo? Signature);
 
+/// <summary>A text replacement, offsets into the request's source; an insertion has Start == End.</summary>
+public sealed record EngineTextEdit(
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End,
+    [property: JsonPropertyName("text")] string Text);
+
+/// <summary>What Enter should leave behind: edits, and where the caret belongs once they apply.</summary>
+public sealed record EngineSmartEnter(
+    [property: JsonPropertyName("edits")] EngineTextEdit[] Edits,
+    [property: JsonPropertyName("caret")] int? Caret);
+
+/// <summary>A plain set of edits: canonical casing and loop-iterator sync both answer with one.</summary>
+public sealed record EngineTextEdits(
+    [property: JsonPropertyName("edits")] EngineTextEdit[] Edits);
+
 /// <summary>
 /// Serialisation for the engine protocol.
 ///
@@ -85,7 +100,13 @@ public sealed record EngineSignatureHelp(
 [JsonSerializable(typeof(EngineSignatureParameter))]
 [JsonSerializable(typeof(EngineSignatureInfo))]
 [JsonSerializable(typeof(EngineSignatureHelp))]
+[JsonSerializable(typeof(EngineTextEdit))]
+[JsonSerializable(typeof(EngineSmartEnter))]
+[JsonSerializable(typeof(EngineTextEdits))]
 [JsonSerializable(typeof(JsonElement))]
+// Booleans ride the request dictionaries boxed, and a boxed value serialises only if its own
+// type is registered; leaving it out fails at run time, in the middle of a keystroke.
+[JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;
 

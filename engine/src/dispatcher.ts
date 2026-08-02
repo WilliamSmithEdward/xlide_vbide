@@ -10,9 +10,12 @@ import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLog
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import { completionsFor } from './completion';
 import { hoverFor } from './hover';
+import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
 import { signatureHelpFor } from './signature';
 import {
     ErrorCode,
+    type CanonicalCaseParams,
+    type CanonicalCaseResult,
     type CompletionParams,
     type CompletionResult,
     type DiagnosticsParams,
@@ -20,10 +23,14 @@ import {
     type HoverParams,
     type HoverResult,
     type JsonRpcError,
+    type LoopSyncParams,
+    type LoopSyncResult,
     type ModulePayload,
     type ProjectOpenParams,
     type SignatureHelpParams,
     type SignatureHelpResult,
+    type SmartEnterParams,
+    type SmartEnterResult,
 } from './protocol';
 
 /** Thrown to answer a request with a JSON-RPC error rather than a result. */
@@ -90,6 +97,15 @@ export class Dispatcher {
             case 'textDocument/signatureHelp':
                 return this.signatureHelp(this.require<SignatureHelpParams>(params));
 
+            case 'textDocument/smartEnter':
+                return this.smartEnter(this.require<SmartEnterParams>(params));
+
+            case 'textDocument/canonicalCase':
+                return this.canonicalCase(this.require<CanonicalCaseParams>(params));
+
+            case 'textDocument/loopSync':
+                return this.loopSync(this.require<LoopSyncParams>(params));
+
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
@@ -141,6 +157,27 @@ export class Dispatcher {
 
         // Same liveness rule as completion.
         return { signature: signatureHelpFor(this.seededModules.get(params.projectId) ?? [], params) };
+    }
+
+    private smartEnter(params: SmartEnterParams): SmartEnterResult {
+        this.requireInitialized();
+
+        // Pure text work: the request's source is the whole story.
+        return smartEnterFor(params);
+    }
+
+    private canonicalCase(params: CanonicalCaseParams): CanonicalCaseResult {
+        this.requireInitialized();
+
+        // Same liveness rule as completion.
+        return { edits: canonicalCaseFor(this.seededModules.get(params.projectId) ?? [], params) };
+    }
+
+    private loopSync(params: LoopSyncParams): LoopSyncResult {
+        this.requireInitialized();
+
+        // Pure text work: the request's source is the whole story.
+        return { edits: loopSyncFor(params) };
     }
 
     private diagnostics(params: DiagnosticsParams): DiagnosticsResult {

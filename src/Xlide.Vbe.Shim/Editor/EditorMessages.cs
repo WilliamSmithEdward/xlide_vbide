@@ -212,6 +212,31 @@ public sealed record SignatureHelpResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("signature")] SurfaceSignatureInfo? Signature);
 
+/// <summary>A text replacement, offsets into the live source; an insertion has Start == End.</summary>
+public sealed record SurfaceTextEdit(
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End,
+    [property: JsonPropertyName("text")] string Text);
+
+/// <summary>The answer to one Smart Enter request: edits, and the caret once they apply.</summary>
+public sealed record SmartEnterResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits,
+    [property: JsonPropertyName("caret")] int? Caret);
+
+/// <summary>The answer to one canonical-case request; no edits means the span was canonical.</summary>
+public sealed record CanonicalCaseResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
+
+/// <summary>The answer to one loop-sync request; at most one edit, the paired rename.</summary>
+public sealed record LoopSyncResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -244,6 +269,10 @@ public sealed record SignatureHelpResultMessage(
 [JsonSerializable(typeof(SignatureHelpResultMessage))]
 [JsonSerializable(typeof(SurfaceSignatureInfo))]
 [JsonSerializable(typeof(SurfaceSignatureParameter))]
+[JsonSerializable(typeof(SurfaceTextEdit))]
+[JsonSerializable(typeof(SmartEnterResultMessage))]
+[JsonSerializable(typeof(CanonicalCaseResultMessage))]
+[JsonSerializable(typeof(LoopSyncResultMessage))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

@@ -141,6 +141,9 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.CompletionRequested = OnCompletionRequested;
         _editorSurface.HoverRequested = OnHoverRequested;
         _editorSurface.SignatureHelpRequested = OnSignatureHelpRequested;
+        _editorSurface.SmartEnterRequested = OnSmartEnterRequested;
+        _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
+        _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -1733,6 +1736,144 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowSignatureHelp(requestId, payload));
+        });
+    }
+
+    /// <summary>
+    /// Answers a Smart Enter request from the surface: what the Enter that just went in should
+    /// leave behind. Answered the way a completion is: capture on the host thread, resolve off
+    /// it, marshal the answer back. A request that fails answers empty rather than never.
+    /// </summary>
+    private void OnSmartEnterRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowSmartEnter(requestId, [], null);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceTextEdit[] edits = [];
+            int? caret = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.SmartEnterAsync(module, source, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    edits = [.. answered.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
+                    caret = answered.Caret;
+                }
+
+                if (edits.Length > 0)
+                {
+                    Log.Info($"smartEnter: {module}@{offset} -> {edits.Length} edit(s)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"smartEnter: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowSmartEnter(requestId, edits, caret));
+        });
+    }
+
+    /// <summary>
+    /// Answers a canonical-case request from the surface: the case corrections for a span,
+    /// resolved from the same project facts completion uses.
+    /// </summary>
+    private void OnCanonicalCaseRequested(int requestId, int start, int end, bool single, bool completeHeader)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowCanonicalCase(requestId, []);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceTextEdit[] edits = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.CanonicalCaseAsync(module, source, start, end, single, completeHeader, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    edits = [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
+                }
+
+                if (edits.Length > 0)
+                {
+                    Log.Info($"canonicalCase: {module}@{start}..{end} -> {edits.Length} edit(s)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"canonicalCase: {module}@{start}..{end} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowCanonicalCase(requestId, edits));
+        });
+    }
+
+    /// <summary>
+    /// Answers a loop-sync request from the surface: the paired iterator rename, when the edit
+    /// at the offset touched one side of a For/Next pair.
+    /// </summary>
+    private void OnLoopSyncRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowLoopSync(requestId, []);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceTextEdit[] edits = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.LoopSyncAsync(module, source, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    edits = [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
+                }
+
+                if (edits.Length > 0)
+                {
+                    Log.Info($"loopSync: {module}@{offset} -> {edits.Length} edit(s)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"loopSync: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowLoopSync(requestId, edits));
         });
     }
 

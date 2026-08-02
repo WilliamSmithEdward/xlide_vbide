@@ -240,6 +240,78 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineSignatureHelp);
     }
 
+    /// <summary>Asks what Enter should leave behind, given the text just after the newline.</summary>
+    public async Task<EngineSmartEnter?> SmartEnterAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["offset"] = offset,
+        };
+
+        var result = await CallAsync("textDocument/smartEnter", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineSmartEnter);
+    }
+
+    /// <summary>Asks for the case corrections over a span of a module's live source.</summary>
+    public async Task<EngineTextEdits?> CanonicalCaseAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int start,
+        int end,
+        bool single,
+        bool completeHeader,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["start"] = start,
+            ["end"] = end,
+            ["single"] = single,
+            ["completeHeader"] = completeHeader,
+        };
+
+        var result = await CallAsync("textDocument/canonicalCase", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
+    }
+
+    /// <summary>Asks for the paired loop-iterator rename after an edit at an offset.</summary>
+    public async Task<EngineTextEdits?> LoopSyncAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["offset"] = offset,
+        };
+
+        var result = await CallAsync("textDocument/loopSync", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
+    }
+
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
         var writer = _writer;

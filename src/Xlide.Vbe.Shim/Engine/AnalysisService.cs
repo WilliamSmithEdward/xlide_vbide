@@ -216,6 +216,101 @@ internal sealed class AnalysisService : IAsyncDisposable
         return result?.Signature;
     }
 
+    /// <summary>
+    /// Asks the engine what Enter should leave behind, or null when there is no engine, no
+    /// address for the module, or nothing is owed.
+    /// </summary>
+    public async Task<EngineSmartEnter?> SmartEnterAsync(
+        string moduleName,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks the engine for the case corrections over a span of a module's live text, or null
+    /// when there is no engine or no address for the module.
+    /// </summary>
+    public async Task<EngineTextEdit[]?> CanonicalCaseAsync(
+        string moduleName,
+        string source,
+        int start,
+        int end,
+        bool single,
+        bool completeHeader,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        var result = await engine.CanonicalCaseAsync(
+                home.ProjectId, moduleName, home.ModuleType, source, start, end, single, completeHeader, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Edits;
+    }
+
+    /// <summary>
+    /// Asks the engine for the paired loop-iterator rename after an edit at an offset, or null
+    /// when there is no engine or no address for the module.
+    /// </summary>
+    public async Task<EngineTextEdit[]?> LoopSyncAsync(
+        string moduleName,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        var result = await engine.LoopSyncAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Edits;
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;
