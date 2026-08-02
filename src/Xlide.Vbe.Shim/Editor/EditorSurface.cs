@@ -815,8 +815,9 @@ internal sealed class EditorSurface : IDisposable
         var script = timings.TryGetProperty("scriptMs", out var s) && s.TryGetInt32(out var scriptMs) ? scriptMs : -1;
         var create = timings.TryGetProperty("createMs", out var c) && c.TryGetInt32(out var createMs) ? createMs : -1;
         var total = timings.TryGetProperty("totalMs", out var t) && t.TryGetInt32(out var totalMs) ? totalMs : -1;
+        var build = timings.TryGetProperty("build", out var b) ? b.GetString() : null;
 
-        return $" in {total}ms (bundle {script}ms, editor {create}ms)";
+        return $" in {total}ms (bundle {script}ms, editor {create}ms{(build is null ? string.Empty : $", build {build}")})";
     }
 
     private void Post(string json)

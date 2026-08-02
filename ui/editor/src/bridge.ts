@@ -88,6 +88,8 @@ export interface BootTimings {
   createMs: number;
   /** Everything, to the moment this message is posted. */
   totalMs: number;
+  /** Build stamp of the bundle actually running, so a cached stale one is visible. */
+  build?: string;
 }
 
 export type ClientMessage =

@@ -110,6 +110,9 @@ async function main() {
     absWorkingDir: root,
     outdir: "dist",
     bundle: true,
+    // Stamped into the bundle and reported in the ready message, so the host log always proves
+    // WHICH build the page is running: a cached stale bundle is otherwise invisible.
+    define: { __XLIDE_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 19)) },
     target: ["chrome120"],
     platform: "browser",
     minify: true,

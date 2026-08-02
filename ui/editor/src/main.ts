@@ -39,6 +39,9 @@ import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 
+// Stamped by the build; reported to the host so the log names the running bundle.
+declare const __XLIDE_BUILD__: string;
+
 // The worker is a sibling of index.html in dist, addressed relative to the document base so a
 // virtual host mapping, a static server and a subdirectory deployment all resolve the same.
 globalThis.MonacoEnvironment = {
@@ -198,6 +201,7 @@ function boot(): void {
     scriptMs: Math.round(scriptMs),
     createMs: Math.round(createMs - scriptMs),
     totalMs: Math.round(performance.now()),
+    build: __XLIDE_BUILD__,
   });
 
   // After ready, so the reply cannot arrive before the host considers the page up. The bar needs
