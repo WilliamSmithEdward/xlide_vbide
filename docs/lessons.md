@@ -326,3 +326,37 @@ Consequence: give "no answer" its own value the moment a channel gets a timeout,
 let it share a spelling with "empty". Hold verdicts about text mid-keystroke until the line
 is left — the VBE had this right for thirty years. And filter at the single point every
 surface publishes through, so squiggles, panel, and badges cannot disagree.
+
+## 22. Two absences that had to be read from the windows themselves
+
+Neither the Immediate window nor a cancelled shutdown announces itself. Both defects came from
+inferring the missing announcement badly; both fixes came from reading the state Windows itself
+maintains.
+
+The Immediate window exposes no handle, shares its window class with the code panes, and its
+caption is localised, so it was identified by closing it and diffing which pane stopped being
+visible. The hide is asynchronous: whenever the window list had not caught up, the diff
+answered "0 windows changed", the reader never attached, and Debug.Print silently went nowhere
+— while evaluation itself worked perfectly, which read as a broken Immediate to anyone typing
+in it. The identification that survives timing: the object model NAMES the localised caption,
+the handle CARRIES the same caption, visible or hidden, and matching the two cannot lose a
+race. The diff remains only as a fallback, and a failed attachment retries on the first
+evaluation, by which time the window certainly exists.
+
+The cancelled shutdown: the host asks about unsaved changes AFTER OnBeginShutdown, and Cancel
+abandons the shutdown with no callback. The watchdog inferred cancellation from its timer
+ticking — but an app-modal dialog pumps timers too, so the session revived while the save
+dialog was still on screen, painted the surface over an undecided shutdown, and when the
+developer chose Save, the real teardown ripped through a seconds-old session mid-start and
+crashed the host. The signal that actually distinguishes the states: an app-modal dialog
+DISABLES the application's windows. A disabled frame is a question still open; an enabled
+frame held across consecutive ticks is the cancellation.
+
+Evidence: the session logs — "immediate: 0 windows changed when it closed" with "immediate:
+ok" answers around it; and the crash log's timeline, revive at +1.5s into the dialog,
+OnDisconnection four seconds later, then nothing.
+
+Consequence: when a component gives no notification, do not manufacture one from timing —
+find the state the OS already maintains about it (captions, enabled bits, ownership) and read
+that. And treat "my timer ticked" with suspicion inside any window of modality: modal loops
+pump everybody's timers.

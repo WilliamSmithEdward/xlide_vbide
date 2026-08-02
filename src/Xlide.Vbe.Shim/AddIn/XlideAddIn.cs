@@ -3,6 +3,7 @@ using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
+using Xlide.Vbe.Shim.Interop;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -35,6 +36,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     /// <summary>Alive between OnBeginShutdown and whatever the shutdown turns out to be.</summary>
     private ShutdownWatchdog? _watchdog;
     private int _watchdogTicks;
+    private int _watchdogEnabledTicks;
 
     /// <summary>
     /// Releases the session if the host never called OnDisconnection. COM controls this object's
@@ -126,6 +128,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             // is the one thing left listening; its ticks only arrive if the host thread is still
             // pumping, which is itself the news.
             _watchdogTicks = 0;
+            _watchdogEnabledTicks = 0;
             _watchdog ??= ShutdownWatchdog.Create(OnWatchdogTick);
             return HResult.Ok;
         }
@@ -153,16 +156,39 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
                 return;
             }
 
-            if (CodePaneTracker.FindFrame() == 0)
+            var frame = CodePaneTracker.FindFrame();
+            if (frame == 0)
             {
                 // No editor frame yet: either the teardown is mid-flight after all, or the
                 // frame is briefly gone. A few patient ticks tell the difference.
+                _watchdogEnabledTicks = 0;
                 if (++_watchdogTicks >= 8)
                 {
                     Log.Info("watchdog: no editor frame returned, standing down");
                     RetireWatchdog();
                 }
 
+                return;
+            }
+
+            // A standing frame is not yet the answer. The host asks about unsaved changes with
+            // an app-modal dialog AFTER OnBeginShutdown, and a modal loop pumps timers, so a
+            // tick during the dialog proves only that the developer is still deciding. Reviving
+            // there painted the surface over an undecided shutdown, and when the developer then
+            // chose Save, the real teardown ripped through a seconds-old session mid-start and
+            // took the host down with it. What the dialog does do is DISABLE the frame, the way
+            // every app-modal dialog disables its application's windows; an enabled frame held
+            // across consecutive ticks is the cancellation. The wait costs nothing — while the
+            // dialog is up the developer is looking at the dialog — and it does not spend the
+            // patience budget above, because a dialog can sit unanswered for minutes.
+            if (!Win32.IsWindowEnabled(frame))
+            {
+                _watchdogEnabledTicks = 0;
+                return;
+            }
+
+            if (++_watchdogEnabledTicks < 2)
+            {
                 return;
             }
 

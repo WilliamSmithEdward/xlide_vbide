@@ -69,6 +69,14 @@ internal static unsafe partial class Win32
     public static partial bool IsWindowVisible(nint window);
 
     /// <summary>
+    /// False while an app-modal dialog has disabled the window, which is how a dialog with no
+    /// callback still announces itself: the windows it took input from say so.
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindowEnabled(nint window);
+
+    /// <summary>
     /// Enumerates every descendant of a window, not only its immediate children, which is why a
     /// single call over the editor's frame reaches the panes regardless of how deeply the editor
     /// nests them.
