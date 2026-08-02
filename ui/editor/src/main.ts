@@ -19,8 +19,13 @@ import "monaco-editor/features/indentation/register.js";
 import "monaco-editor/features/lineSelection/register.js";
 import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/multicursor/register.js";
+import "monaco-editor/features/parameterHints/register.js";
 import "monaco-editor/features/quickCommand/register.js";
 import "monaco-editor/features/smartSelect/register.js";
+// Suggest is the completion widget itself; snippet expands the placeholders completions insert.
+// A completion provider without these registered answers into a void.
+import "monaco-editor/features/snippet/register.js";
+import "monaco-editor/features/suggest/register.js";
 import "monaco-editor/features/tokenization/register.js";
 import "monaco-editor/features/wordHighlighter/register.js";
 import "monaco-editor/features/wordOperations/register.js";
