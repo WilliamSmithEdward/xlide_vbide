@@ -82,6 +82,21 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
+    /// <summary>Raised when the developer opens a menu, with the path to it; empty is the bar.</summary>
+    public Action<int[]>? MenuRequested { get; set; }
+
+    /// <summary>Raised when the developer chooses a menu item, with the path to it.</summary>
+    public Action<int[]>? MenuExecuteRequested { get; set; }
+
+    /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
+    public Action? Ready { get; set; }
+
+    /// <summary>
+    /// True once the page is up. Consulted before covering native chrome the page replaces: a menu
+    /// bar covered by a surface whose page never arrived is a menu bar the developer cannot reach.
+    /// </summary>
+    public bool IsReady => _loaded;
+
     /// <summary>
     /// Asked about each key the editor might own, before the document sees it. Return true to
     /// claim it.
@@ -244,6 +259,36 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new EditorCommandMessage("editorCommand", id),
             EditorMessageContext.Default.EditorCommandMessage));
+    }
+
+    /// <summary>
+    /// Answers a menu request with the items the editor holds right now.
+    ///
+    /// Never held: a reply only exists because the page asked, so the page is up, and a menu's
+    /// contents are true at the moment they are read. Replaying them later would drop a menu down
+    /// that nobody has open.
+    /// </summary>
+    public void ShowMenu(int[] path, SurfaceMenuItem[] items)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ArgumentNullException.ThrowIfNull(items);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SetMenuMessage("setMenu", path, items),
+            EditorMessageContext.Default.SetMenuMessage));
+    }
+
+    /// <summary>Shows or withdraws the surface's own menu bar.</summary>
+    public void SetChrome(bool menuBar)
+    {
+        Send("setChrome", JsonSerializer.Serialize(
+            new SetChromeMessage("setChrome", menuBar),
+            EditorMessageContext.Default.SetChromeMessage));
     }
 
     /// <summary>Adds a line to the Immediate panel's output.</summary>
@@ -472,6 +517,7 @@ internal sealed class EditorSurface : IDisposable
                     _loaded = true;
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
                     Flush();
+                    Ready?.Invoke();
                     break;
 
                 case "selectionChanged":
@@ -554,12 +600,56 @@ internal sealed class EditorSurface : IDisposable
                     }
 
                     break;
+
+                case "menu":
+                    if (PathOf(document.RootElement) is { } menuPath)
+                    {
+                        MenuRequested?.Invoke(menuPath);
+                    }
+
+                    break;
+
+                case "menuExecute":
+                    // An empty path names the bar itself, which can be asked about but not run.
+                    if (PathOf(document.RootElement) is { Length: > 0 } executePath)
+                    {
+                        MenuExecuteRequested?.Invoke(executePath);
+                    }
+
+                    break;
             }
         }
         catch (JsonException)
         {
             Log.Warn("editor surface: a message from the page was not valid");
         }
+    }
+
+    /// <summary>
+    /// The position chain in a menu message, or null when it is malformed. Positions are one-based
+    /// because the editor's collections are.
+    /// </summary>
+    private static int[]? PathOf(JsonElement message)
+    {
+        if (!message.TryGetProperty("path", out var path) || path.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var result = new int[path.GetArrayLength()];
+        var i = 0;
+
+        foreach (var element in path.EnumerateArray())
+        {
+            if (!element.TryGetInt32(out result[i]) || result[i] < 1)
+            {
+                return null;
+            }
+
+            i++;
+        }
+
+        return result;
     }
 
     private void OnNavigate(JsonElement message)

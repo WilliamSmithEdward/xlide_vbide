@@ -20,7 +20,8 @@ body {
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  /* menu bar, toolbar, main, status. */
+  grid-template-rows: auto auto 1fr auto;
   min-height: 0;
 
   /* Written by the splitters. */
@@ -157,6 +158,116 @@ body {
 #shell.panel-collapsed #panel-splitter {
   /* Nothing to resize while the panel is a single row of text. */
   display: none;
+}
+
+/* The menu bar and its dropdowns. The bar is a shell row; the dropdowns are fixed-position
+   children of the body so they can hang over the editor without being clipped by any row. */
+
+#menubar {
+  display: flex;
+  align-items: stretch;
+  padding: 0 4px;
+  user-select: none;
+  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#menubar[hidden] {
+  display: none;
+}
+
+.menu-top {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 3px 9px;
+  cursor: default;
+}
+
+.menu-top:hover,
+.menu-top.open {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.menu-top:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.menu-underline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.menu-dropdown {
+  position: fixed;
+  z-index: 90;
+  min-width: 200px;
+  max-width: 420px;
+  max-height: 75vh;
+  overflow-y: auto;
+  padding: 4px 0;
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #cccccc);
+  border: 1px solid var(--vscode-menu-border, rgba(128, 128, 128, 0.35));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 12px 4px 8px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.menu-item.highlight {
+  background: var(--vscode-menu-selectionBackground, #04395e);
+  color: var(--vscode-menu-selectionForeground, #ffffff);
+}
+
+.menu-item.disabled {
+  opacity: 0.45;
+}
+
+.menu-check {
+  flex: 0 0 auto;
+  width: 14px;
+  font-size: 12px;
+}
+
+.menu-check.blank {
+  visibility: hidden;
+}
+
+.menu-caption {
+  flex: 1 1 auto;
+}
+
+.menu-shortcut {
+  margin-left: 24px;
+  opacity: 0.6;
+  font-size: 12px;
+}
+
+.menu-sub {
+  flex: 0 0 auto;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--vscode-menu-separatorBackground, rgba(128, 128, 128, 0.35));
+}
+
+.menu-empty {
+  padding: 4px 12px;
+  opacity: 0.5;
+  font-style: italic;
 }
 
 #toolbar {

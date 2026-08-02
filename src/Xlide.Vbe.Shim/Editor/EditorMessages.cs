@@ -107,6 +107,35 @@ public sealed record SetBreakpointsMessage(
     [property: JsonPropertyName("lines")] int[] Lines);
 
 /// <summary>
+/// One entry in a menu. The index is the item's real position in the editor's own control
+/// collection, which is how the page addresses it back; hidden items are skipped but positions are
+/// not renumbered around them.
+/// </summary>
+public sealed record SurfaceMenuItem(
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("caption")] string Caption,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("separator")] bool Separator,
+    [property: JsonPropertyName("popup")] bool Popup,
+    [property: JsonPropertyName("checked")] bool Checked,
+    [property: JsonPropertyName("shortcut")] string? Shortcut);
+
+/// <summary>The items of one menu, named by the path the page asked about.</summary>
+public sealed record SetMenuMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("path")] int[] Path,
+    [property: JsonPropertyName("items")] SurfaceMenuItem[] Items);
+
+/// <summary>
+/// Which parts of the surface's own chrome are drawn. The menu bar is withdrawn while the surface
+/// retreats to the document area, because the native bar is visible then and two menu bars answer
+/// the same question twice.
+/// </summary>
+public sealed record SetChromeMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("menuBar")] bool MenuBar);
+
+/// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
 /// rather than at build time.
@@ -125,6 +154,9 @@ public sealed record SetBreakpointsMessage(
 [JsonSerializable(typeof(ImmediateResultMessage))]
 [JsonSerializable(typeof(SetCurrentLineMessage))]
 [JsonSerializable(typeof(SetBreakpointsMessage))]
+[JsonSerializable(typeof(SetMenuMessage))]
+[JsonSerializable(typeof(SetChromeMessage))]
+[JsonSerializable(typeof(SurfaceMenuItem))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

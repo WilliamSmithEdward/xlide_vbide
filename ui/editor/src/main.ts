@@ -96,6 +96,9 @@ function boot(): void {
       command.id === "undo" || command.id === "redo" || editor.getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
+    menuRequest: (path) => bridge.requestMenu(path),
+    menuExecute: (path) => bridge.executeMenu(path),
+    menuClosed: () => editor.focus(),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
@@ -111,6 +114,10 @@ function boot(): void {
     createMs: Math.round(createMs - scriptMs),
     totalMs: Math.round(performance.now()),
   });
+
+  // After ready, so the reply cannot arrive before the host considers the page up. The bar needs
+  // its top-level items before anything is clicked: they carry the Alt accelerators.
+  shell.requestMenus();
 }
 
 if (document.readyState === "loading") {

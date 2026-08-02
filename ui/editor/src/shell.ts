@@ -10,6 +10,7 @@
  */
 
 import { Explorer, type ExplorerProject } from "./explorer.js";
+import { Menubar, type MenuItem } from "./menubar.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
 
 export type FindingSeverity = "error" | "warning" | "info" | "hint";
@@ -38,6 +39,12 @@ export interface ShellHandlers {
   evaluate(text: string): void;
   /** Which panel is showing, and whether the panel is open at all. */
   panelChanged(name: string, open: boolean): void;
+  /** The developer opened a menu; the host is asked for its items. [] is the bar itself. */
+  menuRequest(path: number[]): void;
+  /** The developer chose a menu item, named by its position chain. */
+  menuExecute(path: number[]): void;
+  /** Every menu closed, so focus belongs to the editor again. */
+  menuClosed(): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -85,6 +92,7 @@ export class Shell {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly sidebarSplitter: HTMLElement;
   private readonly explorer: Explorer;
+  private readonly menubar: Menubar;
   private readonly panelTabs: HTMLElement;
   private readonly problemsBody: HTMLElement;
   private readonly immediateBody: HTMLElement;
@@ -117,6 +125,12 @@ export class Shell {
     this.explorer = new Explorer(
       root.querySelector("#sidebar-tree") as HTMLElement,
       (name) => handlers.activateModule(name));
+
+    this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
+      request: (path) => handlers.menuRequest(path),
+      execute: (path) => handlers.menuExecute(path),
+      closed: () => handlers.menuClosed(),
+    });
 
     buildToolbar(
       root.querySelector("#toolbar") as HTMLElement,
@@ -174,6 +188,21 @@ export class Shell {
   /** Replaces the project explorer's contents. */
   setProjects(projects: ExplorerProject[]): void {
     this.explorer.setProjects(projects);
+  }
+
+  /** Takes one menu's items from the host: the bar for an empty path, a dropdown otherwise. */
+  setMenu(path: number[], items: MenuItem[]): void {
+    this.menubar.setItems(path, items);
+  }
+
+  /** Shows or withdraws the menu bar; while it is withdrawn the native bar is the visible one. */
+  setMenuBarVisible(visible: boolean): void {
+    this.menubar.setVisible(visible);
+  }
+
+  /** Asks the host for the top-level menus. Called once the transport is up. */
+  requestMenus(): void {
+    this.menubar.refresh();
   }
 
   /** Appends a line to the Immediate panel's output. */

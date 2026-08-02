@@ -1,5 +1,6 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { ExplorerProject } from "./explorer.js";
+import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding } from "./shell.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
@@ -55,7 +56,9 @@ export type HostMessage =
   | { type: "setDiagnostics"; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
-  | { type: "revealLine"; line: number };
+  | { type: "revealLine"; line: number }
+  | { type: "setMenu"; path: number[]; items: MenuItem[] }
+  | { type: "setChrome"; menuBar: boolean };
 
 /**
  * Where the page's start-up time went, measured from navigation start.
@@ -82,7 +85,9 @@ export type ClientMessage =
   | { type: "navigate"; module: string; line: number; column: number }
   | { type: "command"; name: string }
   | { type: "evaluate"; text: string }
-  | { type: "panel"; name: string; open: boolean };
+  | { type: "panel"; name: string; open: boolean }
+  | { type: "menu"; path: number[] }
+  | { type: "menuExecute"; path: number[] };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -213,6 +218,16 @@ export class EditorBridge {
     this.transport.post({ type: "navigate", module, line, column });
   }
 
+  /** Asks the host for a menu's items; [] is the bar itself. */
+  requestMenu(path: number[]): void {
+    this.transport.post({ type: "menu", path });
+  }
+
+  /** Asks the host to run the menu item a position chain leads to. */
+  executeMenu(path: number[]): void {
+    this.transport.post({ type: "menuExecute", path });
+  }
+
   /**
    * Runs a toolbar command.
    *
@@ -259,8 +274,7 @@ export class EditorBridge {
         this.shell?.notify(message.text);
         return;
       case "editorCommand":
-        this.editor.focus();
-        this.editor.getAction(message.id)?.run();
+        this.runEditorCommand(message.id);
         return;
       case "immediateResult":
         this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");
@@ -293,6 +307,12 @@ export class EditorBridge {
       case "revealLine":
         this.editor.revealLineInCenterIfOutsideViewport(message.line);
         return;
+      case "setMenu":
+        this.shell?.setMenu(message.path, message.items);
+        return;
+      case "setChrome":
+        this.shell?.setMenuBarVisible(message.menuBar);
+        return;
       default: {
         const unknown: never = message;
         console.warn("[xlide] unhandled host message", unknown);
@@ -305,6 +325,30 @@ export class EditorBridge {
       return;
     }
     monaco.editor.setTheme(theme);
+  }
+
+  /**
+   * Runs a command the host named: one of Monaco's actions, or one of the surface's own.
+   *
+   * The host reaches for this when a route it owns lands on something the surface owns: a claimed
+   * key, or a menu item whose native version acts on the covered pane. Undo and redo are built
+   * into the editor rather than registered, so they are triggered by name; the panel commands are
+   * not editor commands at all and go to the shell.
+   */
+  private runEditorCommand(id: string): void {
+    if (id === "xlide.panel.immediate") {
+      this.shell?.showImmediate();
+      return;
+    }
+
+    this.editor.focus();
+
+    if (id === "undo" || id === "redo") {
+      this.editor.trigger("xlide", id, null);
+      return;
+    }
+
+    this.editor.getAction(id)?.run();
   }
 
   private model(): monaco.editor.ITextModel | null {
@@ -669,9 +713,49 @@ export function demoTransport(): HostTransport {
         // The real host owns the breakpoint set; the demo just echoes the single line back.
         send({ type: "setBreakpoints", lines: [message.line] });
       }
+      if (message.type === "menu") {
+        send({ type: "setMenu", path: message.path, items: demoMenuItems(message.path) });
+      }
+      if (message.type === "menuExecute") {
+        send({ type: "notice", text: `menu [${message.path.join(", ")}] executed` });
+      }
     },
     subscribe(handler) {
       deliver = handler;
     },
   };
+}
+
+/** A menu tree shaped like the host's, so every rendering case is reachable in a browser. */
+function demoMenuItems(path: number[]): MenuItem[] {
+  const item = (index: number, caption: string, extra: Partial<MenuItem> = {}): MenuItem => ({
+    index,
+    caption,
+    enabled: true,
+    separator: false,
+    popup: false,
+    checked: false,
+    ...extra,
+  });
+
+  if (path.length === 0) {
+    return ["&File", "&Edit", "&View", "&Insert", "F&ormat", "&Debug", "&Run", "&Tools", "&Window", "&Help"]
+      .map((caption, i) => item(i + 1, caption, { popup: true }));
+  }
+
+  if (path.length === 1) {
+    return [
+      item(1, "&Save Book1", { shortcut: "Ctrl+S" }),
+      item(2, "&Import File...", { separator: true }),
+      item(3, "&Export File...", { enabled: false }),
+      item(4, "Print && Export", { popup: true, separator: true }),
+      item(5, "&Toolbar", { checked: true }),
+      item(6, "&Close and Return", { separator: true, shortcut: "Alt+Q" }),
+    ];
+  }
+
+  return [
+    item(1, "Deep &One"),
+    item(2, "Deep &Two", { popup: path.length < 3 }),
+  ];
 }

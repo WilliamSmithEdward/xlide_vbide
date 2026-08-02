@@ -176,6 +176,7 @@ internal sealed class AddInSession : IDisposable
 
             if (pane.Window == 0)
             {
+                _surfaceShown = false;
                 _editorSurface?.Follow(default, visible: false);
                 return;
             }
@@ -197,6 +198,11 @@ internal sealed class AddInSession : IDisposable
             {
                 return;
             }
+
+            // Remembered so that placement can be recomputed at moments that are not window
+            // events: a menu item opening a native window, or the page announcing it is ready.
+            _frame = host;
+            _documentArea = documentArea;
 
             // A pane can be reparented, by being undocked or by the editor rebuilding its layout.
             // The surface belongs to one parent, so a change means a new one rather than a move.
@@ -224,6 +230,12 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.Polled = PollDebugState;
                 _editorSurface.EvaluateRequested = EvaluateImmediate;
                 _editorSurface.PanelChanged = OnPanelChanged;
+                _editorSurface.MenuRequested = OnMenuRequested;
+                _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
+
+                // The moment the page is up is the moment the menu bar can be covered, and it is
+                // not a window event, so nothing else would recompute the bounds.
+                _editorSurface.Ready = RefreshSurfacePlacement;
 
                 // Now rather than at start-up. The editor answers that these windows are visible
                 // before it has created them, so hiding one then closes something with no window
@@ -238,7 +250,10 @@ internal sealed class AddInSession : IDisposable
             //
             // The native panes keep running underneath, unchanged and never seen. They remain the
             // text of record, the compile target, and what the debugger drives.
-            _editorSurface.Follow(SurfaceBounds(host, documentArea), visible: true);
+            var covering = CanCoverChrome();
+            _surfaceShown = true;
+            _editorSurface.Follow(SurfaceBounds(host, documentArea, covering), visible: true);
+            _editorSurface.SetChrome(menuBar: covering);
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
@@ -822,6 +837,143 @@ internal sealed class AddInSession : IDisposable
         _analysis?.Reanalyse();
     }
 
+    /// <summary>Answers the surface's menu bar with the items the editor holds right now.</summary>
+    private void OnMenuRequested(int[] path)
+    {
+        try
+        {
+            var items = VbeMenus.Read(_editor, path);
+            _editorSurface?.ShowMenu(path, items);
+            Log.Info($"menu: [{string.Join(",", path)}] read, {items.Length} item(s)");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"menu: [{string.Join(",", path)}] could not be read", ex);
+
+            // An empty menu renders as an empty menu, which at least answers the click.
+            _editorSurface?.ShowMenu(path, []);
+        }
+    }
+
+    /// <summary>
+    /// Runs a menu item the developer chose from the surface's menu bar.
+    ///
+    /// Most items are executed exactly where they live, which is what keeps this menu complete: it
+    /// can run anything the native menu can, dialogs included. The exceptions are the commands the
+    /// session has its own path for, and the windows the surface replaces; those are routed to the
+    /// replacement, because executing them natively would either skip the session's bookkeeping or
+    /// put a native window on screen that the surface exists to replace.
+    /// </summary>
+    private void OnMenuExecuteRequested(int[] path)
+    {
+        try
+        {
+            using var control = VbeMenus.ControlAt(_editor, path);
+            if (control is null)
+            {
+                Log.Info($"menu: [{string.Join(",", path)}] no longer exists");
+                return;
+            }
+
+            var id = control.GetInt32("Id");
+            if (RouteMenuCommand(id))
+            {
+                Log.Info($"menu: [{string.Join(",", path)}] routed as command {id}");
+                return;
+            }
+
+            if (!control.GetBool("Enabled"))
+            {
+                // The page draws disabled items as disabled, but its picture is as old as the
+                // moment the menu opened, and the editor moves on underneath it.
+                _editorSurface?.Notify("That menu item is not available right now.");
+                return;
+            }
+
+            // The item acts on the module and on the editor's own caret, so both are brought
+            // current first: compiling, saving and exporting must see what was just typed.
+            _editorSurface?.FlushEdits();
+            SyncCaretToPane();
+
+            control.Invoke("Execute");
+            Log.Info($"menu: [{string.Join(",", path)}] executed ({id})");
+
+            if (id == VbeCommands.Command.ClearAllBreakpoints)
+            {
+                ForgetBreakpoints();
+            }
+
+            // A menu item can start a run, and it can open or close native windows the surface
+            // must make room for. Both are watched for rather than assumed.
+            WatchDebugState();
+            RefreshSurfacePlacement();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"menu: [{string.Join(",", path)}] could not be executed", ex);
+            _editorSurface?.Notify("That menu item could not be run.");
+        }
+    }
+
+    /// <summary>
+    /// Runs a menu command through its surface-side owner instead of the native item, when it has
+    /// one. True when the command was taken.
+    /// </summary>
+    private bool RouteMenuCommand(int id)
+    {
+        if (VbeCommands.RoutesThroughSession(id))
+        {
+            ExecuteEditorCommand(id);
+            return true;
+        }
+
+        switch (id)
+        {
+            // Editing commands act on the text the developer sees, which is the surface's.
+            // Executed natively they would act on the covered pane, and the native find dialog
+            // is a modal over an editor nobody is looking at.
+            case VbeCommands.Command.Undo:
+                _editorSurface?.RunEditorCommand("undo");
+                return true;
+
+            case VbeCommands.Command.Redo:
+                _editorSurface?.RunEditorCommand("redo");
+                return true;
+
+            case VbeCommands.Command.Find:
+                _editorSurface?.RunEditorCommand("actions.find");
+                return true;
+
+            case VbeCommands.Command.Replace:
+                _editorSurface?.RunEditorCommand("editor.action.startFindReplaceAction");
+                return true;
+
+            // Windows the surface has its own version of. The native ones were closed at start-up
+            // and reopening one would put it behind the surface, which reads as nothing happening.
+            case VbeCommands.Command.ImmediateWindow:
+                _editorSurface?.RunEditorCommand("xlide.panel.immediate");
+                return true;
+
+            case VbeCommands.Command.ProjectExplorer:
+                _editorSurface?.Notify("The project explorer is part of the editor and always shown.");
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Drops every breakpoint this add-in recorded, after the editor cleared them all. The record
+    /// only mirrors the editor; when the editor forgets, remembering draws dots on lines that no
+    /// longer stop anything.
+    /// </summary>
+    private void ForgetBreakpoints()
+    {
+        _breakpoints.Clear();
+        _editorSurface?.ShowBreakpoints([]);
+    }
+
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
     private void RunCommand(string name)
     {
@@ -999,9 +1151,11 @@ internal sealed class AddInSession : IDisposable
 
         _windowsHidden = true;
 
-        // Project explorer, properties, and the Immediate window, each of which the surface now
-        // has its own. The Locals and Watch windows stay: nothing replaces them yet, and hiding a
-        // window with no replacement removes the feature rather than restyling it.
+        // The project explorer and the Immediate window have surface replacements. The properties
+        // window does not yet; it is closed for the dock space it occupies, and the menu can bring
+        // it back, at which point the surface retreats so it can be seen. The Locals and Watch
+        // windows stay untouched: nothing replaces them yet, and hiding a window with no
+        // replacement removes the feature rather than restyling it.
         const int immediateWindow = 5;
         ReadOnlySpan<int> replaced = [immediateWindow, 6, 7];
 
@@ -1248,25 +1402,35 @@ internal sealed class AddInSession : IDisposable
         surface.ShowDiagnostics(markers);
     }
 
+    /// <summary>The editor's frame window, kept for placements recomputed outside window events.</summary>
+    private nint _frame;
+
+    /// <summary>The editor's document area, kept for the same reason.</summary>
+    private nint _documentArea;
+
+    /// <summary>
+    /// Whether the surface is meant to be on screen right now. A recomputed placement must not
+    /// show a surface the session decided to hide because no pane is visible.
+    /// </summary>
+    private bool _surfaceShown;
+
     /// <summary>
     /// Where the surface goes inside the frame.
     ///
-    /// The document area is inset from the frame by a border the frame draws itself, a pale line a
-    /// pixel or two wide down the inside of the window. Covering only the document area leaves that
-    /// line showing, and it is not something the compositor draws, so no window attribute reaches
-    /// it. The surface takes everything below the command bars instead, which covers it.
+    /// Covering, it takes the frame's entire client area: the menu bar row included, because the
+    /// surface draws its own menu bar backed by the same menus, and the document inset too, because
+    /// the frame draws a pale line a pixel or two inside itself that no compositor attribute
+    /// reaches. Anything less leaves native chrome showing through a themed product.
     ///
-    /// Unless one of the editor's own docked windows is open. Those the surface replaces are
-    /// closed, but the Locals and Watch windows are not replaced and can be opened from the menu,
-    /// and covering one would hide a window the developer just asked for. When any is showing, the
-    /// surface goes back to the document area and the border shows again, which is the right way
-    /// round: a visible seam is a smaller problem than a missing window.
+    /// Retreating, it takes only the document area, and the native chrome shows again. That is the
+    /// right way round: a visible seam is a smaller problem than covering a window or a toolbar the
+    /// developer just asked for.
     /// </summary>
-    private unsafe PixelRect SurfaceBounds(nint frame, nint documentArea)
+    private static unsafe PixelRect SurfaceBounds(nint frame, nint documentArea, bool covering)
     {
         var document = ClientAreaIn(documentArea, frame);
 
-        if (AnyToolWindowOpen())
+        if (!covering)
         {
             return document;
         }
@@ -1277,9 +1441,38 @@ internal sealed class AddInSession : IDisposable
             return document;
         }
 
-        // Down from where the document area starts, so the command bars keep their space, and out
-        // to the frame's own edges in every other direction.
-        return new PixelRect(0, document.Top, client.Right - client.Left, client.Bottom - client.Top);
+        return new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top);
+    }
+
+    /// <summary>
+    /// Whether the surface may cover everything native inside the frame.
+    ///
+    /// Three things say no. A page that has not loaded yet: covering the menu bar with a surface
+    /// that cannot draw its own menus takes every menu away, so the native bar stays until the
+    /// replacement is genuinely standing. A native tool window the developer opened: covering it
+    /// would hide what they just asked for. And a docked toolbar they have shown, for the same
+    /// reason.
+    /// </summary>
+    private bool CanCoverChrome() =>
+        _editorSurface is { IsReady: true } && !AnyToolWindowOpen() && !AnyDockedToolbarVisible();
+
+    /// <summary>
+    /// Recomputes where the surface belongs, now.
+    ///
+    /// For the moments that are not window events: a menu item has just opened or closed a native
+    /// window, or the page has just come up. Waiting for the next window event leaves the wrong
+    /// thing covered in the meantime.
+    /// </summary>
+    private void RefreshSurfacePlacement()
+    {
+        if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0)
+        {
+            return;
+        }
+
+        var covering = CanCoverChrome();
+        _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, covering), visible: true);
+        _editorSurface.SetChrome(menuBar: covering);
     }
 
     /// <summary>
@@ -1292,8 +1485,10 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private bool AnyToolWindowOpen()
     {
-        // Object browser, watches, locals. The three the surface has no replacement for.
-        ReadOnlySpan<int> tools = [2, 3, 4];
+        // Object browser, watches, locals, properties: the ones the surface has no replacement
+        // for. Properties is closed at start-up for its dock space, but the menu can reopen it,
+        // and reopened it must be seen.
+        ReadOnlySpan<int> tools = [2, 3, 4, 7];
 
         try
         {
@@ -1313,6 +1508,49 @@ internal sealed class AddInSession : IDisposable
         {
             // Erring towards the smaller rectangle, which covers less and hides nothing.
             Log.Info($"surface: the editor's windows could not be read ({ex.GetType().Name})");
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the developer has a native toolbar docked and showing.
+    ///
+    /// The surface's own toolbar replaces the Standard bar, which is hidden, but the others can be
+    /// shown from the View menu, and a docked bar occupies real rows at the frame's edge. Covering
+    /// those rows would put a toolbar on screen that cannot be pressed.
+    /// </summary>
+    private bool AnyDockedToolbarVisible()
+    {
+        const int menuBarType = 1;
+        const int floating = 4;
+        const int popup = 5;
+
+        try
+        {
+            using var bars = _editor.GetObject("CommandBars");
+            var count = bars?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var bar = bars!.GetItem(i);
+                if (bar is null || !bar.GetBool("Visible") || bar.GetInt32("Type") == menuBarType)
+                {
+                    continue;
+                }
+
+                // A floating bar floats above everything and contests nothing.
+                var position = bar.GetInt32("Position");
+                if (position != floating && position != popup)
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"surface: the editor's toolbars could not be read ({ex.GetType().Name})");
             return true;
         }
 

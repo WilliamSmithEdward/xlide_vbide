@@ -23,6 +23,7 @@ const INDEX_HTML = `<!doctype html>
 </head>
 <body>
 <div id="shell">
+  <div id="menubar" role="menubar" aria-label="Menus"></div>
   <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
   <div id="main">
     <div id="sidebar">

@@ -46,7 +46,27 @@ internal static class VbeCommands
         public const int Save = 3;
         public const int ObjectBrowser = 473;
         public const int UncommentBlock = 2552;
+        public const int Undo = 128;
+        public const int Redo = 129;
+        public const int Find = 141;
+        public const int Replace = 313;
+        public const int ClearAllBreakpoints = 579;
+        public const int ImmediateWindow = 2554;
+        public const int ProjectExplorer = 2557;
+        public const int PropertiesWindow = 222;
     }
+
+    /// <summary>
+    /// Whether a command must run through the session's own command path rather than being executed
+    /// where it was found. Toggling a breakpoint is bookkeeping as well as a command, and running,
+    /// stepping and saving need the developer's edits and caret to reach the editor first. A menu
+    /// item that executes one of these directly does the command and skips all of that, which is
+    /// exactly how an invisible breakpoint was set once before.
+    /// </summary>
+    public static bool RoutesThroughSession(int id) => id is
+        Command.Run or Command.Break or Command.Reset or Command.ToggleBreakpoint or
+        Command.StepInto or Command.StepOver or Command.StepOut or Command.RunToCursor or
+        Command.Save;
 
     /// <summary>
     /// Executes a command by identifier.

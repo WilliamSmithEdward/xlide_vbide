@@ -9,8 +9,8 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 that would be expensive to reverse.
 
 Repository: `F:\GitHub\xlide\xlide_vbide`, public at
-<https://github.com/WilliamSmithEdward/xlide_vbide>. Working tree clean and pushed as of commit
-`848174d`.
+<https://github.com/WilliamSmithEdward/xlide_vbide>. The tree is committed and pushed at the end
+of every session; `git log` names what each one did.
 
 ## 1. What this is, in one paragraph
 
@@ -105,6 +105,21 @@ has said plainly it must never be a production mechanism.
   native Standard toolbar is hidden (its commands were moved to ours first); title bar, caption
   and window border are dark via DWM attributes. The frame's own pale inner line is covered by the
   surface extending to the frame edge.
+- The menu bar is ours. The surface draws its own File..Help bar and covers the native one, but
+  only once its page has reported ready: a covered bar with no page behind it would take the only
+  route to References and Options away. Each menu is read live from CommandBars at the moment it
+  opens (VbeMenus.Read), so captions, enablement, checkmarks, shortcuts and the dynamic Window
+  list are always the editor's own, and localisation comes free. Items execute by position chain
+  (VbeMenus.ControlAt), never by identifier. Routed exceptions: run/step/save/breakpoint go
+  through ExecuteEditorCommand (bookkeeping), undo/redo/find/replace run in the surface,
+  Clear All Breakpoints also clears the surface's drawn record, View -> Immediate opens our
+  panel, and the project explorer item answers with a notice. Anything that opens a native
+  window or docked toolbar makes the surface retreat to the document area at once
+  (RefreshSurfacePlacement) and withdraw its own menu row (setChrome), so nothing native is ever
+  reachable-but-covered. Verified live: staged covering in the log (below command bars, then
+  0,0 after ready) and 11 menus read; dropdowns, submenus, separators, disabled/checked items,
+  shortcut column, execution paths, Alt+letter, F10, arrows and Escape verified in the browser
+  demo (demoTransport serves a canned tree).
 - 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit
@@ -220,15 +235,14 @@ A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled s
 
 ## 9. Open and known, in priority order
 
-1. **Menu bar replacement** — the user wants it and has been given the plan and its limits.
-   Approach: extend the overlay upward to cover the (unhideable) menu bar; build our menu in the
-   surface from a live CommandBars tree read (captions come from the VBE, so localisation is
-   free); execute items BY PATH (IDs are not unique); reimplement Alt accelerators; refresh
-   enabled state per open. Hard limits to keep in view: modal dialogs (References, Options,
-   Macros, Project Properties) stay native and light; our menu must be COMPLETE before covering
-   theirs, because afterwards it is the only route to References/Options; the Window menu is
-   dynamic. Scope is roughly the toolbar plus the explorer combined. Build the host-side tree
-   reader and path execution first and verify live before writing any UI.
+1. **Menu bar: first live click-through.** Built and verified as far as automation reaches (see
+   section 5); no person has clicked the real menus yet. Watch the log for `menu: [n] read` on
+   the first dropdown and `menu: [...] executed`. Known edges, all accepted for now: the native
+   (light) bar shows during the ~2 s page boot, then ours covers it; keys the host claims (F5,
+   F8, F9) still act while one of our menus is open, because the accelerator hook runs before
+   the page sees anything; Alt alone does not focus the bar (Alt+letter and F10 do); floating
+   native toolbars are left alone and uncontested; disabled items are as fresh as the moment the
+   menu opened, and an execute on a stale item answers with a notice.
 2. **~2.1 s surface start-up**, entirely bundle fetch/parse (editor construction is 50 ms). The
    page reports its own timings in the ready message on every run. Untried: bundle splitting,
    warming during host start-up, cached compilation. (Task #17.)
@@ -254,3 +268,8 @@ A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled s
 - No synthetic input (SendKeys) in production, ever.
 - The whole UI should end up ours: consistently dark, VS-style ergonomics, the VBE alive
   underneath as the engine. The module is the source of truth; typing follows xlide_vscode.
+- Every native window should eventually be replaced by the surface (user, 2026-08-01): Locals,
+  Watch, Object Browser, Properties, Call Stack, and dialogs wherever the object model allows a
+  faithful rebuild (References and Macros are scriptable; parts of Options are not). Until a
+  replacement exists, the native window stays reachable and the surface retreats for it; the menu
+  routing table in RouteMenuCommand is where "open ours instead" gets decided per window.
