@@ -362,6 +362,64 @@ internal sealed class CodePaneTracker : IDisposable
 
     private static HashSet<nint>? _visible;
 
+    /// <summary>
+    /// The pane-class window carrying this exact caption, visible or hidden, or zero.
+    ///
+    /// This is how the Immediate window is identified: the object model names its localised
+    /// caption, the handle carries the same caption, and neither changes with visibility — so
+    /// the identification cannot lose the race that diffing visible panes across an
+    /// asynchronous hide loses. The caption is unique among the editor's tool windows; code
+    /// panes carry their module titles.
+    /// </summary>
+    internal static unsafe nint FindPaneByCaption(string caption)
+    {
+        _captionWanted = caption;
+        _captionFound = 0;
+
+        try
+        {
+            var ours = Win32.GetCurrentProcessId();
+
+            nint frame = 0;
+            while (_captionFound == 0 && (frame = Win32.FindWindowEx(0, frame, FrameClass, null)) != 0)
+            {
+                Win32.GetWindowThreadProcessId(frame, out var owner);
+                if (owner != ours)
+                {
+                    continue;
+                }
+
+                Win32.EnumChildWindows(
+                    frame,
+                    (nint)(delegate* unmanaged<nint, nint, int>)&OnCaptionCandidate,
+                    0);
+            }
+
+            return _captionFound;
+        }
+        finally
+        {
+            _captionWanted = null;
+        }
+    }
+
+    private static string? _captionWanted;
+    private static nint _captionFound;
+
+    [UnmanagedCallersOnly]
+    private static int OnCaptionCandidate(nint window, nint parameter)
+    {
+        if (_captionWanted is { } wanted
+            && ReadClassName(window) == PaneClass
+            && ReadWindowText(window) == wanted)
+        {
+            _captionFound = window;
+            return 0;
+        }
+
+        return 1;
+    }
+
     [UnmanagedCallersOnly]
     private static int OnVisiblePane(nint window, nint parameter)
     {

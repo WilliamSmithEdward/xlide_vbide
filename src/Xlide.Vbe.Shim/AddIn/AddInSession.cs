@@ -1498,24 +1498,17 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Starts reading the Immediate window, having worked out which window it is.
-    ///
-    /// The one that stopped being visible when it was closed is the one that was closed. Its class
-    /// is shared with the code panes and with the Locals and Watch windows, and its caption is
-    /// localised, so there is nothing else to tell it apart by. It keeps its handle once hidden,
-    /// which is what makes it readable afterwards.
+    /// Starts reading the Immediate window, its handle already worked out — by caption match
+    /// normally, by the visibility diff as the fallback. The window keeps its handle once
+    /// hidden, which is what makes it readable afterwards.
     /// </summary>
-    private void AttachImmediateReader(HashSet<nint> before)
+    private void AttachImmediateReader(nint window)
     {
-        before.ExceptWith(CodePaneTracker.VisiblePanes());
-
-        if (before.Count != 1)
+        if (window == 0)
         {
-            Log.Info($"immediate: {before.Count} windows changed when it closed, cannot tell which it is");
             return;
         }
 
-        var window = before.First();
         _immediateReader = ImmediateReader.Create(window);
 
         if (_immediateReader is null)
@@ -1561,6 +1554,19 @@ internal sealed class AddInSession : IDisposable
     private void EvaluateImmediate(string line)
     {
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
+
+        // An attachment that failed at start-up is retried the moment output is about to
+        // matter. The window certainly exists by now — start-up toggled it visible — and the
+        // caption identification does not care that it is hidden.
+        if (_immediateReader is null && _immediateCaption is { Length: > 0 } caption)
+        {
+            AttachImmediateReader(CodePaneTracker.FindPaneByCaption(caption));
+            if (_immediateReader is not null)
+            {
+                Log.Info("immediate: reader attached on retry");
+            }
+        }
+
         _editorSurface?.FlushEdits();
 
         var evaluator = _immediate ??= new ImmediateEvaluator(_editor);
@@ -2573,13 +2579,41 @@ internal sealed class AddInSession : IDisposable
     {
         window.SetBool("Visible", true);
 
-        var before = CodePaneTracker.VisiblePanes();
+        // The identification that survives timing: the object model names the window's
+        // localised caption, and the handle carries the same caption, visible or not. The old
+        // way — diffing which pane stopped being visible across the hide — lost whenever the
+        // hide had not yet reached the window list, and answered "0 windows changed"; that is
+        // a hidden Immediate whose Debug.Print output nothing can mirror. The caption is kept
+        // so a failed attachment can be retried when the first evaluation actually needs it.
+        _immediateCaption = window.GetString("Caption");
+        var handle = _immediateCaption is { Length: > 0 } caption
+            ? CodePaneTracker.FindPaneByCaption(caption)
+            : 0;
+
+        var before = handle == 0 ? CodePaneTracker.VisiblePanes() : null;
 
         window.SetBool("Visible", false);
-        Log.Info($"window: closed the editor's own '{window.GetString("Caption")}'");
+        Log.Info($"window: closed the editor's own '{_immediateCaption}'");
 
-        AttachImmediateReader(before);
+        if (handle == 0 && before is not null)
+        {
+            // The old diff as the fallback for a host where the caption read nothing.
+            before.ExceptWith(CodePaneTracker.VisiblePanes());
+            if (before.Count == 1)
+            {
+                handle = before.First();
+            }
+            else
+            {
+                Log.Info($"immediate: {before.Count} windows changed when it closed, cannot tell which it is");
+            }
+        }
+
+        AttachImmediateReader(handle);
     }
+
+    /// <summary>The Immediate window's localised caption, kept so attachment can be retried.</summary>
+    private string? _immediateCaption;
 
     /// <summary>
     /// Publishes every finding to the surface's panel, across all modules — except the ones the

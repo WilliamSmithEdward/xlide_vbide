@@ -208,3 +208,18 @@ unless told otherwise, and terminates only the identity it recorded.
 It also launches the host as a process rather than creating it through automation, because a host
 created through automation does not load add-ins at all, and it restores state the host rewrites
 after a failed load. Both are recorded in `lessons.md` with the evidence.
+
+## 10. The product never requires "Trust access to the VBA project object model"
+
+That Trust Center setting gates exactly two doors: `Application.VBE` and
+`Workbook.VBProject` — the bridges from the host's own object model into the editor's. It does
+not gate an editor add-in: the editor hands its object model to `OnConnection` directly, and
+everything reachable from that instance works with the setting off.
+
+So the product commits to the ungated paths, permanently: every project, component, and module
+read or write goes through the `OnConnection` instance; execution reaches the host through
+`AccessibleObjectFromWindow` on a worksheet window and `Application.Run`. A feature that could
+only be built on one of the gated bridges is a feature that asks every user to weaken a security
+setting first, and it gets redesigned or dropped. The development harness scripts do use
+`Workbook.VBProject` to seed fixtures — they run on a development machine, they are not the
+product, and they must never migrate into it.
