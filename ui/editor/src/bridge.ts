@@ -90,7 +90,9 @@ export type ClientMessage =
   | { type: "menu"; path: number[] }
   | { type: "menuExecute"; path: number[] }
   | { type: "editProperty"; component: string; name: string; value: string }
-  | { type: "selectComponent"; name: string };
+  | { type: "selectComponent"; name: string }
+  | { type: "closeModule"; name: string }
+  | { type: "insertComponent"; kind: number };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -239,6 +241,21 @@ export class EditorBridge {
   /** Tells the host the explorer's selection changed, which the properties panel follows. */
   selectComponent(name: string): void {
     this.transport.post({ type: "selectComponent", name });
+  }
+
+  /** Asks the host to close a module's pane, which is what closes its tab. */
+  closeModule(name: string): void {
+    this.transport.post({ type: "closeModule", name });
+  }
+
+  /** Asks the host for a new component: 1 module, 2 class module, 3 form. */
+  insertComponent(kind: number): void {
+    this.transport.post({ type: "insertComponent", kind });
+  }
+
+  /** Asks the host to toggle the breakpoint on a line, same as clicking the margin. */
+  toggleBreakpoint(line: number): void {
+    this.transport.post({ type: "breakpointToggleRequested", line });
   }
 
   /**

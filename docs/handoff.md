@@ -120,6 +120,13 @@ has said plainly it must never be a production mechanism.
   0,0 after ready) and 11 menus read; dropdowns, submenus, separators, disabled/checked items,
   shortcut column, execution paths, Alt+letter, F10, arrows and Escape verified in the browser
   demo (demoTransport serves a canned tree).
+- Tabs have modern ergonomics: hover/active close button, middle-click close, Ctrl+W and
+  Ctrl+F4 close the active module (claimed at the accelerator hook; unclaimed Ctrl+W tells the
+  browser to close its own window), Ctrl+PageUp/PageDown cycle, drag to reorder with the order
+  surviving host updates. Right clicks answer with class-curated menus everywhere (see 9.2).
+  Closing goes through the pane's window; inserting goes through VBComponents.Add and opens what
+  it made; commands that live only inside menus (References 942, ProjectProperties 2578) are
+  found by a recursive descent that is sound only for UNIQUE identifiers.
 - The Properties window is replaced, and the pane mirrors the native one. It follows the
   explorer's SELECTION (single click selects and publishes properties; double click or Enter
   opens the code, exactly like the native tree); an object header names the selection and its
@@ -248,6 +255,13 @@ A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled s
 
 ## 9. Open and known, in priority order
 
+**THE MISSION (user, 2026-08-01), which frames everything below:**
+1. Replicate all base functionality of the VBE editor.
+2. Replace all native windows with custom GUI implementations.
+3. Bring the editor into parity with xlide_vscode as far as feasible: tab completion, member
+   (dot) menus, IntelliSense, and the rest of its feature set. xlide_vscode is the user's own
+   MIT project at `F:\GitHub\xlide\xlide_vscode` and porting from it is sanctioned.
+
 1. **Menu bar: first live click-through.** Built and verified as far as automation reaches (see
    section 5); no person has clicked the real menus yet. Watch the log for `menu: [n] read` on
    the first dropdown and `menu: [...] executed`. Known edges, all accepted for now: the native
@@ -256,14 +270,13 @@ A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled s
    the page sees anything; Alt alone does not focus the bar (Alt+letter and F10 do); floating
    native toolbars are left alone and uncontested; disabled items are as fresh as the moment the
    menu opened, and an execute on a stale item answers with a notice.
-2. **Right-click surfaces, per object class (user directive 2026-08-01).** Every context menu in
-   the product must be validated against the class of the thing clicked: a project, a standard
-   module, a class module, a form, a document component, a tab, the editor text, the breakpoint
-   margin and a properties row each get options that are logical for that class, and irrelevant
-   options are removed rather than shown disabled. Where an action exists only natively, drive
-   the native popup bar's item by position chain the way the menu bar does; otherwise use surface
-   commands. Today the only context menu anywhere is Monaco's own inside the editor; everything
-   else has none yet, so this lands as each surface grows one.
+2. **Right-click surfaces, per object class (user directive 2026-08-01).** First pass SHIPPED:
+   curated menus on tabs (close / close others / close all), explorer components (open or open
+   code, rename, close), the project header (insert module/class/form, References, Project
+   Properties), the breakpoint margin (toggle, clear all), problems rows (go to, copy) and the
+   Immediate log (clear); the editor's own menu gained the host's run/breakpoint commands.
+   Still to add as the features land: Export File and Remove (both need a native file dialog or
+   a confirm flow), form designer items, and re-validation of every menu as classes grow.
 3. **~2.1 s surface start-up**, entirely bundle fetch/parse (editor construction is 50 ms). The
    page reports its own timings in the ready message on every run. Untried: bundle splitting,
    warming during host start-up, cached compilation. (Task #17.)

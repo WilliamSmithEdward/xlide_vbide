@@ -54,6 +54,8 @@ internal static class VbeCommands
         public const int ImmediateWindow = 2554;
         public const int ProjectExplorer = 2557;
         public const int PropertiesWindow = 222;
+        public const int References = 942;
+        public const int ProjectProperties = 2578;
     }
 
     /// <summary>
@@ -175,20 +177,56 @@ internal static class VbeCommands
         return null;
     }
 
-    private static DispatchObject? FindOn(DispatchObject bar, int commandId)
+    /// <summary>
+    /// Finds a control by identifier on a bar, descending into its menus.
+    ///
+    /// The descent is what lets commands that live only inside a menu (References, Project
+    /// Properties) be found at all. It is only sound for identifiers that are unique across the
+    /// menus: several are shared by unrelated items, and looking one of those up would find
+    /// whichever came first. Everything in <see cref="Command"/> is unique; menu replication,
+    /// which cannot make that promise, addresses by position instead.
+    /// </summary>
+    private static DispatchObject? FindOn(DispatchObject bar, int commandId, int depth = 0)
     {
+        const int popupControl = 10;
+        const int deepestMenu = 3;
+
         using var controls = bar.GetObject("Controls");
         var count = controls?.GetInt32("Count") ?? 0;
 
         for (var i = 1; i <= count; i++)
         {
             var control = controls!.GetItem(i);
-            if (control?.GetInt32("Id") == commandId)
+            if (control is null)
+            {
+                continue;
+            }
+
+            if (control.GetInt32("Id") == commandId)
             {
                 return control;
             }
 
-            control?.Dispose();
+            if (depth < deepestMenu)
+            {
+                int controlType;
+                try
+                {
+                    controlType = control.GetInt32("Type");
+                }
+                catch (Exception)
+                {
+                    controlType = 0;
+                }
+
+                if (controlType == popupControl && FindOn(control, commandId, depth + 1) is { } found)
+                {
+                    control.Dispose();
+                    return found;
+                }
+            }
+
+            control.Dispose();
         }
 
         return null;
@@ -215,6 +253,9 @@ internal static class VbeCommands
         "quickWatch" => Command.QuickWatch,
         "addWatch" => Command.AddWatch,
         "callStack" => Command.CallStack,
+        "clearAllBreakpoints" => Command.ClearAllBreakpoints,
+        "references" => Command.References,
+        "projectProperties" => Command.ProjectProperties,
         _ => 0,
     };
 
@@ -307,8 +348,10 @@ internal static class VbeCommands
 internal static class VirtualKey
 {
     public const uint F1 = 0x70;
+    public const uint F4 = 0x73;
     public const uint F5 = 0x74;
     public const uint F8 = 0x77;
     public const uint F9 = 0x78;
     public const uint S = 0x53;
+    public const uint W = 0x57;
 }

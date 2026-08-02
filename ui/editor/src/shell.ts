@@ -9,6 +9,7 @@
  * concept of them.
  */
 
+import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import { Explorer, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
@@ -58,6 +59,10 @@ export interface ShellHandlers {
   menuClosed(): void;
   /** The developer edited a property of the shown component. */
   editProperty(component: string, name: string, value: string): void;
+  /** The developer closed a module's tab, however they did it. */
+  closeModule(name: string): void;
+  /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
+  insertComponent(kind: number): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -122,9 +127,20 @@ export class Shell {
   private readonly history: string[] = [];
   private historyIndex = 0;
 
-  private modules: string[] = [];
   private active: string | null = null;
   private findings: ShellFinding[] = [];
+
+  /**
+   * The tabs in the order the developer arranged them. The host reports WHICH modules are open;
+   * where each one sits in the strip is the developer's, and survives every host update.
+   */
+  private tabOrder: string[] = [];
+
+  /** True from a drag until the click it would otherwise become has been swallowed. */
+  private dragSuppressesClick = false;
+
+  /** A rename asked for from a menu; focused when the properties for it arrive. */
+  private pendingRename: string | null = null;
   private panelOpen = true;
   private panelHeight = 180;
   private sidebarWidth = 260;
@@ -155,6 +171,8 @@ export class Shell {
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
       open: (name) => handlers.activateModule(name),
+      context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
+      projectContext: (x, y) => this.projectMenu(x, y),
     });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
@@ -196,15 +214,80 @@ export class Shell {
     // One listener on the strip rather than one per tab: the tabs are rebuilt whenever the set of
     // open modules changes, and per-tab listeners would have to be torn down with them.
     this.tabStrip.addEventListener("click", (event) => {
+      // A drag that ends over a tab is not a click on it.
+      if (this.dragSuppressesClick) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      const tab = target.closest("[data-module]") as HTMLElement | null;
+      if (!tab?.dataset.module) {
+        return;
+      }
+
+      if (target.closest(".tab-close")) {
+        this.handlers.closeModule(tab.dataset.module);
+        return;
+      }
+
+      this.handlers.activateModule(tab.dataset.module);
+    });
+
+    // The middle button closes, the way every tabbed editor closes.
+    this.tabStrip.addEventListener("auxclick", (event) => {
+      if (event.button !== 1) {
+        return;
+      }
+
       const tab = (event.target as HTMLElement).closest("[data-module]") as HTMLElement | null;
       if (tab?.dataset.module) {
-        this.handlers.activateModule(tab.dataset.module);
+        event.preventDefault();
+        this.handlers.closeModule(tab.dataset.module);
+      }
+    });
+
+    this.tabStrip.addEventListener("contextmenu", (event) => {
+      const tab = (event.target as HTMLElement).closest("[data-module]") as HTMLElement | null;
+      if (tab?.dataset.module) {
+        event.preventDefault();
+        this.tabMenu(tab.dataset.module, event.clientX, event.clientY);
+      }
+    });
+
+    this.installTabDrag();
+
+    // Cycling belongs to the strip, wherever focus happens to be.
+    document.addEventListener("keydown", (event) => {
+      if (event.ctrlKey && (event.key === "PageDown" || event.key === "PageUp")) {
+        event.preventDefault();
+        this.cycleTab(event.key === "PageDown" ? 1 : -1);
       }
     });
 
     this.panelList.addEventListener("click", (event) => {
       const row = (event.target as HTMLElement).closest("[data-line]") as HTMLElement | null;
       this.goTo(row);
+    });
+
+    this.panelList.addEventListener("contextmenu", (event) => {
+      const row = (event.target as HTMLElement).closest("[data-line]") as HTMLElement | null;
+      if (!row) {
+        return;
+      }
+
+      event.preventDefault();
+      const message = row.querySelector(".message")?.textContent ?? "";
+      showContextMenu(event.clientX, event.clientY, [
+        { label: "Go To", run: () => this.goTo(row) },
+        { label: "Copy Message", run: () => void navigator.clipboard.writeText(message) },
+      ]);
+    });
+
+    this.immediateLog.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      showContextMenu(event.clientX, event.clientY, [
+        { label: "Clear", run: () => this.immediateLog.replaceChildren() },
+      ]);
     });
 
     this.panelList.addEventListener("keydown", (event) => {
@@ -217,8 +300,15 @@ export class Shell {
 
   /** Replaces the tab strip. The active module is highlighted, not just listed. */
   setModules(modules: string[], active: string | null): void {
-    this.modules = modules;
     this.active = active;
+
+    // The host says which modules are open; the developer says where their tabs sit. Tabs that
+    // are still open keep their positions, new ones join at the end, closed ones leave.
+    this.tabOrder = [
+      ...this.tabOrder.filter((name) => modules.includes(name)),
+      ...modules.filter((name) => !this.tabOrder.includes(name)),
+    ];
+
     this.statusModule.textContent = active ?? "";
     this.explorer.setActive(active);
     this.renderTabs();
@@ -250,6 +340,14 @@ export class Shell {
     this.propertiesKind = kind;
     this.properties = properties;
     this.renderProperties();
+
+    // A rename that was asked for lands here, when the name field for it actually exists.
+    if (this.pendingRename === component) {
+      this.pendingRename = null;
+      const input = this.propertiesList.querySelector<HTMLInputElement>("input");
+      input?.focus();
+      input?.select();
+    }
   }
 
   /** Opens the properties section and puts focus in it, for the menu route to it. */
@@ -672,7 +770,7 @@ export class Shell {
   private renderTabs(): void {
     this.tabStrip.replaceChildren();
 
-    for (const name of this.modules) {
+    for (const name of this.tabOrder) {
       const tab = document.createElement("button");
       tab.type = "button";
       tab.className = "tab" + (name === this.active ? " active" : "");
@@ -692,7 +790,175 @@ export class Shell {
         tab.appendChild(badge);
       }
 
+      const close = document.createElement("span");
+      close.className = "tab-close codicon codicon-close";
+      close.title = "Close (Ctrl+W)";
+      close.setAttribute("role", "button");
+      close.setAttribute("aria-label", `Close ${name}`);
+      tab.appendChild(close);
+
       this.tabStrip.appendChild(tab);
+    }
+  }
+
+  /**
+   * Makes the tabs draggable into a new order.
+   *
+   * The dragged tab is moved in the DOM as the pointer crosses its neighbours' midpoints, so the
+   * feedback is the reorder itself. The element is moved rather than re-rendered, because the
+   * pointer capture that keeps the drag alive belongs to the element and would die with it.
+   */
+  private installTabDrag(): void {
+    this.tabStrip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      const tab = target.closest(".tab") as HTMLElement | null;
+      if (!tab || target.closest(".tab-close")) {
+        return;
+      }
+
+      const startX = event.clientX;
+      const pointerId = event.pointerId;
+      let moved = false;
+
+      const move = (during: PointerEvent) => {
+        // A few pixels of slack, so a click with a shaky hand is still a click.
+        if (!moved && Math.abs(during.clientX - startX) < 5) {
+          return;
+        }
+
+        if (!moved) {
+          moved = true;
+          this.dragSuppressesClick = true;
+          tab.classList.add("dragging");
+
+          try {
+            tab.setPointerCapture(pointerId);
+          } catch {
+            // A pointer that has already gone cannot be captured; the window listeners still
+            // finish the drag.
+          }
+        }
+
+        const after = this.tabAfter(during.clientX, tab);
+        if (after === null) {
+          this.tabStrip.appendChild(tab);
+        } else if (after !== tab) {
+          this.tabStrip.insertBefore(tab, after);
+        }
+      };
+
+      const end = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", end);
+        tab.classList.remove("dragging");
+
+        if (moved) {
+          this.tabOrder = [...this.tabStrip.querySelectorAll<HTMLElement>("[data-module]")]
+            .map((t) => t.dataset.module)
+            .filter((name): name is string => !!name);
+
+          // Cleared after the click this drag produces has already been ignored.
+          setTimeout(() => {
+            this.dragSuppressesClick = false;
+          }, 0);
+        }
+      };
+
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", end);
+    });
+  }
+
+  /** The tab the dragged one should sit before at this pointer position, or null for the end. */
+  private tabAfter(x: number, dragging: HTMLElement): HTMLElement | null {
+    for (const tab of this.tabStrip.querySelectorAll<HTMLElement>(".tab")) {
+      if (tab === dragging) {
+        continue;
+      }
+
+      const box = tab.getBoundingClientRect();
+      if (x < box.left + box.width / 2) {
+        return tab;
+      }
+    }
+
+    return null;
+  }
+
+  /** Activates the next or previous tab in the developer's order, wrapping at the ends. */
+  private cycleTab(delta: number): void {
+    if (this.tabOrder.length === 0) {
+      return;
+    }
+
+    const current = Math.max(0, this.tabOrder.indexOf(this.active ?? ""));
+    const next = this.tabOrder[(current + delta + this.tabOrder.length) % this.tabOrder.length];
+    if (next && next !== this.active) {
+      this.handlers.activateModule(next);
+    }
+  }
+
+  private tabMenu(name: string, x: number, y: number): void {
+    showContextMenu(x, y, [
+      { label: "Close", run: () => this.handlers.closeModule(name) },
+      {
+        label: "Close Others",
+        enabled: this.tabOrder.length > 1,
+        run: () => this.tabOrder.filter((other) => other !== name)
+          .forEach((other) => this.handlers.closeModule(other)),
+      },
+      { label: "Close All", run: () => [...this.tabOrder].forEach((other) => this.handlers.closeModule(other)) },
+    ]);
+  }
+
+  /**
+   * The menu for one explorer item, shaped by what the component is. Options that make no sense
+   * for the class are left out rather than disabled; the host's own operations arrive as the
+   * classes grow them.
+   */
+  private componentMenu(name: string, kind: number, x: number, y: number): void {
+    // A document or a form is an object with code behind it; a module is only its code.
+    const openLabel = kind === 100 || kind === 3 ? "Open Code" : "Open";
+
+    const items: ContextMenuItem[] = [
+      { label: openLabel, run: () => this.handlers.activateModule(name) },
+      {},
+      { label: "Rename", run: () => this.beginRename(name) },
+    ];
+
+    if (this.tabOrder.includes(name)) {
+      items.push({}, { label: "Close", run: () => this.handlers.closeModule(name) });
+    }
+
+    showContextMenu(x, y, items);
+  }
+
+  private projectMenu(x: number, y: number): void {
+    showContextMenu(x, y, [
+      { label: "Insert Module", run: () => this.handlers.insertComponent(1) },
+      { label: "Insert Class Module", run: () => this.handlers.insertComponent(2) },
+      { label: "Insert UserForm", run: () => this.handlers.insertComponent(3) },
+      {},
+      { label: "References...", run: () => this.hostCommand("references") },
+      { label: "Project Properties...", run: () => this.hostCommand("projectProperties") },
+    ]);
+  }
+
+  private hostCommand(id: string): void {
+    this.handlers.command({ id, target: "host", icon: "", label: id });
+  }
+
+  /** Selects a component and puts focus in its name, once its properties arrive. */
+  private beginRename(name: string): void {
+    this.pendingRename = name;
+    this.handlers.selectComponent(name);
+
+    if (!this.propertiesOpen) {
+      this.togglePropertiesOpen();
     }
   }
 

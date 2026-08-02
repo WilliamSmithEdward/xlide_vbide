@@ -48,6 +48,10 @@ export interface ExplorerHandlers {
   select(name: string): void;
   /** Double click, or Enter on the focused item: the component's code opens. */
   open(name: string): void;
+  /** Right click on a component: the menu for its class, at this position. */
+  context(name: string, kind: number, x: number, y: number): void;
+  /** Right click on a project header. */
+  projectContext(x: number, y: number): void;
 }
 
 export class Explorer {
@@ -96,6 +100,28 @@ export class Explorer {
           event.preventDefault();
           this.handlers.open(name);
         }
+      }
+    });
+
+    this.root.addEventListener("contextmenu", (event) => {
+      const item = (event.target as HTMLElement).closest("[data-component]") as HTMLElement | null;
+      if (item?.dataset.component) {
+        event.preventDefault();
+        this.selected = item.dataset.component;
+        this.render();
+        this.handlers.select(item.dataset.component);
+        this.handlers.context(
+          item.dataset.component,
+          Number(item.dataset.kind ?? "0"),
+          event.clientX,
+          event.clientY);
+        return;
+      }
+
+      const project = (event.target as HTMLElement).closest(".tree-project") as HTMLElement | null;
+      if (project) {
+        event.preventDefault();
+        this.handlers.projectContext(event.clientX, event.clientY);
       }
     });
   }
@@ -163,6 +189,7 @@ export class Explorer {
       + (component.name === this.active ? " active" : "")
       + (component.name === this.selected ? " selected" : "");
     button.dataset.component = component.name;
+    button.dataset.kind = String(component.kind);
     button.setAttribute("role", "treeitem");
     button.setAttribute("aria-selected", String(component.name === this.selected));
 

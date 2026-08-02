@@ -94,6 +94,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer selects a component in the explorer without opening it.</summary>
     public Action<string>? ComponentSelected { get; set; }
 
+    /// <summary>Raised when the developer closes a module's tab.</summary>
+    public Action<string>? ModuleCloseRequested { get; set; }
+
+    /// <summary>Raised when the developer asks for a new component: 1 module, 2 class, 3 form.</summary>
+    public Action<int>? ComponentInsertRequested { get; set; }
+
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
     public Action? Ready { get; set; }
 
@@ -641,6 +647,24 @@ internal sealed class EditorSurface : IDisposable
                         && selected.GetString() is { Length: > 0 } selectedName)
                     {
                         ComponentSelected?.Invoke(selectedName);
+                    }
+
+                    break;
+
+                case "closeModule":
+                    if (document.RootElement.TryGetProperty("name", out var closing)
+                        && closing.GetString() is { Length: > 0 } closingName)
+                    {
+                        ModuleCloseRequested?.Invoke(closingName);
+                    }
+
+                    break;
+
+                case "insertComponent":
+                    if (document.RootElement.TryGetProperty("kind", out var componentKind)
+                        && componentKind.TryGetInt32(out var insertKind))
+                    {
+                        ComponentInsertRequested?.Invoke(insertKind);
                     }
 
                     break;

@@ -28,6 +28,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport } from "./bridge.js";
+import { showContextMenu } from "./contextmenu.js";
 import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
@@ -101,9 +102,60 @@ function boot(): void {
     menuClosed: () => editor.focus(),
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
     selectComponent: (name) => bridge.selectComponent(name),
+    closeModule: (name) => bridge.closeModule(name),
+    insertComponent: (kind) => bridge.insertComponent(kind),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
+
+  // The host's own commands, present in the editor's context menu and the command palette so
+  // they are discoverable where a developer already looks for commands.
+  const hostActions: Array<[string, string, string]> = [
+    ["xlide.run", "Run Sub/UserForm (F5)", "run"],
+    ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
+    ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
+  ];
+
+  for (const [id, label, command] of hostActions) {
+    editor.addAction({
+      id,
+      label,
+      contextMenuGroupId: "1_xlide",
+      contextMenuOrder: 1,
+      run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
+    });
+  }
+
+  // The margin's own menu. The editor would otherwise offer its text menu there, which is a menu
+  // for a place the click was not.
+  editor.onContextMenu((event) => {
+    const kind = event.target.type;
+    if (kind !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      && kind !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+      return;
+    }
+
+    event.event.preventDefault();
+    event.event.stopPropagation();
+
+    const line = event.target.position?.lineNumber;
+    showContextMenu(event.event.posx, event.event.posy, [
+      {
+        label: "Toggle Breakpoint",
+        enabled: line !== undefined,
+        run: () => bridge.toggleBreakpoint(line ?? 1),
+      },
+      {
+        label: "Clear All Breakpoints",
+        run: () => bridge.runCommand({
+          id: "clearAllBreakpoints",
+          target: "host",
+          icon: "",
+          label: "Clear All Breakpoints",
+        }),
+      },
+    ]);
+  });
 
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 

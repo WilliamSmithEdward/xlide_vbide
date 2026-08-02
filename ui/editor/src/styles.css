@@ -603,6 +603,34 @@ span.prop-value.readonly {
   color: #ffffff;
 }
 
+/* The close affordance appears when the tab could plausibly be closed right now: under the
+   pointer, or on the active tab. Space is reserved either way so tabs do not change width. */
+
+.tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 13px;
+  opacity: 0;
+}
+
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 0.7;
+}
+
+.tab .tab-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+.tab.dragging {
+  opacity: 0.55;
+}
+
 #panel {
   display: flex;
   flex-direction: column;

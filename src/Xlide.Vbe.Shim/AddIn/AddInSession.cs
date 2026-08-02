@@ -234,6 +234,8 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
                 _editorSurface.PropertyEditRequested = OnPropertyEdit;
                 _editorSurface.ComponentSelected = OnComponentSelected;
+                _editorSurface.ModuleCloseRequested = CloseModule;
+                _editorSurface.ComponentInsertRequested = InsertComponent;
 
                 // The moment the page is up is the moment the menu bar can be covered, and it is
                 // not a window event, so nothing else would recompute the bounds.
@@ -307,6 +309,19 @@ internal sealed class AddInSession : IDisposable
             return true;
         }
 
+        // Closing keys are claimed unconditionally: unclaimed, the browser treats Ctrl+W as an
+        // instruction to close ITS window, which takes the whole surface with it.
+        if (control && !shift && virtualKey is VirtualKey.W or VirtualKey.F4)
+        {
+            if (_editorSurface?.Module is { } shown)
+            {
+                Log.Info($"key: 0x{virtualKey:X2} ctrl -> close {shown}");
+                CloseModule(shown);
+            }
+
+            return true;
+        }
+
         var command = VbeCommands.ForKey(virtualKey, shift, control);
         Log.Info($"key: 0x{virtualKey:X2}{(shift ? " shift" : string.Empty)}{(control ? " ctrl" : string.Empty)}"
                  + $" -> {(command == 0 ? "not ours" : command.ToString(System.Globalization.CultureInfo.InvariantCulture))}");
@@ -351,6 +366,14 @@ internal sealed class AddInSession : IDisposable
         }
 
         VbeCommands.Execute(_editor, command);
+
+        // Clearing all breakpoints clears the editor's; the drawn record must follow, whichever
+        // route asked for it.
+        if (command == VbeCommands.Command.ClearAllBreakpoints)
+        {
+            ForgetBreakpoints();
+        }
+
         WatchDebugState();
     }
 
@@ -1694,6 +1717,67 @@ internal sealed class AddInSession : IDisposable
             f.Severity,
             f.StartLine,
             f.StartColumn))]);
+    }
+
+    /// <summary>
+    /// Closes a module's pane, which is what closing its tab means. The editor activates another
+    /// pane afterwards and the surface follows it; closing the last one hides the surface, which
+    /// is the empty state there is.
+    /// </summary>
+    private void CloseModule(string component)
+    {
+        try
+        {
+            using var pane = FindCodePane(component);
+            using var window = pane?.GetObject("Window");
+            if (window is null)
+            {
+                return;
+            }
+
+            window.Invoke("Close");
+            Log.Info($"module: closed {component}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"module: {component} could not be closed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Adds a component to the active project and opens it: 1 module, 2 class module, 3 form.
+    ///
+    /// Through the project's own collection rather than a menu, because the operation is the
+    /// documented one and it names what it made, which is what lets the new module open at once.
+    /// </summary>
+    private void InsertComponent(int kind)
+    {
+        if (kind is not (1 or 2 or 3))
+        {
+            return;
+        }
+
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            using var components = project?.GetObject("VBComponents");
+            using var added = components?.CallObject("Add", kind);
+            var name = added?.GetString("Name");
+
+            Log.Info($"project: inserted {name ?? "?"} (kind {kind})");
+
+            if (name is not null)
+            {
+                ShowModule(name);
+            }
+
+            _analysis?.Reanalyse();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"project: a component of kind {kind} could not be inserted", ex);
+            _editorSurface?.Notify($"The component could not be inserted: {ex.Message}");
+        }
     }
 
     /// <summary>Brings a module's pane to the front, which the surface then follows.</summary>
