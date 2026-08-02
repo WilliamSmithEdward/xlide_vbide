@@ -131,6 +131,18 @@ export class EditorBridge {
   private readonly currentLine: monaco.editor.IEditorDecorationsCollection;
   private readonly breakpoints: monaco.editor.IEditorDecorationsCollection;
 
+  /**
+   * The faint dot shown under the pointer in the breakpoint margin.
+   *
+   * The margin is a narrow strip with nothing in it, and nothing about it says it can be clicked.
+   * Showing where the breakpoint would land is what makes the target findable, and it also draws
+   * the edges of the strip, which is the part that was being guessed at.
+   */
+  private readonly breakpointHover: monaco.editor.IEditorDecorationsCollection;
+
+  /** Lines that already carry a breakpoint, so the hover dot is not drawn over a real one. */
+  private breakpointLines = new Set<number>();
+
   /** Monotonic counter over locally originated edits; reset by loadDocument, adopted from applyEdit. */
   private revision = 0;
   /** Echo suppression: true while a host edit is being written into the model. */
@@ -144,11 +156,14 @@ export class EditorBridge {
     this.shell = shell;
     this.currentLine = editor.createDecorationsCollection([]);
     this.breakpoints = editor.createDecorationsCollection([]);
+    this.breakpointHover = editor.createDecorationsCollection([]);
 
     this.disposables.push(
       editor.onDidChangeModelContent((event) => this.onContentChanged(event)),
       editor.onDidChangeCursorSelection((event) => this.onSelectionChanged(event.selection)),
       editor.onMouseDown((event) => this.onMouseDown(event)),
+      editor.onMouseMove((event) => this.onMouseMove(event)),
+      editor.onMouseLeave(() => this.breakpointHover.clear()),
     );
 
     transport.subscribe((message) => this.handle(message));
@@ -430,8 +445,34 @@ export class EditorBridge {
     ]);
   }
 
+  private onMouseMove(event: monaco.editor.IEditorMouseEvent): void {
+    const line = event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      ? event.target.position?.lineNumber
+      : undefined;
+
+    // Nothing under the pointer, or a line that already has one: either way there is nothing
+    // useful to preview.
+    if (line === undefined || this.breakpointLines.has(line)) {
+      this.breakpointHover.clear();
+      return;
+    }
+
+    this.breakpointHover.set([
+      {
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: false,
+          glyphMarginClassName: "xlide-breakpoint-hover",
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      },
+    ]);
+  }
+
   private setBreakpoints(lines: number[]): void {
     const sorted = [...new Set(lines)].sort((a, b) => a - b);
+    this.breakpointLines = new Set(sorted);
+    this.breakpointHover.clear();
     this.breakpoints.set(
       sorted.map((line) => ({
         range: new monaco.Range(line, 1, line, 1),

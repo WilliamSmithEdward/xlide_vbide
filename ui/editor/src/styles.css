@@ -383,6 +383,29 @@ body {
   border-left: 8px solid #ffd24a;
 }
 
+/* The breakpoint margin, drawn so it can be found.
+   It is a narrow strip with nothing in it, and a target nobody can see is a target nobody hits.
+   The right edge is drawn as well as the fill, because the blank space beside it belongs to the
+   line numbers and is not clickable: without the edge, half of what looks like the target is not. */
+.monaco-editor .glyph-margin {
+  background: var(--vscode-editorGutter-background, rgba(128, 128, 128, 0.13));
+  box-shadow: inset -1px 0 0 var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.3));
+}
+
+/* Where the breakpoint would go, under the pointer. */
+.xlide-breakpoint-hover::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 5px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: #e51400;
+  opacity: 0.4;
+}
+
 .xlide-breakpoint-glyph::after {
   content: "";
   position: absolute;
