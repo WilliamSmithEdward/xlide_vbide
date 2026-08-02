@@ -291,10 +291,18 @@ internal sealed class EditorSurface : IDisposable
 
         surface._browser.MessageReceived = surface.OnMessage;
         surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
+        surface._overlay.LoaderTicked = () => surface.LoadingPulse?.Invoke();
 
         Log.Info($"editor surface: created, serving from {root}");
         return surface;
     }
+
+    /// <summary>
+    /// Raised on the host thread a few times a second while the loader is showing. The session
+    /// re-asserts placement here, because the loading phase has no pane and therefore no window
+    /// events, while the editor is still arranging itself underneath the loader.
+    /// </summary>
+    public Action? LoadingPulse { get; set; }
 
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);

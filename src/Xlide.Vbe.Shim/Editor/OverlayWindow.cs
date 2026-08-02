@@ -109,6 +109,17 @@ internal sealed unsafe class OverlayWindow : IDisposable
     public Action? Polled { get; set; }
 
     /// <summary>
+    /// Raised on the host thread at each loader animation step, while the loader is showing.
+    ///
+    /// The loading phase is event-starved: no pane exists yet, so nothing else re-places the
+    /// surface, while the editor is still arranging itself underneath — restoring its size,
+    /// raising its own bands. Whoever owns placement listens here and re-asserts it, which is
+    /// what keeps the loader covering the window it was placed over rather than the window as
+    /// it was a moment ago.
+    /// </summary>
+    public Action? LoaderTicked { get; set; }
+
+    /// <summary>
     /// Starts or restarts a one-shot timer. Restarting is what makes it a debounce: each call
     /// pushes the deadline out, so a burst of keystrokes produces one callback rather than one per
     /// key.
@@ -386,6 +397,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
                     else if ((nuint)wParam == LoaderTimerId)
                     {
                         overlay._loaderPhase++;
+                        overlay.LoaderTicked?.Invoke();
                         Win32.InvalidateRect(window, null, false);
                     }
 
@@ -594,6 +606,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
         _handle = 0;
         Elapsed = null;
         Polled = null;
+        LoaderTicked = null;
 
         if (handle != 0 && Win32.IsWindow(handle))
         {

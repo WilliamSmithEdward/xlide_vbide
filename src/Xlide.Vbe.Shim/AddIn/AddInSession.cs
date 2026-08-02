@@ -149,6 +149,12 @@ internal sealed class AddInSession : IDisposable
         // window event, so nothing else would recompute the bounds.
         _editorSurface.Ready = RefreshSurfacePlacement;
 
+        // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
+        // arranging itself — restoring its size, raising its own bands — and with no pane open
+        // there is no window event to notice any of it. Without this, the loader keeps covering
+        // the window as it was at the first placement, and a band of native chrome outlives it.
+        _editorSurface.LoadingPulse = RefreshSurfacePlacement;
+
         // Now rather than at start-up. The editor answers that these windows are visible before
         // it has created them, so hiding one then closes something with no window behind it and
         // there is nothing to identify afterwards.
