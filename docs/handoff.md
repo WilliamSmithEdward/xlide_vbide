@@ -8,43 +8,57 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START HERE — 2026-08-02 09:40
+## START NEW SESSION HERE — 2026-08-02 15:05
 
-**State.** The add-in loads in the developer's own Excel and they have confirmed live: the full
-surface, the Immediate panel, engine completions, live problems while typing, and the properties
-panel. Published and awaiting their first look: hover and call tips (from the last session), and
-from this one the **typing-ergonomics port** (task #26) and the **branded start-up loader**
-(task #27).
+**State, all developer-confirmed live in a real 26,000-line workbook.** One marathon session
+shipped: the typing-ergonomics port (Smart Enter block closers, canonical casing on idle and
+line-leave, loop-iterator sync — `engine/src/onType.ts` + `ui/editor/src/typing.ts`); the
+full-window branded loader with a stall retreat (`OverlayWindow`, `SurfaceBounds`); the
+workbook-rooted explorer with unfoldable modules, procedure navigation that selects the whole
+declaration line, and the accordion (`ui/editor/src/explorer.ts`, `textDocument/outline`); the
+companion's token colours driven by engine-sent word lists so project types and procedures paint
+as what they are (`buildVbaMonarch`, `setLanguageFacts`); class names as member receivers (fixed
+in the shared resolver — see the unpushed commit below); live diagnostics that follow the typing
+with caret suppression and stale-drop; the minimap; Ctrl+W/middle-click/focus-return ergonomics;
+and survival of a cancelled Excel shutdown (`ShutdownWatchdog` revives the session).
 
-**What the typing port is.** `F:\GitHub\xlide\xlide_vscode` is the ergonomics SPEC, mirrored
-"down to the small details" — the user's own words. The engine now answers three more requests —
-`textDocument/smartEnter`, `canonicalCase`, `loopSync` — built on the extension's own
-smart-editing helpers (`engine/src/onType.ts`), and the surface owns the moments in
-`ui/editor/src/typing.ts`: Enter asks what it should leave behind (End Sub under `Sub Test()`
-with the parens completed, `Next i`, `End With` with the dot seeded, comment continuation);
-touched lines recase to canonical spellings after a 200ms idle and when the caret leaves them
-(leaving a bare `Sub test` also completes its parens); editing a For iterator renames its Next.
-Replies apply only if the model version has not moved; drops are traced into the host log. The
-language configuration in `ui/editor/src/vba.ts` is the extension's own, transliterated.
-Remaining sweep for #26, best judged after the live look: Smart Tab (the extension's
-`vbaSmartTab.ts`, a Tab-at-line-start indent rule), and whether Monaco auto-triggers member
-completion on the With-seeded dot the way typing a dot does.
+**The scale architecture, built this session because the flat one froze on 918KB of module:**
+- The page ships keystrokes as Monaco change ranges (full text only under 64KB); the shim
+  reconstructs and streams the same edits to the engine as `textDocument/didChange`; the engine
+  holds one live string per module and every request carries an offset alone. Order is the
+  pipe's FIFO, and the notification's wait is registered synchronously so no request overtakes
+  the text it is about.
+- Write-back is a line diff at one anchor (prefix/suffix window; whole-replace fallback);
+  `assembleContext` is cached against the seeded-array identity; the analyzer's token cache hits
+  because one string instance per keystroke serves every feature.
+- Analysis yields the road: large modules defer the live pass until the caret leaves the edited
+  line (or 1.5s of quiet); the full pass runs on structural writes and otherwise once per 3s,
+  with skipped turns made up when quiet. Every page-side sink is idempotent — identical facts,
+  findings, projects, counts, actives, and outlines change nothing, not even a repaint — and a
+  legitimate tree rebuild restores the scroll (lesson 20).
 
-**What the loader is.** Alt+F11 used to open on a black-and-grey patchwork while WebView2 booted.
-Now the controller stays invisible until the page posts `ready` (revealed in
-`EditorSurface.OnMessage`), and `OverlayWindow` paints the wait: wordmark, three-dot pulse, and
-past ~18s a hint that the log has the story. The page shell carries its dark background inline.
+**Open threads, in order of likely next ask:**
+1. `xlide_vscode` carries local commit `6453c20` (class/UserForm receivers in the shared
+   resolver, their full suite green) — the developer confirmed it working; it is NOT pushed.
+2. #26's tail: Smart Tab (`vbaSmartTab.ts`), and whether the With-seeded dot auto-triggers
+   member completion.
+3. Latent, known, working-but-illegal: `AnalysisService` reads the object model from pool
+   threads (`ProjectReader.ReadAll` inside `Task.Run`); move the read to the host thread the
+   next time analysis is touched. Latent too: something host-side publishes once a second (the
+   sinks are gated; the source was never named).
+4. #24 project-qualified addressing is still the multi-workbook backend gap; #17 start-up time.
 
-**Before touching anything, know these three:**
+**Before touching anything, know these:**
 1. Registry writes from the agent shell are a MIRAGE (sandbox COW; lesson 17). Registration is
-   the developer running `tools\Register-DevShim.ps1` themselves; verify persistence with their
-   regedit, never with in-sandbox reads.
+   the developer running `tools\Register-DevShim.ps1` themselves; verify with their regedit.
 2. Cross-thread work into the browser rides the overlay's action timer, never a posted message
-   (lesson 18); off-thread `PostWebMessage` fails `UI_E_WRONG_THREAD`. Log lines carry
-   `[host]`/`[tN]` — read them before theorizing.
-3. The deploy dance: the developer closes Excel and says so → `tools\dev.ps1 -NoRun` + robocopy
-   `ui\editor\dist` into the publish tree (engine changes also need
-   `node build.mjs --package` in `engine/`) → they reopen. The DLL is locked while Excel runs.
+   (lesson 18). Log lines carry `[host]`/`[tN]` — and read the log's DATA before theorizing:
+   lessons 19 and 20 were both settled by one log line after theories failed.
+3. `PixelRect` is four EDGES, not origin-and-size (lesson 19).
+4. The deploy dance: close Excel (the developer authorised force-close for republish) →
+   `tools\dev.ps1 -NoRun`; page changes also robocopy `ui\editor\dist` into the publish tree;
+   engine changes also `node build.mjs --package` in `engine/` (the shim loads the exe from the
+   repo path). The DLL is locked while Excel runs.
 
 Repository: `F:\GitHub\xlide\xlide_vbide`, public at
 <https://github.com/WilliamSmithEdward/xlide_vbide>. The tree is committed and pushed at the end

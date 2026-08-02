@@ -275,3 +275,22 @@ before constructing one — and treat a helper that works everywhere else as sus
 yours is the first call with a different shape. And when screenshots breed theories, switch
 to numbers: a short polling watch of the live window settles in seconds what reasoning about
 compositors cannot settle at all.
+
+## 20. A tree that cycled once a second, and the log line that said the data never changed
+
+The explorer's unfolded class appeared to collapse and expand in a loop. Two theory-led fixes
+went out first — stop the accordion following unchanged active-module pushes, stop clearing
+fetched outlines on identical project pushes — both real hardenings, neither the cause. The
+third pass started from the log instead and ended the hunt in one line: the outline request was
+answering every second with exactly 1,565 procedures, every time. The data never changed. The
+cycle was the drawing: two update paths redrew the tree unconditionally on the host's
+once-a-second pushes, a redraw wipes and rebuilds the rows, and rebuilding a 1,565-row list
+resets its scroll — which the eye reads as collapse and expand.
+
+Evidence: the shim log's outline lines, identical count at one-second cadence; the two
+screenshots showing both "states" with the chevron open in each.
+
+Consequence: every sink that receives pushed state must be idempotent — identical input changes
+nothing, not even a repaint — and any rebuild of a scrolling surface must put the scroll back.
+And when a UI loops, read the data cadence out of the log before theorising about state: if the
+data is constant, the bug is in the drawing.
