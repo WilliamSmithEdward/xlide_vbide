@@ -96,6 +96,30 @@ const GOOD_MODULE = [
     '',
 ].join('\r\n');
 
+// Legal only because it is a class: Me, a Friend procedure, an event. Analysed as a standard
+// module every line of it is an error, which is exactly the regression this pins.
+const CLASS_MODULE = [
+    'Option Explicit',
+    '',
+    'Public Event Renamed(ByVal newName As String)',
+    '',
+    'Private mName As String',
+    '',
+    'Friend Sub Adopt(ByVal name As String)',
+    '    mName = name',
+    '    RaiseEvent Renamed(mName)',
+    'End Sub',
+    '',
+    'Public Property Get Name() As String',
+    '    Name = mName',
+    'End Property',
+    '',
+    'Public Sub Describe()',
+    '    Debug.Print Me.Name',
+    'End Sub',
+    '',
+].join('\r\n');
+
 let failures = 0;
 function check(name, body) {
     try {
@@ -117,9 +141,10 @@ try {
         modules: [
             { moduleName: 'BadModule', source: BAD_MODULE, type: 'standard' },
             { moduleName: 'GoodModule', source: GOOD_MODULE, type: 'standard' },
+            { moduleName: 'FineClass', source: CLASS_MODULE, type: 'class' },
         ],
     });
-    check('project/open accepts both modules', () => assert.equal(opened.modules, 2));
+    check('project/open accepts the modules', () => assert.equal(opened.modules, 3));
 
     const bad = await call('textDocument/diagnostics', {
         documentKey: 'Smoke/BadModule',
@@ -157,6 +182,40 @@ try {
 
     console.log(`  -> ${good.diagnostics.length} diagnostic(s) on the clean module`);
     check('clean code produces no findings', () => assert.equal(good.diagnostics.length, 0));
+
+    // The module kind must reach the rules: a class using Me, Friend, and an event is legal as
+    // a class and one long error list as anything else.
+    const fineClass = await call('textDocument/diagnostics', {
+        documentKey: 'Smoke/FineClass',
+        projectId: 'Smoke',
+        generation: 1,
+        source: CLASS_MODULE,
+        moduleName: 'FineClass',
+        moduleType: 'class',
+    });
+
+    console.log(`  -> ${fineClass.diagnostics.length} diagnostic(s) on the class module:`);
+    for (const diagnostic of fineClass.diagnostics) {
+        console.log(`     [${diagnostic.severity}] ${diagnostic.code}: ${diagnostic.message}`);
+    }
+
+    check('Me, Friend, and events are legal in a class module', () =>
+        assert.equal(fineClass.diagnostics.length, 0));
+
+    const misfiledClass = await call('textDocument/diagnostics', {
+        documentKey: 'Smoke/MisfiledClass',
+        projectId: 'Smoke',
+        generation: 1,
+        source: CLASS_MODULE,
+        moduleName: 'FineClass',
+        moduleType: 'standard',
+    });
+
+    check('the same source as a standard module is the error list', () => {
+        assert.ok(
+            misfiledClass.diagnostics.some((diagnostic) => diagnostic.code === 'me-outside-object-module'),
+            'expected me-outside-object-module for the standard kind');
+    });
 
     // Completions: members after a dot against the host model, and identifiers elsewhere.
     const memberSource = GOOD_MODULE.replace('    n = 1', '    ThisWorkbook.');

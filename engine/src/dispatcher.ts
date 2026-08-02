@@ -8,6 +8,7 @@
 
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
+import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { completionsFor } from './completion';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
@@ -192,6 +193,10 @@ export class Dispatcher {
             source: params.source,
             moduleName: params.moduleName,
             moduleType: params.moduleType,
+            // The semantic rules read the kind, not the type: without this, a class module is
+            // analysed as a standard one and every Me, Friend, and event declaration in it is
+            // reported as an error. The extension's own client always sends both.
+            moduleKind: moduleKindFromType(params.moduleType),
             documentType: params.documentType,
             severityOverrides: params.severityOverrides,
         };
