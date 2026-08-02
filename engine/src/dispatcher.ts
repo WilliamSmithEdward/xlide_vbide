@@ -10,7 +10,7 @@ import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLog
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { completionsFor } from './completion';
-import { outlineFor } from './outline';
+import { outlineFor, projectWordsFor } from './outline';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
 import { signatureHelpFor } from './signature';
@@ -118,7 +118,7 @@ export class Dispatcher {
         }
     }
 
-    private openProject(params: ProjectOpenParams): { modules: number } {
+    private openProject(params: ProjectOpenParams): { modules: number; types: string[]; procedures: string[] } {
         this.requireInitialized();
 
         this.analysis.handle({
@@ -135,7 +135,13 @@ export class Dispatcher {
 
         this.generations.set(params.projectId, params.generation);
         this.seededModules.set(params.projectId, params.modules.map((module) => ({ ...module })));
-        return { modules: params.modules.length };
+
+        // The project's own words, for the surface's tokenizer: names that are types and names
+        // that are procedures. This is what lets `ROneCOne.Create(...)` read as a type and a
+        // call while `values(index, 1)` stays a variable — the distinction the extension makes
+        // with its semantic tokens.
+        const facts = projectWordsFor(params.modules);
+        return { modules: params.modules.length, types: facts.types, procedures: facts.procedures };
     }
 
     private closeProject(params: { projectId: string }): null {

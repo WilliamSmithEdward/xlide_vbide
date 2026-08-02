@@ -221,6 +221,20 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.LoopSyncResultMessage));
     }
 
+    /// <summary>
+    /// Tells the tokenizer the project's words. Held for the page when it has not loaded yet,
+    /// and replaced rather than queued when it has: only the latest lists describe the project.
+    /// </summary>
+    public void SetLanguageFacts(string[] types, string[] procedures)
+    {
+        ArgumentNullException.ThrowIfNull(types);
+        ArgumentNullException.ThrowIfNull(procedures);
+
+        Send("setLanguageFacts", JsonSerializer.Serialize(
+            new SetLanguageFactsMessage("setLanguageFacts", types, procedures),
+            EditorMessageContext.Default.SetLanguageFactsMessage));
+    }
+
     /// <summary>Answers one outline request. Never held.</summary>
     public void ShowOutline(int requestId, SurfaceOutlineProcedure[] procedures)
     {

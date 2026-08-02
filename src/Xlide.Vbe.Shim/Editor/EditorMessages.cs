@@ -250,6 +250,15 @@ public sealed record OutlineResultMessage(
     [property: JsonPropertyName("procedures")] SurfaceOutlineProcedure[] Procedures);
 
 /// <summary>
+/// The project's own words for the tokenizer: names that denote types and names that denote
+/// procedures, so a name reads as what it is wherever it appears.
+/// </summary>
+public sealed record SetLanguageFactsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("types")] string[] Types,
+    [property: JsonPropertyName("procedures")] string[] Procedures);
+
+/// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
 /// rather than at build time.
@@ -287,6 +296,7 @@ public sealed record OutlineResultMessage(
 [JsonSerializable(typeof(LoopSyncResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
+[JsonSerializable(typeof(SetLanguageFactsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

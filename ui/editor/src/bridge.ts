@@ -4,7 +4,7 @@ import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
-import { VBA_LANGUAGE_ID } from "./vba.js";
+import { VBA_LANGUAGE_ID, updateVbaLanguageFacts } from "./vba.js";
 
 /*
  * Position convention
@@ -67,7 +67,8 @@ export type HostMessage =
   | { type: "smartEnterResult"; id: number; edits: HostTextEdit[]; caret?: number | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "loopSyncResult"; id: number; edits: HostTextEdit[] }
-  | { type: "outlineResult"; id: number; procedures: HostProcedure[] };
+  | { type: "outlineResult"; id: number; procedures: HostProcedure[] }
+  | { type: "setLanguageFacts"; types: string[]; procedures: string[] };
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
 export interface HostProcedure {
@@ -722,6 +723,9 @@ export class EditorBridge {
         }
         return;
       }
+      case "setLanguageFacts":
+        updateVbaLanguageFacts(message.types, message.procedures);
+        return;
       default: {
         const unknown: never = message;
         console.warn("[xlide] unhandled host message", unknown);

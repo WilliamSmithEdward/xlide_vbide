@@ -89,6 +89,15 @@ public sealed record EngineOutline(
     [property: JsonPropertyName("procedures")] EngineOutlineProcedure[] Procedures);
 
 /// <summary>
+/// What opening a project taught the engine: how many modules, and the project's own words —
+/// names that denote types and names that denote procedures, for the surface's tokenizer.
+/// </summary>
+public sealed record EngineProjectOpened(
+    [property: JsonPropertyName("modules")] int Modules,
+    [property: JsonPropertyName("types")] string[] Types,
+    [property: JsonPropertyName("procedures")] string[] Procedures);
+
+/// <summary>
 /// Serialisation for the engine protocol.
 ///
 /// Every type is registered on a source-generated context because the add-in is compiled ahead of
@@ -115,6 +124,7 @@ public sealed record EngineOutline(
 [JsonSerializable(typeof(EngineTextEdits))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
+[JsonSerializable(typeof(EngineProjectOpened))]
 [JsonSerializable(typeof(JsonElement))]
 // Booleans ride the request dictionaries boxed, and a boxed value serialises only if its own
 // type is registered; leaving it out fails at run time, in the middle of a keystroke.

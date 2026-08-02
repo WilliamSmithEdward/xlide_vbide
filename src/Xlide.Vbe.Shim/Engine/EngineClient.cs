@@ -134,7 +134,11 @@ internal sealed class EngineClient : IAsyncDisposable
         });
 
     /// <summary>Replaces everything the engine knows about a project.</summary>
-    public Task OpenProjectAsync(string projectId, int generation, EngineModule[] modules, CancellationToken cancellation)
+    public async Task<EngineProjectOpened?> OpenProjectAsync(
+        string projectId,
+        int generation,
+        EngineModule[] modules,
+        CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
         {
@@ -143,7 +147,8 @@ internal sealed class EngineClient : IAsyncDisposable
             ["modules"] = modules,
         };
 
-        return CallAsync("project/open", payload, cancellation);
+        var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineProjectOpened);
     }
 
     /// <summary>Analyses one module and returns its findings.</summary>

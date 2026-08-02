@@ -46,6 +46,12 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// <summary>Raised when a module has been analysed.</summary>
     public event Action<IReadOnlyList<Finding>>? FindingsReady;
 
+    /// <summary>
+    /// Raised after a pass has seeded every project, with the union of the projects' words:
+    /// names that denote types and names that denote procedures, for the surface's tokenizer.
+    /// </summary>
+    public event Action<IReadOnlyList<string>, IReadOnlyList<string>>? LanguageFactsReady;
+
     /// <summary>True once an engine is running and answering.</summary>
     public bool IsReady => _engine is { IsRunning: true };
 
@@ -354,10 +360,19 @@ internal sealed class AnalysisService : IAsyncDisposable
 
         Log.Info($"engine: analysing {snapshots.Count} project(s) at generation {generation}");
 
+        var factTypes = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var factProcedures = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var snapshot in snapshots)
         {
-            await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
+            var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
                 .ConfigureAwait(false);
+
+            if (opened is not null)
+            {
+                factTypes.UnionWith(opened.Types);
+                factProcedures.UnionWith(opened.Procedures);
+            }
 
             _openProjects.Add(snapshot.ProjectId);
 
@@ -393,6 +408,9 @@ internal sealed class AnalysisService : IAsyncDisposable
                 FindingsReady?.Invoke(findings);
             }
         }
+
+        // After every project has been seeded, so the tokenizer's word lists describe them all.
+        LanguageFactsReady?.Invoke([.. factTypes], [.. factProcedures]);
     }
 
     /// <summary>

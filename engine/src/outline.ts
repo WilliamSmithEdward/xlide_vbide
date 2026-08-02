@@ -53,3 +53,38 @@ function lineAt(source: string, offset: number): number {
     }
     return line;
 }
+
+/**
+ * The project's own words: every name that denotes a type (class and document modules, Type and
+ * Enum declarations) and every procedure name, across the whole project. The surface's tokenizer
+ * takes these as word lists, which is how a name reads as what it is wherever it appears.
+ */
+export function projectWordsFor(
+    modules: readonly ModulePayload[],
+): { types: string[]; procedures: string[] } {
+    const types = new Set<string>();
+    const procedures = new Set<string>();
+
+    for (const module of modules) {
+        if (module.type === 'class' || module.type === 'document') {
+            types.add(module.moduleName);
+        }
+
+        try {
+            for (const member of parseModule(module.source).members) {
+                if (member.kind === 'Procedure') {
+                    procedures.add(member.name);
+                } else if (member.kind === 'Type' || member.kind === 'Enum') {
+                    const name = 'name' in member && typeof member.name === 'string' ? member.name : undefined;
+                    if (name) {
+                        types.add(name);
+                    }
+                }
+            }
+        } catch {
+            // A module that will not parse lends no words; the rest still do.
+        }
+    }
+
+    return { types: [...types].sort(), procedures: [...procedures].sort() };
+}

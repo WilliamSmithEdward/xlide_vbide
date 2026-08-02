@@ -146,6 +146,11 @@ try {
     });
     check('project/open accepts the modules', () => assert.equal(opened.modules, 3));
 
+    check('project/open names the project types and procedures', () => {
+        assert.deepEqual(opened.types, ['FineClass']);
+        assert.deepEqual(opened.procedures, ['Adopt', 'Describe', 'Fine', 'Name', 'Probe']);
+    });
+
     const bad = await call('textDocument/diagnostics', {
         documentKey: 'Smoke/BadModule',
         projectId: 'Smoke',

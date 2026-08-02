@@ -82,7 +82,18 @@ const BUILTIN_FUNCTIONS: string[] = [
   "Trim", "TypeName", "UBound", "UCase", "Val", "VarType", "Weekday", "WeekdayName", "Year",
 ];
 
-export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
+/**
+ * The tokenizer, built around what the project itself declares. The companion editor gets this
+ * knowledge from its semantic tokens; here the engine sends the project's words — names that
+ * denote types, names that denote procedures — and the tokenizer is rebuilt around them, which
+ * is what lets `ROneCOne.Create(...)` read as a type and a call while `values(index, 1)` stays
+ * a variable.
+ */
+function buildVbaMonarch(
+  projectTypes: readonly string[],
+  projectProcedures: readonly string[],
+): monaco.languages.IMonarchLanguage {
+  return {
   ignoreCase: true,
   defaultToken: "",
   tokenPostfix: ".vba",
@@ -91,6 +102,8 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
   languageConstants: LANGUAGE_CONSTANTS,
   languageValues: LANGUAGE_VALUES,
   builtinFunctions: BUILTIN_FUNCTIONS,
+  projectTypes: projectTypes as string[],
+  projectProcedures: projectProcedures as string[],
 
   tokenizer: {
     root: [
@@ -158,15 +171,19 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
         cases: { "@keywords": "keyword", "@languageConstants": "constant", "@default": "identifier" },
       }]],
 
-      // A name with an argument list is a call, wherever it appears.
+      // A name with an argument list is a call when the project (or the runtime) declares a
+      // procedure by that name, and stays a variable otherwise: array indexing wears the same
+      // parentheses, and `values(index, 1)` is data, not a call.
       [/([A-Za-z_]\w*)(?=\s*\()/, {
         cases: {
           "@keywords": "keyword",
           "@languageConstants": "constant",
           "@languageValues": "constant",
           "@builtinTypes": "type",
+          "@projectTypes": "type",
           "@builtinFunctions": "function",
-          "@default": "function",
+          "@projectProcedures": "function",
+          "@default": "identifier",
         },
       }],
 
@@ -176,7 +193,9 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
           "@languageConstants": "constant",
           "@languageValues": "constant",
           "@builtinTypes": "type",
+          "@projectTypes": "type",
           "@builtinFunctions": "function",
+          "@projectProcedures": "function",
           "@keywords": "keyword",
           "@default": "identifier",
         },
@@ -199,7 +218,19 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
       [/"/, { token: "string.quote", bracket: "@close", next: "@pop" }],
     ],
   },
-};
+  };
+}
+
+/**
+ * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration,
+ * so a class inserted a moment ago starts reading as a type without anything being reopened.
+ */
+export function updateVbaLanguageFacts(
+  types: readonly string[],
+  procedures: readonly string[],
+): void {
+  monaco.languages.setMonarchTokensProvider(VBA_LANGUAGE_ID, buildVbaMonarch(types, procedures));
+}
 
 // The configuration below is the extension's own language-configuration JSON, transliterated:
 // its patterns spell case-insensitivity as [Xx] character classes because JSON has no flags,
@@ -322,6 +353,6 @@ export function registerVba(): void {
     extensions: [".bas", ".cls", ".frm", ".vba"],
     aliases: ["VBA", "vba", "Visual Basic for Applications"],
   });
-  monaco.languages.setMonarchTokensProvider(VBA_LANGUAGE_ID, vbaMonarchLanguage);
+  monaco.languages.setMonarchTokensProvider(VBA_LANGUAGE_ID, buildVbaMonarch([], []));
   monaco.languages.setLanguageConfiguration(VBA_LANGUAGE_ID, vbaLanguageConfiguration);
 }

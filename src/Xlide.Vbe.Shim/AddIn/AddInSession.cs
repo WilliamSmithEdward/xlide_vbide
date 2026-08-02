@@ -267,6 +267,13 @@ internal sealed class AddInSession : IDisposable
         try
         {
             _analysis = new AnalysisService(_editor);
+            _analysis.LanguageFactsReady += (types, procedures) =>
+            {
+                Log.Info($"analysis: language facts, {types.Count} type(s), {procedures.Count} procedure(s)");
+                _editorSurface?.RunOnHostThread(() =>
+                    _editorSurface?.SetLanguageFacts([.. types], [.. procedures]));
+            };
+
             _analysis.FindingsReady += findings =>
             {
                 _findings = findings;
