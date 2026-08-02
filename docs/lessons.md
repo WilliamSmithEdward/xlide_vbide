@@ -226,3 +226,28 @@ verifying persistence means the developer's regedit, not the sandbox's Test-Path
 generally: when an integration works in every harness run and fails in every human run, suspect
 the harness's environment before the product, and prove any "the system is corrupt" theory
 against a view of the system the harness cannot have contaminated.
+
+## 18. A posted message that is never dispatched, proven by a line that never appeared
+
+Completion answers were marshalled back to the host thread with PostMessage of an app-range
+message to the overlay window, and the handler logged one line when an answer crossed. That line
+appears in zero logs across every session ever recorded: the host's component-manager message
+loop swallows app-range messages posted to windows it does not manage, so the marshal never ran
+once, and the failure was perfectly silent because the drop happened between a successful
+PostMessage and a handler that never fired. The same sessions prove WM_TIMER always arrives -
+the write debounce and the poll rode it throughout - so the marshal now queues actions and
+nudges a zero-delay window timer, which is legal from any thread.
+
+The companion defect: analysis findings were published straight from the engine's reader
+thread, and the browser refuses any thread but its own with UI_E_WRONG_THREAD (0x802A000C), so
+mid-typing refreshes died and the problems panel served stale findings until a module switch
+republished from the host thread - which is also why the defect looked intermittent.
+
+Evidence: grep of every shim log for the delivery line (zero hits ever) against grep for
+answered requests (hits in twenty sessions); 0x802A000C on every push since the first
+post-ready analysis; both gone after the timer marshal, confirmed live by the developer.
+
+Consequence: a marshal is only trusted when its success is observable - log on delivery and on
+drop, never only on send. In this host, cross-thread work rides window timers, not posted
+messages. And when a feature works in a demo transport and no live log ever shows its final
+hop, the feature has never worked, whatever the demo shows.
