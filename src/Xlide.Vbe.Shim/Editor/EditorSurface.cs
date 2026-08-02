@@ -52,6 +52,12 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     private const uint WriteDelayMilliseconds = 400;
 
+    /// <summary>
+    /// How long the typing rests before the live analysis pass. Just inside the write delay, so
+    /// findings refresh from the text as typed without waiting for the module write-back.
+    /// </summary>
+    private const uint LiveAnalysisDelayMilliseconds = 350;
+
     private string? _text;
     private bool _unwritten;
     private bool _loaded;
@@ -324,6 +330,7 @@ internal sealed class EditorSurface : IDisposable
         surface._browser.MessageReceived = surface.OnMessage;
         surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
         surface._overlay.LoaderTicked = () => surface.LoadingPulse?.Invoke();
+        surface._overlay.AnalysisDue = () => surface.LiveAnalysisDue?.Invoke();
 
         Log.Info($"editor surface: created, serving from {root}");
         return surface;
@@ -338,6 +345,9 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>True once the loader has been showing implausibly long; placement consults it.</summary>
     public bool IsLoaderStalled => _overlay?.LoaderStalled ?? false;
+
+    /// <summary>Raised on the host thread when the typing has rested and the live text should be analysed.</summary>
+    public Action? LiveAnalysisDue { get; set; }
 
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
@@ -762,6 +772,10 @@ internal sealed class EditorSurface : IDisposable
                         _text = updated;
                         _unwritten = true;
                         _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+
+                        // The findings shown must describe this text, not the text as of the
+                        // last write: a deleted error must go, and it must go soon.
+                        _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
                     }
 
                     break;

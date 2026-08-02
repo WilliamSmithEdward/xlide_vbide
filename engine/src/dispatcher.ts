@@ -218,6 +218,7 @@ export class Dispatcher {
             moduleKind: moduleKindFromType(params.moduleType),
             documentType: params.documentType,
             severityOverrides: params.severityOverrides,
+            activeIncompleteExpressionOffset: params.activeIncompleteExpressionOffset,
         };
 
         const response = this.analysis.handle(request);

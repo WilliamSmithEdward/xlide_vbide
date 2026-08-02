@@ -77,7 +77,13 @@ function boot(): void {
     automaticLayout: true,
     glyphMargin: true,
     lineNumbersMinChars: 4,
-    minimap: { enabled: false },
+    // The companion editor's minimap, its settings included: blocks rather than characters.
+    minimap: {
+      enabled: true,
+      renderCharacters: false,
+      showMarkSectionHeaders: false,
+      showRegionSectionHeaders: false,
+    },
     scrollBeyondLastLine: false,
     renderLineHighlight: "line",
     renderWhitespace: "selection",

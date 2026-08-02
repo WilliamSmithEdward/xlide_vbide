@@ -76,6 +76,12 @@ export interface DiagnosticsParams {
     documentType?: string;
     /** Per-rule severity overrides keyed by diagnostic code. */
     severityOverrides?: Record<string, string>;
+    /**
+     * The caret, when the module is the one being typed in. The analyzer holds back the
+     * transient complaints of an expression mid-edit at this position, so typing does not
+     * squiggle against itself.
+     */
+    activeIncompleteExpressionOffset?: number;
 }
 
 /** A single finding. Spans are UTF-16 offsets into the analysed source. */

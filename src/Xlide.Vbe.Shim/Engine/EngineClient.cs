@@ -158,7 +158,8 @@ internal sealed class EngineClient : IAsyncDisposable
         string moduleName,
         string moduleType,
         string source,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        int? activeIncompleteExpressionOffset = null)
     {
         var payload = new Dictionary<string, object>
         {
@@ -169,6 +170,11 @@ internal sealed class EngineClient : IAsyncDisposable
             ["moduleType"] = moduleType,
             ["source"] = source,
         };
+
+        if (activeIncompleteExpressionOffset is { } activeOffset)
+        {
+            payload["activeIncompleteExpressionOffset"] = activeOffset;
+        }
 
         var result = await CallAsync("textDocument/diagnostics", payload, cancellation).ConfigureAwait(false);
         if (result is null)

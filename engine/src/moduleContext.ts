@@ -55,7 +55,40 @@ export interface AssembledContext {
     projectTypes?: VbaProjectAnalysisOptions['projectTypes'];
 }
 
+/**
+ * Assembled contexts by seeded-module set and module. The seeded array is replaced whole when a
+ * project reseeds, so its identity is the cache key: a hit means the project facts describe the
+ * sources the engine holds, and a reseed invalidates everything at once by changing the key.
+ *
+ * What is cached is built from the seeded copy of the requested module, not its live text. The
+ * live text still drives every resolver directly; only the cross-module facts lag until the
+ * next write-back, which is the same bargain the editor extension strikes — and what turns the
+ * per-keystroke cost of a completion from indexing the whole project into scanning one module.
+ */
+const contextCache = new WeakMap<readonly ModulePayload[], Map<string, AssembledContext>>();
+
 export function assembleContext(
+    seeded: readonly ModulePayload[],
+    request: LiveModuleRequest,
+): AssembledContext {
+    let byModule = contextCache.get(seeded);
+    if (!byModule) {
+        byModule = new Map();
+        contextCache.set(seeded, byModule);
+    }
+
+    const key = request.moduleName.toLowerCase();
+    const cached = byModule.get(key);
+    if (cached) {
+        return cached;
+    }
+
+    const assembled = buildContext(seeded, request);
+    byModule.set(key, assembled);
+    return assembled;
+}
+
+function buildContext(
     seeded: readonly ModulePayload[],
     request: LiveModuleRequest,
 ): AssembledContext {
@@ -76,7 +109,10 @@ export function assembleContext(
         documentType: (request.documentType ?? seededDocumentTypeOf(seeded, request.moduleName)) as
             | EventHandlerDocumentType
             | undefined,
-        source: request.source,
+        // The seeded copy, deliberately: this entry only feeds the cached project facts, and a
+        // cache must not embalm whichever keystroke happened to build it. Every resolver gets
+        // the live text through its own parameters.
+        source: seededSourceOf(seeded, request.moduleName) ?? request.source,
     };
     entries.push(current);
 
@@ -163,6 +199,10 @@ function codeNamesFor(entries: ModuleEntry[]): Record<string, string> {
 
 function seededTypeOf(seeded: readonly ModulePayload[], moduleName: string): string | undefined {
     return seeded.find((module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.type;
+}
+
+function seededSourceOf(seeded: readonly ModulePayload[], moduleName: string): string | undefined {
+    return seeded.find((module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.source;
 }
 
 function seededDocumentTypeOf(seeded: readonly ModulePayload[], moduleName: string): string | undefined {

@@ -263,6 +263,25 @@ try {
             'expected Probe from BadModule');
     });
 
+    // A class module's own name is a receiver: factory-style classes are addressed by name.
+    const classReceiverSource = GOOD_MODULE.replace('    n = 1', '    FineClass.');
+    const classReceiverOffset = classReceiverSource.indexOf('FineClass.') + 'FineClass.'.length;
+    const classReceiver = await call('textDocument/completion', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: classReceiverSource,
+        offset: classReceiverOffset,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> ${classReceiver.items.length} member(s) after FineClass.`);
+    check('a class name as receiver offers the class members', () => {
+        assert.ok(classReceiver.items.some((item) => item.label === 'Describe'),
+            'expected Describe among the members');
+        assert.ok(classReceiver.items.some((item) => item.label === 'Name'),
+            'expected the Name property among the members');
+    });
+
     // Hovers: the identifier under the cursor, described from the same project facts.
     const localHover = await call('textDocument/hover', {
         projectId: 'Smoke',

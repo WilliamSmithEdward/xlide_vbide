@@ -26,6 +26,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private const nuint PollTimerId = 2;
     private const nuint ActionTimerId = 3;
     private const nuint LoaderTimerId = 4;
+    private const nuint AnalyseTimerId = 5;
 
     /// <summary>One pulse step of the loader; three steps make its cycle.</summary>
     private const uint LoaderTickMilliseconds = 240;
@@ -145,6 +146,21 @@ internal sealed unsafe class OverlayWindow : IDisposable
         if (_handle != 0)
         {
             Win32.KillTimer(_handle, WriteTimerId);
+        }
+    }
+
+    /// <summary>Raised once, on the host thread, after <see cref="StartAnalyseTimer"/> elapses.</summary>
+    public Action? AnalysisDue { get; set; }
+
+    /// <summary>
+    /// Starts or restarts the live-analysis debounce: each keystroke pushes the deadline out,
+    /// and the pass runs once per pause rather than once per key.
+    /// </summary>
+    public void StartAnalyseTimer(uint milliseconds)
+    {
+        if (_handle != 0)
+        {
+            Win32.SetTimer(_handle, AnalyseTimerId, milliseconds, 0);
         }
     }
 
@@ -407,6 +423,12 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         overlay.LoaderTicked?.Invoke();
                         Win32.InvalidateRect(window, null, false);
                     }
+                    else if ((nuint)wParam == AnalyseTimerId)
+                    {
+                        // One shot per pause in the typing.
+                        Win32.KillTimer(window, AnalyseTimerId);
+                        overlay.AnalysisDue?.Invoke();
+                    }
 
                     return 0;
                 }
@@ -603,6 +625,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
             Win32.KillTimer(handle, PollTimerId);
             Win32.KillTimer(handle, ActionTimerId);
             Win32.KillTimer(handle, LoaderTimerId);
+            Win32.KillTimer(handle, AnalyseTimerId);
         }
 
         // Anything still queued was for a surface that no longer exists.

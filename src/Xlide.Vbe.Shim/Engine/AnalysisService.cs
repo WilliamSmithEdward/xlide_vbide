@@ -31,6 +31,9 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     private EngineClient? _engine;
     private int _generation;
+
+    /// <summary>The generation the engine was last seeded with, which live analysis must name.</summary>
+    private int _lastSeededGeneration;
     private readonly HashSet<string> _openProjects = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -375,6 +378,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             }
 
             _openProjects.Add(snapshot.ProjectId);
+            _lastSeededGeneration = snapshot.Generation;
 
             foreach (var module in snapshot.Modules)
             {
@@ -398,7 +402,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                     continue;
                 }
 
-                findings.AddRange(Convert(module, result.Diagnostics));
+                findings.AddRange(Convert(module.ModuleName, module.Source, result.Diagnostics));
             }
 
             Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
@@ -420,9 +424,9 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// to know where every line starts, and rebuilding that for each of several hundred findings
     /// turns a linear pass into a quadratic one.
     /// </summary>
-    private static IEnumerable<Finding> Convert(EngineModule module, EngineDiagnostic[] diagnostics)
+    private static IEnumerable<Finding> Convert(string moduleName, string source, EngineDiagnostic[] diagnostics)
     {
-        var lineStarts = TextPositions.LineStarts(module.Source);
+        var lineStarts = TextPositions.LineStarts(source);
 
         foreach (var diagnostic in diagnostics)
         {
@@ -430,7 +434,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             var (endLine, endColumn) = TextPositions.ToLineColumn(lineStarts, diagnostic.Span.End);
 
             yield return new Finding(
-                module.ModuleName,
+                moduleName,
                 diagnostic.Code,
                 diagnostic.Message,
                 diagnostic.Severity,
@@ -438,6 +442,54 @@ internal sealed class AnalysisService : IAsyncDisposable
                 startColumn,
                 endLine,
                 endColumn);
+        }
+    }
+
+    /// <summary>
+    /// Analyses one module's live text, with the caret so the engine holds back the transient
+    /// complaints of an expression mid-edit. Null when there is no engine, no address for the
+    /// module, or the engine has not been seeded yet.
+    /// </summary>
+    public async Task<IReadOnlyList<Finding>?> DiagnoseLiveAsync(
+        string moduleName,
+        string source,
+        int caretOffset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine || _lastSeededGeneration == 0)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        try
+        {
+            var result = await engine.DiagnoseAsync(
+                    home.ProjectId,
+                    _lastSeededGeneration,
+                    moduleName,
+                    home.ModuleType,
+                    source,
+                    cancellation,
+                    caretOffset)
+                .ConfigureAwait(false);
+
+            return result is null ? null : [.. Convert(moduleName, source, result.Diagnostics)];
+        }
+        catch (Exception ex)
+        {
+            // A reseed can race this and change the generation; the next pause asks again.
+            Log.Info($"live: {moduleName} could not be analysed ({ex.GetType().Name})");
+            return null;
         }
     }
 

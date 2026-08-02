@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
@@ -145,6 +146,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
+        _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -1939,6 +1941,63 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures));
+        });
+    }
+
+    /// <summary>
+    /// Analyses the shown module's text as typed, once the typing rests. This is what keeps the
+    /// squiggles describing the text on screen rather than the text as of the last write-back:
+    /// an error the developer deleted goes away on the next pause, not the next module write.
+    /// The caret rides along so the engine holds back the transient complaints of the
+    /// expression being typed. A result computed for text that has moved on is dropped — the
+    /// keystroke that moved it has already scheduled the next pass.
+    /// </summary>
+    private void OnLiveAnalysisDue()
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            return;
+        }
+
+        var lineStarts = TextPositions.LineStarts(source);
+        var caretOffset = TextPositions.ToOffset(lineStarts, surface.CaretLine, surface.CaretColumn);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                var findings = await analysis.DiagnoseLiveAsync(module, source, caretOffset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (findings is null)
+                {
+                    return;
+                }
+
+                Log.Info($"live: {module} -> {findings.Count} finding(s)");
+
+                surface.RunOnHostThread(() =>
+                {
+                    if (surface.Module != module || !ReferenceEquals(surface.Text, source) && surface.Text != source)
+                    {
+                        Log.Info($"live: {module} answer was for older text, dropped");
+                        return;
+                    }
+
+                    _findings = [.. _findings.Where(finding => finding.Module != module), .. findings];
+                    PublishMarkersForShownModule();
+                    PublishFindingsToSurface();
+                });
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"live: {module} failed ({ex.GetType().Name})");
+            }
         });
     }
 
