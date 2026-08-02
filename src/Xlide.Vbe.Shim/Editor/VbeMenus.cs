@@ -135,8 +135,9 @@ internal static class VbeMenus
     /// <summary>
     /// Finds the menu bar by what it is rather than what it is called. Its name is a fixed string
     /// today, but its type is what makes it the menu bar, and the type is not a string at all.
+    /// Also consulted for its height, which is where the loader's ground begins.
     /// </summary>
-    private static DispatchObject? FindMenuBar(DispatchObject editor)
+    internal static DispatchObject? FindMenuBar(DispatchObject editor)
     {
         using var bars = editor.GetObject("CommandBars");
         var count = bars?.GetInt32("Count") ?? 0;

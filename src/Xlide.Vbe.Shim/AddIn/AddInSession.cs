@@ -2520,14 +2520,18 @@ internal sealed class AddInSession : IDisposable
     /// Retreating, it takes only the document area, and the native chrome shows again. That is the
     /// right way round: a visible seam is a smaller problem than covering a window or a toolbar the
     /// developer just asked for.
+    ///
+    /// While the page is still coming up there is a third answer: everything below the native menu
+    /// bar. The loader is what is showing then, and a dark panel floating at the document area's
+    /// offsets reads as misalignment rather than as a screen coming into focus.
     /// </summary>
-    private static unsafe PixelRect SurfaceBounds(nint frame, nint documentArea, bool covering)
+    private unsafe PixelRect SurfaceBounds(nint frame, nint documentArea, bool covering)
     {
         var document = ClientAreaIn(documentArea, frame);
 
         if (!covering)
         {
-            return document;
+            return _editorSurface is { IsReady: false } ? LoadingBounds(frame, document) : document;
         }
 
         Rect client;
@@ -2537,6 +2541,45 @@ internal sealed class AddInSession : IDisposable
         }
 
         return new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top);
+    }
+
+    /// <summary>
+    /// Where the loader belongs: the frame's client area below the native menu bar, aligned to
+    /// the window's own edges. The menu bar row stays native and reachable the whole time, which
+    /// is also the way back in if the page never arrives. Falls back to the document area when
+    /// the bar's height cannot be read, which is the placement this replaces.
+    /// </summary>
+    private unsafe PixelRect LoadingBounds(nint frame, PixelRect fallback)
+    {
+        Rect client;
+        if (!Win32.GetClientRect(frame, &client))
+        {
+            return fallback;
+        }
+
+        var menuBottom = MenuBarHeight();
+        var height = client.Bottom - client.Top;
+        if (menuBottom <= 0 || menuBottom >= height)
+        {
+            return fallback;
+        }
+
+        return new PixelRect(0, menuBottom, client.Right - client.Left, height - menuBottom);
+    }
+
+    /// <summary>The native menu bar's height in pixels, or zero when it cannot be read.</summary>
+    private int MenuBarHeight()
+    {
+        try
+        {
+            using var menuBar = VbeMenus.FindMenuBar(_editor);
+            return menuBar?.GetInt32("Height") ?? 0;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"surface: the menu bar's height could not be read ({ex.GetType().Name})");
+            return 0;
+        }
     }
 
     /// <summary>
