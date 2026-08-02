@@ -8,23 +8,32 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START HERE — 2026-08-02 01:40
+## START HERE — 2026-08-02 09:40
 
-**State.** The add-in loads in the developer's own Excel (the day the registration became real —
-lesson 17) and the developer has confirmed live, in their session: the full surface, the
-Immediate panel, engine completions on `.` and at expression positions, live problems while
-typing, and the properties panel. Published 01:34 and awaiting their first look: hover
-(declaration + origin + docs) and call tips (active parameter tracked through parenthesized and
-parenless calls). All of it is engine-served through one channel; the shared project assembly is
-`engine/src/moduleContext.ts`, the providers are in `ui/editor/src/main.ts`.
+**State.** The add-in loads in the developer's own Excel and they have confirmed live: the full
+surface, the Immediate panel, engine completions, live problems while typing, and the properties
+panel. Published and awaiting their first look: hover and call tips (from the last session), and
+from this one the **typing-ergonomics port** (task #26) and the **branded start-up loader**
+(task #27).
 
-**Next task, user-directed: typing-ergonomics parity with xlide_vscode** (task #26).
-`F:\GitHub\xlide\xlide_vscode` is the ergonomics SPEC, mirrored "down to the small details" — the
-user's own words, with two named gaps: **auto-capitalization while typing** and **auto-inserting
-`End Sub`** after `Sub test`+Enter. Start by inventorying every typing-time behavior over there
-(on-type case correction, block closers, enter/indent rules, auto-closing pairs, snippet and
-signature triggers), then port each into the Monaco surface. Mind rule 2 below: our on-type edits
-and the module's own rewrites must not fight; the resync baseline is the module's read-back.
+**What the typing port is.** `F:\GitHub\xlide\xlide_vscode` is the ergonomics SPEC, mirrored
+"down to the small details" — the user's own words. The engine now answers three more requests —
+`textDocument/smartEnter`, `canonicalCase`, `loopSync` — built on the extension's own
+smart-editing helpers (`engine/src/onType.ts`), and the surface owns the moments in
+`ui/editor/src/typing.ts`: Enter asks what it should leave behind (End Sub under `Sub Test()`
+with the parens completed, `Next i`, `End With` with the dot seeded, comment continuation);
+touched lines recase to canonical spellings after a 200ms idle and when the caret leaves them
+(leaving a bare `Sub test` also completes its parens); editing a For iterator renames its Next.
+Replies apply only if the model version has not moved; drops are traced into the host log. The
+language configuration in `ui/editor/src/vba.ts` is the extension's own, transliterated.
+Remaining sweep for #26, best judged after the live look: Smart Tab (the extension's
+`vbaSmartTab.ts`, a Tab-at-line-start indent rule), and whether Monaco auto-triggers member
+completion on the With-seeded dot the way typing a dot does.
+
+**What the loader is.** Alt+F11 used to open on a black-and-grey patchwork while WebView2 booted.
+Now the controller stays invisible until the page posts `ready` (revealed in
+`EditorSurface.OnMessage`), and `OverlayWindow` paints the wait: wordmark, three-dot pulse, and
+past ~18s a hint that the log has the story. The page shell carries its dark background inline.
 
 **Before touching anything, know these three:**
 1. Registry writes from the agent shell are a MIRAGE (sandbox COW; lesson 17). Registration is
