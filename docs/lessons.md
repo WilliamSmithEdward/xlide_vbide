@@ -251,3 +251,27 @@ Consequence: a marshal is only trusted when its success is observable - log on d
 drop, never only on send. In this host, cross-thread work rides window timers, not posted
 messages. And when a feature works in a demo transport and no live log ever shows its final
 hop, the feature has never worked, whatever the demo shows.
+
+## 19. Three grand theories about a gray strip, and the arithmetic that outlived them
+
+A band of native chrome survived at the bottom of the start-up loader through three
+increasingly clever explanations: an aggressive placement heartbeat (shipped, changed
+nothing), a DWM border theory (the border was already dark), and a startup-HMENU theory
+(built on the shim's own log showing the client 37px shorter during loading — a real
+observation, wrongly attributed). The truth was a one-line bug in the fix itself: PixelRect
+is four EDGES, and the loading rectangle passed a height where the bottom edge belongs. It
+was the first rectangle in the tree with a nonzero top, which is exactly where the
+edges-versus-size conventions stop agreeing, so every existing call had been silently
+compatible with the wrong reading.
+
+Evidence: a six-second watcher polling the live loading phase five times a second — menu
+handle, window rect, client rect, overlay rect, all physical pixels. It showed menu=0
+throughout, the client constant, and the overlay bottom exactly one menu-height short; the
+2x shortfall in the logged height named the constructor mix-up directly. After the fix the
+same watcher showed the overlay bottom equal to the client bottom on every row.
+
+Consequence: when a rectangle type exists, learn whether it is edges or origin-and-size
+before constructing one — and treat a helper that works everywhere else as suspect anyway if
+yours is the first call with a different shape. And when screenshots breed theories, switch
+to numbers: a short polling watch of the live window settles in seconds what reasoning about
+compositors cannot settle at all.
