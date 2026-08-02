@@ -202,12 +202,25 @@ internal sealed class WebView2Surface : IDisposable
         var hr = view.Target.PostWebMessageAsString(json);
         if (hr < 0)
         {
-            Log.Error($"webview: PostWebMessageAsString returned 0x{hr:X8}");
+            Log.Error($"webview: PostWebMessageAsString returned 0x{hr:X8}{KnownHresult(hr)}");
             return false;
         }
 
         return true;
     }
+
+    /// <summary>
+    /// Names the failure codes this integration has actually met, so a support log reads as a
+    /// diagnosis rather than a puzzle. An unknown code stays a bare number honestly.
+    /// </summary>
+    private static string KnownHresult(int hr) => hr switch
+    {
+        unchecked((int)0x802A000C) => " (UI_E_WRONG_THREAD: called off the browser's own thread)",
+        unchecked((int)0x8001010E) => " (RPC_E_WRONG_THREAD)",
+        unchecked((int)0x80070005) => " (E_ACCESSDENIED)",
+        unchecked((int)0x8007139F) => " (ERROR_INVALID_STATE: the browser is gone or not up yet)",
+        _ => string.Empty,
+    };
 
     private bool BeginEnvironment()
     {

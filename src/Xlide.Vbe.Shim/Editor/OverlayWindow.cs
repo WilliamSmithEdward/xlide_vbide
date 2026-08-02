@@ -22,9 +22,8 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>Timer identifiers, scoped to this window.</summary>
     private const nuint WriteTimerId = 1;
     private const nuint PollTimerId = 2;
+    private const nuint ActionTimerId = 3;
 
-    /// <summary>Message that carries a posted action's handle in its LPARAM.</summary>
-    private const uint WmRunAction = 0x8000 + 0x71;
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();
 
@@ -108,10 +107,18 @@ internal sealed unsafe class OverlayWindow : IDisposable
         }
     }
 
+    /// <summary>Actions waiting to run on the host thread, drained by the action timer.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentQueue<Action> _actions = new();
+
     /// <summary>
     /// Runs an action on the thread that owns this window, which is the only thread the editor's
     /// object model and the browser may be touched from. An engine answer arrives on a pool
     /// thread, and this is its way back.
+    ///
+    /// The hop rides a window timer, not a posted message. The host's message loop swallows
+    /// app-range messages posted to windows it does not manage — across every recorded session,
+    /// not one posted action was ever dispatched — while WM_TIMER demonstrably always arrives:
+    /// the write debounce and the poll run on it in those same sessions.
     /// </summary>
     public void RunOnHostThread(Action action)
     {
@@ -119,14 +126,30 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
         if (_handle == 0)
         {
+            // Dropped, and said so: a marshal that vanishes silently once cost two days of
+            // completions that never arrived.
+            Log.Info("overlay: an action for the host thread was dropped, the window is gone");
             return;
         }
 
-        var handle = GCHandle.Alloc(action);
+        _actions.Enqueue(action);
+        Win32.SetTimer(_handle, ActionTimerId, 0, 0);
+    }
 
-        if (!Win32.PostMessage(_handle, WmRunAction, 0, GCHandle.ToIntPtr(handle)))
+    /// <summary>Runs everything queued for the host thread. Only the window's thread calls this.</summary>
+    private void DrainActions()
+    {
+        while (_actions.TryDequeue(out var action))
         {
-            handle.Free();
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                // One failing action must not take the rest of the queue with it.
+                Log.Error("overlay: a marshalled action failed", ex);
+            }
         }
     }
 
@@ -310,21 +333,11 @@ internal sealed unsafe class OverlayWindow : IDisposable
                     {
                         overlay.Polled?.Invoke();
                     }
-
-                    return 0;
-                }
-
-                case WmRunAction:
-                {
-                    var stored = GCHandle.FromIntPtr(lParam);
-
-                    try
+                    else if ((nuint)wParam == ActionTimerId)
                     {
-                        (stored.Target as Action)?.Invoke();
-                    }
-                    finally
-                    {
-                        stored.Free();
+                        // One shot per burst of queued actions.
+                        Win32.KillTimer(window, ActionTimerId);
+                        overlay.DrainActions();
                     }
 
                     return 0;
@@ -385,6 +398,12 @@ internal sealed unsafe class OverlayWindow : IDisposable
         {
             Win32.KillTimer(handle, WriteTimerId);
             Win32.KillTimer(handle, PollTimerId);
+            Win32.KillTimer(handle, ActionTimerId);
+        }
+
+        // Anything still queued was for a surface that no longer exists.
+        while (_actions.TryDequeue(out _))
+        {
         }
 
         _handle = 0;

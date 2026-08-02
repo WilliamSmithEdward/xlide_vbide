@@ -157,6 +157,9 @@ internal sealed class AddInSession : IDisposable
     /// <summary>True while the surface is up over an editor that has no panes anywhere.</summary>
     private bool _watchingEmpty;
 
+    /// <summary>Which panes existed and showed when they were last logged. See TrackCodePanes.</summary>
+    private string? _lastPaneComposition;
+
     /// <summary>
     /// Puts the surface over an editor that has no panes at all, which is what a fresh
     /// workbook's editor is. The surface normally arrives with the first pane; without this, an
@@ -265,8 +268,14 @@ internal sealed class AddInSession : IDisposable
                     Log.Info($"  and {findings.Count - 20} more");
                 }
 
-                PublishMarkersForShownModule();
-                PublishFindingsToSurface();
+                // This callback arrives on the engine's reader thread, and the browser refuses
+                // any other thread than its own. Without the hop, every mid-typing refresh dies
+                // with UI_E_WRONG_THREAD and the panel goes stale until a module switch.
+                _editorSurface?.RunOnHostThread(() =>
+                {
+                    PublishMarkersForShownModule();
+                    PublishFindingsToSurface();
+                });
             };
 
             _analysis.Start();
@@ -2458,11 +2467,21 @@ internal sealed class AddInSession : IDisposable
             _codePanes = new CodePaneTracker(_editor);
             _codePanes.Changed += panes =>
             {
-                Log.Info($"code panes: {panes.Count} open");
-                foreach (var pane in panes)
+                // A drag reports a new rectangle per mouse move, and following it is routine, not
+                // an event: logging each wrote hundreds of identical lines in a second. Which
+                // panes exist and whether they show is what changes rarely and reads as a story.
+                var composition = string.Join("|",
+                    panes.Select(pane => pane.Component + (pane.IsVisible ? string.Empty : "~")));
+
+                if (composition != _lastPaneComposition)
                 {
-                    Log.Info($"  {pane.Component} at {pane.Bounds.Left},{pane.Bounds.Top} " +
-                             $"{pane.Bounds.Width}x{pane.Bounds.Height}" + (pane.IsVisible ? string.Empty : " (hidden)"));
+                    _lastPaneComposition = composition;
+                    Log.Info($"code panes: {panes.Count} open");
+                    foreach (var pane in panes)
+                    {
+                        Log.Info($"  {pane.Component} at {pane.Bounds.Left},{pane.Bounds.Top} " +
+                                 $"{pane.Bounds.Width}x{pane.Bounds.Height}" + (pane.IsVisible ? string.Empty : " (hidden)"));
+                    }
                 }
 
                 FollowActivePane(panes);

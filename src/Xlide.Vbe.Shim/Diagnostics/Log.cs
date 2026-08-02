@@ -18,6 +18,9 @@ internal static class Log
     private static string? _path;
     private static bool _failed;
 
+    /// <summary>The thread the log opened on, which is the host's own. See Write.</summary>
+    private static readonly int _hostThread = Environment.CurrentManagedThreadId;
+
     /// <summary>Full path of the current log file, or null if logging could not start.</summary>
     public static string? Path => _path;
 
@@ -68,8 +71,14 @@ internal static class Log
 
         try
         {
+            // The thread is part of every line because a whole class of defect is "right call,
+            // wrong thread", and a log that hides the thread hides the defect. The thread the
+            // log was opened on is the host's; everything else is named by number.
+            var thread = Environment.CurrentManagedThreadId;
+            var origin = thread == _hostThread ? "host" : $"t{thread}";
+
             var line = string.Create(CultureInfo.InvariantCulture,
-                $"{DateTime.Now:HH:mm:ss.fff} [{level}] {message}{Environment.NewLine}");
+                $"{DateTime.Now:HH:mm:ss.fff} [{level}] [{origin}] {message}{Environment.NewLine}");
 
             Debug.Write(line);
 

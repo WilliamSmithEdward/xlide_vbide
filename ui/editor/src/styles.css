@@ -187,6 +187,7 @@ body {
 }
 
 #properties-head {
+  flex: 0 0 auto;
   border: 0;
   background: transparent;
   color: inherit;
@@ -214,6 +215,9 @@ body {
 }
 
 #properties-object {
+  /* The header must never be squeezed by the list below it: in a column flex, every child
+     shrinks by default, and a long list crushed this line to half its height. */
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -239,6 +243,7 @@ body {
 }
 
 #properties-list {
+  flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
   padding-bottom: 6px;
