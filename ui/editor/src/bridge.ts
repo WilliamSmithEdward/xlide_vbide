@@ -143,6 +143,18 @@ export class EditorBridge {
   /** Lines that already carry a breakpoint, so the hover dot is not drawn over a real one. */
   private breakpointLines = new Set<number>();
 
+  /**
+   * The squiggles the host last sent.
+   *
+   * Kept because replacing the model's text drags every marker to the end of the replacement.
+   * Markers are anchored to positions in the text, and a whole-document edit is, as far as the
+   * editor is concerned, the entire text being deleted and different text arriving: everything
+   * anchored inside it collapses to one point. They are set again afterwards, at the positions the
+   * host gave, which are still correct because the text either did not change or changed only in
+   * ways that do not move lines.
+   */
+  private lastMarkers: HostMarker[] = [];
+
   /** Monotonic counter over locally originated edits; reset by loadDocument, adopted from applyEdit. */
   private revision = 0;
   /** Echo suppression: true while a host edit is being written into the model. */
@@ -271,6 +283,9 @@ export class EditorBridge {
   }
 
   private loadDocument(moduleName: string, text: string): void {
+    // A different module's squiggles are not this one's.
+    this.lastMarkers = [];
+
     const existing = this.model();
     // A fresh model per module keeps the URI meaningful for markers and disposes the old
     // undo stack, which must not survive a module switch.
@@ -323,7 +338,7 @@ export class EditorBridge {
     try {
       model.pushEditOperations(
         selections ?? null,
-        [{ range: model.getFullModelRange(), text, forceMoveMarkers: true }],
+        [{ range: model.getFullModelRange(), text, forceMoveMarkers: false }],
         () => selections ?? null);
     } finally {
       this.applyingHostEdit = false;
@@ -334,6 +349,10 @@ export class EditorBridge {
       // than being rejected.
       this.editor.setSelections(selections);
     }
+
+    // Set again, because replacing the text collapsed them all onto its end. Without this a
+    // defect reported on line six is drawn under the last line of the module.
+    this.setDiagnostics(this.lastMarkers);
   }
 
   private applyEdit(revision: number, changes: HostTextChange[]): void {
@@ -407,6 +426,8 @@ export class EditorBridge {
   }
 
   private setDiagnostics(markers: HostMarker[]): void {
+    this.lastMarkers = markers;
+
     const model = this.model();
     if (!model) {
       return;

@@ -44,6 +44,18 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private IReadOnlyList<Finding> _findings = [];
 
+    /// <summary>
+    /// What each module read back as the last time this add-in wrote it.
+    ///
+    /// This is the baseline a later comparison is made against, and it is deliberately not the
+    /// surface's text. The editor rewrites what it is given as it takes a module in: it completes
+    /// a procedure's parentheses, inserts the blank body of one, and respells keywords. Comparing
+    /// the module against the surface would see all of that as a change and pull it back into the
+    /// document, on top of somebody who is still typing. Comparing it against this sees only what
+    /// changed the module after we wrote it, which is what "something else changed it" means.
+    /// </summary>
+    private readonly Dictionary<string, string> _writtenModules = new(StringComparer.OrdinalIgnoreCase);
+
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -346,19 +358,19 @@ internal sealed class AddInSession : IDisposable
                 module.Invoke("AddFromString", text);
             }
 
-            // Read straight back, because the editor rewrites what it is given. It respells
-            // keywords and normalises spacing as it takes a module in, so the text it now holds is
-            // not the text that was sent. Adopting its version here is what keeps the two the same
-            // document; without it every later comparison sees a difference that is the editor's
-            // doing and not the developer's, and the surface slowly drifts away from the truth.
+            // Read straight back and remembered, but not pushed into the surface.
+            //
+            // The editor rewrites what it is given, and its rewrites are the kind a developer is in
+            // the middle of doing for themselves: it completes the parentheses on a procedure and
+            // inserts a blank body for one. Sending that back mid-keystroke duplicated what had
+            // just been typed and inserted lines nobody asked for. What it holds is remembered as
+            // the baseline instead, so a later comparison sees changes made by something else and
+            // not the editor's own tidying of our own write.
             var stored = ProjectReader.ReadSource(found);
-            if (stored is not null && stored != text)
-            {
-                Log.Info($"write: {component} was normalised by the editor, adopting its version");
-                _editorSurface?.Sync(component, stored);
-            }
+            _writtenModules[component] = stored ?? text;
 
-            Log.Info($"write: {component}, {text.Length} character(s)");
+            Log.Info($"write: {component}, {text.Length} character(s)"
+                     + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty));
 
             // The analyzer reads the module, so it has nothing new to say until the module has
             // been written. Without this the squiggles describe the text as it was before the
@@ -643,13 +655,23 @@ internal sealed class AddInSession : IDisposable
         {
             using var found = FindComponent(module);
             var stored = found is null ? null : ProjectReader.ReadSource(found);
-
-            if (stored is not null && stored != surface.Text)
+            if (stored is null)
             {
-                Log.Info($"resync: {module} changed underneath the surface, adopting the module");
-                surface.Sync(module, stored);
-                _analysis?.Reanalyse();
+                return;
             }
+
+            // Against what the module said last time, not against the surface. The two differ by
+            // the editor's own reformatting from the moment anything is written, and that
+            // difference is not a change anybody made.
+            if (_writtenModules.TryGetValue(module, out var baseline) && baseline == stored)
+            {
+                return;
+            }
+
+            Log.Info($"resync: {module} changed outside the surface, adopting the module");
+            _writtenModules[module] = stored;
+            surface.Sync(module, stored);
+            _analysis?.Reanalyse();
         }
         catch (Exception ex)
         {
@@ -724,6 +746,7 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        _writtenModules[component] = source;
         _editorSurface?.Show(component, source);
         Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
 
