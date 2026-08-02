@@ -200,10 +200,24 @@ export class Explorer {
   }
 
   setProjects(projects: ExplorerProject[]): void {
+    // The host republishes the tree on all sorts of occasions, usually unchanged. An identical
+    // push must change nothing on screen: acting on it cleared and refetched the unfolded
+    // procedures, which blinked them out and back in a loop.
+    const key = JSON.stringify(projects);
+    if (key === this.projectsKey) {
+      return;
+    }
+    this.projectsKey = key;
     this.projects = projects;
 
-    // Procedure lists describe a project that just changed shape; ask again when unfolded.
-    this.outlines.clear();
+    // Outlines for modules that no longer exist go. The rest stay as shown until their refresh
+    // lands, so an unfolded list is replaced, never blanked.
+    const names = new Set(projects.flatMap((project) => project.components.map((component) => component.name)));
+    for (const known of [...this.outlines.keys()]) {
+      if (!names.has(known)) {
+        this.outlines.delete(known);
+      }
+    }
 
     // The first workbook opens itself so modules are visible without a click.
     const first = projects[0];
@@ -220,6 +234,9 @@ export class Explorer {
 
     this.render();
   }
+
+  /** The last projects payload applied, so an identical republish is a no-op. */
+  private projectsKey = "";
 
   setActive(name: string | null): void {
     // The tree follows the module being edited — but only when it genuinely changed. The host
@@ -287,6 +304,17 @@ export class Explorer {
     if (this.expandedModule !== module) {
       return;
     }
+
+    // An unchanged list redraws nothing: refreshes arrive with every analysis pass, and most
+    // of them confirm what is already on screen.
+    const known = this.outlines.get(module);
+    if (known && known.length === procedures.length
+      && known.every((procedure, i) => procedure.name === procedures[i]?.name
+        && procedure.kind === procedures[i]?.kind
+        && procedure.line === procedures[i]?.line)) {
+      return;
+    }
+
     this.outlines.set(module, procedures);
     this.render();
   }
