@@ -208,7 +208,13 @@ is no HKLM enumeration to fall back on. Click-to-Run Office runs behind an App-V
 there, not in the real HKLM. On this machine, user-launched Excel resolves the Addins64 read into
 that overlay and finds nothing (empty Add-in Manager, `VBE.Addins.Count = 0`, no shim log ever
 written), while harness-launched Excel reads the real HKCU key and loads — same EXE, same user,
-different registry view. Remedy: the registration is planted inside the overlay as well.
+different registry view. On the dev machine the fault went deeper: an in-process probe of a fresh
+Excel showed the user hive's `VBA\VBE` subtree reading 0x80070002 (WScript renders that error as
+"Invalid root in registry key") while sibling `VBA\7.1` passed through and overlay writes showed
+through as HKLM — with real-HKCU, overlay-MACHINE and overlay-USER registrations all in place.
+That pins the veto inside the machine's C2R package registry data; only an Office repair rebuilds
+it. General remedy for the HKLM-masked variant: the registration is planted inside the overlay as
+well.
 `xlide-setup` does this itself on Click-to-Run machines — it relaunches its own exe elevated with
 `--overlay-only` (declining UAC leaves a working per-user install; silent installs never prompt
 and write the overlay only when already elevated; uninstall removes the supplement the same way).
