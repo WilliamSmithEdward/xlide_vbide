@@ -44,6 +44,7 @@ export interface HostMarker extends HostRange {
 export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
   | { type: "syncDocument"; moduleName: string; text: string }
+  | { type: "notice"; text: string }
   | { type: "setModules"; modules: string[]; active: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
@@ -204,6 +205,9 @@ export class EditorBridge {
         return;
       case "syncDocument":
         this.syncDocument(message.moduleName, message.text);
+        return;
+      case "notice":
+        this.shell?.notify(message.text);
         return;
       case "setModules":
         this.shell?.setModules(message.modules, message.active);

@@ -77,6 +77,8 @@ export class Shell {
   private readonly panelToggle: HTMLButtonElement;
   private readonly statusPosition: HTMLElement;
   private readonly statusModule: HTMLElement;
+  private readonly statusNotice: HTMLElement;
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly sidebarSplitter: HTMLElement;
   private readonly explorer: Explorer;
 
@@ -95,6 +97,7 @@ export class Shell {
     this.tabStrip = root.querySelector("#tabs") as HTMLElement;
     this.statusPosition = root.querySelector("#status-position") as HTMLElement;
     this.statusModule = root.querySelector("#status-module") as HTMLElement;
+    this.statusNotice = root.querySelector("#status-notice") as HTMLElement;
 
     this.sidebarSplitter = root.querySelector("#sidebar-splitter") as HTMLElement;
     this.explorer = new Explorer(
@@ -148,6 +151,28 @@ export class Shell {
   /** Replaces the project explorer's contents. */
   setProjects(projects: ExplorerProject[]): void {
     this.explorer.setProjects(projects);
+  }
+
+  /**
+   * Shows a message briefly in the status line.
+   *
+   * The status line rather than a dialog: this is for actions that were legitimately declined, and
+   * a modal reply to a click the developer has already moved on from is worse than the silence it
+   * replaces. It clears itself, so nothing has to be dismissed.
+   */
+  notify(text: string): void {
+    this.statusNotice.textContent = text;
+    this.statusNotice.classList.add("visible");
+
+    if (this.noticeTimer !== undefined) {
+      clearTimeout(this.noticeTimer);
+    }
+
+    this.noticeTimer = setTimeout(() => {
+      this.statusNotice.classList.remove("visible");
+      this.statusNotice.textContent = "";
+      this.noticeTimer = undefined;
+    }, 5000);
   }
 
   /** Shows where the caret is. */

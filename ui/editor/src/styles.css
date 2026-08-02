@@ -218,6 +218,17 @@ body {
   border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
+#status-notice {
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+#status-notice.visible {
+  opacity: 1;
+}
+
 #tabs {
   display: flex;
   overflow-x: auto;

@@ -43,7 +43,7 @@ const INDEX_HTML = `<!doctype html>
       </div>
     </div>
   </div>
-  <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span></div>
+  <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
 </div>
 <script src="./editor.js"></script>
 </body>

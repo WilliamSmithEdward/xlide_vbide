@@ -265,24 +265,42 @@ internal sealed class AddInSession : IDisposable
             return false;
         }
 
-        // The editor runs what the module holds, and the caret it uses is its own. Both are brought
-        // up to date here, at the one moment it matters: running code the developer has not
-        // finished typing is worse than a short pause before it starts.
+        ExecuteEditorCommand(command);
+        return true;
+    }
+
+    /// <summary>
+    /// Runs one of the editor's commands, whichever way the developer asked for it.
+    ///
+    /// Every route goes through here: the key, the toolbar button, and the glyph margin. Having
+    /// two of these is exactly how the toolbar's toggle came to set a breakpoint that was never
+    /// drawn: the bookkeeping was on the key path and the button went straight at the command.
+    /// </summary>
+    private void ExecuteEditorCommand(int command)
+    {
+        if (command == 0)
+        {
+            return;
+        }
+
+        // The editor runs what the module holds, and acts on its own caret. Both are brought up to
+        // date here, at the one moment it matters: running code the developer has not finished
+        // typing is worse than a short pause before it starts. A toolbar button also takes focus
+        // off the surface, which is when the two carets are furthest apart.
         _editorSurface?.FlushEdits();
         SyncCaretToPane();
 
-        // Toggling goes through the bookkeeping rather than straight at the command, so the
-        // breakpoint drawn on the surface and the one the editor holds stay the same set however
-        // the developer asked for it.
+        // Toggling a breakpoint is bookkeeping as well as a command. The editor cannot report which
+        // lines carry one, so the record kept here is the only thing the surface can draw from, and
+        // a route that skips it sets a breakpoint that is real and invisible.
         if (command == VbeCommands.Command.ToggleBreakpoint)
         {
             ToggleBreakpoint(_editorSurface?.CaretLine ?? 0);
-            return true;
+            return;
         }
 
         VbeCommands.Execute(_editor, command);
         WatchDebugState();
-        return true;
     }
 
     /// <summary>
@@ -459,7 +477,10 @@ internal sealed class AddInSession : IDisposable
 
         if (!CanBreakOn(_editorSurface?.LineAt(line)))
         {
+            // Said out loud, not only logged. The developer pressed something and nothing happened,
+            // and "nothing happened" is indistinguishable from a fault unless the reason is given.
             Log.Info($"breakpoint: {module}({line}) is not an executable statement");
+            _editorSurface?.Notify($"No breakpoint on line {line}: only executable statements can carry one.");
             return;
         }
 
@@ -665,12 +686,7 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        // Same as for a keystroke. A toolbar button also takes focus away from the surface, which
-        // is exactly when the two are furthest apart.
-        _editorSurface?.FlushEdits();
-        SyncCaretToPane();
-        VbeCommands.Execute(_editor, command);
-        WatchDebugState();
+        ExecuteEditorCommand(command);
     }
 
     /// <summary>Puts the native pane's caret where the surface's caret is.</summary>

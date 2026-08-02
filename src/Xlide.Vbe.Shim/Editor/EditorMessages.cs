@@ -80,6 +80,11 @@ public sealed record SyncDocumentMessage(
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("text")] string Text);
 
+/// <summary>Something the developer should be told, shown briefly and not dwelt on.</summary>
+public sealed record NoticeMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("text")] string Text);
+
 /// <summary>The line execution is stopped on, or null when nothing is stopped.</summary>
 public sealed record SetCurrentLineMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -104,6 +109,7 @@ public sealed record SetBreakpointsMessage(
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
+[JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(SetCurrentLineMessage))]
 [JsonSerializable(typeof(SetBreakpointsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]

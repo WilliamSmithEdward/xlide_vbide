@@ -198,6 +198,27 @@ internal sealed class EditorSurface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Tells the developer something briefly.
+    ///
+    /// For the cases where an action is legitimately declined and silence would read as a fault.
+    /// Not held for a page that is not up: a notice about something that happened before the
+    /// surface existed is not worth showing when it finally does.
+    /// </summary>
+    public void Notify(string text)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new NoticeMessage("notice", text),
+            EditorMessageContext.Default.NoticeMessage));
+    }
+
     /// <summary>True when the developer has typed something that has not reached the module.</summary>
     public bool HasUnwrittenEdits => _unwritten;
 
