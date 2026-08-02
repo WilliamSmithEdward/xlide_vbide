@@ -66,14 +66,17 @@ export class Explorer {
     // One listener for the whole tree. The tree is rebuilt whenever the project changes, and
     // per-item listeners would have to be torn down with it.
     //
-    // Selecting and opening are separate gestures, the way the editor's own tree works: a click
-    // selects, which the properties panel follows, and a double click or Enter opens the code.
+    // A single click selects AND opens. The properties panel follows the selection either way,
+    // but a click that only selected read as a tree that had stopped working: opening on a
+    // single click is the ergonomic this product follows, deliberately unlike the host's own
+    // tree, which asks for a double click.
     this.root.addEventListener("click", (event) => {
       const name = this.componentAt(event);
       if (name) {
         this.selected = name;
         this.render();
         this.handlers.select(name);
+        this.handlers.open(name);
       }
     });
 
