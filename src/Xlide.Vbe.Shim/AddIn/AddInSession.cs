@@ -2588,35 +2588,47 @@ internal sealed class AddInSession : IDisposable
     /// right way round: a visible seam is a smaller problem than covering a window or a toolbar the
     /// developer just asked for.
     ///
-    /// While the page is still coming up there is a third answer: everything below the native menu
-    /// bar. The loader is what is showing then, and a dark panel floating at the document area's
-    /// offsets reads as misalignment rather than as a screen coming into focus.
+    /// While the page is still coming up, the loader takes the whole client area too, menu row
+    /// included: a strip of native chrome over a branded splash reads as a defect, not as a menu.
+    /// Only a loader that has stalled hands the menu row back, so a page that never arrives
+    /// cannot keep every menu covered.
     /// </summary>
     private unsafe PixelRect SurfaceBounds(nint frame, nint documentArea, bool covering)
     {
         var document = ClientAreaIn(documentArea, frame);
 
-        if (!covering)
+        if (covering)
         {
-            return _editorSurface is { IsReady: false } ? LoadingBounds(frame, document) : document;
+            return FullClientBounds(frame, document);
         }
 
+        if (_editorSurface is { IsReady: false } surface)
+        {
+            return surface.IsLoaderStalled
+                ? BelowMenuBounds(frame, document)
+                : FullClientBounds(frame, document);
+        }
+
+        return document;
+    }
+
+    private static unsafe PixelRect FullClientBounds(nint frame, PixelRect fallback)
+    {
         Rect client;
         if (!Win32.GetClientRect(frame, &client))
         {
-            return document;
+            return fallback;
         }
 
         return new PixelRect(0, 0, client.Right - client.Left, client.Bottom - client.Top);
     }
 
     /// <summary>
-    /// Where the loader belongs: the frame's client area below the native menu bar, aligned to
-    /// the window's own edges. The menu bar row stays native and reachable the whole time, which
-    /// is also the way back in if the page never arrives. Falls back to the document area when
-    /// the bar's height cannot be read, which is the placement this replaces.
+    /// The stalled loader's retreat: the client area below the native menu bar, which goes back
+    /// to being usable while the loader explains itself. Falls back to the document area when
+    /// the bar's height cannot be read.
     /// </summary>
-    private unsafe PixelRect LoadingBounds(nint frame, PixelRect fallback)
+    private unsafe PixelRect BelowMenuBounds(nint frame, PixelRect fallback)
     {
         Rect client;
         if (!Win32.GetClientRect(frame, &client))

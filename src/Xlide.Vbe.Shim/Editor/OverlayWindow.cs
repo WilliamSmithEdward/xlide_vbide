@@ -65,6 +65,13 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>Which of the loader's dots is lit, advanced by its timer.</summary>
     private int _loaderPhase;
 
+    /// <summary>
+    /// True once the loader has been showing implausibly long. Placement consults this: a
+    /// stalled loader retreats below the native menu bar, so a page that never arrives cannot
+    /// keep every menu covered.
+    /// </summary>
+    public bool LoaderStalled => _loading && _loaderPhase >= LoaderStalledAfterTicks;
+
     private OverlayWindow()
     {
     }

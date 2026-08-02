@@ -304,6 +304,9 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public Action? LoadingPulse { get; set; }
 
+    /// <summary>True once the loader has been showing implausibly long; placement consults it.</summary>
+    public bool IsLoaderStalled => _overlay?.LoaderStalled ?? false;
+
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
