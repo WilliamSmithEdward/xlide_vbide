@@ -199,6 +199,20 @@ Registry: `HKCU\Software\Microsoft\VBA\VBE\6.0\Addins64`, subkey = ProgID. Frame
 Object Browser windows all share class `VbaWindow` — a window's class says nothing about what it
 is; only the object model knows.
 
+Add-in discovery is **HKCU-only** — vbe7.dll's own strings carry
+`HKEY_CURRENT_USER\Software\Microsoft\VBA\VBE\6.0` and `...\Addins64`, and Rubberduck's installer
+writes the Addins keys under HKCU even when elevated (HKLM there is only .NET COM classes). There
+is no HKLM enumeration to fall back on. Click-to-Run Office runs behind an App-V registry overlay
+(`HKLM\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE`) which owns the
+`Software\Microsoft\VBA` namespace — the machine-level VBA values (`Vbe71DllPath`) exist *only*
+there, not in the real HKLM. On this machine, user-launched Excel resolves the Addins64 read into
+that overlay and finds nothing (empty Add-in Manager, `VBE.Addins.Count = 0`, no shim log ever
+written), while harness-launched Excel reads the real HKCU key and loads — same EXE, same user,
+different registry view. Remedy: `tools\Register-InOfficeOverlay.ps1` (elevated) plants the
+Addins64 + Classes registration inside the overlay; Office updates can rebuild the overlay, so the
+installer must re-assert it. `Register-MachineWide.ps1` (real-HKLM mirror) was retired — the VBE
+never reads that hive.
+
 `Window.Type`: 0 code, 2 object browser, 3 watch, 4 locals, 5 immediate, 6 project, 7 properties,
 10 linked frame, 15 our tool window. `VBProject.Mode`: 1 = break, 2 = design.
 
