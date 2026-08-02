@@ -201,3 +201,28 @@ Consequences: collection reads that feed the UI tolerate individual members refu
 that gives up on a picture must own a way back to it (the poll timer retries a stale tracker
 until the editor answers); repeated identical failures are counted, not repeated, and recovery is
 announced; and nothing on a closing path may go through an accessor that creates.
+
+## 17. The development environment's registry writes were a mirage, and every verification read it back
+
+The add-in never loaded in Excel the developer launched, while loading perfectly in every
+harness launch, across a full day of registry theories: Click-to-Run masking, App-V overlay
+branches, package-data corruption. The real explanation was simpler and worse: the agent tool
+shell runs commands in a sandbox that virtualizes registry writes. The per-user registration
+was only ever written into the sandbox's private copy-on-write layer. Reads from the same
+environment saw the phantom key, so verification always passed; Excel launched from that
+environment inherited the same view, so the harness always loaded the add-in. The real user
+hive never contained the key at all, which the developer proved in one screenshot of regedit.
+
+Evidence: regedit showed `HKCU\Software\Microsoft\VBA` containing only `7.1`, `Forms3` and
+`Trusted` while the same path read from the tool shell showed a fully populated `VBE\6.0`
+subtree. A probe module injected into the developer-launched Excel read the key as missing
+(0x80070002, which WScript renders misleadingly as "Invalid root in registry key") while the
+same probe in a harness-launched Excel read it fine. Elevated child processes escaped the
+sandbox, which is why HKLM writes were real and per-user writes were not.
+
+Consequence: registration state must be established from the developer's own context, never
+from inside the agent environment — `tools\Register-DevShim.ps1` exists for exactly that, and
+verifying persistence means the developer's regedit, not the sandbox's Test-Path. More
+generally: when an integration works in every harness run and fails in every human run, suspect
+the harness's environment before the product, and prove any "the system is corrupt" theory
+against a view of the system the harness cannot have contaminated.

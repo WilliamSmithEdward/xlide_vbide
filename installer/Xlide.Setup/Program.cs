@@ -13,11 +13,11 @@ namespace Xlide.Setup;
 /// administrator rights — the editor resolves class registration through the user hive, and a
 /// development tool that demands elevation excludes exactly the people most likely to want it.
 ///
-/// Click-to-Run Office adds one wrinkle: it resolves the VBA registry namespace through its own
-/// overlay, and on some machines that hides per-user add-in keys from Excel entirely. On such
-/// installations this installer also plants the same registration inside the overlay, which is the
-/// one step that needs elevation. It asks by relaunching itself with the elevation verb; declining
-/// leaves a complete per-user installation that works everywhere the overlay does not interfere.
+/// Click-to-Run Office resolves some registry namespaces through its own overlay. When the
+/// installer happens to run elevated on such a machine it plants the same registration inside the
+/// overlay as well; it never asks for elevation itself, because the per-user registration is the
+/// documented, complete mechanism. The --overlay-only verb exists for running that one step
+/// deliberately.
 ///
 /// The installer reuses the same registration description the product and its tests use, so there
 /// is no second copy of the registry layout that could disagree with the first.
@@ -247,12 +247,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// Plants the registration inside the Click-to-Run overlay too, elevating for that one step.
-    ///
-    /// Skipped silently when Office is not Click-to-Run. In silent mode nothing may prompt, so the
-    /// overlay is written only if this process already runs elevated. Declining the prompt is a
-    /// supported outcome: the per-user installation stands on its own wherever the overlay does not
-    /// hide it.
+    /// Plants the registration inside the Click-to-Run overlay too, when that is possible without
+    /// asking anyone for anything: only on C2R machines, and only when already elevated.
     /// </summary>
     private static void SupplementOverlay(string shimPath, bool silent)
     {
@@ -262,52 +258,13 @@ internal static class Program
             return;
         }
 
-        Report(silent, string.Empty);
-
+        // Never prompt for elevation: the per-user registration is the documented, complete
+        // mechanism. The overlay copy is written only when the installer already runs elevated,
+        // or explicitly via --overlay-only, for machines whose virtualized view hides HKLM.
         if (IsElevated())
         {
             WriteOverlayRegistration(shimPath);
             ReportOverlayWritten(silent);
-            return;
-        }
-
-        if (silent)
-        {
-            // A silent install must not raise an elevation prompt. Re-running the installer
-            // interactively, or elevated, completes the supplement.
-            return;
-        }
-
-        Report(silent, "Office here is Click-to-Run, whose virtualized registry can hide per-user add-ins from Excel.");
-        Report(silent, "Approving the elevation prompt registers inside Office's own registry overlay as well.");
-
-        try
-        {
-            var self = Environment.ProcessPath
-                ?? throw new InvalidOperationException("The installer cannot determine its own path.");
-
-            using var pass = Process.Start(new ProcessStartInfo(self, $"--overlay-only --shim \"{shimPath}\"")
-            {
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden,
-            }) ?? throw new InvalidOperationException("The elevated pass did not start.");
-
-            pass.WaitForExit();
-
-            if (pass.ExitCode == 0)
-            {
-                ReportOverlayWritten(silent);
-            }
-            else
-            {
-                Report(silent, "The overlay step failed. The per-user installation stands; run this installer again to retry.");
-            }
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            Report(silent, "Elevation was declined. The per-user installation stands; if xlide does not appear");
-            Report(silent, "in the editor, run this installer again and approve the prompt.");
         }
     }
 
@@ -336,35 +293,8 @@ internal static class Program
             return;
         }
 
-        if (silent)
-        {
-            Report(silent: false, $"The overlay registration under HKLM\\{addInKey} remains; removing it needs an elevated run with --uninstall --overlay-only.");
-            return;
-        }
-
-        try
-        {
-            var self = Environment.ProcessPath
-                ?? throw new InvalidOperationException("The uninstaller cannot determine its own path.");
-
-            using var pass = Process.Start(new ProcessStartInfo(self, "--uninstall --overlay-only")
-            {
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden,
-            }) ?? throw new InvalidOperationException("The elevated pass did not start.");
-
-            pass.WaitForExit();
-
-            if (pass.ExitCode != 0)
-            {
-                Report(silent, "The overlay registration could not be removed and remains behind.");
-            }
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-        {
-            Report(silent, "Elevation was declined, so the overlay registration remains behind. It is inert without the files.");
-        }
+        Report(silent, $"An overlay registration under HKLM\\{addInKey} remains. It is inert without the");
+        Report(silent, "files; an elevated run with --uninstall --overlay-only removes it.");
     }
 
     private static int WriteOverlayRegistration(string shimPath)

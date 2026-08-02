@@ -202,24 +202,24 @@ is; only the object model knows.
 Add-in discovery is **HKCU-only** — vbe7.dll's own strings carry
 `HKEY_CURRENT_USER\Software\Microsoft\VBA\VBE\6.0` and `...\Addins64`, and Rubberduck's installer
 writes the Addins keys under HKCU even when elevated (HKLM there is only .NET COM classes). There
-is no HKLM enumeration to fall back on. Click-to-Run Office runs behind an App-V registry overlay
-(`HKLM\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE`) which owns the
-`Software\Microsoft\VBA` namespace — the machine-level VBA values (`Vbe71DllPath`) exist *only*
-there, not in the real HKLM. On this machine, user-launched Excel resolves the Addins64 read into
-that overlay and finds nothing (empty Add-in Manager, `VBE.Addins.Count = 0`, no shim log ever
-written), while harness-launched Excel reads the real HKCU key and loads — same EXE, same user,
-different registry view. On the dev machine the fault went deeper: an in-process probe of a fresh
-Excel showed the user hive's `VBA\VBE` subtree reading 0x80070002 (WScript renders that error as
-"Invalid root in registry key") while sibling `VBA\7.1` passed through and overlay writes showed
-through as HKLM — with real-HKCU, overlay-MACHINE and overlay-USER registrations all in place.
-That pins the veto inside the machine's C2R package registry data; only an Office repair rebuilds
-it. General remedy for the HKLM-masked variant: the registration is planted inside the overlay as
-well.
-`xlide-setup` does this itself on Click-to-Run machines — it relaunches its own exe elevated with
-`--overlay-only` (declining UAC leaves a working per-user install; silent installs never prompt
-and write the overlay only when already elevated; uninstall removes the supplement the same way).
-`tools\Register-InOfficeOverlay.ps1` is the standalone equivalent for the dev loop. Office updates
-can rebuild the overlay and drop the supplement — re-running the installer re-asserts it.
+is no HKLM enumeration to fall back on, and the per-user registration needs no elevation — that
+is the entire documented mechanism.
+
+**The dev-loop registration mirage (lesson 17, read it):** the agent tool shell virtualizes
+registry writes, so registrations written from it exist only in the sandbox's private layer.
+Harness-launched Excel inherits that layer and loads the add-in; Excel the developer launches
+reads the real hive, which never got the key. A day went to Click-to-Run/App-V theories before a
+regedit screenshot showed the truth. Registration on the dev machine is therefore done by the
+developer running `tools\Register-DevShim.ps1` in their own terminal (no admin); the published
+shim path is stable across rebuilds so one real registration survives the dev loop. Elevated
+child processes escape the sandbox (UAC-relaunched writes land for real) — useful, but not a
+substitute. Verify persistence with the developer's regedit, never with in-sandbox reads.
+
+Click-to-Run keeps machine-level VBA values (`Vbe71DllPath`) only inside its overlay
+(`HKLM\...\ClickToRun\REGISTRY\MACHINE`); real HKLM has no VBA branch on C2R machines. The
+installer writes the per-user registration only and never prompts for elevation; when it already
+runs elevated on a C2R machine it also plants the overlay copy, and `--overlay-only` runs that
+step deliberately (`tools\Register-InOfficeOverlay.ps1` is the standalone form).
 `Register-MachineWide.ps1` (real-HKLM mirror) was retired — the VBE never reads that hive.
 
 `Window.Type`: 0 code, 2 object browser, 3 watch, 4 locals, 5 immediate, 6 project, 7 properties,
