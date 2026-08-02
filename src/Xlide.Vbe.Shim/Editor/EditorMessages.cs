@@ -85,6 +85,12 @@ public sealed record NoticeMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("text")] string Text);
 
+/// <summary>One line of output for the Immediate panel.</summary>
+public sealed record ImmediateResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("failed")] bool Failed);
+
 /// <summary>The line execution is stopped on, or null when nothing is stopped.</summary>
 public sealed record SetCurrentLineMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -110,6 +116,7 @@ public sealed record SetBreakpointsMessage(
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
 [JsonSerializable(typeof(NoticeMessage))]
+[JsonSerializable(typeof(ImmediateResultMessage))]
 [JsonSerializable(typeof(SetCurrentLineMessage))]
 [JsonSerializable(typeof(SetBreakpointsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]

@@ -118,13 +118,14 @@ Frozen lookup tables built from field initialisers read generated arrays declare
 of a partial class, and got null. Building them inside a nested type forces the outer type to
 initialise first, which is guaranteed rather than incidental.
 
-### The editor refuses to size a tool window, in any state
+### A property assignment through dispatch carries a named argument
 
-Setting `Width` or `Height` throws whether the window floats or is docked. Docking one produces a
-band six pixels high with a negative client area, and its contents do not follow when the user
-resizes it. Its own tool windows are therefore not somewhere a panel can live, and the product's
-panels are rendered in the editing surface instead. The tool window and its ActiveX control were
-removed rather than kept.
+The value being assigned is identified by a reserved dispatch identifier, not by position. A setter
+that passes it positionally fails every time, with no message. This was got wrong here and the
+failures were read as the editor refusing to allow those properties to be set, which is what
+retired the tool window; see lessons.md 10. The panels live in the editing surface for reasons that
+do not depend on it, but do not repeat the inference: a failed call with no message says nothing
+about whose fault it is.
 
 ### A surface among the panes loses a race it cannot win
 

@@ -39,6 +39,27 @@ internal struct DispatchParameters
     public uint NamedArgumentCount;
 }
 
+/// <summary>
+/// EXCEPINFO. Filled in by the callee when a call fails because it raised an error, and the only
+/// place the error's own text is available: the HRESULT alone says nothing more than that
+/// something went wrong.
+///
+/// The strings are allocated by the callee and owned by the caller once the call returns.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct ExcepInfo
+{
+    public ushort Code;
+    public ushort Reserved;
+    public nint Source;
+    public nint Description;
+    public nint HelpFile;
+    public uint HelpContext;
+    public nint ReservedPointer;
+    public nint DeferredFillIn;
+    public int ErrorCode;
+}
+
 /// <summary>Invocation kinds accepted by <see cref="IDispatch.Invoke"/>.</summary>
 [Flags]
 internal enum InvokeKind : ushort

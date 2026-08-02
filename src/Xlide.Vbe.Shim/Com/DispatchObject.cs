@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
@@ -172,7 +173,40 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>Writes a numeric property.</summary>
-    public void SetInt32(string name, int value)
+    public void SetInt32(string name, int value) => SetProperty(name, ComVariant.Create(value));
+
+    /// <summary>Writes a text property.</summary>
+    public void SetString(string name, string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        SetProperty(name, ComVariant.Create(value));
+    }
+
+    /// <summary>
+    /// Calls a method that takes another automation object, which is how a collection is asked to
+    /// remove one of its members.
+    /// </summary>
+    public void InvokeWithObject(string name, DispatchObject argument)
+    {
+        ArgumentNullException.ThrowIfNull(argument);
+        ObjectDisposedException.ThrowIf(!argument.IsAlive, argument);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        // The variant releases what it holds when it is cleared, so it is given a reference of its
+        // own rather than the caller's. Without this the argument is released twice.
+        Marshal.AddRef(argument.Pointer);
+
+        using var value = ComVariant.CreateRaw(VarEnum.VT_DISPATCH, argument.Pointer);
+        using var result = InvokeCore(dispId, InvokeKind.Method, [value]);
+    }
+
+    /// <summary>Calls a method that takes one number and returns another automation object.</summary>
+    public DispatchObject? CallObject(string name, int argument)
     {
         var dispId = GetDispId(name);
         if (dispId == DispId.Unknown)
@@ -180,9 +214,47 @@ internal sealed unsafe class DispatchObject : IDisposable
             throw new InvalidOperationException($"The object has no member named '{name}'.");
         }
 
-        using var argument = ComVariant.Create(value);
-        using var result = InvokeCore(dispId, InvokeKind.PropertyPut, [argument]);
+        using var value = ComVariant.Create(argument);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [value]);
+        return FromVariant(result);
     }
+
+    /// <summary>
+    /// Calls a method with one string argument and renders whatever it returns as text.
+    ///
+    /// The result is shown to a developer, so it is rendered the way the language spells things
+    /// rather than the way this runtime does: True rather than true, Empty and Null by name.
+    /// </summary>
+    public string CallToString(string name, string argument)
+    {
+        ArgumentNullException.ThrowIfNull(argument);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var value = ComVariant.Create(argument);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [value]);
+        return Display(result);
+    }
+
+    /// <summary>Renders a variant the way VBA would print it.</summary>
+    private static string Display(in ComVariant value) => value.VarType switch
+    {
+        VarEnum.VT_EMPTY => "Empty",
+        VarEnum.VT_NULL => "Null",
+        VarEnum.VT_BOOL => value.As<bool>() ? "True" : "False",
+        VarEnum.VT_I2 => value.As<short>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_I4 or VarEnum.VT_INT => value.As<int>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_R4 => value.As<float>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_R8 => value.As<double>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_DATE => value.As<DateTime>().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+        VarEnum.VT_BSTR => VariantToString(value) ?? string.Empty,
+        VarEnum.VT_DISPATCH or VarEnum.VT_UNKNOWN => "[object]",
+        _ => value.VarType.ToString(),
+    };
 
     /// <summary>Reads a property that returns another automation object.</summary>
     public DispatchObject? GetObject(string name)
@@ -370,28 +442,40 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>Writes a boolean property.</summary>
-    public void SetBool(string name, bool value)
+    public void SetBool(string name, bool value) => SetProperty(name, ComVariant.Create(value));
+
+    /// <summary>
+    /// Writes any property.
+    ///
+    /// A property assignment is the one call shape that carries a named argument: the value being
+    /// assigned is identified by a reserved dispatch identifier rather than by position. Without it
+    /// the call arrives with a value the callee cannot account for and is refused.
+    ///
+    /// This is worth stating plainly because it was got wrong once and the wrong conclusion was
+    /// drawn from it. Two setters here passed the value positionally, every assignment through them
+    /// failed, and the failures were read as the editor refusing to allow those properties to be
+    /// set. They were refusals of a malformed call.
+    /// </summary>
+    private void SetProperty(string name, ComVariant value)
     {
         ObjectDisposedException.ThrowIf(_dispatch is null, this);
 
-        var dispId = GetDispId(name);
-        if (dispId == DispId.Unknown)
-        {
-            throw new InvalidOperationException($"The object has no member named '{name}'.");
-        }
-
-        var argument = ComVariant.Create(value);
         try
         {
-            // A property assignment is the one call shape that carries a named argument: the value
-            // being assigned is identified by a reserved dispatch identifier rather than by
-            // position.
+            var dispId = GetDispId(name);
+            if (dispId == DispId.Unknown)
+            {
+                throw new InvalidOperationException($"The object has no member named '{name}'.");
+            }
+
             var namedArgument = DispId.PropertyPut;
             var parameters = default(DispatchParameters);
-            parameters.Arguments = (nint)(&argument);
+            parameters.Arguments = (nint)(&value);
             parameters.ArgumentCount = 1;
             parameters.NamedArguments = (nint)(&namedArgument);
             parameters.NamedArgumentCount = 1;
+
+            var exception = default(ExcepInfo);
 
             var hr = _dispatch.Invoke(
                 dispId,
@@ -400,17 +484,17 @@ internal sealed unsafe class DispatchObject : IDisposable
                 (ushort)InvokeKind.PropertyPut,
                 (nint)(&parameters),
                 0,
-                0,
+                (nint)(&exception),
                 0);
 
             if (hr < 0)
             {
-                Marshal.ThrowExceptionForHR(hr);
+                Throw(hr, ref exception);
             }
         }
         finally
         {
-            argument.Dispose();
+            value.Dispose();
         }
     }
 
@@ -438,6 +522,54 @@ internal sealed unsafe class DispatchObject : IDisposable
         _ => value.As<object>()?.ToString(),
     };
 
+    /// <summary>DISP_E_EXCEPTION: the callee raised an error and filled in the description.</summary>
+    private const int DispatchException = unchecked((int)0x80020009);
+
+    /// <summary>
+    /// Raises the failure, preferring what the callee said over what the runtime would say.
+    ///
+    /// The strings in the block belong to the caller once it has been filled in, so they are freed
+    /// here whether or not they are used.
+    /// </summary>
+    private static void Throw(int hr, ref ExcepInfo exception)
+    {
+        try
+        {
+            if (hr != DispatchException)
+            {
+                Marshal.ThrowExceptionForHR(hr);
+                return;
+            }
+
+            var description = exception.Description == 0 ? null : Marshal.PtrToStringBSTR(exception.Description);
+            var source = exception.Source == 0 ? null : Marshal.PtrToStringBSTR(exception.Source);
+
+            if (string.IsNullOrWhiteSpace(description))
+            {
+                Marshal.ThrowExceptionForHR(exception.ErrorCode != 0 ? exception.ErrorCode : hr);
+                return;
+            }
+
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(source) ? description : $"{description.Trim()}");
+        }
+        finally
+        {
+            FreeBstr(ref exception.Source);
+            FreeBstr(ref exception.Description);
+            FreeBstr(ref exception.HelpFile);
+        }
+    }
+
+    private static void FreeBstr(ref nint value)
+    {
+        if (value != 0)
+        {
+            Marshal.FreeBSTR(value);
+            value = 0;
+        }
+    }
+
     private ComVariant InvokeCore(int dispId, InvokeKind kind, ReadOnlySpan<ComVariant> arguments)
     {
         ObjectDisposedException.ThrowIf(_dispatch is null, this);
@@ -452,6 +584,14 @@ internal sealed unsafe class DispatchObject : IDisposable
             reversed[i] = arguments[arguments.Length - 1 - i];
         }
 
+        // Rich error information is asked for and used.
+        //
+        // When a call fails because the callee raised an error, the interesting part is the
+        // description the callee wrote, not the HRESULT: "Type mismatch" against "Arg_COMException".
+        // Passing nothing here throws the second one away, which for anything the developer typed
+        // means the answer is discarded and a generic wrapper shown in its place.
+        var exception = default(ExcepInfo);
+
         fixed (ComVariant* argumentBlock = reversed)
         {
             parameters.Arguments = arguments.Length == 0 ? 0 : (nint)argumentBlock;
@@ -464,13 +604,13 @@ internal sealed unsafe class DispatchObject : IDisposable
                 (ushort)kind,
                 (nint)(&parameters),
                 (nint)(&result),
-                0,
+                (nint)(&exception),
                 0);
 
             if (hr < 0)
             {
                 result.Dispose();
-                Marshal.ThrowExceptionForHR(hr);
+                Throw(hr, ref exception);
             }
         }
 

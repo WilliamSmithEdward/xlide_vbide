@@ -107,20 +107,29 @@ failure mode that produces memory corruption rather than an error. The cost is i
 control-plane calls. Paths that run per keystroke will use early binding, measured rather than
 assumed.
 
-## 10. The editor will not size a tool window, in any state
+## 10. A property assignment carries a named argument, and forgetting it looks like a refusal
 
-Setting `Width` or `Height` on a tool window throws whether it is floating or docked, before and
-after it is made visible. Docking one produces a band six pixels high whose client area measures a
-negative height, so a panel inside it is invisible; and when the user resizes a floating one, the
-contents do not follow.
+Assigning a property through dispatch is the one call shape that needs a named argument: the value
+is identified by a reserved dispatch identifier rather than by position. A setter that passes it
+positionally fails every time, and the failure is an ordinary failed call with no message.
 
-Evidence: measured on Excel 365, `GenericPane 'xlide' rect 0,2082 5120x6 client 5120x-28`, with
-`COMException` from both dimension setters and `Height` reading back as the height of the whole
-frame.
+This was got wrong, and the wrong conclusion was drawn from it. Two setters passed the value
+positionally; every assignment through them failed; and the failures were recorded here as the
+editor refusing to allow those properties to be set. **That entry was wrong and has been removed.**
+The editor was refusing a malformed call.
 
-Consequence: the editor's own tool windows are not somewhere a panel can live. Every panel is
-rendered in the editing surface, which owns its own layout. The tool window, the ActiveX control
-that hosted it, and their registration were removed rather than kept.
+What was actually measured about tool windows still stands: a docked one was six pixels high with a
+client area measuring a negative height, and its contents did not follow when the window was
+resized. Whether it can be sized once asked properly is now unproven either way, because the tool
+window was removed before the setter was fixed.
+
+The panels stayed in the editing surface regardless, for reasons that do not depend on this: the
+surface can have tabs, splitters, and one consistent layout, and the product owns all of it.
+
+The general lesson is the one worth keeping. A failure that arrives with no message says nothing
+about whose fault it is, and "the host refuses to do this" is a conclusion that needs more evidence
+than a failed call. Compare against something already known to work: the boolean setter beside these
+two had the named argument and had always worked, and the difference between them was the answer.
 
 ## 11. A surface among the panes loses a race it cannot win
 

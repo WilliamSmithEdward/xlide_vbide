@@ -91,6 +91,7 @@ function boot(): void {
     layoutChanged: () => editor.layout(),
     command: (command) => bridge.runCommand(command),
     commandAvailable: (command) => editor.getAction(command.id) !== null,
+    evaluate: (text) => bridge.evaluate(text),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

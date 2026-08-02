@@ -76,6 +76,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer chooses a command the editor owns.</summary>
     public Action<string>? CommandRequested { get; set; }
 
+    /// <summary>Raised when the developer enters a line in the Immediate panel.</summary>
+    public Action<string>? EvaluateRequested { get; set; }
+
     /// <summary>
     /// Asked about each key the editor might own, before the document sees it. Return true to
     /// claim it.
@@ -217,6 +220,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new NoticeMessage("notice", text),
             EditorMessageContext.Default.NoticeMessage));
+    }
+
+    /// <summary>Adds a line to the Immediate panel's output.</summary>
+    public void ShowImmediateResult(string text, bool failed)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ImmediateResultMessage("immediateResult", text, failed),
+            EditorMessageContext.Default.ImmediateResultMessage));
     }
 
     /// <summary>True when the developer has typed something that has not reached the module.</summary>
@@ -479,6 +497,15 @@ internal sealed class EditorSurface : IDisposable
                         && breakpointLine.TryGetInt32(out var toggled))
                     {
                         BreakpointToggleRequested?.Invoke(toggled);
+                    }
+
+                    break;
+
+                case "evaluate":
+                    if (document.RootElement.TryGetProperty("text", out var expression)
+                        && expression.GetString() is { Length: > 0 } entered)
+                    {
+                        EvaluateRequested?.Invoke(entered);
                     }
 
                     break;

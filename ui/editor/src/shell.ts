@@ -34,6 +34,8 @@ export interface ShellHandlers {
   command(command: ToolbarCommand): void;
   /** Whether an editor command exists in this build. Buttons for missing ones are not drawn. */
   commandAvailable(command: ToolbarCommand): boolean;
+  /** The developer entered a line in the Immediate panel. */
+  evaluate(text: string): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -81,6 +83,15 @@ export class Shell {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly sidebarSplitter: HTMLElement;
   private readonly explorer: Explorer;
+  private readonly panelTabs: HTMLElement;
+  private readonly problemsBody: HTMLElement;
+  private readonly immediateBody: HTMLElement;
+  private readonly immediateLog: HTMLElement;
+  private readonly immediateInput: HTMLInputElement;
+
+  /** Lines entered in the Immediate panel, newest last, walked with the arrow keys. */
+  private readonly history: string[] = [];
+  private historyIndex = 0;
 
   private modules: string[] = [];
   private active: string | null = null;
@@ -112,6 +123,15 @@ export class Shell {
     this.panelList = root.querySelector("#panel-list") as HTMLElement;
     this.panelCount = root.querySelector("#panel-count") as HTMLElement;
     this.panelToggle = root.querySelector("#panel-toggle") as HTMLButtonElement;
+
+    this.panelTabs = root.querySelector("#panel-tabs") as HTMLElement;
+    this.problemsBody = root.querySelector("#panel-list") as HTMLElement;
+    this.immediateBody = root.querySelector("#immediate") as HTMLElement;
+    this.immediateLog = root.querySelector("#immediate-log") as HTMLElement;
+    this.immediateInput = root.querySelector("#immediate-input") as HTMLInputElement;
+
+    this.installPanelTabs();
+    this.installImmediate();
 
     this.panelToggle.addEventListener("click", () => this.togglePanel());
     this.installSplitter();
@@ -151,6 +171,97 @@ export class Shell {
   /** Replaces the project explorer's contents. */
   setProjects(projects: ExplorerProject[]): void {
     this.explorer.setProjects(projects);
+  }
+
+  /** Appends a line to the Immediate panel's output. */
+  appendImmediate(text: string, kind: "echo" | "result" | "failed" = "result"): void {
+    const line = document.createElement("div");
+    line.className = `immediate-line ${kind}`;
+    line.textContent = text;
+
+    this.immediateLog.appendChild(line);
+
+    // Kept at the bottom, because the newest line is the answer to what was just asked.
+    this.immediateLog.scrollTop = this.immediateLog.scrollHeight;
+  }
+
+  /** Brings the Immediate panel forward, opening the panel if it was collapsed. */
+  showImmediate(): void {
+    this.selectPanel("immediate");
+
+    if (!this.panelOpen) {
+      this.togglePanel();
+    }
+
+    this.immediateInput.focus();
+  }
+
+  private installPanelTabs(): void {
+    this.panelTabs.addEventListener("click", (event) => {
+      const tab = (event.target as HTMLElement).closest("[data-panel]") as HTMLElement | null;
+      if (tab?.dataset.panel) {
+        this.selectPanel(tab.dataset.panel);
+
+        // Picking a panel while it is collapsed means wanting to see it.
+        if (!this.panelOpen) {
+          this.togglePanel();
+        }
+      }
+    });
+  }
+
+  private selectPanel(name: string): void {
+    for (const tab of this.panelTabs.querySelectorAll<HTMLElement>("[data-panel]")) {
+      const active = tab.dataset.panel === name;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-selected", String(active));
+    }
+
+    this.problemsBody.hidden = name !== "problems";
+    this.immediateBody.hidden = name !== "immediate";
+
+    if (name === "immediate") {
+      this.immediateInput.focus();
+    }
+  }
+
+  private installImmediate(): void {
+    this.immediateInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.submitImmediate();
+        return;
+      }
+
+      // The last few lines are usually variations on each other, so they are worth walking.
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        if (this.history.length === 0) {
+          return;
+        }
+
+        event.preventDefault();
+        this.historyIndex = event.key === "ArrowUp"
+          ? Math.max(0, this.historyIndex - 1)
+          : Math.min(this.history.length, this.historyIndex + 1);
+
+        this.immediateInput.value = this.history[this.historyIndex] ?? "";
+        this.immediateInput.setSelectionRange(this.immediateInput.value.length, this.immediateInput.value.length);
+      }
+    });
+  }
+
+  private submitImmediate(): void {
+    const text = this.immediateInput.value.trim();
+    if (text.length === 0) {
+      return;
+    }
+
+    this.history.push(text);
+    this.historyIndex = this.history.length;
+    this.immediateInput.value = "";
+
+    this.appendImmediate(text, "echo");
+    this.handlers.evaluate(text);
   }
 
   /**

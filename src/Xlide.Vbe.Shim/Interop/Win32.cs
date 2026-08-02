@@ -225,6 +225,19 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [LibraryImport("kernel32.dll")]
+    public static partial uint GetCurrentProcessId();
+
+    /// <summary>
+    /// Asks a window for an object behind it. With the native object model identifier this is how
+    /// a host application's own automation object is reached without the running object table.
+    /// </summary>
+    [LibraryImport("oleacc.dll")]
+    public static partial int AccessibleObjectFromWindow(nint window, uint objectId, in Guid interfaceId, out nint result);
+
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     public static partial nint SetWindowLongPtr(nint window, int index, nint value);
 

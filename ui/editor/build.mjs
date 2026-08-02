@@ -36,10 +36,24 @@ const INDEX_HTML = `<!doctype html>
       <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
       <div id="panel">
         <div id="panel-head">
-          <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-list">Problems</button>
+          <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-body" aria-label="Show or hide the panel"></button>
+          <div id="panel-tabs" role="tablist" aria-label="Panels">
+            <button class="panel-tab active" data-panel="problems" role="tab" aria-selected="true" type="button">Problems</button>
+            <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
+          </div>
           <span id="panel-count">no problems</span>
         </div>
-        <div id="panel-list" role="list"></div>
+        <div id="panel-body">
+          <div id="panel-list" role="list"></div>
+          <div id="immediate" hidden>
+            <div id="immediate-log" role="log" aria-live="polite" aria-label="Immediate window output"></div>
+            <div id="immediate-entry">
+              <span id="immediate-prompt" aria-hidden="true">&gt;</span>
+              <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
+                     aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

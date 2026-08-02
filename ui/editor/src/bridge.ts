@@ -45,6 +45,7 @@ export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
   | { type: "syncDocument"; moduleName: string; text: string }
   | { type: "notice"; text: string }
+  | { type: "immediateResult"; text: string; failed: boolean }
   | { type: "setModules"; modules: string[]; active: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
@@ -78,7 +79,8 @@ export type ClientMessage =
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string }
   | { type: "navigate"; module: string; line: number; column: number }
-  | { type: "command"; name: string };
+  | { type: "command"; name: string }
+  | { type: "evaluate"; text: string };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -194,6 +196,11 @@ export class EditorBridge {
     this.transport.post({ type: "activateModule", moduleName });
   }
 
+  /** Asks the host to evaluate a line entered in the Immediate panel. */
+  evaluate(text: string): void {
+    this.transport.post({ type: "evaluate", text });
+  }
+
   /** Asks the host to go to a finding, in response to the developer picking it. */
   navigate(module: string, line: number, column: number): void {
     this.transport.post({ type: "navigate", module, line, column });
@@ -235,6 +242,9 @@ export class EditorBridge {
         return;
       case "notice":
         this.shell?.notify(message.text);
+        return;
+      case "immediateResult":
+        this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");
         return;
       case "setModules":
         this.shell?.setModules(message.modules, message.active);

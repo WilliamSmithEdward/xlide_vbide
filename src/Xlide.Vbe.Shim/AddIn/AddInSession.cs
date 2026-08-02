@@ -35,6 +35,7 @@ internal sealed class AddInSession : IDisposable
 
     private CodePaneTracker? _codePanes;
     private AnalysisService? _analysis;
+    private ImmediateEvaluator? _immediate;
     private EditorSurface? _editorSurface;
 
     /// <summary>
@@ -220,6 +221,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.TextChanged = WriteModule;
                 _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
                 _editorSurface.Polled = PollDebugState;
+                _editorSurface.EvaluateRequested = EvaluateImmediate;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -696,6 +698,25 @@ internal sealed class AddInSession : IDisposable
         {
             _editorSurface?.Poll(0);
         }
+    }
+
+    /// <summary>
+    /// Runs a line the developer entered in the Immediate panel.
+    ///
+    /// Their edits go to the module first. Evaluating compiles the project, so a line that refers
+    /// to something just typed has to be able to see it.
+    /// </summary>
+    private void EvaluateImmediate(string line)
+    {
+        _editorSurface?.FlushEdits();
+
+        var evaluator = _immediate ??= new ImmediateEvaluator(_editor);
+        var result = evaluator.Evaluate(line, _inBreak);
+
+        _editorSurface?.ShowImmediateResult(result.Text, result.Failed);
+
+        // Evaluating adds and removes a module, which the analyzer would otherwise report on.
+        _analysis?.Reanalyse();
     }
 
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
