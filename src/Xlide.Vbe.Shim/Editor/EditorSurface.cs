@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Interop;
@@ -761,21 +762,45 @@ internal sealed class EditorSurface : IDisposable
                     break;
 
                 case "contentChanged":
-                    if (_module is not null
-                        && document.RootElement.TryGetProperty("fullText", out var text)
-                        && text.GetString() is { } updated)
+                    if (_module is not null)
                     {
-                        // Held, not written. Writing a module replaces every line of it, which
-                        // resets the project, so doing it per keystroke would reset the project on
-                        // every keystroke. The edit is written once the developer stops typing,
-                        // and immediately before anything that has to see it.
-                        _text = updated;
-                        _unwritten = true;
-                        _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+                        // A small module arrives whole; a large one arrives as its changes and
+                        // is reconstructed here, because building and shipping the full text of
+                        // a large module per keystroke is what typing latency is made of.
+                        var updated = document.RootElement.TryGetProperty("fullText", out var text)
+                            ? text.GetString()
+                            : null;
 
-                        // The findings shown must describe this text, not the text as of the
-                        // last write: a deleted error must go, and it must go soon.
-                        _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
+                        if (updated is null
+                            && _text is { } current
+                            && document.RootElement.TryGetProperty("changes", out var changeSet)
+                            && changeSet.ValueKind == JsonValueKind.Array)
+                        {
+                            updated = ApplyChanges(current, changeSet);
+                        }
+
+                        if (updated is not null)
+                        {
+                            if (document.RootElement.TryGetProperty("fullLength", out var lengthElement)
+                                && lengthElement.TryGetInt32(out var expectedLength)
+                                && updated.Length != expectedLength)
+                            {
+                                Log.Error($"surface: reconstructed {updated.Length} character(s) where the page holds {expectedLength}");
+                            }
+
+                            // Held, not written. Writing a module replaces its changed lines,
+                            // which resets the project, so doing it per keystroke would reset
+                            // the project on every keystroke. The edit is written once the
+                            // developer stops typing, and immediately before anything that has
+                            // to see it.
+                            _text = updated;
+                            _unwritten = true;
+                            _overlay?.StartWriteTimer(WriteDelayMilliseconds);
+
+                            // The findings shown must describe this text, not the text as of
+                            // the last write: a deleted error must go, and it must go soon.
+                            _overlay?.StartAnalyseTimer(LiveAnalysisDelayMilliseconds);
+                        }
                     }
 
                     break;
@@ -1000,6 +1025,47 @@ internal sealed class EditorSurface : IDisposable
         {
             Log.Warn("editor surface: a message from the page was not valid");
         }
+    }
+
+    /// <summary>
+    /// Rebuilds the text from the page's change ranges, which arrive bottom-up so every earlier
+    /// range still means what it meant: the offsets are computed once, against the text the
+    /// ranges describe, and applied from the tail forward. Null when a range is malformed or
+    /// out of bounds, and the caller keeps the text it has rather than guessing.
+    /// </summary>
+    private static string? ApplyChanges(string text, JsonElement changes)
+    {
+        var lineStarts = TextPositions.LineStarts(text);
+        var updated = text;
+
+        foreach (var change in changes.EnumerateArray())
+        {
+            if (!change.TryGetProperty("startLine", out var startLineElement)
+                || !startLineElement.TryGetInt32(out var startLine)
+                || !change.TryGetProperty("startColumn", out var startColumnElement)
+                || !startColumnElement.TryGetInt32(out var startColumn)
+                || !change.TryGetProperty("endLine", out var endLineElement)
+                || !endLineElement.TryGetInt32(out var endLine)
+                || !change.TryGetProperty("endColumn", out var endColumnElement)
+                || !endColumnElement.TryGetInt32(out var endColumn)
+                || !change.TryGetProperty("text", out var replacement)
+                || replacement.GetString() is not { } inserted)
+            {
+                return null;
+            }
+
+            var start = TextPositions.ToOffset(lineStarts, startLine, startColumn);
+            var end = TextPositions.ToOffset(lineStarts, endLine, endColumn);
+
+            if (start < 0 || end < start || end > updated.Length)
+            {
+                return null;
+            }
+
+            updated = string.Concat(updated.AsSpan(0, start), inserted, updated.AsSpan(end));
+        }
+
+        return updated;
     }
 
     /// <summary>

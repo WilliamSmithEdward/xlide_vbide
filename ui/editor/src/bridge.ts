@@ -145,7 +145,7 @@ export interface BootTimings {
 
 export type ClientMessage =
   | { type: "ready"; timings?: BootTimings }
-  | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullText: string }
+  | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string }
@@ -932,12 +932,23 @@ export class EditorBridge {
       ...fromMonacoRange(change.range),
       text: change.text,
     }));
-    this.transport.post({
+
+    // A small module travels whole, which is simplest. A large one travels as its changes:
+    // building and shipping the full text per keystroke is what typing latency is made of,
+    // and the host reconstructs the same text from the ranges. The length rides along so a
+    // divergence would be seen the moment it happened rather than believed impossible.
+    const fullLength = model.getValueLength();
+    const message: Extract<ClientMessage, { type: "contentChanged" }> = {
       type: "contentChanged",
       revision: this.revision,
       changes,
-      fullText: model.getValue(),
-    });
+      fullLength,
+    };
+    if (fullLength < 64_000) {
+      message.fullText = model.getValue();
+    }
+
+    this.transport.post(message);
   }
 
   private onSelectionChanged(selection: monaco.Selection): void {

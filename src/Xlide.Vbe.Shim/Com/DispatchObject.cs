@@ -407,6 +407,27 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Calls a method that takes a number and then a string, which is how lines are inserted
+    /// into a module at a position.
+    /// </summary>
+    public void Invoke(string name, int first, string second)
+    {
+        ArgumentNullException.ThrowIfNull(second);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        // The string variant owns what it was built from and frees it when cleared; the number
+        // owns nothing.
+        using var text = ComVariant.Create(second);
+        var position = ComVariant.Create(first);
+        using var result = InvokeCore(dispId, InvokeKind.Method, [position, text]);
+    }
+
+    /// <summary>
     /// Reads an indexed member, which is how automation collections expose their items. Editor
     /// collections are one-based.
     /// </summary>

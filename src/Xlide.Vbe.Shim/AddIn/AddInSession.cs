@@ -582,17 +582,28 @@ internal sealed class AddInSession : IDisposable
                 return;
             }
 
-            var existing = module.GetInt32("CountOfLines");
-            if (existing > 0)
-            {
-                module.Invoke("DeleteLines", 1, existing);
-            }
+            // The changed lines alone, when the last read-back says where they are. Replacing a
+            // whole large module makes the host reparse every line of it — seconds, on the
+            // thread the keystrokes live on — where typing only ever touches a few. The whole
+            // replace below remains for a module with no baseline or a rewrite too large to
+            // call an edit.
+            var baseline = _writtenModules.TryGetValue(component, out var known) ? known : null;
+            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text);
 
-            // A module with nothing in it is a legitimate state, and asking the host to add an
-            // empty string to one is not.
-            if (text.Length > 0)
+            if (!wroteDiff)
             {
-                module.Invoke("AddFromString", text);
+                var existing = module.GetInt32("CountOfLines");
+                if (existing > 0)
+                {
+                    module.Invoke("DeleteLines", 1, existing);
+                }
+
+                // A module with nothing in it is a legitimate state, and asking the host to add
+                // an empty string to one is not.
+                if (text.Length > 0)
+                {
+                    module.Invoke("AddFromString", text);
+                }
             }
 
             // Read straight back and remembered, but not pushed into the surface.
@@ -606,7 +617,7 @@ internal sealed class AddInSession : IDisposable
             var stored = ProjectReader.ReadSource(found);
             _writtenModules[component] = stored ?? text;
 
-            Log.Info($"write: {component}, {text.Length} character(s)"
+            Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
                      + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty));
 
             // The analyzer reads the module, so it has nothing new to say until the module has
@@ -619,6 +630,64 @@ internal sealed class AddInSession : IDisposable
             Log.Error($"write: {component} could not be updated", ex);
         }
     }
+
+    /// <summary>
+    /// Writes only the lines that changed between the baseline and the new text: the common
+    /// prefix and suffix are found, and the window between them is deleted and re-inserted at
+    /// one anchor, so nothing shifts under anything. False when the change is too large to be
+    /// typing — a paste of a module's worth of text is a whole replace, honestly.
+    /// </summary>
+    private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text)
+    {
+        const int LargestDiffLines = 400;
+
+        if (baseline == text)
+        {
+            return true;
+        }
+
+        var oldLines = SplitPhysicalLines(baseline);
+        var newLines = SplitPhysicalLines(text);
+
+        var prefix = 0;
+        var maxPrefix = Math.Min(oldLines.Length, newLines.Length);
+        while (prefix < maxPrefix && oldLines[prefix] == newLines[prefix])
+        {
+            prefix++;
+        }
+
+        var suffix = 0;
+        var maxSuffix = Math.Min(oldLines.Length, newLines.Length) - prefix;
+        while (suffix < maxSuffix
+               && oldLines[oldLines.Length - 1 - suffix] == newLines[newLines.Length - 1 - suffix])
+        {
+            suffix++;
+        }
+
+        var oldWindow = oldLines.Length - prefix - suffix;
+        var newWindow = newLines.Length - prefix - suffix;
+
+        if (oldWindow > LargestDiffLines || newWindow > LargestDiffLines)
+        {
+            return false;
+        }
+
+        if (oldWindow > 0)
+        {
+            module.Invoke("DeleteLines", prefix + 1, oldWindow);
+        }
+
+        if (newWindow > 0)
+        {
+            module.Invoke("InsertLines", prefix + 1,
+                string.Join("\r\n", newLines.Skip(prefix).Take(newWindow)));
+        }
+
+        return true;
+    }
+
+    private static string[] SplitPhysicalLines(string text) =>
+        text.Split(["\r\n", "\n"], StringSplitOptions.None);
 
     /// <summary>
     /// Breakpoints the developer has set, by module.
