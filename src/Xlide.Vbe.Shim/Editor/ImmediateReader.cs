@@ -32,6 +32,9 @@ internal sealed class ImmediateReader : IDisposable
     /// <summary>Everything read so far, so only what is new is reported.</summary>
     private string _seen = string.Empty;
 
+    /// <summary>The last raw reading, so the log records each change of state exactly once.</summary>
+    private string? _lastRaw;
+
     private bool _failed;
 
     private ImmediateReader(nint window) => _window = window;
@@ -141,13 +144,16 @@ internal sealed class ImmediateReader : IDisposable
     /// <summary>
     /// Reports whatever the window has gained since the last read.
     ///
-    /// Two readings are not trusted. An empty one is ignored outright: the window is hidden and
-    /// nobody can clear it, but a project reset makes it read as empty for a moment, and adopting
-    /// that moment as the baseline meant the next reading replayed the entire buffer as if it
-    /// were new. That replay is exactly how every old line reappeared under each evaluation. And
-    /// a reading that does not continue the old one is adopted silently rather than reported:
-    /// the buffer was trimmed, which part survived is unknowable, and showing all of it again is
-    /// worse than showing none of it.
+    /// Three things about the reading are not what they look like. The text ends in the line the
+    /// caret sits on, and new output is inserted BEFORE that tail, so the raw text never simply
+    /// grows: compared raw, every reading looked like a rewrite, which first replayed the whole
+    /// buffer under every evaluation and then, made silent, swallowed the output instead. The
+    /// tail is trimmed away and lines are all that is compared. An empty reading is ignored
+    /// outright: the window is hidden and nobody can clear it, but a project reset makes it read
+    /// as empty for a moment, and adopting that moment as the baseline is what a replay grows
+    /// from. And a trimmed reading that still does not continue the old one means the editor
+    /// discarded old lines; which part survived is unknowable, so it is adopted without being
+    /// shown again.
     /// </summary>
     public void Poll()
     {
@@ -156,7 +162,17 @@ internal sealed class ImmediateReader : IDisposable
             return;
         }
 
-        var current = ReadAll();
+        var raw = ReadAll();
+
+        // Once per change of state, the raw truth: what the window says it holds and what the
+        // baseline is. This is what tells a dead capture apart from a window nothing wrote to.
+        if (raw != _lastRaw)
+        {
+            _lastRaw = raw;
+            Log.Info($"immediate: window {(raw is null ? "unreadable" : $"{raw.Length} char(s) '{Tail(raw)}'")}, seen {_seen.Length}");
+        }
+
+        var current = Normalise(raw);
         if (current is null || current.Length == 0 || current == _seen)
         {
             return;
@@ -177,8 +193,18 @@ internal sealed class ImmediateReader : IDisposable
         }
     }
 
+    /// <summary>The reading without the caret's own tail, which is presentation and not output.</summary>
+    private static string? Normalise(string? text) => text?.TrimEnd('\r', '\n', ' ', '\t');
+
+    /// <summary>The end of a reading, printable, for the log.</summary>
+    private static string Tail(string text)
+    {
+        var tail = text.Length > 60 ? text[^60..] : text;
+        return tail.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\u0001", "\\1");
+    }
+
     /// <summary>Treats everything currently in the window as already seen.</summary>
-    public void Reset() => _seen = ReadAll() ?? string.Empty;
+    public void Reset() => _seen = Normalise(ReadAll()) ?? string.Empty;
 
     private string? ReadAll()
     {

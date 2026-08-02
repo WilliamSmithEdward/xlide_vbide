@@ -36,6 +36,12 @@ internal sealed class ImmediateEvaluator
     /// <summary>Procedure the module exposes, which is what gets run by name.</summary>
     private const string ScratchProcedure = "XlideImmediateRun";
 
+    /// <summary>
+    /// Marks a value that is an error description rather than a result. Control characters cannot
+    /// be typed into the panel, so no expression of the developer's can produce this by accident.
+    /// </summary>
+    private const char ErrorMarker = (char)1;
+
     /// <summary>Standard module. The editor's own numbering.</summary>
     private const int StandardModule = 1;
 
@@ -121,6 +127,12 @@ internal sealed class ImmediateEvaluator
             // compiled procedure and the host is what knows how to call into it.
             var value = application.CallToString("Run", $"{ScratchModule}.{ScratchProcedure}");
 
+            // The scratch code marks an error it caught, and the marker cannot be typed.
+            if (value.Length > 0 && value[0] == ErrorMarker)
+            {
+                return new Result(value[1..], Failed: true);
+            }
+
             // A statement that succeeded says nothing, which is what the editor's own Immediate
             // window does: output belongs to the code (Debug.Print), not to the ceremony.
             return wantsValue ? new Result(value, Failed: false) : new Result(string.Empty, Failed: false);
@@ -136,16 +148,24 @@ internal sealed class ImmediateEvaluator
     /// <summary>
     /// Wraps a line in something the project can compile.
     ///
-    /// A value is returned as a variant, so anything the expression produces survives the trip; a
-    /// statement is run for its effect and reports nothing.
+    /// Always a function, and always with its own error handler. A run-time error in an unhandled
+    /// frame is the editor's cue to put up its error dialog and drop into break mode INSIDE the
+    /// scratch module, which put the scratch code on the developer's screen with a stopped-line
+    /// marker on it. Handled here, the error comes back as a marked value instead, and the panel
+    /// shows the language's own message the way it shows any other answer.
     /// </summary>
-    private static string Compose(string body, bool wantsValue) => wantsValue
-        ? $"Public Function {ScratchProcedure}() As Variant\r\n"
-          + $"    {ScratchProcedure} = ({body})\r\n"
-          + "End Function\r\n"
-        : $"Public Sub {ScratchProcedure}()\r\n"
-          + $"    {body}\r\n"
-          + "End Sub\r\n";
+    private static string Compose(string body, bool wantsValue)
+    {
+        var work = wantsValue ? $"    {ScratchProcedure} = ({body})\r\n" : $"    {body}\r\n";
+
+        return $"Public Function {ScratchProcedure}() As Variant\r\n"
+            + "    On Error GoTo Failed\r\n"
+            + work
+            + "    Exit Function\r\n"
+            + "Failed:\r\n"
+            + $"    {ScratchProcedure} = Chr$(1) & Err.Description & \" (error \" & Err.Number & \")\"\r\n"
+            + "End Function\r\n";
+    }
 
     private static void Remove(DispatchObject components)
     {

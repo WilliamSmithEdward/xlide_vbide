@@ -1085,6 +1085,15 @@ internal sealed class AddInSession : IDisposable
             using var component = module?.GetObject("Parent");
             var name = component?.GetString("Name");
 
+            // Stopped inside the evaluator's scratch frame is not somewhere the developer can be
+            // taken: the module is ours and about to vanish. The stop is real, so the marker
+            // rules below still run against whatever module is showing; only the switch is
+            // refused.
+            if (name is not null && IsScratchComponent(name))
+            {
+                return;
+            }
+
             if (name is not null && name != _editorSurface?.Module)
             {
                 ShowModuleInSurface(name);
@@ -1279,6 +1288,9 @@ internal sealed class AddInSession : IDisposable
             var trimmed = line.TrimEnd('\r');
             if (trimmed.Length > 0)
             {
+                // Logged as well as shown, because whether capture is working at all is the
+                // question a support log has to be able to answer.
+                Log.Info($"immediate: captured '{(trimmed.Length > 80 ? trimmed[..80] : trimmed)}'");
                 _editorSurface?.ShowImmediateResult(trimmed, failed: false);
             }
         }
@@ -1292,10 +1304,29 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void EvaluateImmediate(string line)
     {
+        Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
         _editorSurface?.FlushEdits();
 
         var evaluator = _immediate ??= new ImmediateEvaluator(_editor);
-        var result = evaluator.Evaluate(line, _inBreak);
+
+        // The mode is read now rather than taken from the cached flag. The flag is as old as the
+        // last poll, and evaluating during an unnoticed break added a module to a stopped
+        // project, which fails in ways that have nothing to do with what the developer typed.
+        var stopped = _inBreak;
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            stopped = (project?.GetInt32("Mode") ?? DesignMode) != DesignMode;
+        }
+        catch (Exception)
+        {
+            // The cached answer stands.
+        }
+
+        var result = evaluator.Evaluate(line, stopped);
+
+        Log.Info($"immediate: {(result.Failed ? "failed" : "ok")}"
+                 + (result.Text.Length > 0 ? $" '{(result.Text.Length > 80 ? result.Text[..80] : result.Text)}'" : string.Empty));
 
         // A successful statement says nothing, which is the native window's own manner. What the
         // code printed arrives through the Debug.Print reader; the ceremony stays silent.
