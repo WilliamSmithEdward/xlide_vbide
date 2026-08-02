@@ -311,6 +311,36 @@ internal sealed class AnalysisService : IAsyncDisposable
         return result?.Edits;
     }
 
+    /// <summary>
+    /// Asks the engine for a module's procedures, or null when there is no engine or no address
+    /// for the module. The source is given for the module being edited, null otherwise.
+    /// </summary>
+    public async Task<EngineOutlineProcedure[]?> OutlineAsync(
+        string moduleName,
+        string? source,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, source, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Procedures;
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;

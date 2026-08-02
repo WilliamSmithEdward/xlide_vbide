@@ -497,6 +497,39 @@ try {
 
     check('an already-canonical line produces no edits', () => assert.equal(canonicalNoop.edits.length, 0));
 
+    // Outline: the procedures under a module node, in declaration order, kinds spelled the way
+    // the tree spells them.
+    const seededOutline = await call('textDocument/outline', {
+        projectId: 'Smoke',
+        moduleName: 'FineClass',
+    });
+
+    console.log(`  -> outline of the seeded class: ${seededOutline.procedures.map((p) => `${p.kind} ${p.name}@${p.line}`).join(', ')}`);
+    check('the seeded class outlines its procedures in order', () => {
+        assert.deepEqual(
+            seededOutline.procedures.map((p) => `${p.kind} ${p.name}`),
+            ['Sub Adopt', 'Property Get Name', 'Sub Describe']);
+        assert.ok(seededOutline.procedures.every((p) => p.line > 0), 'expected 1-based lines');
+    });
+
+    const liveOutline = await call('textDocument/outline', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE.replace('Sub Fine()', 'Sub Renamed()'),
+    });
+
+    check('a live source outlines as it stands, not as it was seeded', () => {
+        assert.deepEqual(liveOutline.procedures.map((p) => p.name), ['Renamed']);
+        assert.equal(liveOutline.procedures[0].line, 3);
+    });
+
+    const unknownOutline = await call('textDocument/outline', {
+        projectId: 'Smoke',
+        moduleName: 'NoSuchModule',
+    });
+
+    check('an unknown module outlines empty', () => assert.equal(unknownOutline.procedures.length, 0));
+
     // Loop iterator sync: renaming the For side renames the Next side.
     const loopSource = 'Sub Fine()\r\n    For i = 1 To 3\r\n        n = 1\r\n    Next j\r\nEnd Sub\r\n';
     const loopSync = await call('textDocument/loopSync', {

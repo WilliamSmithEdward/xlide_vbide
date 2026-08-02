@@ -312,6 +312,33 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
     }
 
+    /// <summary>
+    /// Asks for a module's procedures. The source is optional: given for the module being
+    /// edited, omitted to answer from the engine's seeded copy.
+    /// </summary>
+    public async Task<EngineOutline?> OutlineAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? source,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+        };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
+
+        var result = await CallAsync("textDocument/outline", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineOutline);
+    }
+
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
         var writer = _writer;

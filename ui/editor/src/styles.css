@@ -380,6 +380,17 @@ span.prop-value.readonly {
   opacity: 0.55;
 }
 
+/* The twisty on a module row: a target of its own, so unfolding is never also an open. */
+.tree-item .tree-twisty {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* A procedure under its unfolded module, one level deeper. */
+.tree-item.tree-proc {
+  padding-left: 44px;
+}
+
 /* A workbook's row: a real button, because everything on it can be done to — it toggles, it
    carries the workbook menu — and a row that responds to the pointer is how that is announced. */
 .tree-workbook {

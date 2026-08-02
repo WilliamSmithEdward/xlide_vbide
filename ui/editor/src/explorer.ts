@@ -5,10 +5,12 @@
  * window on request, and a hidden window cannot be uncovered by anything the host does later. The
  * project itself is untouched, so everything that reads it keeps working.
  *
- * Each workbook is its own unit, the way the companion editor's tree shows them: the workbook's
- * file name at the root, its modules flat beneath it with their kind spelled out beside the name,
- * ordered document, form, module, class. There is no project node and there are no grouping rows;
- * the kind column carries what the groups used to say.
+ * The shape is the companion editor's tree, behaviour included. Each workbook is its own unit,
+ * named by its file; its modules sit flat beneath it in document, form, module, class order with
+ * their kind spelled out; a module unfolds into its procedures, and clicking one goes to its
+ * line. Expansion is an accordion: one module open at a time, following the module being edited,
+ * and activating a module in another workbook moves the whole tree's attention there. A workbook
+ * the developer collapsed by hand stays collapsed until the attention genuinely moves again.
  */
 
 /** Component kinds, as the host numbers them. */
@@ -28,6 +30,13 @@ export interface ExplorerComponent {
 export interface ExplorerProject {
   name: string;
   components: ExplorerComponent[];
+}
+
+/** One procedure of a module: the kind as the tree spells it, and its 1-based line. */
+export interface ExplorerProcedure {
+  name: string;
+  kind: string;
+  line: number;
 }
 
 interface KindMeta {
@@ -60,6 +69,10 @@ export interface ExplorerHandlers {
   context(name: string, kind: number, x: number, y: number): void;
   /** Right click on a workbook's row. */
   projectContext(project: string, x: number, y: number): void;
+  /** A module's procedures, for its unfolded node. */
+  outline(module: string): Promise<ExplorerProcedure[]>;
+  /** A procedure was picked: go to its line in its module. */
+  openProcedure(module: string, line: number): void;
 }
 
 export class Explorer {
@@ -71,8 +84,19 @@ export class Explorer {
   private selected: string | null = null;
   private problemCounts = new Map<string, number>();
 
-  /** Which workbooks are open in the tree; one never seen before starts open. */
-  private readonly expanded = new Map<string, boolean>();
+  /** Which workbooks are open. Workbooks start closed; the first one is opened on arrival. */
+  private readonly expandedWorkbooks = new Map<string, boolean>();
+
+  /** The one module whose procedures are unfolded: the accordion. */
+  private expandedModule: string | null = null;
+
+  /** The workbook the attention is in, so collapsing others happens only when it moves. */
+  private attentionWorkbook: string | null = null;
+
+  /** Fetched procedures by module, dropped whenever the project set is republished. */
+  private readonly outlines = new Map<string, ExplorerProcedure[]>();
+
+  private firstProjectsSeen = false;
 
   constructor(root: HTMLElement, handlers: ExplorerHandlers) {
     this.root = root;
@@ -80,15 +104,28 @@ export class Explorer {
 
     // One listener for the whole tree. The tree is rebuilt whenever the project changes, and
     // per-item listeners would have to be torn down with it.
-    //
-    // A single click selects AND opens. The properties panel follows the selection either way,
-    // but a click that only selected read as a tree that had stopped working: opening on a
-    // single click is the ergonomic this product follows, deliberately unlike the host's own
-    // tree, which asks for a double click.
     this.root.addEventListener("click", (event) => {
+      // The chevron toggles and does nothing else, so unfolding is never also an open.
+      const toggle = (event.target as HTMLElement).closest("[data-toggle]") as HTMLElement | null;
+      if (toggle?.dataset.toggle) {
+        this.toggleModule(toggle.dataset.toggle);
+        return;
+      }
+
+      const procedure = this.procedureAt(event);
+      if (procedure) {
+        this.handlers.openProcedure(procedure.module, procedure.line);
+        return;
+      }
+
+      // A single click selects AND opens. The properties panel follows the selection either
+      // way, but a click that only selected read as a tree that had stopped working: opening
+      // on a single click is the ergonomic this product follows, deliberately unlike the
+      // host's own tree, which asks for a double click.
       const name = this.componentAt(event);
       if (name) {
         this.selected = name;
+        this.setExpandedModule(name);
         this.render();
         this.handlers.select(name);
         this.handlers.open(name);
@@ -97,7 +134,7 @@ export class Explorer {
 
       const workbook = this.workbookAt(event);
       if (workbook) {
-        this.expanded.set(workbook, !(this.expanded.get(workbook) ?? true));
+        this.expandedWorkbooks.set(workbook, !(this.expandedWorkbooks.get(workbook) ?? false));
         this.render();
       }
     });
@@ -111,7 +148,7 @@ export class Explorer {
 
     this.root.addEventListener("keydown", (event) => {
       // A button already turns Enter into a click; this turns it into an open instead, so the
-      // keyboard can do everything the mouse can. A workbook row keeps the click, which toggles.
+      // keyboard can do everything the mouse can. Workbook and procedure rows keep the click.
       if (event.key === "Enter") {
         const name = this.componentAt(event);
         if (name) {
@@ -154,19 +191,100 @@ export class Explorer {
     return row?.dataset.project ?? null;
   }
 
+  private procedureAt(event: Event): { module: string; line: number } | null {
+    const row = (event.target as HTMLElement).closest("[data-proc-module]") as HTMLElement | null;
+    if (!row?.dataset.procModule) {
+      return null;
+    }
+    return { module: row.dataset.procModule, line: Number(row.dataset.procLine ?? "1") };
+  }
+
   setProjects(projects: ExplorerProject[]): void {
     this.projects = projects;
+
+    // Procedure lists describe a project that just changed shape; ask again when unfolded.
+    this.outlines.clear();
+
+    // The first workbook opens itself so modules are visible without a click.
+    const first = projects[0];
+    if (!this.firstProjectsSeen && first) {
+      this.firstProjectsSeen = true;
+      if (!this.expandedWorkbooks.has(first.name)) {
+        this.expandedWorkbooks.set(first.name, true);
+      }
+    }
+
+    if (this.expandedModule) {
+      void this.fetchOutline(this.expandedModule);
+    }
+
     this.render();
   }
 
   setActive(name: string | null): void {
     this.active = name;
+    if (name) {
+      // The tree follows the module being edited: its node unfolds, the previous one folds.
+      this.setExpandedModule(name);
+    }
     this.render();
   }
 
   /** Problem counts by component, so a defect is visible without opening the module. */
   setProblemCounts(counts: Map<string, number>): void {
     this.problemCounts = counts;
+
+    // Analysis just described the project again; an unfolded procedure list follows it, so a
+    // procedure renamed or added while typing appears without any clicking.
+    if (this.expandedModule) {
+      void this.fetchOutline(this.expandedModule);
+    }
+
+    this.render();
+  }
+
+  /**
+   * The accordion: this module's procedures unfold and every other module folds. Its workbook
+   * opens; other workbooks close only when the attention genuinely moved between workbooks, so
+   * a workbook collapsed by hand stays collapsed while work continues inside another.
+   */
+  private setExpandedModule(name: string): void {
+    const owner = this.projects.find((project) =>
+      project.components.some((component) => component.name === name));
+
+    if (this.expandedModule !== name) {
+      this.expandedModule = name;
+      void this.fetchOutline(name);
+    }
+
+    if (owner) {
+      if (this.attentionWorkbook !== owner.name) {
+        if (this.attentionWorkbook !== null) {
+          for (const project of this.projects) {
+            this.expandedWorkbooks.set(project.name, project.name === owner.name);
+          }
+        }
+        this.attentionWorkbook = owner.name;
+      }
+      this.expandedWorkbooks.set(owner.name, true);
+    }
+  }
+
+  private toggleModule(name: string): void {
+    if (this.expandedModule === name) {
+      this.expandedModule = null;
+    } else {
+      this.setExpandedModule(name);
+    }
+    this.render();
+  }
+
+  private async fetchOutline(module: string): Promise<void> {
+    const procedures = await this.handlers.outline(module);
+    if (this.expandedModule !== module) {
+      return;
+    }
+    this.outlines.set(module, procedures);
     this.render();
   }
 
@@ -174,7 +292,7 @@ export class Explorer {
     this.root.replaceChildren();
 
     for (const project of this.projects) {
-      const isOpen = this.expanded.get(project.name) ?? true;
+      const isOpen = this.expandedWorkbooks.get(project.name) ?? false;
       this.root.appendChild(this.workbookRow(project.name, isOpen));
 
       if (!isOpen) {
@@ -192,6 +310,12 @@ export class Explorer {
 
       for (const component of members) {
         this.root.appendChild(this.item(component));
+
+        if (component.name === this.expandedModule) {
+          for (const procedure of this.outlines.get(component.name) ?? []) {
+            this.root.appendChild(this.procedureRow(component.name, procedure));
+          }
+        }
       }
     }
   }
@@ -218,6 +342,7 @@ export class Explorer {
 
   private item(component: ExplorerComponent): HTMLElement {
     const meta = kindMeta(component.kind);
+    const isUnfolded = component.name === this.expandedModule;
 
     const button = document.createElement("button");
     button.type = "button";
@@ -228,6 +353,12 @@ export class Explorer {
     button.dataset.kind = String(component.kind);
     button.setAttribute("role", "treeitem");
     button.setAttribute("aria-selected", String(component.name === this.selected));
+    button.setAttribute("aria-expanded", String(isUnfolded));
+
+    const chevron = document.createElement("span");
+    chevron.className = `codicon codicon-chevron-${isUnfolded ? "down" : "right"} tree-twisty`;
+    chevron.dataset.toggle = component.name;
+    chevron.setAttribute("aria-hidden", "true");
 
     const glyph = document.createElement("span");
     glyph.className = `codicon codicon-${meta.icon}`;
@@ -237,7 +368,7 @@ export class Explorer {
     kind.className = "tree-kind";
     kind.textContent = meta.type;
 
-    button.append(glyph, document.createTextNode(component.name), kind);
+    button.append(chevron, glyph, document.createTextNode(component.name), kind);
 
     const problems = this.problemCounts.get(component.name) ?? 0;
     if (problems > 0) {
@@ -248,6 +379,22 @@ export class Explorer {
       button.appendChild(badge);
     }
 
+    return button;
+  }
+
+  private procedureRow(module: string, procedure: ExplorerProcedure): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tree-item tree-proc";
+    button.dataset.procModule = module;
+    button.dataset.procLine = String(procedure.line);
+    button.setAttribute("role", "treeitem");
+
+    const glyph = document.createElement("span");
+    glyph.className = "codicon codicon-symbol-method";
+    glyph.setAttribute("aria-hidden", "true");
+
+    button.append(glyph, document.createTextNode(`${procedure.kind} ${procedure.name}`));
     return button;
   }
 }

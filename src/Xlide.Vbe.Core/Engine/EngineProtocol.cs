@@ -78,6 +78,16 @@ public sealed record EngineSmartEnter(
 public sealed record EngineTextEdits(
     [property: JsonPropertyName("edits")] EngineTextEdit[] Edits);
 
+/// <summary>One procedure: the kind as a tree spells it ("Sub", "Property Get") and its 1-based line.</summary>
+public sealed record EngineOutlineProcedure(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("line")] int Line);
+
+/// <summary>A module's procedures, in declaration order.</summary>
+public sealed record EngineOutline(
+    [property: JsonPropertyName("procedures")] EngineOutlineProcedure[] Procedures);
+
 /// <summary>
 /// Serialisation for the engine protocol.
 ///
@@ -103,6 +113,8 @@ public sealed record EngineTextEdits(
 [JsonSerializable(typeof(EngineTextEdit))]
 [JsonSerializable(typeof(EngineSmartEnter))]
 [JsonSerializable(typeof(EngineTextEdits))]
+[JsonSerializable(typeof(EngineOutlineProcedure))]
+[JsonSerializable(typeof(EngineOutline))]
 [JsonSerializable(typeof(JsonElement))]
 // Booleans ride the request dictionaries boxed, and a boxed value serialises only if its own
 // type is registered; leaving it out fails at run time, in the middle of a keystroke.

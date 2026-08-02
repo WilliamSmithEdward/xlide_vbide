@@ -119,6 +119,7 @@ function boot(): void {
     selectComponent: (name) => bridge.selectComponent(name),
     closeModule: (name) => bridge.closeModule(name),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
+    requestOutline: (module) => bridge.requestOutline(module),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

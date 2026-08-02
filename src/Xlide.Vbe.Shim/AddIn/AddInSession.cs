@@ -144,6 +144,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.SmartEnterRequested = OnSmartEnterRequested;
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
+        _editorSurface.OutlineRequested = OnOutlineRequested;
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -1880,6 +1881,52 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowLoopSync(requestId, edits));
+        });
+    }
+
+    /// <summary>
+    /// Answers an outline request from the surface: a module's procedures for its tree node.
+    /// The live text is captured when the request is about the module being edited; any other
+    /// module answers from the engine's seeded copy, which is current as of the last write-back.
+    /// </summary>
+    private void OnOutlineRequested(int requestId, string moduleName)
+    {
+        var surface = _editorSurface;
+
+        if (surface is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowOutline(requestId, []);
+            return;
+        }
+
+        var source = string.Equals(surface.Module, moduleName, StringComparison.OrdinalIgnoreCase)
+            ? surface.Text
+            : null;
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceOutlineProcedure[] procedures = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.OutlineAsync(moduleName, source, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    procedures = [.. answered.Select(procedure =>
+                        new SurfaceOutlineProcedure(procedure.Name, procedure.Kind, procedure.Line))];
+                }
+
+                Log.Info($"outline: {moduleName} -> {procedures.Length} procedure(s)");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"outline: {moduleName} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures));
         });
     }
 

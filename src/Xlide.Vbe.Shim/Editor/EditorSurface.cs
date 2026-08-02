@@ -125,6 +125,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks for the paired loop rename: (requestId, offset).</summary>
     public Action<int, int>? LoopSyncRequested { get; set; }
 
+    /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName).</summary>
+    public Action<int, string>? OutlineRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -216,6 +219,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new LoopSyncResultMessage("loopSyncResult", requestId, edits),
             EditorMessageContext.Default.LoopSyncResultMessage));
+    }
+
+    /// <summary>Answers one outline request. Never held.</summary>
+    public void ShowOutline(int requestId, SurfaceOutlineProcedure[] procedures)
+    {
+        ArgumentNullException.ThrowIfNull(procedures);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new OutlineResultMessage("outlineResult", requestId, procedures),
+            EditorMessageContext.Default.OutlineResultMessage));
     }
 
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
@@ -911,6 +929,17 @@ internal sealed class EditorSurface : IDisposable
                         && loopOffset >= 0)
                     {
                         LoopSyncRequested?.Invoke(loopRequestId, loopOffset);
+                    }
+
+                    break;
+
+                case "outline":
+                    if (document.RootElement.TryGetProperty("id", out var outlineId)
+                        && outlineId.TryGetInt32(out var outlineRequestId)
+                        && document.RootElement.TryGetProperty("module", out var outlineModuleElement)
+                        && outlineModuleElement.GetString() is { Length: > 0 } outlineModule)
+                    {
+                        OutlineRequested?.Invoke(outlineRequestId, outlineModule);
                     }
 
                     break;

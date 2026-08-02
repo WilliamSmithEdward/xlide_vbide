@@ -10,6 +10,7 @@ import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLog
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { completionsFor } from './completion';
+import { outlineFor } from './outline';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
 import { signatureHelpFor } from './signature';
@@ -27,6 +28,8 @@ import {
     type LoopSyncParams,
     type LoopSyncResult,
     type ModulePayload,
+    type OutlineParams,
+    type OutlineResult,
     type ProjectOpenParams,
     type SignatureHelpParams,
     type SignatureHelpResult,
@@ -107,6 +110,9 @@ export class Dispatcher {
             case 'textDocument/loopSync':
                 return this.loopSync(this.require<LoopSyncParams>(params));
 
+            case 'textDocument/outline':
+                return this.outline(this.require<OutlineParams>(params));
+
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
@@ -179,6 +185,13 @@ export class Dispatcher {
 
         // Pure text work: the request's source is the whole story.
         return { edits: loopSyncFor(params) };
+    }
+
+    private outline(params: OutlineParams): OutlineResult {
+        this.requireInitialized();
+
+        // Live source when given, the seeded copy otherwise.
+        return { procedures: outlineFor(this.seededModules.get(params.projectId) ?? [], params) };
     }
 
     private diagnostics(params: DiagnosticsParams): DiagnosticsResult {

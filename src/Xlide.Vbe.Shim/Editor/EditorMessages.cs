@@ -237,6 +237,18 @@ public sealed record LoopSyncResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
 
+/// <summary>One procedure in a module's outline, the kind spelled the way the tree shows it.</summary>
+public sealed record SurfaceOutlineProcedure(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("line")] int Line);
+
+/// <summary>The answer to one outline request: the module's procedures in declaration order.</summary>
+public sealed record OutlineResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("procedures")] SurfaceOutlineProcedure[] Procedures);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -273,6 +285,8 @@ public sealed record LoopSyncResultMessage(
 [JsonSerializable(typeof(SmartEnterResultMessage))]
 [JsonSerializable(typeof(CanonicalCaseResultMessage))]
 [JsonSerializable(typeof(LoopSyncResultMessage))]
+[JsonSerializable(typeof(SurfaceOutlineProcedure))]
+[JsonSerializable(typeof(OutlineResultMessage))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

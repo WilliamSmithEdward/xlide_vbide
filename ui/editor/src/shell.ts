@@ -10,7 +10,7 @@
  */
 
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
-import { Explorer, type ExplorerProject } from "./explorer.js";
+import { Explorer, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
 
@@ -63,6 +63,8 @@ export interface ShellHandlers {
   closeModule(name: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
+  /** A module's procedures, for its unfolded node in the tree. */
+  requestOutline(module: string): Promise<ExplorerProcedure[]>;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -176,6 +178,8 @@ export class Shell {
       open: (name) => handlers.activateModule(name),
       context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
+      outline: (module) => handlers.requestOutline(module),
+      openProcedure: (module, line) => handlers.navigate(module, line, 1),
     });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {

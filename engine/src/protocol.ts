@@ -260,3 +260,27 @@ export interface LoopSyncParams {
 export interface LoopSyncResult {
     edits: TextEditPayload[];
 }
+
+/**
+ * textDocument/outline: a module's procedures, in declaration order. The source is optional:
+ * present for the module being edited (the liveness rule), absent to use the seeded copy, which
+ * is how the tree asks about modules that are not open.
+ */
+export interface OutlineParams {
+    projectId: string;
+    moduleName: string;
+    source?: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** One procedure: the kind as the tree spells it ("Sub", "Property Get"), and its 1-based line. */
+export interface OutlineProcedure {
+    name: string;
+    kind: string;
+    line: number;
+}
+
+export interface OutlineResult {
+    procedures: OutlineProcedure[];
+}

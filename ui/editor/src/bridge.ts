@@ -66,7 +66,15 @@ export type HostMessage =
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "smartEnterResult"; id: number; edits: HostTextEdit[]; caret?: number | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
-  | { type: "loopSyncResult"; id: number; edits: HostTextEdit[] };
+  | { type: "loopSyncResult"; id: number; edits: HostTextEdit[] }
+  | { type: "outlineResult"; id: number; procedures: HostProcedure[] };
+
+/** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
+export interface HostProcedure {
+  name: string;
+  kind: string;
+  line: number;
+}
 
 /** A text replacement, UTF-16 offsets into the live source; an insertion has start === end. */
 export interface HostTextEdit {
@@ -156,6 +164,7 @@ export type ClientMessage =
   | { type: "smartEnter"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "loopSync"; id: number; offset: number }
+  | { type: "outline"; id: number; module: string }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -272,12 +281,19 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Outline requests awaiting their answers, by request identifier. */
+  private readonly pendingOutlines = new Map<number, {
+    resolve: (procedures: HostProcedure[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   private nextCompletionId = 1;
   private nextHoverId = 1;
   private nextSignatureId = 1;
   private nextSmartEnterId = 1;
   private nextCanonicalCaseId = 1;
   private nextLoopSyncId = 1;
+  private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -489,6 +505,24 @@ export class EditorBridge {
     });
   }
 
+  /**
+   * Asks the host for a module's procedures, for its node in the tree. Resolves empty rather
+   * than rejecting: a module that cannot answer simply has nothing to unfold.
+   */
+  requestOutline(module: string): Promise<HostProcedure[]> {
+    const id = this.nextOutlineId++;
+
+    return new Promise<HostProcedure[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingOutlines.delete(id);
+        resolve([]);
+      }, 2000);
+
+      this.pendingOutlines.set(id, { resolve, timer });
+      this.transport.post({ type: "outline", id, module });
+    });
+  }
+
   /** True while a host edit is being written into the model, so listeners can tell it from typing. */
   get isApplyingHostEdit(): boolean {
     return this.applyingHostEdit;
@@ -636,6 +670,15 @@ export class EditorBridge {
           this.pendingLoopSyncs.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.edits);
+        }
+        return;
+      }
+      case "outlineResult": {
+        const waiter = this.pendingOutlines.get(message.id);
+        if (waiter) {
+          this.pendingOutlines.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.procedures);
         }
         return;
       }
@@ -1169,6 +1212,18 @@ export function demoTransport(): HostTransport {
       }
       if (message.type === "canonicalCase") {
         send({ type: "canonicalCaseResult", id: message.id, edits: [] });
+      }
+      if (message.type === "outline") {
+        send({
+          type: "outlineResult",
+          id: message.id,
+          procedures: message.module === "Module1"
+            ? [
+              { name: "Recalculate", kind: "Sub", line: 10 },
+              { name: "Describe", kind: "Function", line: 44 },
+            ]
+            : [],
+        });
       }
       if (message.type === "completion") {
         send({
