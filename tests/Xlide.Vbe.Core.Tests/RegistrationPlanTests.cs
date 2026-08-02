@@ -104,4 +104,26 @@ public class RegistrationPlanTests
         Assert.Throws<ArgumentException>(() =>
             RegistrationPlan.Build("  ", HostBitness.X64, RegistryScope.CurrentUser));
     }
+
+    [Fact]
+    public void OverlayDetectionLooksAtTheVbaNamespaceOfficeActuallyOwns()
+    {
+        // Click-to-Run keeps its machine-level VBA values only inside this overlay, so its
+        // presence is what identifies an Office whose registry views go through it.
+        Assert.Equal(
+            @"SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE\SOFTWARE\Microsoft\VBA",
+            RegistrationPlan.OverlayVbaKey);
+    }
+
+    [Fact]
+    public void OverlayRebasePreservesTheEntryShapeUnderTheClickToRunBranch()
+    {
+        // The overlay's MACHINE branch mirrors an ordinary hive, so the same plan entries must
+        // land beneath it unchanged; a transformation here would fork the registration layout.
+        var entry = Plan()[0];
+
+        Assert.Equal(
+            $@"SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE\{entry.Path}",
+            RegistrationPlan.OverlayPath(entry.Path));
+    }
 }

@@ -9,10 +9,15 @@ namespace Xlide.Setup;
 /// <summary>
 /// Installs and removes the product for the current user.
 ///
-/// Everything happens under the user's own profile and the user's registry hive, so no
-/// administrator rights are involved at any point. That is a deliberate product constraint rather
-/// than a convenience: the editor resolves class registration through the user hive, and asking for
-/// elevation to install a development tool excludes exactly the people most likely to want it.
+/// The primary registration lives under the user's own profile and registry hive and needs no
+/// administrator rights — the editor resolves class registration through the user hive, and a
+/// development tool that demands elevation excludes exactly the people most likely to want it.
+///
+/// Click-to-Run Office adds one wrinkle: it resolves the VBA registry namespace through its own
+/// overlay, and on some machines that hides per-user add-in keys from Excel entirely. On such
+/// installations this installer also plants the same registration inside the overlay, which is the
+/// one step that needs elevation. It asks by relaunching itself with the elevation verb; declining
+/// leaves a complete per-user installation that works everywhere the overlay does not interfere.
 ///
 /// The installer reuses the same registration description the product and its tests use, so there
 /// is no second copy of the registry layout that could disagree with the first.
@@ -27,6 +32,20 @@ internal static class Program
         var silent = args.Contains("--silent", StringComparer.OrdinalIgnoreCase);
         var uninstall = args.Contains("--uninstall", StringComparer.OrdinalIgnoreCase);
         var relaunched = args.Contains("--relaunched", StringComparer.OrdinalIgnoreCase);
+
+        // The elevated pass of this same executable: touch only the Click-to-Run overlay and exit.
+        if (args.Contains("--overlay-only", StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                return uninstall ? RemoveOverlayRegistration() : WriteOverlayRegistration(ShimArgument(args));
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"The overlay step failed: {ex.Message}");
+                return 1;
+            }
+        }
 
         try
         {
@@ -105,6 +124,8 @@ internal static class Program
         Report(silent, string.Empty);
         Report(silent, "Registered for the current user. No administrator rights were needed.");
 
+        SupplementOverlay(shim, silent);
+
         if (!HasWebViewRuntime())
         {
             Report(silent, string.Empty);
@@ -147,6 +168,7 @@ internal static class Program
         }
 
         RemoveRegistration();
+        RemoveOverlaySupplement(silent);
         DeleteKeyIfPresent(UninstallKey);
 
         if (Directory.Exists(target))
@@ -205,18 +227,201 @@ internal static class Program
     {
         foreach (var entry in RegistrationPlan.Build(shimPath, HostBitness.X64, RegistryScope.CurrentUser))
         {
-            using var key = Registry.CurrentUser.CreateSubKey(entry.Path, writable: true)
-                ?? throw new InvalidOperationException($"Could not create HKCU\\{entry.Path}.");
+            WriteEntry(Registry.CurrentUser, entry.Path, entry);
+        }
+    }
 
-            if (entry.IsDword)
+    private static void WriteEntry(RegistryKey hive, string path, RegistryEntry entry)
+    {
+        using var key = hive.CreateSubKey(path, writable: true)
+            ?? throw new InvalidOperationException($"Could not create {hive.Name}\\{path}.");
+
+        if (entry.IsDword)
+        {
+            key.SetValue(entry.Name, int.Parse(entry.Value, System.Globalization.CultureInfo.InvariantCulture), RegistryValueKind.DWord);
+        }
+        else
+        {
+            key.SetValue(entry.Name, entry.Value, RegistryValueKind.String);
+        }
+    }
+
+    /// <summary>
+    /// Plants the registration inside the Click-to-Run overlay too, elevating for that one step.
+    ///
+    /// Skipped silently when Office is not Click-to-Run. In silent mode nothing may prompt, so the
+    /// overlay is written only if this process already runs elevated. Declining the prompt is a
+    /// supported outcome: the per-user installation stands on its own wherever the overlay does not
+    /// hide it.
+    /// </summary>
+    private static void SupplementOverlay(string shimPath, bool silent)
+    {
+        using var overlay = Registry.LocalMachine.OpenSubKey(RegistrationPlan.OverlayVbaKey);
+        if (overlay is null)
+        {
+            return;
+        }
+
+        Report(silent, string.Empty);
+
+        if (IsElevated())
+        {
+            WriteOverlayRegistration(shimPath);
+            ReportOverlayWritten(silent);
+            return;
+        }
+
+        if (silent)
+        {
+            // A silent install must not raise an elevation prompt. Re-running the installer
+            // interactively, or elevated, completes the supplement.
+            return;
+        }
+
+        Report(silent, "Office here is Click-to-Run, whose virtualized registry can hide per-user add-ins from Excel.");
+        Report(silent, "Approving the elevation prompt registers inside Office's own registry overlay as well.");
+
+        try
+        {
+            var self = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The installer cannot determine its own path.");
+
+            using var pass = Process.Start(new ProcessStartInfo(self, $"--overlay-only --shim \"{shimPath}\"")
             {
-                key.SetValue(entry.Name, int.Parse(entry.Value, System.Globalization.CultureInfo.InvariantCulture), RegistryValueKind.DWord);
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden,
+            }) ?? throw new InvalidOperationException("The elevated pass did not start.");
+
+            pass.WaitForExit();
+
+            if (pass.ExitCode == 0)
+            {
+                ReportOverlayWritten(silent);
             }
             else
             {
-                key.SetValue(entry.Name, entry.Value, RegistryValueKind.String);
+                Report(silent, "The overlay step failed. The per-user installation stands; run this installer again to retry.");
             }
         }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            Report(silent, "Elevation was declined. The per-user installation stands; if xlide does not appear");
+            Report(silent, "in the editor, run this installer again and approve the prompt.");
+        }
+    }
+
+    private static void ReportOverlayWritten(bool silent)
+    {
+        Report(silent, "Registered inside Office's Click-to-Run overlay as well.");
+        Report(silent, "Office updates can rebuild that overlay; if xlide disappears after one, run this installer again.");
+    }
+
+    /// <summary>Removes the overlay supplement, elevating only when there is one to remove.</summary>
+    private static void RemoveOverlaySupplement(bool silent)
+    {
+        var addInKey = $@"{RegistrationPlan.OverlayPath(RegistrationPlan.AddInsKeyPath(HostBitness.X64))}\{ProductIdentity.AddInProgId}";
+
+        using (var probe = Registry.LocalMachine.OpenSubKey(addInKey))
+        {
+            if (probe is null)
+            {
+                return;
+            }
+        }
+
+        if (IsElevated())
+        {
+            RemoveOverlayRegistration();
+            return;
+        }
+
+        if (silent)
+        {
+            Report(silent: false, $"The overlay registration under HKLM\\{addInKey} remains; removing it needs an elevated run with --uninstall --overlay-only.");
+            return;
+        }
+
+        try
+        {
+            var self = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The uninstaller cannot determine its own path.");
+
+            using var pass = Process.Start(new ProcessStartInfo(self, "--uninstall --overlay-only")
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden,
+            }) ?? throw new InvalidOperationException("The elevated pass did not start.");
+
+            pass.WaitForExit();
+
+            if (pass.ExitCode != 0)
+            {
+                Report(silent, "The overlay registration could not be removed and remains behind.");
+            }
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            Report(silent, "Elevation was declined, so the overlay registration remains behind. It is inert without the files.");
+        }
+    }
+
+    private static int WriteOverlayRegistration(string shimPath)
+    {
+        foreach (var entry in RegistrationPlan.Build(shimPath, HostBitness.X64, RegistryScope.CurrentUser))
+        {
+            WriteEntry(Registry.LocalMachine, RegistrationPlan.OverlayPath(entry.Path), entry);
+        }
+
+        return 0;
+    }
+
+    private static int RemoveOverlayRegistration()
+    {
+        var classes = RegistrationPlan.OverlayPath(RegistrationPlan.ClassesRoot(RegistryScope.CurrentUser));
+
+        foreach (var path in new[]
+                 {
+                     $@"{RegistrationPlan.OverlayPath(RegistrationPlan.AddInsKeyPath(HostBitness.X64))}\{ProductIdentity.AddInProgId}",
+                     $@"{classes}\CLSID\{{{ProductIdentity.AddInClsid}}}",
+                     $@"{classes}\{ProductIdentity.AddInProgId}",
+                 })
+        {
+            using var probe = Registry.LocalMachine.OpenSubKey(path);
+            if (probe is null)
+            {
+                continue;
+            }
+
+            probe.Dispose();
+            Registry.LocalMachine.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
+        }
+
+        return 0;
+    }
+
+    private static string ShimArgument(string[] args)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i].Equals("--shim", StringComparison.OrdinalIgnoreCase))
+            {
+                var path = Path.GetFullPath(args[i + 1]);
+                return File.Exists(path)
+                    ? path
+                    : throw new FileNotFoundException($"No shim at {path}.", path);
+            }
+        }
+
+        throw new ArgumentException("--overlay-only needs --shim <path> when installing.");
+    }
+
+    private static bool IsElevated()
+    {
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        return new System.Security.Principal.WindowsPrincipal(identity)
+            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
     }
 
     private static void RemoveRegistration()

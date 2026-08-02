@@ -72,6 +72,26 @@ public static class RegistrationPlan
     }
 
     /// <summary>
+    /// Root of the Click-to-Run registry overlay, relative to HKLM. C2R Office resolves the
+    /// Software\Microsoft\VBA namespace through this overlay — the editor's machine-level VBA
+    /// values exist only here — and on some machines the per-user Addins64 read resolves into it
+    /// and comes back empty, hiding a correct HKCU registration. Registration planted here is in
+    /// the view those reads consult. Office updates can rebuild the overlay, so anything written
+    /// under it must be re-asserted rather than assumed durable.
+    /// </summary>
+    public const string OverlayRoot = @"SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE";
+
+    /// <summary>Key whose presence identifies a Click-to-Run Office whose VBA namespace lives in
+    /// the overlay. Writable only by administrators, like everything under the overlay.</summary>
+    public const string OverlayVbaKey = OverlayRoot + @"\SOFTWARE\Microsoft\VBA";
+
+    /// <summary>
+    /// Rebases a plan entry's hive-relative path into the overlay. The overlay's MACHINE branch
+    /// mirrors the ordinary hive shape, so the same entries apply verbatim beneath it.
+    /// </summary>
+    public static string OverlayPath(string entryPath) => $@"{OverlayRoot}\{entryPath}";
+
+    /// <summary>
     /// Key path, relative to the hive root, under which the VBE looks for add-ins.
     /// </summary>
     public static string AddInsKeyPath(HostBitness bitness) => bitness switch
