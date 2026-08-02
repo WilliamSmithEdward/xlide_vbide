@@ -38,8 +38,10 @@ and survival of a cancelled Excel shutdown (`ShutdownWatchdog` revives the sessi
   legitimate tree rebuild restores the scroll (lesson 20).
 
 **Open threads, in order of likely next ask:**
-1. `xlide_vscode` carries local commit `6453c20` (class/UserForm receivers in the shared
-   resolver, their full suite green) — the developer confirmed it working; it is NOT pushed.
+1. `xlide_vscode` carries TWO local commits, neither pushed: `6453c20` (class/UserForm
+   receivers in the shared resolver, developer-confirmed) and `1f9d8b8` (hover for any
+   object-module surface used as a bare receiver — `ROneCOne` in `ROneCOne.DataView(...)`).
+   Their full suite is green at 2478 after both.
 2. #26's tail: Smart Tab (`vbaSmartTab.ts`), and whether the With-seeded dot auto-triggers
    member completion.
 3. Latent, known, working-but-illegal: `AnalysisService` reads the object model from pool

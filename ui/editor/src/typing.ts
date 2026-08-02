@@ -1,14 +1,29 @@
-// VBA typing automation: the editor-side halves of Smart Enter, canonical casing, and loop
-// iterator sync. The decisions live in the host's engine, which answers with plain edits; this
-// controller owns the moments — which keystroke asks, when a line has gone idle, when the caret
-// leaves a line — and applies what comes back if the text has not moved in the meantime.
+// VBA typing automation: Smart Enter, Smart Tab, Smart Backspace, canonical casing, and loop
+// iterator sync — the extension's typing feel, re-created over Monaco.
 //
-// It mirrors the extension's typing automation and canonical-case controller, re-expressed over
-// the bridge: the same triggers, the same touch-and-idle line tracking, the same
-// leave-a-line-and-it-recases feel. An answer that arrives after more typing is dropped, never
-// merged: the next pass over the line asks again against the text as it stands.
+// The structural half runs HERE, in the page, on the extension's own pure helpers, bundled
+// straight from its source: what Enter leaves behind, what Tab means at this caret, what
+// Backspace does to an empty comment continuation, which `Next` renames with its `For`. The
+// extension computes these beside the document and applies them within a frame, and that
+// immediacy is the feature; a round trip to the host's engine put an answer's latency between
+// Enter and its `End If`, and under analysis load the wait was visible. Text the page already
+// holds needs no round trip to describe.
+//
+// Canonical casing stays in the engine: respelling an identifier needs the project's
+// declarations, and only the engine holds every module.
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import {
+  commentContinuationText,
+  detectSmartBlockOpener,
+  isSmartBlockClosedAhead,
+  procedureHeaderParensEdit,
+  resolveLoopIteratorSyncEdit,
+  smartBlockInsertion,
+  withMemberContinuationText,
+} from "xlide-spec/vbaSmartEnter";
+import { lexerStrippedLine, lexerStrippedLines } from "xlide-spec/analyzer/lexer/strippedLines";
+import { smartTabShouldIndentLine } from "xlide-spec/vbaSmartTab";
 import type { EditorBridge, HostTextEdit } from "./bridge.js";
 
 /** How long a touched line rests before its recase pass, the extension's own figure. */
@@ -17,8 +32,14 @@ const CANONICAL_LINE_IDLE_DELAY_MS = 200;
 /** The change a plain Enter makes: a newline plus whatever indent the editor added. */
 const PLAIN_ENTER = /^\r?\n[ \t]*$/;
 
-/** Lines that could be half of a For/Next pair, checked before asking the host at all. */
+/** Lines that could be half of a For/Next pair, checked before scanning the document at all. */
 const LOOP_LINE = /^[ \t]*(?:For|Next)\b/i;
+
+// The extension reads these from settings; this surface has no settings page yet, so the
+// defaults it ships with are the behaviour here (task #12 owns making them configurable).
+const BLOCK_LAYOUT = "comfy" as const;
+const CONTINUE_COMMENT_ON_NEWLINE = true;
+const MIRROR_COMMENT_SPACING = true;
 
 export function installTypingAutomation(
   editor: monaco.editor.IStandaloneCodeEditor,
@@ -48,6 +69,19 @@ class TypingAutomation {
     editor.onDidChangeCursorPosition((event) => this.onCursorChanged(event));
     editor.onDidBlurEditorText(() => this.flushCandidateLine());
     editor.onDidChangeModel(() => this.reset());
+
+    // Tab and Backspace, rebound under the extension's own when-clauses. Both fall through to
+    // the editor's stock command whenever the smart answer is "nothing", so the keys never go
+    // dead — they only gain the VBE-flavoured cases.
+    editor.addCommand(
+      monaco.KeyCode.Tab,
+      () => this.smartTab(),
+      "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode"
+      + " && !editorTabMovesFocus && !inlineSuggestionVisible");
+    editor.addCommand(
+      monaco.KeyCode.Backspace,
+      () => this.smartBackspace(),
+      "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode");
 
     const model = editor.getModel();
     const position = editor.getPosition();
@@ -81,8 +115,12 @@ class TypingAutomation {
       return;
     }
 
-    if (PLAIN_ENTER.test(change.text)) {
-      void this.smartEnter(model, change);
+    if (change.rangeLength === 0 && PLAIN_ENTER.test(change.text)) {
+      // After the event settles, the way the extension's document listener runs after the
+      // editor's own Enter: the editor's auto-indent is already on the body line, and editing
+      // from inside a content event would re-enter this listener mid-flight.
+      const openerLineNumber = change.range.startLineNumber;
+      queueMicrotask(() => this.smartEnter(model, openerLineNumber));
       return;
     }
 
@@ -193,40 +231,112 @@ class TypingAutomation {
     this.applyIfCurrent(model, version, edits, "typing: recase");
   }
 
-  /** Asks what the Enter that just went in should leave behind, and puts the caret there. */
-  private async smartEnter(
-    model: monaco.editor.ITextModel,
-    change: monaco.editor.IModelContentChange,
-  ): Promise<void> {
-    const offset = model.getOffsetAt({
-      lineNumber: change.range.startLineNumber,
-      column: change.range.startColumn,
+  /**
+   * What the Enter that just went in should leave behind, decided the way the extension decides
+   * it: the block opener completes with its closer and an indented body line, a whole-line
+   * comment continues its apostrophes, a `.member` line inside an open With seeds the next dot.
+   * The editor-produced auto-indent is kept when it is already deeper than the opener asks.
+   */
+  private smartEnter(model: monaco.editor.ITextModel, openerLineNumber: number): void {
+    if (this.editor.getModel() !== model || this.applying || this.bridge.isApplyingHostEdit) {
+      return;
+    }
+
+    const bodyLineNumber = openerLineNumber + 1;
+    if (openerLineNumber < 1 || bodyLineNumber > model.getLineCount()) {
+      return;
+    }
+
+    // Enter mid-line pushed text down, or something landed on the body line already: nothing
+    // is owed. The header parens are deliberately not applied alone; the extension waits too.
+    const bodyLine = model.getLineContent(bodyLineNumber);
+    if (!/^[ \t]*$/.test(bodyLine)) {
+      return;
+    }
+
+    const openerLine = model.getLineContent(openerLineNumber);
+    const headerEdit = procedureHeaderParensEdit(openerLine);
+    const normalized = headerEdit
+      ? `${openerLine.slice(0, headerEdit.startCol)}${headerEdit.newText}${openerLine.slice(headerEdit.endCol)}`
+      : openerLine;
+
+    const opener = detectSmartBlockOpener(lexerStrippedLine(normalized));
+    if (!opener) {
+      // Not a block: a whole-line comment continues, then a With-member line, in the
+      // extension's order. The helpers index lines from zero.
+      const source = model.getValue();
+      const continuation = CONTINUE_COMMENT_ON_NEWLINE
+        ? commentContinuationText(source, openerLineNumber - 1, MIRROR_COMMENT_SPACING)
+        : undefined;
+      const lineText = continuation ?? withMemberContinuationText(source, openerLineNumber - 1);
+      if (!lineText) {
+        return;
+      }
+
+      this.applyBodyLine(model, bodyLineNumber, bodyLine, [], lineText, lineText.length, 0);
+      return;
+    }
+
+    const source = model.getValue();
+    const strippedLines = lexerStrippedLines(source);
+    strippedLines[openerLineNumber - 1] = lexerStrippedLine(normalized);
+    const closedAhead = isSmartBlockClosedAhead(strippedLines, openerLineNumber - 1, opener);
+
+    const insertion = smartBlockInsertion(normalized, bodyLine, opener, {
+      eol: model.getEOL(),
+      insertCloser: !closedAhead,
+      layout: BLOCK_LAYOUT,
     });
-    const version = model.getVersionId();
 
-    const result = await this.bridge.requestSmartEnter(offset);
-    if (!result || result.edits.length === 0) {
-      return;
-    }
+    const headerOperations: monaco.editor.IIdentifiedSingleEditOperation[] = headerEdit
+      ? [{
+        range: new monaco.Range(
+          openerLineNumber, headerEdit.startCol + 1,
+          openerLineNumber, headerEdit.endCol + 1),
+        text: headerEdit.newText,
+      }]
+      : [];
 
-    if (this.editor.getModel() !== model || model.getVersionId() !== version) {
-      this.bridge.trace("typing: smart enter stale, dropped");
-      return;
-    }
+    this.applyBodyLine(
+      model,
+      bodyLineNumber,
+      bodyLine,
+      headerOperations,
+      insertion.replacementText,
+      insertion.bodyText.length,
+      insertion.bodyLineOffset);
+  }
 
-    const operations = result.edits.map((edit) => ({
-      range: monaco.Range.fromPositions(model.getPositionAt(edit.start), model.getPositionAt(edit.end)),
-      text: edit.text,
-    }));
+  /**
+   * Replaces the editor-created body line and places the caret at the end of the editable body
+   * text, `bodyLineOffset` lines below it. Grouped with the Enter itself on the undo stack: one
+   * undo returns the developer to the line as typed.
+   */
+  private applyBodyLine(
+    model: monaco.editor.ITextModel,
+    bodyLineNumber: number,
+    bodyLine: string,
+    extraOperations: monaco.editor.IIdentifiedSingleEditOperation[],
+    replacementText: string,
+    caretColumnOffset: number,
+    bodyLineOffset: number,
+  ): void {
+    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = [
+      ...extraOperations,
+      {
+        range: new monaco.Range(bodyLineNumber, 1, bodyLineNumber, bodyLine.length + 1),
+        text: replacementText,
+      },
+    ];
 
     this.applying = true;
     try {
-      // Grouped with the Enter itself: one undo returns the developer to the line as typed.
       this.editor.executeEdits("xlide-smart-enter", operations);
       this.editor.pushUndoStop();
 
-      if (result.caret !== null) {
-        const caret = model.getPositionAt(result.caret);
+      const caretLine = bodyLineNumber + bodyLineOffset;
+      if (caretLine <= model.getLineCount()) {
+        const caret = new monaco.Position(caretLine, caretColumnOffset + 1);
         this.editor.setPosition(caret);
         this.candidate = { model, position: caret };
       }
@@ -235,6 +345,107 @@ class TypingAutomation {
     }
   }
 
+  /**
+   * Tab, the way the extension's Smart Tab reads it: at a blank line, in the leading
+   * whitespace, or over a multi-line selection it indents the line; inside line content it
+   * stays an ordinary tab. An empty continued-comment marker is cleared first either way.
+   */
+  private smartTab(): void {
+    const model = this.editor.getModel();
+    if (!model) {
+      return;
+    }
+
+    this.clearEmptyContinuedComment(model);
+
+    const selection = this.editor.getSelection();
+    if (!selection) {
+      this.editor.trigger("xlide", "tab", null);
+      return;
+    }
+
+    const position = selection.getPosition();
+    const lineText = model.getLineContent(position.lineNumber);
+    const selections = this.editor.getSelections() ?? [selection];
+    const spansLines = selections.some((s) => s.startLineNumber !== s.endLineNumber);
+
+    // The helper counts columns from zero, the way the extension's editor does.
+    if (smartTabShouldIndentLine(lineText, position.column - 1, selection.isEmpty(), spansLines)) {
+      this.editor.trigger("xlide", "editor.action.indentLines", null);
+    } else {
+      this.editor.trigger("xlide", "tab", null);
+    }
+  }
+
+  /**
+   * Backspace on the empty marker a continued comment left behind clears the whole marker, so
+   * leaving a comment is one keystroke rather than one per apostrophe. Anything else stays an
+   * ordinary Backspace.
+   */
+  private smartBackspace(): void {
+    const model = this.editor.getModel();
+    if (!model || !this.clearEmptyContinuedComment(model)) {
+      this.editor.trigger("xlide", "deleteLeft", null);
+    }
+  }
+
+  /**
+   * The extension's clearEmptyContinuedComment: a caret at the end of a line that holds only a
+   * comment marker continued from the line above deletes the marker. True when it did.
+   */
+  private clearEmptyContinuedComment(model: monaco.editor.ITextModel): boolean {
+    const selections = this.editor.getSelections();
+    if (!selections || selections.length !== 1) {
+      return false;
+    }
+
+    const selection = selections[0];
+    if (!selection || !selection.isEmpty()) {
+      return false;
+    }
+
+    const position = selection.getPosition();
+    if (position.lineNumber === 1) {
+      return false;
+    }
+
+    const line = model.getLineContent(position.lineNumber);
+    const before = line.slice(0, position.column - 1);
+    const after = line.slice(position.column - 1);
+    if (after.trim().length > 0) {
+      return false;
+    }
+
+    // Any apostrophe run, mirroring commentContinuationText's capture, so 2- and
+    // 4+-apostrophe continued comments clear too.
+    const match = /^(\s*)('+) ?$/.exec(before);
+    const indent = match?.[1];
+    const apostrophes = match?.[2];
+    if (indent === undefined || apostrophes === undefined) {
+      return false;
+    }
+
+    const previous = model.getLineContent(position.lineNumber - 1).trimStart();
+    if (!previous.startsWith(apostrophes)) {
+      return false;
+    }
+
+    const markerStart = indent.length;
+    this.applying = true;
+    try {
+      this.editor.executeEdits("xlide-smart-backspace", [{
+        range: new monaco.Range(
+          position.lineNumber, markerStart + 1,
+          position.lineNumber, position.column),
+        text: "",
+      }]);
+    } finally {
+      this.applying = false;
+    }
+    return true;
+  }
+
+  /** The paired rename when an edit touches a simple For/Next iterator: local, synchronous. */
   private maybeLoopSync(model: monaco.editor.ITextModel, change: monaco.editor.IModelContentChange): void {
     const line = Math.min(change.range.startLineNumber, model.getLineCount());
     if (!LOOP_LINE.test(model.getLineContent(line))) {
@@ -243,18 +454,17 @@ class TypingAutomation {
 
     const column = Math.min(change.range.startColumn + change.text.length, model.getLineMaxColumn(line));
     const offset = model.getOffsetAt({ lineNumber: line, column });
-    void this.loopSync(model, offset);
-  }
 
-  private async loopSync(model: monaco.editor.ITextModel, offset: number): Promise<void> {
-    const version = model.getVersionId();
-    const edits = await this.bridge.requestLoopSync(offset);
-    if (edits.length === 0) {
+    const edit = resolveLoopIteratorSyncEdit(model.getValue(), offset);
+    if (!edit) {
       return;
     }
 
-    // Dropped is fine: the pair resyncs on the next keystroke that touches it.
-    this.applyIfCurrent(model, version, edits, "typing: loop sync");
+    this.applyIfCurrent(
+      model,
+      model.getVersionId(),
+      [{ start: edit.span.start, end: edit.span.end, text: edit.newText }],
+      "typing: loop sync");
   }
 
   /**

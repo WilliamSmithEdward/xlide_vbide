@@ -63,8 +63,10 @@ export interface ShellHandlers {
   closeModule(name: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
-  /** A module's procedures, for its unfolded node in the tree. */
-  requestOutline(module: string): Promise<ExplorerProcedure[]>;
+  /** A module's procedures, for its unfolded node in the tree; null when no answer came. */
+  requestOutline(module: string): Promise<ExplorerProcedure[] | null>;
+  /** A line for the host's log, from the corners only the log's data cadence explains. */
+  trace(text: string): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -180,6 +182,7 @@ export class Shell {
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
       outline: (module) => handlers.requestOutline(module),
       openProcedure: (module, line) => handlers.navigate(module, line, 1, true),
+      trace: (text) => handlers.trace(text),
     });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
@@ -221,19 +224,22 @@ export class Shell {
     // One listener on the strip rather than one per tab: the tabs are rebuilt whenever the set of
     // open modules changes, and per-tab listeners would have to be torn down with them.
     this.tabStrip.addEventListener("click", (event) => {
-      // A drag that ends over a tab is not a click on it.
-      if (this.dragSuppressesClick) {
-        return;
-      }
-
       const target = event.target as HTMLElement;
       const tab = target.closest("[data-module]") as HTMLElement | null;
       if (!tab?.dataset.module) {
         return;
       }
 
+      // The close box answers first and unconditionally: a drag can never begin on it, so drag
+      // suppression has no business vetoing it — and a suppression flag gone stale had exactly
+      // that effect, an X that swallowed every click until the page was reloaded.
       if (target.closest(".tab-close")) {
         this.handlers.closeModule(tab.dataset.module);
+        return;
+      }
+
+      // A drag that ends over a tab is not a click on it.
+      if (this.dragSuppressesClick) {
         return;
       }
 
@@ -896,6 +902,7 @@ export class Shell {
       const end = () => {
         window.removeEventListener("pointermove", move);
         window.removeEventListener("pointerup", end);
+        window.removeEventListener("pointercancel", end);
         tab.classList.remove("dragging");
 
         if (moved) {
@@ -912,6 +919,10 @@ export class Shell {
 
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", end);
+      // The host steals focus mid-press on all sorts of occasions — showing a module, following
+      // a navigation — and an interrupted pointer stream ends in pointercancel, never pointerup.
+      // Without this the suppression flag stayed raised forever.
+      window.addEventListener("pointercancel", end);
     });
   }
 

@@ -2007,22 +2007,24 @@ internal sealed class AddInSession : IDisposable
 
         if (surface is null || _analysis is not { } analysis)
         {
-            _editorSurface?.ShowOutline(requestId, []);
+            // Not "this module is empty" — "nothing here can answer yet". The page keeps what
+            // it already shows.
+            _editorSurface?.ShowOutline(requestId, [], failed: true);
             return;
         }
 
-        var source = string.Equals(surface.Module, moduleName, StringComparison.OrdinalIgnoreCase)
-            ? surface.Text
-            : null;
-
+        // No source travels with the request: the engine's live copy is exact — didChange rides
+        // the same FIFO pipe ahead of this — and serialising a 918KB module once a second to
+        // tell the engine what it already holds was most of this request's cost.
         _ = Task.Run(async () =>
         {
             SurfaceOutlineProcedure[] procedures = [];
+            var failed = false;
 
             try
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.OutlineAsync(moduleName, source, deadline.Token)
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var answered = await analysis.OutlineAsync(moduleName, source: null, deadline.Token)
                     .ConfigureAwait(false);
 
                 if (answered is not null)
@@ -2030,15 +2032,20 @@ internal sealed class AddInSession : IDisposable
                     procedures = [.. answered.Select(procedure =>
                         new SurfaceOutlineProcedure(procedure.Name, procedure.Kind, procedure.Line))];
                 }
+                else
+                {
+                    failed = true;
+                }
 
                 Log.Info($"outline: {moduleName} -> {procedures.Length} procedure(s)");
             }
             catch (Exception ex)
             {
+                failed = true;
                 Log.Info($"outline: {moduleName} failed ({ex.GetType().Name})");
             }
 
-            surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures));
+            surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures, failed));
         });
     }
 

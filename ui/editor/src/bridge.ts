@@ -64,10 +64,8 @@ export type HostMessage =
   | { type: "completionResult"; id: number; items: HostCompletionItem[] }
   | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
-  | { type: "smartEnterResult"; id: number; edits: HostTextEdit[]; caret?: number | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
-  | { type: "loopSyncResult"; id: number; edits: HostTextEdit[] }
-  | { type: "outlineResult"; id: number; procedures: HostProcedure[] }
+  | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] };
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
@@ -82,12 +80,6 @@ export interface HostTextEdit {
   start: number;
   end: number;
   text: string;
-}
-
-/** What Enter should leave behind: edits, and where the caret belongs once they apply. */
-export interface HostSmartEnterResult {
-  edits: HostTextEdit[];
-  caret: number | null;
 }
 
 /** One parameter slot, its label exactly as it appears in the signature line. */
@@ -162,9 +154,7 @@ export type ClientMessage =
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
-  | { type: "smartEnter"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
-  | { type: "loopSync"; id: number; offset: number }
   | { type: "outline"; id: number; module: string }
   | { type: "trace"; text: string };
 
@@ -264,36 +254,22 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
-  /** Smart Enter requests awaiting their answers, by request identifier. */
-  private readonly pendingSmartEnters = new Map<number, {
-    resolve: (result: HostSmartEnterResult | null) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
   /** Canonical-case requests awaiting their answers, by request identifier. */
   private readonly pendingCanonicalCases = new Map<number, {
     resolve: (edits: HostTextEdit[]) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
-  /** Loop-sync requests awaiting their answers, by request identifier. */
-  private readonly pendingLoopSyncs = new Map<number, {
-    resolve: (edits: HostTextEdit[]) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
   /** Outline requests awaiting their answers, by request identifier. */
   private readonly pendingOutlines = new Map<number, {
-    resolve: (procedures: HostProcedure[]) => void;
+    resolve: (procedures: HostProcedure[] | null) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
 
   private nextCompletionId = 1;
   private nextHoverId = 1;
   private nextSignatureId = 1;
-  private nextSmartEnterId = 1;
   private nextCanonicalCaseId = 1;
-  private nextLoopSyncId = 1;
   private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -481,25 +457,6 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host what the Enter that just went in should leave behind: block closers, header
-   * parens, comment and With continuations. Resolves null rather than rejecting: an Enter whose
-   * answer never comes is an ordinary Enter, which is what the developer already has.
-   */
-  requestSmartEnter(offset: number): Promise<HostSmartEnterResult | null> {
-    const id = this.nextSmartEnterId++;
-
-    return new Promise<HostSmartEnterResult | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingSmartEnters.delete(id);
-        resolve(null);
-      }, 2000);
-
-      this.pendingSmartEnters.set(id, { resolve, timer });
-      this.transport.post({ type: "smartEnter", id, offset });
-    });
-  }
-
-  /**
    * Asks the host for the case corrections over a span. Resolves empty rather than rejecting: a
    * recase that fails is a line left as typed, and the next pass over it will ask again.
    */
@@ -529,35 +486,20 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host for the paired loop-iterator rename after an edit. Resolves empty rather than
-   * rejecting: a pair that stays unsynced for a keystroke is corrected by the next one.
+   * Asks the host for a module's procedures, for its node in the tree. Resolves null — never
+   * empty — when no answer comes: a timeout is not a statement that the module has no
+   * procedures, and the difference decides whether the tree keeps what it already shows. The
+   * window is generous because the host thread legitimately stalls for seconds while a large
+   * module is being shown, and the answer queued behind that stall is still a good answer.
    */
-  requestLoopSync(offset: number): Promise<HostTextEdit[]> {
-    const id = this.nextLoopSyncId++;
-
-    return new Promise<HostTextEdit[]>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingLoopSyncs.delete(id);
-        resolve([]);
-      }, 2000);
-
-      this.pendingLoopSyncs.set(id, { resolve, timer });
-      this.transport.post({ type: "loopSync", id, offset });
-    });
-  }
-
-  /**
-   * Asks the host for a module's procedures, for its node in the tree. Resolves empty rather
-   * than rejecting: a module that cannot answer simply has nothing to unfold.
-   */
-  requestOutline(module: string): Promise<HostProcedure[]> {
+  requestOutline(module: string): Promise<HostProcedure[] | null> {
     const id = this.nextOutlineId++;
 
-    return new Promise<HostProcedure[]>((resolve) => {
+    return new Promise<HostProcedure[] | null>((resolve) => {
       const timer = setTimeout(() => {
         this.pendingOutlines.delete(id);
-        resolve([]);
-      }, 2000);
+        resolve(null);
+      }, 8000);
 
       this.pendingOutlines.set(id, { resolve, timer });
       this.transport.post({ type: "outline", id, module });
@@ -687,28 +629,10 @@ export class EditorBridge {
         }
         return;
       }
-      case "smartEnterResult": {
-        const waiter = this.pendingSmartEnters.get(message.id);
-        if (waiter) {
-          this.pendingSmartEnters.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve({ edits: message.edits, caret: message.caret ?? null });
-        }
-        return;
-      }
       case "canonicalCaseResult": {
         const waiter = this.pendingCanonicalCases.get(message.id);
         if (waiter) {
           this.pendingCanonicalCases.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.edits);
-        }
-        return;
-      }
-      case "loopSyncResult": {
-        const waiter = this.pendingLoopSyncs.get(message.id);
-        if (waiter) {
-          this.pendingLoopSyncs.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.edits);
         }
@@ -719,7 +643,8 @@ export class EditorBridge {
         if (waiter) {
           this.pendingOutlines.delete(message.id);
           clearTimeout(waiter.timer);
-          waiter.resolve(message.procedures);
+          // A failed answer is a shrug, not a statement of emptiness.
+          waiter.resolve(message.failed ? null : message.procedures);
         }
         return;
       }
@@ -1266,14 +1191,9 @@ export function demoTransport(): HostTransport {
           },
         });
       }
-      // The demo has no engine; answering the typing requests empty keeps Enter an ordinary
-      // Enter and a keystroke an ordinary keystroke.
-      if (message.type === "smartEnter") {
-        send({ type: "smartEnterResult", id: message.id, edits: [], caret: null });
-      }
-      if (message.type === "loopSync") {
-        send({ type: "loopSyncResult", id: message.id, edits: [] });
-      }
+      // The demo has no engine; answering the recase requests empty keeps a keystroke an
+      // ordinary keystroke. Smart Enter, Smart Tab, and loop sync are page-local and need no
+      // answers at all, which also makes the demo the place they can be exercised without a host.
       if (message.type === "canonicalCase") {
         send({ type: "canonicalCaseResult", id: message.id, edits: [] });
       }

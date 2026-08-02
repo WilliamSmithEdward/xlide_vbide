@@ -69,10 +69,12 @@ export interface ExplorerHandlers {
   context(name: string, kind: number, x: number, y: number): void;
   /** Right click on a workbook's row. */
   projectContext(project: string, x: number, y: number): void;
-  /** A module's procedures, for its unfolded node. */
-  outline(module: string): Promise<ExplorerProcedure[]>;
+  /** A module's procedures, for its unfolded node; null when no answer came. */
+  outline(module: string): Promise<ExplorerProcedure[] | null>;
   /** A procedure was picked: go to its line in its module. */
   openProcedure(module: string, line: number): void;
+  /** A line for the host's log, for the defects only the log's data cadence explains. */
+  trace?(text: string): void;
 }
 
 export class Explorer {
@@ -207,6 +209,13 @@ export class Explorer {
     if (key === this.projectsKey) {
       return;
     }
+
+    // A push that got past the guard names itself in the host's log, because a push that
+    // CHANGES on a timer is a defect upstream and the diff is the only witness.
+    if (this.projectsKey !== "") {
+      this.handlers.trace?.(`tree: projects push changed, ${diffExcerpt(this.projectsKey, key)}`);
+    }
+
     this.projectsKey = key;
     this.projects = projects;
 
@@ -264,6 +273,7 @@ export class Explorer {
       return;
     }
 
+    this.handlers.trace?.(`tree: counts push changed, ${countsDelta(this.problemCounts, counts)}`);
     this.problemCounts = counts;
 
     // Analysis just described the project again; an unfolded procedure list follows it, so a
@@ -311,9 +321,36 @@ export class Explorer {
     this.render();
   }
 
+  /** Modules with an outline request in flight, so pushes queue one trailing refresh at most. */
+  private readonly outlineFetching = new Set<string>();
+  private readonly outlineRefetch = new Set<string>();
+
   private async fetchOutline(module: string): Promise<void> {
-    const procedures = await this.handlers.outline(module);
-    if (this.expandedModule !== module) {
+    // One request per module at a time. The pushes that trigger refreshes arrive faster than a
+    // busy host answers, and concurrent requests came home out of order: a late empty answer
+    // landing after a full one is exactly how an unfolded list vanished mid-show.
+    if (this.outlineFetching.has(module)) {
+      this.outlineRefetch.add(module);
+      return;
+    }
+
+    this.outlineFetching.add(module);
+    try {
+      const procedures = await this.handlers.outline(module);
+      this.applyOutline(module, procedures);
+    } finally {
+      this.outlineFetching.delete(module);
+      if (this.outlineRefetch.delete(module) && this.expandedModule === module) {
+        void this.fetchOutline(module);
+      }
+    }
+  }
+
+  private applyOutline(module: string, procedures: ExplorerProcedure[] | null): void {
+    // No answer is not an answer: a timeout or a host failure says nothing about the module,
+    // and what is already unfolded stays. Only a real answer may replace it — including a real
+    // empty one, which is a module whose procedures were genuinely deleted.
+    if (procedures === null || this.expandedModule !== module) {
       return;
     }
 
@@ -444,4 +481,34 @@ export class Explorer {
     button.append(glyph, document.createTextNode(`${procedure.kind} ${procedure.name}`));
     return button;
   }
+}
+
+/** Where two serialized payloads part ways, with enough of each side to name the field. */
+function diffExcerpt(before: string, after: string): string {
+  let at = 0;
+  const limit = Math.min(before.length, after.length);
+  while (at < limit && before[at] === after[at]) {
+    at += 1;
+  }
+
+  const window = (text: string): string =>
+    text.slice(Math.max(0, at - 24), at + 48).replaceAll('"', "'");
+  return `${before.length} -> ${after.length} chars, first diff at ${at}:`
+    + ` was "${window(before)}" now "${window(after)}"`;
+}
+
+/** The entries that differ between two count maps, capped so the log line stays a line. */
+function countsDelta(before: Map<string, number>, after: Map<string, number>): string {
+  const names = new Set([...before.keys(), ...after.keys()]);
+  const changes: string[] = [];
+  for (const name of names) {
+    const was = before.get(name);
+    const now = after.get(name);
+    if (was !== now) {
+      changes.push(`${name} ${was ?? "-"} -> ${now ?? "-"}`);
+    }
+  }
+
+  const shown = changes.slice(0, 4).join(", ");
+  return changes.length > 4 ? `${shown}, +${changes.length - 4} more` : shown;
 }

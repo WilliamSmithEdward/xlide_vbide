@@ -14,7 +14,14 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // The spec repo's smart-editing helpers, bundled from source by build.mjs (its esbuild
+    // alias points at ../../xlide_vscode/src) but type-checked against local declarations,
+    // because the spec compiles under its own compiler settings, not this project's stricter
+    // ones. The declarations live in src/spec/xlide-spec.
+    "paths": {
+      "xlide-spec/*": ["./src/spec/xlide-spec/*"]
+    }
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.d.ts"]
 }

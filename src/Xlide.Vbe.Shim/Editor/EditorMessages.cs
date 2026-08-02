@@ -243,11 +243,16 @@ public sealed record SurfaceOutlineProcedure(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("line")] int Line);
 
-/// <summary>The answer to one outline request: the module's procedures in declaration order.</summary>
+/// <summary>
+/// The answer to one outline request: the module's procedures in declaration order. Failed
+/// marks an answer that is a shrug rather than a statement — the engine timed out or threw —
+/// so the page keeps what it already shows instead of blanking an unfolded list.
+/// </summary>
 public sealed record OutlineResultMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("id")] int Id,
-    [property: JsonPropertyName("procedures")] SurfaceOutlineProcedure[] Procedures);
+    [property: JsonPropertyName("procedures")] SurfaceOutlineProcedure[] Procedures,
+    [property: JsonPropertyName("failed")] bool Failed = false);
 
 /// <summary>
 /// The project's own words for the tokenizer: names that denote types and names that denote

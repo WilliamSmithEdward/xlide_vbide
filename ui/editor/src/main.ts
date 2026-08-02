@@ -78,11 +78,14 @@ function boot(): void {
     glyphMargin: true,
     lineNumbersMinChars: 4,
     // The companion editor's minimap, its settings included: blocks rather than characters.
+    // The slider — the "you are here" of the preview — stays visible instead of appearing on
+    // hover, by the developer's request: it is the indicator, not a control to be discovered.
     minimap: {
       enabled: true,
       renderCharacters: false,
       showMarkSectionHeaders: false,
       showRegionSectionHeaders: false,
+      showSlider: "always",
     },
     scrollBeyondLastLine: false,
     renderLineHighlight: "line",
@@ -126,6 +129,7 @@ function boot(): void {
     closeModule: (name) => bridge.closeModule(name),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     requestOutline: (module) => bridge.requestOutline(module),
+    trace: (text) => bridge.trace(text),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

@@ -249,8 +249,8 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetLanguageFactsMessage));
     }
 
-    /// <summary>Answers one outline request. Never held.</summary>
-    public void ShowOutline(int requestId, SurfaceOutlineProcedure[] procedures)
+    /// <summary>Answers one outline request. Never held. Failed means "no answer", not "empty".</summary>
+    public void ShowOutline(int requestId, SurfaceOutlineProcedure[] procedures, bool failed = false)
     {
         ArgumentNullException.ThrowIfNull(procedures);
 
@@ -260,7 +260,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         Post(JsonSerializer.Serialize(
-            new OutlineResultMessage("outlineResult", requestId, procedures),
+            new OutlineResultMessage("outlineResult", requestId, procedures, failed),
             EditorMessageContext.Default.OutlineResultMessage));
     }
 
