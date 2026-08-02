@@ -1002,6 +1002,9 @@ internal sealed class AddInSession : IDisposable
             using var project = _editor.GetObject("ActiveVBProject");
             var mode = project?.GetInt32("Mode") ?? DesignMode;
 
+            // The read answered, so the busy episode, if there was one, is over.
+            _debugReadFailureLogged = false;
+
             if (mode != BreakMode)
             {
                 if (_inBreak)
@@ -1050,9 +1053,18 @@ internal sealed class AddInSession : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error("debug: the execution state could not be read", ex);
+            // Refused while the editor runs the developer's code, and this polls at 150ms, so it
+            // is said once per episode rather than seven times a second for the whole run.
+            if (!_debugReadFailureLogged)
+            {
+                _debugReadFailureLogged = true;
+                Log.Info($"debug: the execution state could not be read while the editor is busy ({ex.Message})");
+            }
         }
     }
+
+    /// <summary>Whether the current episode of unreadable execution state has been reported.</summary>
+    private bool _debugReadFailureLogged;
 
     /// <summary>Whether the developer is looking at the Immediate panel.</summary>
     private bool _watchingImmediate;
@@ -1145,6 +1157,15 @@ internal sealed class AddInSession : IDisposable
     private void PollDebugState()
     {
         _immediateReader?.Poll();
+
+        // A stale pane picture is retried here, because the editor that refused it also stopped
+        // producing trustworthy window events. Success fires the tracker's Changed, which is what
+        // catches the tab strip up with everything that happened while the editor was busy.
+        if (_codePanes is { Stale: true })
+        {
+            _codePanes.Refresh();
+        }
+
         UpdateDebugState();
 
         // Watching continues for as long as execution is stopped, because the developer is about
@@ -1461,13 +1482,23 @@ internal sealed class AddInSession : IDisposable
             var modules = new List<string>(count);
             for (var i = 1; i <= count; i++)
             {
-                using var pane = panes!.GetItem(i);
-                using var module = pane?.GetObject("CodeModule");
-                using var component = module?.GetObject("Parent");
-
-                if (component?.GetString("Name") is { Length: > 0 } name && !modules.Contains(name))
+                // Per pane, not around the loop. A pane can be mid-destruction at the moment this
+                // list is read, and one dying pane must not take the whole tab strip with it: that
+                // is exactly how a closed tab once refused to leave the screen.
+                try
                 {
-                    modules.Add(name);
+                    using var pane = panes!.GetItem(i);
+                    using var module = pane?.GetObject("CodeModule");
+                    using var component = module?.GetObject("Parent");
+
+                    if (component?.GetString("Name") is { Length: > 0 } name && !modules.Contains(name))
+                    {
+                        modules.Add(name);
+                    }
+                }
+                catch (Exception)
+                {
+                    // The pane that would not answer is the one that is going away.
                 }
             }
 
@@ -1723,20 +1754,43 @@ internal sealed class AddInSession : IDisposable
     /// Closes a module's pane, which is what closing its tab means. The editor activates another
     /// pane afterwards and the surface follows it; closing the last one hides the surface, which
     /// is the empty state there is.
+    ///
+    /// The pane is looked for in the editor's own open list, never through the component. Reading
+    /// a component's pane CREATES one when none is open, so closing that way closes forever: a
+    /// second click on a dead tab was conjuring a fresh pane just to destroy it, and the editor
+    /// spent a minute churning through the wreckage.
     /// </summary>
     private void CloseModule(string component)
     {
         try
         {
-            using var pane = FindCodePane(component);
-            using var window = pane?.GetObject("Window");
-            if (window is null)
+            using var panes = _editor.GetObject("CodePanes");
+            var count = panes?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
             {
-                return;
+                try
+                {
+                    using var pane = panes!.GetItem(i);
+                    using var module = pane?.GetObject("CodeModule");
+                    using var owner = module?.GetObject("Parent");
+                    if (!string.Equals(owner?.GetString("Name"), component, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    using var window = pane!.GetObject("Window");
+                    window?.Invoke("Close");
+                    Log.Info($"module: closed {component}");
+                    return;
+                }
+                catch (Exception)
+                {
+                    // A pane that will not answer is already going away.
+                }
             }
 
-            window.Invoke("Close");
-            Log.Info($"module: closed {component}");
+            Log.Info($"module: {component} has no open pane to close");
         }
         catch (Exception ex)
         {
@@ -2081,6 +2135,15 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 FollowActivePane(panes);
+            };
+
+            // While the editor is refusing refreshes, the window events that normally drive them
+            // prove nothing. The poll timer becomes the way back: it keeps asking until the
+            // editor answers, and the answer is what removes a closed tab from the strip.
+            _codePanes.RefreshFailed += () =>
+            {
+                _pollsRemaining = Math.Max(_pollsRemaining, (int)(20_000 / DebugPollMilliseconds));
+                UpdatePolling();
             };
 
             _codePanes.Start();

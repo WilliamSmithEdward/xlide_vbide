@@ -62,6 +62,20 @@ internal sealed class CodePaneTracker : IDisposable
     /// <summary>Raised after the set of panes, or any pane's position, has changed.</summary>
     public event Action<IReadOnlyList<CodePane>>? Changed;
 
+    /// <summary>
+    /// Raised when a refresh could not be completed because the editor is not answering, which
+    /// happens while it runs the developer's code. Whoever owns a timer should keep one running
+    /// and retry, because the window events that normally drive refreshes stop mattering the
+    /// moment they all fail, and the picture stays wrong until something asks again.
+    /// </summary>
+    public event Action? RefreshFailed;
+
+    /// <summary>True while the picture is known to be out of date because refreshes are failing.</summary>
+    public bool Stale => _failedRefreshes > 0;
+
+    /// <summary>Consecutive refreshes the editor has refused, for recovery and log discipline.</summary>
+    private int _failedRefreshes;
+
     public void Start()
     {
         _hook = WindowEventHook.Install(OnWindowEvent);
@@ -102,6 +116,15 @@ internal sealed class CodePaneTracker : IDisposable
         {
             var open = _openComponents ??= ReadOpenComponents();
             var found = FindPaneWindows();
+
+            // The reads succeeded, so the editor is answering again. Said once, with the count,
+            // rather than staying silent about a minute of blindness.
+            if (_failedRefreshes > 0)
+            {
+                Log.Info($"code panes: the editor is answering again, after {_failedRefreshes} abandoned refresh(es)");
+                _failedRefreshes = 0;
+            }
+
             var updated = new List<CodePane>(found.Count);
 
             foreach (var window in found)
@@ -138,9 +161,19 @@ internal sealed class CodePaneTracker : IDisposable
         }
         catch (COMException ex)
         {
-            // The editor can be mid-teardown, in which case the object model stops answering. That
-            // is expected and not worth surfacing as an error.
-            Log.Info($"code panes: refresh abandoned, the editor stopped answering, 0x{ex.HResult:X8}");
+            // The editor stops answering while it runs the developer's code and while it tears
+            // windows down. Expected, but not once per window event: a run that lasts a minute
+            // used to write two thousand identical lines. The first failure is reported, the
+            // repetition is summarised, and the recovery above closes the story.
+            _failedRefreshes++;
+
+            if (_failedRefreshes == 1 || _failedRefreshes % 200 == 0)
+            {
+                Log.Info($"code panes: refresh abandoned, the editor is not answering, "
+                         + $"0x{ex.HResult:X8} ({_failedRefreshes} in a row)");
+            }
+
+            RefreshFailed?.Invoke();
         }
         catch (Exception ex)
         {
