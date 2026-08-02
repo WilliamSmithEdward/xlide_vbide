@@ -214,6 +214,26 @@ itself; only covering it hides it. The menu bar is drawn by Office and no attrib
 A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled state) was taken
 2026-08-01; regenerate with a CommandBars walk when needed.
 
+Pane lifecycle facts, measured while making tabs behave:
+- With maximised panes the editor keeps a WINDOW only for the ACTIVE pane and destroys the
+  others. The window map says one pane however many are open; only `CodePanes` knows the open
+  set. Never feed the tab list from windows.
+- `CodePanes` keeps a corpse entry for a just-closed pane: `Count` still counts it and
+  `Item(n).CodeModule` throws. Read the collection per item, tolerantly, always.
+- `CodePane.Show` displays but does not activate a pane that is already open behind another; no
+  activation means no window event. Set `ActiveCodePane` directly - and that is an OBJECT
+  assignment, which must go out as `DISPATCH_PROPERTYPUTREF`; an ordinary put is refused.
+- Activating a native pane MOVES KEYBOARD FOCUS to it. Return focus to the surface
+  (`controller.MoveFocus`) or every keyboard shortcut works exactly once.
+- Ctrl+W and Ctrl+PageDown/PageUp are BROWSER accelerators (close window, switch browser tabs);
+  unclaimed they never reach the page. Claim them at the accelerator hook like F1.
+- The page has a `trace` message that writes into the shim log (`page: ...`), which is how a
+  page-side silence is told apart from a transport one. `globalThis.xlideBridge` is reachable
+  from devtools for the same reason.
+- `tools`-side probes may use synthetic input against the harness (never in the product). The
+  tab lifecycle probe lives in the session scratchpad; the tool shell is sandboxed away from
+  SendInput, so such probes run unsandboxed.
+
 ## 8. Lessons that cost real time this session (long form in lessons.md)
 
 - **A dispatch property put carries a named argument** (DISPID_PROPERTYPUT). Two setters passed

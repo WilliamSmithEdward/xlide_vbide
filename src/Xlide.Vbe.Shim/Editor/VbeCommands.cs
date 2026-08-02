@@ -262,11 +262,18 @@ internal static class VbeCommands
     /// <summary>
     /// The surface command a keystroke means, or null when the surface does not own that key.
     ///
-    /// These are keys the host would otherwise take for itself. F1 is its help, and help is not
-    /// what a developer pressing F1 in a modern editor is asking for.
+    /// These are keys that would otherwise be taken before the page could see them. F1 is the
+    /// host's help, and Ctrl+PageDown belongs to the browser, which treats it as its own tab
+    /// switching and swallows it whole; the only way the page's tabs can have the key is to claim
+    /// it here and say what it meant.
     /// </summary>
-    public static string? SurfaceCommandForKey(uint virtualKey, bool shift, bool control) =>
-        virtualKey == VirtualKey.F1 && !shift && !control ? "editor.action.quickCommand" : null;
+    public static string? SurfaceCommandForKey(uint virtualKey, bool shift, bool control) => virtualKey switch
+    {
+        VirtualKey.F1 when !shift && !control => "editor.action.quickCommand",
+        VirtualKey.PageDown when control && !shift => "xlide.tab.next",
+        VirtualKey.PageUp when control && !shift => "xlide.tab.previous",
+        _ => null,
+    };
 
     /// <summary>
     /// The editor command a keystroke means, or zero when the editor does not own that key.
@@ -352,6 +359,8 @@ internal static class VirtualKey
     public const uint F5 = 0x74;
     public const uint F8 = 0x77;
     public const uint F9 = 0x78;
+    public const uint PageUp = 0x21;
+    public const uint PageDown = 0x22;
     public const uint S = 0x53;
     public const uint W = 0x57;
 }

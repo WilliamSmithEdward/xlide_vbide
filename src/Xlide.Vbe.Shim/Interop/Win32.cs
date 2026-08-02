@@ -191,6 +191,13 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     public static partial nint GetParent(nint window);
 
+    /// <summary>Asks a window to close, exactly as its own close box would.</summary>
+    public const uint WmClose = 0x0010;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool PostMessage(nint window, uint message, nint wParam, nint lParam);
+
     /// <summary>
     /// State of a key at the point the message being processed was posted, which is what a key
     /// handler needs: asking for the state now would report where the modifier is by the time the

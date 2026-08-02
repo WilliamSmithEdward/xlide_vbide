@@ -108,6 +108,10 @@ function boot(): void {
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
 
+  // Reachable from a devtools console, which is how the page half of a host defect gets isolated
+  // from the transport half.
+  (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
+
   // The host's own commands, present in the editor's context menu and the command palette so
   // they are discoverable where a developer already looks for commands.
   const hostActions: Array<[string, string, string]> = [

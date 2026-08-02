@@ -256,14 +256,6 @@ export class Shell {
 
     this.installTabDrag();
 
-    // Cycling belongs to the strip, wherever focus happens to be.
-    document.addEventListener("keydown", (event) => {
-      if (event.ctrlKey && (event.key === "PageDown" || event.key === "PageUp")) {
-        event.preventDefault();
-        this.cycleTab(event.key === "PageDown" ? 1 : -1);
-      }
-    });
-
     this.panelList.addEventListener("click", (event) => {
       const row = (event.target as HTMLElement).closest("[data-line]") as HTMLElement | null;
       this.goTo(row);
@@ -889,17 +881,24 @@ export class Shell {
     return null;
   }
 
-  /** Activates the next or previous tab in the developer's order, wrapping at the ends. */
-  private cycleTab(delta: number): void {
+  /**
+   * Activates the next or previous tab in the developer's order, wrapping at the ends, and says
+   * which one it chose. Public because the key that means it never reaches the page: the browser
+   * owns Ctrl+PageDown, so the host claims it and asks for this by name.
+   */
+  cycleTab(delta: number): string | null {
     if (this.tabOrder.length === 0) {
-      return;
+      return null;
     }
 
     const current = Math.max(0, this.tabOrder.indexOf(this.active ?? ""));
     const next = this.tabOrder[(current + delta + this.tabOrder.length) % this.tabOrder.length];
     if (next && next !== this.active) {
       this.handlers.activateModule(next);
+      return next;
     }
+
+    return null;
   }
 
   private tabMenu(name: string, x: number, y: number): void {

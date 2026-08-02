@@ -485,6 +485,22 @@ internal sealed unsafe class DispatchObject : IDisposable
     public void SetBool(string name, bool value) => SetProperty(name, ComVariant.Create(value));
 
     /// <summary>
+    /// Writes a property that takes another automation object, which is how the active pane is
+    /// chosen. The variant is given a reference of its own, because clearing it releases one.
+    ///
+    /// Assigned by reference, which is its own invoke kind: an object property put that arrives
+    /// as an ordinary put asks the callee to copy a value, and the editor refuses that outright.
+    /// </summary>
+    public void SetObject(string name, DispatchObject value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        ObjectDisposedException.ThrowIf(!value.IsAlive, value);
+
+        Marshal.AddRef(value.Pointer);
+        SetProperty(name, ComVariant.CreateRaw(VarEnum.VT_DISPATCH, value.Pointer), InvokeKind.PropertyPutRef);
+    }
+
+    /// <summary>
     /// Writes any property.
     ///
     /// A property assignment is the one call shape that carries a named argument: the value being
@@ -496,7 +512,7 @@ internal sealed unsafe class DispatchObject : IDisposable
     /// failed, and the failures were read as the editor refusing to allow those properties to be
     /// set. They were refusals of a malformed call.
     /// </summary>
-    private void SetProperty(string name, ComVariant value)
+    private void SetProperty(string name, ComVariant value, InvokeKind kind = InvokeKind.PropertyPut)
     {
         ObjectDisposedException.ThrowIf(_dispatch is null, this);
 
@@ -521,7 +537,7 @@ internal sealed unsafe class DispatchObject : IDisposable
                 dispId,
                 NullGuid,
                 0,
-                (ushort)InvokeKind.PropertyPut,
+                (ushort)kind,
                 (nint)(&parameters),
                 0,
                 (nint)(&exception),

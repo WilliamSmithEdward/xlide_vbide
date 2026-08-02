@@ -159,25 +159,22 @@ internal sealed class CodePaneTracker : IDisposable
 
             Changed?.Invoke(_panes);
         }
-        catch (COMException ex)
+        catch (Exception ex)
         {
             // The editor stops answering while it runs the developer's code and while it tears
-            // windows down. Expected, but not once per window event: a run that lasts a minute
-            // used to write two thousand identical lines. The first failure is reported, the
-            // repetition is summarised, and the recovery above closes the story.
+            // windows down, and its refusals arrive as more than one exception type. Expected,
+            // but not once per window event: a run that lasts a minute used to write two
+            // thousand identical lines. The first failure is reported, the repetition is
+            // summarised, and the recovery above closes the story.
             _failedRefreshes++;
 
             if (_failedRefreshes == 1 || _failedRefreshes % 200 == 0)
             {
-                Log.Info($"code panes: refresh abandoned, the editor is not answering, "
-                         + $"0x{ex.HResult:X8} ({_failedRefreshes} in a row)");
+                var detail = ex is COMException com ? $"0x{com.HResult:X8}" : $"{ex.GetType().Name}: {ex.Message}";
+                Log.Info($"code panes: refresh abandoned, {detail} ({_failedRefreshes} in a row)");
             }
 
             RefreshFailed?.Invoke();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("code panes: refresh failed", ex);
         }
         finally
         {
@@ -204,32 +201,123 @@ internal sealed class CodePaneTracker : IDisposable
         return true;
     }
 
+    /// <summary>Whether the current episode of an unavailable pane list has been reported.</summary>
+    private bool _paneListUnavailableLogged;
+
     /// <summary>
-    /// Names of the components the editor reports as having a pane open. This is the authority on
-    /// what a pane window may legitimately be showing.
+    /// Names a pane window may legitimately be showing.
+    ///
+    /// The editor's own pane list is asked first, because it is exact. It is also fragile: after
+    /// a pane closes it can spend a long time refusing every read while the rest of the object
+    /// model answers normally. When that happens the component names of every project stand in.
+    /// A pane window's caption can only name a component, so matching against the superset
+    /// changes nothing for windows that exist, and it keeps the tracker alive, which is what
+    /// keeps tabs switchable, while the pane list sulks.
     /// </summary>
     private List<string> ReadOpenComponents()
     {
-        var names = new List<string>();
-
-        using var panes = _editor.GetObject("CodePanes");
-        if (panes is null)
+        try
         {
+            var names = ReadPaneComponents();
+            _paneListUnavailableLogged = false;
             return names;
         }
-
-        var count = panes.GetInt32("Count");
-        for (var i = 1; i <= count; i++)
+        catch (Exception ex)
         {
-            using var pane = panes.GetItem(i);
-            using var module = pane?.GetObject("CodeModule");
-            using var component = module?.GetObject("Parent");
-
-            var name = component?.GetString("Name");
-            if (!string.IsNullOrEmpty(name))
+            if (!_paneListUnavailableLogged)
             {
-                names.Add(name);
+                _paneListUnavailableLogged = true;
+                var stage = ex.Data["stage"] as string ?? "?";
+                Log.Info($"code panes: the pane list is unavailable at {stage} "
+                         + $"({ex.GetType().Name}: {ex.Message}); matching against every project component");
             }
+
+            return ReadAllComponentNames();
+        }
+    }
+
+    /// <summary>The exact list, from the editor's pane collection, with the failing step named.</summary>
+    private List<string> ReadPaneComponents()
+    {
+        var stage = "CodePanes";
+
+        try
+        {
+            var names = new List<string>();
+
+            using var panes = _editor.GetObject("CodePanes");
+            if (panes is null)
+            {
+                return names;
+            }
+
+            stage = "Count";
+            var count = panes.GetInt32("Count");
+
+            for (var i = 1; i <= count; i++)
+            {
+                stage = $"Item({i})";
+                using var pane = panes.GetItem(i);
+                stage = $"Item({i}).CodeModule";
+                using var module = pane?.GetObject("CodeModule");
+                stage = $"Item({i}).Parent";
+                using var component = module?.GetObject("Parent");
+
+                stage = $"Item({i}).Name";
+                var name = component?.GetString("Name");
+                if (!string.IsNullOrEmpty(name))
+                {
+                    names.Add(name);
+                }
+            }
+
+            return names;
+        }
+        catch (Exception ex)
+        {
+            ex.Data["stage"] = stage;
+            throw;
+        }
+    }
+
+    /// <summary>Every component name in every project: the superset the fallback matches against.</summary>
+    private List<string> ReadAllComponentNames()
+    {
+        var names = new List<string>();
+
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var projectCount = projects?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= projectCount; i++)
+            {
+                try
+                {
+                    using var project = projects!.GetItem(i);
+                    using var components = project?.GetObject("VBComponents");
+                    var componentCount = components?.GetInt32("Count") ?? 0;
+
+                    for (var j = 1; j <= componentCount; j++)
+                    {
+                        using var component = components!.GetItem(j);
+                        var name = component?.GetString("Name");
+                        if (!string.IsNullOrEmpty(name))
+                        {
+                            names.Add(name);
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // A project that will not answer contributes nothing; the others still do.
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // Both sources refusing at once is the abandoned-refresh case; the caller's catch
+            // owns reporting it.
         }
 
         return names;

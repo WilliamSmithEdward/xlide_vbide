@@ -1474,6 +1474,14 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        // From the editor's pane collection, per item and tolerantly, and not from the tracker's
+        // window map. The windows cannot carry this list: with maximised panes the editor keeps a
+        // window only for the ACTIVE pane and destroys the others, so the map holds one entry
+        // however many panes are open, and a strip fed from it had one immortal tab. The
+        // collection knows every open pane; what it cannot be trusted with is a member that has
+        // just died, so one dead member is skipped rather than aborting the list, and a
+        // collection that refuses entirely changes nothing: the strip keeps its last picture and
+        // the tracker's recovery republishes it.
         try
         {
             using var panes = _editor.GetObject("CodePanes");
@@ -1482,9 +1490,6 @@ internal sealed class AddInSession : IDisposable
             var modules = new List<string>(count);
             for (var i = 1; i <= count; i++)
             {
-                // Per pane, not around the loop. A pane can be mid-destruction at the moment this
-                // list is read, and one dying pane must not take the whole tab strip with it: that
-                // is exactly how a closed tab once refused to leave the screen.
                 try
                 {
                     using var pane = panes!.GetItem(i);
@@ -1506,7 +1511,7 @@ internal sealed class AddInSession : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Error("modules: the open panes could not be listed", ex);
+            Log.Info($"modules: the pane list would not answer ({ex.GetType().Name}); keeping the last strip");
         }
     }
 
@@ -1762,6 +1767,34 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void CloseModule(string component)
     {
+        if (CloseThroughObjectModel(component))
+        {
+            return;
+        }
+
+        // The pane collection would not say, but the tracker already knows which window shows the
+        // module, and asking the window to close is exactly what its own close box does. This is
+        // what keeps closing alive while the collection is refusing everyone.
+        if (_codePanes is not null)
+        {
+            foreach (var pane in _codePanes.Panes)
+            {
+                if (string.Equals(pane.Component, component, StringComparison.OrdinalIgnoreCase)
+                    && Win32.IsWindow(pane.Window))
+                {
+                    Win32.PostMessage(pane.Window, Win32.WmClose, 0, 0);
+                    Log.Info($"module: asked {component}'s window to close");
+                    return;
+                }
+            }
+        }
+
+        Log.Info($"module: {component} has no open pane to close");
+    }
+
+    /// <summary>Closes a module's pane through the editor's own pane list. False when it cannot.</summary>
+    private bool CloseThroughObjectModel(string component)
+    {
         try
         {
             using var panes = _editor.GetObject("CodePanes");
@@ -1782,20 +1815,20 @@ internal sealed class AddInSession : IDisposable
                     using var window = pane!.GetObject("Window");
                     window?.Invoke("Close");
                     Log.Info($"module: closed {component}");
-                    return;
+                    return true;
                 }
                 catch (Exception)
                 {
                     // A pane that will not answer is already going away.
                 }
             }
-
-            Log.Info($"module: {component} has no open pane to close");
         }
         catch (Exception ex)
         {
-            Log.Error($"module: {component} could not be closed", ex);
+            Log.Info($"module: the pane list would not answer for {component} ({ex.GetType().Name})");
         }
+
+        return false;
     }
 
     /// <summary>
@@ -1834,13 +1867,50 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    /// <summary>Brings a module's pane to the front, which the surface then follows.</summary>
+    /// <summary>
+    /// Shows a module: the editor's active pane is set to it, and the surface is told to show it.
+    ///
+    /// Both are told directly. Show creates and displays a pane, but it does not reliably
+    /// activate one that is already open behind another, and an activation that does not happen
+    /// produces no window event and therefore, before this, no switch: clicking a tab did
+    /// nothing exactly when both modules were already open. The active pane matters because the
+    /// run and debug commands act on it; the surface matters because it is what the developer
+    /// sees; neither is left to depend on the editor choosing to move a window.
+    /// </summary>
     private void ShowModule(string component)
     {
         try
         {
+            // Before the document changes underneath them.
+            _editorSurface?.FlushEdits();
+
             using var pane = FindCodePane(component);
-            pane?.Invoke("Show");
+            if (pane is null)
+            {
+                return;
+            }
+
+            pane.Invoke("Show");
+
+            try
+            {
+                _editor.SetObject("ActiveCodePane", pane);
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"modules: {component} could not be made the active pane ({ex.GetType().Name})");
+            }
+
+            if (_editorSurface?.Module != component)
+            {
+                ShowModuleInSurface(component);
+            }
+
+            PublishModules();
+
+            // Activating the native pane moved keyboard focus onto it, and the developer is not
+            // looking at it. Without this, the shortcut that switches module works exactly once.
+            _editorSurface?.Focus();
         }
         catch (Exception ex)
         {

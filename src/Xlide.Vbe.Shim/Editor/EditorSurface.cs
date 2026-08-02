@@ -181,6 +181,13 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
+    /// <summary>
+    /// Puts keyboard focus back on the surface. Activating a native pane takes it, and a surface
+    /// that does not have focus hears no keys: the shortcut that switched module would work once
+    /// and then fall silent.
+    /// </summary>
+    public void Focus() => _browser?.Focus();
+
     /// <summary>Shows a module's text.</summary>
     public void Show(string moduleName, string text)
     {
@@ -265,6 +272,7 @@ internal sealed class EditorSurface : IDisposable
 
         if (!_loaded)
         {
+            Log.Info($"surface: command {id} dropped, the page is not up");
             return;
         }
 
@@ -577,6 +585,7 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("moduleName", out var requested)
                         && requested.GetString() is { Length: > 0 } name)
                     {
+                        Log.Info($"surface: activate {name} requested");
                         ModuleRequested?.Invoke(name);
                     }
 
@@ -665,6 +674,16 @@ internal sealed class EditorSurface : IDisposable
                         && componentKind.TryGetInt32(out var insertKind))
                     {
                         ComponentInsertRequested?.Invoke(insertKind);
+                    }
+
+                    break;
+
+                case "trace":
+                    // The page's own words, in the only log support can read.
+                    if (document.RootElement.TryGetProperty("text", out var trace)
+                        && trace.GetString() is { Length: > 0 } traced)
+                    {
+                        Log.Info($"page: {traced}");
                     }
 
                     break;

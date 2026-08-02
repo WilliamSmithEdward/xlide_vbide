@@ -92,7 +92,8 @@ export type ClientMessage =
   | { type: "editProperty"; component: string; name: string; value: string }
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string }
-  | { type: "insertComponent"; kind: number };
+  | { type: "insertComponent"; kind: number }
+  | { type: "trace"; text: string };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -368,7 +369,17 @@ export class EditorBridge {
    * into the editor rather than registered, so they are triggered by name; the panel commands are
    * not editor commands at all and go to the shell.
    */
+  /**
+   * Writes a line into the host's log, because the page has no log of its own that support can
+   * read. For the moments when the question is which side of the bridge went quiet.
+   */
+  private trace(text: string): void {
+    this.transport.post({ type: "trace", text });
+  }
+
   private runEditorCommand(id: string): void {
+    this.trace(`editorCommand ${id}`);
+
     if (id === "xlide.panel.immediate") {
       this.shell?.showImmediate();
       return;
@@ -376,6 +387,14 @@ export class EditorBridge {
 
     if (id === "xlide.panel.properties") {
       this.shell?.revealProperties();
+      return;
+    }
+
+    // Tab cycling arrives from the host because the browser swallows Ctrl+PageDown for its own
+    // tab switching before the page could ever see the key.
+    if (id === "xlide.tab.next" || id === "xlide.tab.previous") {
+      const target = this.shell?.cycleTab(id === "xlide.tab.next" ? 1 : -1);
+      this.trace(`cycle -> ${target ?? "(nothing)"}`);
       return;
     }
 
@@ -729,7 +748,7 @@ export function demoTransport(): HostTransport {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
-        send({ type: "setModules", modules: ["Module1"], active: "Module1" });
+        send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1" });
         send({
           type: "setProjects",
           projects: [{
