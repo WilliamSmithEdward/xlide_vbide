@@ -222,9 +222,12 @@ export class Explorer {
   }
 
   setActive(name: string | null): void {
+    // The tree follows the module being edited — but only when it genuinely changed. The host
+    // republishes the module list on all sorts of occasions with the same active module, and
+    // following every push would fold whatever the developer just unfolded by hand.
+    const changed = name !== this.active;
     this.active = name;
-    if (name) {
-      // The tree follows the module being edited: its node unfolds, the previous one folds.
+    if (name && changed) {
       this.setExpandedModule(name);
     }
     this.render();
