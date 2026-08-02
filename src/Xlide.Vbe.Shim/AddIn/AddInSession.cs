@@ -238,7 +238,7 @@ internal sealed class AddInSession : IDisposable
             //
             // The native panes keep running underneath, unchanged and never seen. They remain the
             // text of record, the compile target, and what the debugger drives.
-            _editorSurface.Follow(ClientAreaIn(documentArea, host), visible: true);
+            _editorSurface.Follow(SurfaceBounds(host, documentArea), visible: true);
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
@@ -1246,6 +1246,77 @@ internal sealed class AddInSession : IDisposable
             .ToArray();
 
         surface.ShowDiagnostics(markers);
+    }
+
+    /// <summary>
+    /// Where the surface goes inside the frame.
+    ///
+    /// The document area is inset from the frame by a border the frame draws itself, a pale line a
+    /// pixel or two wide down the inside of the window. Covering only the document area leaves that
+    /// line showing, and it is not something the compositor draws, so no window attribute reaches
+    /// it. The surface takes everything below the command bars instead, which covers it.
+    ///
+    /// Unless one of the editor's own docked windows is open. Those the surface replaces are
+    /// closed, but the Locals and Watch windows are not replaced and can be opened from the menu,
+    /// and covering one would hide a window the developer just asked for. When any is showing, the
+    /// surface goes back to the document area and the border shows again, which is the right way
+    /// round: a visible seam is a smaller problem than a missing window.
+    /// </summary>
+    private unsafe PixelRect SurfaceBounds(nint frame, nint documentArea)
+    {
+        var document = ClientAreaIn(documentArea, frame);
+
+        if (AnyToolWindowOpen())
+        {
+            return document;
+        }
+
+        Rect client;
+        if (!Win32.GetClientRect(frame, &client))
+        {
+            return document;
+        }
+
+        // Down from where the document area starts, so the command bars keep their space, and out
+        // to the frame's own edges in every other direction.
+        return new PixelRect(0, document.Top, client.Right - client.Left, client.Bottom - client.Top);
+    }
+
+    /// <summary>
+    /// Whether any of the editor's own docked windows is showing.
+    ///
+    /// Asked of the object model rather than worked out from windows on screen. Every one of these
+    /// shares its window class with the code panes, so a window that is visible says nothing about
+    /// what it is: an earlier version compared visible windows against the panes it was tracking
+    /// and a second code pane, open but behind the first, read as a tool window every time.
+    /// </summary>
+    private bool AnyToolWindowOpen()
+    {
+        // Object browser, watches, locals. The three the surface has no replacement for.
+        ReadOnlySpan<int> tools = [2, 3, 4];
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is not null && tools.Contains(window.GetInt32("Type")) && window.GetBool("Visible"))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Erring towards the smaller rectangle, which covers less and hides nothing.
+            Log.Info($"surface: the editor's windows could not be read ({ex.GetType().Name})");
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
