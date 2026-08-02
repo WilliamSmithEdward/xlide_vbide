@@ -172,3 +172,18 @@ work rather than as an image that had been cut.
 Consequence: the capture declares per-monitor awareness before measuring anything. It also takes
 the largest visible window of the frame class rather than the first, because the editor owns small
 windows of that class which are not the frame.
+
+## 15. Reading a property runs its getter, and some getters do real work
+
+The properties panel read the value of everything in a document component's property collection.
+That collection is the entire host object surface, roughly one hundred and seventy properties on a
+workbook, and it includes the hidden mail-integration ones. Reading a value calls its getter, and
+reading a workbook's mail session getter starts a mail logon: on a machine with a mail client and
+no profile, selecting a worksheet opened the mail system's "create new profile" wizard. The panel
+was also reading every value twice, once for its type and once for its text.
+
+The editor's own Properties window never does this because it filters to the properties the type
+library marks browsable, and the dangerous getters are all marked hidden. Until the type library
+is read directly, the browsable sets for the known document kinds are spelled out as allowlists,
+an unknown document kind falls back to its name alone, names are enumerated before any value is
+read (enumerating names runs nothing), and each shown value is read exactly once.

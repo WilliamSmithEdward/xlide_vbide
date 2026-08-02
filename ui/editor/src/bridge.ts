@@ -59,7 +59,7 @@ export type HostMessage =
   | { type: "revealLine"; line: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
-  | { type: "setProperties"; component: string; properties: ShellProperty[] };
+  | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] };
 
 /**
  * Where the page's start-up time went, measured from navigation start.
@@ -89,7 +89,8 @@ export type ClientMessage =
   | { type: "panel"; name: string; open: boolean }
   | { type: "menu"; path: number[] }
   | { type: "menuExecute"; path: number[] }
-  | { type: "editProperty"; component: string; name: string; value: string };
+  | { type: "editProperty"; component: string; name: string; value: string }
+  | { type: "selectComponent"; name: string };
 
 export interface HostTransport {
   post(message: ClientMessage): void;
@@ -235,6 +236,11 @@ export class EditorBridge {
     this.transport.post({ type: "editProperty", component, name, value });
   }
 
+  /** Tells the host the explorer's selection changed, which the properties panel follows. */
+  selectComponent(name: string): void {
+    this.transport.post({ type: "selectComponent", name });
+  }
+
   /**
    * Runs a toolbar command.
    *
@@ -321,7 +327,7 @@ export class EditorBridge {
         this.shell?.setMenuBarVisible(message.menuBar);
         return;
       case "setProperties":
-        this.shell?.setProperties(message.component, message.properties);
+        this.shell?.setProperties(message.component, message.kind, message.properties);
         return;
       default: {
         const unknown: never = message;
@@ -706,6 +712,18 @@ export function demoTransport(): HostTransport {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
+        send({ type: "setModules", modules: ["Module1"], active: "Module1" });
+        send({
+          type: "setProjects",
+          projects: [{
+            name: "VBAProject",
+            components: [
+              { name: "Sheet1", kind: 100 },
+              { name: "ThisWorkbook", kind: 100 },
+              { name: "Module1", kind: 1 },
+            ],
+          }],
+        });
         send({
           type: "setDiagnostics",
           markers: [
@@ -726,24 +744,28 @@ export function demoTransport(): HostTransport {
         send({
           type: "setProperties",
           component: "Module1",
+          kind: "Module",
+          properties: [{ name: "(Name)", value: "Module1", writable: true, boolean: false }],
+        });
+      }
+      if (message.type === "selectComponent") {
+        // A worksheet-shaped answer, so the boolean dropdowns and the header are reachable.
+        send({
+          type: "setProperties",
+          component: message.name,
+          kind: "Worksheet",
           properties: [
-            { name: "Name", value: "Module1", writable: true },
-            { name: "StandardWidth", value: "8.43", writable: true },
-            { name: "Saved", value: "False", writable: false },
+            { name: "(Name)", value: message.name, writable: true, boolean: false },
+            { name: "Name", value: "Sheet1", writable: true, boolean: false },
+            { name: "StandardWidth", value: "8.43", writable: true, boolean: false },
+            { name: "EnableCalculation", value: "True", writable: true, boolean: true },
+            { name: "Visible", value: "-1", writable: true, boolean: false },
+            { name: "Parent", value: "[object]", writable: false, boolean: false },
           ],
         });
       }
       if (message.type === "editProperty") {
         send({ type: "notice", text: `${message.name} set to '${message.value}'` });
-        send({
-          type: "setProperties",
-          component: message.component,
-          properties: [
-            { name: "Name", value: message.name === "Name" ? message.value : "Module1", writable: true },
-            { name: "StandardWidth", value: message.name === "StandardWidth" ? message.value : "8.43", writable: true },
-            { name: "Saved", value: "False", writable: false },
-          ],
-        });
       }
       if (message.type === "breakpointToggleRequested") {
         // The real host owns the breakpoint set; the demo just echoes the single line back.

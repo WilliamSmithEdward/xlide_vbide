@@ -29,6 +29,8 @@ export interface ShellProperty {
   value: string;
   /** Whether an edit will be attempted. The host can still refuse one, and says so. */
   writable: boolean;
+  /** True and False rather than free text. */
+  boolean: boolean;
 }
 
 export interface ShellHandlers {
@@ -46,6 +48,8 @@ export interface ShellHandlers {
   evaluate(text: string): void;
   /** Which panel is showing, and whether the panel is open at all. */
   panelChanged(name: string, open: boolean): void;
+  /** The developer selected a component in the explorer without opening it. */
+  selectComponent(name: string): void;
   /** The developer opened a menu; the host is asked for its items. [] is the bar itself. */
   menuRequest(path: number[]): void;
   /** The developer chose a menu item, named by its position chain. */
@@ -129,11 +133,13 @@ export class Shell {
   private readonly propertiesSection: HTMLElement;
   private readonly propertiesHead: HTMLButtonElement;
   private readonly propertiesList: HTMLElement;
+  private readonly propertiesObject: HTMLElement;
   private readonly propertiesSplitter: HTMLElement;
   private propertiesComponent = "";
+  private propertiesKind = "";
   private properties: ShellProperty[] = [];
   private propertiesOpen = true;
-  private propertiesHeight = 200;
+  private propertiesHeight = 300;
 
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
@@ -146,9 +152,10 @@ export class Shell {
     this.statusNotice = root.querySelector("#status-notice") as HTMLElement;
 
     this.sidebarSplitter = root.querySelector("#sidebar-splitter") as HTMLElement;
-    this.explorer = new Explorer(
-      root.querySelector("#sidebar-tree") as HTMLElement,
-      (name) => handlers.activateModule(name));
+    this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
+      select: (name) => handlers.selectComponent(name),
+      open: (name) => handlers.activateModule(name),
+    });
 
     this.menubar = new Menubar(root.querySelector("#menubar") as HTMLElement, {
       request: (path) => handlers.menuRequest(path),
@@ -159,6 +166,7 @@ export class Shell {
     this.propertiesSection = root.querySelector("#properties") as HTMLElement;
     this.propertiesHead = root.querySelector("#properties-head") as HTMLButtonElement;
     this.propertiesList = root.querySelector("#properties-list") as HTMLElement;
+    this.propertiesObject = root.querySelector("#properties-object") as HTMLElement;
     this.propertiesSplitter = root.querySelector("#properties-splitter") as HTMLElement;
     this.propertiesHead.addEventListener("click", () => this.togglePropertiesOpen());
     this.installPropertiesSplitter();
@@ -236,9 +244,10 @@ export class Shell {
     this.menubar.refresh();
   }
 
-  /** Replaces the properties panel with the shown component's properties. */
-  setProperties(component: string, properties: ShellProperty[]): void {
+  /** Replaces the properties panel with the selected component's properties. */
+  setProperties(component: string, kind: string, properties: ShellProperty[]): void {
     this.propertiesComponent = component;
+    this.propertiesKind = kind;
     this.properties = properties;
     this.renderProperties();
   }
@@ -319,6 +328,16 @@ export class Shell {
     this.propertiesSection.hidden = this.properties.length === 0;
     this.propertiesSplitter.hidden = this.properties.length === 0 || !this.propertiesOpen;
 
+    // The object header, naming the selection and its class the way the editor's own window does.
+    this.propertiesObject.replaceChildren();
+    const objectName = document.createElement("span");
+    objectName.className = "prop-object-name";
+    objectName.textContent = this.propertiesComponent;
+    const objectKind = document.createElement("span");
+    objectKind.className = "prop-object-kind";
+    objectKind.textContent = this.propertiesKind;
+    this.propertiesObject.append(objectName, objectKind);
+
     for (const property of this.properties) {
       const row = document.createElement("div");
       row.className = "prop-row";
@@ -331,7 +350,27 @@ export class Shell {
 
       row.appendChild(name);
 
-      if (property.writable) {
+      if (property.writable && property.boolean) {
+        // A boolean offers its two values rather than a text field that trusts spelling.
+        const select = document.createElement("select");
+        select.className = "prop-value";
+        select.setAttribute("aria-label", `${property.name} of ${this.propertiesComponent}`);
+
+        for (const option of ["True", "False"]) {
+          const choice = document.createElement("option");
+          choice.value = option;
+          choice.textContent = option;
+          choice.selected = option === property.value;
+          select.appendChild(choice);
+        }
+
+        select.addEventListener("change", () => {
+          property.value = select.value;
+          this.handlers.editProperty(this.propertiesComponent, property.name, select.value);
+        });
+
+        row.appendChild(select);
+      } else if (property.writable) {
         const input = document.createElement("input");
         input.className = "prop-value";
         input.type = "text";

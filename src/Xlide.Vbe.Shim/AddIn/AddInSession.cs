@@ -233,6 +233,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.MenuRequested = OnMenuRequested;
                 _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
                 _editorSurface.PropertyEditRequested = OnPropertyEdit;
+                _editorSurface.ComponentSelected = OnComponentSelected;
 
                 // The moment the page is up is the moment the menu bar can be covered, and it is
                 // not a window event, so nothing else would recompute the bounds.
@@ -591,61 +592,173 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Sends the surface the properties of the component it is showing.
-    ///
-    /// Read from the component's own property collection, which is the documented model behind the
-    /// editor's Properties window: a plain module carries only its name, a document component
-    /// carries the host object's properties, and a form carries the form's. A value that cannot be
-    /// read is shown as unavailable rather than dropped, so the panel's shape stays the shape of
-    /// the component.
+    /// The component whose properties the panel shows: the explorer's selection, or the shown
+    /// module when nothing has been selected.
+    /// </summary>
+    private string? _propertiesTarget;
+
+    /*
+     * The document-component properties that are safe to read, which are the ones the editor's own
+     * Properties window shows. That window filters to the properties the type library marks
+     * browsable; until the type library is read directly (the IntelliSense track), these lists ARE
+     * that filter. They are not an aesthetic choice: reading a property runs its getter, and some
+     * of the unlisted getters do real work. Reading a workbook's mail properties starts the mail
+     * system's profile wizard on a machine with none, which is how this was learned.
+     */
+
+    private static readonly string[] WorksheetProperties =
+    [
+        "Name", "DisplayPageBreaks", "DisplayRightToLeft", "EnableAutoFilter", "EnableCalculation",
+        "EnableFormatConditionsCalculation", "EnableOutlining", "EnablePivotTable",
+        "EnableSelection", "ScrollArea", "StandardWidth", "Visible",
+    ];
+
+    private static readonly string[] WorkbookProperties =
+    [
+        "AccuracyVersion", "AutoUpdateFrequency", "AutoUpdateSaveChanges",
+        "ChangeHistoryDuration", "ConflictResolution", "Date1904", "DisplayDrawingObjects",
+        "DisplayInkComments", "EnableAutoRecover", "EncryptionProvider", "EnvelopeVisible",
+        "Final", "ForceFullCalculation", "HighlightChangesOnScreen", "InactiveListBorderVisible",
+        "IsAddin", "KeepChangeHistory", "ListChangesOnNewSheet", "Password",
+        "PrecisionAsDisplayed", "ReadOnlyRecommended", "RemovePersonalInformation", "Saved",
+        "SaveLinkValues", "ShowConflictHistory", "ShowPivotChartActiveFields",
+        "ShowPivotTableFieldList", "TemplateRemoveExtData", "UpdateLinks",
+        "UpdateRemoteReferences",
+    ];
+
+    /// <summary>Component types, as the editor numbers them.</summary>
+    private const int DocumentComponent = 100;
+
+    /// <summary>
+    /// What a document component is, and which of its properties may be read, told from the names
+    /// its collection carries. Names are safe to enumerate; it is values that run getters. A
+    /// document kind this does not recognise shows only its names, which loses detail and starts
+    /// nothing.
+    /// </summary>
+    private static (string Kind, string[]? Allowed) ClassifyDocument(HashSet<string> names)
+    {
+        if (names.Contains("StandardWidth"))
+        {
+            return ("Worksheet", WorksheetProperties);
+        }
+
+        if (names.Contains("Date1904"))
+        {
+            return ("Workbook", WorkbookProperties);
+        }
+
+        return ("Document", ["Name"]);
+    }
+
+    /// <summary>
+    /// Sends the surface the properties of the selected component, shaped the way the editor's own
+    /// Properties window shapes them: an object header naming the component and its class, the
+    /// code name as "(Name)" sorted first, and for a document component the host object's
+    /// browsable properties alongside it.
     /// </summary>
     private void PublishProperties()
     {
         var surface = _editorSurface;
-        var module = surface?.Module;
-        if (surface is null || module is null)
+        var target = _propertiesTarget ?? surface?.Module;
+        if (surface is null || target is null)
         {
             return;
         }
 
         try
         {
-            using var found = FindComponent(module);
+            using var found = FindComponent(target);
             using var properties = found?.GetObject("Properties");
-            var count = properties?.GetInt32("Count") ?? 0;
+            if (found is null || properties is null)
+            {
+                return;
+            }
 
-            var entries = new List<SurfacePropertyEntry>(count);
+            var componentType = found.GetInt32("Type");
+            var count = properties.GetInt32("Count");
+
+            // Names first, values second. Enumerating names runs nothing; it is the value reads
+            // that must be limited to what is known to be safe.
+            var names = new List<string>(count);
             for (var i = 1; i <= count; i++)
             {
-                using var property = properties!.GetItem(i);
+                using var property = properties.GetItem(i);
+
+                try
+                {
+                    if (property?.GetString("Name") is { Length: > 0 } name)
+                    {
+                        names.Add(name);
+                    }
+                }
+                catch (Exception)
+                {
+                    // A property that will not even say its name has nothing to offer the panel.
+                }
+            }
+
+            string kind;
+            HashSet<string>? allowed;
+
+            if (componentType == DocumentComponent)
+            {
+                var (documentKind, list) = ClassifyDocument(new HashSet<string>(names, StringComparer.OrdinalIgnoreCase));
+                kind = documentKind;
+                allowed = list is null ? null : new HashSet<string>(list, StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                kind = componentType switch
+                {
+                    1 => "Module",
+                    2 => "Class Module",
+                    3 => "UserForm",
+                    11 => "ActiveX Designer",
+                    _ => "Component",
+                };
+                allowed = null;
+            }
+
+            var entries = new List<SurfacePropertyEntry>(names.Count + 1);
+
+            // The code name. A document component's collection does not carry it (its Name is the
+            // host object's), so it is added here; everywhere else the collection's Name IS the
+            // code name and is shown under the same spelling the editor uses.
+            if (componentType == DocumentComponent)
+            {
+                entries.Add(new SurfacePropertyEntry("(Name)", target, true, false));
+            }
+
+            foreach (var name in names)
+            {
+                if (allowed is not null && !allowed.Contains(name))
+                {
+                    continue;
+                }
+
+                using var property = properties.GetItem(name);
                 if (property is null)
                 {
                     continue;
                 }
 
-                string? name;
-                try
-                {
-                    name = property.GetString("Name");
-                }
-                catch (Exception)
-                {
-                    continue;
-                }
+                var shownName = componentType != DocumentComponent
+                    && string.Equals(name, "Name", StringComparison.OrdinalIgnoreCase)
+                    ? "(Name)"
+                    : name;
 
-                if (!string.IsNullOrEmpty(name))
-                {
-                    entries.Add(DescribeProperty(name, property));
-                }
+                entries.Add(DescribeProperty(shownName, property));
             }
 
-            // The order the collection enumerates in is arbitrary; alphabetical is findable.
+            // Alphabetical, which puts "(Name)" first: the parenthesis sorts before any letter,
+            // and that is the point of the parenthesis.
             entries.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-            surface.ShowProperties(module, [.. entries]);
+            surface.ShowProperties(target, kind, [.. entries]);
+            Log.Info($"properties: {target} ({kind}), showing {entries.Count} of {count}");
         }
         catch (Exception ex)
         {
-            Log.Error($"properties: {module} could not be read", ex);
+            Log.Error($"properties: {target} could not be read", ex);
         }
     }
 
@@ -654,23 +767,30 @@ internal sealed class AddInSession : IDisposable
     /// it currently holds: values of simple types are editable, objects and the unreadable are not.
     /// The editor can still refuse an edit, and that refusal is reported when it happens.
     /// </summary>
-    private static SurfacePropertyEntry DescribeProperty(string name, DispatchObject property)
+    private static SurfacePropertyEntry DescribeProperty(string shownName, DispatchObject property)
     {
         try
         {
-            var type = property.GetVarType("Value");
-            var writable = type is VarEnum.VT_BSTR or VarEnum.VT_BOOL
+            var (kind, display) = property.ReadProperty("Value");
+            var writable = kind is VarEnum.VT_BSTR or VarEnum.VT_BOOL
                 or VarEnum.VT_I2 or VarEnum.VT_I4 or VarEnum.VT_INT
                 or VarEnum.VT_R4 or VarEnum.VT_R8 or VarEnum.VT_EMPTY;
 
-            return new SurfacePropertyEntry(name, property.GetDisplay("Value"), writable);
+            return new SurfacePropertyEntry(shownName, display, writable, kind == VarEnum.VT_BOOL);
         }
         catch (Exception)
         {
             // Some values refuse to be read in some host states. The property still exists, and a
             // row that says so beats a property that silently vanishes.
-            return new SurfacePropertyEntry(name, "(unavailable)", false);
+            return new SurfacePropertyEntry(shownName, "(unavailable)", false, false);
         }
+    }
+
+    /// <summary>Follows the explorer's selection with the properties panel, and nothing else.</summary>
+    private void OnComponentSelected(string component)
+    {
+        _propertiesTarget = component;
+        PublishProperties();
     }
 
     /// <summary>
@@ -683,9 +803,37 @@ internal sealed class AddInSession : IDisposable
         try
         {
             using var found = FindComponent(component);
-            using var properties = found?.GetObject("Properties");
+            if (found is null)
+            {
+                Log.Info($"properties: {component} no longer exists");
+                PublishProperties();
+                return;
+            }
+
+            // "(Name)" is the code name, which is the component's own rather than one of the
+            // collection's. For a document component the collection's Name is the host object's.
+            if (string.Equals(name, "(Name)", StringComparison.Ordinal))
+            {
+                found.SetString("Name", value);
+
+                var actual = found.GetString("Name") ?? value;
+                Log.Info($"properties: {component} code name = '{actual}'");
+
+                if (!string.Equals(actual, component, StringComparison.OrdinalIgnoreCase))
+                {
+                    AdoptRename(component, actual);
+                }
+                else
+                {
+                    PublishProperties();
+                }
+
+                return;
+            }
+
+            using var properties = found.GetObject("Properties");
             using var property = properties?.GetItem(name);
-            if (found is null || property is null)
+            if (property is null)
             {
                 Log.Info($"properties: {component}.{name} no longer exists");
                 PublishProperties();
@@ -777,7 +925,7 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    /// <summary>Moves every record keyed by a component's old name to its new one, then shows it.</summary>
+    /// <summary>Moves every record keyed by a component's old name to its new one.</summary>
     private void AdoptRename(string oldName, string newName)
     {
         if (_writtenModules.Remove(oldName, out var baseline))
@@ -790,11 +938,25 @@ internal sealed class AddInSession : IDisposable
             _breakpoints[newName] = lines;
         }
 
+        if (string.Equals(_propertiesTarget, oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            _propertiesTarget = newName;
+        }
+
         Log.Info($"properties: {oldName} renamed to {newName}");
 
-        // Shown under the new name, which also republishes markers, breakpoints and properties.
-        // The analyzer re-runs because its findings carry the old name until it does.
-        ShowModuleInSurface(newName);
+        // Only a rename of the shown module reloads the editor; renaming anything else must not
+        // take the developer away from what they were editing. The analyzer re-runs either way,
+        // because its findings carry the old name until it does.
+        if (string.Equals(_editorSurface?.Module, oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            ShowModuleInSurface(newName);
+        }
+        else
+        {
+            PublishProperties();
+        }
+
         PublishModules();
         PublishProjects();
         _analysis?.Reanalyse();
@@ -1236,6 +1398,9 @@ internal sealed class AddInSession : IDisposable
         {
             return;
         }
+
+        // Opening a module also selects it, the way the editor's own tree behaves.
+        _propertiesTarget = component;
 
         _writtenModules[component] = source;
         _editorSurface?.Show(component, source);

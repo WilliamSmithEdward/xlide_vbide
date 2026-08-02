@@ -91,6 +91,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer edits a property: component, property name, new value.</summary>
     public Action<string, string, string>? PropertyEditRequested { get; set; }
 
+    /// <summary>Raised when the developer selects a component in the explorer without opening it.</summary>
+    public Action<string>? ComponentSelected { get; set; }
+
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
     public Action? Ready { get; set; }
 
@@ -294,14 +297,15 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetChromeMessage));
     }
 
-    /// <summary>Replaces the properties panel's contents with the shown component's properties.</summary>
-    public void ShowProperties(string component, SurfacePropertyEntry[] properties)
+    /// <summary>Replaces the properties panel's contents with the selected component's properties.</summary>
+    public void ShowProperties(string component, string kind, SurfacePropertyEntry[] properties)
     {
         ArgumentNullException.ThrowIfNull(component);
+        ArgumentNullException.ThrowIfNull(kind);
         ArgumentNullException.ThrowIfNull(properties);
 
         Send("setProperties", JsonSerializer.Serialize(
-            new SetPropertiesMessage("setProperties", component, properties),
+            new SetPropertiesMessage("setProperties", component, kind, properties),
             EditorMessageContext.Default.SetPropertiesMessage));
     }
 
@@ -628,6 +632,15 @@ internal sealed class EditorSurface : IDisposable
                     if (PathOf(document.RootElement) is { Length: > 0 } executePath)
                     {
                         MenuExecuteRequested?.Invoke(executePath);
+                    }
+
+                    break;
+
+                case "selectComponent":
+                    if (document.RootElement.TryGetProperty("name", out var selected)
+                        && selected.GetString() is { Length: > 0 } selectedName)
+                    {
+                        ComponentSelected?.Invoke(selectedName);
                     }
 
                     break;

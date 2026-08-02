@@ -43,26 +43,63 @@ const GROUPS: Group[] = [
   { title: "Class Modules", kinds: [ComponentKind.ClassModule], icon: "symbol-class" },
 ];
 
+export interface ExplorerHandlers {
+  /** Single click: the component becomes the selection, and nothing opens. */
+  select(name: string): void;
+  /** Double click, or Enter on the focused item: the component's code opens. */
+  open(name: string): void;
+}
+
 export class Explorer {
   private readonly root: HTMLElement;
-  private readonly activate: (name: string) => void;
+  private readonly handlers: ExplorerHandlers;
 
   private projects: ExplorerProject[] = [];
   private active: string | null = null;
+  private selected: string | null = null;
   private problemCounts = new Map<string, number>();
 
-  constructor(root: HTMLElement, activate: (name: string) => void) {
+  constructor(root: HTMLElement, handlers: ExplorerHandlers) {
     this.root = root;
-    this.activate = activate;
+    this.handlers = handlers;
 
     // One listener for the whole tree. The tree is rebuilt whenever the project changes, and
     // per-item listeners would have to be torn down with it.
+    //
+    // Selecting and opening are separate gestures, the way the editor's own tree works: a click
+    // selects, which the properties panel follows, and a double click or Enter opens the code.
     this.root.addEventListener("click", (event) => {
-      const item = (event.target as HTMLElement).closest("[data-component]") as HTMLElement | null;
-      if (item?.dataset.component) {
-        this.activate(item.dataset.component);
+      const name = this.componentAt(event);
+      if (name) {
+        this.selected = name;
+        this.render();
+        this.handlers.select(name);
       }
     });
+
+    this.root.addEventListener("dblclick", (event) => {
+      const name = this.componentAt(event);
+      if (name) {
+        this.handlers.open(name);
+      }
+    });
+
+    this.root.addEventListener("keydown", (event) => {
+      // A button already turns Enter into a click; this turns it into an open instead, so the
+      // keyboard can do everything the mouse can.
+      if (event.key === "Enter") {
+        const name = this.componentAt(event);
+        if (name) {
+          event.preventDefault();
+          this.handlers.open(name);
+        }
+      }
+    });
+  }
+
+  private componentAt(event: Event): string | null {
+    const item = (event.target as HTMLElement).closest("[data-component]") as HTMLElement | null;
+    return item?.dataset.component ?? null;
   }
 
   setProjects(projects: ExplorerProject[]): void {
@@ -119,10 +156,12 @@ export class Explorer {
   private item(component: ExplorerComponent, icon: string): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "tree-item" + (component.name === this.active ? " active" : "");
+    button.className = "tree-item"
+      + (component.name === this.active ? " active" : "")
+      + (component.name === this.selected ? " selected" : "");
     button.dataset.component = component.name;
     button.setAttribute("role", "treeitem");
-    button.setAttribute("aria-selected", String(component.name === this.active));
+    button.setAttribute("aria-selected", String(component.name === this.selected));
 
     const glyph = document.createElement("span");
     glyph.className = `codicon codicon-${icon}`;

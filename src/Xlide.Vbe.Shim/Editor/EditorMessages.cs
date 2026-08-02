@@ -136,18 +136,24 @@ public sealed record SetChromeMessage(
     [property: JsonPropertyName("menuBar")] bool MenuBar);
 
 /// <summary>
-/// One property of the shown component, rendered for display. Writable says whether an edit will
-/// be attempted, not promised: the editor can still refuse one, and the refusal is reported.
+/// One property of the selected component, rendered for display. Writable says whether an edit
+/// will be attempted, not promised: the editor can still refuse one, and the refusal is reported.
+/// Boolean marks a value that offers True and False rather than free text.
 /// </summary>
 public sealed record SurfacePropertyEntry(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("value")] string Value,
-    [property: JsonPropertyName("writable")] bool Writable);
+    [property: JsonPropertyName("writable")] bool Writable,
+    [property: JsonPropertyName("boolean")] bool Boolean);
 
-/// <summary>The properties of the component the surface is showing.</summary>
+/// <summary>
+/// The properties of the selected component, with the class name shown in the panel's object
+/// header the way the editor's own window names what is selected.
+/// </summary>
 public sealed record SetPropertiesMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("component")] string Component,
+    [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("properties")] SurfacePropertyEntry[] Properties);
 
 /// <summary>

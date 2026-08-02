@@ -185,11 +185,17 @@ internal sealed unsafe class DispatchObject : IDisposable
         return value.VarType;
     }
 
-    /// <summary>Reads a property and renders it the way the language would print it.</summary>
-    public string GetDisplay(string name)
+    /// <summary>
+    /// Reads a property once and reports both the type it held and how it prints.
+    ///
+    /// One read, deliberately. A property is read by running its getter, a getter is code that can
+    /// do anything, and some do a great deal: reading a workbook's mail session starts the mail
+    /// system. Callers that need both answers must not pay that price twice.
+    /// </summary>
+    public (VarEnum Kind, string Display) ReadProperty(string name)
     {
         using var value = GetProperty(name);
-        return Display(value);
+        return (value.VarType, Display(value));
     }
 
     /// <summary>Writes a text property.</summary>

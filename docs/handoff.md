@@ -120,14 +120,19 @@ has said plainly it must never be a production mechanism.
   0,0 after ready) and 11 menus read; dropdowns, submenus, separators, disabled/checked items,
   shortcut column, execution paths, Alt+letter, F10, arrows and Escape verified in the browser
   demo (demoTransport serves a canned tree).
-- The Properties window is replaced. A surface pane pinned under the explorer (resizable by a
-  gripped splitter, like the other two) shows the shown component's properties from its own
-  Properties collection: name for a plain module, the host object's properties for a document
-  component. Simple-typed values are editable in place; edits write in the type the property
-  holds; refusals are reported in the editor's own words; renaming a component rekeys the write
-  baseline and breakpoint record and reloads the document under the new name. View -> Properties
-  Window opens this pane. Verified live: the pane renders from the real collection; the edit
-  round trip is verified against the demo transport, and rename should be exercised by hand.
+- The Properties window is replaced, and the pane mirrors the native one. It follows the
+  explorer's SELECTION (single click selects and publishes properties; double click or Enter
+  opens the code, exactly like the native tree); an object header names the selection and its
+  class ("Sheet1 Worksheet"); the code name appears as "(Name)" and sorts first; booleans are
+  True/False dropdowns; the rest are inputs or read-only rows. Edits write in the type the
+  property holds; refusals are reported in the editor's own words; renaming through "(Name)"
+  rekeys the write baseline and breakpoint record, and only reloads the editor if the renamed
+  module is the one being shown. View -> Properties Window opens this pane. CRITICAL SAFETY RULE
+  (lessons.md 15): for document components, only the allowlisted browsable properties are read,
+  names are enumerated before any value, and each value is read once - reading an unlisted
+  getter such as a workbook's mail properties STARTS THE MAIL SYSTEM. The allowlists stand in
+  for the type library's browsable flags until those are read directly (IntelliSense track).
+  Resizable by a gripped splitter, like the other two.
 - 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit
