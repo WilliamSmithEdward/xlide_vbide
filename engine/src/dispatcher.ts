@@ -10,6 +10,7 @@ import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLog
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import { completionsFor } from './completion';
 import { hoverFor } from './hover';
+import { signatureHelpFor } from './signature';
 import {
     ErrorCode,
     type CompletionParams,
@@ -21,6 +22,8 @@ import {
     type JsonRpcError,
     type ModulePayload,
     type ProjectOpenParams,
+    type SignatureHelpParams,
+    type SignatureHelpResult,
 } from './protocol';
 
 /** Thrown to answer a request with a JSON-RPC error rather than a result. */
@@ -84,6 +87,9 @@ export class Dispatcher {
             case 'textDocument/hover':
                 return this.hover(this.require<HoverParams>(params));
 
+            case 'textDocument/signatureHelp':
+                return this.signatureHelp(this.require<SignatureHelpParams>(params));
+
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
@@ -128,6 +134,13 @@ export class Dispatcher {
 
         // Same liveness rule as completion.
         return { hover: hoverFor(this.seededModules.get(params.projectId) ?? [], params) };
+    }
+
+    private signatureHelp(params: SignatureHelpParams): SignatureHelpResult {
+        this.requireInitialized();
+
+        // Same liveness rule as completion.
+        return { signature: signatureHelpFor(this.seededModules.get(params.projectId) ?? [], params) };
     }
 
     private diagnostics(params: DiagnosticsParams): DiagnosticsResult {

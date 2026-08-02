@@ -140,6 +140,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ComponentInsertRequested = InsertComponent;
         _editorSurface.CompletionRequested = OnCompletionRequested;
         _editorSurface.HoverRequested = OnHoverRequested;
+        _editorSurface.SignatureHelpRequested = OnSignatureHelpRequested;
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -1687,6 +1688,51 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowHover(requestId, payload));
+        });
+    }
+
+    /// <summary>Answers a call-tip request from the surface, the same way a hover is answered.</summary>
+    private void OnSignatureHelpRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowSignatureHelp(requestId, null);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceSignatureInfo? payload = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.SignatureHelpAsync(module, source, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    payload = new SurfaceSignatureInfo(
+                        answered.Label,
+                        [.. answered.Parameters.Select(parameter =>
+                            new SurfaceSignatureParameter(parameter.Label, parameter.Documentation))],
+                        answered.ActiveParameter,
+                        answered.Documentation,
+                        answered.Details);
+                }
+
+                Log.Info($"signature: {module}@{offset} -> {(payload is null ? "nothing" : payload.Label)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"signature: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowSignatureHelp(requestId, payload));
         });
     }
 

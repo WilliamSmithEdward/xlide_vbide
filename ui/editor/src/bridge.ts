@@ -62,7 +62,23 @@ export type HostMessage =
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
   | { type: "completionResult"; id: number; items: HostCompletionItem[] }
-  | { type: "hoverResult"; id: number; hover: HostHoverPayload | null };
+  | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
+  | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null };
+
+/** One parameter slot, its label exactly as it appears in the signature line. */
+export interface HostSignatureParameter {
+  label: string;
+  documentation?: string | null;
+}
+
+/** A resolved call tip from the host's engine. */
+export interface HostSignatureInfo {
+  label: string;
+  parameters: HostSignatureParameter[];
+  activeParameter: number;
+  documentation?: string | null;
+  details?: string[] | null;
+}
 
 /** A resolved hover from the host's engine. Spans are UTF-16 offsets into the live source. */
 export interface HostHoverPayload {
@@ -120,6 +136,7 @@ export type ClientMessage =
   | { type: "insertComponent"; kind: number }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
+  | { type: "signatureHelp"; id: number; offset: number }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -212,8 +229,15 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Call-tip requests awaiting their answers, by request identifier. */
+  private readonly pendingSignatures = new Map<number, {
+    resolve: (signature: HostSignatureInfo | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   private nextCompletionId = 1;
   private nextHoverId = 1;
+  private nextSignatureId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -339,6 +363,24 @@ export class EditorBridge {
   }
 
   /**
+   * Asks the host for the call tip at an offset. Resolves null rather than rejecting: a tip that
+   * fails is a tip that does not show.
+   */
+  requestSignatureHelp(offset: number): Promise<HostSignatureInfo | null> {
+    const id = this.nextSignatureId++;
+
+    return new Promise<HostSignatureInfo | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingSignatures.delete(id);
+        resolve(null);
+      }, 2000);
+
+      this.pendingSignatures.set(id, { resolve, timer });
+      this.transport.post({ type: "signatureHelp", id, offset });
+    });
+  }
+
+  /**
    * Runs a toolbar command.
    *
    * An editor command is run here; a host command is sent on. The editor's caret has to reach the
@@ -444,6 +486,15 @@ export class EditorBridge {
           this.pendingHovers.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.hover);
+        }
+        return;
+      }
+      case "signatureHelpResult": {
+        const waiter = this.pendingSignatures.get(message.id);
+        if (waiter) {
+          this.pendingSignatures.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.signature);
         }
         return;
       }
@@ -943,6 +994,17 @@ export function demoTransport(): HostTransport {
             details: ["Excel host global"],
             start: message.offset,
             end: message.offset,
+          },
+        });
+      }
+      if (message.type === "signatureHelp") {
+        send({
+          type: "signatureHelpResult",
+          id: message.id,
+          signature: {
+            label: "MsgBox(Prompt, [Buttons], [Title]) As VbMsgBoxResult",
+            parameters: [{ label: "Prompt" }, { label: "[Buttons]" }, { label: "[Title]" }],
+            activeParameter: 0,
           },
         });
       }

@@ -185,6 +185,37 @@ internal sealed class AnalysisService : IAsyncDisposable
         return result?.Hover;
     }
 
+    /// <summary>
+    /// Asks the engine for the call tip at an offset into a module's live text, or null when
+    /// there is no engine, no address for the module, or the caret is not inside a call.
+    /// </summary>
+    public async Task<EngineSignatureInfo?> SignatureHelpAsync(
+        string moduleName,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Signature;
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;

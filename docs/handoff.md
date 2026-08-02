@@ -148,12 +148,19 @@ has said plainly it must never be a production mechanism.
   expression position: in-scope identifiers, host globals, runtime functions, other modules'
   procedures, plus keywords; keyword-exclusive grammar positions show only keywords. The pipe
   client serialises calls (the protocol pairs answers by position); the surface asks with a
-  correlation id + UTF-16 offset; the host answers off-thread and marshals back via a posted
-  window message (OverlayWindow.RunOnHostThread); the page maps analyzer kinds to Monaco icons
-  and inserts '${'-bearing insertText as snippets. Engine smoke test covers it end to end; log
-  line per request: "completion: <module>@<offset> -> N item(s)". Hover and signature help are
-  the next rungs on the same channel; xlide_vscode has resolveHover and signatureHelp ready to
-  lift the same way.
+  correlation id + UTF-16 offset; the host answers off-thread and marshals back on the overlay's
+  action timer (OverlayWindow.RunOnHostThread — never a posted message, see lesson 18); the page
+  maps analyzer kinds to Monaco icons and inserts '${'-bearing insertText as snippets. Engine
+  smoke test covers it end to end; log line per request:
+  "completion: <module>@<offset> -> N item(s)".
+- HOVER and SIGNATURE HELP ride the same channel (textDocument/hover, textDocument/signatureHelp),
+  reusing resolveHover and resolveSignatureHelp over the shared project assembly
+  (engine/src/moduleContext.ts — one assembly so completion, hover, and call tips describe the
+  same project). Hover renders the declaration line as VBA code plus origin/visibility details
+  and markdown docs; call tips carry the full parameter list with the active parameter tracked
+  through both parenthesized and parenless calls, triggered on '(', ',' and space exactly as the
+  extension triggers them. Smoke-tested end to end (local, host global, cross-module procedure,
+  MsgBox tip, parenless second argument, null cases).
 - 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit

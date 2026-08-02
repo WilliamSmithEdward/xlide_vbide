@@ -156,3 +156,37 @@ export interface HoverPayload {
 export interface HoverResult {
     hover: HoverPayload | null;
 }
+
+/**
+ * textDocument/signatureHelp: the call tip for the argument list the caret is inside. Same
+ * liveness rule as completion.
+ */
+export interface SignatureHelpParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now. */
+    source: string;
+    /** UTF-16 offset into that source. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** One parameter slot, its label exactly as it appears in the signature line. */
+export interface SignatureParameterPayload {
+    label: string;
+    documentation?: string;
+}
+
+/** A resolved call tip: the signature line and which parameter is active. */
+export interface SignatureInfoPayload {
+    label: string;
+    parameters: SignatureParameterPayload[];
+    activeParameter: number;
+    documentation?: string;
+    details?: string[];
+}
+
+export interface SignatureHelpResult {
+    signature: SignatureInfoPayload | null;
+}

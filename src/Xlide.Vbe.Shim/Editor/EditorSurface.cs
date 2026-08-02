@@ -106,6 +106,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks what the identifier at an offset is: (requestId, offset).</summary>
     public Action<int, int>? HoverRequested { get; set; }
 
+    /// <summary>Raised when the page asks for the call tip at an offset: (requestId, offset).</summary>
+    public Action<int, int>? SignatureHelpRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -139,6 +142,19 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new HoverResultMessage("hoverResult", requestId, hover),
             EditorMessageContext.Default.HoverResultMessage));
+    }
+
+    /// <summary>Answers one call-tip request. Never held: a tip outlives no keystroke.</summary>
+    public void ShowSignatureHelp(int requestId, SurfaceSignatureInfo? signature)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SignatureHelpResultMessage("signatureHelpResult", requestId, signature),
+            EditorMessageContext.Default.SignatureHelpResultMessage));
     }
 
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
@@ -758,6 +774,18 @@ internal sealed class EditorSurface : IDisposable
                         && hoverOffset >= 0)
                     {
                         HoverRequested?.Invoke(hoverRequestId, hoverOffset);
+                    }
+
+                    break;
+
+                case "signatureHelp":
+                    if (document.RootElement.TryGetProperty("id", out var signatureId)
+                        && signatureId.TryGetInt32(out var signatureRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var signatureOffsetElement)
+                        && signatureOffsetElement.TryGetInt32(out var signatureOffset)
+                        && signatureOffset >= 0)
+                    {
+                        SignatureHelpRequested?.Invoke(signatureRequestId, signatureOffset);
                     }
 
                     break;

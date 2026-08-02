@@ -193,6 +193,25 @@ public sealed record HoverResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("hover")] SurfaceHoverPayload? Hover);
 
+/// <summary>One parameter slot, its label exactly as it appears in the signature line.</summary>
+public sealed record SurfaceSignatureParameter(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("documentation")] string? Documentation);
+
+/// <summary>A resolved call tip: the signature line and which parameter is active.</summary>
+public sealed record SurfaceSignatureInfo(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("parameters")] SurfaceSignatureParameter[] Parameters,
+    [property: JsonPropertyName("activeParameter")] int ActiveParameter,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("details")] string[]? Details);
+
+/// <summary>The answer to one call-tip request; null means the caret is not inside a call.</summary>
+public sealed record SignatureHelpResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("signature")] SurfaceSignatureInfo? Signature);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -222,6 +241,9 @@ public sealed record HoverResultMessage(
 [JsonSerializable(typeof(SurfaceCompletionItem))]
 [JsonSerializable(typeof(HoverResultMessage))]
 [JsonSerializable(typeof(SurfaceHoverPayload))]
+[JsonSerializable(typeof(SignatureHelpResultMessage))]
+[JsonSerializable(typeof(SurfaceSignatureInfo))]
+[JsonSerializable(typeof(SurfaceSignatureParameter))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

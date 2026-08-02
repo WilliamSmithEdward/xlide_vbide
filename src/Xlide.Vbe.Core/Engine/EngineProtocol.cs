@@ -47,6 +47,22 @@ public sealed record EngineHoverPayload(
 public sealed record EngineHover(
     [property: JsonPropertyName("hover")] EngineHoverPayload? Hover);
 
+/// <summary>One parameter slot, its label exactly as it appears in the signature line.</summary>
+public sealed record EngineSignatureParameter(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("documentation")] string? Documentation);
+
+/// <summary>A resolved call tip: the signature line and which parameter is active.</summary>
+public sealed record EngineSignatureInfo(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("parameters")] EngineSignatureParameter[] Parameters,
+    [property: JsonPropertyName("activeParameter")] int ActiveParameter,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("details")] string[]? Details);
+
+public sealed record EngineSignatureHelp(
+    [property: JsonPropertyName("signature")] EngineSignatureInfo? Signature);
+
 /// <summary>
 /// Serialisation for the engine protocol.
 ///
@@ -66,6 +82,9 @@ public sealed record EngineHover(
 [JsonSerializable(typeof(EngineCompletions))]
 [JsonSerializable(typeof(EngineHoverPayload))]
 [JsonSerializable(typeof(EngineHover))]
+[JsonSerializable(typeof(EngineSignatureParameter))]
+[JsonSerializable(typeof(EngineSignatureInfo))]
+[JsonSerializable(typeof(EngineSignatureHelp))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;

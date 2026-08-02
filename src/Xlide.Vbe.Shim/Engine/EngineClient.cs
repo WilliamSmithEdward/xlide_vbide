@@ -218,6 +218,28 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineHover);
     }
 
+    /// <summary>Asks for the call tip at an offset into a module's live source.</summary>
+    public async Task<EngineSignatureHelp?> SignatureHelpAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["offset"] = offset,
+        };
+
+        var result = await CallAsync("textDocument/signatureHelp", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineSignatureHelp);
+    }
+
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
         var writer = _writer;

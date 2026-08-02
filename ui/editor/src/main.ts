@@ -183,6 +183,41 @@ function boot(): void {
     },
   });
 
+  // Call tips, triggered the way the extension triggers them: the opening paren, the comma, and
+  // the space, because VBA calls procedures without parentheses too.
+  monaco.languages.registerSignatureHelpProvider(VBA_LANGUAGE_ID, {
+    signatureHelpTriggerCharacters: ["(", ",", " "],
+    signatureHelpRetriggerCharacters: [","],
+    provideSignatureHelp: async (model, position) => {
+      if (model !== editor.getModel()) {
+        return null;
+      }
+
+      const info = await bridge.requestSignatureHelp(model.getOffsetAt(position));
+      if (!info) {
+        return null;
+      }
+
+      const signature: monaco.languages.SignatureInformation = {
+        label: info.label,
+        parameters: info.parameters.map((parameter) => ({
+          label: parameter.label,
+          ...(parameter.documentation ? { documentation: { value: parameter.documentation } } : {}),
+        })),
+        ...(info.documentation ? { documentation: { value: info.documentation } } : {}),
+      };
+
+      return {
+        value: {
+          signatures: [signature],
+          activeSignature: 0,
+          activeParameter: info.activeParameter,
+        },
+        dispose: () => { },
+      };
+    },
+  });
+
   // The host's own commands, present in the editor's context menu and the command palette so
   // they are discoverable where a developer already looks for commands.
   const hostActions: Array<[string, string, string]> = [

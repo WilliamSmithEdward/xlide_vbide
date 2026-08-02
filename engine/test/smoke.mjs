@@ -259,6 +259,49 @@ try {
 
     check('hovering nothing answers null', () => assert.equal(blankHover.hover, null));
 
+    // Signature help: the call tip inside an argument list.
+    const runtimeCallSource = GOOD_MODULE.replace('    n = 1', '    MsgBox(');
+    const runtimeTip = await call('textDocument/signatureHelp', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: runtimeCallSource,
+        offset: runtimeCallSource.indexOf('MsgBox(') + 'MsgBox('.length,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> call tip: ${runtimeTip.signature?.label ?? '(none)'}`);
+    check('a runtime call shows its tip with the first parameter active', () => {
+        assert.ok(runtimeTip.signature, 'expected a signature');
+        assert.ok(runtimeTip.signature.label.includes('MsgBox'),
+            `label was '${runtimeTip.signature.label}'`);
+        assert.ok(runtimeTip.signature.parameters.length > 0, 'expected parameters');
+        assert.equal(runtimeTip.signature.activeParameter, 0);
+    });
+
+    const secondArgSource = GOOD_MODULE.replace('    n = 1', '    MsgBox "hi", ');
+    const secondArgTip = await call('textDocument/signatureHelp', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: secondArgSource,
+        offset: secondArgSource.indexOf(', ') + 2,
+        moduleType: 'standard',
+    });
+
+    check('a parenless call advances the active parameter past the comma', () => {
+        assert.ok(secondArgTip.signature, 'expected a signature');
+        assert.equal(secondArgTip.signature.activeParameter, 1);
+    });
+
+    const noCallTip = await call('textDocument/signatureHelp', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE,
+        offset: GOOD_MODULE.indexOf('n = 1'),
+        moduleType: 'standard',
+    });
+
+    check('outside any call there is no tip', () => assert.equal(noCallTip.signature, null));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;
