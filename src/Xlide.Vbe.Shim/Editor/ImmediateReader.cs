@@ -193,14 +193,57 @@ internal sealed class ImmediateReader : IDisposable
         }
     }
 
-    /// <summary>The reading without the caret's own tail, which is presentation and not output.</summary>
-    private static string? Normalise(string? text) => text?.TrimEnd('\r', '\n', ' ', '\t');
+    /// <summary>
+    /// The reading without the caret's own tail, which is presentation and not output.
+    ///
+    /// The tail is trimmed by character class, not by a list. The document ends in a character
+    /// that is neither a newline nor a space, output is inserted BEFORE it, and a list that did
+    /// not include it meant every reading failed the prefix check and every print was swallowed.
+    /// Anything unprintable or blank at the end is the caret's furniture, not the code's output.
+    /// </summary>
+    private static string? Normalise(string? text)
+    {
+        if (text is null)
+        {
+            return null;
+        }
 
-    /// <summary>The end of a reading, printable, for the log.</summary>
+        var end = text.Length;
+        while (end > 0 && (char.IsWhiteSpace(text[end - 1]) || char.IsControl(text[end - 1])))
+        {
+            end--;
+        }
+
+        return text[..end];
+    }
+
+    /// <summary>The end of a reading with every non-printable made visible, for the log.</summary>
     private static string Tail(string text)
     {
         var tail = text.Length > 60 ? text[^60..] : text;
-        return tail.Replace("\r", "\\r").Replace("\n", "\\n").Replace("\u0001", "\\1");
+        var printable = new System.Text.StringBuilder(tail.Length + 8);
+
+        foreach (var c in tail)
+        {
+            if (c == '\r')
+            {
+                printable.Append("\\r");
+            }
+            else if (c == '\n')
+            {
+                printable.Append("\\n");
+            }
+            else if (c < ' ' || c > '~')
+            {
+                printable.Append($"\\u{(int)c:X4}");
+            }
+            else
+            {
+                printable.Append(c);
+            }
+        }
+
+        return printable.ToString();
     }
 
     /// <summary>Treats everything currently in the window as already seen.</summary>
