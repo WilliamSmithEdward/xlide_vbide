@@ -100,6 +100,27 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer asks for a new component: 1 module, 2 class, 3 form.</summary>
     public Action<int>? ComponentInsertRequested { get; set; }
 
+    /// <summary>Raised when the editor wants completions: request identifier, caret offset.</summary>
+    public Action<int, int>? CompletionRequested { get; set; }
+
+    /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
+    public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
+
+    /// <summary>Answers one completion request. Never held: an answer outlives no keystroke.</summary>
+    public void ShowCompletions(int requestId, SurfaceCompletionItem[] items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new CompletionResultMessage("completionResult", requestId, items),
+            EditorMessageContext.Default.CompletionResultMessage));
+    }
+
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
     public Action? Ready { get; set; }
 
@@ -693,6 +714,18 @@ internal sealed class EditorSurface : IDisposable
                         && componentKind.TryGetInt32(out var insertKind))
                     {
                         ComponentInsertRequested?.Invoke(insertKind);
+                    }
+
+                    break;
+
+                case "completion":
+                    if (document.RootElement.TryGetProperty("id", out var completionId)
+                        && completionId.TryGetInt32(out var requestId)
+                        && document.RootElement.TryGetProperty("offset", out var caretOffset)
+                        && caretOffset.TryGetInt32(out var offset)
+                        && offset >= 0)
+                    {
+                        CompletionRequested?.Invoke(requestId, offset);
                     }
 
                     break;

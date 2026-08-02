@@ -27,7 +27,7 @@ import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
-import { EditorBridge, demoTransport, webView2Transport } from "./bridge.js";
+import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
 import { Shell } from "./shell.js";
@@ -112,6 +112,28 @@ function boot(): void {
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
 
+  // Completions come from the host's engine: the analyzer that verified the Excel object model
+  // decides what a receiver offers, and the page only renders the answer. Triggered on the dot
+  // for member access, and by ordinary typing for identifiers and keywords.
+  monaco.languages.registerCompletionItemProvider(VBA_LANGUAGE_ID, {
+    triggerCharacters: ["."],
+    provideCompletionItems: async (model, position) => {
+      if (model !== editor.getModel()) {
+        return { suggestions: [] };
+      }
+
+      const items = await bridge.requestCompletions(model.getOffsetAt(position));
+      const word = model.getWordUntilPosition(position);
+      const range = new monaco.Range(
+        position.lineNumber,
+        word.startColumn,
+        position.lineNumber,
+        word.endColumn);
+
+      return { suggestions: items.map((item) => toSuggestion(item, range)) };
+    },
+  });
+
   // The host's own commands, present in the editor's context menu and the command palette so
   // they are discoverable where a developer already looks for commands.
   const hostActions: Array<[string, string, string]> = [
@@ -176,6 +198,61 @@ function boot(): void {
   // After ready, so the reply cannot arrive before the host considers the page up. The bar needs
   // its top-level items before anything is clicked: they carry the Alt accelerators.
   shell.requestMenus();
+}
+
+/** The analyzer's completion kinds, mapped onto the editor's icons. */
+const COMPLETION_KINDS: Record<string, monaco.languages.CompletionItemKind> = {
+  method: monaco.languages.CompletionItemKind.Method,
+  property: monaco.languages.CompletionItemKind.Property,
+  event: monaco.languages.CompletionItemKind.Event,
+  constant: monaco.languages.CompletionItemKind.Constant,
+  enum: monaco.languages.CompletionItemKind.Enum,
+  enumMember: monaco.languages.CompletionItemKind.EnumMember,
+  global: monaco.languages.CompletionItemKind.Variable,
+  codeName: monaco.languages.CompletionItemKind.File,
+  variable: monaco.languages.CompletionItemKind.Variable,
+  parameter: monaco.languages.CompletionItemKind.Variable,
+  value: monaco.languages.CompletionItemKind.Value,
+  procedure: monaco.languages.CompletionItemKind.Function,
+  function: monaco.languages.CompletionItemKind.Function,
+  runtime: monaco.languages.CompletionItemKind.Function,
+  module: monaco.languages.CompletionItemKind.Module,
+  type: monaco.languages.CompletionItemKind.Struct,
+  object: monaco.languages.CompletionItemKind.Class,
+  collection: monaco.languages.CompletionItemKind.Class,
+  keyword: monaco.languages.CompletionItemKind.Keyword,
+};
+
+function toSuggestion(item: HostCompletionItem, range: monaco.Range): monaco.languages.CompletionItem {
+  const insertText = item.insertText ?? item.label;
+
+  const suggestion: monaco.languages.CompletionItem = {
+    label: item.label,
+    kind: COMPLETION_KINDS[item.kind] ?? monaco.languages.CompletionItemKind.Text,
+    insertText,
+    range,
+  };
+
+  if (item.detail) {
+    suggestion.detail = item.detail;
+  }
+  if (item.documentation) {
+    suggestion.documentation = { value: item.documentation };
+  }
+  if (item.filterText) {
+    suggestion.filterText = item.filterText;
+  }
+  if (item.sortText) {
+    suggestion.sortText = item.sortText;
+  }
+
+  // The engine's snippet placeholders use the editor's own snippet syntax; plain text must not
+  // be parsed as it, or a literal dollar sign in an insertion would vanish.
+  if (insertText.includes("${") || insertText.includes("$0")) {
+    suggestion.insertTextRules = monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet;
+  }
+
+  return suggestion;
 }
 
 if (document.readyState === "loading") {

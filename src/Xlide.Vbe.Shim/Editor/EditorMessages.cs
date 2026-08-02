@@ -163,6 +163,22 @@ public sealed record SetPropertiesMessage(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("properties")] SurfacePropertyEntry[] Properties);
 
+/// <summary>One completion offered to the editor. The kind is the analyzer's vocabulary.</summary>
+public sealed record SurfaceCompletionItem(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("detail")] string? Detail,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("insertText")] string? InsertText,
+    [property: JsonPropertyName("filterText")] string? FilterText,
+    [property: JsonPropertyName("sortText")] string? SortText);
+
+/// <summary>The answer to one completion request, matched to it by its identifier.</summary>
+public sealed record CompletionResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("items")] SurfaceCompletionItem[] Items);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -188,6 +204,8 @@ public sealed record SetPropertiesMessage(
 [JsonSerializable(typeof(SurfaceMenuItem))]
 [JsonSerializable(typeof(SetPropertiesMessage))]
 [JsonSerializable(typeof(SurfacePropertyEntry))]
+[JsonSerializable(typeof(CompletionResultMessage))]
+[JsonSerializable(typeof(SurfaceCompletionItem))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

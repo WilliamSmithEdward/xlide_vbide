@@ -91,3 +91,38 @@ export interface DiagnosticsResult {
     /** Whether the analyser reused per-procedure work or ran a full pass. */
     mode?: 'full' | 'incremental';
 }
+
+/**
+ * textDocument/completion: what can be typed at an offset.
+ *
+ * The source travels with the request because the developer is mid-keystroke: the engine's seeded
+ * copy of this module is as old as the last write-back, and completions against that would offer
+ * members of a receiver that no longer exists on the line. The other modules' seeded sources are
+ * current enough for the project facts they contribute.
+ */
+export interface CompletionParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now. */
+    source: string;
+    /** UTF-16 offset of the caret into that source. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** One completion. The kind is the analyzer's own vocabulary; the surface maps it to icons. */
+export interface CompletionItemPayload {
+    label: string;
+    kind: string;
+    detail?: string;
+    documentation?: string;
+    /** May contain editor snippet placeholders; the surface inserts it as a snippet when it does. */
+    insertText?: string;
+    filterText?: string;
+    sortText?: string;
+}
+
+export interface CompletionResult {
+    items: CompletionItemPayload[];
+}

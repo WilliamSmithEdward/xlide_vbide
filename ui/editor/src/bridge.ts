@@ -60,7 +60,19 @@ export type HostMessage =
   | { type: "revealLine"; line: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
-  | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] };
+  | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
+  | { type: "completionResult"; id: number; items: HostCompletionItem[] };
+
+/** One completion from the host's engine. The kind is the analyzer's own vocabulary. */
+export interface HostCompletionItem {
+  label: string;
+  kind: string;
+  detail?: string | null;
+  documentation?: string | null;
+  insertText?: string | null;
+  filterText?: string | null;
+  sortText?: string | null;
+}
 
 /**
  * Where the page's start-up time went, measured from navigation start.
@@ -94,6 +106,7 @@ export type ClientMessage =
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string }
   | { type: "insertComponent"; kind: number }
+  | { type: "completion"; id: number; offset: number }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -173,6 +186,14 @@ export class EditorBridge {
 
   /** Monotonic counter over locally originated edits; reset by loadDocument, adopted from applyEdit. */
   private revision = 0;
+
+  /** Completion requests awaiting their answers, by request identifier. */
+  private readonly pendingCompletions = new Map<number, {
+    resolve: (items: HostCompletionItem[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private nextCompletionId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -258,6 +279,25 @@ export class EditorBridge {
   /** Asks the host to toggle the breakpoint on a line, same as clicking the margin. */
   toggleBreakpoint(line: number): void {
     this.transport.post({ type: "breakpointToggleRequested", line });
+  }
+
+  /**
+   * Asks the host what can be typed at an offset. Resolves empty rather than rejecting when the
+   * host is slow or gone, because a completion that fails is a list that does not open, not an
+   * error anybody should see.
+   */
+  requestCompletions(offset: number): Promise<HostCompletionItem[]> {
+    const id = this.nextCompletionId++;
+
+    return new Promise<HostCompletionItem[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingCompletions.delete(id);
+        resolve([]);
+      }, 2000);
+
+      this.pendingCompletions.set(id, { resolve, timer });
+      this.transport.post({ type: "completion", id, offset });
+    });
   }
 
   /**
@@ -351,6 +391,15 @@ export class EditorBridge {
       case "setProperties":
         this.shell?.setProperties(message.component, message.kind, message.properties);
         return;
+      case "completionResult": {
+        const waiter = this.pendingCompletions.get(message.id);
+        if (waiter) {
+          this.pendingCompletions.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.items);
+        }
+        return;
+      }
       default: {
         const unknown: never = message;
         console.warn("[xlide] unhandled host message", unknown);
@@ -837,6 +886,19 @@ export function demoTransport(): HostTransport {
       }
       if (message.type === "menuExecute") {
         send({ type: "notice", text: `menu [${message.path.join(", ")}] executed` });
+      }
+      if (message.type === "completion") {
+        send({
+          type: "completionResult",
+          id: message.id,
+          items: [
+            { label: "Worksheets", kind: "property", detail: "Workbook.Worksheets As Sheets" },
+            { label: "Range", kind: "property", detail: "Worksheet.Range As Range" },
+            { label: "Application", kind: "global", detail: "Excel.Application" },
+            { label: "MsgBox", kind: "runtime", detail: "MsgBox(Prompt, [Buttons], ...)" },
+            { label: "If", kind: "keyword", detail: "If ... Then", insertText: "If ${1:condition} Then\n\t$0\nEnd If" },
+          ],
+        });
       }
     },
     subscribe(handler) {

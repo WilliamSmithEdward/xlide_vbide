@@ -22,6 +22,9 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>Timer identifiers, scoped to this window.</summary>
     private const nuint WriteTimerId = 1;
     private const nuint PollTimerId = 2;
+
+    /// <summary>Message that carries a posted action's handle in its LPARAM.</summary>
+    private const uint WmRunAction = 0x8000 + 0x71;
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();
 
@@ -102,6 +105,28 @@ internal sealed unsafe class OverlayWindow : IDisposable
         if (_handle != 0)
         {
             Win32.KillTimer(_handle, PollTimerId);
+        }
+    }
+
+    /// <summary>
+    /// Runs an action on the thread that owns this window, which is the only thread the editor's
+    /// object model and the browser may be touched from. An engine answer arrives on a pool
+    /// thread, and this is its way back.
+    /// </summary>
+    public void RunOnHostThread(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (_handle == 0)
+        {
+            return;
+        }
+
+        var handle = GCHandle.Alloc(action);
+
+        if (!Win32.PostMessage(_handle, WmRunAction, 0, GCHandle.ToIntPtr(handle)))
+        {
+            handle.Free();
         }
     }
 
@@ -284,6 +309,22 @@ internal sealed unsafe class OverlayWindow : IDisposable
                     else if ((nuint)wParam == PollTimerId)
                     {
                         overlay.Polled?.Invoke();
+                    }
+
+                    return 0;
+                }
+
+                case WmRunAction:
+                {
+                    var stored = GCHandle.FromIntPtr(lParam);
+
+                    try
+                    {
+                        (stored.Target as Action)?.Invoke();
+                    }
+                    finally
+                    {
+                        stored.Free();
                     }
 
                     return 0;

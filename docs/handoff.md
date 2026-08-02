@@ -140,6 +140,20 @@ has said plainly it must never be a production mechanism.
   getter such as a workbook's mail properties STARTS THE MAIL SYSTEM. The allowlists stand in
   for the type library's browsable flags until those are read directly (IntelliSense track).
   Resizable by a gripped splitter, like the other two.
+- COMPLETIONS are served by the engine (mission pillar 3, first slice). The engine's
+  textDocument/completion reuses xlide_vscode's analyzer resolvers directly (memberAccess,
+  identifierCompletion, keywordCompletion) with project facts assembled from the seeded modules
+  and the live text of the module being typed. After a dot: the verified Excel object model's
+  members for the resolved receiver (ThisWorkbook. -> 186 members in the smoke test). At an
+  expression position: in-scope identifiers, host globals, runtime functions, other modules'
+  procedures, plus keywords; keyword-exclusive grammar positions show only keywords. The pipe
+  client serialises calls (the protocol pairs answers by position); the surface asks with a
+  correlation id + UTF-16 offset; the host answers off-thread and marshals back via a posted
+  window message (OverlayWindow.RunOnHostThread); the page maps analyzer kinds to Monaco icons
+  and inserts '${'-bearing insertText as snippets. Engine smoke test covers it end to end; log
+  line per request: "completion: <module>@<offset> -> N item(s)". Hover and signature help are
+  the next rungs on the same channel; xlide_vscode has resolveHover and signatureHelp ready to
+  lift the same way.
 - 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit

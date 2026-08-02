@@ -24,6 +24,19 @@ public sealed record EngineDiagnostics(
     [property: JsonPropertyName("diagnostics")] EngineDiagnostic[] Diagnostics,
     [property: JsonPropertyName("mode")] string? Mode);
 
+/// <summary>One completion, in the analyzer's own vocabulary of kinds.</summary>
+public sealed record EngineCompletionItem(
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("detail")] string? Detail,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("insertText")] string? InsertText,
+    [property: JsonPropertyName("filterText")] string? FilterText,
+    [property: JsonPropertyName("sortText")] string? SortText);
+
+public sealed record EngineCompletions(
+    [property: JsonPropertyName("items")] EngineCompletionItem[] Items);
+
 /// <summary>
 /// Serialisation for the engine protocol.
 ///
@@ -39,6 +52,8 @@ public sealed record EngineDiagnostics(
 [JsonSerializable(typeof(EngineDiagnostic))]
 [JsonSerializable(typeof(EngineDiagnostics))]
 [JsonSerializable(typeof(EngineSpan))]
+[JsonSerializable(typeof(EngineCompletionItem))]
+[JsonSerializable(typeof(EngineCompletions))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;

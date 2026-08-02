@@ -31,6 +31,13 @@ internal sealed class EngineClient : IAsyncDisposable
     private KillOnCloseJob? _job;
     private int _nextId = 1;
 
+    /// <summary>
+    /// One request on the pipe at a time. The protocol pairs each answer with the last question
+    /// by position, so two concurrent calls would take each other's answers; a completion asked
+    /// during an analysis pass waits its turn instead.
+    /// </summary>
+    private readonly SemaphoreSlim _oneCall = new(1, 1);
+
     private EngineClient(string executablePath)
     {
         _executablePath = executablePath;
@@ -167,6 +174,28 @@ internal sealed class EngineClient : IAsyncDisposable
         return result.Value.Deserialize(EngineJsonContext.Default.EngineDiagnostics);
     }
 
+    /// <summary>Asks what can be typed at an offset into a module's live source.</summary>
+    public async Task<EngineCompletions?> CompleteAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["offset"] = offset,
+        };
+
+        var result = await CallAsync("textDocument/completion", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineCompletions);
+    }
+
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
         var writer = _writer;
@@ -192,26 +221,35 @@ internal sealed class EngineClient : IAsyncDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
 
-        await writer.WriteLineAsync(line.AsMemory(), deadline.Token).ConfigureAwait(false);
+        await _oneCall.WaitAsync(deadline.Token).ConfigureAwait(false);
 
-        // One request is outstanding at a time, so the next line is this call's answer. A pipeline
-        // would need correlation by identifier; nothing here benefits from one.
-        var response = await reader.ReadLineAsync(deadline.Token).ConfigureAwait(false);
-        if (response is null)
+        try
         {
-            throw new IOException("The engine closed the connection.");
+            await writer.WriteLineAsync(line.AsMemory(), deadline.Token).ConfigureAwait(false);
+
+            // One request is outstanding at a time, so the next line is this call's answer. A
+            // pipeline would need correlation by identifier; nothing here benefits from one.
+            var response = await reader.ReadLineAsync(deadline.Token).ConfigureAwait(false);
+            if (response is null)
+            {
+                throw new IOException("The engine closed the connection.");
+            }
+
+            using var document = JsonDocument.Parse(response);
+
+            if (document.RootElement.TryGetProperty("error", out var error))
+            {
+                var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
+                Log.Warn($"engine: {method} refused: {message}");
+                return null;
+            }
+
+            return document.RootElement.TryGetProperty("result", out var result) ? result.Clone() : null;
         }
-
-        using var document = JsonDocument.Parse(response);
-
-        if (document.RootElement.TryGetProperty("error", out var error))
+        finally
         {
-            var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
-            Log.Warn($"engine: {method} refused: {message}");
-            return null;
+            _oneCall.Release();
         }
-
-        return document.RootElement.TryGetProperty("result", out var result) ? result.Clone() : null;
     }
 
     public async ValueTask DisposeAsync()

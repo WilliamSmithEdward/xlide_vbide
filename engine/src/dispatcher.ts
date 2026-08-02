@@ -8,11 +8,15 @@
 
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
+import { completionsFor } from './completion';
 import {
     ErrorCode,
+    type CompletionParams,
+    type CompletionResult,
     type DiagnosticsParams,
     type DiagnosticsResult,
     type JsonRpcError,
+    type ModulePayload,
     type ProjectOpenParams,
 } from './protocol';
 
@@ -35,6 +39,13 @@ export class RpcError extends Error {
 export class Dispatcher {
     private readonly analysis = new AnalysisWorkerState();
     private readonly generations = new Map<string, number>();
+
+    /**
+     * The modules each project was last seeded with, kept for completion contexts. The analysis
+     * state holds them too, but behind its own boundary; completions need the payloads.
+     */
+    private readonly seededModules = new Map<string, ModulePayload[]>();
+
     private nextRequestId = 1;
     private initialized = false;
 
@@ -64,6 +75,9 @@ export class Dispatcher {
             case 'textDocument/diagnostics':
                 return this.diagnostics(this.require<DiagnosticsParams>(params));
 
+            case 'textDocument/completion':
+                return this.completion(this.require<CompletionParams>(params));
+
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
@@ -85,12 +99,22 @@ export class Dispatcher {
         });
 
         this.generations.set(params.projectId, params.generation);
+        this.seededModules.set(params.projectId, params.modules.map((module) => ({ ...module })));
         return { modules: params.modules.length };
     }
 
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
+        this.seededModules.delete(params.projectId);
         return null;
+    }
+
+    private completion(params: CompletionParams): CompletionResult {
+        this.requireInitialized();
+
+        // Not gated on generation: the request carries the live source of the module being typed
+        // in, and the seeded copies of the others are current enough for the facts they lend.
+        return { items: completionsFor(this.seededModules.get(params.projectId) ?? [], params) };
     }
 
     private diagnostics(params: DiagnosticsParams): DiagnosticsResult {

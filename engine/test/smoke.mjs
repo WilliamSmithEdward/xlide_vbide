@@ -158,6 +158,47 @@ try {
     console.log(`  -> ${good.diagnostics.length} diagnostic(s) on the clean module`);
     check('clean code produces no findings', () => assert.equal(good.diagnostics.length, 0));
 
+    // Completions: members after a dot against the host model, and identifiers elsewhere.
+    const memberSource = GOOD_MODULE.replace('    n = 1', '    ThisWorkbook.');
+    const memberOffset = memberSource.indexOf('ThisWorkbook.') + 'ThisWorkbook.'.length;
+    const memberAnswer = await call('textDocument/completion', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: memberSource,
+        offset: memberOffset,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> ${memberAnswer.items.length} member completion(s) after ThisWorkbook.`);
+    check('ThisWorkbook. offers workbook members', () => {
+        assert.ok(memberAnswer.items.length > 10, 'expected a member surface');
+        assert.ok(memberAnswer.items.some((item) => item.label === 'Worksheets'),
+            'expected Worksheets among the members');
+    });
+
+    const identifierSource = GOOD_MODULE.replace('    n = 1', '    n = ');
+    const identifierOffset = identifierSource.indexOf('    n = ') + '    n = '.length;
+    const identifierAnswer = await call('textDocument/completion', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: identifierSource,
+        offset: identifierOffset,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> ${identifierAnswer.items.length} completion(s) at an expression position`);
+    check('an expression position offers globals and the local', () => {
+        assert.ok(identifierAnswer.items.some((item) => item.label === 'Application'),
+            'expected the Application global');
+        assert.ok(identifierAnswer.items.some((item) => item.label === 'n'),
+            'expected the local variable n');
+    });
+
+    check('a procedure from the other module is offered', () => {
+        assert.ok(identifierAnswer.items.some((item) => item.label === 'Probe'),
+            'expected Probe from BadModule');
+    });
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

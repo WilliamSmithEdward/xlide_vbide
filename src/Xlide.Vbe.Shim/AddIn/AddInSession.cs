@@ -250,6 +250,7 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface.ComponentSelected = OnComponentSelected;
                 _editorSurface.ModuleCloseRequested = CloseModule;
                 _editorSurface.ComponentInsertRequested = InsertComponent;
+                _editorSurface.CompletionRequested = OnCompletionRequested;
 
                 // The moment the page is up is the moment the menu bar can be covered, and it is
                 // not a window event, so nothing else would recompute the bounds.
@@ -1482,6 +1483,60 @@ internal sealed class AddInSession : IDisposable
     {
         _breakpoints.Clear();
         _editorSurface?.ShowBreakpoints([]);
+    }
+
+    /// <summary>
+    /// Answers a completion request from the surface.
+    ///
+    /// The module name and its live text are captured here, on the host thread; the engine round
+    /// trip happens off it, because completions ride on every keystroke and the developer must
+    /// never wait for one; and the answer is marshalled back, because the browser may only be
+    /// spoken to from the thread that owns it. A request that fails answers empty rather than
+    /// never: the editor is left waiting on nothing.
+    /// </summary>
+    private void OnCompletionRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowCompletions(requestId, []);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceCompletionItem[] items = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.CompleteAsync(module, source, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    items = [.. answered.Select(item => new SurfaceCompletionItem(
+                        item.Label,
+                        item.Kind,
+                        item.Detail,
+                        item.Documentation,
+                        item.InsertText,
+                        item.FilterText,
+                        item.SortText))];
+                }
+
+                Log.Info($"completion: {module}@{offset} -> {items.Length} item(s)");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"completion: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowCompletions(requestId, items));
+        });
     }
 
     /// <summary>Runs a command the developer chose from the toolbar.</summary>

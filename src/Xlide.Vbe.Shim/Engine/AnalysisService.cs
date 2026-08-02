@@ -33,6 +33,14 @@ internal sealed class AnalysisService : IAsyncDisposable
     private int _generation;
     private readonly HashSet<string> _openProjects = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Which project each module belonged to at the last pass, and what kind of module it was.
+    /// Completion requests arrive with a module name and nothing else; this is what turns the
+    /// name back into the engine's addressing.
+    /// </summary>
+    private readonly Dictionary<string, (string ProjectId, string ModuleType)> _moduleHomes =
+        new(StringComparer.OrdinalIgnoreCase);
+
     public AnalysisService(DispatchObject editor) => _editor = editor;
 
     /// <summary>Raised when a module has been analysed.</summary>
@@ -113,6 +121,39 @@ internal sealed class AnalysisService : IAsyncDisposable
         });
     }
 
+    /// <summary>
+    /// Asks the engine what can be typed at an offset into a module's live text, or null when
+    /// there is no engine or it has not yet seen the module's project.
+    /// </summary>
+    public async Task<EngineCompletionItem[]?> CompleteAsync(
+        string moduleName,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        {
+            // A module the last pass never saw (just inserted, perhaps): a single open project
+            // is still a safe address for it.
+            if (_openProjects.Count != 1)
+            {
+                return null;
+            }
+
+            home = (_openProjects.First(), "standard");
+        }
+
+        var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, source, offset, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Items;
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;
@@ -132,6 +173,11 @@ internal sealed class AnalysisService : IAsyncDisposable
                 .ConfigureAwait(false);
 
             _openProjects.Add(snapshot.ProjectId);
+
+            foreach (var module in snapshot.Modules)
+            {
+                _moduleHomes[module.ModuleName] = (snapshot.ProjectId, module.Type);
+            }
 
             var findings = new List<Finding>();
 
