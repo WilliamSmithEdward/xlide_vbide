@@ -225,6 +225,27 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.NoticeMessage));
     }
 
+    /// <summary>
+    /// Runs one of the surface's own commands.
+    ///
+    /// Used for keys the host would otherwise take. A key claimed at the browser's accelerator hook
+    /// never reaches the document, so the command the developer wanted has to be asked for
+    /// explicitly rather than left to the page's own key handling.
+    /// </summary>
+    public void RunEditorCommand(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new EditorCommandMessage("editorCommand", id),
+            EditorMessageContext.Default.EditorCommandMessage));
+    }
+
     /// <summary>Adds a line to the Immediate panel's output.</summary>
     public void ShowImmediateResult(string text, bool failed)
     {

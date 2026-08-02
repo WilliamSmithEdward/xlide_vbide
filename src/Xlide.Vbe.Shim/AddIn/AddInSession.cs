@@ -229,6 +229,8 @@ internal sealed class AddInSession : IDisposable
                 // before it has created them, so hiding one then closes something with no window
                 // behind it and there is nothing to identify afterwards.
                 HideReplacedWindows();
+                HideRedundantToolbar();
+                DarkenTitleBar(host);
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -276,6 +278,17 @@ internal sealed class AddInSession : IDisposable
     {
         var shift = (Win32.GetKeyState(Win32.VkShift) & Win32.KeyDownMask) != 0;
         var control = (Win32.GetKeyState(Win32.VkControl) & Win32.KeyDownMask) != 0;
+
+        // Keys the surface owns are claimed here, before the host is asked about them. F1 opens the
+        // host's help, and a key that reaches the host is gone: the browser's hook is the only place
+        // it can be taken, and taking it means the command has to be asked for rather than left to
+        // the document's own key handling.
+        if (VbeCommands.SurfaceCommandForKey(virtualKey, shift, control) is { } surfaceCommand)
+        {
+            Log.Info($"key: 0x{virtualKey:X2} -> surface {surfaceCommand}");
+            _editorSurface?.RunEditorCommand(surfaceCommand);
+            return true;
+        }
 
         var command = VbeCommands.ForKey(virtualKey, shift, control);
         Log.Info($"key: 0x{virtualKey:X2}{(shift ? " shift" : string.Empty)}{(control ? " ctrl" : string.Empty)}"
@@ -1023,6 +1036,94 @@ internal sealed class AddInSession : IDisposable
         {
             Log.Error("window: the replaced windows could not be closed", ex);
         }
+    }
+
+    /// <summary>
+    /// Hides the editor's own toolbar, which the surface's own toolbar has replaced.
+    ///
+    /// Hidden only because everything on it is somewhere else now: saving, undo and redo, the object
+    /// browser, and every run and step command are on the surface's toolbar or on the keys they
+    /// always were. Hiding a bar whose commands had nowhere else to go would take those commands
+    /// away, which is not a theme change.
+    ///
+    /// The menu bar is left alone. Its menus reach a great deal that has no replacement yet, and a
+    /// consistent colour is not worth losing References, Options, or the object browser's menu.
+    /// </summary>
+    private void HideRedundantToolbar()
+    {
+        try
+        {
+            using var bars = _editor.GetObject("CommandBars");
+            var count = bars?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var bar = bars!.GetItem(i);
+
+                // The programmatic name, which is not localised the way a caption is.
+                if (bar?.GetString("Name") != "Standard" || !bar.GetBool("Visible"))
+                {
+                    continue;
+                }
+
+                bar.SetBool("Visible", false);
+                Log.Info("window: hid the editor's own toolbar");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"window: the editor's toolbar could not be hidden ({ex.GetType().Name})");
+        }
+    }
+
+    /*
+     * Frame colours, as the compositor wants them: one byte each of blue, green and red, in that
+     * order, which is the reverse of how they are written everywhere else. They match the surface's
+     * dark theme so the window is one thing rather than a dark document in a pale frame.
+     */
+    private static readonly int BorderColour = 0x002D2D2D;
+    private static readonly int CaptionColour = 0x001E1E1E;
+    private static readonly int CaptionTextColour = 0x00D4D4D4;
+
+    /// <summary>
+    /// Asks the system to draw the editor's title bar dark.
+    ///
+    /// The title bar is drawn by the desktop compositor, not by the editor, so nothing the editor
+    /// or this add-in paints can reach it. The compositor will draw it dark on request, and that
+    /// request is the only way to change it.
+    ///
+    /// The attribute was renumbered once, before it was documented. Both numbers are tried because
+    /// which one works depends on the build of Windows rather than on anything observable here.
+    /// </summary>
+    private static void DarkenTitleBar(nint frame)
+    {
+        var dark = 1;
+
+        if (Win32.DwmSetWindowAttribute(frame, Win32.UseDarkTitleBar, in dark, sizeof(int)) < 0)
+        {
+            Win32.DwmSetWindowAttribute(frame, Win32.UseDarkTitleBarLegacy, in dark, sizeof(int));
+        }
+
+        // The border and the caption are drawn by the compositor too, and dark mode alone leaves
+        // the border light: a pale rectangle around an otherwise dark window. Colours are given
+        // explicitly so the frame matches the surface rather than approximately matching it.
+        // These are refused on Windows versions that predate them, which is why nothing checks.
+        Win32.DwmSetWindowAttribute(frame, Win32.BorderColor, in BorderColour, sizeof(int));
+        Win32.DwmSetWindowAttribute(frame, Win32.CaptionColor, in CaptionColour, sizeof(int));
+        Win32.DwmSetWindowAttribute(frame, Win32.CaptionTextColor, in CaptionTextColour, sizeof(int));
+
+        // The frame is redrawn only when it is told something about it changed.
+        Win32.SetWindowPos(
+            frame,
+            0,
+            0,
+            0,
+            0,
+            0,
+            Win32.SwpNoMove | Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate | Win32.SwpFrameChanged);
+
+        Log.Info("window: asked for a dark title bar");
     }
 
     /// <summary>

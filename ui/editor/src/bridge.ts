@@ -45,6 +45,7 @@ export type HostMessage =
   | { type: "loadDocument"; moduleName: string; text: string }
   | { type: "syncDocument"; moduleName: string; text: string }
   | { type: "notice"; text: string }
+  | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
   | { type: "setModules"; modules: string[]; active: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
@@ -228,6 +229,14 @@ export class EditorBridge {
     // Focus first. An editor action taken while the button has focus operates on an editor that
     // does not have it, and the ones that open a widget put it somewhere the developer cannot type.
     this.editor.focus();
+
+    // Undo and redo are not actions. They are built into the editor rather than registered like
+    // the rest, so looking them up finds nothing and they have to be triggered by name.
+    if (command.id === "undo" || command.id === "redo") {
+      this.editor.trigger("xlide", command.id, null);
+      return;
+    }
+
     this.editor.getAction(command.id)?.run();
   }
 
@@ -248,6 +257,10 @@ export class EditorBridge {
         return;
       case "notice":
         this.shell?.notify(message.text);
+        return;
+      case "editorCommand":
+        this.editor.focus();
+        this.editor.getAction(message.id)?.run();
         return;
       case "immediateResult":
         this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");

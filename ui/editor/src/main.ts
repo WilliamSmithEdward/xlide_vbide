@@ -90,7 +90,10 @@ function boot(): void {
     navigate: (module, line, column) => bridge.navigate(module, line, column),
     layoutChanged: () => editor.layout(),
     command: (command) => bridge.runCommand(command),
-    commandAvailable: (command) => editor.getAction(command.id) !== null,
+    // Undo and redo are built in rather than registered, so they never resolve as actions and
+    // would be dropped by a check that only knows about registered ones.
+    commandAvailable: (command) =>
+      command.id === "undo" || command.id === "redo" || editor.getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
   });

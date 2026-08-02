@@ -43,6 +43,8 @@ internal static class VbeCommands
         public const int AddWatch = 1820;
         public const int CallStack = 620;
         public const int CommentBlock = 192;
+        public const int Save = 3;
+        public const int ObjectBrowser = 473;
         public const int UncommentBlock = 2552;
     }
 
@@ -180,6 +182,8 @@ internal static class VbeCommands
     /// </summary>
     public static int ForName(string name) => name switch
     {
+        "save" => Command.Save,
+        "objectBrowser" => Command.ObjectBrowser,
         "run" => Command.Run,
         "break" => Command.Break,
         "reset" => Command.Reset,
@@ -193,6 +197,15 @@ internal static class VbeCommands
         "callStack" => Command.CallStack,
         _ => 0,
     };
+
+    /// <summary>
+    /// The surface command a keystroke means, or null when the surface does not own that key.
+    ///
+    /// These are keys the host would otherwise take for itself. F1 is its help, and help is not
+    /// what a developer pressing F1 in a modern editor is asking for.
+    /// </summary>
+    public static string? SurfaceCommandForKey(uint virtualKey, bool shift, bool control) =>
+        virtualKey == VirtualKey.F1 && !shift && !control ? "editor.action.quickCommand" : null;
 
     /// <summary>
     /// The editor command a keystroke means, or zero when the editor does not own that key.
@@ -215,6 +228,9 @@ internal static class VbeCommands
             VirtualKey.F8 when shift => Command.StepOver,
             VirtualKey.F8 => Command.StepInto,
             VirtualKey.F9 => Command.ToggleBreakpoint,
+
+            // Saving belongs to the host: the workbook is what gets written, not the module.
+            VirtualKey.S when control => Command.Save,
             _ => 0,
         };
     }
@@ -270,7 +286,9 @@ internal static class VbeCommands
 /// <summary>The few virtual key codes this needs, so the numbers do not appear bare in a switch.</summary>
 internal static class VirtualKey
 {
+    public const uint F1 = 0x70;
     public const uint F5 = 0x74;
     public const uint F8 = 0x77;
     public const uint F9 = 0x78;
+    public const uint S = 0x53;
 }

@@ -29,7 +29,11 @@ export interface ToolbarCommand {
  * Monaco itself, and an unknown one is ignored rather than reported, so each is spelled once here.
  */
 export const COMMANDS: ToolbarCommand[] = [
-  { id: "run", target: "host", icon: "play", label: "Run (F5)" },
+  { id: "save", target: "host", icon: "save", label: "Save (Ctrl+S)" },
+  { id: "undo", target: "editor", icon: "discard", label: "Undo (Ctrl+Z)" },
+  { id: "redo", target: "editor", icon: "redo", label: "Redo (Ctrl+Y)" },
+
+  { id: "run", target: "host", icon: "play", label: "Run (F5)", separatorBefore: true },
   { id: "break", target: "host", icon: "debug-pause", label: "Break (Ctrl+F5)" },
   { id: "reset", target: "host", icon: "debug-stop", label: "Reset (Shift+F5)" },
 
@@ -50,6 +54,8 @@ export const COMMANDS: ToolbarCommand[] = [
 
   { id: "editor.foldAll", target: "editor", icon: "fold", label: "Fold all", separatorBefore: true },
   { id: "editor.unfoldAll", target: "editor", icon: "unfold", label: "Unfold all" },
+
+  { id: "objectBrowser", target: "host", icon: "library", label: "Object browser (F2)", separatorBefore: true },
 ];
 
 /**

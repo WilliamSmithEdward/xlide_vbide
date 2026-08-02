@@ -231,6 +231,28 @@ internal static unsafe partial class Win32
     [LibraryImport("kernel32.dll")]
     public static partial uint GetCurrentProcessId();
 
+    /// <summary>
+    /// Sets a window attribute the desktop compositor owns. Used here for the one that darkens a
+    /// title bar, which is drawn by the system rather than by the application and so cannot be
+    /// changed any other way.
+    /// </summary>
+    [LibraryImport("dwmapi.dll")]
+    public static partial int DwmSetWindowAttribute(nint window, uint attribute, in int value, uint size);
+
+    /// <summary>DWMWA_USE_IMMERSIVE_DARK_MODE, and the number it had before it was documented.</summary>
+    public const uint UseDarkTitleBar = 20;
+    public const uint UseDarkTitleBarLegacy = 19;
+
+    /// <summary>
+    /// Colours of the parts the compositor draws: the border around the window, the caption behind
+    /// its title, and the title itself. Present from Windows 11; refused harmlessly before it.
+    /// </summary>
+    public const uint BorderColor = 34;
+    public const uint CaptionColor = 35;
+    public const uint CaptionTextColor = 36;
+
+    public const uint SwpFrameChanged = 0x0020;
+
     [LibraryImport("ole32.dll")]
     public static partial int CoCreateInstance(
         in Guid classId,

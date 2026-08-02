@@ -80,6 +80,11 @@ public sealed record SyncDocumentMessage(
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("text")] string Text);
 
+/// <summary>Asks the surface to run one of the editor's own commands.</summary>
+public sealed record EditorCommandMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] string Id);
+
 /// <summary>Something the developer should be told, shown briefly and not dwelt on.</summary>
 public sealed record NoticeMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -115,6 +120,7 @@ public sealed record SetBreakpointsMessage(
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
+[JsonSerializable(typeof(EditorCommandMessage))]
 [JsonSerializable(typeof(NoticeMessage))]
 [JsonSerializable(typeof(ImmediateResultMessage))]
 [JsonSerializable(typeof(SetCurrentLineMessage))]
