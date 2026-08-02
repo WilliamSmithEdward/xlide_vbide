@@ -187,3 +187,17 @@ library marks browsable, and the dangerous getters are all marked hidden. Until 
 is read directly, the browsable sets for the known document kinds are spelled out as allowlists,
 an unknown document kind falls back to its name alone, names are enumerated before any value is
 read (enumerating names runs nothing), and each shown value is read exactly once.
+
+## 16. One dying pane, one give-up, and one create-on-read lined up behind a tab that would not close
+
+Closing a tab closed the real pane and the tab stayed. The module list aborted wholesale when one
+pane refused to answer, and the pane that was just closed is exactly such a pane; the tracker had
+no retry of its own, so once the editor started refusing refreshes, the window events that
+normally drive them all failed identically, one log line each, two thousand in a minute; and a
+second click on the dead tab found the pane THROUGH THE COMPONENT, and reading a component's pane
+creates one when none is open, so every extra click created a pane in order to destroy it.
+
+Consequences: collection reads that feed the UI tolerate individual members refusing; anything
+that gives up on a picture must own a way back to it (the poll timer retries a stale tracker
+until the editor answers); repeated identical failures are counted, not repeated, and recovery is
+announced; and nothing on a closing path may go through an accessor that creates.
