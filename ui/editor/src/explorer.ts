@@ -240,11 +240,15 @@ export class Explorer {
 
   setActive(name: string | null): void {
     // The tree follows the module being edited — but only when it genuinely changed. The host
-    // republishes the module list on all sorts of occasions with the same active module, and
-    // following every push would fold whatever the developer just unfolded by hand.
-    const changed = name !== this.active;
+    // republishes the module list on all sorts of occasions with the same active module;
+    // following every push would fold what was just unfolded by hand, and even redrawing on
+    // every push wipes and rebuilds a large unfolded list, which reads as flicker.
+    if (name === this.active) {
+      return;
+    }
+
     this.active = name;
-    if (name && changed) {
+    if (name) {
       this.setExpandedModule(name);
     }
     this.render();
@@ -252,6 +256,14 @@ export class Explorer {
 
   /** Problem counts by component, so a defect is visible without opening the module. */
   setProblemCounts(counts: Map<string, number>): void {
+    // Identical counts arrive constantly and must change nothing: neither a redraw of a large
+    // unfolded list, nor a re-parse of its module.
+    const same = counts.size === this.problemCounts.size
+      && [...counts].every(([name, count]) => this.problemCounts.get(name) === count);
+    if (same) {
+      return;
+    }
+
     this.problemCounts = counts;
 
     // Analysis just described the project again; an unfolded procedure list follows it, so a
@@ -320,6 +332,8 @@ export class Explorer {
   }
 
   private render(): void {
+    // Rebuilding the rows resets the scroll; a redraw must not read as a jump.
+    const scrollTop = this.root.scrollTop;
     this.root.replaceChildren();
 
     for (const project of this.projects) {
@@ -349,6 +363,8 @@ export class Explorer {
         }
       }
     }
+
+    this.root.scrollTop = scrollTop;
   }
 
   private workbookRow(name: string, isOpen: boolean): HTMLElement {
