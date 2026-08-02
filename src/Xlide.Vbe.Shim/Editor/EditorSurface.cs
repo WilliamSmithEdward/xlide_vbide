@@ -116,6 +116,10 @@ internal sealed class EditorSurface : IDisposable
             return;
         }
 
+        // The request was already logged with its item count; this line proves the answer made it
+        // back across the thread marshal and onto the wire to the page.
+        Log.Info($"completion: delivering {requestId}");
+
         Post(JsonSerializer.Serialize(
             new CompletionResultMessage("completionResult", requestId, items),
             EditorMessageContext.Default.CompletionResultMessage));

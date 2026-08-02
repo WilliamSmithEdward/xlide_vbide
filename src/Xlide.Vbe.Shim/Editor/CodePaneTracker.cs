@@ -448,6 +448,9 @@ internal sealed class CodePaneTracker : IDisposable
         return FindFrameByEnumeration();
     }
 
+    /// <summary>The editor's frame window, found without needing any pane to exist.</summary>
+    internal static nint FindFrame() => FindFrameByEnumeration();
+
     private static unsafe nint FindFrameByEnumeration()
     {
         // GetTopWindow-style enumeration over the desktop would reach other processes. Walking our

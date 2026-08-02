@@ -91,6 +91,114 @@ internal sealed class AddInSession : IDisposable
         ReportOpenProjects();
         TrackCodePanes();
         StartAnalysis();
+
+        // An editor with no panes at all never fires the pane events the surface normally
+        // arrives on, and a developer opening a fresh workbook's editor would meet the native
+        // gray shell. The surface goes up now, showing the empty workspace and the explorer.
+        TryShowEmptyWorkspace();
+    }
+
+    /// <summary>
+    /// Creates the surface over a frame if it is not already there, and wires it. A frame change
+    /// means a new surface rather than a move: the surface belongs to one parent.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(_editorSurface))]
+    private bool EnsureSurfaceForFrame(nint host)
+    {
+        if (_editorSurface is not null && _editorSurface.Host != host)
+        {
+            Log.Info("editor surface: the document area changed, rebuilding");
+            _editorSurface.Dispose();
+            _editorSurface = null;
+        }
+
+        if (_editorSurface is not null)
+        {
+            return true;
+        }
+
+        _editorSurface = EditorSurface.Create(host, default);
+        if (_editorSurface is null)
+        {
+            return false;
+        }
+
+        _editorSurface.KeyPressed = OnSurfaceKey;
+        _editorSurface.ModuleRequested = ShowModule;
+        _editorSurface.NavigateRequested = GoTo;
+        _editorSurface.CommandRequested = RunCommand;
+        _editorSurface.TextChanged = WriteModule;
+        _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
+        _editorSurface.Polled = PollDebugState;
+        _editorSurface.EvaluateRequested = EvaluateImmediate;
+        _editorSurface.PanelChanged = OnPanelChanged;
+        _editorSurface.MenuRequested = OnMenuRequested;
+        _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
+        _editorSurface.PropertyEditRequested = OnPropertyEdit;
+        _editorSurface.ComponentSelected = OnComponentSelected;
+        _editorSurface.ModuleCloseRequested = CloseModule;
+        _editorSurface.ComponentInsertRequested = InsertComponent;
+        _editorSurface.CompletionRequested = OnCompletionRequested;
+
+        // The moment the page is up is the moment the menu bar can be covered, and it is not a
+        // window event, so nothing else would recompute the bounds.
+        _editorSurface.Ready = RefreshSurfacePlacement;
+
+        // Now rather than at start-up. The editor answers that these windows are visible before
+        // it has created them, so hiding one then closes something with no window behind it and
+        // there is nothing to identify afterwards.
+        HideReplacedWindows();
+        HideRedundantToolbar();
+        DarkenTitleBar(host);
+
+        return true;
+    }
+
+    /// <summary>True while the surface is up over an editor that has no panes anywhere.</summary>
+    private bool _watchingEmpty;
+
+    /// <summary>
+    /// Puts the surface over an editor that has no panes at all, which is what a fresh
+    /// workbook's editor is. The surface normally arrives with the first pane; without this, an
+    /// editor with no module yet stays native gray, and the explorer shown here is how the first
+    /// module gets opened or inserted at all.
+    /// </summary>
+    private void TryShowEmptyWorkspace()
+    {
+        if (_editorSurface is not null || _stopped)
+        {
+            return;
+        }
+
+        var frame = CodePaneTracker.FindFrame();
+        if (frame == 0)
+        {
+            return;
+        }
+
+        var documentArea = Win32.FindWindowEx(frame, 0, "MDIClient", null);
+        if (documentArea == 0)
+        {
+            return;
+        }
+
+        _frame = frame;
+        _documentArea = documentArea;
+
+        if (!EnsureSurfaceForFrame(frame))
+        {
+            return;
+        }
+
+        _surfaceShown = true;
+        _watchingEmpty = true;
+        _editorSurface!.Clear();
+        _editorSurface.ShowModules([], null);
+        PublishProjects();
+        RefreshSurfacePlacement();
+        UpdatePolling();
+
+        Log.Info("editor surface: opened onto an editor with no panes");
     }
 
     /// <summary>
@@ -218,50 +326,9 @@ internal sealed class AddInSession : IDisposable
             _frame = host;
             _documentArea = documentArea;
 
-            // A pane can be reparented, by being undocked or by the editor rebuilding its layout.
-            // The surface belongs to one parent, so a change means a new one rather than a move.
-            if (_editorSurface is not null && _editorSurface.Host != host)
+            if (!EnsureSurfaceForFrame(host))
             {
-                Log.Info("editor surface: the document area changed, rebuilding");
-                _editorSurface.Dispose();
-                _editorSurface = null;
-            }
-
-            if (_editorSurface is null)
-            {
-                _editorSurface = EditorSurface.Create(host, default);
-                if (_editorSurface is null)
-                {
-                    return;
-                }
-
-                _editorSurface.KeyPressed = OnSurfaceKey;
-                _editorSurface.ModuleRequested = ShowModule;
-                _editorSurface.NavigateRequested = GoTo;
-                _editorSurface.CommandRequested = RunCommand;
-                _editorSurface.TextChanged = WriteModule;
-                _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
-                _editorSurface.Polled = PollDebugState;
-                _editorSurface.EvaluateRequested = EvaluateImmediate;
-                _editorSurface.PanelChanged = OnPanelChanged;
-                _editorSurface.MenuRequested = OnMenuRequested;
-                _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
-                _editorSurface.PropertyEditRequested = OnPropertyEdit;
-                _editorSurface.ComponentSelected = OnComponentSelected;
-                _editorSurface.ModuleCloseRequested = CloseModule;
-                _editorSurface.ComponentInsertRequested = InsertComponent;
-                _editorSurface.CompletionRequested = OnCompletionRequested;
-
-                // The moment the page is up is the moment the menu bar can be covered, and it is
-                // not a window event, so nothing else would recompute the bounds.
-                _editorSurface.Ready = RefreshSurfacePlacement;
-
-                // Now rather than at start-up. The editor answers that these windows are visible
-                // before it has created them, so hiding one then closes something with no window
-                // behind it and there is nothing to identify afterwards.
-                HideReplacedWindows();
-                HideRedundantToolbar();
-                DarkenTitleBar(host);
+                return;
             }
 
             // The surface covers the whole document area, not the rectangle of one pane. Switching
@@ -271,6 +338,8 @@ internal sealed class AddInSession : IDisposable
             // text of record, the compile target, and what the debugger drives.
             var covering = CanCoverChrome();
             _surfaceShown = true;
+            _watchingEmpty = false;
+            UpdatePolling();
             _editorSurface.Follow(SurfaceBounds(host, documentArea, covering), visible: true);
             _editorSurface.SetChrome(menuBar: covering);
 
@@ -364,8 +433,15 @@ internal sealed class AddInSession : IDisposable
     {
         if (_editorSurface is null || _frame == 0 || _documentArea == 0)
         {
-            _surfaceShown = false;
-            _editorSurface?.Follow(default, visible: false);
+            // No surface yet and no pane to hang one on: the empty-workspace path can still
+            // stand one up over the bare frame.
+            TryShowEmptyWorkspace();
+
+            if (_editorSurface is null)
+            {
+                _surfaceShown = false;
+            }
+
             return;
         }
 
@@ -380,9 +456,11 @@ internal sealed class AddInSession : IDisposable
         Log.Info("editor surface: no panes open, showing the empty workspace");
 
         _surfaceShown = true;
+        _watchingEmpty = true;
         _editorSurface.Clear();
         _editorSurface.ShowModules([], null);
         RefreshSurfacePlacement();
+        UpdatePolling();
     }
 
     /// <summary>
@@ -1156,10 +1234,18 @@ internal sealed class AddInSession : IDisposable
     {
         var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
+            : _watchingEmpty ? EmptyWorkspacePollMilliseconds
             : 0;
 
         _editorSurface?.Poll(interval);
     }
+
+    /// <summary>
+    /// How often the project tree is refreshed while the editor has no panes. With no panes
+    /// there are no window events, and the explorer is the only way the first module gets
+    /// opened, so it cannot be allowed to sit stale.
+    /// </summary>
+    private const uint EmptyWorkspacePollMilliseconds = 1000;
 
     /// <summary>
     /// Checks that the surface still agrees with the module, and adopts the module when it does
@@ -1215,6 +1301,13 @@ internal sealed class AddInSession : IDisposable
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
     {
+        // While the editor has no panes, the tree is the only living thing on screen and the
+        // only route to a first module, so it follows the project as it grows.
+        if (_watchingEmpty)
+        {
+            PublishProjects();
+        }
+
         _immediateReader?.Poll();
 
         // A stale pane picture is retried here, because the editor that refused it also stopped
