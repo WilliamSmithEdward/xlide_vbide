@@ -20,6 +20,18 @@ internal struct Point
     public int Y;
 }
 
+/// <summary>Win32 PAINTSTRUCT. Layout matches exactly and is passed by pointer to BeginPaint.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct PaintStruct
+{
+    public nint DeviceContext;
+    public int Erase;
+    public Rect Paint;
+    public int Restore;
+    public int IncUpdate;
+    public fixed byte Reserved[32];
+}
+
 /// <summary>Win32 SIZE, used for the scroll extent argument the in-place site passes by value.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct Size
@@ -228,6 +240,82 @@ internal static unsafe partial class Win32
 
     /// <summary>Mask for the high-order bit of a key state, which is set while the key is down.</summary>
     public const short KeyDownMask = unchecked((short)0x8000);
+
+    // ---- Painting, for the start-up loader: the one thing this shim draws itself. ----
+
+    public const uint WmPaint = 0x000F;
+
+    /// <summary>SetBkMode TRANSPARENT: text draws over what is there, with no fill of its own.</summary>
+    public const int BackgroundTransparent = 1;
+
+    public const uint DtCenter = 0x0001;
+    public const uint DtVCenter = 0x0004;
+    public const uint DtSingleLine = 0x0020;
+    public const uint DtNoPrefix = 0x0800;
+
+    /// <summary>GetStockObject NULL_PEN: shapes drawn with no outline.</summary>
+    public const int NullPen = 8;
+
+    public const int FontWeightSemibold = 600;
+    public const uint FontDefaultCharset = 1;
+    public const uint FontClearTypeQuality = 5;
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial nint BeginPaint(nint window, PaintStruct* paint);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EndPaint(nint window, PaintStruct* paint);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool InvalidateRect(nint window, Rect* rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+
+    [LibraryImport("user32.dll")]
+    public static partial int FillRect(nint deviceContext, Rect* rect, nint brush);
+
+    [LibraryImport("user32.dll", EntryPoint = "DrawTextW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int DrawText(nint deviceContext, string text, int count, Rect* rect, uint format);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial nint CreateSolidBrush(uint color);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DeleteObject(nint gdiObject);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial nint SelectObject(nint deviceContext, nint gdiObject);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial uint SetTextColor(nint deviceContext, uint color);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial int SetBkMode(nint deviceContext, int mode);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial nint GetStockObject(int index);
+
+    [LibraryImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool Ellipse(nint deviceContext, int left, int top, int right, int bottom);
+
+    [LibraryImport("gdi32.dll", EntryPoint = "CreateFontW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial nint CreateFont(
+        int height,
+        int width,
+        int escapement,
+        int orientation,
+        int weight,
+        uint italic,
+        uint underline,
+        uint strikeOut,
+        uint charSet,
+        uint outPrecision,
+        uint clipPrecision,
+        uint quality,
+        uint pitchAndFamily,
+        string faceName);
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint FindWindowEx(nint parent, nint childAfter, string? className, string? windowName);

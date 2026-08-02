@@ -682,6 +682,11 @@ internal sealed class EditorSurface : IDisposable
                     _loaded = true;
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
                     Flush();
+
+                    // Only now is the browser worth looking at: the page is styled and has its
+                    // flushed state. The loader retires in the same breath.
+                    _browser?.Reveal();
+                    _overlay?.HideLoader();
                     Ready?.Invoke();
                     break;
 

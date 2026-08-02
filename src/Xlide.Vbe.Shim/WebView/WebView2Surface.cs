@@ -359,7 +359,11 @@ internal sealed class WebView2Surface : IDisposable
         Log.Info("webview: controller created");
 
         SetBounds(_bounds);
-        _controller.Target.PutIsVisible(1);
+
+        // Held invisible until the page reports ready. A controller shown now is the
+        // compositor's blank rectangle for as long as the page takes to arrive; the overlay's
+        // loader owns those pixels instead, and Reveal retires it.
+        _controller.Target.PutIsVisible(0);
 
         if (_controller.Target.GetCoreWebView2(out var viewPointer) < 0 || viewPointer == 0)
         {
@@ -389,6 +393,15 @@ internal sealed class WebView2Surface : IDisposable
         SubscribeWebMessageReceived();
         SubscribeAcceleratorKeyPressed();
         Navigate();
+    }
+
+    /// <summary>
+    /// Makes the browser visible. Held back until the page says ready, so the first thing seen
+    /// over the pane is the styled surface rather than a blank coming into being.
+    /// </summary>
+    public void Reveal()
+    {
+        _controller?.Target.PutIsVisible(1);
     }
 
     /// <summary>

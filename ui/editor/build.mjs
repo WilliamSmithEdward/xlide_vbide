@@ -19,6 +19,9 @@ const INDEX_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self' blob:; connect-src 'self'">
 <title>xlide editor</title>
+<!-- Before the stylesheet arrives, the page is already the editor's dark ground: the host holds
+     the browser hidden until ready, and this keeps even a reload from ever flashing white. -->
+<style>html,body{margin:0;height:100%;background:#1e1e1e}</style>
 <link rel="stylesheet" href="./editor.css">
 </head>
 <body>

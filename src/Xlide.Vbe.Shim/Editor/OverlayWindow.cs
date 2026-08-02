@@ -12,8 +12,10 @@ namespace Xlide.Vbe.Shim.Editor;
 /// clipped, moved, and destroyed by code that has no idea it exists, and the pane is recreated more
 /// often than it looks. A sibling positioned over it survives all of that and is ours to place.
 ///
-/// Nothing is painted here. The window exists to own a rectangle and give the browser surface a
-/// parent; every pixel inside it comes from the surface.
+/// While the browser is coming up, this window paints the loader: the wordmark and a pulse on the
+/// editor's dark ground, because the alternative is the compositor's blank rectangle. From the
+/// moment the page reports ready, nothing is painted here again; every pixel comes from the
+/// surface.
 /// </summary>
 internal sealed unsafe class OverlayWindow : IDisposable
 {
@@ -23,6 +25,23 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private const nuint WriteTimerId = 1;
     private const nuint PollTimerId = 2;
     private const nuint ActionTimerId = 3;
+    private const nuint LoaderTimerId = 4;
+
+    /// <summary>One pulse step of the loader; three steps make its cycle.</summary>
+    private const uint LoaderTickMilliseconds = 240;
+
+    /// <summary>
+    /// Ticks before the loader admits something is wrong and says where to look. Covers every
+    /// way the browser can fail to arrive with one message instead of a spinner that never ends.
+    /// </summary>
+    private const int LoaderStalledAfterTicks = 75;
+
+    // The loader's palette, as COLORREF values. They are the page's own dark theme, so the
+    // hand-off from loader to surface reads as one screen coming into focus.
+    private const uint LoaderBackground = 0x001E1E1E;
+    private const uint LoaderForeground = 0x00CCCCCC;
+    private const uint LoaderDimmed = 0x00404040;
+    private const uint LoaderHint = 0x00808080;
 
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();
@@ -40,8 +59,30 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private PixelRect _placed;
     private bool _shown;
 
+    /// <summary>True from creation until the surface reports ready, while the loader paints.</summary>
+    private bool _loading = true;
+
+    /// <summary>Which of the loader's dots is lit, advanced by its timer.</summary>
+    private int _loaderPhase;
+
     private OverlayWindow()
     {
+    }
+
+    /// <summary>
+    /// Retires the loader: the browser is about to be seen, so this window goes back to painting
+    /// nothing. Idempotent, and only meaningful on the host thread, which owns the window.
+    /// </summary>
+    public void HideLoader()
+    {
+        if (_handle == 0 || !_loading)
+        {
+            return;
+        }
+
+        _loading = false;
+        Win32.KillTimer(_handle, LoaderTimerId);
+        Win32.InvalidateRect(_handle, null, false);
     }
 
     public nint Handle => _handle;
@@ -186,6 +227,9 @@ internal sealed unsafe class OverlayWindow : IDisposable
         }
 
         overlay._handle = handle;
+
+        // The loader animates from the first frame; the browser retires it when its page is up.
+        Win32.SetTimer(handle, LoaderTimerId, LoaderTickMilliseconds, 0);
         return overlay;
     }
 
@@ -339,12 +383,31 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         Win32.KillTimer(window, ActionTimerId);
                         overlay.DrainActions();
                     }
+                    else if ((nuint)wParam == LoaderTimerId)
+                    {
+                        overlay._loaderPhase++;
+                        Win32.InvalidateRect(window, null, false);
+                    }
 
                     return 0;
                 }
 
+                case Win32.WmPaint:
+                {
+                    var overlay = FromHandle(window);
+                    if (overlay is not null && overlay._loading)
+                    {
+                        overlay.PaintLoader(window);
+                        return 0;
+                    }
+
+                    // The browser owns the pixels; the default handling just validates.
+                    break;
+                }
+
                 case Win32.WmEraseBackground:
-                    // The browser paints every pixel. Erasing first would flash.
+                    // The browser paints every pixel, and so does the loader. Erasing first
+                    // would flash.
                     return 1;
 
                 case Win32.WmNcDestroy:
@@ -390,6 +453,127 @@ internal sealed unsafe class OverlayWindow : IDisposable
         return handle.IsAllocated ? handle.Target as OverlayWindow : null;
     }
 
+    /// <summary>
+    /// The loader frame: the wordmark over the editor's dark ground, three dots pulsing beneath
+    /// it, and past the stall threshold a line saying where the log is. Plain GDI, because this
+    /// paints before anything richer exists — being before everything else is its whole point.
+    /// </summary>
+    private void PaintLoader(nint window)
+    {
+        PaintStruct paint;
+        var dc = Win32.BeginPaint(window, &paint);
+        if (dc == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Rect client;
+            if (!Win32.GetClientRect(window, &client))
+            {
+                return;
+            }
+
+            var background = Win32.CreateSolidBrush(LoaderBackground);
+            if (background != 0)
+            {
+                _ = Win32.FillRect(dc, &client, background);
+                Win32.DeleteObject(background);
+            }
+
+            _ = Win32.SetBkMode(dc, Win32.BackgroundTransparent);
+
+            var centerX = (client.Left + client.Right) / 2;
+            var centerY = (client.Top + client.Bottom) / 2;
+
+            // The wordmark, a little above centre so the dots sit at the optical middle.
+            var wordmarkFont = Win32.CreateFont(
+                -30, 0, 0, 0,
+                Win32.FontWeightSemibold,
+                0, 0, 0,
+                Win32.FontDefaultCharset,
+                0, 0,
+                Win32.FontClearTypeQuality,
+                0,
+                "Segoe UI");
+
+            if (wordmarkFont != 0)
+            {
+                var previousFont = Win32.SelectObject(dc, wordmarkFont);
+                _ = Win32.SetTextColor(dc, LoaderForeground);
+
+                var wordmarkRect = client;
+                wordmarkRect.Bottom = centerY;
+                Win32.DrawText(
+                    dc,
+                    "xlide",
+                    -1,
+                    &wordmarkRect,
+                    Win32.DtCenter | Win32.DtVCenter | Win32.DtSingleLine | Win32.DtNoPrefix);
+
+                Win32.SelectObject(dc, previousFont);
+                Win32.DeleteObject(wordmarkFont);
+            }
+
+            // The pulse: three dots, one lit, walking left to right.
+            var previousPen = Win32.SelectObject(dc, Win32.GetStockObject(Win32.NullPen));
+            for (var dot = 0; dot < 3; dot++)
+            {
+                var lit = _loaderPhase % 3 == dot;
+                var brush = Win32.CreateSolidBrush(lit ? LoaderForeground : LoaderDimmed);
+                if (brush == 0)
+                {
+                    continue;
+                }
+
+                var previousBrush = Win32.SelectObject(dc, brush);
+                var dotX = centerX + (dot - 1) * 18;
+                var dotY = centerY + 18;
+                Win32.Ellipse(dc, dotX - 4, dotY - 4, dotX + 5, dotY + 5);
+                Win32.SelectObject(dc, previousBrush);
+                Win32.DeleteObject(brush);
+            }
+
+            Win32.SelectObject(dc, previousPen);
+
+            if (_loaderPhase >= LoaderStalledAfterTicks)
+            {
+                var hintFont = Win32.CreateFont(
+                    -13, 0, 0, 0,
+                    0, 0, 0, 0,
+                    Win32.FontDefaultCharset,
+                    0, 0,
+                    Win32.FontClearTypeQuality,
+                    0,
+                    "Segoe UI");
+
+                if (hintFont != 0)
+                {
+                    var previousFont = Win32.SelectObject(dc, hintFont);
+                    _ = Win32.SetTextColor(dc, LoaderHint);
+
+                    var hintRect = client;
+                    hintRect.Top = centerY + 40;
+                    hintRect.Bottom = centerY + 70;
+                    Win32.DrawText(
+                        dc,
+                        "still starting — the xlide log has the story",
+                        -1,
+                        &hintRect,
+                        Win32.DtCenter | Win32.DtSingleLine | Win32.DtNoPrefix);
+
+                    Win32.SelectObject(dc, previousFont);
+                    Win32.DeleteObject(hintFont);
+                }
+            }
+        }
+        finally
+        {
+            Win32.EndPaint(window, &paint);
+        }
+    }
+
     public void Dispose()
     {
         var handle = _handle;
@@ -399,6 +583,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
             Win32.KillTimer(handle, WriteTimerId);
             Win32.KillTimer(handle, PollTimerId);
             Win32.KillTimer(handle, ActionTimerId);
+            Win32.KillTimer(handle, LoaderTimerId);
         }
 
         // Anything still queued was for a surface that no longer exists.
