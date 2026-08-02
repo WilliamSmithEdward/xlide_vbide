@@ -2631,7 +2631,10 @@ internal sealed class AddInSession : IDisposable
             return fallback;
         }
 
-        return new PixelRect(0, menuBottom, client.Right - client.Left, height - menuBottom);
+        // A PixelRect is edges, not origin-and-size: the fourth value is the bottom edge, which
+        // is the client's own. Passing a height here left a menu-bar-sized band of native frame
+        // below the loader, invisible in every other rectangle because their tops are zero.
+        return new PixelRect(0, menuBottom, client.Right - client.Left, height);
     }
 
     /// <summary>The native menu bar's height in pixels, or zero when it cannot be read.</summary>
