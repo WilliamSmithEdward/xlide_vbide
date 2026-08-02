@@ -179,6 +179,20 @@ public sealed record CompletionResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("items")] SurfaceCompletionItem[] Items);
 
+/// <summary>A resolved hover: declaration line, plain-text facts, spans into the live source.</summary>
+public sealed record SurfaceHoverPayload(
+    [property: JsonPropertyName("signature")] string Signature,
+    [property: JsonPropertyName("details")] string[] Details,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End);
+
+/// <summary>The answer to one hover request; a null hover means nothing under the cursor.</summary>
+public sealed record HoverResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("hover")] SurfaceHoverPayload? Hover);
+
 /// <summary>
 /// Serialisation for surface messages. Source generated, because ahead-of-time compilation has no
 /// reflection to fall back on and a message type that is not registered here fails at run time
@@ -206,6 +220,8 @@ public sealed record CompletionResultMessage(
 [JsonSerializable(typeof(SurfacePropertyEntry))]
 [JsonSerializable(typeof(CompletionResultMessage))]
 [JsonSerializable(typeof(SurfaceCompletionItem))]
+[JsonSerializable(typeof(HoverResultMessage))]
+[JsonSerializable(typeof(SurfaceHoverPayload))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]
 [JsonSerializable(typeof(SurfaceFinding))]

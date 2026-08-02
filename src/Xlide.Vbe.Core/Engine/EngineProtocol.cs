@@ -37,6 +37,16 @@ public sealed record EngineCompletionItem(
 public sealed record EngineCompletions(
     [property: JsonPropertyName("items")] EngineCompletionItem[] Items);
 
+/// <summary>A resolved hover: the declaration line, plain-text facts, and documentation.</summary>
+public sealed record EngineHoverPayload(
+    [property: JsonPropertyName("signature")] string Signature,
+    [property: JsonPropertyName("details")] string[] Details,
+    [property: JsonPropertyName("documentation")] string? Documentation,
+    [property: JsonPropertyName("span")] EngineSpan Span);
+
+public sealed record EngineHover(
+    [property: JsonPropertyName("hover")] EngineHoverPayload? Hover);
+
 /// <summary>
 /// Serialisation for the engine protocol.
 ///
@@ -54,6 +64,8 @@ public sealed record EngineCompletions(
 [JsonSerializable(typeof(EngineSpan))]
 [JsonSerializable(typeof(EngineCompletionItem))]
 [JsonSerializable(typeof(EngineCompletions))]
+[JsonSerializable(typeof(EngineHoverPayload))]
+[JsonSerializable(typeof(EngineHover))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;

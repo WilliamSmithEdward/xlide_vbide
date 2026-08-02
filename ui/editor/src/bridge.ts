@@ -61,7 +61,17 @@ export type HostMessage =
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
-  | { type: "completionResult"; id: number; items: HostCompletionItem[] };
+  | { type: "completionResult"; id: number; items: HostCompletionItem[] }
+  | { type: "hoverResult"; id: number; hover: HostHoverPayload | null };
+
+/** A resolved hover from the host's engine. Spans are UTF-16 offsets into the live source. */
+export interface HostHoverPayload {
+  signature: string;
+  details: string[];
+  documentation?: string | null;
+  start: number;
+  end: number;
+}
 
 /** One completion from the host's engine. The kind is the analyzer's own vocabulary. */
 export interface HostCompletionItem {
@@ -109,6 +119,7 @@ export type ClientMessage =
   | { type: "closeModule"; name: string }
   | { type: "insertComponent"; kind: number }
   | { type: "completion"; id: number; offset: number }
+  | { type: "hover"; id: number; offset: number }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -195,7 +206,14 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Hover requests awaiting their answers, by request identifier. */
+  private readonly pendingHovers = new Map<number, {
+    resolve: (hover: HostHoverPayload | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   private nextCompletionId = 1;
+  private nextHoverId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -303,6 +321,24 @@ export class EditorBridge {
   }
 
   /**
+   * Asks the host what the identifier at an offset is. Resolves null rather than rejecting when
+   * the host is slow or gone: a hover that fails is a tooltip that does not appear, not an error.
+   */
+  requestHover(offset: number): Promise<HostHoverPayload | null> {
+    const id = this.nextHoverId++;
+
+    return new Promise<HostHoverPayload | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingHovers.delete(id);
+        resolve(null);
+      }, 2000);
+
+      this.pendingHovers.set(id, { resolve, timer });
+      this.transport.post({ type: "hover", id, offset });
+    });
+  }
+
+  /**
    * Runs a toolbar command.
    *
    * An editor command is run here; a host command is sent on. The editor's caret has to reach the
@@ -399,6 +435,15 @@ export class EditorBridge {
           this.pendingCompletions.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.items);
+        }
+        return;
+      }
+      case "hoverResult": {
+        const waiter = this.pendingHovers.get(message.id);
+        if (waiter) {
+          this.pendingHovers.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.hover);
         }
         return;
       }
@@ -888,6 +933,18 @@ export function demoTransport(): HostTransport {
       }
       if (message.type === "menuExecute") {
         send({ type: "notice", text: `menu [${message.path.join(", ")}] executed` });
+      }
+      if (message.type === "hover") {
+        send({
+          type: "hoverResult",
+          id: message.id,
+          hover: {
+            signature: "ThisWorkbook As Workbook",
+            details: ["Excel host global"],
+            start: message.offset,
+            end: message.offset,
+          },
+        });
       }
       if (message.type === "completion") {
         send({

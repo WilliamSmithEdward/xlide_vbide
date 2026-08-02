@@ -9,12 +9,15 @@
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import { completionsFor } from './completion';
+import { hoverFor } from './hover';
 import {
     ErrorCode,
     type CompletionParams,
     type CompletionResult,
     type DiagnosticsParams,
     type DiagnosticsResult,
+    type HoverParams,
+    type HoverResult,
     type JsonRpcError,
     type ModulePayload,
     type ProjectOpenParams,
@@ -78,6 +81,9 @@ export class Dispatcher {
             case 'textDocument/completion':
                 return this.completion(this.require<CompletionParams>(params));
 
+            case 'textDocument/hover':
+                return this.hover(this.require<HoverParams>(params));
+
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
@@ -115,6 +121,13 @@ export class Dispatcher {
         // Not gated on generation: the request carries the live source of the module being typed
         // in, and the seeded copies of the others are current enough for the facts they lend.
         return { items: completionsFor(this.seededModules.get(params.projectId) ?? [], params) };
+    }
+
+    private hover(params: HoverParams): HoverResult {
+        this.requireInitialized();
+
+        // Same liveness rule as completion.
+        return { hover: hoverFor(this.seededModules.get(params.projectId) ?? [], params) };
     }
 
     private diagnostics(params: DiagnosticsParams): DiagnosticsResult {

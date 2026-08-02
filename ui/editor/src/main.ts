@@ -148,6 +148,41 @@ function boot(): void {
     },
   });
 
+  // Hovers come from the same engine: the identifier under the cursor described by its
+  // declaration line, its origin, and its documentation. The signature renders as VBA code, the
+  // way the extension renders it.
+  monaco.languages.registerHoverProvider(VBA_LANGUAGE_ID, {
+    provideHover: async (model, position) => {
+      if (model !== editor.getModel()) {
+        return null;
+      }
+
+      const hover = await bridge.requestHover(model.getOffsetAt(position));
+      if (!hover) {
+        return null;
+      }
+
+      const start = model.getPositionAt(hover.start);
+      const end = model.getPositionAt(hover.end);
+      const contents: monaco.IMarkdownString[] = [
+        { value: "```vba\n" + hover.signature + "\n```" },
+      ];
+
+      if (hover.details.length > 0) {
+        contents.push({ value: hover.details.join("  \n") });
+      }
+
+      if (hover.documentation) {
+        contents.push({ value: hover.documentation });
+      }
+
+      return {
+        range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column),
+        contents,
+      };
+    },
+  });
+
   // The host's own commands, present in the editor's context menu and the command palette so
   // they are discoverable where a developer already looks for commands.
   const hostActions: Array<[string, string, string]> = [

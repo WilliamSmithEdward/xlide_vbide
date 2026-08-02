@@ -126,3 +126,33 @@ export interface CompletionItemPayload {
 export interface CompletionResult {
     items: CompletionItemPayload[];
 }
+
+/**
+ * textDocument/hover: describe the identifier at an offset. The source travels with the request
+ * for the same liveness reason completion's does.
+ */
+export interface HoverParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text as the editor shows it right now. */
+    source: string;
+    /** UTF-16 offset into that source. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** A resolved hover. The span is UTF-16 offsets into the request's source. */
+export interface HoverPayload {
+    /** Declaration line, rendered as VBA code. */
+    signature: string;
+    /** Plain-text facts: origin module, visibility, source note. */
+    details: string[];
+    /** Markdown documentation when any is known. */
+    documentation?: string;
+    span: { start: number; end: number };
+}
+
+export interface HoverResult {
+    hover: HoverPayload | null;
+}

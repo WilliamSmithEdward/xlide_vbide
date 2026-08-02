@@ -139,6 +139,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ModuleCloseRequested = CloseModule;
         _editorSurface.ComponentInsertRequested = InsertComponent;
         _editorSurface.CompletionRequested = OnCompletionRequested;
+        _editorSurface.HoverRequested = OnHoverRequested;
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
         // window event, so nothing else would recompute the bounds.
@@ -1638,6 +1639,54 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowCompletions(requestId, items));
+        });
+    }
+
+    /// <summary>
+    /// Answers a hover request from the surface, the same way a completion is answered: capture
+    /// on the host thread, resolve off it, marshal the answer back. A request that fails answers
+    /// empty rather than never.
+    /// </summary>
+    private void OnHoverRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+        var source = surface?.Text;
+
+        if (surface is null || module is null || source is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowHover(requestId, null);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceHoverPayload? payload = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.HoverAsync(module, source, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not null)
+                {
+                    payload = new SurfaceHoverPayload(
+                        answered.Signature,
+                        answered.Details,
+                        answered.Documentation,
+                        answered.Span.Start,
+                        answered.Span.End);
+                }
+
+                Log.Info($"hover: {module}@{offset} -> {(payload is null ? "nothing" : payload.Signature)}");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"hover: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowHover(requestId, payload));
         });
     }
 

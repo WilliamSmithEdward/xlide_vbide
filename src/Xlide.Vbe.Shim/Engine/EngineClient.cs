@@ -196,6 +196,28 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineCompletions);
     }
 
+    /// <summary>Asks what the identifier at an offset into a module's live source is.</summary>
+    public async Task<EngineHover?> HoverAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string source,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["source"] = source,
+            ["offset"] = offset,
+        };
+
+        var result = await CallAsync("textDocument/hover", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineHover);
+    }
+
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
         var writer = _writer;

@@ -103,6 +103,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the editor wants completions: request identifier, caret offset.</summary>
     public Action<int, int>? CompletionRequested { get; set; }
 
+    /// <summary>Raised when the page asks what the identifier at an offset is: (requestId, offset).</summary>
+    public Action<int, int>? HoverRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -123,6 +126,19 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new CompletionResultMessage("completionResult", requestId, items),
             EditorMessageContext.Default.CompletionResultMessage));
+    }
+
+    /// <summary>Answers one hover request. Never held: a hover outlives no cursor move.</summary>
+    public void ShowHover(int requestId, SurfaceHoverPayload? hover)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new HoverResultMessage("hoverResult", requestId, hover),
+            EditorMessageContext.Default.HoverResultMessage));
     }
 
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
@@ -730,6 +746,18 @@ internal sealed class EditorSurface : IDisposable
                         && offset >= 0)
                     {
                         CompletionRequested?.Invoke(requestId, offset);
+                    }
+
+                    break;
+
+                case "hover":
+                    if (document.RootElement.TryGetProperty("id", out var hoverId)
+                        && hoverId.TryGetInt32(out var hoverRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var hoverOffsetElement)
+                        && hoverOffsetElement.TryGetInt32(out var hoverOffset)
+                        && hoverOffset >= 0)
+                    {
+                        HoverRequested?.Invoke(hoverRequestId, hoverOffset);
                     }
 
                     break;

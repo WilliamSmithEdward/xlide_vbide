@@ -199,6 +199,66 @@ try {
             'expected Probe from BadModule');
     });
 
+    // Hovers: the identifier under the cursor, described from the same project facts.
+    const localHover = await call('textDocument/hover', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE,
+        offset: GOOD_MODULE.indexOf('n = 1'),
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> hover on the local: ${localHover.hover?.signature ?? '(none)'}`);
+    check('hovering the local names its declaration', () => {
+        assert.ok(localHover.hover, 'expected a hover');
+        assert.ok(localHover.hover.signature.includes('n As Long'),
+            `signature was '${localHover.hover.signature}'`);
+    });
+
+    const globalHoverSource = GOOD_MODULE.replace('    n = 1', '    ThisWorkbook.Save');
+    const globalHover = await call('textDocument/hover', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: globalHoverSource,
+        offset: globalHoverSource.indexOf('ThisWorkbook') + 3,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> hover on the global: ${globalHover.hover?.signature ?? '(none)'}`);
+    check('hovering ThisWorkbook names the host global', () => {
+        assert.ok(globalHover.hover, 'expected a hover');
+        assert.ok(globalHover.hover.signature.includes('ThisWorkbook As Workbook'),
+            `signature was '${globalHover.hover.signature}'`);
+    });
+
+    const probeHoverSource = GOOD_MODULE.replace('    n = 1', '    Probe');
+    const probeHover = await call('textDocument/hover', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: probeHoverSource,
+        offset: probeHoverSource.indexOf('    Probe') + 6,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> hover across modules: ${probeHover.hover?.signature ?? '(none)'}`);
+    check('hovering a procedure from the other module names its home', () => {
+        assert.ok(probeHover.hover, 'expected a hover');
+        assert.ok(probeHover.hover.signature.includes('Sub Probe'),
+            `signature was '${probeHover.hover.signature}'`);
+        assert.ok(probeHover.hover.details.some((detail) => detail.includes('BadModule')),
+            `details were '${probeHover.hover.details.join('; ')}'`);
+    });
+
+    const blankHover = await call('textDocument/hover', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE,
+        offset: GOOD_MODULE.indexOf('()') + 1,
+        moduleType: 'standard',
+    });
+
+    check('hovering nothing answers null', () => assert.equal(blankHover.hover, null));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;
