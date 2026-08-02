@@ -230,9 +230,31 @@ Pane lifecycle facts, measured while making tabs behave:
 - The page has a `trace` message that writes into the shim log (`page: ...`), which is how a
   page-side silence is told apart from a transport one. `globalThis.xlideBridge` is reachable
   from devtools for the same reason.
-- `tools`-side probes may use synthetic input against the harness (never in the product). The
-  tab lifecycle probe lives in the session scratchpad; the tool shell is sandboxed away from
-  SendInput, so such probes run unsandboxed.
+- `tools`-side probes may use synthetic input against the harness (never in the product), BUT
+  the user has judged SendKeys-style probing unreliable and it misfired once (it executed
+  File -> Import through the menu). The standing verification loop is: the user drives, and the
+  log answers - both halves log every evaluation, its outcome, and each change in what the
+  hidden window holds, with non-printables escaped.
+
+Immediate window facts, measured while making capture behave:
+- The UIA TextPattern reading of the (hidden) Immediate window ends with a trailing empty line
+  and a NUL, U+0000. New output is inserted BEFORE that tail, so the raw text never simply
+  grows. Diff on readings trimmed of ALL trailing whitespace-or-control characters, by class,
+  never by a list; a raw comparison first replayed the whole buffer per evaluation and then
+  swallowed every print.
+- A reading of empty is a project-reset artefact, not a cleared window (it is hidden; nobody
+  can clear it): ignore it, never adopt it as the baseline. A reading that does not continue
+  the baseline means trimming; adopt it silently.
+- An unhandled run-time error in code started by Application.Run drops the editor into break
+  mode INSIDE the calling frame and shows its dialog. The evaluator's scratch procedure carries
+  its own On Error handler and returns the language's message as a Chr$(1)-marked value; the
+  scratch module (ImmediateEvaluator.ScratchModule) is filtered out of the pane picker, the tab
+  list, the explorer and the debugger's module switch, because it surfacing was one flash per
+  evaluation.
+- Evaluation must check VBProject.Mode FRESH, not the cached break flag: evaluating during an
+  unnoticed break adds a module to a stopped project and fails incomprehensibly.
+- A successful statement prints nothing (native parity); ?expr prints its value; errors print
+  the editor's own message.
 
 ## 8. Lessons that cost real time this session (long form in lessons.md)
 
