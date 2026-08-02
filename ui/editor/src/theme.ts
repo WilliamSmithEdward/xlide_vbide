@@ -7,28 +7,40 @@ export type XlideTheme = typeof THEME_DARK | typeof THEME_LIGHT;
 
 // Token rules are keyed on the scopes emitted by the VBA Monarch tokenizer. The `.vba`
 // postfix is dropped so the same rule covers any future language that reuses the scope.
+//
+// The colours are the ones the companion editor's grammar renders as: keywords in one voice,
+// declared and called names in another, types a third, the language's own values a fourth,
+// ordinary identifiers a fifth. A module should read identically in the two products.
 const darkRules: monaco.editor.ITokenThemeRule[] = [
   { token: "comment", foreground: "6a9955", fontStyle: "italic" },
-  { token: "keyword", foreground: "569cd6" },
+  { token: "keyword", foreground: "c586c0" },
+  { token: "keyword.option", foreground: "ce9178" },
   { token: "keyword.continuation", foreground: "808080" },
-  { token: "identifier", foreground: "d4d4d4" },
+  { token: "constant", foreground: "569cd6" },
+  { token: "type", foreground: "4ec9b8" },
+  { token: "function", foreground: "dcdcaa" },
+  { token: "identifier", foreground: "9cdcfe" },
   { token: "string", foreground: "ce9178" },
   { token: "string.escape", foreground: "d7ba7d" },
   { token: "number", foreground: "b5cea8" },
-  { token: "number.date", foreground: "c586c0" },
+  { token: "number.date", foreground: "b5cea8" },
   { token: "operator", foreground: "d4d4d4" },
   { token: "delimiter", foreground: "d4d4d4" },
 ];
 
 const lightRules: monaco.editor.ITokenThemeRule[] = [
   { token: "comment", foreground: "008000", fontStyle: "italic" },
-  { token: "keyword", foreground: "0000ff" },
+  { token: "keyword", foreground: "af00db" },
+  { token: "keyword.option", foreground: "a31515" },
   { token: "keyword.continuation", foreground: "808080" },
-  { token: "identifier", foreground: "1b1b1f" },
+  { token: "constant", foreground: "0000ff" },
+  { token: "type", foreground: "267f99" },
+  { token: "function", foreground: "795e26" },
+  { token: "identifier", foreground: "001080" },
   { token: "string", foreground: "a31515" },
   { token: "string.escape", foreground: "b06000" },
   { token: "number", foreground: "098658" },
-  { token: "number.date", foreground: "af00db" },
+  { token: "number.date", foreground: "098658" },
   { token: "operator", foreground: "1b1b1f" },
   { token: "delimiter", foreground: "1b1b1f" },
 ];

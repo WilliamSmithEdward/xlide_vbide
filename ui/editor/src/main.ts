@@ -103,7 +103,7 @@ function boot(): void {
   let bridge: EditorBridge;
   const shell = new Shell(document.body, {
     activateModule: (name) => bridge.activateModule(name),
-    navigate: (module, line, column) => bridge.navigate(module, line, column),
+    navigate: (module, line, column, selectLine) => bridge.navigate(module, line, column, selectLine),
     layoutChanged: () => editor.layout(),
     command: (command) => bridge.runCommand(command),
     // Undo and redo are built in rather than registered, so they never resolve as actions and

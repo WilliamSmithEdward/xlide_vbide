@@ -22,11 +22,75 @@ export const CANONICAL_KEYWORDS: readonly string[] = [
   "Debug", "Me",
 ];
 
+// The classification below is the companion editor's TextMate grammar, re-expressed as a
+// Monarch tokenizer, and its colours in theme.ts are what that grammar renders as over there:
+// every keyword one colour, declaration names and calls another, types a third, the language's
+// literal values a fourth, ordinary identifiers a fifth. The two products should read the same
+// module the same way at a glance.
+
+/** Every word the grammar paints as a keyword, canonical list included. */
+const TOKEN_KEYWORDS: string[] = [
+  ...CANONICAL_KEYWORDS,
+  "Eqv", "Imp", "TypeOf", "AddressOf", "Lib", "Alias", "Spc", "Any", "Shared",
+  "Base", "Compare", "Attribute", "Write", "Seek", "Lock", "Unlock", "Put", "Open", "Close",
+  "Input", "Print", "LSet", "RSet", "Wend", "GoSub", "Return",
+  "DefBool", "DefByte", "DefCur", "DefDate", "DefDbl", "DefDec", "DefInt", "DefLng",
+  "DefLngLng", "DefLngPtr", "DefObj", "DefSng", "DefStr", "DefVar",
+];
+
+/** The built-in type names, painted as types wherever they appear. */
+const BUILTIN_TYPES: string[] = [
+  "Boolean", "Byte", "Integer", "Long", "LongLong", "LongPtr", "Single", "Double",
+  "Currency", "Date", "String", "Variant", "Object",
+];
+
+/** Literal values and intrinsic constants, painted as constants. */
+const LANGUAGE_CONSTANTS: string[] = [
+  "True", "False", "Nothing", "Null", "Empty",
+  "vbCrLf", "vbCr", "vbLf", "vbNewLine", "vbTab", "vbNullString", "vbNullChar", "vbBack",
+  "vbFormFeed", "vbVerticalTab", "vbBlack", "vbRed", "vbGreen", "vbYellow", "vbBlue",
+  "vbMagenta", "vbCyan", "vbWhite", "vbOKOnly", "vbOKCancel", "vbAbortRetryIgnore",
+  "vbYesNoCancel", "vbYesNo", "vbRetryCancel", "vbCritical", "vbQuestion", "vbExclamation",
+  "vbInformation", "vbDefaultButton1", "vbDefaultButton2", "vbDefaultButton3",
+  "vbApplicationModal", "vbSystemModal", "vbOK", "vbCancel", "vbAbort", "vbRetry", "vbIgnore",
+  "vbYes", "vbNo", "vbString", "vbBinaryCompare", "vbTextCompare",
+  "xlUp", "xlDown", "xlToLeft", "xlToRight", "xlValues", "xlFormulas", "xlComments",
+  "xlWhole", "xlPart", "xlByRows", "xlByColumns", "xlNext", "xlPrevious",
+  "xlCellTypeLastCell", "xlCellTypeBlanks", "xlShiftUp", "xlShiftToLeft", "xlShiftDown",
+  "xlShiftToRight",
+];
+
+/** Names whose value is the language itself: `Me`. Painted with the constants. */
+const LANGUAGE_VALUES: string[] = ["Me"];
+
+/** The VBA standard library's functions, painted as calls wherever they appear. */
+const BUILTIN_FUNCTIONS: string[] = [
+  "Abs", "Array", "Asc", "AscB", "AscW", "Atn", "CBool", "CByte", "CCur", "CDate", "CDbl",
+  "CDec", "Choose", "Chr", "ChrB", "ChrW", "CInt", "CLng", "CLngLng", "CLngPtr", "Cos",
+  "CreateObject", "CSng", "CStr", "CurDir", "CVar", "CVErr", "DateAdd", "DateDiff", "DatePart",
+  "DateSerial", "DateValue", "Day", "DDB", "Dir", "DoEvents", "Environ", "EOF", "Err", "Exp",
+  "FileAttr", "FileCopy", "FileDateTime", "FileLen", "Filter", "Fix", "Format",
+  "FormatCurrency", "FormatDateTime", "FormatNumber", "FormatPercent", "FreeFile", "FV",
+  "GetAttr", "GetObject", "GetSetting", "Hex", "Hour", "IIf", "IMEStatus", "InputBox", "InStr",
+  "InStrB", "InStrRev", "Int", "IPmt", "IRR", "IsArray", "IsDate", "IsEmpty", "IsError",
+  "IsMissing", "IsNull", "IsNumeric", "IsObject", "Join", "LBound", "LCase", "Left", "LeftB",
+  "Len", "LenB", "Loc", "LOF", "Log", "LTrim", "Mid", "MidB", "Minute", "MIRR", "Month",
+  "MonthName", "MsgBox", "Now", "NPer", "NPV", "Oct", "Partition", "Pmt", "PPmt", "PSet", "PV",
+  "QBColor", "Randomize", "Rate", "Replace", "RGB", "Right", "RightB", "Rnd", "Round", "RTrim",
+  "Scale", "Second", "Sgn", "Shell", "Sin", "SLN", "Space", "Split", "Sqr", "Str", "StrComp",
+  "StrConv", "StrReverse", "Switch", "SYD", "Tan", "Time", "Timer", "TimeSerial", "TimeValue",
+  "Trim", "TypeName", "UBound", "UCase", "Val", "VarType", "Weekday", "WeekdayName", "Year",
+];
+
 export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
   ignoreCase: true,
   defaultToken: "",
   tokenPostfix: ".vba",
-  keywords: CANONICAL_KEYWORDS as string[],
+  keywords: TOKEN_KEYWORDS,
+  builtinTypes: BUILTIN_TYPES,
+  languageConstants: LANGUAGE_CONSTANTS,
+  languageValues: LANGUAGE_VALUES,
+  builtinFunctions: BUILTIN_FUNCTIONS,
 
   tokenizer: {
     root: [
@@ -35,8 +99,10 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
       [/rem\b.*$/, "comment"],
       [/'.*$/, "comment"],
 
-      // Date literal. Bounded to a single line so conditional compilation directives
-      // (`#If Win64 Then`) fall through to the keyword rules instead of being eaten.
+      // Conditional compilation directives, before the date literal can eat their #.
+      [/^(\s*)(#\s*(?:If|ElseIf|Else|End\s+If|EndIf|Const))\b/, ["", "keyword"]],
+
+      // Date literal. Bounded to a single line.
       [/#[^#\n]*#/, "number.date"],
 
       // Radix prefixes must precede the `&` operator rule and the plain number rules.
@@ -56,7 +122,68 @@ export const vbaMonarchLanguage: monaco.languages.IMonarchLanguage = {
       [/\d+[eEdD][-+]?\d+[!#@&%]?/, "number.float"],
       [/\d+[!#@&%]?/, "number"],
 
-      [/[a-zA-Z_]\w*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
+      // Option's argument has its own colour, the way the grammar scopes it apart.
+      [/(Option)(\s+)(Explicit|Base|Compare|Private\s+Module)\b/, ["keyword", "", "keyword.option"]],
+
+      // Declaration names: what follows the declaring keyword is the declared thing, and it
+      // is painted as one. Order matters: these run before the general word rule below.
+      [/\b(Sub|Function)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "function"]],
+      [/\b(Property)(\s+)(Get|Let|Set)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "keyword", "", "function"]],
+      [/\b(Event)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "function"]],
+      [/\b(Implements)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "type"]],
+      [/\b(Type|Enum)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "type"]],
+
+      // What follows As or New names a type, built-in or the project's own.
+      [/\b(As|New)(\s+)([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)/, ["keyword", "", "type"]],
+
+      // A statement that starts with a bare name is a call: `InternalBeginAsyncOpen`,
+      // `RequireDbConnection Me, "..."`. A name being assigned, labelled, or dotted is not.
+      [/^(\s*)([A-Za-z_]\w*)(?![\w])(?!\s*[=:.(])/, ["", {
+        cases: {
+          "@keywords": "keyword",
+          "@languageConstants": "constant",
+          "@languageValues": "constant",
+          "@builtinTypes": "type",
+          "@builtinFunctions": "function",
+          "@default": "function",
+        },
+      }]],
+
+      // A member with an argument list is a call; a plain member is a member. The grammar's
+      // quirk is kept: a member spelled like a keyword paints as one (`.Open`, `.Print`).
+      [/(\.)([A-Za-z_]\w*)(?=\s*\()/, ["delimiter", {
+        cases: { "@keywords": "keyword", "@default": "function" },
+      }]],
+      [/(\.)([A-Za-z_]\w*)/, ["delimiter", {
+        cases: { "@keywords": "keyword", "@languageConstants": "constant", "@default": "identifier" },
+      }]],
+
+      // A name with an argument list is a call, wherever it appears.
+      [/([A-Za-z_]\w*)(?=\s*\()/, {
+        cases: {
+          "@keywords": "keyword",
+          "@languageConstants": "constant",
+          "@languageValues": "constant",
+          "@builtinTypes": "type",
+          "@builtinFunctions": "function",
+          "@default": "function",
+        },
+      }],
+
+      // Every word that remains: constants, types, built-ins, keywords, then identifiers.
+      [/[a-zA-Z_]\w*/, {
+        cases: {
+          "@languageConstants": "constant",
+          "@languageValues": "constant",
+          "@builtinTypes": "type",
+          "@builtinFunctions": "function",
+          "@keywords": "keyword",
+          "@default": "identifier",
+        },
+      }],
+
+      // A foreign name is an identifier wearing brackets.
+      [/\[[^\]\n]+\]/, "identifier"],
 
       [/"/, { token: "string.quote", bracket: "@open", next: "@string" }],
 
