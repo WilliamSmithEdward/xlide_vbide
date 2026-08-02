@@ -1,273 +1,256 @@
 # Handoff
 
-Everything needed to pick this up cold. Written at the end of the session that built the
-foundation, for whoever continues it.
+Everything needed to pick this up cold. Rewritten at the end of the session that made the surface
+the whole visible editor; the previous version described a foundation, this one describes a product
+with a short list of holes.
 
-Read this, then [status.md](status.md) for what is proven, [architecture.md](architecture.md) for
-the design, and [decisions.md](decisions.md) for the choices that would be expensive to reverse.
+Read this, then [lessons.md](lessons.md) for the long-form findings with evidence,
+[architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
+that would be expensive to reverse.
+
+Repository: `F:\GitHub\xlide\xlide_vbide`, public at
+<https://github.com/WilliamSmithEdward/xlide_vbide>. Working tree clean and pushed as of commit
+`848174d`.
 
 ## 1. What this is, in one paragraph
 
-An add-in that upgrades the VBA editor from inside it. A native COM in-process server loads into the
-editor, hosts web-based UI in the editor's own docked tool windows, overlays a modern editing
-surface on the code panes, and talks to a language engine running in a separate process. It installs
-from one executable, per user, with no runtime on the machine.
+An add-in that replaces the visible VBA editor from inside it. A native COM in-process server
+(NativeAOT, no runtime in Excel's process) loads into the VBE, covers the editor with a WebView2
+surface running Monaco, and drives the real editor underneath through its object model and command
+bars. The developer sees our toolbar, project explorer, module tabs, editor, problems panel,
+Immediate panel, and status bar; the native components stay alive as invisible engines. An
+out-of-process language engine supplies diagnostics. One EXE installs it per user; nothing else is
+required on the machine.
 
-Repository: `F:\GitHub\xlide\xlide_vbide`, published at
-<https://github.com/WilliamSmithEdward/xlide_vbide>.
+## 2. The two rules that decide the design
 
-## 2. Machine setup
+**The module is the source of truth. The surface is a view of it.** The compiler, the debugger, the
+saved workbook and the analyzer all read `CodeModule`; nothing reads the surface. An edit that has
+not reached the module has not happened. When the two disagree, the module wins.
 
-Two things are installed but not on the system path, and forgetting either produces a confusing
-failure rather than a clear one.
+**With one amendment, from the user, after living with the first rule:** the editor rewrites what
+it is given (respells keywords, completes a procedure's parentheses, inserts blank bodies), and
+those rewrites are exactly what a developer is mid-way through typing themselves. So resync
+comparisons run against a baseline of *what the module read back as after our last write*, never
+against the surface text, and an unfinished edit is never overwritten. Typing ergonomics follow
+xlide_vscode, not the VBE. `Sub Later` stays `Sub Later`.
+
+Anything added here should answer: what happens when the surface and the module disagree, and how
+does it get back in step without the developer losing work.
+
+## 3. Machine setup
+
+Nothing below is on the system PATH; forgetting any of it fails confusingly rather than clearly.
 
 ```powershell
-# The SDK. Not on PATH; every script prepends it.
+# The SDK (user-local .NET 10.0.302).
 $env:PATH = "$env:LOCALAPPDATA\Microsoft\dotnet;$env:PATH"
 
-# Required for ahead-of-time publishing: the native linker is located through vswhere, which is
-# also not on PATH. Without it the build fails with the linker's error text embedded in a command
-# line, which reads as a linker problem rather than a discovery problem.
+# NativeAOT publishing finds the linker through vswhere. Without this the error text reads as a
+# linker fault, not a discovery fault.
 $env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
 
-# Required to RUN anything built framework-dependent. A built program launches through a small
-# native host that finds the runtime through the registry or this variable, never through PATH.
-# Without it a program reports that .NET is not installed at all.
+# Required to RUN anything framework-dependent, or it reports .NET is not installed.
 $env:DOTNET_ROOT = "$env:LOCALAPPDATA\Microsoft\dotnet"
 ```
 
-Installed during that session: .NET 10.0.302 SDK (user-local), Visual Studio Build Tools 2026 with
-the C++ workload. Node 24.18 and npm 11.16 were already present. Excel 365 x64, VBA 7.1.
+VS Build Tools 2026 (C++ workload), Node 24, Excel 365 x64 16.0.20228, VBA 7.1, Windows 11.
 
-## 3. Running things
+## 4. Running things
 
 ```powershell
 tools\dev.ps1                                  # build, test, register, verify in a real editor
-tools\dev.ps1 -Reuse                           # repeat check against an already-open host, ~0.24s
 tools\dev.ps1 -Unregister                      # leave the machine clean
-
-tools\harness\Invoke-VbeLoadCheck.ps1          # does the add-in load and connect
-tools\harness\Invoke-AnalysisCheck.ps1         # does it report a real defect and not a false one
-tools\harness\Get-EditorScreenshot.ps1         # open the editor and capture it, about 2.6s
-tools\harness\Get-EditorWindowTree.ps1         # dump the editor's window structure
-
+tools\harness\Get-EditorScreenshot.ps1 -KeepOpen   # launch, capture at true DPI, leave running
 tools\Compare-Lexers.ps1                       # differential gate for the analyzer port
 installer\build.ps1                            # produce xlide-setup.exe
-
-cd engine; npm run build; npm test             # the language engine and its smoke test
-cd ui\editor; node build.mjs                   # the editing surface bundle
+cd ui\editor; node build.mjs                   # rebuild the surface bundle (esbuild + tsc)
+cd engine;    npm run build                    # the TS language engine sidecar
 ```
 
-## 4. Lessons that cost real time
+The dev loop is: rebuild the bundle if the page changed, `dotnet publish` the shim, kill Excel, run
+`Get-EditorScreenshot.ps1 -KeepOpen`, read `%LOCALAPPDATA%\xlide_vbide\logs\shim-*.log`. The
+harness waits for `analysis:` and `editor surface: ready` lines before capturing, and restores
+`LoadBehavior` and clears Excel's resiliency keys before each run. The fixture is
+`tools\harness\fixtures\scratch.xlsm`, regenerated by `New-ScratchWorkbook.ps1`.
 
-Each of these was found by running something, not by reading. Several look like one kind of failure
-while being another, which is why they are written down.
+Throwaway probes from this session live in the session scratchpad (not the repo): window-tree
+dumps, focus probes, menu dumps, synthetic-input senders. Synthetic input (SendKeys, mouse_event)
+is dev-harness only and unreliable — foreground restrictions make it fail silently — and the user
+has said plainly it must never be a production mechanism.
 
-### The host does not load add-ins when started through automation
+## 5. What works, verified against real Excel
 
-A host created with automation runs in embedding mode and loads no add-ins at all. Registration can
-be perfect and the result is silence: no library load, no class activation, nothing in any log. The
-harness launches the executable as a process and then attaches.
-
-### A failed connect disables the add-in permanently
-
-When an add-in fails to connect, the editor rewrites its `LoadBehavior` to 0. Every later run then
-lists it but never activates it, so the second failure looks nothing like the first and appears to
-be caused by whatever changed in between. Every harness restores it to 3 before running.
-
-### Source-generated COM interop does not supply IDispatch
-
-Interop generated from `[GeneratedComInterface]` exposes exactly the interfaces a class declares.
-The editor asks an add-in for `IDispatch` as well as the extensibility interface and refuses,
-silently, when it cannot get it. Declaring both fixed it. Because the extensibility interface is
-dual, its first four members are the dispatch members, so one implementation satisfies each.
-
-### Attaching through the running object table costs tens of seconds
-
-The host publishes itself there lazily, ten to forty seconds after it is visibly usable, and waiting
-for that was ninety-eight percent of a check. Asking a worksheet window for its native object model
-answers in well under a second and names the instance precisely. See `WorkbookWindowOf` in the
-harness scripts.
-
-Two bugs made that technique look unworkable when first tried, and both fail invisibly: a window
-class read marshalled as ANSI, so every comparison failed while appearing to return text; and
-`0xFFFFFFF0` parsed as a signed value by the scripting runtime, so the call threw before reaching
-the API. If a documented technique appears not to work, suspect the marshalling before the
-technique.
-
-### Add-ins load when the editor initialises, not when the host starts
-
-A harness that starts the host and waits for the add-in without opening the editor waits forever.
-
-### Terminating the host poisons the next run
-
-The host treats termination as a crash and offers document recovery on the next start, before it is
-drivable. Every harness clears the resiliency keys first.
-
-### Reading the screen captures the wrong window
-
-Screen capture cannot block, which makes it tempting, but it captures whatever is actually in front,
-and a background process is not permitted to reliably raise a window. The failure is silent and
-produces a flawless capture of a different application; it happened, and nothing in the output said
-so. Ask the window to render itself instead, with the full-content flag so composited surfaces
-appear, and check responsiveness first because rendering can block on a window that is not pumping.
-
-### Static initialiser order across partial classes is undefined
-
-Frozen lookup tables built from field initialisers read generated arrays declared in the other half
-of a partial class, and got null. Building them inside a nested type forces the outer type to
-initialise first, which is guaranteed rather than incidental.
-
-### A property assignment through dispatch carries a named argument
-
-The value being assigned is identified by a reserved dispatch identifier, not by position. A setter
-that passes it positionally fails every time, with no message. This was got wrong here and the
-failures were read as the editor refusing to allow those properties to be set, which is what
-retired the tool window; see lessons.md 10. The panels live in the editing surface for reasons that
-do not depend on it, but do not repeat the inference: a failed call with no message says nothing
-about whose fault it is.
-
-### A surface among the panes loses a race it cannot win
-
-The editor raises a pane whenever it activates one, before anything outside the process can react.
-The surface is a child of the frame, positioned on the document area, so activating a pane cannot
-reorder it. Structural, rather than a faster reaction.
-
-### The editor rewrites the source it is handed
-
-Giving a module its text respells keywords and normalises spacing, so what it holds afterwards is
-not what was sent. Read it straight back and adopt its version, or the two drift apart from the
-first keystroke.
-
-### Whether a command is enabled is not the execution state
-
-`Reset` is enabled in design mode as well, so it cannot mean "stopped". `VBProject.Mode` reports it
-directly. And running does not block the call that starts it, so the state has to be watched for a
-while afterwards rather than checked once.
-
-## 5. Editor internals, measured
-
-Full detail in [editor-windows.md](editor-windows.md); re-measure with
-`tools\harness\Get-EditorWindowTree.ps1`.
-
-- The editor frame is class `wndclass_desked_gsk`.
-- A code pane is class `VbaWindow`. So is the Immediate window. The caption separates them, and
-  captions are localised, so the object model stays the authority for which components have panes
-  open while window enumeration supplies the handle it does not expose.
-- Panes are document children with live splitters between docked panes, so a pane can be resized by
-  a change nowhere near it. Anything drawn over one must follow window events rather than sample a
-  rectangle once.
-- The registry path for add-ins is confirmed by the string embedded in the editor's own library:
-  `Software\Microsoft\VBA\VBE\6.0\Addins64` for a 64-bit host.
+- Add-in loads (NativeAOT COM server, IDispatch declared explicitly), engine connects over a named
+  pipe, diagnostics arrive with correct positions.
+- The surface covers the frame's whole client area below the command bars: toolbar (21 commands),
+  project explorer with per-module problem badges, module tabs with error counts, Monaco with VBA
+  grammar and themes, problems panel, Immediate panel, status bar with transient notices,
+  draggable and keyboard-operable splitters.
+- Typing writes back to `CodeModule` 400 ms after the last keystroke and immediately before
+  run, step, module switch, and shutdown; re-analysis follows each write. Verified by reading the
+  module back out of the VBA project.
+- F5, F8, Shift+F8, Ctrl+F8, F9, Ctrl+S work; F1 opens the command palette instead of VBA help.
+  All routes (key, toolbar button, glyph margin) go through one `ExecuteEditorCommand` path.
+- Breakpoints render as red dots, with a hover preview dot and a visibly delineated margin.
+  Non-executable lines are refused with a status-line notice before the VBE's modal can appear.
+- Break mode is detected from `VBProject.Mode`; the stopped line comes from the pane's
+  `GetSelection` (four by-ref ints) and is marked and revealed in Monaco.
+- Immediate panel: `?expr` evaluates (scratch module + `Application.Run`, module removed always),
+  plain lines run as statements, history on arrow keys. `?2*21` -> `42` verified. Declined during
+  break, with the reason shown: adding a module would reset the project.
+- `Debug.Print` output is captured from the hidden native Immediate window via UI Automation
+  TextPattern and appended to our panel. Verified end to end with the window closed.
+- Native Project Explorer, Properties and Immediate windows are closed via the object model; the
+  native Standard toolbar is hidden (its commands were moved to ours first); title bar, caption
+  and window border are dark via DWM attributes. The frame's own pale inner line is covered by the
+  surface extending to the frame edge.
+- 95 unit tests green; the lexer port agrees with the reference on 175/175 corpus files.
 
 ## 6. How the pieces fit
 
 ```text
 EXCEL.EXE
-  Xlide.Vbe.Shim.dll         native, no runtime loaded into the host
-    AddInSession             owns everything released before shutdown, and the editing contract
-    CodePaneTracker          which panes exist, where they are, what they show
-    EditorSurface            the window over the document area, and the protocol with the page
-    OverlayWindow            the window itself, and the two timers the session runs on
-    VbeCommands              runs the editor's own commands through its command bars
-    AnalysisService          owns the engine and converts offsets to line and column
-  WebView2 process           the editing surface
+  Xlide.Vbe.Shim.dll          native, no runtime loaded into the host
+    AddInSession              owns lifetime + the editing contract: write-back, resync baseline,
+                              debug state, breakpoint bookkeeping, panel routing, window hiding
+    CodePaneTracker           which panes exist, where; VisiblePanes(); pane/frame class names
+    EditorSurface             overlay + the page protocol (hold-until-ready queue, newest per
+                              kind, order preserved; loadDocument before setDiagnostics)
+    OverlayWindow             the window itself + two WM_TIMER timers (write debounce id 1,
+                              poll id 2)
+    VbeCommands               executes VBE commands via CommandBars (bars walked; FindControl
+                              does not search menus and returns nothing rather than failing)
+    ImmediateEvaluator        compiles a line into a scratch module, runs it by name, removes it
+    ImmediateReader           reads the hidden native Immediate window via UIA TextPattern
+    HostApplication           reaches Excel's Application from in-proc (XLMAIN->XLDESK->EXCEL7 +
+                              AccessibleObjectFromWindow OBJID_NATIVEOM); never the ROT
+    AnalysisService           owns the engine; Reanalyse() after writes
+    DispatchObject            late-bound calls; property puts carry DISPID_PROPERTYPUT; EXCEPINFO
+                              captured so VBA's own error text survives
+  WebView2 process            the surface page
 
-xlide-engine.exe             language engine, named pipe, JSON-RPC one object per line
+xlide-engine.exe              TS analyzer sidecar, named pipe, JSON-RPC line-framed
 
 ui/editor/src
-  main.ts                    boots the editor and the shell
-  shell.ts                   tab strip, problems panel, splitters
-  explorer.ts                the project tree
-  toolbar.ts                 the command bar, and which commands belong to whom
-  format.ts                  indentation and canonical keyword spelling
-  bridge.ts                  every message in both directions
-  vba.ts, theme.ts           the language and the themes
+  main.ts        boot, per-feature Monaco imports (features are opt-in!), boot timings reported
+  shell.ts       tabs, panel tabs (Problems/Immediate), splitters, notices, status line
+  explorer.ts    project tree grouped the way the VBE groups it
+  toolbar.ts     command table; host vs editor dispatch; availability check draws no dead buttons
+  bridge.ts      every message both directions; syncDocument preserves undo/caret; markers re-set
+                 after any whole-document replace
+  format.ts      VBA formatter: indentation + canonical keyword case, nothing else
+  vba.ts         Monarch grammar + CANONICAL_KEYWORDS (shared with the formatter)
 ```
 
-Everything the developer sees is in the surface. The editor's own project explorer and properties
-windows are closed at start-up, because a hidden window cannot be uncovered by anything the editor
-does later, and closing them gives the document area their space.
+## 7. Measured VBE facts (re-measure only if a host build disagrees)
 
-Two rules hold the whole thing together. Nothing expensive runs in the host process. Every COM
-object has exactly one owner that releases it exactly once, and everything is released before the
-host begins tearing down.
+Registry: `HKCU\Software\Microsoft\VBA\VBE\6.0\Addins64`, subkey = ProgID. Frame class
+`wndclass_desked_gsk`, document area `MDIClient`, and the code panes, Immediate, Locals, Watch and
+Object Browser windows all share class `VbaWindow` — a window's class says nothing about what it
+is; only the object model knows.
 
-## 7. The analyzer port
+`Window.Type`: 0 code, 2 object browser, 3 watch, 4 locals, 5 immediate, 6 project, 7 properties,
+10 linked frame, 15 our tool window. `VBProject.Mode`: 1 = break, 2 = design.
 
-The engine currently in use is the TypeScript analyzer from
-[the editor extension](https://github.com/WilliamSmithEdward/xlide_vscode), reused rather than
-rewritten, packaged as one executable. It works and is validated, and it ships a language runtime
-that is ninety megabytes against an add-in of two. The port removes that.
+Command IDs (measured by enumerating CommandBars): Run 186, Break 189, Reset 228,
+ToggleBreakpoint 51, StepInto 188, StepOver 194, StepOut 2559, RunToCursor 1811, QuickWatch 229,
+AddWatch 1820, EditWatch 940, CallStack 620, Compile 578, ClearAllBreakpoints 579,
+SetNextStatement 1812, ShowNextStatement 1813, Comment 192, Uncomment 2552, Save 3, Undo 128,
+Redo 129, Find 141, Replace 313, ObjectBrowser 473, ImmediateWindow 2554, LocalsWindow 2555,
+WatchWindow 2556, ProjectExplorer 2557, PropertiesWindow 222, References 942, Options 522,
+Macros 930, ProjectProperties 2578, InsertProcedure 559, InsertUserForm 512, InsertModule 3039,
+InsertClassModule 2579, Import 524, Export 525.
 
-The port is staged and gated. Each layer must agree with the reference implementation on a shared
-corpus before the next begins, and the reference stays in the repository as the oracle. The lexer is
-done and agrees on all 175 files of the corpus; run `tools\Compare-Lexers.ps1` to confirm.
+**Menu item IDs are NOT unique.** 746 is shared by New Project, Close Project, Remove <module>,
+Make, four Insert placeholders, Digital Signature, and MSDN on the Web; 830 by every window-list
+entry; 761 by every toolbar toggle. The current command set is by-ID and every ID in it is unique
+(checked against the full dump), but menu replication MUST execute by path
+(`bar.Controls.Item(i).Controls.Item(j).Execute()`), which is verified working live.
 
-Five defects were found by that comparison that 48 unit tests missed, and every one was a genuine
-misreading of the language. The most expensive: a hash only opens a date literal when the body
-between the pair reads as a date. File statements write a file number as a hash followed by an
-expression, so pairing it with the next hash on the line swallowed quoted text and commas.
+`MenuBar.Visible = false` returns E_FAIL — a genuine refusal (the identical call hides the
+Standard toolbar). The menu bar cannot be hidden, only covered.
 
-The parser contract is fully mapped and is the next layer: about 3,400 lines, with the boundary
-between structured nodes and the raw-statement fallback enumerated exhaustively. Ask for that map
-again if it is not in the repository; it was produced by reading
-`xlide_vscode\src\analyzer\parser\`.
+DWM: attribute 20 (19 on older builds) = dark title bar; 34 border colour, 35 caption colour,
+36 caption text; values are COLORREF `0x00BBGGRR`; refused harmlessly before Windows 11. The
+frame's client area is inset ~11 px and a 1-2 px pale line at that inset is drawn by the frame
+itself; only covering it hides it. The menu bar is drawn by Office and no attribute reaches it.
 
-## 8. The rule that decides the design
+A full menu tree dump (11 menus, ~90 items, captions + IDs + nesting + enabled state) was taken
+2026-08-01; regenerate with a CommandBars walk when needed.
 
-**The module is the source of truth. The surface is a view of it.**
+## 8. Lessons that cost real time this session (long form in lessons.md)
 
-The compiler, the debugger, the workbook that gets saved and the analyzer all read the module, and
-nothing reads the surface, so an edit that has not reached the module has not happened. Everything
-in the editing path follows from this: edits are written back, the module is read straight back
-afterwards because the editor rewrites what it is given, and when the two differ the module wins.
-The one exception is an edit the developer has not finished, which is never overwritten.
+- **A dispatch property put carries a named argument** (DISPID_PROPERTYPUT). Two setters passed
+  the value positionally; every assignment failed with no message; and the failures were recorded
+  as "the VBE refuses to size tool windows". That claim was WRONG and is retracted in lessons.md.
+  A failed call with no message says nothing about whose fault it is; compare against a sibling
+  call that works (the boolean setter did) before blaming the host.
+- **Pass EXCEPINFO to IDispatch::Invoke** or the callee's error text ("Type mismatch") is thrown
+  away in favour of "Arg_COMException". For the Immediate panel that text is the answer.
+- **The VBE rewrites AddFromString input.** Read the module back and adopt that as the baseline;
+  never compare the module against the surface, or its own tidying reads as an external change
+  and stomps the developer mid-keystroke.
+- **Whole-document replaces collapse Monaco markers onto the end of the text.** Keep the host's
+  markers and re-set them after any sync; `forceMoveMarkers: false`; restore selections around
+  the edit so the caret and undo stack survive.
+- **Undo/redo are not Monaco actions.** `editor.trigger("xlide", "undo", null)`; the toolbar's
+  availability check must special-case them or their buttons are (correctly) never drawn.
+- **A key claimed at the WebView2 accelerator hook never reaches the page.** Claiming F1 means
+  explicitly messaging the page to open the palette. Keys the VBE owns (F5, F8, F9) must be
+  claimed there too, or the browser acts on them (F5 reloads and destroys the document).
+- **The editor reports windows Visible=true before creating them.** Identify the Immediate window
+  only once the editor is genuinely up (the surface has a pane): show it, snapshot visible
+  `VbaWindow`s recursively (not direct children — depths vary), hide it, diff.
+- **The native Immediate window is unreadable by every normal means** (HWnd = 0 via the object
+  model, WM_GETTEXT answers the caption, MSAA children fail) **but UIA TextPattern reads it in
+  full, even while hidden**: CoCreate CUIAutomation, ElementFromHandle, FindFirst descendant,
+  GetCurrentPattern(10014), QI IUIAutomationTextPattern, GetDocumentRange, GetText(-1). Poll it
+  (300 ms, only while the panel is watched); do not subscribe — the text-changed event fires on
+  the VBE thread while it is inside the developer's running code.
+- **PrintWindow captures lie about parts of this window.** The menu bar renders light on screen
+  and dark in capture. Measure pixels for edge/colour questions; only the user's own screenshot
+  is on-screen truth. The capturing process must also be per-monitor DPI aware or every capture
+  silently crops.
+- **The scratch workbook must be .xlsm.** Excel saves an .xlsx by silently dropping its VBA.
+- **VBA identifiers cannot start with an underscore** (bit the scratch-module naming).
+- **VBProject.Mode is the execution state.** Command enabled-ness is not (Reset is enabled in
+  design mode too), and running does not block the command that starts it — poll for up to 20 s
+  after any run/step command, keep polling while stopped, stop when idle.
 
-Anything added here should be able to answer: what happens when these two disagree, and how does it
-get back in step without the developer losing work.
+## 9. Open and known, in priority order
 
-## 9. Open and known
+1. **Menu bar replacement** — the user wants it and has been given the plan and its limits.
+   Approach: extend the overlay upward to cover the (unhideable) menu bar; build our menu in the
+   surface from a live CommandBars tree read (captions come from the VBE, so localisation is
+   free); execute items BY PATH (IDs are not unique); reimplement Alt accelerators; refresh
+   enabled state per open. Hard limits to keep in view: modal dialogs (References, Options,
+   Macros, Project Properties) stay native and light; our menu must be COMPLETE before covering
+   theirs, because afterwards it is the only route to References/Options; the Window menu is
+   dynamic. Scope is roughly the toolbar plus the explorer combined. Build the host-side tree
+   reader and path execution first and verify live before writing any UI.
+2. **~2.1 s surface start-up**, entirely bundle fetch/parse (editor construction is 50 ms). The
+   page reports its own timings in the ready message on every run. Untried: bundle splitting,
+   warming during host start-up, cached compilation. (Task #17.)
+3. **Panels are fixed.** The user wants VS-style drag-to-any-edge / stack-as-tabs.
+4. **Locals, Watch, Object Browser are still native** (deliberate: no replacement yet; hiding
+   them would remove features). While any is open the surface retreats to document-area bounds,
+   so the frame's pale line reappears — accepted trade, logged when it happens.
+5. **Debug.Print lands only while the Immediate panel is open** (poll-gated). The text still
+   exists in the hidden window; backfill-on-first-open is a small known gap.
+6. Stepping's current-line marker is implemented and log-verified, not yet pixel-verified in a
+   live break by the user.
+7. Forms designer untouched. Analyzer parser port (~3,400 lines) next in that track; lexer done.
+   IntelliSense backfill from type libraries not started. No settings surface. Nothing signed.
 
-- **The editing surface takes about two seconds to appear**, of which the whole cost is fetching,
-  parsing and evaluating a 3.2 MB bundle; constructing the editor is fifty milliseconds of it. The
-  page reports this itself, so the number is in the log on every run. Options not yet tried:
-  splitting the bundle, warming the surface during host start-up, or serving it in a form the
-  browser can cache compiled.
-- **Panels cannot be rearranged.** The layout is a fixed explorer, editor and panel with draggable
-  dividers. Dragging one panel to another edge, or stacking panels as tabs, is not built.
-- **The Immediate, Locals and Watch windows are still the editor's own**, so they do not match the
-  rest. They are left alone deliberately: there is nothing to replace them with yet, and taking
-  them away would remove the feature rather than restyle it.
-- **The forms designer is untouched.**
-- Breakpoints are remembered rather than read: the editor exposes no way to enumerate them. Every
-  route to toggling one goes through the same bookkeeping, so the surface and the editor agree in
-  practice, but a breakpoint set some other way would be real and undrawn.
-- Nothing is signed, so the installer draws a Windows Security warning. This blocks public release
-  and nothing else.
+## 10. Conventions and user directives (binding)
 
-## 10. What to do next, in order
-
-1. Cut the surface start-up. Two seconds is the first thing anyone will notice.
-2. Make the panels rearrangeable: drag to an edge, stack as tabs.
-3. Replace the Immediate window, driving the editor's own hidden one as the evaluator.
-4. Continue the port: the parser, then symbols, then the rules, each behind the differential gate.
-5. Settings, so the formatting options are the developer's rather than the defaults.
-6. Completion and tooltips, backfilled from referenced type libraries.
-7. The forms designer, after a spike.
-8. Signing and an update mechanism, before any public release.
-
-## 10. Conventions
-
-Plain ASCII everywhere, no em dashes, no emoji. Comments explain constraints and non-obvious
-behaviour, never narration. Prose wraps at 100 characters.
-
-Commit messages say what changed and why, and name defects found and what they looked like, because
-that is the part nobody can reconstruct later.
-
-Never mention any other add-in product in anything that ships or is published. This is a clean-room
-implementation built on documented interfaces.
-
-Report status literally. A check that passes because it did not look hard enough is worse than no
-check: the harness in this repository once reported success while the add-in was not connected, and
-finding that was worth more than the feature being tested.
+- Never mention the other add-in product in anything public. Clean-room; cite only Microsoft
+  specs and documented interfaces.
+- ASCII prose, no em dashes, wrap at 100. Comments explain constraints, never narrate. Commit
+  messages say what changed, why, and what the defect looked like.
+- Report status literally; a check that passes by not looking hard enough is worse than none.
+- The user rejects backwards-compatibility hacks — full refactors are fine.
+- No synthetic input (SendKeys) in production, ever.
+- The whole UI should end up ours: consistently dark, VS-style ergonomics, the VBE alive
+  underneath as the engine. The module is the source of truth; typing follows xlide_vscode.
