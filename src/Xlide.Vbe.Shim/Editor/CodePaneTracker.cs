@@ -3,6 +3,7 @@ using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Engine;
 using Xlide.Vbe.Shim.Interop;
 
 namespace Xlide.Vbe.Shim.Editor;
@@ -12,7 +13,20 @@ namespace Xlide.Vbe.Shim.Editor;
 /// <param name="Component">Component the pane is showing, or null when it could not be matched.</param>
 /// <param name="Bounds">Screen rectangle of the pane.</param>
 /// <param name="IsVisible">Whether the pane is currently shown.</param>
-internal readonly record struct CodePane(nint Window, string? Component, PixelRect Bounds, bool IsVisible);
+/// <param name="Project">
+/// Identity of the project the component belongs to, or null when it could not be told apart —
+/// a caption names only the component, so when two projects share the component's name the
+/// pane's owner is ambiguous from here.
+/// </param>
+internal readonly record struct CodePane(
+    nint Window,
+    string? Component,
+    PixelRect Bounds,
+    bool IsVisible,
+    string? Project = null);
+
+/// <summary>A component that has a pane open, with the identity of the project that owns it.</summary>
+internal readonly record struct OpenComponent(string Name, string? Project);
 
 /// <summary>
 /// Keeps an up to date picture of which code panes exist, where they are, and what they show.
@@ -52,7 +66,7 @@ internal sealed class CodePaneTracker : IDisposable
     /// It changes only when a pane opens or closes, so it is cached and invalidated by exactly
     /// those events.
     /// </summary>
-    private List<string>? _openComponents;
+    private List<OpenComponent>? _openComponents;
 
     public CodePaneTracker(DispatchObject editor) => _editor = editor;
 
@@ -125,6 +139,7 @@ internal sealed class CodePaneTracker : IDisposable
                 _failedRefreshes = 0;
             }
 
+            var openNames = open.Select(candidate => candidate.Name).ToList();
             var updated = new List<CodePane>(found.Count);
 
             foreach (var window in found)
@@ -135,7 +150,7 @@ internal sealed class CodePaneTracker : IDisposable
                     continue;
                 }
 
-                var component = CodePaneCaption.MatchComponent(caption, open);
+                var component = CodePaneCaption.MatchComponent(caption, openNames);
                 if (component is null)
                 {
                     // Unmatched windows are dropped rather than guessed at. Placing a surface over
@@ -143,7 +158,12 @@ internal sealed class CodePaneTracker : IDisposable
                     continue;
                 }
 
-                updated.Add(new CodePane(window, component, ReadBounds(window), Win32.IsWindowVisible(window)));
+                updated.Add(new CodePane(
+                    window,
+                    component,
+                    ReadBounds(window),
+                    Win32.IsWindowVisible(window),
+                    ProjectOf(open, component)));
             }
 
             // Events arrive in bursts and most of them change nothing. Telling listeners that
@@ -214,7 +234,29 @@ internal sealed class CodePaneTracker : IDisposable
     /// changes nothing for windows that exist, and it keeps the tracker alive, which is what
     /// keeps tabs switchable, while the pane list sulks.
     /// </summary>
-    private List<string> ReadOpenComponents()
+    /// <summary>
+    /// The project a matched component belongs to, when exactly one open component carries the
+    /// name. Two projects sharing the name means the caption alone cannot say, and null is the
+    /// honest answer rather than a guess.
+    /// </summary>
+    private static string? ProjectOf(List<OpenComponent> open, string component)
+    {
+        string? project = null;
+        var matches = 0;
+
+        foreach (var candidate in open)
+        {
+            if (string.Equals(candidate.Name, component, StringComparison.OrdinalIgnoreCase))
+            {
+                matches++;
+                project = candidate.Project;
+            }
+        }
+
+        return matches == 1 ? project : null;
+    }
+
+    private List<OpenComponent> ReadOpenComponents()
     {
         try
         {
@@ -237,13 +279,13 @@ internal sealed class CodePaneTracker : IDisposable
     }
 
     /// <summary>The exact list, from the editor's pane collection, with the failing step named.</summary>
-    private List<string> ReadPaneComponents()
+    private List<OpenComponent> ReadPaneComponents()
     {
         var stage = "CodePanes";
 
         try
         {
-            var names = new List<string>();
+            var names = new List<OpenComponent>();
 
             using var panes = _editor.GetObject("CodePanes");
             if (panes is null)
@@ -267,7 +309,7 @@ internal sealed class CodePaneTracker : IDisposable
                 var name = component?.GetString("Name");
                 if (!string.IsNullOrEmpty(name))
                 {
-                    names.Add(name);
+                    names.Add(new OpenComponent(name, ProjectIdentityOf(component!)));
                 }
             }
 
@@ -280,10 +322,29 @@ internal sealed class CodePaneTracker : IDisposable
         }
     }
 
-    /// <summary>Every component name in every project: the superset the fallback matches against.</summary>
-    private List<string> ReadAllComponentNames()
+    /// <summary>
+    /// Identity of the project that owns a component, or null when it will not say. One more
+    /// hop than the component read itself — the component's collection's parent is the project
+    /// — and deliberately forgiving: a pane whose project cannot be named is still a pane.
+    /// </summary>
+    private static string? ProjectIdentityOf(DispatchObject component)
     {
-        var names = new List<string>();
+        try
+        {
+            using var collection = component.GetObject("Collection");
+            using var project = collection?.GetObject("Parent");
+            return project is null ? null : ProjectReader.Identity(project).Id;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Every component in every project: the superset the fallback matches against.</summary>
+    private List<OpenComponent> ReadAllComponentNames()
+    {
+        var names = new List<OpenComponent>();
 
         try
         {
@@ -295,7 +356,13 @@ internal sealed class CodePaneTracker : IDisposable
                 try
                 {
                     using var project = projects!.GetItem(i);
-                    using var components = project?.GetObject("VBComponents");
+                    if (project is null)
+                    {
+                        continue;
+                    }
+
+                    var identity = ProjectReader.Identity(project).Id;
+                    using var components = project.GetObject("VBComponents");
                     var componentCount = components?.GetInt32("Count") ?? 0;
 
                     for (var j = 1; j <= componentCount; j++)
@@ -304,7 +371,7 @@ internal sealed class CodePaneTracker : IDisposable
                         var name = component?.GetString("Name");
                         if (!string.IsNullOrEmpty(name))
                         {
-                            names.Add(name);
+                            names.Add(new OpenComponent(name, identity));
                         }
                     }
                 }
