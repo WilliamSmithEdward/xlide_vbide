@@ -79,6 +79,54 @@ internal sealed class AddInSession : IDisposable
     /// <summary>When an unknown project last triggered a full pass, so two quick shows cost one.</summary>
     private long _lastUnknownProjectPass;
 
+    /// <summary>The developer's settings, loaded once per session and written on every change.</summary>
+    private ProductSettings _settings = ProductSettings.Default;
+
+    /// <summary>Where the settings live: beside the logs, hand-editable, growable.</summary>
+    private static string SettingsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "xlide_vbide",
+        "settings.json");
+
+    private static ProductSettings LoadSettings()
+    {
+        try
+        {
+            var path = SettingsPath;
+            return File.Exists(path) ? ProductSettings.Parse(File.ReadAllText(path)) : ProductSettings.Default;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"settings: could not be read, using defaults ({ex.GetType().Name})");
+            return ProductSettings.Default;
+        }
+    }
+
+    /// <summary>
+    /// A change from the page's dialog: adopted, written through, and echoed back — the echo is
+    /// the page's confirmation that the choice will survive the session.
+    /// </summary>
+    private void OnSettingsChanged(ProductSettings updated)
+    {
+        _settings = updated.Normalized();
+
+        try
+        {
+            var path = SettingsPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, _settings.ToJson());
+            Log.Info($"settings: saved (blockLayout {_settings.BlockLayout}"
+                + $", continueComment {_settings.ContinueCommentOnNewline}"
+                + $", mirrorSpacing {_settings.MirrorCommentSpacing})");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("settings: could not be written; the choice holds for this session only", ex);
+        }
+
+        _editorSurface?.ShowSettings(_settings);
+    }
+
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -190,8 +238,15 @@ internal sealed class AddInSession : IDisposable
         };
 
         // The moment the page is up is the moment the menu bar can be covered, and it is not a
-        // window event, so nothing else would recompute the bounds.
-        _editorSurface.Ready = RefreshSurfacePlacement;
+        // window event, so nothing else would recompute the bounds. The settings ride the same
+        // moment: the page's typing behaviour starts from what the developer chose last time.
+        _settings = LoadSettings();
+        _editorSurface.SettingsChangeRequested = OnSettingsChanged;
+        _editorSurface.Ready = () =>
+        {
+            RefreshSurfacePlacement();
+            _editorSurface?.ShowSettings(_settings);
+        };
 
         // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
         // arranging itself — restoring its size, raising its own bands — and with no pane open

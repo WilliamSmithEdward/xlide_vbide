@@ -119,6 +119,12 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    #9 the C# analyzer port.
 
 **Before touching anything, know these:**
+0. Smart App Control turned ON on this machine mid-day 2026-08-02. It blocks freshly built
+   unsigned RELEASE managed test assemblies from running (0x800711C7, surfacing as xUnit's
+   "Test process did not return valid JSON"); Debug test assemblies and the NativeAOT shim
+   itself load fine. dev.ps1's test gate therefore runs Debug. If a Release-built THING ever
+   fails to start with that error, suspect the policy before the code. Turning SAC off is the
+   developer's decision alone — it cannot be re-enabled without reinstalling Windows.
 1. Registry writes from the agent shell are a MIRAGE (sandbox COW; lesson 17). Registration is
    the developer running `tools\Register-DevShim.ps1` themselves; verify with their regedit.
 2. Cross-thread work into the browser rides the overlay's action timer, never a posted message

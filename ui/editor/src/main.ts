@@ -41,6 +41,7 @@ import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
+import { openSettingsDialog } from "./settingsdialog.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
@@ -115,11 +116,21 @@ function boot(): void {
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
     layoutChanged: () => editor.layout(),
-    command: (command) => bridge.runCommand(command),
+    command: (command) => {
+      // The settings dialog is the page's own, not a Monaco action and not the host's.
+      if (command.id === "openSettings") {
+        openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
+        return;
+      }
+
+      bridge.runCommand(command);
+    },
     // Undo and redo are built in rather than registered, so they never resolve as actions and
-    // would be dropped by a check that only knows about registered ones.
+    // would be dropped by a check that only knows about registered ones. The settings dialog
+    // is the page's own and always exists.
     commandAvailable: (command) =>
-      command.id === "undo" || command.id === "redo" || editor.getAction(command.id) !== null,
+      command.id === "undo" || command.id === "redo" || command.id === "openSettings"
+      || editor.getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
     menuRequest: (path) => bridge.requestMenu(path),

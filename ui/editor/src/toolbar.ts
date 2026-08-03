@@ -56,6 +56,8 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "editor.unfoldAll", target: "editor", icon: "unfold", label: "Unfold all" },
 
   { id: "objectBrowser", target: "host", icon: "library", label: "Object browser (F2)", separatorBefore: true },
+
+  { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings", separatorBefore: true },
 ];
 
 /**

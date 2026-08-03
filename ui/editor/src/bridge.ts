@@ -3,6 +3,7 @@ import type { ExplorerProject } from "./explorer.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { ToolbarCommand } from "./toolbar.js";
+import { applySettings, type EditorSettings } from "./settings.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
 import { VBA_LANGUAGE_ID, updateVbaLanguageFacts } from "./vba.js";
 
@@ -66,7 +67,8 @@ export type HostMessage =
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
-  | { type: "setLanguageFacts"; types: string[]; procedures: string[] };
+  | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
+  | { type: "setSettings"; blockLayout: string; continueCommentOnNewline: boolean; mirrorCommentSpacing: boolean };
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
 export interface HostProcedure {
@@ -164,6 +166,7 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "outline"; id: number; module: string; project?: string }
+  | { type: "updateSettings"; blockLayout: string; continueCommentOnNewline: boolean; mirrorCommentSpacing: boolean }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -394,6 +397,19 @@ export class EditorBridge {
   /** Asks the host to close a module's pane, which is what closes its tab. */
   closeModule(name: string, project?: string): void {
     this.transport.post({ type: "closeModule", name, ...(project ? { project } : {}) });
+  }
+
+  /**
+   * Asks the host to adopt and persist settings. The host echoes them back as setSettings once
+   * written, and the echo is what the page applies: a choice is real when the file has it.
+   */
+  updateSettings(settings: EditorSettings): void {
+    this.transport.post({
+      type: "updateSettings",
+      blockLayout: settings.blockLayout,
+      continueCommentOnNewline: settings.continueCommentOnNewline,
+      mirrorCommentSpacing: settings.mirrorCommentSpacing,
+    });
   }
 
   /**
@@ -658,6 +674,13 @@ export class EditorBridge {
       }
       case "setLanguageFacts":
         updateVbaLanguageFacts(message.types, message.procedures);
+        return;
+      case "setSettings":
+        applySettings({
+          blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
+          continueCommentOnNewline: message.continueCommentOnNewline,
+          mirrorCommentSpacing: message.mirrorCommentSpacing,
+        });
         return;
       default: {
         const unknown: never = message;
@@ -1102,6 +1125,7 @@ export function demoTransport(): HostTransport {
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
         send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1" });
+        send({ type: "setSettings", blockLayout: "comfy", continueCommentOnNewline: true, mirrorCommentSpacing: true });
         send({
           type: "setProjects",
           projects: [
@@ -1197,6 +1221,16 @@ export function demoTransport(): HostTransport {
             parameters: [{ label: "Prompt" }, { label: "[Buttons]" }, { label: "[Title]" }],
             activeParameter: 0,
           },
+        });
+      }
+      // The demo persists nothing, so the echo IS the write: what the dialog asks for comes
+      // straight back, which exercises the same applied-on-echo path the host uses.
+      if (message.type === "updateSettings") {
+        send({
+          type: "setSettings",
+          blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
+          continueCommentOnNewline: message.continueCommentOnNewline,
+          mirrorCommentSpacing: message.mirrorCommentSpacing,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

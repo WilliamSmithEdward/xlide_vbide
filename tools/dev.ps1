@@ -83,7 +83,11 @@ if ($Unregister) {
 
 if (-not $NoBuild) {
     Invoke-Step 'Test' {
-        dotnet test (Join-Path $repoRoot 'tests\Xlide.Vbe.Core.Tests') -c $Configuration --nologo
+        # Debug deliberately, whatever the publish configuration: Smart App Control (observed
+        # ON 2026-08-02) blocks freshly built unsigned RELEASE test assemblies from running
+        # (0x800711C7, surfacing as xUnit's "did not return valid JSON"), while Debug ones and
+        # the NativeAOT shim itself load fine. The gate is about correctness, not codegen.
+        dotnet test (Join-Path $repoRoot 'tests\Xlide.Vbe.Core.Tests') -c Debug --nologo
     }
 
     Invoke-Step 'Publish the shim (ahead-of-time, native)' {

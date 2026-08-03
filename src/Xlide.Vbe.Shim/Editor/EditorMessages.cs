@@ -52,6 +52,13 @@ public sealed record SetModulesMessage(
     [property: JsonPropertyName("active")] string? Active,
     [property: JsonPropertyName("activeProject")] string? ActiveProject);
 
+/// <summary>The developer's settings, for the page's dialog and its typing behaviour.</summary>
+public sealed record SetSettingsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("blockLayout")] string BlockLayout,
+    [property: JsonPropertyName("continueCommentOnNewline")] bool ContinueCommentOnNewline,
+    [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing);
+
 /// <summary>One finding as the surface's panel wants it.</summary>
 public sealed record SurfaceFinding(
     [property: JsonPropertyName("module")] string Module,
@@ -282,6 +289,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetThemeMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]
 [JsonSerializable(typeof(SetModulesMessage))]
+[JsonSerializable(typeof(SetSettingsMessage))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]

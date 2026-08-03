@@ -25,6 +25,7 @@ import {
 import { lexerStrippedLine, lexerStrippedLines } from "xlide-spec/analyzer/lexer/strippedLines";
 import { smartTabShouldIndentLine } from "xlide-spec/vbaSmartTab";
 import type { EditorBridge, HostTextEdit } from "./bridge.js";
+import { currentSettings } from "./settings.js";
 
 /** How long a touched line rests before its recase pass, the extension's own figure. */
 const CANONICAL_LINE_IDLE_DELAY_MS = 200;
@@ -35,11 +36,9 @@ const PLAIN_ENTER = /^\r?\n[ \t]*$/;
 /** Lines that could be half of a For/Next pair, checked before scanning the document at all. */
 const LOOP_LINE = /^[ \t]*(?:For|Next)\b/i;
 
-// The extension reads these from settings; this surface has no settings page yet, so the
-// defaults it ships with are the behaviour here (task #12 owns making them configurable).
-const BLOCK_LAYOUT = "comfy" as const;
-const CONTINUE_COMMENT_ON_NEWLINE = true;
-const MIRROR_COMMENT_SPACING = true;
+// The extension reads these from settings, and so does this surface now: the host loads the
+// developer's file, the page applies what arrives, and every Enter reads the choice as it
+// stands. See settings.ts for the store and settingsdialog.ts for where choices are made.
 
 export function installTypingAutomation(
   editor: monaco.editor.IStandaloneCodeEditor,
@@ -264,9 +263,10 @@ class TypingAutomation {
     if (!opener) {
       // Not a block: a whole-line comment continues, then a With-member line, in the
       // extension's order. The helpers index lines from zero.
+      const settings = currentSettings();
       const source = model.getValue();
-      const continuation = CONTINUE_COMMENT_ON_NEWLINE
-        ? commentContinuationText(source, openerLineNumber - 1, MIRROR_COMMENT_SPACING)
+      const continuation = settings.continueCommentOnNewline
+        ? commentContinuationText(source, openerLineNumber - 1, settings.mirrorCommentSpacing)
         : undefined;
       const lineText = continuation ?? withMemberContinuationText(source, openerLineNumber - 1);
       if (!lineText) {
@@ -285,7 +285,7 @@ class TypingAutomation {
     const insertion = smartBlockInsertion(normalized, bodyLine, opener, {
       eol: model.getEOL(),
       insertCloser: !closedAhead,
-      layout: BLOCK_LAYOUT,
+      layout: currentSettings().blockLayout,
     });
 
     const headerOperations: monaco.editor.IIdentifiedSingleEditOperation[] = headerEdit

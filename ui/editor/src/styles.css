@@ -745,6 +745,101 @@ span.prop-value.readonly {
   opacity: 0.55;
 }
 
+/* The settings dialog: a small modal card, one row per choice, saved as choices change. */
+
+#settings-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 90;
+}
+
+#settings-card {
+  width: 460px;
+  max-width: calc(100vw - 40px);
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+#settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+#settings-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+#settings-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 14px;
+}
+
+.settings-row + .settings-row {
+  border-top: 1px solid rgba(128, 128, 128, 0.12);
+}
+
+.settings-text {
+  min-width: 0;
+}
+
+.settings-label {
+  display: block;
+  font-weight: 600;
+}
+
+.settings-description {
+  margin-top: 2px;
+  opacity: 0.7;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.settings-row select {
+  background: var(--vscode-dropdown-background, #3c3c3c);
+  color: inherit;
+  border: 1px solid var(--vscode-dropdown-border, #5a5a5a);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font: inherit;
+}
+
+.settings-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--vscode-focusBorder, #0078d4);
+}
+
+#settings-foot {
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+  opacity: 0.6;
+  font-size: 12px;
+}
+
 #panel {
   display: flex;
   flex-direction: column;

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
 using Xlide.Vbe.Shim.Diagnostics;
@@ -113,6 +114,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer closes a module's tab, with its workbook when the
     /// tab carries one.</summary>
     public Action<string, string?>? ModuleCloseRequested { get; set; }
+
+    /// <summary>Raised when the developer changed a setting in the page's dialog.</summary>
+    public Action<ProductSettings>? SettingsChangeRequested { get; set; }
 
     /// <summary>
     /// Raised when the developer asks for a new component: (kind, workbook). Kind is 1 module,
@@ -577,6 +581,20 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetDiagnosticsMessage));
     }
 
+    /// <summary>Sends the developer's settings, for the page's dialog and typing behaviour.</summary>
+    public void ShowSettings(ProductSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        Send("setSettings", JsonSerializer.Serialize(
+            new SetSettingsMessage(
+                "setSettings",
+                settings.BlockLayout,
+                settings.ContinueCommentOnNewline,
+                settings.MirrorCommentSpacing),
+            EditorMessageContext.Default.SetSettingsMessage));
+    }
+
     /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.</summary>
     public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject)
     {
@@ -964,6 +982,25 @@ internal sealed class EditorSurface : IDisposable
                     }
 
                     break;
+
+                case "updateSettings":
+                {
+                    var layout = document.RootElement.TryGetProperty("blockLayout", out var layoutValue)
+                        ? layoutValue.GetString() ?? "comfy"
+                        : "comfy";
+                    var continueComment = !document.RootElement.TryGetProperty("continueCommentOnNewline", out var continueValue)
+                        || continueValue.ValueKind is not (JsonValueKind.False);
+                    var mirrorSpacing = !document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
+                        || mirrorValue.ValueKind is not (JsonValueKind.False);
+
+                    SettingsChangeRequested?.Invoke(new ProductSettings
+                    {
+                        BlockLayout = layout,
+                        ContinueCommentOnNewline = continueComment,
+                        MirrorCommentSpacing = mirrorSpacing,
+                    }.Normalized());
+                    break;
+                }
 
                 case "insertComponent":
                     if (document.RootElement.TryGetProperty("kind", out var componentKind)
