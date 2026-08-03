@@ -63,16 +63,17 @@ function kindMeta(kind: number): KindMeta {
 export interface ExplorerHandlers {
   /** Single click: the component becomes the selection, and nothing opens. */
   select(name: string): void;
-  /** Double click, or Enter on the focused item: the component's code opens. */
-  open(name: string): void;
+  /** Double click, or Enter on the focused item: the component's code opens. The workbook says
+   *  WHICH one when two workbooks share the name. */
+  open(name: string, workbook?: string): void;
   /** Right click on a component: the menu for its class, at this position. */
   context(name: string, kind: number, x: number, y: number): void;
   /** Right click on a workbook's row. */
   projectContext(project: string, x: number, y: number): void;
   /** A module's procedures, for its unfolded node; null when no answer came. */
-  outline(module: string): Promise<ExplorerProcedure[] | null>;
-  /** A procedure was picked: go to its line in its module. */
-  openProcedure(module: string, line: number): void;
+  outline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
+  /** A procedure was picked: go to its line in its module, in its workbook. */
+  openProcedure(module: string, line: number, workbook?: string): void;
   /** A line for the host's log, for the defects only the log's data cadence explains. */
   trace?(text: string): void;
 }
@@ -92,6 +93,9 @@ export class Explorer {
   /** The one module whose procedures are unfolded: the accordion. */
   private expandedModule: string | null = null;
 
+  /** The workbook that module belongs to, so a shared name unfolds the right workbook's list. */
+  private expandedModuleWorkbook: string | null = null;
+
   /** The workbook the attention is in, so collapsing others happens only when it moves. */
   private attentionWorkbook: string | null = null;
 
@@ -110,13 +114,13 @@ export class Explorer {
       // The chevron toggles and does nothing else, so unfolding is never also an open.
       const toggle = (event.target as HTMLElement).closest("[data-toggle]") as HTMLElement | null;
       if (toggle?.dataset.toggle) {
-        this.toggleModule(toggle.dataset.toggle);
+        this.toggleModule(toggle.dataset.toggle, toggle.dataset.workbook);
         return;
       }
 
       const procedure = this.procedureAt(event);
       if (procedure) {
-        this.handlers.openProcedure(procedure.module, procedure.line);
+        this.handlers.openProcedure(procedure.module, procedure.line, procedure.workbook);
         return;
       }
 
@@ -126,11 +130,12 @@ export class Explorer {
       // host's own tree, which asks for a double click.
       const name = this.componentAt(event);
       if (name) {
+        const workbook = this.workbookOf(event);
         this.selected = name;
-        this.setExpandedModule(name);
+        this.setExpandedModule(name, workbook);
         this.render();
         this.handlers.select(name);
-        this.handlers.open(name);
+        this.handlers.open(name, workbook);
         return;
       }
 
@@ -193,12 +198,22 @@ export class Explorer {
     return row?.dataset.project ?? null;
   }
 
-  private procedureAt(event: Event): { module: string; line: number } | null {
+  private procedureAt(event: Event): { module: string; line: number; workbook?: string } | null {
     const row = (event.target as HTMLElement).closest("[data-proc-module]") as HTMLElement | null;
     if (!row?.dataset.procModule) {
       return null;
     }
-    return { module: row.dataset.procModule, line: Number(row.dataset.procLine ?? "1") };
+    return {
+      module: row.dataset.procModule,
+      line: Number(row.dataset.procLine ?? "1"),
+      ...(row.dataset.procWorkbook ? { workbook: row.dataset.procWorkbook } : {}),
+    };
+  }
+
+  /** The workbook of the component row an event landed on, when the row carries one. */
+  private workbookOf(event: Event): string | undefined {
+    const item = (event.target as HTMLElement).closest("[data-component]") as HTMLElement | null;
+    return item?.dataset.workbook || undefined;
   }
 
   setProjects(projects: ExplorerProject[]): void {
@@ -290,12 +305,16 @@ export class Explorer {
    * opens; other workbooks close only when the attention genuinely moved between workbooks, so
    * a workbook collapsed by hand stays collapsed while work continues inside another.
    */
-  private setExpandedModule(name: string): void {
-    const owner = this.projects.find((project) =>
-      project.components.some((component) => component.name === name));
+  private setExpandedModule(name: string, workbook?: string): void {
+    const owner = workbook
+      ? this.projects.find((project) => project.name === workbook)
+      : this.projects.find((project) =>
+        project.components.some((component) => component.name === name));
 
-    if (this.expandedModule !== name) {
+    const ownerName = owner?.name ?? null;
+    if (this.expandedModule !== name || this.expandedModuleWorkbook !== ownerName) {
       this.expandedModule = name;
+      this.expandedModuleWorkbook = ownerName;
       void this.fetchOutline(name);
     }
 
@@ -312,11 +331,13 @@ export class Explorer {
     }
   }
 
-  private toggleModule(name: string): void {
-    if (this.expandedModule === name) {
+  private toggleModule(name: string, workbook?: string): void {
+    if (this.expandedModule === name
+      && (!workbook || this.expandedModuleWorkbook === workbook)) {
       this.expandedModule = null;
+      this.expandedModuleWorkbook = null;
     } else {
-      this.setExpandedModule(name);
+      this.setExpandedModule(name, workbook);
     }
     this.render();
   }
@@ -336,7 +357,7 @@ export class Explorer {
 
     this.outlineFetching.add(module);
     try {
-      const procedures = await this.handlers.outline(module);
+      const procedures = await this.handlers.outline(module, this.expandedModuleWorkbook ?? undefined);
       this.applyOutline(module, procedures);
     } finally {
       this.outlineFetching.delete(module);
@@ -391,11 +412,14 @@ export class Explorer {
       });
 
       for (const component of members) {
-        this.root.appendChild(this.item(component));
+        this.root.appendChild(this.item(component, project.name));
 
-        if (component.name === this.expandedModule) {
+        // The unfolded module is one (name, workbook) pair, so a shared name unfolds only in
+        // the workbook whose row was opened.
+        if (component.name === this.expandedModule
+          && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === project.name)) {
           for (const procedure of this.outlines.get(component.name) ?? []) {
-            this.root.appendChild(this.procedureRow(component.name, procedure));
+            this.root.appendChild(this.procedureRow(component.name, procedure, project.name));
           }
         }
       }
@@ -424,9 +448,10 @@ export class Explorer {
     return button;
   }
 
-  private item(component: ExplorerComponent): HTMLElement {
+  private item(component: ExplorerComponent, workbook: string): HTMLElement {
     const meta = kindMeta(component.kind);
-    const isUnfolded = component.name === this.expandedModule;
+    const isUnfolded = component.name === this.expandedModule
+      && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === workbook);
 
     const button = document.createElement("button");
     button.type = "button";
@@ -434,6 +459,7 @@ export class Explorer {
       + (component.name === this.active ? " active" : "")
       + (component.name === this.selected ? " selected" : "");
     button.dataset.component = component.name;
+    button.dataset.workbook = workbook;
     button.dataset.kind = String(component.kind);
     button.setAttribute("role", "treeitem");
     button.setAttribute("aria-selected", String(component.name === this.selected));
@@ -442,6 +468,7 @@ export class Explorer {
     const chevron = document.createElement("span");
     chevron.className = `codicon codicon-chevron-${isUnfolded ? "down" : "right"} tree-twisty`;
     chevron.dataset.toggle = component.name;
+    chevron.dataset.workbook = workbook;
     chevron.setAttribute("aria-hidden", "true");
 
     const glyph = document.createElement("span");
@@ -466,12 +493,13 @@ export class Explorer {
     return button;
   }
 
-  private procedureRow(module: string, procedure: ExplorerProcedure): HTMLElement {
+  private procedureRow(module: string, procedure: ExplorerProcedure, workbook: string): HTMLElement {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "tree-item tree-proc";
     button.dataset.procModule = module;
     button.dataset.procLine = String(procedure.line);
+    button.dataset.procWorkbook = workbook;
     button.setAttribute("role", "treeitem");
 
     const glyph = document.createElement("span");

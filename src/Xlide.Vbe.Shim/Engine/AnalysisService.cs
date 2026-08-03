@@ -393,6 +393,7 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// </summary>
     public async Task<EngineOutlineProcedure[]?> OutlineAsync(
         string moduleName,
+        string? projectId,
         string? source,
         CancellationToken cancellation)
     {
@@ -402,13 +403,38 @@ internal sealed class AnalysisService : IAsyncDisposable
         }
 
         // The one request class that serves modules the surface is NOT showing: the tree asks
-        // about any row it has. A name's own home stands even while another project is shown.
-        if (ResolveHome(moduleName, aboutShownModule: false) is not { } home)
+        // about any row it has, and names the workbook the row belongs to. An explicit project
+        // is the whole answer; a bare name lets its own home stand even while another project
+        // is shown.
+        (string ProjectId, string ModuleType)? home = null;
+        if (projectId is not null)
+        {
+            var homes = _moduleHomes;
+            if (homes.TryGetValue(moduleName, out var candidates))
+            {
+                foreach (var candidate in candidates)
+                {
+                    if (string.Equals(candidate.ProjectId, projectId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        home = candidate;
+                        break;
+                    }
+                }
+            }
+
+            home ??= (projectId, "standard");
+        }
+        else
+        {
+            home = ResolveHome(moduleName, aboutShownModule: false);
+        }
+
+        if (home is not { } resolved)
         {
             return null;
         }
 
-        var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, null, cancellation)
+        var result = await engine.OutlineAsync(resolved.ProjectId, moduleName, resolved.ModuleType, null, cancellation)
             .ConfigureAwait(false);
 
         return result?.Procedures;

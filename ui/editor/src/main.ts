@@ -111,8 +111,9 @@ function boot(): void {
   // a finding need the host to have sent something first.
   let bridge: EditorBridge;
   const shell = new Shell(document.body, {
-    activateModule: (name) => bridge.activateModule(name),
-    navigate: (module, line, column, selectLine) => bridge.navigate(module, line, column, selectLine),
+    activateModule: (name, workbook) => bridge.activateModule(name, workbook),
+    navigate: (module, line, column, selectLine, workbook) =>
+      bridge.navigate(module, line, column, selectLine, workbook),
     layoutChanged: () => editor.layout(),
     command: (command) => bridge.runCommand(command),
     // Undo and redo are built in rather than registered, so they never resolve as actions and
@@ -128,7 +129,7 @@ function boot(): void {
     selectComponent: (name) => bridge.selectComponent(name),
     closeModule: (name) => bridge.closeModule(name),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
-    requestOutline: (module) => bridge.requestOutline(module),
+    requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
   });
 

@@ -35,10 +35,10 @@ export interface ShellProperty {
 }
 
 export interface ShellHandlers {
-  /** The developer picked a module from the tab strip. */
-  activateModule(name: string): void;
+  /** The developer picked a module. The tree names the workbook; the tab strip cannot yet. */
+  activateModule(name: string, workbook?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
-  navigate(module: string, line: number, column: number, selectLine?: boolean): void;
+  navigate(module: string, line: number, column: number, selectLine?: boolean, workbook?: string): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
   layoutChanged(): void;
   /** A toolbar command was chosen. */
@@ -64,7 +64,7 @@ export interface ShellHandlers {
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
   /** A module's procedures, for its unfolded node in the tree; null when no answer came. */
-  requestOutline(module: string): Promise<ExplorerProcedure[] | null>;
+  requestOutline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A line for the host's log, from the corners only the log's data cadence explains. */
   trace(text: string): void;
 }
@@ -205,11 +205,11 @@ export class Shell {
     this.sidebarSplitter = root.querySelector("#sidebar-splitter") as HTMLElement;
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
-      open: (name) => handlers.activateModule(name),
+      open: (name, workbook) => handlers.activateModule(name, workbook),
       context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
-      outline: (module) => handlers.requestOutline(module),
-      openProcedure: (module, line) => handlers.navigate(module, line, 1, true),
+      outline: (module, workbook) => handlers.requestOutline(module, workbook),
+      openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
       trace: (text) => handlers.trace(text),
     });
 

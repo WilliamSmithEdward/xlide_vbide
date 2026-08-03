@@ -148,8 +148,8 @@ export type ClientMessage =
   | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
-  | { type: "activateModule"; moduleName: string }
-  | { type: "navigate"; module: string; line: number; column: number }
+  | { type: "activateModule"; moduleName: string; project?: string }
+  | { type: "navigate"; module: string; line: number; column: number; project?: string }
   | { type: "command"; name: string }
   | { type: "evaluate"; text: string }
   | { type: "panel"; name: string; open: boolean }
@@ -163,7 +163,7 @@ export type ClientMessage =
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
-  | { type: "outline"; id: number; module: string }
+  | { type: "outline"; id: number; module: string; project?: string }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -311,9 +311,9 @@ export class EditorBridge {
     this.transport.post(timings ? { type: "ready", timings } : { type: "ready" });
   }
 
-  /** Asks the host to show a module, in response to the developer picking its tab. */
-  activateModule(moduleName: string): void {
-    this.transport.post({ type: "activateModule", moduleName });
+  /** Asks the host to show a module. The tree names the workbook it means; a tab cannot yet. */
+  activateModule(moduleName: string, project?: string): void {
+    this.transport.post({ type: "activateModule", moduleName, ...(project ? { project } : {}) });
   }
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
@@ -333,9 +333,9 @@ export class EditorBridge {
    * the editor focused, ready to type. A procedure asks for its whole line, so where the block
    * starts is visible at a glance.
    */
-  navigate(module: string, line: number, column: number, selectLine = false): void {
+  navigate(module: string, line: number, column: number, selectLine = false, project?: string): void {
     this.pendingCaret = { module, line, column, selectLine };
-    this.transport.post({ type: "navigate", module, line, column });
+    this.transport.post({ type: "navigate", module, line, column, ...(project ? { project } : {}) });
     this.applyPendingCaret();
   }
 
@@ -500,7 +500,7 @@ export class EditorBridge {
    * window is generous because the host thread legitimately stalls for seconds while a large
    * module is being shown, and the answer queued behind that stall is still a good answer.
    */
-  requestOutline(module: string): Promise<HostProcedure[] | null> {
+  requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
     const id = this.nextOutlineId++;
 
     return new Promise<HostProcedure[] | null>((resolve) => {
@@ -510,7 +510,7 @@ export class EditorBridge {
       }, 8000);
 
       this.pendingOutlines.set(id, { resolve, timer });
-      this.transport.post({ type: "outline", id, module });
+      this.transport.post({ type: "outline", id, module, ...(project ? { project } : {}) });
     });
   }
 

@@ -275,11 +275,11 @@ internal sealed class AddInSession : IDisposable
     /// what the debugger drives. Leaving it where it was would put the two out of step the first
     /// time the user pressed F8.
     /// </summary>
-    private void GoTo(string component, int line, int column)
+    private void GoTo(string component, int line, int column, string? projectDisplay = null)
     {
         try
         {
-            using var pane = FindCodePane(component);
+            using var pane = FindCodePane(component, ProjectIdFromDisplay(projectDisplay));
             if (pane is null)
             {
                 Log.Info($"navigate: no pane for {component}");
@@ -2076,7 +2076,7 @@ internal sealed class AddInSession : IDisposable
     /// The live text is captured when the request is about the module being edited; any other
     /// module answers from the engine's seeded copy, which is current as of the last write-back.
     /// </summary>
-    private void OnOutlineRequested(int requestId, string moduleName)
+    private void OnOutlineRequested(int requestId, string moduleName, string? projectDisplay)
     {
         var surface = _editorSurface;
 
@@ -2087,6 +2087,10 @@ internal sealed class AddInSession : IDisposable
             _editorSurface?.ShowOutline(requestId, [], failed: true);
             return;
         }
+
+        // The tree names the workbook its row belongs to, which is what makes a shared module
+        // name unfold the right workbook's procedures.
+        var projectId = ProjectIdFromDisplay(projectDisplay);
 
         // No source travels with the request: the engine's live copy is exact — didChange rides
         // the same FIFO pipe ahead of this — and serialising a 918KB module once a second to
@@ -2099,7 +2103,7 @@ internal sealed class AddInSession : IDisposable
             try
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-                var answered = await analysis.OutlineAsync(moduleName, source: null, deadline.Token)
+                var answered = await analysis.OutlineAsync(moduleName, projectId, source: null, deadline.Token)
                     .ConfigureAwait(false);
 
                 if (answered is not null)
@@ -2837,14 +2841,17 @@ internal sealed class AddInSession : IDisposable
     /// run and debug commands act on it; the surface matters because it is what the developer
     /// sees; neither is left to depend on the editor choosing to move a window.
     /// </summary>
-    private void ShowModule(string component)
+    private void ShowModule(string component, string? projectDisplay = null)
     {
         try
         {
             // Before the document changes underneath them.
             _editorSurface?.FlushEdits();
 
-            using var pane = FindCodePane(component);
+            // The tree says which workbook it means; a bare name resolves shown-project-first.
+            var projectId = ProjectIdFromDisplay(projectDisplay);
+
+            using var pane = FindCodePane(component, projectId);
             if (pane is null)
             {
                 return;
@@ -2861,9 +2868,9 @@ internal sealed class AddInSession : IDisposable
                 Log.Info($"modules: {component} could not be made the active pane ({ex.GetType().Name})");
             }
 
-            if (_editorSurface?.Module != component)
+            if (_editorSurface?.Module != component || projectId is not null && _shownProject != projectId)
             {
-                ShowModuleInSurface(component);
+                ShowModuleInSurface(component, projectId);
             }
 
             PublishModules();
@@ -2961,14 +2968,37 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>Finds the code pane a component's module is displayed in, opening one if needed.</summary>
-    private DispatchObject? FindCodePane(string component)
+    private DispatchObject? FindCodePane(string component, string? projectId = null)
     {
-        using var found = FindComponent(component);
+        // An explicit project wins; the shown project stands in when the name is the module on
+        // the surface; anything else searches every project the way it always has.
+        var owner = projectId ?? (IsShownComponent(component) ? _shownProject : null);
+
+        using var found = FindComponent(component, owner, out _);
         using var module = found?.GetObject("CodeModule");
 
         // Reading CodePane on a module that has never been opened creates the pane, which is what
         // makes navigating to a module the user has not opened work at all.
         return module?.GetObject("CodePane");
+    }
+
+    /// <summary>True when this name is the module currently on the surface.</summary>
+    private bool IsShownComponent(string component) =>
+        string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The identity behind a workbook name the tree uses, or null when nothing matches. The
+    /// tree names workbooks by file name, which is what FindProjectByDisplayName matches.
+    /// </summary>
+    private string? ProjectIdFromDisplay(string? display)
+    {
+        if (string.IsNullOrEmpty(display))
+        {
+            return null;
+        }
+
+        using var project = FindProjectByDisplayName(display);
+        return project is null ? null : ProjectReader.Identity(project).Id;
     }
 
     /// <summary>

@@ -81,11 +81,13 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the surface reports the developer changed the text.</summary>
     public Action<string, string>? TextChanged { get; set; }
 
-    /// <summary>Raised when the developer picks a module from the tab strip.</summary>
-    public Action<string>? ModuleRequested { get; set; }
+    /// <summary>Raised when the developer picks a module, with the workbook when the picker
+    /// knows it (the tree does; the tab strip does not yet).</summary>
+    public Action<string, string?>? ModuleRequested { get; set; }
 
-    /// <summary>Raised when the developer picks a finding and wants to be taken to it.</summary>
-    public Action<string, int, int>? NavigateRequested { get; set; }
+    /// <summary>Raised when the developer wants to be taken to a place, with the workbook when
+    /// the asker knows it.</summary>
+    public Action<string, int, int, string?>? NavigateRequested { get; set; }
 
     /// <summary>Raised when the developer chooses a command the editor owns.</summary>
     public Action<string>? CommandRequested { get; set; }
@@ -139,8 +141,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks for the paired loop rename: (requestId, offset).</summary>
     public Action<int, int>? LoopSyncRequested { get; set; }
 
-    /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName).</summary>
-    public Action<int, string>? OutlineRequested { get; set; }
+    /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName,
+    /// workbook or null).</summary>
+    public Action<int, string, string?>? OutlineRequested { get; set; }
 
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
@@ -869,8 +872,12 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("moduleName", out var requested)
                         && requested.GetString() is { Length: > 0 } name)
                     {
-                        Log.Info($"surface: activate {name} requested");
-                        ModuleRequested?.Invoke(name);
+                        var requestedProject = document.RootElement.TryGetProperty("project", out var wanted)
+                            ? wanted.GetString()
+                            : null;
+                        Log.Info($"surface: activate {name} requested"
+                            + (requestedProject is null ? string.Empty : $" in {requestedProject}"));
+                        ModuleRequested?.Invoke(name, requestedProject);
                     }
 
                     break;
@@ -1052,7 +1059,10 @@ internal sealed class EditorSurface : IDisposable
                         && document.RootElement.TryGetProperty("module", out var outlineModuleElement)
                         && outlineModuleElement.GetString() is { Length: > 0 } outlineModule)
                     {
-                        OutlineRequested?.Invoke(outlineRequestId, outlineModule);
+                        var outlineProject = document.RootElement.TryGetProperty("project", out var outlineOwner)
+                            ? outlineOwner.GetString()
+                            : null;
+                        OutlineRequested?.Invoke(outlineRequestId, outlineModule, outlineProject);
                     }
 
                     break;
@@ -1215,8 +1225,9 @@ internal sealed class EditorSurface : IDisposable
 
         var line = message.TryGetProperty("line", out var lineValue) && lineValue.TryGetInt32(out var l) ? l : 1;
         var column = message.TryGetProperty("column", out var columnValue) && columnValue.TryGetInt32(out var c) ? c : 1;
+        var project = message.TryGetProperty("project", out var projectValue) ? projectValue.GetString() : null;
 
-        NavigateRequested?.Invoke(component, line, column);
+        NavigateRequested?.Invoke(component, line, column, project);
     }
 
     /// <summary>
