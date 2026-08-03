@@ -110,8 +110,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer selects a component in the explorer without opening it.</summary>
     public Action<string>? ComponentSelected { get; set; }
 
-    /// <summary>Raised when the developer closes a module's tab.</summary>
-    public Action<string>? ModuleCloseRequested { get; set; }
+    /// <summary>Raised when the developer closes a module's tab, with its workbook when the
+    /// tab carries one.</summary>
+    public Action<string, string?>? ModuleCloseRequested { get; set; }
 
     /// <summary>
     /// Raised when the developer asks for a new component: (kind, workbook). Kind is 1 module,
@@ -577,12 +578,13 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.</summary>
-    public void ShowModules(string[] modules, string? active)
+    public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject)
     {
         ArgumentNullException.ThrowIfNull(modules);
+        ArgumentNullException.ThrowIfNull(projects);
 
         Send("setModules", JsonSerializer.Serialize(
-            new SetModulesMessage("setModules", modules, active),
+            new SetModulesMessage("setModules", modules, projects, active, activeProject),
             EditorMessageContext.Default.SetModulesMessage));
     }
 
@@ -955,7 +957,10 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("name", out var closing)
                         && closing.GetString() is { Length: > 0 } closingName)
                     {
-                        ModuleCloseRequested?.Invoke(closingName);
+                        var closingProject = document.RootElement.TryGetProperty("project", out var closingOwner)
+                            ? closingOwner.GetString()
+                            : null;
+                        ModuleCloseRequested?.Invoke(closingName, closingProject);
                     }
 
                     break;

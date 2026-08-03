@@ -259,7 +259,7 @@ internal sealed class AddInSession : IDisposable
         _surfaceShown = true;
         _watchingEmpty = true;
         _editorSurface!.Clear();
-        _editorSurface.ShowModules([], null);
+        _editorSurface.ShowModules([], [], null, null);
         PublishProjects();
         RefreshSurfacePlacement();
         UpdatePolling();
@@ -558,7 +558,7 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        var open = ReadOpenModuleNames();
+        var open = ReadOpenModules();
         if (open is not { Count: 0 })
         {
             // A window gap mid-churn, or a pane list that is refusing: either way, not an empty
@@ -571,7 +571,7 @@ internal sealed class AddInSession : IDisposable
         _surfaceShown = true;
         _watchingEmpty = true;
         _editorSurface.Clear();
-        _editorSurface.ShowModules([], null);
+        _editorSurface.ShowModules([], [], null, null);
         RefreshSurfacePlacement();
         UpdatePolling();
     }
@@ -2321,10 +2321,31 @@ internal sealed class AddInSession : IDisposable
 
         // A refusing collection changes nothing: the strip keeps its last picture and the
         // tracker's recovery republishes it.
-        if (ReadOpenModuleNames() is { } modules)
+        if (ReadOpenModules() is { } modules)
         {
-            surface.ShowModules([.. modules], surface.Module);
+            surface.ShowModules(
+                [.. modules.Select(m => m.Name)],
+                [.. modules.Select(m => m.Project)],
+                surface.Module,
+                DisplayFromProjectId(_shownProject));
         }
+    }
+
+    /// <summary>
+    /// What the developer calls a project, from its identity alone: the file's name for a saved
+    /// workbook, the identity itself otherwise. Lowercase for saved ones — comparisons on the
+    /// page side are case-insensitive.
+    /// </summary>
+    private static string? DisplayFromProjectId(string? projectId)
+    {
+        if (string.IsNullOrEmpty(projectId))
+        {
+            return null;
+        }
+
+        return projectId.Contains('\\') || projectId.Contains('/')
+            ? Path.GetFileName(projectId)
+            : projectId;
     }
 
     /// <summary>
@@ -2336,14 +2357,14 @@ internal sealed class AddInSession : IDisposable
     /// open. What the collection cannot be trusted with is a member that has just died, so a dead
     /// member is skipped rather than taking the list with it.
     /// </summary>
-    private List<string>? ReadOpenModuleNames()
+    private List<(string Name, string? Project)>? ReadOpenModules()
     {
         try
         {
             using var panes = _editor.GetObject("CodePanes");
             var count = panes?.GetInt32("Count") ?? 0;
 
-            var modules = new List<string>(count);
+            var modules = new List<(string Name, string? Project)>(count);
             for (var i = 1; i <= count; i++)
             {
                 try
@@ -2352,11 +2373,33 @@ internal sealed class AddInSession : IDisposable
                     using var module = pane?.GetObject("CodeModule");
                     using var component = module?.GetObject("Parent");
 
-                    if (component?.GetString("Name") is { Length: > 0 } name
-                        && !IsScratchComponent(name)
-                        && !modules.Contains(name))
+                    if (component?.GetString("Name") is not { Length: > 0 } name
+                        || IsScratchComponent(name))
                     {
-                        modules.Add(name);
+                        continue;
+                    }
+
+                    // The workbook the tab belongs to, by the name the tree uses, so the strip
+                    // can say WHICH Module1 when two workbooks hold one.
+                    string? owner = null;
+                    try
+                    {
+                        using var collection = component.GetObject("Collection");
+                        using var project = collection?.GetObject("Parent");
+                        if (project is not null)
+                        {
+                            owner = ProjectReader.Identity(project).DisplayName;
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // A tab without a workbook is still a tab.
+                    }
+
+                    if (!modules.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(m.Project, owner, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        modules.Add((name, owner));
                     }
                 }
                 catch (Exception)
@@ -2718,11 +2761,13 @@ internal sealed class AddInSession : IDisposable
     /// second click on a dead tab was conjuring a fresh pane just to destroy it, and the editor
     /// spent a minute churning through the wreckage.
     /// </summary>
-    private void CloseModule(string component)
+    private void CloseModule(string component, string? projectDisplay = null)
     {
+        var projectId = ProjectIdFromDisplay(projectDisplay);
+
         try
         {
-            if (CloseThroughObjectModel(component))
+            if (CloseThroughObjectModel(component, projectId))
             {
                 return;
             }
@@ -2735,6 +2780,8 @@ internal sealed class AddInSession : IDisposable
                 foreach (var pane in _codePanes.Panes)
                 {
                     if (string.Equals(pane.Component, component, StringComparison.OrdinalIgnoreCase)
+                        && (projectId is null || pane.Project is null
+                            || string.Equals(pane.Project, projectId, StringComparison.OrdinalIgnoreCase))
                         && Win32.IsWindow(pane.Window))
                     {
                         Win32.PostMessage(pane.Window, Win32.WmClose, 0, 0);
@@ -2756,7 +2803,7 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>Closes a module's pane through the editor's own pane list. False when it cannot.</summary>
-    private bool CloseThroughObjectModel(string component)
+    private bool CloseThroughObjectModel(string component, string? projectId = null)
     {
         try
         {
@@ -2773,6 +2820,19 @@ internal sealed class AddInSession : IDisposable
                     if (!string.Equals(owner?.GetString("Name"), component, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
+                    }
+
+                    // The tab said which workbook it belongs to; a same-named pane in another
+                    // workbook is not the one being closed.
+                    if (projectId is not null && owner is not null)
+                    {
+                        using var collection = owner.GetObject("Collection");
+                        using var project = collection?.GetObject("Parent");
+                        if (project is not null
+                            && !string.Equals(ProjectReader.Identity(project).Id, projectId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
                     }
 
                     using var window = pane!.GetObject("Window");

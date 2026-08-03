@@ -262,7 +262,7 @@ export class Explorer {
   /** The last projects payload applied, so an identical republish is a no-op. */
   private projectsKey = "";
 
-  setActive(name: string | null): void {
+  setActive(name: string | null, workbook?: string): void {
     // The tree follows the module being edited — but only when it genuinely changed. The host
     // republishes the module list on all sorts of occasions with the same active module;
     // following every push would fold what was just unfolded by hand, and even redrawing on
@@ -273,7 +273,7 @@ export class Explorer {
 
     this.active = name;
     if (name) {
-      this.setExpandedModule(name);
+      this.setExpandedModule(name, workbook);
     }
     this.render();
   }
@@ -307,7 +307,7 @@ export class Explorer {
    */
   private setExpandedModule(name: string, workbook?: string): void {
     const owner = workbook
-      ? this.projects.find((project) => project.name === workbook)
+      ? this.projects.find((project) => project.name.toLowerCase() === workbook.toLowerCase())
       : this.projects.find((project) =>
         project.components.some((component) => component.name === name));
 

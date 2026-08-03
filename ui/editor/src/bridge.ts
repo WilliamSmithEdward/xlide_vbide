@@ -49,7 +49,7 @@ export type HostMessage =
   | { type: "notice"; text: string }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
-  | { type: "setModules"; modules: string[]; active: string | null }
+  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
   | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
@@ -157,7 +157,7 @@ export type ClientMessage =
   | { type: "menuExecute"; path: number[] }
   | { type: "editProperty"; component: string; name: string; value: string }
   | { type: "selectComponent"; name: string }
-  | { type: "closeModule"; name: string }
+  | { type: "closeModule"; name: string; project?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
@@ -392,8 +392,8 @@ export class EditorBridge {
   }
 
   /** Asks the host to close a module's pane, which is what closes its tab. */
-  closeModule(name: string): void {
-    this.transport.post({ type: "closeModule", name });
+  closeModule(name: string, project?: string): void {
+    this.transport.post({ type: "closeModule", name, ...(project ? { project } : {}) });
   }
 
   /**
@@ -574,7 +574,7 @@ export class EditorBridge {
         this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");
         return;
       case "setModules":
-        this.shell?.setModules(message.modules, message.active);
+        this.shell?.setModules(message.modules, message.projects ?? [], message.active, message.activeProject ?? null);
         return;
       case "setFindings":
         this.shell?.setFindings(message.findings);

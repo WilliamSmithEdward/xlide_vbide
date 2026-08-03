@@ -40,11 +40,17 @@ public sealed record RevealLineMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("line")] int Line);
 
-/// <summary>The modules the editor has open, and which one is showing.</summary>
+/// <summary>
+/// The modules the editor has open, and which one is showing. Projects runs parallel to
+/// Modules — the workbook each tab belongs to, by the name the tree uses — so the strip can
+/// say WHICH Module1 when two workbooks hold one.
+/// </summary>
 public sealed record SetModulesMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("modules")] string[] Modules,
-    [property: JsonPropertyName("active")] string? Active);
+    [property: JsonPropertyName("projects")] string?[] Projects,
+    [property: JsonPropertyName("active")] string? Active,
+    [property: JsonPropertyName("activeProject")] string? ActiveProject);
 
 /// <summary>One finding as the surface's panel wants it.</summary>
 public sealed record SurfaceFinding(
