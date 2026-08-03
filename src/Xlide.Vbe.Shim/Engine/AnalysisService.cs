@@ -46,6 +46,15 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     public AnalysisService(DispatchObject editor) => _editor = editor;
 
+    /// <summary>
+    /// Runs an action on the host thread, which owns the object model, answering false while
+    /// there is nothing to carry it. The full pass runs on pool threads — the pipe conversation
+    /// belongs there — but the read of the projects does not: the editor's objects live on the
+    /// host's thread, and calling them from anywhere else worked only by luck. Wired by the
+    /// session to the overlay's action timer.
+    /// </summary>
+    public Func<Action, bool>? HostMarshal { get; set; }
+
     /// <summary>Raised when a module has been analysed.</summary>
     public event Action<IReadOnlyList<Finding>>? FindingsReady;
 
@@ -375,6 +384,60 @@ internal sealed class AnalysisService : IAsyncDisposable
         return result?.Procedures;
     }
 
+    /// <summary>
+    /// Reads the projects on the host thread, which owns them, and hands the snapshots back to
+    /// this pool thread. Null when the read could not be run — the session is between surfaces,
+    /// or the host thread never answered — and the pass is abandoned rather than served stale:
+    /// whatever prompted it will prompt again.
+    /// </summary>
+    private async Task<List<ProjectSnapshot>?> ReadProjectsAsync(int generation)
+    {
+        var read = new TaskCompletionSource<List<ProjectSnapshot>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        void ReadOnHost()
+        {
+            try
+            {
+                read.TrySetResult(ProjectReader.ReadAll(_editor, generation));
+            }
+            catch (Exception ex)
+            {
+                read.TrySetException(ex);
+            }
+        }
+
+        // At start-up the engine can finish connecting a beat before the surface — and its
+        // host-thread door — exists, so a declined marshal is retried rather than answered by
+        // reading from the wrong thread, which is exactly the call this method exists to end.
+        for (var attempt = 0; ; attempt++)
+        {
+            if (HostMarshal is { } marshal && marshal(ReadOnHost))
+            {
+                break;
+            }
+
+            if (attempt >= 40)
+            {
+                return null;
+            }
+
+            await Task.Delay(250, _stopping.Token).ConfigureAwait(false);
+        }
+
+        // Bounded, because the door can also drop its action silently when the surface dies
+        // between accept and tick, and a pass that waits forever would sit on nothing.
+        var settled = await Task.WhenAny(read.Task, Task.Delay(TimeSpan.FromSeconds(10), _stopping.Token))
+            .ConfigureAwait(false);
+
+        if (settled != read.Task)
+        {
+            return null;
+        }
+
+        return await read.Task.ConfigureAwait(false);
+    }
+
     private async Task AnalyseEverythingAsync()
     {
         var engine = _engine;
@@ -384,7 +447,12 @@ internal sealed class AnalysisService : IAsyncDisposable
         }
 
         var generation = Interlocked.Increment(ref _generation);
-        var snapshots = ProjectReader.ReadAll(_editor, generation);
+        var snapshots = await ReadProjectsAsync(generation).ConfigureAwait(false);
+        if (snapshots is null)
+        {
+            Log.Info($"engine: generation {generation} could not read the projects, pass abandoned");
+            return;
+        }
 
         Log.Info($"engine: analysing {snapshots.Count} project(s) at generation {generation}");
 

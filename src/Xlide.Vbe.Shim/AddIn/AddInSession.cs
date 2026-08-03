@@ -307,6 +307,22 @@ internal sealed class AddInSession : IDisposable
         try
         {
             _analysis = new AnalysisService(_editor);
+
+            // The read of the projects belongs to the thread that owns them. The door is the
+            // overlay's action timer, and it answers false while there is no surface to carry
+            // it — the service retries rather than reading from the wrong thread.
+            _analysis.HostMarshal = action =>
+            {
+                var surface = _editorSurface;
+                if (surface is null)
+                {
+                    return false;
+                }
+
+                surface.RunOnHostThread(action);
+                return true;
+            };
+
             _analysis.LanguageFactsReady += (types, procedures) =>
             {
                 // Unchanged words are not sent: the page rebuilds its tokenizer on arrival,

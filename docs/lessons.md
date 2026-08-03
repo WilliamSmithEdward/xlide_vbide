@@ -360,3 +360,27 @@ Consequence: when a component gives no notification, do not manufacture one from
 find the state the OS already maintains about it (captions, enabled bits, ownership) and read
 that. And treat "my timer ticked" with suspicion inside any window of modality: modal loops
 pump everybody's timers.
+
+## 23. Two seconds billed to the wrong suspect, and the ready line that itemised it
+
+The surface took 2.1s to boot and the obvious suspects were the obvious ones: 3.4MB of
+JavaScript must be slow to compile, or the cache must not be helping. Both were wrong, and one
+log line convicted the real cost. The page was taught to itemise its own ready message from
+the browser's resource timeline — document arrival, request departure, bytes complete,
+compile-and-run — and it read: html 3ms, request 0ms, fetch 2025ms, compile+run 77ms. The
+document was instant, the request left at time zero, the compile was noise. The two seconds
+were the WebView2 folder mapping brokering the bundle through the browser's host pipe at
+about two megabytes a second, every boot, from local disk.
+
+The fix followed from the diagnosis rather than preceding it: serve the same bytes over a
+loopback socket (ephemeral port, GET/HEAD only, per-session path token, one directory) and
+keep the mapping as the fallback. Boot went from 2164ms to 181ms, fetch from 2025ms to 49ms,
+and nothing else changed — same page, same CSP, same everything.
+
+Evidence: the before and after ready lines, in the log, four minutes apart.
+
+Consequence: when a duration needs cutting, make the thing being cut report its own stages
+first — the browser already keeps the resource timeline; asking it is one message field. And
+keep the itemised line in the log permanently: the next regression in any stage then names
+itself. Beware fetch-time labels too — "transfer: cache" from an app-scheme response meant
+nothing; the byte count over the socket was the number that could be believed.

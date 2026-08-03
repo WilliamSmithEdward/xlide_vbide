@@ -44,10 +44,11 @@ and survival of a cancelled Excel shutdown (`ShutdownWatchdog` revives the sessi
    Their full suite is green at 2478 after both.
 2. #26's tail: Smart Tab (`vbaSmartTab.ts`), and whether the With-seeded dot auto-triggers
    member completion.
-3. Latent, known, working-but-illegal: `AnalysisService` reads the object model from pool
-   threads (`ProjectReader.ReadAll` inside `Task.Run`); move the read to the host thread the
-   next time analysis is touched. Latent too: something host-side publishes once a second (the
-   sinks are gated; the source was never named).
+3. Latent: something host-side once published a CHANGING payload every second in the
+   developer's environment (never reproduced against the scratch workbook). The page now logs
+   `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the
+   next occurrence names the oscillating field itself. (The pool-thread `ProjectReader.ReadAll`
+   debt is PAID: the read rides `HostMarshal` to the host thread, with retry and abandonment.)
 4. #24 project-qualified addressing is still the multi-workbook backend gap; #17 start-up time.
 
 **Before touching anything, know these:**
