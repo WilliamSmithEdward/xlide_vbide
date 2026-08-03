@@ -8,48 +8,61 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START NEW SESSION HERE — 2026-08-02 15:05
+## START NEW SESSION HERE — 2026-08-02 18:00
 
-**State, all developer-confirmed live in a real 26,000-line workbook.** One marathon session
-shipped: the typing-ergonomics port (Smart Enter block closers, canonical casing on idle and
-line-leave, loop-iterator sync — `engine/src/onType.ts` + `ui/editor/src/typing.ts`); the
-full-window branded loader with a stall retreat (`OverlayWindow`, `SurfaceBounds`); the
-workbook-rooted explorer with unfoldable modules, procedure navigation that selects the whole
-declaration line, and the accordion (`ui/editor/src/explorer.ts`, `textDocument/outline`); the
-companion's token colours driven by engine-sent word lists so project types and procedures paint
-as what they are (`buildVbaMonarch`, `setLanguageFacts`); class names as member receivers (fixed
-in the shared resolver — see the unpushed commit below); live diagnostics that follow the typing
-with caret suppression and stale-drop; the minimap; Ctrl+W/middle-click/focus-return ergonomics;
-and survival of a cancelled Excel shutdown (`ShutdownWatchdog` revives the session).
+**State.** The editor is in daily live use against a real 26,000-line workbook, and today's
+second stretch closed every reported defect and the start-up complaint:
 
-**The scale architecture, built this session because the flat one froze on 918KB of module:**
-- The page ships keystrokes as Monaco change ranges (full text only under 64KB); the shim
-  reconstructs and streams the same edits to the engine as `textDocument/didChange`; the engine
-  holds one live string per module and every request carries an offset alone. Order is the
-  pipe's FIFO, and the notification's wait is registered synchronously so no request overtakes
-  the text it is about.
-- Write-back is a line diff at one anchor (prefix/suffix window; whole-replace fallback);
-  `assembleContext` is cached against the seeded-array identity; the analyzer's token cache hits
-  because one string instance per keystroke serves every feature.
-- Analysis yields the road: large modules defer the live pass until the caret leaves the edited
-  line (or 1.5s of quiet); the full pass runs on structural writes and otherwise once per 3s,
-  with skipped turns made up when quiet. Every page-side sink is idempotent — identical facts,
-  findings, projects, counts, actives, and outlines change nothing, not even a repaint — and a
-  legitimate tree rebuild restores the scroll (lesson 20).
+- **Boot is 181ms, was 2164ms.** The two seconds were the WebView2 folder mapping streaming
+  the 3.4MB bundle through the browser's host pipe (~2MB/s); `LoopbackPageServer` now serves
+  dist over 127.0.0.1 (ephemeral port, per-session path token, GET/HEAD, one directory), with
+  the mapping kept as fallback. The ready log line itemises html/request/fetch/compile
+  permanently (lesson 23), so a start-up regression names its own stage.
+- **Typing structure is page-local.** Smart Enter (block closers, comment and With-member
+  continuation), Smart Tab, Smart Backspace, and loop-iterator sync run in the page on the
+  extension's own bundled helpers (`ui/editor/src/typing.ts`; tsc sees `src/spec/xlide-spec`
+  declarations, esbuild aliases to the real sources) — no round trip between Enter and its
+  `End If`. Canonical casing stays engine-side.
+- **A line being typed gets no verdicts** (`ActiveLineHold`, Core, tested): typing hides
+  findings touching that line from squiggles, panel, and badges at one filter point; the caret
+  leaving republishes from cache. The VBE model, adopted deliberately (lesson 21).
+- **The tree cannot blank an unfolded list**: outline timeout resolves null (never empty), the
+  host marks failures, one request per module with a trailing refresh, engine memoises the
+  outline per source string, and requests no longer carry the module text (lesson 21).
+- **Immediate window mirrors again** — identified by caption match, not visibility diffing
+  (lesson 22); a failed attach retries on first evaluation. Developer-confirmed.
+- **Cancelled-shutdown revive waits for the save prompt**: an app-modal dialog disables the
+  frame; only an enabled frame across two ticks revives (lesson 22). Reproduced both ways.
+- Hover answers for class receivers (`ROneCOne` in `ROneCOne.DataView(...)`), the minimap
+  slider is always visible, the tab X survives pointercancel and drag suppression.
+- `ProjectReader.ReadAll` now runs on the host thread via `AnalysisService.HostMarshal`
+  (declined marshal retries; unanswered marshal abandons the pass). The old pool-thread debt is
+  paid.
+- **Decision 10**: the product never requires "Trust access to the VBA project object model" —
+  OnConnection instance + `AccessibleObjectFromWindow`/`Application.Run` only. Harness scripts
+  are the sole (dev-only) exception.
+
+**The scale architecture (unchanged, still the spine):** page ships Monaco change ranges (full
+text under 64KB) → shim reconstructs and streams `textDocument/didChange` → engine holds one
+live string per module; requests carry offsets only; FIFO order with the notification's wait
+registered synchronously. Write-back is a line diff at one anchor. Analysis yields to typing
+(live pass deferred to line-leave on large modules; full pass 3s-gated with catch-up). Every
+page sink is idempotent and tree rebuilds restore scroll (lesson 20).
 
 **Open threads, in order of likely next ask:**
 1. `xlide_vscode` carries TWO local commits, neither pushed: `6453c20` (class/UserForm
-   receivers in the shared resolver, developer-confirmed) and `1f9d8b8` (hover for any
-   object-module surface used as a bare receiver — `ROneCOne` in `ROneCOne.DataView(...)`).
-   Their full suite is green at 2478 after both.
-2. #26's tail: Smart Tab (`vbaSmartTab.ts`), and whether the With-seeded dot auto-triggers
-   member completion.
+   receivers in the shared resolver) and `1f9d8b8` (hover for object-module surfaces as bare
+   receivers). Suite green at 2478 after both. Push is the developer's call.
+2. #24 project-qualified addressing: the multi-workbook backend gap. `_moduleHomes` keys by
+   bare module name, so two workbooks sharing a module name collide. The engine already
+   addresses by (projectId, module); the shim and page do not. This is the next big build.
 3. Latent: something host-side once published a CHANGING payload every second in the
    developer's environment (never reproduced against the scratch workbook). The page now logs
    `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the
-   next occurrence names the oscillating field itself. (The pool-thread `ProjectReader.ReadAll`
-   debt is PAID: the read rides `HostMarshal` to the host thread, with retry and abandonment.)
-4. #24 project-qualified addressing is still the multi-workbook backend gap; #17 start-up time.
+   next occurrence names the oscillating field itself.
+4. Then the standing backlog: #20 right-click curation (needs the developer), #22 split
+   groups, #12 settings, #13 tests panel, #14 debugging/forms designer, #10 typelib backfill,
+   #9 the C# analyzer port.
 
 **Before touching anything, know these:**
 1. Registry writes from the agent shell are a MIRAGE (sandbox COW; lesson 17). Registration is
