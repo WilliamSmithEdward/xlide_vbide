@@ -114,9 +114,21 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    developer's environment (never reproduced against the scratch workbook). The page now logs
    `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the
    next occurrence names the oscillating field itself.
-4. Then the standing backlog: #20 right-click curation (needs the developer), #22 split
-   groups, #12 settings, #13 tests panel, #14 debugging/forms designer, #10 typelib backfill,
-   #9 the C# analyzer port.
+4. THE PHASE-OUT PROGRAM (developer directive, 2026-08-02 evening): remove or supersede every
+   remaining native VBE UI element. Already done: native toolbars hidden and their menu
+   toggles suppressed (shared id 761), the native window list suppressed (shared id 830) —
+   the tab strip is the window list — and Tools > Options (id 522) routed to the product's
+   settings dialog; Project Explorer, Properties, and Immediate were already replaced and
+   routed. Remaining, in rough order: Locals window, Watch window, Call Stack (surface debug
+   panels over the hidden native windows, the Immediate-reader pattern); Object Browser (ties
+   to #10's typelib model); the Window menu's arrangement items; native dialogs the object
+   model can faithfully rebuild (References and Macros are scriptable; Project Properties);
+   the UserForm designer and its Toolbox (#14, the largest); Help items last. The rule stands:
+   until a replacement exists, the native window stays reachable.
+5. Then the standing backlog: #20 right-click curation (needs the developer), #22 split
+   groups, #13 tests panel, #14 debugging/forms designer, #10 typelib backfill, #9 the C#
+   analyzer port. (#12 settings is DONE: six choices, gear dialog, settings.json, formatter
+   wired.)
 
 **Before touching anything, know these:**
 0. Smart App Control turned ON on this machine mid-day 2026-08-02. It blocks freshly built

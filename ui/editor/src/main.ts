@@ -161,6 +161,11 @@ function boot(): void {
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
 
+  // Tools > Options routes here from the host: the native Options dialog is superseded, and
+  // the product's settings are where the choices that matter live.
+  bridge.openSettings = () =>
+    openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
+
   // Typing automation: Smart Enter block closers, canonical casing, loop-iterator sync. After
   // the bridge, deliberately: the bridge's content listener registered first, so the text a
   // request describes has always reached the host before the request asking about it does.

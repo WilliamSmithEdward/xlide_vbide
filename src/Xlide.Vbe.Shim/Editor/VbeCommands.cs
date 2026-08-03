@@ -56,6 +56,7 @@ internal static class VbeCommands
         public const int PropertiesWindow = 222;
         public const int References = 942;
         public const int ProjectProperties = 2578;
+        public const int Options = 522;
     }
 
     /// <summary>

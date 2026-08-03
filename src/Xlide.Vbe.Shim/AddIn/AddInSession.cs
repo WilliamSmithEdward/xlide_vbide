@@ -1825,6 +1825,13 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface?.Notify("The project explorer is part of the editor and always shown.");
                 return true;
 
+            // The native Options dialog is superseded: its Editor and Editor Format tabs
+            // configure an editor nobody is looking at. Tools > Options opens the product's
+            // own settings, which is where the choices that matter now live.
+            case VbeCommands.Command.Options:
+                _editorSurface?.RunEditorCommand("xlide.openSettings");
+                return true;
+
             default:
                 return false;
         }

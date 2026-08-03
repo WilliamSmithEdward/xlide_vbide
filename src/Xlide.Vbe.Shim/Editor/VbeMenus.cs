@@ -44,6 +44,15 @@ internal static class VbeMenus
     };
 
     /// <summary>
+    /// Items the surface has replaced outright, left out of every menu it serves. 761 is every
+    /// native toolbar's visibility toggle — the native toolbars are hidden and the surface's
+    /// toolbar is the toolbar — and 830 is every entry of the native window list, whose job the
+    /// tab strip does. Each id is shared across exactly its family and nothing else (measured;
+    /// the handoff's command table), which is what makes suppression by id safe.
+    /// </summary>
+    private static readonly HashSet<int> Replaced = [761, 830];
+
+    /// <summary>
     /// Reads the items of one menu: the bar itself for an empty path, or the submenu the path leads
     /// to. Items the editor is not showing are left out, but every item keeps its real position, so
     /// a path built from what is returned still addresses the right control.
@@ -76,6 +85,11 @@ internal static class VbeMenus
             }
 
             var id = TryInt(control, "Id", fallback: 0);
+            if (Replaced.Contains(id))
+            {
+                continue;
+            }
+
             var popup = TryInt(control, "Type", fallback: 0) == PopupControlType;
             var shortcut = ExtractShortcut(ref caption, control, id, popup);
 

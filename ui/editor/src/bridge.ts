@@ -734,8 +734,16 @@ export class EditorBridge {
     this.transport.post({ type: "trace", text });
   }
 
+  /** Opens the settings dialog; wired by the page's entry point, which owns the dialog. */
+  openSettings: (() => void) | null = null;
+
   private runEditorCommand(id: string): void {
     this.trace(`editorCommand ${id}`);
+
+    if (id === "xlide.openSettings") {
+      this.openSettings?.();
+      return;
+    }
 
     if (id === "xlide.panel.immediate") {
       this.shell?.showImmediate();
