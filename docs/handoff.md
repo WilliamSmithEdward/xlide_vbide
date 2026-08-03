@@ -71,15 +71,19 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
       `PublishMarkersForShownModule` filters by (shown project, module); the problems panel row
       shows the workbook when two projects share a module name; tree badge counts key on
       (project, component) — the explorer's rows are already per-workbook.
-   d. `AnalysisService`: `_moduleHomes` keys on (projectId, moduleName) with a name-only index
-      for surface calls that still send bare names; ambiguous bare names resolve to the shown
-      project first. Live text/diagnose/outline calls from the session pass the shown project.
+   d. DONE, probe-verified: `_moduleHomes` maps each name to EVERY home it has (swapped
+      wholesale per pass); one `ResolveHome` replaces nine lookup copies. Requests about the
+      shown module (everything the editor asks) resolve to `PreferredProject` even before a
+      pass seeds it — the probe caught live text poisoning a same-named module in the other
+      workbook when resolution fell back to the seeded home. The outline alone asks with
+      `aboutShownModule: false` so tree rows for other workbooks keep their own homes; a
+      COLLIDED name's tree outline still mis-addresses until (e) sends the project.
    e. Page protocol: `activateModule`/`closeModule`/`outline`/`navigate` gain an optional
       `project`; `setModules` sends (project, module) pairs; tabs render "Module1 — Book2.xlsm"
       only when bare names collide; explorer clicks pass their workbook.
-   f. Engine stale projects: `AnalyseEverythingAsync` opens ids but never closes ones that
-      vanished (a save-as changes the id, the old one lingers engine-side). Add a close pass
-      diffing `_openProjects` against the snapshot ids.
+   f. DONE (not yet probe-exercised — needs a workbook to close mid-session): the pass diffs
+      `_openProjects` against the snapshot ids, closes the vanished projects engine-side
+      (`EngineClient.CloseProjectAsync`), and prunes their homes.
    Steps (b) and (c) are DONE and harness-verified: `_shownProject` tracked from the pane's
    project, `FindComponent` project-scoped, writes/resync/live-merge target the shown project,
    findings carry Project, markers filter by it (null-tolerant during the transition).
