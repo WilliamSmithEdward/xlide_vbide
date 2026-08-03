@@ -78,9 +78,13 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
       workbook when resolution fell back to the seeded home. The outline alone asks with
       `aboutShownModule: false` so tree rows for other workbooks keep their own homes; a
       COLLIDED name's tree outline still mis-addresses until (e) sends the project.
-   e. Page protocol: `activateModule`/`closeModule`/`outline`/`navigate` gain an optional
-      `project`; `setModules` sends (project, module) pairs; tabs render "Module1 — Book2.xlsm"
-      only when bare names collide; explorer clicks pass their workbook.
+   e. HALF DONE — the request side is in: explorer rows carry their workbook, and
+      `activateModule`/`outline`/`navigate` send an optional `project` (the tree's workbook
+      name, resolved host-side via `ProjectIdFromDisplay`); the accordion is a
+      (module, workbook) pair, which closed (d)'s collided-outline caveat. REMAINING: the push
+      side — `setModules` sending (project, module) pairs so the tab strip and `closeModule`
+      are project-aware, with "Module1 — Book2.xlsm" labels only when bare names collide, and
+      tab/active state keyed by the pair in `shell.ts`.
    f. DONE (not yet probe-exercised — needs a workbook to close mid-session): the pass diffs
       `_openProjects` against the snapshot ids, closes the vanished projects engine-side
       (`EngineClient.CloseProjectAsync`), and prunes their homes.
