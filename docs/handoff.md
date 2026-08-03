@@ -78,13 +78,17 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
       workbook when resolution fell back to the seeded home. The outline alone asks with
       `aboutShownModule: false` so tree rows for other workbooks keep their own homes; a
       COLLIDED name's tree outline still mis-addresses until (e) sends the project.
-   e. HALF DONE — the request side is in: explorer rows carry their workbook, and
-      `activateModule`/`outline`/`navigate` send an optional `project` (the tree's workbook
-      name, resolved host-side via `ProjectIdFromDisplay`); the accordion is a
-      (module, workbook) pair, which closed (d)'s collided-outline caveat. REMAINING: the push
-      side — `setModules` sending (project, module) pairs so the tab strip and `closeModule`
-      are project-aware, with "Module1 — Book2.xlsm" labels only when bare names collide, and
-      tab/active state keyed by the pair in `shell.ts`.
+   e. DONE both sides. Requests: explorer rows carry their workbook, and
+      `activateModule`/`outline`/`navigate`/`closeModule` send an optional `project` (resolved
+      host-side via `ProjectIdFromDisplay`); the accordion is a (module, workbook) pair. Push:
+      `setModules` carries the workbook beside every module and the active one; tabs are
+      (module, workbook) pairs through ordering, activation, cycling, closing, dragging, and
+      the menu, labelled "Module1 — Book2" only on collision; close matches the pane's own
+      project. This was also the developer-reported bug — two same-named modules could not be
+      open in two tabs — fixed the moment it was reported. NOT yet pair-aware: tab badges and
+      tree problem counts (name-keyed — a collided name shows the summed count on both), and
+      the problems panel's rows (no workbook column). SurfaceFinding would need the project
+      field plumbed to the page for those.
    f. DONE (not yet probe-exercised — needs a workbook to close mid-session): the pass diffs
       `_openProjects` against the snapshot ids, closes the vanished projects engine-side
       (`EngineClient.CloseProjectAsync`), and prunes their homes.
