@@ -76,6 +76,9 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private string? _shownProject;
 
+    /// <summary>When an unknown project last triggered a full pass, so two quick shows cost one.</summary>
+    private long _lastUnknownProjectPass;
+
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -454,7 +457,11 @@ internal sealed class AddInSession : IDisposable
                 // Before the document is replaced. Loading a module resets the surface, so an edit
                 // that has not been written yet would go with the document it belonged to.
                 _editorSurface.FlushEdits();
-                ShowModuleInSurface(pane.Component, pane.Project);
+
+                // The tracker's project goes null when two open panes share the component's
+                // name — a caption cannot tell them apart. The object model's active pane can,
+                // and the pane being followed is by definition the active one.
+                ShowModuleInSurface(pane.Component, pane.Project ?? ActivePaneOwner(pane.Component));
             }
 
             PublishModules();
@@ -2251,6 +2258,19 @@ internal sealed class AddInSession : IDisposable
         // project first, and markers for a same-named module elsewhere stay off this surface.
         _shownProject = owner;
 
+        // A project the engine has never been seeded with — a workbook just opened or created.
+        // Nothing else would ask for the pass: only this session's own writes call Reanalyse,
+        // which is how an externally added workbook stayed unanalysed forever. Gated, because
+        // a new workbook shows two panes in quick succession and the first pass has not had
+        // time to make the project known before the second show asks.
+        if (owner is not null && _analysis is { } analysisService && !analysisService.KnowsProject(owner)
+            && Environment.TickCount64 - _lastUnknownProjectPass > 2000)
+        {
+            _lastUnknownProjectPass = Environment.TickCount64;
+            Log.Info($"analysis: {component}'s project is new, analysing everything");
+            analysisService.Reanalyse();
+        }
+
         // Opening a module also selects it, the way the editor's own tree behaves.
         _propertiesTarget = component;
 
@@ -2853,6 +2873,35 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>Finds a component by name across every open project, or null when there is none.</summary>
+    /// <summary>
+    /// The project of the editor's own active pane, when its component carries this name. The
+    /// caption-matched pane picture cannot tell two same-named modules apart; the object
+    /// model's ActiveCodePane names both its component and its project without a caption.
+    /// </summary>
+    private string? ActivePaneOwner(string component)
+    {
+        try
+        {
+            using var active = _editor.GetObject("ActiveCodePane");
+            using var module = active?.GetObject("CodeModule");
+            using var found = module?.GetObject("Parent");
+            if (found?.GetString("Name") is not { } name
+                || !string.Equals(name, component, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            using var collection = found.GetObject("Collection");
+            using var project = collection?.GetObject("Parent");
+            return project is null ? null : ProjectReader.Identity(project).Id;
+        }
+        catch (Exception)
+        {
+            // No active pane, or an editor mid-teardown: the ambiguity simply stands.
+            return null;
+        }
+    }
+
     private DispatchObject? FindComponent(string component) => FindComponent(component, null, out _);
 
     /// <summary>

@@ -39,7 +39,14 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>The generation the engine was last seeded with, which live analysis must name.</summary>
     private int _lastSeededGeneration;
-    private readonly HashSet<string> _openProjects = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Projects the engine has been seeded with. Concurrent because pool threads write it
+    /// during a pass while feature calls read it, and the session's host thread now asks it
+    /// whether a shown project is known at all.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _openProjects =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Which project each module belonged to at the last pass, and what kind of module it was.
@@ -71,6 +78,9 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>True once an engine is running and answering.</summary>
     public bool IsReady => _engine is { IsRunning: true };
+
+    /// <summary>True when a pass has seeded this project into the engine.</summary>
+    public bool KnowsProject(string projectId) => _openProjects.ContainsKey(projectId);
 
     /// <summary>
     /// Starts the engine and analyses everything currently open.
@@ -163,7 +173,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         engine.NotifyDidChange(home.ProjectId, moduleName, source, edits);
@@ -193,7 +203,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -224,7 +234,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -255,7 +265,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -286,7 +296,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -318,7 +328,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.CanonicalCaseAsync(
@@ -350,7 +360,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.LoopSyncAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -380,7 +390,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, null, cancellation)
@@ -475,7 +485,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 factProcedures.UnionWith(opened.Procedures);
             }
 
-            _openProjects.Add(snapshot.ProjectId);
+            _openProjects.TryAdd(snapshot.ProjectId, 0);
             _lastSeededGeneration = snapshot.Generation;
 
             foreach (var module in snapshot.Modules)
@@ -571,7 +581,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 return null;
             }
 
-            home = (_openProjects.First(), "standard");
+            home = (_openProjects.Keys.First(), "standard");
         }
 
         try
