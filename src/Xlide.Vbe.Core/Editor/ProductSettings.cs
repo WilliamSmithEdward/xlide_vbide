@@ -25,6 +25,18 @@ public sealed record ProductSettings
     [JsonPropertyName("editor.mirrorCommentSpacing")]
     public bool MirrorCommentSpacing { get; init; } = true;
 
+    /// <summary>Format Module: spaces per indent level.</summary>
+    [JsonPropertyName("format.indentSize")]
+    public int FormatIndentSize { get; init; } = 4;
+
+    /// <summary>Format Module: indent with tabs rather than spaces.</summary>
+    [JsonPropertyName("format.useTabs")]
+    public bool FormatUseTabs { get; init; }
+
+    /// <summary>Format Module: respell keywords in their canonical case.</summary>
+    [JsonPropertyName("format.canonicalKeywords")]
+    public bool FormatCanonicalKeywords { get; init; } = true;
+
     public static ProductSettings Default { get; } = new();
 
     /// <summary>The settings with every value forced into its legal range.</summary>
@@ -33,6 +45,7 @@ public sealed record ProductSettings
         BlockLayout = string.Equals(BlockLayout, "compact", StringComparison.OrdinalIgnoreCase)
             ? "compact"
             : "comfy",
+        FormatIndentSize = Math.Clamp(FormatIndentSize, 1, 8),
     };
 
     /// <summary>

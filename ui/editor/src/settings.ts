@@ -14,6 +14,12 @@ export interface EditorSettings {
   continueCommentOnNewline: boolean;
   /** A continued comment also mirrors the spaces after the apostrophes. */
   mirrorCommentSpacing: boolean;
+  /** Format Module: spaces per indent level. */
+  formatIndentSize: number;
+  /** Format Module: indent with tabs rather than spaces. */
+  formatUseTabs: boolean;
+  /** Format Module: respell keywords in their canonical case. */
+  formatCanonicalKeywords: boolean;
 }
 
 /** What ships: the companion editor's own defaults. */
@@ -21,6 +27,9 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   blockLayout: "comfy",
   continueCommentOnNewline: true,
   mirrorCommentSpacing: true,
+  formatIndentSize: 4,
+  formatUseTabs: false,
+  formatCanonicalKeywords: true,
 };
 
 let current: EditorSettings = { ...DEFAULT_SETTINGS };
@@ -38,6 +47,9 @@ export function applySettings(next: EditorSettings): void {
     blockLayout: next.blockLayout === "compact" ? "compact" : "comfy",
     continueCommentOnNewline: next.continueCommentOnNewline !== false,
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
+    formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
+    formatUseTabs: next.formatUseTabs === true,
+    formatCanonicalKeywords: next.formatCanonicalKeywords !== false,
   };
 
   for (const listener of listeners) {

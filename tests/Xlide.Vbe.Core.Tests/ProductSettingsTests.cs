@@ -17,6 +17,22 @@ public class ProductSettingsTests
         Assert.Equal("comfy", settings.BlockLayout);
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.True(settings.MirrorCommentSpacing);
+        Assert.Equal(4, settings.FormatIndentSize);
+        Assert.False(settings.FormatUseTabs);
+        Assert.True(settings.FormatCanonicalKeywords);
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(-3, 1)]
+    [InlineData(9, 8)]
+    [InlineData(100, 8)]
+    [InlineData(2, 2)]
+    public void TheIndentSizeIsClampedToItsLegalRange(int asked, int kept)
+    {
+        var settings = ProductSettings.Parse($"{{ \"format.indentSize\": {asked} }}");
+
+        Assert.Equal(kept, settings.FormatIndentSize);
     }
 
     [Theory]

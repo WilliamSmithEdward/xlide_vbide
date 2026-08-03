@@ -68,7 +68,15 @@ export type HostMessage =
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
-  | { type: "setSettings"; blockLayout: string; continueCommentOnNewline: boolean; mirrorCommentSpacing: boolean };
+  | {
+    type: "setSettings";
+    blockLayout: string;
+    continueCommentOnNewline: boolean;
+    mirrorCommentSpacing: boolean;
+    formatIndentSize?: number;
+    formatUseTabs?: boolean;
+    formatCanonicalKeywords?: boolean;
+  };
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
 export interface HostProcedure {
@@ -166,7 +174,15 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "outline"; id: number; module: string; project?: string }
-  | { type: "updateSettings"; blockLayout: string; continueCommentOnNewline: boolean; mirrorCommentSpacing: boolean }
+  | {
+    type: "updateSettings";
+    blockLayout: string;
+    continueCommentOnNewline: boolean;
+    mirrorCommentSpacing: boolean;
+    formatIndentSize: number;
+    formatUseTabs: boolean;
+    formatCanonicalKeywords: boolean;
+  }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -409,6 +425,9 @@ export class EditorBridge {
       blockLayout: settings.blockLayout,
       continueCommentOnNewline: settings.continueCommentOnNewline,
       mirrorCommentSpacing: settings.mirrorCommentSpacing,
+      formatIndentSize: settings.formatIndentSize,
+      formatUseTabs: settings.formatUseTabs,
+      formatCanonicalKeywords: settings.formatCanonicalKeywords,
     });
   }
 
@@ -680,6 +699,9 @@ export class EditorBridge {
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
+          formatIndentSize: message.formatIndentSize ?? 4,
+          formatUseTabs: message.formatUseTabs ?? false,
+          formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
         });
         return;
       default: {
@@ -1125,7 +1147,15 @@ export function demoTransport(): HostTransport {
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
         send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1" });
-        send({ type: "setSettings", blockLayout: "comfy", continueCommentOnNewline: true, mirrorCommentSpacing: true });
+        send({
+          type: "setSettings",
+          blockLayout: "comfy",
+          continueCommentOnNewline: true,
+          mirrorCommentSpacing: true,
+          formatIndentSize: 4,
+          formatUseTabs: false,
+          formatCanonicalKeywords: true,
+        });
         send({
           type: "setProjects",
           projects: [
@@ -1231,6 +1261,9 @@ export function demoTransport(): HostTransport {
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
+          formatIndentSize: message.formatIndentSize,
+          formatUseTabs: message.formatUseTabs,
+          formatCanonicalKeywords: message.formatCanonicalKeywords,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

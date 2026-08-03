@@ -57,7 +57,10 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("blockLayout")] string BlockLayout,
     [property: JsonPropertyName("continueCommentOnNewline")] bool ContinueCommentOnNewline,
-    [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing);
+    [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
+    [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
+    [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
+    [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
 
 /// <summary>One finding as the surface's panel wants it.</summary>
 public sealed record SurfaceFinding(

@@ -591,7 +591,10 @@ internal sealed class EditorSurface : IDisposable
                 "setSettings",
                 settings.BlockLayout,
                 settings.ContinueCommentOnNewline,
-                settings.MirrorCommentSpacing),
+                settings.MirrorCommentSpacing,
+                settings.FormatIndentSize,
+                settings.FormatUseTabs,
+                settings.FormatCanonicalKeywords),
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
@@ -992,12 +995,23 @@ internal sealed class EditorSurface : IDisposable
                         || continueValue.ValueKind is not (JsonValueKind.False);
                     var mirrorSpacing = !document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
                         || mirrorValue.ValueKind is not (JsonValueKind.False);
+                    var indentSize = document.RootElement.TryGetProperty("formatIndentSize", out var indentValue)
+                        && indentValue.TryGetInt32(out var asked)
+                        ? asked
+                        : 4;
+                    var useTabs = document.RootElement.TryGetProperty("formatUseTabs", out var tabsValue)
+                        && tabsValue.ValueKind is JsonValueKind.True;
+                    var canonicalKeywords = !document.RootElement.TryGetProperty("formatCanonicalKeywords", out var keywordsValue)
+                        || keywordsValue.ValueKind is not (JsonValueKind.False);
 
                     SettingsChangeRequested?.Invoke(new ProductSettings
                     {
                         BlockLayout = layout,
                         ContinueCommentOnNewline = continueComment,
                         MirrorCommentSpacing = mirrorSpacing,
+                        FormatIndentSize = indentSize,
+                        FormatUseTabs = useTabs,
+                        FormatCanonicalKeywords = canonicalKeywords,
                     }.Normalized());
                     break;
                 }

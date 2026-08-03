@@ -33,6 +33,26 @@ const OPTIONS = [
     description:
       "A continued comment also repeats the spaces after the apostrophe, so the text lines up.",
   },
+  {
+    key: "formatIndentSize" as const,
+    kind: "number" as const,
+    label: "Format: indent size",
+    description: "Spaces per indent level when formatting a module or a selection.",
+    min: 1,
+    max: 8,
+  },
+  {
+    key: "formatUseTabs" as const,
+    kind: "toggle" as const,
+    label: "Format: indent with tabs",
+    description: "Formatting indents with tab characters instead of spaces.",
+  },
+  {
+    key: "formatCanonicalKeywords" as const,
+    kind: "toggle" as const,
+    label: "Format: canonical keywords",
+    description: "Formatting respells keywords in their canonical case, the way the language spells them.",
+  },
 ];
 
 /**
@@ -112,6 +132,24 @@ export function openSettingsDialog(
         select.value = currentSettings().blockLayout;
       });
       control = select;
+    } else if (option.kind === "number") {
+      const field = document.createElement("input");
+      field.type = "number";
+      field.id = `setting-${option.key}`;
+      field.min = String(option.min);
+      field.max = String(option.max);
+      field.step = "1";
+
+      field.addEventListener("change", () => {
+        const asked = Math.round(Number(field.value));
+        const legal = Math.min(option.max, Math.max(option.min, Number.isFinite(asked) ? asked : option.min));
+        update({ ...currentSettings(), [option.key]: legal });
+      });
+
+      refreshers.push(() => {
+        field.value = String(currentSettings()[option.key]);
+      });
+      control = field;
     } else {
       const toggle = document.createElement("input");
       toggle.type = "checkbox";

@@ -40,7 +40,8 @@ import "monaco-editor/features/wordPartOperations/register.js";
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
-import { DEFAULT_FORMAT_OPTIONS, registerFormatting } from "./format.js";
+import { registerFormatting } from "./format.js";
+import { currentSettings } from "./settings.js";
 import { openSettingsDialog } from "./settingsdialog.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
@@ -69,7 +70,17 @@ function boot(): void {
 
   registerVba();
   defineThemes();
-  registerFormatting(() => DEFAULT_FORMAT_OPTIONS);
+
+  // The formatter reads the developer's choices at each run, so a change in the settings
+  // dialog is the very next Format Module's behaviour.
+  registerFormatting(() => {
+    const settings = currentSettings();
+    return {
+      indentSize: settings.formatIndentSize,
+      useTabs: settings.formatUseTabs,
+      canonicalKeywords: settings.formatCanonicalKeywords,
+    };
+  });
 
   const editor = monaco.editor.create(container, {
     value: "",
