@@ -119,12 +119,19 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    toggles suppressed (shared id 761), the native window list suppressed (shared id 830) —
    the tab strip is the window list — and Tools > Options (id 522) routed to the product's
    settings dialog; Project Explorer, Properties, and Immediate were already replaced and
-   routed. Remaining, in rough order: Locals window, Watch window, Call Stack (surface debug
-   panels over the hidden native windows, the Immediate-reader pattern); Object Browser (ties
+   routed. ALSO DONE (2026-08-02 late, probe-verified): the surface never retreats for a
+   native window any more — "opening non xlide windows reverts the toolbar" was the retreat
+   itself; now it keeps the whole client and punches region holes where native tool windows
+   sit (Test-CutoutHoles.ps1 is the standing probe; lesson 24 has the maximised-MDI phantom
+   strip). Remaining, in rough order: Locals window (UIA probe BANKED: rows read
+   `Expression <n> Value <v> Type <t>`, context in an Edit element
+   `VBAProject.BreakProbe.BreakHere` — build LocalsReader on the ImmediateReader pattern, a
+   panel tab, route ids 2555/2556), Watch window, Call Stack (id 620); Object Browser (ties
    to #10's typelib model); the Window menu's arrangement items; native dialogs the object
    model can faithfully rebuild (References and Macros are scriptable; Project Properties);
-   the UserForm designer and its Toolbox (#14, the largest); Help items last. The rule stands:
-   until a replacement exists, the native window stays reachable.
+   the UserForm designer and its Toolbox (#14, the largest); Help items last. The rule
+   stands: until a replacement exists, the native window stays reachable — through a hole,
+   not by retreat.
 5. Then the standing backlog: #20 right-click curation (needs the developer), #22 split
    groups, #13 tests panel, #14 debugging/forms designer, #10 typelib backfill, #9 the C#
    analyzer port. (#12 settings is DONE: six choices, gear dialog, settings.json, formatter
@@ -253,13 +260,21 @@ has said plainly it must never be a production mechanism.
   (VbeMenus.ControlAt), never by identifier. Routed exceptions: run/step/save/breakpoint go
   through ExecuteEditorCommand (bookkeeping), undo/redo/find/replace run in the surface,
   Clear All Breakpoints also clears the surface's drawn record, View -> Immediate opens our
-  panel, and the project explorer item answers with a notice. Anything that opens a native
-  window or docked toolbar makes the surface retreat to the document area at once
-  (RefreshSurfacePlacement) and withdraw its own menu row (setChrome), so nothing native is ever
-  reachable-but-covered. Verified live: staged covering in the log (below command bars, then
-  0,0 after ready) and 11 menus read; dropdowns, submenus, separators, disabled/checked items,
-  shortcut column, execution paths, Alt+letter, F10, arrows and Escape verified in the browser
-  demo (demoTransport serves a canned tree).
+  panel, and the project explorer item answers with a notice. A native tool window opening does
+  NOT make the surface retreat (retreating handed the native menu and toolbar rows back — "the
+  toolbar reverts", 2026-08-02): the surface keeps the frame's whole client and punches
+  window-region holes exactly where each visible native tool window sits
+  (NativeToolWindowCutouts -> OverlayWindow.SetCutouts, SetWindowRgn RGN_DIFF). The window is
+  live inside its hole — painting, input, dragging all work — and everything around it stays
+  ours. Hole rects come from the object model's window captions (FindChildByCaption, class-free
+  because the Object Browser has its own class), clipped to each window's parent (a maximised
+  MDI child reports a phantom caption strip above the document area; lesson 24). While any hole
+  is open a 200ms poll re-derives placement, because the Object Browser moves without a word to
+  the pane tracker; the overlay skips identical states so the quiet case costs nothing. All
+  docked native toolbars are hidden at session start (HideNativeToolbars; their commands are
+  all in the menus, their toggles suppressed). Verified by tools\harness\Test-CutoutHoles.ps1:
+  our chrome intact in every capture, Locals and Object Browser each live inside their holes,
+  "surface: N native hole(s) cut [...]" then "whole again" in the log when they close.
 - Tabs have modern ergonomics: hover/active close button, middle-click close, Ctrl+W and
   Ctrl+F4 close the active module (claimed at the accelerator hook; unclaimed Ctrl+W tells the
   browser to close its own window), Ctrl+PageUp/PageDown cycle, drag to reorder with the order
@@ -508,8 +523,9 @@ Immediate window facts, measured while making capture behave:
    warming during host start-up, cached compilation. (Task #17.)
 4. **Panels are fixed.** The user wants VS-style drag-to-any-edge / stack-as-tabs.
 5. **Locals, Watch, Object Browser are still native** (deliberate: no replacement yet; hiding
-   them would remove features). While any is open the surface retreats to document-area bounds,
-   so the frame's pale line reappears — accepted trade, logged when it happens.
+   them would remove features). While any is open the surface no longer retreats: it keeps the
+   whole client and shows the window through a punched region hole, chrome intact
+   (Test-CutoutHoles.ps1 guards this; hole rects logged as "surface: N native hole(s) cut").
 6. **Debug.Print lands only while the Immediate panel is open** (poll-gated). The text still
    exists in the hidden window; backfill-on-first-open is a small known gap.
 7. Stepping's current-line marker is implemented and log-verified, not yet pixel-verified in a
@@ -531,5 +547,6 @@ Immediate window facts, measured while making capture behave:
 - Every native window should eventually be replaced by the surface (user, 2026-08-01): Locals,
   Watch, Object Browser, Properties, Call Stack, and dialogs wherever the object model allows a
   faithful rebuild (References and Macros are scriptable; parts of Options are not). Until a
-  replacement exists, the native window stays reachable and the surface retreats for it; the menu
+  replacement exists, the native window stays reachable — shown through a punched hole in the
+  surface, never by retreating the surface (the toolbar-revert bug, fixed 2026-08-02); the menu
   routing table in RouteMenuCommand is where "open ours instead" gets decided per window.

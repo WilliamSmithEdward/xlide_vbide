@@ -438,7 +438,20 @@ internal sealed class CodePaneTracker : IDisposable
     /// asynchronous hide loses. The caption is unique among the editor's tool windows; code
     /// panes carry their module titles.
     /// </summary>
-    internal static unsafe nint FindPaneByCaption(string caption)
+    internal static unsafe nint FindPaneByCaption(string caption) => FindByCaption(caption, paneClassOnly: true);
+
+    /// <summary>
+    /// The frame descendant carrying this exact caption regardless of window class, or zero.
+    ///
+    /// The pane-class filter above is right for the Immediate window, which shares its class with
+    /// the code panes. The Object Browser does not — its class is its own — so callers locating an
+    /// arbitrary tool window by its object-model caption match on the caption alone. Tool captions
+    /// are localised words like "Locals"; module panes carry their file-qualified titles, so the
+    /// two vocabularies do not collide.
+    /// </summary>
+    internal static unsafe nint FindChildByCaption(string caption) => FindByCaption(caption, paneClassOnly: false);
+
+    private static unsafe nint FindByCaption(string caption, bool paneClassOnly)
     {
         _captionWanted = caption;
         _captionFound = 0;
@@ -459,7 +472,7 @@ internal sealed class CodePaneTracker : IDisposable
                 Win32.EnumChildWindows(
                     frame,
                     (nint)(delegate* unmanaged<nint, nint, int>)&OnCaptionCandidate,
-                    0);
+                    paneClassOnly ? 1 : 0);
             }
 
             return _captionFound;
@@ -477,7 +490,7 @@ internal sealed class CodePaneTracker : IDisposable
     private static int OnCaptionCandidate(nint window, nint parameter)
     {
         if (_captionWanted is { } wanted
-            && ReadClassName(window) == PaneClass
+            && (parameter == 0 || ReadClassName(window) == PaneClass)
             && ReadWindowText(window) == wanted)
         {
             _captionFound = window;

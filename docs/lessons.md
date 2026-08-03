@@ -384,3 +384,43 @@ first — the browser already keeps the resource timeline; asking it is one mess
 keep the itemised line in the log permanently: the next regression in any stage then names
 itself. Beware fetch-time labels too — "transfer: cache" from an app-scheme response meant
 nothing; the byte count over the socket was the number that could be believed.
+
+## 24. The surface that retreated, and the phantom strip inside the hole
+
+The developer opened any native tool window (Locals, the Object Browser) and the product
+visibly reverted: our menu bar and toolbar vanished, the native rows returned. The cause was
+the design, not a defect in it: CanCoverChrome said no whenever a native tool window was
+visible, and the surface retreated to the document area so the window could be seen. The
+retreat gave back the entire chrome to show one window.
+
+The replacement inverts the concession. The surface never retreats once its page is ready: it
+keeps the frame's whole client area and punches window-region holes (SetWindowRgn, RGN_DIFF)
+exactly where each visible native tool window sits. A hole is real absence, not transparency:
+painting, hit-testing and the browser's own child windows stop at the region boundary, so the
+native window inside it is fully live while everything around it stays ours. Hole rectangles
+come from the object model: each window names its localised caption, the caption finds the
+handle (class-free matching, because the Object Browser has its own window class), the handle
+has the rectangle. While any hole is open, a 200ms poll re-derives placement, because the
+Object Browser moves without a word to the pane tracker; the overlay compares against the
+last-applied state and an unchanged layout costs a read and no repaint.
+
+The first capture with the Object Browser open exposed a subtlety worth keeping: the native
+menu band appeared INSIDE the hole, above the browser. A maximised MDI child reports a window
+rectangle a caption-height TALLER than the document area it sits in - classic MDI merges the
+child caption into the menu row, and the phantom strip where the caption used to be extends
+above the MDI client, normally clipped invisible by the parent. A hole cut to the raw
+rectangle faithfully exposed that strip, and the native band lives there. The fix is the
+general truth, not a special case: a child window is clipped to its parent, so the part of it
+that can be seen is its rectangle intersected with its parent client area. Clip every hole to
+the found window parent.
+
+Evidence: tools\harness\Test-CutoutHoles.ps1 captures - chrome intact with Locals and the
+Object Browser each live inside their holes, and the healed capture identical to a plain
+boot; the log lines "surface: 2 native hole(s) cut [2,27,638,122;0,130,640,409]" then
+"surface: whole again, no native holes".
+
+Consequence: when a cover and a native window contest the same pixels, do not move the cover -
+subtract the window from it. Regions make the subtraction exact, the object model names what
+to subtract, and clipping to the parent keeps phantom geometry out of it. And when a hole must
+track a window nobody announces, poll while the hole exists and make the idle poll free by
+comparing before applying.

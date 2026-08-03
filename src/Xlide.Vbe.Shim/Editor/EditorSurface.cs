@@ -390,6 +390,12 @@ internal sealed class EditorSurface : IDisposable
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
     /// <summary>
+    /// Punches holes in the surface where native tool windows must show through, in the frame's
+    /// client space. An empty set makes it whole again.
+    /// </summary>
+    public void SetCutouts(ReadOnlySpan<PixelRect> holes) => _overlay?.SetCutouts(holes);
+
+    /// <summary>
     /// Puts keyboard focus back on the surface. Activating a native pane takes it, and a surface
     /// that does not have focus hears no keys: the shortcut that switched module would work once
     /// and then fall silent.

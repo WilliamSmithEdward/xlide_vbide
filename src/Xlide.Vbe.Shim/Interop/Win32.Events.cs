@@ -105,4 +105,17 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ShowWindow(nint window, int command);
+
+    [LibraryImport("gdi32.dll")]
+    public static partial nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    /// <summary>RGN_DIFF: the first region minus the second.</summary>
+    public const int RgnDiff = 4;
+
+    [LibraryImport("gdi32.dll")]
+    public static partial int CombineRgn(nint destination, nint first, nint second, int mode);
+
+    /// <summary>The window owns the region after a successful call; do not delete it.</summary>
+    [LibraryImport("user32.dll")]
+    public static partial int SetWindowRgn(nint window, nint region, [MarshalAs(UnmanagedType.Bool)] bool redraw);
 }

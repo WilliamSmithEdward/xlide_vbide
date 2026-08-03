@@ -323,6 +323,76 @@ internal sealed unsafe class OverlayWindow : IDisposable
         }
     }
 
+    /// <summary>The cutouts last applied, in the parent's client space, and the placement they were computed against.</summary>
+    private PixelRect[]? _cutouts;
+    private PixelRect _cutoutsPlacedAt;
+
+    /// <summary>
+    /// Punches holes in the overlay where native windows must show through.
+    ///
+    /// The surface never retreats to make room for a native tool window; it covers the whole
+    /// frame and cuts a hole exactly where each one sits. The hole is real absence, not
+    /// transparency: painting, hit-testing, and the browser's own child windows all stop at the
+    /// region boundary, so the native window underneath is fully live inside it.
+    ///
+    /// Rectangles arrive in the parent's client space, the same space <see cref="Place"/> uses;
+    /// the region wants them window-relative, so the current placement is subtracted. An empty
+    /// set restores the whole rectangle.
+    /// </summary>
+    public void SetCutouts(ReadOnlySpan<PixelRect> holes)
+    {
+        if (_handle == 0)
+        {
+            return;
+        }
+
+        // A region is sized to the window; the same holes against a different placement are a
+        // different region. Skipping only truly identical states matters because rebuilding the
+        // region forces a repaint.
+        if (_cutouts is not null && _cutoutsPlacedAt.Equals(_placed) && holes.SequenceEqual(_cutouts))
+        {
+            return;
+        }
+
+        _cutouts = holes.ToArray();
+        _cutoutsPlacedAt = _placed;
+
+        if (holes.IsEmpty)
+        {
+            _ = Win32.SetWindowRgn(_handle, 0, true);
+            return;
+        }
+
+        var region = Win32.CreateRectRgn(0, 0, _placed.Width, _placed.Height);
+        if (region == 0)
+        {
+            return;
+        }
+
+        foreach (var hole in holes)
+        {
+            var cut = Win32.CreateRectRgn(
+                hole.Left - _placed.Left,
+                hole.Top - _placed.Top,
+                hole.Right - _placed.Left,
+                hole.Bottom - _placed.Top);
+
+            if (cut == 0)
+            {
+                continue;
+            }
+
+            _ = Win32.CombineRgn(region, region, cut, Win32.RgnDiff);
+            Win32.DeleteObject(cut);
+        }
+
+        if (Win32.SetWindowRgn(_handle, region, true) == 0)
+        {
+            // The window only owns the region on success.
+            Win32.DeleteObject(region);
+        }
+    }
+
     private static bool EnsureClassRegistered()
     {
         lock (ClassGate)

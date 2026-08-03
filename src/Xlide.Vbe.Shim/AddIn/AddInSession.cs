@@ -258,7 +258,7 @@ internal sealed class AddInSession : IDisposable
         // it has created them, so hiding one then closes something with no window behind it and
         // there is nothing to identify afterwards.
         HideReplacedWindows();
-        HideRedundantToolbar();
+        HideNativeToolbars();
         DarkenTitleBar(host);
 
         return true;
@@ -500,12 +500,13 @@ internal sealed class AddInSession : IDisposable
             //
             // The native panes keep running underneath, unchanged and never seen. They remain the
             // text of record, the compile target, and what the debugger drives.
-            var covering = CanCoverChrome();
             _surfaceShown = true;
             _watchingEmpty = false;
             UpdatePolling();
-            _editorSurface.Follow(SurfaceBounds(host, documentArea, covering), visible: true);
-            _editorSurface.SetChrome(menuBar: covering);
+
+            // One placement path for every trigger, so cutouts, chrome, and bounds cannot drift
+            // apart between the window-event route and the recomputed one.
+            RefreshSurfacePlacement();
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
             {
@@ -852,6 +853,20 @@ internal sealed class AddInSession : IDisposable
 
     /// <summary>How often the editor's Immediate window is read while it is being looked at.</summary>
     private const uint ImmediatePollMilliseconds = 300;
+
+    /// <summary>
+    /// How often placement is recomputed while the surface has holes cut in it.
+    ///
+    /// The holes track native tool windows, and not every one of those announces its movements:
+    /// the Object Browser has its own window class, so the pane tracker never hears it move,
+    /// resize, or close. Its hole would stay where the window was. While any hole is open, the
+    /// placement is re-derived on a timer instead; the overlay skips identical states, so an
+    /// unchanged layout costs a read and no repaint.
+    /// </summary>
+    private const uint CutoutPollMilliseconds = 200;
+
+    /// <summary>Whether the surface currently has holes cut in it, which is a reason to poll.</summary>
+    private bool _watchingCutouts;
 
     /// <summary>
     /// Polls left before watching stops.
@@ -1488,6 +1503,7 @@ internal sealed class AddInSession : IDisposable
     private void UpdatePolling()
     {
         var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
+            : _watchingCutouts ? CutoutPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
             : _watchingEmpty ? EmptyWorkspacePollMilliseconds
             : 0;
@@ -1563,6 +1579,13 @@ internal sealed class AddInSession : IDisposable
         if (_watchingEmpty)
         {
             PublishProjects();
+        }
+
+        // While holes are open, this is what keeps them under the windows they were cut for:
+        // the Object Browser moves without a word to the pane tracker.
+        if (_watchingCutouts)
+        {
+            RefreshSurfacePlacement();
         }
 
         _immediateReader?.Poll();
@@ -2657,18 +2680,24 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Hides the editor's own toolbar, which the surface's own toolbar has replaced.
+    /// Hides every docked native toolbar, which the surface's toolbar and menus replace.
     ///
-    /// Hidden only because everything on it is somewhere else now: saving, undo and redo, the object
-    /// browser, and every run and step command are on the surface's toolbar or on the keys they
-    /// always were. Hiding a bar whose commands had nowhere else to go would take those commands
-    /// away, which is not a theme change.
+    /// Hidden only because everything on them is somewhere else now: each button is a menu
+    /// command, the menus are all on the surface's bar, and every run and step command keeps the
+    /// key it always had. The toggles that would bring the bars back are suppressed from the
+    /// surface's View menu, so a hidden bar stays hidden. A docked bar left visible would claim
+    /// rows the surface covers — since it stopped retreating for chrome, that is a toolbar on
+    /// screen that cannot be pressed.
     ///
-    /// The menu bar is left alone. Its menus reach a great deal that has no replacement yet, and a
-    /// consistent colour is not worth losing References, Options, or the object browser's menu.
+    /// Floating bars are left alone: they float above the surface and contest nothing. So is the
+    /// menu bar object, whose commands back the surface's own menus.
     /// </summary>
-    private void HideRedundantToolbar()
+    private void HideNativeToolbars()
     {
+        const int menuBarType = 1;
+        const int floating = 4;
+        const int popup = 5;
+
         try
         {
             using var bars = _editor.GetObject("CommandBars");
@@ -2677,21 +2706,24 @@ internal sealed class AddInSession : IDisposable
             for (var i = 1; i <= count; i++)
             {
                 using var bar = bars!.GetItem(i);
+                if (bar is null || !bar.GetBool("Visible") || bar.GetInt32("Type") == menuBarType)
+                {
+                    continue;
+                }
 
-                // The programmatic name, which is not localised the way a caption is.
-                if (bar?.GetString("Name") != "Standard" || !bar.GetBool("Visible"))
+                var position = bar.GetInt32("Position");
+                if (position == floating || position == popup)
                 {
                     continue;
                 }
 
                 bar.SetBool("Visible", false);
-                Log.Info("window: hid the editor's own toolbar");
-                return;
+                Log.Info($"window: hid the editor's docked '{bar.GetString("Name")}' toolbar");
             }
         }
         catch (Exception ex)
         {
-            Log.Info($"window: the editor's toolbar could not be hidden ({ex.GetType().Name})");
+            Log.Info($"window: the editor's toolbars could not be hidden ({ex.GetType().Name})");
         }
     }
 
@@ -3178,9 +3210,10 @@ internal sealed class AddInSession : IDisposable
     /// the frame draws a pale line a pixel or two inside itself that no compositor attribute
     /// reaches. Anything less leaves native chrome showing through a themed product.
     ///
-    /// Retreating, it takes only the document area, and the native chrome shows again. That is the
-    /// right way round: a visible seam is a smaller problem than covering a window or a toolbar the
-    /// developer just asked for.
+    /// Native tool windows do not shrink it. The surface keeps the whole client area and is cut
+    /// away exactly where each one sits — see <see cref="NativeToolWindowCutouts"/> — because the
+    /// old retreat to the document area handed the menu bar and toolbar rows back to the native
+    /// editor every time one opened, and the product visibly reverted.
     ///
     /// While the page is still coming up, the loader takes the whole client area too, menu row
     /// included: a strip of native chrome over a branded splash reads as a defect, not as a menu.
@@ -3261,14 +3294,13 @@ internal sealed class AddInSession : IDisposable
     /// <summary>
     /// Whether the surface may cover everything native inside the frame.
     ///
-    /// Three things say no. A page that has not loaded yet: covering the menu bar with a surface
-    /// that cannot draw its own menus takes every menu away, so the native bar stays until the
-    /// replacement is genuinely standing. A native tool window the developer opened: covering it
-    /// would hide what they just asked for. And a docked toolbar they have shown, for the same
-    /// reason.
+    /// Only a page that has not loaded yet says no: covering the menu bar with a surface that
+    /// cannot draw its own menus takes every menu away, so the native bar stays until the
+    /// replacement is genuinely standing. Native tool windows stopped saying no — the surface
+    /// stays put and leaves a hole where each one sits, because retreating handed the whole
+    /// native chrome back every time one opened.
     /// </summary>
-    private bool CanCoverChrome() =>
-        _editorSurface is { IsReady: true } && !AnyToolWindowOpen() && !AnyDockedToolbarVisible();
+    private bool CanCoverChrome() => _editorSurface is { IsReady: true };
 
     /// <summary>
     /// Recomputes where the surface belongs, now.
@@ -3287,22 +3319,56 @@ internal sealed class AddInSession : IDisposable
         var covering = CanCoverChrome();
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, covering), visible: true);
         _editorSurface.SetChrome(menuBar: covering);
+
+        // After Follow, so the holes are cut against the placement they were computed for.
+        PixelRect[] holes = covering ? NativeToolWindowCutouts() : [];
+        _editorSurface.SetCutouts(holes);
+
+        // Logged on change, not per poll: the poll re-derives this five times a second while any
+        // hole is open, and an unchanged layout is not news.
+        var holeKey = string.Join(";", holes.Select(h => $"{h.Left},{h.Top},{h.Right},{h.Bottom}"));
+        if (holeKey != _lastHoleKey)
+        {
+            _lastHoleKey = holeKey;
+            Log.Info(holes.Length == 0
+                ? "surface: whole again, no native holes"
+                : $"surface: {holes.Length} native hole(s) cut [{holeKey}]");
+        }
+
+        var watching = holes.Length > 0;
+        if (watching != _watchingCutouts)
+        {
+            _watchingCutouts = watching;
+            UpdatePolling();
+        }
     }
 
+    /// <summary>The last hole set that was logged, so the poll only speaks on change.</summary>
+    private string? _lastHoleKey;
+
     /// <summary>
-    /// Whether any of the editor's own docked windows is showing.
+    /// The rectangles of the editor's own tool windows that are showing, in the frame's client
+    /// space: the holes the surface must leave open.
     ///
-    /// Asked of the object model rather than worked out from windows on screen. Every one of these
-    /// shares its window class with the code panes, so a window that is visible says nothing about
-    /// what it is: an earlier version compared visible windows against the panes it was tracking
-    /// and a second code pane, open but behind the first, read as a tool window every time.
+    /// The surface used to retreat to the document area whenever one of these appeared, which
+    /// handed the native menu bar and toolbar row back and read as the product reverting. It
+    /// never retreats now: it keeps the whole client area and is cut away exactly where each
+    /// native window sits, so the window the developer summoned is live inside its hole while
+    /// everything around it stays ours.
+    ///
+    /// Asked of the object model rather than worked out from windows on screen, because most of
+    /// these share their window class with the code panes and a visible window says nothing about
+    /// what it is. The object model names each one's localised caption; the caption finds the
+    /// handle, and the handle has the rectangle.
     /// </summary>
-    private bool AnyToolWindowOpen()
+    private unsafe PixelRect[] NativeToolWindowCutouts()
     {
-        // Object browser, watches, locals, properties: the ones the surface has no replacement
-        // for. Properties is closed at start-up for its dock space, but the menu can reopen it,
-        // and reopened it must be seen.
-        ReadOnlySpan<int> tools = [2, 3, 4, 7];
+        // Object browser, watches, locals, project, properties: every native tool window that
+        // can dock inside the frame. The Immediate window is absent deliberately: its surface
+        // mirror replaces it, and the native one is kept hidden rather than shown through a hole.
+        ReadOnlySpan<int> tools = [2, 3, 4, 6, 7];
+
+        List<PixelRect>? holes = null;
 
         try
         {
@@ -3312,63 +3378,77 @@ internal sealed class AddInSession : IDisposable
             for (var i = 1; i <= count; i++)
             {
                 using var window = windows!.GetItem(i);
-                if (window is not null && tools.Contains(window.GetInt32("Type")) && window.GetBool("Visible"))
-                {
-                    return true;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            // Erring towards the smaller rectangle, which covers less and hides nothing.
-            Log.Info($"surface: the editor's windows could not be read ({ex.GetType().Name})");
-            return true;
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Whether the developer has a native toolbar docked and showing.
-    ///
-    /// The surface's own toolbar replaces the Standard bar, which is hidden, but the others can be
-    /// shown from the View menu, and a docked bar occupies real rows at the frame's edge. Covering
-    /// those rows would put a toolbar on screen that cannot be pressed.
-    /// </summary>
-    private bool AnyDockedToolbarVisible()
-    {
-        const int menuBarType = 1;
-        const int floating = 4;
-        const int popup = 5;
-
-        try
-        {
-            using var bars = _editor.GetObject("CommandBars");
-            var count = bars?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= count; i++)
-            {
-                using var bar = bars!.GetItem(i);
-                if (bar is null || !bar.GetBool("Visible") || bar.GetInt32("Type") == menuBarType)
+                if (window is null
+                    || !tools.Contains(window.GetInt32("Type"))
+                    || !window.GetBool("Visible")
+                    || window.GetString("Caption") is not { Length: > 0 } caption)
                 {
                     continue;
                 }
 
-                // A floating bar floats above everything and contests nothing.
-                var position = bar.GetInt32("Position");
-                if (position != floating && position != popup)
+                // A floating palette is not a frame child, so the caption finds nothing — and
+                // needs nothing: it floats above the surface and contests no pixels. Docked is
+                // what must be cut around, and docked is findable.
+                var handle = CodePaneTracker.FindChildByCaption(caption);
+                if (handle == 0 || !Win32.IsWindowVisible(handle))
                 {
-                    return true;
+                    continue;
+                }
+
+                // Clipped to the parent, because only the parent-clipped part is ever on screen.
+                // A maximised Object Browser reports a rectangle a caption-height taller than the
+                // document area it sits in — the merged-caption strip classic MDI hides under the
+                // menu band — and a hole cut to that raw rectangle exposed the native band above.
+                var hole = WindowRectIn(handle, _frame);
+                var parent = Win32.GetParent(handle);
+                if (parent != 0)
+                {
+                    hole = hole.Intersect(ClientAreaIn(parent, _frame));
+                }
+
+                if (!hole.IsEmpty)
+                {
+                    (holes ??= []).Add(hole);
                 }
             }
         }
         catch (Exception ex)
         {
-            Log.Info($"surface: the editor's toolbars could not be read ({ex.GetType().Name})");
-            return true;
+            Log.Info($"surface: the editor's windows could not be read for cutouts ({ex.GetType().Name})");
         }
 
-        return false;
+        return holes is null ? [] : [.. holes];
+    }
+
+    /// <summary>
+    /// A window's full rectangle — borders and title band included — in another window's client
+    /// coordinates. The client-area mapping below is wrong for cutouts: a hole that starts at
+    /// the tool window's client area leaves its title band covered, and a window whose title
+    /// cannot be seen cannot be dragged or closed.
+    /// </summary>
+    private static unsafe PixelRect WindowRectIn(nint window, nint target)
+    {
+        Rect rect;
+        if (target == 0 || !Win32.GetWindowRect(window, &rect))
+        {
+            return default;
+        }
+
+        var corners = stackalloc Point[2];
+        corners[0] = new Point { X = rect.Left, Y = rect.Top };
+        corners[1] = new Point { X = rect.Right, Y = rect.Bottom };
+
+        Marshal.SetLastSystemError(0);
+        if (Win32.MapWindowPoints(0, target, corners, 2) == 0 && Marshal.GetLastSystemError() != 0)
+        {
+            return default;
+        }
+
+        return new PixelRect(
+            Math.Min(corners[0].X, corners[1].X),
+            Math.Min(corners[0].Y, corners[1].Y),
+            Math.Max(corners[0].X, corners[1].X),
+            Math.Max(corners[0].Y, corners[1].Y));
     }
 
     /// <summary>
