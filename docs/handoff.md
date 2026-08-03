@@ -53,9 +53,35 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
 1. `xlide_vscode` carries TWO local commits, neither pushed: `6453c20` (class/UserForm
    receivers in the shared resolver) and `1f9d8b8` (hover for object-module surfaces as bare
    receivers). Suite green at 2478 after both. Push is the developer's call.
-2. #24 project-qualified addressing: the multi-workbook backend gap. `_moduleHomes` keys by
-   bare module name, so two workbooks sharing a module name collide. The engine already
-   addresses by (projectId, module); the shim and page do not. This is the next big build.
+2. #24 project-qualified addressing: the multi-workbook build, STARTED. The root defect was
+   worse than "the UI is unqualified": `ProjectId` WAS `VBProject.Name`, which is "VBAProject"
+   for nearly every workbook, so two open workbooks were one project to the engine. DONE:
+   `ProjectReader.Identity` — id is the lowercased full file path (unique among saved
+   workbooks, stable for the session), Name only for never-saved workbooks (two unsaved
+   workbooks remain a residual collision, accepted); `ProjectSnapshot` carries `DisplayName`
+   (file tail) alongside. Remaining, in dependency order:
+   a. Pane→project: `CodePaneTracker.ReadOpenComponents` walks pane→CodeModule→Parent; extend
+      one hop (component `Collection` → `Parent` = VBProject) and derive the same Identity, so
+      a `CodePane` carries (ProjectId, Component). Captions cannot do this — a maximised MDI
+      child's caption drops the workbook — the object model must.
+   b. Shown identity: `ShowModuleInSurface`/`FindComponent`/`WriteModule`/`GoTo` currently find
+      components by bare name across all projects; they must take (projectId, name), defaulting
+      to the active pane's project. Track `_shownProject` beside `surface.Module`.
+   c. Findings: the `Finding` record gains Project (from the snapshot when converting);
+      `PublishMarkersForShownModule` filters by (shown project, module); the problems panel row
+      shows the workbook when two projects share a module name; tree badge counts key on
+      (project, component) — the explorer's rows are already per-workbook.
+   d. `AnalysisService`: `_moduleHomes` keys on (projectId, moduleName) with a name-only index
+      for surface calls that still send bare names; ambiguous bare names resolve to the shown
+      project first. Live text/diagnose/outline calls from the session pass the shown project.
+   e. Page protocol: `activateModule`/`closeModule`/`outline`/`navigate` gain an optional
+      `project`; `setModules` sends (project, module) pairs; tabs render "Module1 — Book2.xlsm"
+      only when bare names collide; explorer clicks pass their workbook.
+   f. Engine stale projects: `AnalyseEverythingAsync` opens ids but never closes ones that
+      vanished (a save-as changes the id, the old one lingers engine-side). Add a close pass
+      diffing `_openProjects` against the snapshot ids.
+   Multi-workbook live verification: attach to the harness Excel (attach is fine; launching
+   via COM is not) and `Workbooks.Add` a second workbook with a colliding module name.
 3. Latent: something host-side once published a CHANGING payload every second in the
    developer's environment (never reproduced against the scratch workbook). The page now logs
    `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the

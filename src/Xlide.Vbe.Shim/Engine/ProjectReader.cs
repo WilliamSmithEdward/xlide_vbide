@@ -6,9 +6,10 @@ namespace Xlide.Vbe.Shim.Engine;
 
 /// <summary>Everything the engine needs to know about one project at one moment.</summary>
 /// <param name="ProjectId">Stable identity of the project within this session.</param>
+/// <param name="DisplayName">What the developer calls it: the workbook's file name.</param>
 /// <param name="Generation">Increases whenever any module's text changes.</param>
 /// <param name="Modules">Every module, with its current text.</param>
-internal sealed record ProjectSnapshot(string ProjectId, int Generation, EngineModule[] Modules);
+internal sealed record ProjectSnapshot(string ProjectId, string DisplayName, int Generation, EngineModule[] Modules);
 
 /// <summary>
 /// Reads module sources out of the editor.
@@ -65,6 +66,36 @@ internal static class ProjectReader
         return snapshots;
     }
 
+    /// <summary>
+    /// The identity a project is addressed by, and the name the developer knows it by.
+    ///
+    /// The project's own Name is "VBAProject" for nearly every workbook, so with two workbooks
+    /// open, addressing by Name made both of them the same project everywhere downstream: the
+    /// engine merged their modules, findings crossed workbooks, and a write aimed at whichever
+    /// came first. The workbook's full file path is unique among open, saved workbooks and
+    /// stable for the session, so it is the identity; the Name remains only for a workbook
+    /// never saved, which has no file name and raises when asked for one. Two unsaved
+    /// workbooks can still collide — a residual accepted and confined to that case.
+    /// </summary>
+    public static (string Id, string DisplayName) Identity(DispatchObject project)
+    {
+        var name = project.GetString("Name") ?? "VBAProject";
+
+        try
+        {
+            if (project.GetString("FileName") is { Length: > 0 } fileName)
+            {
+                return (fileName.ToLowerInvariant(), Path.GetFileName(fileName));
+            }
+        }
+        catch (Exception)
+        {
+            // Unsaved: the property raises rather than answering empty.
+        }
+
+        return (name, name);
+    }
+
     /// <summary>Reads one project.</summary>
     public static ProjectSnapshot? Read(DispatchObject project, int generation)
     {
@@ -108,7 +139,8 @@ internal static class ProjectReader
                 modules.Add(new EngineModule(moduleName, source, TypeName(component.GetInt32("Type"))));
             }
 
-            return new ProjectSnapshot(name, generation, [.. modules]);
+            var (id, displayName) = Identity(project);
+            return new ProjectSnapshot(id, displayName, generation, [.. modules]);
         }
         catch (Exception ex)
         {
