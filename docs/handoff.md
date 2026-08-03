@@ -85,10 +85,15 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
       (module, workbook) pairs through ordering, activation, cycling, closing, dragging, and
       the menu, labelled "Module1 — Book2" only on collision; close matches the pane's own
       project. This was also the developer-reported bug — two same-named modules could not be
-      open in two tabs — fixed the moment it was reported. NOT yet pair-aware: tab badges and
-      tree problem counts (name-keyed — a collided name shows the summed count on both), and
-      the problems panel's rows (no workbook column). SurfaceFinding would need the project
-      field plumbed to the page for those.
+      open in two tabs — fixed the moment it was reported. The last residue is DONE too:
+      findings reach the page with their workbook, tab badges count their own module only,
+      tree counts file under (workbook, module) via `problemCountKey`, panel rows name their
+      workbook on collision, and clicking a row navigates to the right workbook.
+   #24 IS COMPLETE. `Test-CollidingModules.ps1` (session scratchpad) is the acceptance probe;
+   re-create it from the handoff's recipe if the scratchpad is gone: harness -KeepOpen, attach,
+   Workbooks.Add, add a colliding module with its own defect, read the log.
+   Beware NUL bytes: string-separator literals must be the `\0` ESCAPE, never the raw byte —
+   four files carried raw bytes and git/ripgrep treated them as binary (fixed in eac2be2).
    f. DONE (not yet probe-exercised — needs a workbook to close mid-session): the pass diffs
       `_openProjects` against the snapshot ids, closes the vanished projects engine-side
       (`EngineClient.CloseProjectAsync`), and prunes their homes.
