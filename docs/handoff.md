@@ -85,16 +85,14 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    findings carry Project, markers filter by it (null-tolerant during the transition).
    The colliding-modules probe (scratchpad `Test-CollidingModules.ps1`) then EXPOSED two
    defects the remaining steps must fix, both in its log:
-   g. With two same-named panes open, caption matching is ambiguous, `CodePane.Project` goes
-      null (by design, honestly), and a bare-name show falls back to first-project — the log
-      shows the rename-follow presenting scratch's 113-char BrokenModule where Book1's new one
-      belonged. The active-pane fix: pair the FOREGROUND pane window with the object model's
-      `ActiveCodePane` (component AND project), which needs no caption at all for the pane
-      being shown.
-   h. An externally added workbook or module is NEVER analysed: "analysing 1 project(s)"
-      appears once at boot and never again. Only our own writes and property edits call
-      `Reanalyse`; a pane-set change bringing an unknown component should call it too (rate-
-      gated), e.g. when the shown component has no engine home yet.
+   g. DONE, probe-verified: when the caption match is ambiguous (two same-named panes), the
+      show consults `ActivePaneOwner` — the object model's ActiveCodePane names component and
+      project without a caption. The probe log now shows Book1's 80-character module where the
+      wrong-project 113-character one used to appear.
+   h. DONE, probe-verified: showing a module whose project the engine has never been seeded
+      with triggers `Reanalyse` (2s-gated; `AnalysisService.KnowsProject`, `_openProjects` now
+      concurrent). The probe log reads "analysing 2 project(s)", each workbook's BrokenModule
+      carrying its own finding at its own line.
 3. Latent: something host-side once published a CHANGING payload every second in the
    developer's environment (never reproduced against the scratch workbook). The page now logs
    `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the
