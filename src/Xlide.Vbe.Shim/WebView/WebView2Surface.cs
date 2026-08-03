@@ -42,6 +42,9 @@ internal sealed class WebView2Surface : IDisposable
     private NavigationCompletedHandler? _navigationHandler;
     private WebMessageReceivedHandler? _messageHandler;
     private AcceleratorKeyPressedHandler? _acceleratorHandler;
+
+    /// <summary>Serves the bundle over loopback; the folder mapping is the fallback behind it.</summary>
+    private LoopbackPageServer? _pageServer;
     private EventRegistrationToken _navigationCompletedToken;
     private EventRegistrationToken _webMessageReceivedToken;
     private EventRegistrationToken _acceleratorKeyPressedToken;
@@ -564,6 +567,20 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
+        // Loopback first: the folder mapping brokers every byte through the browser's host
+        // pipe at about two megabytes a second, which billed two seconds of every start-up to
+        // fetching a bundle that sits on local disk. A socket to 127.0.0.1 serves the same
+        // bytes in tens of milliseconds. The mapping remains the fallback below, because a
+        // slow editor beats no editor.
+        _pageServer ??= LoopbackPageServer.Start(WebViewPaths.EditorContentRoot(directory));
+        if (_pageServer is not null && NavigateToUrl($"{_pageServer.BaseUrl}/index.html"))
+        {
+            return;
+        }
+
+        _pageServer?.Dispose();
+        _pageServer = null;
+
         // The mapping has to be in place before the navigation, not after: the address only
         // resolves because of it.
         if (!SetContentRoot(WebViewPaths.EditorHostName, WebViewPaths.EditorContentRoot(directory)))
@@ -736,6 +753,9 @@ internal sealed class WebView2Surface : IDisposable
         _disposed = true;
         MessageReceived = null;
         AcceleratorPressed = null;
+
+        _pageServer?.Dispose();
+        _pageServer = null;
 
         if (_controller is not null && _acceleratorKeyPressedToken.Value != 0)
         {

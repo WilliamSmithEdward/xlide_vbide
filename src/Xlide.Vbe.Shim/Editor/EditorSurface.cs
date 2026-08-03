@@ -1235,7 +1235,24 @@ internal sealed class EditorSurface : IDisposable
         var total = timings.TryGetProperty("totalMs", out var t) && t.TryGetInt32(out var totalMs) ? totalMs : -1;
         var build = timings.TryGetProperty("build", out var b) ? b.GetString() : null;
 
-        return $" in {total}ms (bundle {script}ms, editor {create}ms{(build is null ? string.Empty : $", build {build}")})";
+        // The split that decides where start-up work goes: fetch is the host serving bytes,
+        // bundle-minus-fetch is the browser compiling them, and transfer 0 is the cache.
+        var detail = string.Empty;
+        if (timings.TryGetProperty("fetchMs", out var f) && f.TryGetInt32(out var fetchMs))
+        {
+            var transfer = timings.TryGetProperty("transferBytes", out var tr) && tr.TryGetInt32(out var bytes)
+                ? bytes
+                : -1;
+            var html = timings.TryGetProperty("htmlMs", out var h) && h.TryGetInt32(out var htmlMs) ? htmlMs : -1;
+            var request = timings.TryGetProperty("requestStartMs", out var rq) && rq.TryGetInt32(out var requestMs)
+                ? requestMs
+                : -1;
+            detail = $", html {html}ms, request {request}ms, fetch {fetchMs}ms"
+                + $", compile+run {(script >= 0 ? script - fetchMs : -1)}ms"
+                + $", transfer {(transfer == 0 ? "cache" : $"{transfer} bytes")}";
+        }
+
+        return $" in {total}ms (bundle {script}ms, editor {create}ms{detail}{(build is null ? string.Empty : $", build {build}")})";
     }
 
     private void Post(string json)

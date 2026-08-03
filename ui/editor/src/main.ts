@@ -290,11 +290,29 @@ function boot(): void {
     console.log("[xlide demo] window.chrome.webview absent, running the loopback demo");
   }
 
+  // The bundle's own resource entry splits the two costs that scriptMs lumps together:
+  // everything before responseEnd is fetching, everything after is compiling and running.
+  // A transfer size of zero is the browser's cache answering — the number that says whether
+  // a second boot is allowed to be cheaper than the first.
+  const bundleEntry = performance
+    .getEntriesByType("resource")
+    .find((entry) => entry.name.endsWith("/editor.js")) as PerformanceResourceTiming | undefined;
+  const navigationEntry = performance
+    .getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;
+
   bridge.start({
     scriptMs: Math.round(scriptMs),
     createMs: Math.round(createMs - scriptMs),
     totalMs: Math.round(performance.now()),
     build: __XLIDE_BUILD__,
+    ...(bundleEntry
+      ? {
+        fetchMs: Math.round(bundleEntry.responseEnd),
+        transferBytes: Math.round(bundleEntry.transferSize),
+        requestStartMs: Math.round(bundleEntry.requestStart),
+      }
+      : {}),
+    ...(navigationEntry ? { htmlMs: Math.round(navigationEntry.responseEnd) } : {}),
   });
 
   // After ready, so the reply cannot arrive before the host considers the page up. The bar needs

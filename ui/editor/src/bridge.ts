@@ -133,6 +133,14 @@ export interface BootTimings {
   totalMs: number;
   /** Build stamp of the bundle actually running, so a cached stale one is visible. */
   build?: string;
+  /** When the bundle's bytes had fully arrived; scriptMs minus this is compile-and-run. */
+  fetchMs?: number;
+  /** Bytes that crossed the wire for the bundle. Zero means the browser's cache served it. */
+  transferBytes?: number;
+  /** When the document itself had arrived: everything before this is the browser starting. */
+  htmlMs?: number;
+  /** When the bundle's request left: the gap after htmlMs is parse-and-queue, not serving. */
+  requestStartMs?: number;
 }
 
 export type ClientMessage =
