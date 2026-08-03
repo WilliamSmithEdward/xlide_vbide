@@ -872,8 +872,60 @@ span.prop-value.readonly {
   content: "\25b8 ";
 }
 
-#panel-count {
-  opacity: 0.7;
+/* The Error List's toolbar row: one toggle per severity, count always showing, pressed means
+   shown. Sits under the tab row and belongs to the Problems panel alone. */
+#problems-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px 4px;
+  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+}
+
+#problems-filters[hidden] {
+  display: none;
+}
+
+.problems-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.45;
+}
+
+.problems-filter:hover {
+  opacity: 0.75;
+}
+
+.problems-filter[aria-pressed="true"] {
+  opacity: 1;
+  background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.22));
+  border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
+}
+
+.problems-filter:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.problems-filter .codicon-error {
+  color: var(--vscode-problemsErrorIcon-foreground, #f14c4c);
+}
+
+.problems-filter .codicon-warning {
+  color: var(--vscode-problemsWarningIcon-foreground, #cca700);
+}
+
+.problems-filter .codicon-info {
+  color: var(--vscode-problemsInfoIcon-foreground, #3794ff);
 }
 
 #panel-list {

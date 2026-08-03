@@ -84,6 +84,27 @@ const SEVERITY_RANK: Record<FindingSeverity, number> = {
   hint: 3,
 };
 
+/** The Error List's groups: errors, warnings, and everything informational. */
+type SeverityGroup = "errors" | "warnings" | "messages";
+
+/** Singular and plural for each toggle's label, the way the studio's Error List spells them. */
+const FILTER_LABELS: Record<SeverityGroup, [string, string]> = {
+  errors: ["Error", "Errors"],
+  warnings: ["Warning", "Warnings"],
+  messages: ["Message", "Messages"],
+};
+
+function severityGroup(severity: FindingSeverity): SeverityGroup {
+  switch (severity) {
+    case "error":
+      return "errors";
+    case "warning":
+      return "warnings";
+    default:
+      return "messages";
+  }
+}
+
 /** Smallest useful panel: the header and about one finding. */
 const MIN_PANEL_HEIGHT = 60;
 
@@ -112,8 +133,15 @@ export class Shell {
   private readonly splitter: HTMLElement;
   private readonly panel: HTMLElement;
   private readonly panelList: HTMLElement;
-  private readonly panelCount: HTMLElement;
+  private readonly problemsFilters: HTMLElement;
   private readonly panelToggle: HTMLButtonElement;
+
+  /** Which severity groups the problems list shows. All on until the developer says otherwise. */
+  private readonly severityFilters: Record<SeverityGroup, boolean> = {
+    errors: true,
+    warnings: true,
+    messages: true,
+  };
   private readonly statusPosition: HTMLElement;
   private readonly statusModule: HTMLElement;
   private readonly statusNotice: HTMLElement;
@@ -205,8 +233,22 @@ export class Shell {
       (command) => handlers.commandAvailable(command));
     this.panel = root.querySelector("#panel") as HTMLElement;
     this.panelList = root.querySelector("#panel-list") as HTMLElement;
-    this.panelCount = root.querySelector("#panel-count") as HTMLElement;
+    this.problemsFilters = root.querySelector("#problems-filters") as HTMLElement;
     this.panelToggle = root.querySelector("#panel-toggle") as HTMLButtonElement;
+
+    // The severity toggles: each shows its count always and filters the list when pressed out,
+    // the way the studio's Error List reads. State lives here, pressed-ness on the button.
+    this.problemsFilters.addEventListener("click", (event) => {
+      const button = (event.target as HTMLElement).closest("[data-severity-filter]") as HTMLElement | null;
+      const group = button?.dataset.severityFilter as SeverityGroup | undefined;
+      if (!button || !group) {
+        return;
+      }
+
+      this.severityFilters[group] = !this.severityFilters[group];
+      button.setAttribute("aria-pressed", String(this.severityFilters[group]));
+      this.renderPanel();
+    });
 
     this.panelTabs = root.querySelector("#panel-tabs") as HTMLElement;
     this.problemsBody = root.querySelector("#panel-list") as HTMLElement;
@@ -606,6 +648,7 @@ export class Shell {
     }
 
     this.problemsBody.hidden = name !== "problems";
+    this.problemsFilters.hidden = name !== "problems";
     this.immediateBody.hidden = name !== "immediate";
     this.shown = name;
 
@@ -1027,22 +1070,33 @@ export class Shell {
   }
 
   private renderPanel(): void {
-    const errors = this.findings.filter((f) => f.severity === "error").length;
-    const warnings = this.findings.filter((f) => f.severity === "warning").length;
+    // The toggles always carry the full counts — a filtered-out severity still says how many it
+    // is hiding, which is what makes toggling it back on an informed act.
+    const totals: Record<SeverityGroup, number> = { errors: 0, warnings: 0, messages: 0 };
+    for (const finding of this.findings) {
+      totals[severityGroup(finding.severity)]++;
+    }
 
-    this.panelCount.textContent = this.findings.length === 0
-      ? "no problems"
-      : `${errors} error${errors === 1 ? "" : "s"}, ${warnings} warning${warnings === 1 ? "" : "s"}`;
+    for (const button of this.problemsFilters.querySelectorAll<HTMLElement>("[data-severity-filter]")) {
+      const group = button.dataset.severityFilter as SeverityGroup;
+      const label = button.querySelector(".filter-count");
+      if (label) {
+        label.textContent = `${totals[group]} ${FILTER_LABELS[group][totals[group] === 1 ? 0 : 1]}`;
+      }
+    }
 
     this.panelList.replaceChildren();
 
     // Worst first, then by where they are, so the order does not depend on which module the
-    // engine happened to analyse first.
-    const sorted = [...this.findings].sort((a, b) =>
-      SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
-      || a.module.localeCompare(b.module)
-      || a.line - b.line
-      || a.column - b.column);
+    // engine happened to analyse first. Severities the developer pressed out stay out of the
+    // list; every other surface — badges, squiggles, tree — keeps the full picture.
+    const sorted = [...this.findings]
+      .filter((finding) => this.severityFilters[severityGroup(finding.severity)])
+      .sort((a, b) =>
+        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
+        || a.module.localeCompare(b.module)
+        || a.line - b.line
+        || a.column - b.column);
 
     for (const finding of sorted) {
       const row = document.createElement("div");

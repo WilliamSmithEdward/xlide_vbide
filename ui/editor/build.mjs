@@ -58,7 +58,11 @@ const INDEX_HTML = `<!doctype html>
             <button class="panel-tab active" data-panel="problems" role="tab" aria-selected="true" type="button">Problems</button>
             <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
           </div>
-          <span id="panel-count">no problems</span>
+        </div>
+        <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
+          <button class="problems-filter" data-severity-filter="errors" type="button" aria-pressed="true"><span class="codicon codicon-error" aria-hidden="true"></span><span class="filter-count">0 Errors</span></button>
+          <button class="problems-filter" data-severity-filter="warnings" type="button" aria-pressed="true"><span class="codicon codicon-warning" aria-hidden="true"></span><span class="filter-count">0 Warnings</span></button>
+          <button class="problems-filter" data-severity-filter="messages" type="button" aria-pressed="true"><span class="codicon codicon-info" aria-hidden="true"></span><span class="filter-count">0 Messages</span></button>
         </div>
         <div id="panel-body">
           <div id="panel-list" role="list"></div>
