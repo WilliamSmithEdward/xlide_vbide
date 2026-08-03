@@ -151,6 +151,17 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineProjectOpened);
     }
 
+    /// <summary>Tells the engine a project is gone, so its modules stop answering for it.</summary>
+    public async Task CloseProjectAsync(string projectId, CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+        };
+
+        _ = await CallAsync("project/close", payload, cancellation).ConfigureAwait(false);
+    }
+
     /// <summary>Analyses one module and returns its findings.</summary>
     public async Task<EngineDiagnostics?> DiagnoseAsync(
         string projectId,

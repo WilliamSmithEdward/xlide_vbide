@@ -2256,7 +2256,13 @@ internal sealed class AddInSession : IDisposable
 
         // What "shown" means from here on: bare names arriving from the page resolve to this
         // project first, and markers for a same-named module elsewhere stay off this surface.
+        // The analysis service hears it too, so completions, hover, and live text for a shared
+        // name address the workbook actually on screen.
         _shownProject = owner;
+        if (_analysis is not null)
+        {
+            _analysis.PreferredProject = owner;
+        }
 
         // A project the engine has never been seeded with — a workbook just opened or created.
         // Nothing else would ask for the pass: only this session's own writes call Reanalyse,

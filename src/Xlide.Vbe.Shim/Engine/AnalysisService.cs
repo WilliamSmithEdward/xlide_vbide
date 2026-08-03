@@ -49,12 +49,67 @@ internal sealed class AnalysisService : IAsyncDisposable
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Which project each module belonged to at the last pass, and what kind of module it was.
-    /// Completion requests arrive with a module name and nothing else; this is what turns the
-    /// name back into the engine's addressing.
+    /// Which projects each module name belonged to at the last pass, and what kind of module
+    /// each was. Requests arrive with a module name and nothing else; this is what turns the
+    /// name back into the engine's addressing. A name can live in several open workbooks at
+    /// once, so the value is every home it has, and resolution prefers the shown project.
+    /// Swapped wholesale per pass — readers snapshot the reference.
     /// </summary>
-    private readonly Dictionary<string, (string ProjectId, string ModuleType)> _moduleHomes =
+    private Dictionary<string, List<(string ProjectId, string ModuleType)>> _moduleHomes =
         new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Identity of the project whose module the surface is showing, kept by the session. The
+    /// tie-break when a bare module name has homes in more than one workbook.
+    /// </summary>
+    public string? PreferredProject { get; set; }
+
+    /// <summary>
+    /// The engine address a bare module name means right now.
+    ///
+    /// Almost every request is about the module on the surface — live text, diagnostics,
+    /// completion, hover, everything the editor itself asks — and for those the shown project
+    /// always wins: its home when the name has one there, and the shown project directly when
+    /// the pass has not seeded it yet, because answering with a same-named module elsewhere is
+    /// exactly how one workbook's live text overwrote another's. Only the outline serves
+    /// modules that are NOT on the surface (the tree's rows), and it says so: for those a
+    /// name's own home stands even when another project is shown. Null when nothing can say.
+    /// </summary>
+    private (string ProjectId, string ModuleType)? ResolveHome(string moduleName, bool aboutShownModule = true)
+    {
+        var homes = _moduleHomes;
+        var preferred = PreferredProject;
+
+        if (homes.TryGetValue(moduleName, out var candidates) && candidates.Count > 0)
+        {
+            if (preferred is not null)
+            {
+                foreach (var candidate in candidates)
+                {
+                    if (string.Equals(candidate.ProjectId, preferred, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return candidate;
+                    }
+                }
+            }
+
+            if (!aboutShownModule || preferred is null)
+            {
+                return candidates[0];
+            }
+
+            return (preferred, "standard");
+        }
+
+        if (aboutShownModule && preferred is not null)
+        {
+            return (preferred, "standard");
+        }
+
+        // A module no pass has seen, with nothing shown: a single open project is still a safe
+        // address for it.
+        return _openProjects.Count == 1 ? (_openProjects.Keys.First(), "standard") : null;
+    }
 
     public AnalysisService(DispatchObject editor) => _editor = editor;
 
@@ -166,14 +221,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return;
         }
 
         engine.NotifyDidChange(home.ProjectId, moduleName, source, edits);
@@ -194,16 +244,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            // A module the last pass never saw (just inserted, perhaps): a single open project
-            // is still a safe address for it.
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.CompleteAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -227,14 +270,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.HoverAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -258,14 +296,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.SignatureHelpAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -289,14 +322,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -321,14 +349,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.CanonicalCaseAsync(
@@ -353,14 +376,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.LoopSyncAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
@@ -383,14 +401,11 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        // The one request class that serves modules the surface is NOT showing: the tree asks
+        // about any row it has. A name's own home stands even while another project is shown.
+        if (ResolveHome(moduleName, aboutShownModule: false) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         var result = await engine.OutlineAsync(home.ProjectId, moduleName, home.ModuleType, null, cancellation)
@@ -488,10 +503,35 @@ internal sealed class AnalysisService : IAsyncDisposable
             _openProjects.TryAdd(snapshot.ProjectId, 0);
             _lastSeededGeneration = snapshot.Generation;
 
+            // This project's homes, rebuilt into a fresh map and swapped in whole: readers
+            // snapshot the reference, and a name shared across workbooks keeps every home it
+            // has rather than the last writer's.
+            var rehomed = new Dictionary<string, List<(string ProjectId, string ModuleType)>>(
+                _moduleHomes.Count,
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (name, homes) in _moduleHomes)
+            {
+                var kept = homes
+                    .Where(h => !string.Equals(h.ProjectId, snapshot.ProjectId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (kept.Count > 0)
+                {
+                    rehomed[name] = kept;
+                }
+            }
+
             foreach (var module in snapshot.Modules)
             {
-                _moduleHomes[module.ModuleName] = (snapshot.ProjectId, module.Type);
+                if (!rehomed.TryGetValue(module.ModuleName, out var list))
+                {
+                    rehomed[module.ModuleName] = list = [];
+                }
+
+                list.Add((snapshot.ProjectId, module.Type));
             }
+
+            _moduleHomes = rehomed;
 
             var findings = new List<Finding>();
 
@@ -518,6 +558,43 @@ internal sealed class AnalysisService : IAsyncDisposable
             if (findings.Count > 0)
             {
                 FindingsReady?.Invoke(findings);
+            }
+        }
+
+        // Projects the pass no longer saw are gone — closed workbooks, or a save-as that gave
+        // the workbook a new identity. The engine forgets them so their modules stop answering,
+        // and the homes map drops their entries so a shared name stops offering a dead address.
+        var present = new HashSet<string>(snapshots.Select(s => s.ProjectId), StringComparer.OrdinalIgnoreCase);
+        foreach (var known in _openProjects.Keys)
+        {
+            if (!present.Contains(known) && _openProjects.TryRemove(known, out _))
+            {
+                try
+                {
+                    await engine.CloseProjectAsync(known, _stopping.Token).ConfigureAwait(false);
+                    Log.Info($"engine: {known} is no longer open, closed");
+                }
+                catch (Exception ex)
+                {
+                    Log.Info($"engine: {known} could not be closed ({ex.GetType().Name})");
+                }
+
+                var pruned = new Dictionary<string, List<(string ProjectId, string ModuleType)>>(
+                    _moduleHomes.Count,
+                    StringComparer.OrdinalIgnoreCase);
+
+                foreach (var (name, homes) in _moduleHomes)
+                {
+                    var kept = homes
+                        .Where(h => !string.Equals(h.ProjectId, known, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (kept.Count > 0)
+                    {
+                        pruned[name] = kept;
+                    }
+                }
+
+                _moduleHomes = pruned;
             }
         }
 
@@ -574,14 +651,9 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        if (!_moduleHomes.TryGetValue(moduleName, out var home))
+        if (ResolveHome(moduleName) is not { } home)
         {
-            if (_openProjects.Count != 1)
-            {
-                return null;
-            }
-
-            home = (_openProjects.Keys.First(), "standard");
+            return null;
         }
 
         try
