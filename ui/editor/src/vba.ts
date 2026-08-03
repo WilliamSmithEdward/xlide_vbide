@@ -222,7 +222,7 @@ function buildVbaMonarch(
 }
 
 /** The words the tokenizer was last built around, so an unchanged push costs nothing. */
-let appliedFactsKey = " ";
+let appliedFactsKey = "\0";
 
 /**
  * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration —
@@ -233,7 +233,7 @@ export function updateVbaLanguageFacts(
   types: readonly string[],
   procedures: readonly string[],
 ): void {
-  const key = `${types.join("\n")} ${procedures.join("\n")}`;
+  const key = `${types.join("\n")}\0${procedures.join("\n")}`;
   if (key === appliedFactsKey) {
     return;
   }

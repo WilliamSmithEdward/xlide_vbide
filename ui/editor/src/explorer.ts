@@ -517,7 +517,7 @@ export class Explorer {
  * counts by this and the tree looks them up by it.
  */
 export function problemCountKey(workbook: string | null | undefined, name: string): string {
-  return `${(workbook ?? "").toLowerCase()} ${name.toLowerCase()}`;
+  return `${(workbook ?? "").toLowerCase()}\0${name.toLowerCase()}`;
 }
 
 /** Where two serialized payloads part ways, with enough of each side to name the field. */
