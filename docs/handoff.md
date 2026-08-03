@@ -80,8 +80,21 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    f. Engine stale projects: `AnalyseEverythingAsync` opens ids but never closes ones that
       vanished (a save-as changes the id, the old one lingers engine-side). Add a close pass
       diffing `_openProjects` against the snapshot ids.
-   Multi-workbook live verification: attach to the harness Excel (attach is fine; launching
-   via COM is not) and `Workbooks.Add` a second workbook with a colliding module name.
+   Steps (b) and (c) are DONE and harness-verified: `_shownProject` tracked from the pane's
+   project, `FindComponent` project-scoped, writes/resync/live-merge target the shown project,
+   findings carry Project, markers filter by it (null-tolerant during the transition).
+   The colliding-modules probe (scratchpad `Test-CollidingModules.ps1`) then EXPOSED two
+   defects the remaining steps must fix, both in its log:
+   g. With two same-named panes open, caption matching is ambiguous, `CodePane.Project` goes
+      null (by design, honestly), and a bare-name show falls back to first-project — the log
+      shows the rename-follow presenting scratch's 113-char BrokenModule where Book1's new one
+      belonged. The active-pane fix: pair the FOREGROUND pane window with the object model's
+      `ActiveCodePane` (component AND project), which needs no caption at all for the pane
+      being shown.
+   h. An externally added workbook or module is NEVER analysed: "analysing 1 project(s)"
+      appears once at boot and never again. Only our own writes and property edits call
+      `Reanalyse`; a pane-set change bringing an unknown component should call it too (rate-
+      gated), e.g. when the shown component has no engine home yet.
 3. Latent: something host-side once published a CHANGING payload every second in the
    developer's environment (never reproduced against the scratch workbook). The page now logs
    `page: tree: ... push changed, <diff>` whenever a push gets past its identity guards, so the

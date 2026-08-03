@@ -68,6 +68,14 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private readonly Dictionary<string, string> _writtenModules = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Identity of the project whose module the surface is showing, or null when it could not
+    /// be told. This is the tie-break for every bare module name that reaches the session while
+    /// the page's protocol still speaks in names alone: the module being edited outranks a
+    /// same-named module in another workbook.
+    /// </summary>
+    private string? _shownProject;
+
     private bool _stopped;
 
     public AddInSession(DispatchObject editor, DispatchObject? addIn)
@@ -446,7 +454,7 @@ internal sealed class AddInSession : IDisposable
                 // Before the document is replaced. Loading a module resets the surface, so an edit
                 // that has not been written yet would go with the document it belonged to.
                 _editorSurface.FlushEdits();
-                ShowModuleInSurface(pane.Component);
+                ShowModuleInSurface(pane.Component, pane.Project);
             }
 
             PublishModules();
@@ -625,7 +633,14 @@ internal sealed class AddInSession : IDisposable
     {
         try
         {
-            using var found = FindComponent(component);
+            // A write is always about the module on the surface, so it goes to the shown
+            // project's component — never to a same-named module in another workbook that
+            // happened to enumerate first.
+            var owner = string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
+                ? _shownProject
+                : null;
+
+            using var found = FindComponent(component, owner, out _);
             using var module = found?.GetObject("CodeModule");
             if (found is null || module is null)
             {
@@ -1450,7 +1465,9 @@ internal sealed class AddInSession : IDisposable
 
         try
         {
-            using var found = FindComponent(module);
+            // The resync is about the module on the surface, so the shown project's copy is the
+            // one compared, never a same-named module elsewhere.
+            using var found = FindComponent(module, _shownProject, out _);
             var stored = found is null ? null : ProjectReader.ReadSource(found);
             if (stored is null)
             {
@@ -2131,6 +2148,14 @@ internal sealed class AddInSession : IDisposable
         var lineStarts = TextPositions.LineStarts(source);
         var caretOffset = TextPositions.ToOffset(lineStarts, surface.CaretLine, surface.CaretColumn);
 
+        // Captured on the host thread now: the answer replaces this project's copy of the
+        // module, never a same-named module in another workbook.
+        var shownProject = _shownProject;
+        bool SameHome(Finding finding) =>
+            string.Equals(finding.Module, module, StringComparison.OrdinalIgnoreCase)
+            && (finding.Project is null || shownProject is null
+                || string.Equals(finding.Project, shownProject, StringComparison.OrdinalIgnoreCase));
+
         _ = Task.Run(async () =>
         {
             try
@@ -2156,13 +2181,13 @@ internal sealed class AddInSession : IDisposable
 
                     // Unchanged findings are not republished: every publish redraws the panel
                     // and the tree, and most pauses change nothing.
-                    var existing = _findings.Where(finding => finding.Module == module);
+                    var existing = _findings.Where(SameHome);
                     if (existing.SequenceEqual(findings))
                     {
                         return;
                     }
 
-                    _findings = [.. _findings.Where(finding => finding.Module != module), .. findings];
+                    _findings = [.. _findings.Where(finding => !SameHome(finding)), .. findings];
                     PublishMarkersForShownModule();
                     PublishFindingsToSurface();
                 });
@@ -2208,9 +2233,9 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>Reads a module's text and hands it to the surface, with its squiggles.</summary>
-    private void ShowModuleInSurface(string component)
+    private void ShowModuleInSurface(string component, string? projectId = null)
     {
-        using var found = FindComponent(component);
+        using var found = FindComponent(component, projectId, out var owner);
         if (found is null)
         {
             return;
@@ -2221,6 +2246,10 @@ internal sealed class AddInSession : IDisposable
         {
             return;
         }
+
+        // What "shown" means from here on: bare names arriving from the page resolve to this
+        // project first, and markers for a same-named module elsewhere stay off this surface.
+        _shownProject = owner;
 
         // Opening a module also selects it, the way the editor's own tree behaves.
         _propertiesTarget = component;
@@ -2824,15 +2853,36 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>Finds a component by name across every open project, or null when there is none.</summary>
-    private DispatchObject? FindComponent(string component)
+    private DispatchObject? FindComponent(string component) => FindComponent(component, null, out _);
+
+    /// <summary>
+    /// The component carrying this name — within one project when its identity is given, in
+    /// whichever project answers first otherwise. The identity of the owning project comes back
+    /// either way, which is how the session learns what "shown" means in a world where two
+    /// workbooks may both hold a Module1.
+    /// </summary>
+    private DispatchObject? FindComponent(string component, string? projectId, out string? foundProject)
     {
+        foundProject = null;
+
         using var projects = _editor.GetObject("VBProjects");
         var count = projects?.GetInt32("Count") ?? 0;
 
         for (var i = 1; i <= count; i++)
         {
             using var project = projects!.GetItem(i);
-            using var components = project?.GetObject("VBComponents");
+            if (project is null)
+            {
+                continue;
+            }
+
+            var identity = ProjectReader.Identity(project).Id;
+            if (projectId is not null && !string.Equals(identity, projectId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            using var components = project.GetObject("VBComponents");
             if (components is null)
             {
                 continue;
@@ -2844,6 +2894,7 @@ internal sealed class AddInSession : IDisposable
                 var candidate = components.GetItem(j);
                 if (candidate?.GetString("Name") == component)
                 {
+                    foundProject = identity;
                     return candidate;
                 }
 
@@ -2883,6 +2934,8 @@ internal sealed class AddInSession : IDisposable
 
         var markers = _findings
             .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
+                && (f.Project is null || _shownProject is null
+                    || string.Equals(f.Project, _shownProject, StringComparison.OrdinalIgnoreCase))
                 && !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
             .Select(f => new EditorMarker(
                 f.StartLine,

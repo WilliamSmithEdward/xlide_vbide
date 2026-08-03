@@ -7,6 +7,10 @@ using Xlide.Vbe.Shim.Interop;
 namespace Xlide.Vbe.Shim.Engine;
 
 /// <summary>One finding, positioned the way the editing surface wants it.</summary>
+/// <param name="Project">
+/// Identity of the project the module belongs to, so a finding about Book1's Module1 never
+/// decorates Book2's. Null only from paths that predate the qualification.
+/// </param>
 internal sealed record Finding(
     string Module,
     string? Code,
@@ -15,7 +19,8 @@ internal sealed record Finding(
     int StartLine,
     int StartColumn,
     int EndLine,
-    int EndColumn);
+    int EndColumn,
+    string? Project = null);
 
 /// <summary>
 /// Keeps the engine supplied with the editor's current sources and hands back findings.
@@ -495,7 +500,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                     continue;
                 }
 
-                findings.AddRange(Convert(module.ModuleName, module.Source, result.Diagnostics));
+                findings.AddRange(Convert(snapshot.ProjectId, module.ModuleName, module.Source, result.Diagnostics));
             }
 
             Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
@@ -517,7 +522,11 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// to know where every line starts, and rebuilding that for each of several hundred findings
     /// turns a linear pass into a quadratic one.
     /// </summary>
-    private static IEnumerable<Finding> Convert(string moduleName, string source, EngineDiagnostic[] diagnostics)
+    private static IEnumerable<Finding> Convert(
+        string projectId,
+        string moduleName,
+        string source,
+        EngineDiagnostic[] diagnostics)
     {
         var lineStarts = TextPositions.LineStarts(source);
 
@@ -534,7 +543,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                 startLine,
                 startColumn,
                 endLine,
-                endColumn);
+                endColumn,
+                projectId);
         }
     }
 
@@ -576,7 +586,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                     caretOffset)
                 .ConfigureAwait(false);
 
-            return result is null ? null : [.. Convert(moduleName, source, result.Diagnostics)];
+            return result is null ? null : [.. Convert(home.ProjectId, moduleName, source, result.Diagnostics)];
         }
         catch (Exception ex)
         {
