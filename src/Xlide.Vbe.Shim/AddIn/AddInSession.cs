@@ -2748,7 +2748,8 @@ internal sealed class AddInSession : IDisposable
                 f.Message,
                 f.Severity,
                 f.StartLine,
-                f.StartColumn))]);
+                f.StartColumn,
+                DisplayFromProjectId(f.Project)))]);
     }
 
     /// <summary>

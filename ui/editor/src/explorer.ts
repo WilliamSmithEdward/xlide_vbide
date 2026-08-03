@@ -481,7 +481,7 @@ export class Explorer {
 
     button.append(chevron, glyph, document.createTextNode(component.name), kind);
 
-    const problems = this.problemCounts.get(component.name) ?? 0;
+    const problems = this.problemCounts.get(problemCountKey(workbook, component.name)) ?? 0;
     if (problems > 0) {
       const badge = document.createElement("span");
       badge.className = "tree-badge";
@@ -509,6 +509,15 @@ export class Explorer {
     button.append(glyph, document.createTextNode(`${procedure.kind} ${procedure.name}`));
     return button;
   }
+}
+
+/**
+ * The key a problem count is filed under: the workbook and the module, lowercased, because a
+ * count belongs to one workbook's module and a shared name must not pool them. The shell files
+ * counts by this and the tree looks them up by it.
+ */
+export function problemCountKey(workbook: string | null | undefined, name: string): string {
+  return `${(workbook ?? "").toLowerCase()} ${name.toLowerCase()}`;
 }
 
 /** Where two serialized payloads part ways, with enough of each side to name the field. */

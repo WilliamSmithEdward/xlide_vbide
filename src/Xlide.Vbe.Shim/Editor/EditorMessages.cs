@@ -59,7 +59,8 @@ public sealed record SurfaceFinding(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("severity")] string Severity,
     [property: JsonPropertyName("line")] int Line,
-    [property: JsonPropertyName("column")] int Column);
+    [property: JsonPropertyName("column")] int Column,
+    [property: JsonPropertyName("project")] string? Project = null);
 
 /// <summary>Everything the panel lists, for every module.</summary>
 public sealed record SetFindingsMessage(
