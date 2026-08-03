@@ -8,7 +8,16 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START NEW SESSION HERE — 2026-08-02 18:00
+## START NEW SESSION HERE — 2026-08-02 21:00
+
+**Late-evening delta (read this first):** the developer's "opening non xlide windows reverts
+the toolbar" is FIXED and probe-guarded — the surface never retreats; it punches
+`SetWindowRgn` holes where native tool windows sit (`tools\harness\Test-CutoutHoles.ps1`,
+lesson 24). All docked native toolbars are hidden at start-up. Then the Locals-panel
+replacement was built end to end and deliberately REVERTED after five probes proved the
+editor only feeds an on-screen Locals window (machinery dormant in-tree; lesson 25; open
+thread 4 has the detail). Cutout state: tools `[2,3,4,6,7]` get holes; Immediate stays
+hidden-and-mirrored. Everything below still holds.
 
 **State.** The editor is in daily live use against a real 26,000-line workbook, and today's
 second stretch closed every reported defect and the start-up complaint:
@@ -123,15 +132,24 @@ page sink is idempotent and tree rebuilds restore scroll (lesson 20).
    native window any more — "opening non xlide windows reverts the toolbar" was the retreat
    itself; now it keeps the whole client and punches region holes where native tool windows
    sit (Test-CutoutHoles.ps1 is the standing probe; lesson 24 has the maximised-MDI phantom
-   strip). Remaining, in rough order: Locals window (UIA probe BANKED: rows read
-   `Expression <n> Value <v> Type <t>`, context in an Edit element
-   `VBAProject.BreakProbe.BreakHere` — build LocalsReader on the ImmediateReader pattern, a
-   panel tab, route ids 2555/2556), Watch window, Call Stack (id 620); Object Browser (ties
-   to #10's typelib model); the Window menu's arrangement items; native dialogs the object
-   model can faithfully rebuild (References and Macros are scriptable; Project Properties);
-   the UserForm designer and its Toolbox (#14, the largest); Help items last. The rule
-   stands: until a replacement exists, the native window stays reachable — through a hole,
-   not by retreat.
+   strip). The Locals REPLACEMENT was then built end to end — LocalsReader (UIA rows
+   `Expression <n> Value <v> Type <t>` + context Edit), SetLocals message, a page panel,
+   route 2555 — and REVERTED the same evening after five probes: the editor only feeds an
+   ON-SCREEN Locals window. Hidden it never fills; visible-but-covered it fills at some break
+   entries, late or never, and never on a step; any genuinely visible part (half the window
+   through a hole) tracks perfectly; a 3px sliver does not. Lesson 25 has the whole
+   investigation including the step-semantics trap that faked half the evidence. All the
+   machinery STAYS DORMANT in the tree (LocalsReader.cs, SetLocals/SurfaceLocalRow, the
+   page's hidden Locals tab + PublishLocals in AddInSession) for when the data has a
+   reliable source — the #14 debugger era, or restyling the native window positioned inside
+   the surface panel (SetWindowLong caption strip on a floating palette is the sketched
+   route). Remaining in the program, in rough order: Watch window and Call Stack (same
+   feed problem, same conclusion — native through holes for now); Object Browser (ties to
+   #10's typelib model, replaceable WITHOUT the debugger); the Window menu's arrangement
+   items; native dialogs the object model can faithfully rebuild (References and Macros are
+   scriptable; Project Properties); the UserForm designer and its Toolbox (#14, the
+   largest); Help items last. The rule stands: until a replacement exists, the native
+   window stays reachable — through a hole, not by retreat.
 5. Then the standing backlog: #20 right-click curation (needs the developer), #22 split
    groups, #13 tests panel, #14 debugging/forms designer, #10 typelib backfill, #9 the C#
    analyzer port. (#12 settings is DONE: six choices, gear dialog, settings.json, formatter

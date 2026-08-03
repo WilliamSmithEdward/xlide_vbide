@@ -424,3 +424,40 @@ subtract the window from it. Regions make the subtraction exact, the object mode
 to subtract, and clipping to the parent keeps phantom geometry out of it. And when a hole must
 track a window nobody announces, poll while the hole exists and make the idle poll free by
 comparing before applying.
+
+## 25. The Locals window only lives on screen, and the step that lied about it
+
+The plan was the Immediate pattern a second time: hide the native Locals window, read it with
+UI Automation, show the rows in a surface panel. The reader, the message, the panel and the
+menu route were all built and the first live break pushed three correct rows. Every probe
+after that disagreed with the last one, and the investigation that followed is worth more
+than the feature.
+
+What the probes established, five runs deep: the editor feeds the Locals window only when the
+window can actually be seen. Hidden, it reads <No Variables> through every break. Visible but
+fully covered by the surface, it is fed unreliably - at some break entries, seconds late or
+not at all, and never on a step. Any genuinely visible part is enough: half the window
+through a region hole tracked every step perfectly. A 3-pixel sliver was not enough, and
+neither InvalidateRect, UpdateWindow, nor RedrawWindow with ALLCHILDREN through that sliver
+changed anything: the gate is upstream of painting, in whatever the editor consults before
+deciding to refresh its debug windows at all.
+
+Two traps inflated the confusion. First, an attach-state machine nobody documents: a window
+shown for the first time is fed at the next break; hidden, it detaches immediately; re-shown
+while idle it backfills the PREVIOUS break's rows without reattaching; re-shown during a
+break it reattaches. Second, and worse: VBA's Step Into stops BEFORE executing the line, so
+"step, then check whether counter incremented" reads the OLD value when everything is
+working. Half the "stale" evidence was correct values misread through an off-by-one about
+step semantics. A probe that asserts freshness must model what the debugger actually executed.
+
+The feature was reverted the same evening: a debug panel that is sometimes right is worse
+than the native window through a cutout, and the cutout arrangement already works. The
+machinery stays dormant in the tree - reader, message, hidden panel tab - for when the data
+has a source that does not depend on the editor's willingness to paint.
+
+Consequence: before building a mirror of a window, probe whether the thing feeding it cares
+that it is on screen. A text buffer (Immediate) keeps its content wherever it is; a VIEW
+(Locals) can be dead the moment nobody can see it, and no amount of forced painting revives
+what the owner never wrote. And when a probe contradicts the last one, suspect the probe's
+model of the system before the system: two of five contradictions here were the probe's own
+misreadings.

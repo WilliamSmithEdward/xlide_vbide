@@ -1393,6 +1393,57 @@ internal sealed class AddInSession : IDisposable
     /// The line comes from the editor's own caret, which it moves onto the statement it stopped at.
     /// There is no property for the current statement; this is the only thing that reports it.
     /// </summary>
+    /// <summary>What the Locals panel last got, so unchanged readings send nothing.</summary>
+    private string? _lastLocalsKey;
+
+    /// <summary>
+    /// Reads the mirrored Locals window and forwards what changed to the panel.
+    ///
+    /// Runs on every debug-state read: entering a break, every step (each is a command, and
+    /// commands start the watch), and the polls in between. The reading is diffed as a whole,
+    /// so sitting in a break costs a read and no message.
+    /// </summary>
+    private void PublishLocals(bool stopped)
+    {
+        if (_editorSurface is null)
+        {
+            return;
+        }
+
+        if (!stopped)
+        {
+            if (_lastLocalsKey is not null)
+            {
+                _lastLocalsKey = null;
+                _editorSurface.ShowLocals(null, []);
+            }
+
+            return;
+        }
+
+        if (_localsReader?.Read() is not { } snapshot)
+        {
+            return;
+        }
+
+        var rows = new SurfaceLocalRow[snapshot.Rows.Count];
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var row = snapshot.Rows[i];
+            rows[i] = new SurfaceLocalRow(row.Expression, row.Value, row.Type);
+        }
+
+        var key = $"{snapshot.Context}\u0001{string.Join('\u0001', rows.Select(r => $"{r.Expression}={r.Value}:{r.Kind}"))}";
+        if (key == _lastLocalsKey)
+        {
+            return;
+        }
+
+        _lastLocalsKey = key;
+        _editorSurface.ShowLocals(snapshot.Context, rows);
+        Log.Info($"locals: {rows.Length} row(s) at {snapshot.Context ?? "(no context)"}");
+    }
+
     private void UpdateDebugState()
     {
         try
@@ -1409,11 +1460,14 @@ internal sealed class AddInSession : IDisposable
                 {
                     _inBreak = false;
                     _editorSurface?.ShowCurrentLine(null);
+                    PublishLocals(stopped: false);
                     Log.Info($"debug: mode {mode}, not stopped");
                 }
 
                 return;
             }
+
+            PublishLocals(stopped: true);
 
             using var pane = _editor.GetObject("ActiveCodePane");
             if (pane is null)
@@ -2639,10 +2693,12 @@ internal sealed class AddInSession : IDisposable
         _windowsHidden = true;
 
         // The project explorer and the Immediate window have surface replacements. The properties
-        // window does not yet; it is closed for the dock space it occupies, and the menu can bring
-        // it back, at which point the surface retreats so it can be seen. The Locals and Watch
-        // windows stay untouched: nothing replaces them yet, and hiding a window with no
-        // replacement removes the feature rather than restyling it.
+        // window does not need its native form; it is closed for the dock space it occupies, and
+        // the menu route opens ours. The Locals and Watch windows stay untouched: both remain
+        // native, reachable through a punched cutout, because the editor only feeds an ON-SCREEN
+        // Locals window — the mirrored-under-the-surface arrangement was built, probed, and
+        // reverted (see LocalsReader's remarks and lesson 25). Hiding a window whose data cannot
+        // be mirrored removes the feature rather than restyling it.
         const int immediateWindow = 5;
         ReadOnlySpan<int> replaced = [immediateWindow, 6, 7];
 
@@ -2678,6 +2734,14 @@ internal sealed class AddInSession : IDisposable
             Log.Error("window: the replaced windows could not be closed", ex);
         }
     }
+
+    /// <summary>
+    /// Never attached today: the Locals mirror is dormant, because the editor only feeds an
+    /// on-screen Locals window (see LocalsReader's remarks). The publish path below no-ops
+    /// while this stays null; attaching is the Immediate pattern — caption to handle to
+    /// LocalsReader.Create — the day the data has a reliable source.
+    /// </summary>
+    private LocalsReader? _localsReader;
 
     /// <summary>
     /// Hides every docked native toolbar, which the surface's toolbar and menus replace.
@@ -3363,9 +3427,11 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private unsafe PixelRect[] NativeToolWindowCutouts()
     {
-        // Object browser, watches, locals, project, properties: every native tool window that
-        // can dock inside the frame. The Immediate window is absent deliberately: its surface
+        // Object browser, watches, locals, project, properties: the native tool windows without
+        // surface replacements. The Immediate window (5) is absent deliberately: its surface
         // mirror replaces it, and the native one is kept hidden rather than shown through a hole.
+        // Locals stays here: the editor only feeds it on screen, so on screen through a hole is
+        // the only honest place for it (lesson 25).
         ReadOnlySpan<int> tools = [2, 3, 4, 6, 7];
 
         List<PixelRect>? holes = null;
@@ -3569,6 +3635,9 @@ internal sealed class AddInSession : IDisposable
 
         _immediateReader?.Dispose();
         _immediateReader = null;
+
+        _localsReader?.Dispose();
+        _localsReader = null;
 
         _codePanes?.Dispose();
         _codePanes = null;

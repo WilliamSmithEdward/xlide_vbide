@@ -68,6 +68,7 @@ export type HostMessage =
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
+  | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | {
     type: "setSettings";
     blockLayout: string;
@@ -694,6 +695,9 @@ export class EditorBridge {
       case "setLanguageFacts":
         updateVbaLanguageFacts(message.types, message.procedures);
         return;
+      case "setLocals":
+        this.shell?.setLocals(message.context ?? null, message.rows ?? []);
+        return;
       case "setSettings":
         applySettings({
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
@@ -747,6 +751,11 @@ export class EditorBridge {
 
     if (id === "xlide.panel.immediate") {
       this.shell?.showImmediate();
+      return;
+    }
+
+    if (id === "xlide.panel.locals") {
+      this.shell?.showLocalsPanel();
       return;
     }
 
@@ -1163,6 +1172,15 @@ export function demoTransport(): HostTransport {
           formatIndentSize: 4,
           formatUseTabs: false,
           formatCanonicalKeywords: true,
+        });
+        send({
+          type: "setLocals",
+          context: "VBAProject.Module1.Demo",
+          rows: [
+            { expression: "counter", value: "42", kind: "Long" },
+            { expression: "label", value: '"hello"', kind: "String" },
+            { expression: "cells", value: "", kind: "Object/Range" },
+          ],
         });
         send({
           type: "setProjects",

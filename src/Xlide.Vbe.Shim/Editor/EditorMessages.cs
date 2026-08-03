@@ -62,6 +62,21 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
 
+/// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
+public sealed record SurfaceLocalRow(
+    [property: JsonPropertyName("expression")] string Expression,
+    [property: JsonPropertyName("value")] string Value,
+    [property: JsonPropertyName("kind")] string Kind);
+
+/// <summary>
+/// What the debugger has in scope. Context names the broken procedure; null context and no rows
+/// means not stopped, which is the panel's empty state.
+/// </summary>
+public sealed record SetLocalsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("context")] string? Context,
+    [property: JsonPropertyName("rows")] SurfaceLocalRow[] Rows);
+
 /// <summary>One finding as the surface's panel wants it.</summary>
 public sealed record SurfaceFinding(
     [property: JsonPropertyName("module")] string Module,
@@ -293,6 +308,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(RevealLineMessage))]
 [JsonSerializable(typeof(SetModulesMessage))]
 [JsonSerializable(typeof(SetSettingsMessage))]
+[JsonSerializable(typeof(SetLocalsMessage))]
+[JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]

@@ -52,6 +52,7 @@ internal static class VbeCommands
         public const int Replace = 313;
         public const int ClearAllBreakpoints = 579;
         public const int ImmediateWindow = 2554;
+        public const int LocalsWindow = 2555;
         public const int ProjectExplorer = 2557;
         public const int PropertiesWindow = 222;
         public const int References = 942;

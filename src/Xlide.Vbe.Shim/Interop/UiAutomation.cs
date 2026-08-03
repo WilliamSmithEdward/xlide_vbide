@@ -66,7 +66,7 @@ internal partial interface IUIAutomationElement
     [PreserveSig] int FindFirstBuildCache(int scope, nint condition, nint request, out nint found);
     [PreserveSig] int FindAllBuildCache(int scope, nint condition, nint request, out nint found);
     [PreserveSig] int BuildUpdatedCache(nint request, out nint updated);
-    [PreserveSig] int GetCurrentPropertyValue(int propertyId, out ComVariantBlock value);
+    [PreserveSig] int GetCurrentPropertyValue(int propertyId, out UiVariant value);
     [PreserveSig] int GetCurrentPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
     [PreserveSig] int GetCachedPropertyValue(int propertyId, out ComVariantBlock value);
     [PreserveSig] int GetCachedPropertyValueEx(int propertyId, int ignoreDefault, out ComVariantBlock value);
@@ -112,6 +112,16 @@ internal partial interface IUIAutomationTextRange
     [PreserveSig] int GetText(int maxLength, out nint text);
 }
 
+/// <summary>IUIAutomationElementArray. What FindAll answers with.</summary>
+[GeneratedComInterface]
+[Guid("14314595-b4bc-4055-95f2-58f2e42c9855")]
+internal partial interface IUIAutomationElementArray
+{
+    // 1..2
+    [PreserveSig] int GetLength(out int length);
+    [PreserveSig] int GetElement(int index, out nint element);
+}
+
 /// <summary>
 /// A variant sized for the vtable, never read.
 ///
@@ -122,6 +132,41 @@ internal partial interface IUIAutomationTextRange
 [StructLayout(LayoutKind.Sequential, Size = 16)]
 internal struct ComVariantBlock;
 
+/// <summary>
+/// A variant that is actually read: the sixteen bytes above with their real shape. The first
+/// word is the type tag; the data starts at offset eight, which is where a BSTR pointer or a
+/// 32-bit integer sits. Only the two types the property reads produce are handled.
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Size = 16)]
+internal struct UiVariant
+{
+    public ushort Type;
+    public ushort Reserved1;
+    public ushort Reserved2;
+    public ushort Reserved3;
+    public nint Value;
+
+    public const ushort TypeBstr = 8;
+    public const ushort TypeInt32 = 3;
+
+    /// <summary>The integer inside, or zero when the variant holds something else.</summary>
+    public readonly int AsInt32() => Type == TypeInt32 ? (int)Value : 0;
+
+    /// <summary>The string inside, freed after reading, or null for anything else.</summary>
+    public string? TakeString()
+    {
+        if (Type != TypeBstr || Value == 0)
+        {
+            return null;
+        }
+
+        var text = System.Runtime.InteropServices.Marshal.PtrToStringBSTR(Value);
+        System.Runtime.InteropServices.Marshal.FreeBSTR(Value);
+        Value = 0;
+        return text;
+    }
+}
+
 /// <summary>Identifiers used with the interfaces above.</summary>
 internal static class UiAutomationIds
 {
@@ -130,6 +175,7 @@ internal static class UiAutomationIds
 
     public static readonly Guid Automation = new("30cbe57d-d9d0-452a-ab13-7ac5ac4825ee");
     public static readonly Guid Element = new("d22108aa-8ac5-49a5-837b-37bbb3d7591e");
+    public static readonly Guid ElementArray = new("14314595-b4bc-4055-95f2-58f2e42c9855");
     public static readonly Guid TextPattern = new("32eba289-3583-42c9-9c59-3b6d9a1e9b6a");
     public static readonly Guid TextRange = new("a543cc6a-f4ae-494b-8239-c814481187a8");
 
@@ -141,4 +187,16 @@ internal static class UiAutomationIds
 
     /// <summary>The whole range, however long it is.</summary>
     public const int WholeRange = -1;
+
+    /// <summary>UIA_NamePropertyId.</summary>
+    public const int NameProperty = 30005;
+
+    /// <summary>UIA_ControlTypePropertyId.</summary>
+    public const int ControlTypeProperty = 30003;
+
+    /// <summary>UIA_ListItemControlTypeId: the rows of the Locals window.</summary>
+    public const int ListItemControl = 50007;
+
+    /// <summary>UIA_EditControlTypeId: the context strip naming the broken procedure.</summary>
+    public const int EditControl = 50004;
 }

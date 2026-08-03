@@ -643,6 +643,25 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetCurrentLineMessage));
     }
 
+    /// <summary>
+    /// Replaces what the Locals panel shows. Null context with no rows is the not-stopped state.
+    /// Not held for a loading page for the same reason as the current line: stale variables are
+    /// worse than none.
+    /// </summary>
+    public void ShowLocals(string? context, SurfaceLocalRow[] rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SetLocalsMessage("setLocals", context, rows),
+            EditorMessageContext.Default.SetLocalsMessage));
+    }
+
     /// <summary>Replaces the breakpoints shown on the module currently displayed.</summary>
     public void ShowBreakpoints(int[] lines)
     {

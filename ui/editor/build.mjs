@@ -57,6 +57,10 @@ const INDEX_HTML = `<!doctype html>
           <div id="panel-tabs" role="tablist" aria-label="Panels">
             <button class="panel-tab active" data-panel="problems" role="tab" aria-selected="true" type="button">Problems</button>
             <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
+            <!-- The Locals tab is dormant with its host mirror: the editor only feeds an
+                 on-screen Locals window, so the native one shows through a cutout instead.
+                 The panel body below stays wired for the day the data has a reliable source. -->
+            <button class="panel-tab" data-panel="locals" role="tab" aria-selected="false" type="button" hidden>Locals</button>
           </div>
         </div>
         <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
@@ -73,6 +77,10 @@ const INDEX_HTML = `<!doctype html>
               <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
                      aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
             </div>
+          </div>
+          <div id="locals" hidden>
+            <div id="locals-context" aria-live="polite" hidden></div>
+            <div id="locals-table" role="table" aria-label="Local variables"></div>
           </div>
         </div>
       </div>

@@ -172,6 +172,9 @@ export class Shell {
   private readonly immediateBody: HTMLElement;
   private readonly immediateLog: HTMLElement;
   private readonly immediateInput: HTMLInputElement;
+  private readonly localsBody: HTMLElement;
+  private readonly localsContext: HTMLElement;
+  private readonly localsTable: HTMLElement;
 
   /** Lines entered in the Immediate panel, newest last, walked with the arrow keys. */
   private readonly history: string[] = [];
@@ -278,9 +281,13 @@ export class Shell {
     this.immediateBody = root.querySelector("#immediate") as HTMLElement;
     this.immediateLog = root.querySelector("#immediate-log") as HTMLElement;
     this.immediateInput = root.querySelector("#immediate-input") as HTMLInputElement;
+    this.localsBody = root.querySelector("#locals") as HTMLElement;
+    this.localsContext = root.querySelector("#locals-context") as HTMLElement;
+    this.localsTable = root.querySelector("#locals-table") as HTMLElement;
 
     this.installPanelTabs();
     this.installImmediate();
+    this.setLocals(null, []);
 
     this.panelToggle.addEventListener("click", () => this.togglePanel());
     this.installSplitter();
@@ -659,6 +666,62 @@ export class Shell {
     this.immediateInput.focus();
   }
 
+  /** Brings the Locals panel forward, opening the panel if it was collapsed. */
+  showLocalsPanel(): void {
+    this.selectPanel("locals");
+
+    if (!this.panelOpen) {
+      this.togglePanel();
+    }
+  }
+
+  /**
+   * Replaces the Locals panel content. Null context is the not-stopped state; a context with no
+   * rows is a break in a scope with nothing in it.
+   */
+  setLocals(context: string | null, rows: { expression: string; value: string; kind: string }[]): void {
+    this.localsContext.textContent = context ?? "";
+    this.localsContext.hidden = context === null;
+    this.localsTable.replaceChildren();
+
+    if (rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "locals-empty";
+      empty.textContent = context === null
+        ? "Not stopped. Variables appear here in break mode."
+        : "No variables in scope.";
+      this.localsTable.appendChild(empty);
+      return;
+    }
+
+    const header = document.createElement("div");
+    header.className = "locals-row locals-header";
+    header.setAttribute("role", "row");
+    for (const title of ["Expression", "Value", "Type"]) {
+      const cell = document.createElement("span");
+      cell.setAttribute("role", "columnheader");
+      cell.textContent = title;
+      header.appendChild(cell);
+    }
+    this.localsTable.appendChild(header);
+
+    for (const row of rows) {
+      const line = document.createElement("div");
+      line.className = "locals-row";
+      line.setAttribute("role", "row");
+
+      for (const text of [row.expression, row.value, row.kind]) {
+        const cell = document.createElement("span");
+        cell.setAttribute("role", "cell");
+        cell.textContent = text;
+        cell.title = text;
+        line.appendChild(cell);
+      }
+
+      this.localsTable.appendChild(line);
+    }
+  }
+
   private installPanelTabs(): void {
     this.panelTabs.addEventListener("click", (event) => {
       const tab = (event.target as HTMLElement).closest("[data-panel]") as HTMLElement | null;
@@ -683,6 +746,7 @@ export class Shell {
     this.problemsBody.hidden = name !== "problems";
     this.problemsFilters.hidden = name !== "problems";
     this.immediateBody.hidden = name !== "immediate";
+    this.localsBody.hidden = name !== "locals";
     this.shown = name;
 
     // The host only watches what it has to. Reading the editor's Immediate window costs a call
