@@ -84,8 +84,12 @@ internal sealed class CodePaneTracker : IDisposable
     /// </summary>
     public event Action? RefreshFailed;
 
-    /// <summary>True while the picture is known to be out of date because refreshes are failing.</summary>
-    public bool Stale => _failedRefreshes > 0;
+    /// <summary>True while the picture is known to be out of date because refreshes are failing,
+    /// or because a burst of events outran the trailing passes and its tail was dropped.</summary>
+    public bool Stale => _failedRefreshes > 0 || _refreshDropped;
+
+    /// <summary>Set when a burst outran the trailing passes; the poll's retry clears it.</summary>
+    private bool _refreshDropped;
 
     /// <summary>Consecutive refreshes the editor has refused, for recovery and log discipline.</summary>
     private int _failedRefreshes;
@@ -95,6 +99,16 @@ internal sealed class CodePaneTracker : IDisposable
         _hook = WindowEventHook.Install(OnWindowEvent);
         Refresh();
     }
+
+    /// <summary>
+    /// Raised on any window destruction in the process. A dying pane cannot be told from a
+    /// dying tooltip here — destruction strips a window of its class name before the event
+    /// arrives — so the listener treats every destroy as "a pane may have closed" and
+    /// re-derives cheaply for a moment. The need: the tracker only ever holds the pane
+    /// windows it can match, the active one in practice, so a HIDDEN pane's close changes
+    /// nothing in its picture and Changed stays silent while the strip shows a dead tab.
+    /// </summary>
+    public Action? WindowDestroyed { get; set; }
 
     /// <summary>
     /// Raised when the editor's own frame or its document area moves or resizes.
@@ -142,6 +156,11 @@ internal sealed class CodePaneTracker : IDisposable
         {
             FrameChanged?.Invoke();
         }
+
+        if (windowEvent.IsDestroy)
+        {
+            WindowDestroyed?.Invoke();
+        }
     }
 
     /// <summary>The window classes whose movements concern the editor surface.</summary>
@@ -149,18 +168,63 @@ internal sealed class CodePaneTracker : IDisposable
         is FrameClass or "MDIClient" or PaneClass or "XlideEditorOverlay"
         or "MsoCommandBarDock" or "MsoCommandBar";
 
+    /// <summary>Set when events arrive while a refresh is running, so none of them are lost.</summary>
+    private bool _refreshQueued;
+
     /// <summary>Rebuilds the picture from both sources.</summary>
     public void Refresh()
     {
-        // Reading window rectangles can itself raise events on some systems. Re-entering here would
-        // recurse without bound.
+        // Reading window rectangles can itself raise events on some systems. Re-entering here
+        // would recurse without bound — but DROPPING the re-entrant call loses the burst's
+        // tail, and the tail is where the truth lives: closing a hidden pane fires its destroy
+        // events while the refresh its hide events started is still running, that refresh
+        // still sees the dying window, and with the trailing events swallowed the strip showed
+        // a closed module's tab until something else stirred ("the tab X doesn't close it",
+        // 2026-08-04, second life). Queued instead of dropped, with a bounded trailing loop:
+        // one more pass sees the settled truth, and the cap keeps a self-raising read from
+        // becoming the recursion the guard was built against.
         if (_refreshing)
         {
+            _refreshQueued = true;
             return;
         }
 
         _refreshing = true;
 
+        try
+        {
+            var passes = 0;
+
+            do
+            {
+                _refreshQueued = false;
+                RefreshOnce();
+            }
+            while (_refreshQueued && ++passes < 4);
+
+            if (_refreshQueued)
+            {
+                // The burst outran the trailing passes. Not silently: the picture is declared
+                // stale, and the poll the listener arms is what finishes the story once the
+                // storm has passed — a teardown's tail once outran every pass here and left a
+                // closed module's tab on the strip.
+                _refreshDropped = true;
+                Log.Verbose("code panes: a burst outran the trailing passes, deferring to the poll");
+                RefreshFailed?.Invoke();
+            }
+            else
+            {
+                _refreshDropped = false;
+            }
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+
+    private void RefreshOnce()
+    {
         try
         {
             var open = _openComponents ??= ReadOpenComponents();
@@ -201,6 +265,15 @@ internal sealed class CodePaneTracker : IDisposable
                     ProjectOf(open, component)));
             }
 
+            // Each pass tells the development log what it saw, so a wrong picture names the
+            // exact pass that adopted it. Collapses while nothing changes.
+            if (Log.VerboseEnabled)
+            {
+                var composition = string.Join("|",
+                    updated.Select(pane => pane.Component + (pane.IsVisible ? string.Empty : "~")));
+                Log.Verbose($"code panes: pass saw {updated.Count} [{composition}]{(SameAs(updated) ? " unchanged" : "")}");
+            }
+
             // Events arrive in bursts and most of them change nothing. Telling listeners that
             // nothing changed would make every one of them re-do its own work, which for a surface
             // positioned over a pane means moving a window that is already in the right place.
@@ -228,12 +301,14 @@ internal sealed class CodePaneTracker : IDisposable
                 var detail = ex is COMException com ? $"0x{com.HResult:X8}" : $"{ex.GetType().Name}: {ex.Message}";
                 Log.Info($"code panes: refresh abandoned, {detail} ({_failedRefreshes} in a row)");
             }
+            else
+            {
+                // The failures between the loud ones, for the development log: a silent
+                // stretch of retries once hid a strip that stayed stale for seconds.
+                Log.Verbose($"code panes: refresh abandoned ({_failedRefreshes} in a row)");
+            }
 
             RefreshFailed?.Invoke();
-        }
-        finally
-        {
-            _refreshing = false;
         }
     }
 

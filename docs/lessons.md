@@ -520,3 +520,36 @@ crash with a delay measured in milliseconds - gate on the state the event implie
 doing work in the state that no longer exists. And verbose logging is a feature with a
 budget: hold the file open, flush per line, and spend lines on signal, not on another
 process's window moves.
+
+## 28. The tracker only holds what it can match, and unchanged is not the same as true
+
+The tab X kept failing for tabs that were not focused, through two correct fixes for two
+real races that were not this bug. The third diagnosis started by giving up on theory: one
+verbose line per tracker pass, saying exactly what the pass saw. The line repeated through
+the entire close - "pass saw 1 [CleanModule] unchanged" before, during, and after closing
+BrokenModule - and that repetition WAS the answer. The tracker never contained the hidden
+pane at all. Its list holds the pane windows it can match, which in practice is the active
+one; closing a hidden pane changes nothing in that picture, the changed event never fires,
+nothing republishes the module list, and the strip keeps a dead tab whose next click
+reopens the module. Closing the ACTIVE tab always worked, which is exactly why the report
+said "if it's not focused".
+
+The durable fix stops trusting change detection for a change the detector cannot represent:
+any window destruction arms a moment of polls that re-read the object model's open list and
+republish it outright. Destruction strips a window of its class name before the event
+arrives, so a dying pane cannot be told from a dying tooltip - every destroy is treated as
+"a pane may have closed", and the page's render-key skip makes the republish free when
+nothing changed. Two structural repairs rode along: events landing during a refresh are
+queued instead of dropped, with a bounded trailing loop that declares the picture stale
+when a burst outruns it, and the silent middle of the retry counter now speaks at verbose.
+
+Evidence: the probe's before/after logs - fifteen "unchanged" passes and eternal silence
+before; the same passes then "setModules [CleanModule]" 160ms after the destroy, twice,
+the second skipped by the page.
+
+Consequence: a cache that cannot represent a state cannot notice entering it. When a
+detector says "unchanged" across an event you know happened, ask what the detector CAN see
+before asking what went wrong - and when the answer is "not this", re-derive from the
+source of truth on a signal cruder than the change itself. And instrument the observer
+first: one line per pass, collapsed when identical, named this in one probe run after
+theory had missed it three times.

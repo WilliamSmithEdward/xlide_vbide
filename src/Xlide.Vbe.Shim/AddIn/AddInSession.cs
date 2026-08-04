@@ -1664,9 +1664,24 @@ internal sealed class AddInSession : IDisposable
         // A stale pane picture is retried here, because the editor that refused it also stopped
         // producing trustworthy window events. Success fires the tracker's Changed, which is what
         // catches the tab strip up with everything that happened while the editor was busy.
-        if (_codePanes is { Stale: true })
+        //
+        // A close ALSO republishes the module list outright, because the tracker cannot see
+        // this change: it only ever holds the pane windows it can match — the active one, in
+        // practice — so closing a HIDDEN pane leaves its picture identical, Changed never
+        // fires, and the strip kept showing the closed module's tab ("the tab X doesn't close
+        // it if it's not focused", 2026-08-04, the real mechanism at last). The strip's truth
+        // is the object model's open list; after a close it is re-read and re-sent, and the
+        // page skips the rebuild when nothing actually changed.
+        if (_resyncPanePolls > 0)
+        {
+            _resyncPanePolls--;
+            _codePanes?.Refresh();
+            PublishModules();
+        }
+        else if (_codePanes is { Stale: true })
         {
             _codePanes.Refresh();
+            PublishModules();
         }
 
         UpdateDebugState();
@@ -2971,12 +2986,24 @@ internal sealed class AddInSession : IDisposable
         }
         finally
         {
+            // The teardown a close starts finishes AFTER this returns, and its window events
+            // can land while a refresh is already mid-flight. The tracker queues those now,
+            // but a close is the one moment staleness is guaranteed visible — the tab must
+            // leave the strip — so the next few polls re-derive the picture unconditionally
+            // rather than trusting the event stream alone.
+            _resyncPanePolls = 3;
+            _pollsRemaining = Math.Max(_pollsRemaining, (int)(2_000 / DebugPollMilliseconds));
+            UpdatePolling();
+
             // Closing a pane makes the editor activate the next one, and activation takes the
             // keyboard with it. Without this, the second Ctrl+W in a row went to a window the
             // developer cannot see.
             _editorSurface?.Focus();
         }
     }
+
+    /// <summary>Polls that must re-derive the pane picture regardless of events. See CloseModule.</summary>
+    private int _resyncPanePolls;
 
     /// <summary>Closes a module's pane through the editor's own pane list. False when it cannot.</summary>
     private bool CloseThroughObjectModel(string component, string? projectId = null)
@@ -3719,6 +3746,17 @@ internal sealed class AddInSession : IDisposable
             // workspace — nothing else hears it, and the surface sat at its old size while the
             // window grew around it. The frame's own events re-derive placement in every state.
             _codePanes.FrameChanged = RefreshSurfacePlacement;
+
+            // Any destroy might have been a hidden pane, which the tracker's own picture cannot
+            // show (it only holds panes it can match — the active one, in practice). A moment of
+            // polls re-reads the object model's open list and republishes; the page skips the
+            // rebuild when nothing changed, so a dying tooltip costs a diff and no work.
+            _codePanes.WindowDestroyed = () =>
+            {
+                _resyncPanePolls = Math.Max(_resyncPanePolls, 2);
+                _pollsRemaining = Math.Max(_pollsRemaining, (int)(1_000 / DebugPollMilliseconds));
+                UpdatePolling();
+            };
 
             _codePanes.Start();
         }

@@ -11,6 +11,23 @@ that would be expensive to reverse.
 ## START NEW SESSION HERE — 2026-08-04 midday
 
 **2026-08-04 delta (read this first):**
+- **The tab X's REAL mechanism, found third: the tracker cannot see a hidden pane close.**
+  The pointer-path and render-skip fixes below were sound but fixed a different (real,
+  demo-proven) race; the live bug was host-side, and the per-pass verbose instrumentation
+  named it: the pane tracker's list only ever holds the pane windows it can match — the
+  ACTIVE one, in practice — so closing a HIDDEN pane leaves its picture identical
+  ("pass saw 1 [CleanModule] unchanged" straight through the close), Changed never fires,
+  PublishModules never runs, and the strip keeps a dead tab whose next click REOPENS the
+  module. Closing the active tab always worked, hence "only when not focused". Fixes: any
+  window destroy (a dying window's class reads empty, so a pane cannot be told from a
+  tooltip) arms a moment of polls that re-read the object model's open list and republish
+  (the page's render-key skip makes identical republishes free); the tracker queues events
+  that land mid-refresh instead of dropping them, with a bounded trailing loop that
+  declares itself Stale when a burst outruns it; and refresh failures 2..199 log at
+  verbose instead of silently. `Test-CloseHiddenPane.ps1` is the standing PASS/FAIL probe.
+  OPEN QUESTION for later: WHY hidden panes fail the tracker's caption match (maximised
+  MDI captions?) — the WM_CLOSE fallback in CloseModule iterates tracker panes and so
+  cannot reach hidden panes either; the OM path covers them today.
 - **The tab X died a second death and got a second, structural fix.** "Clicking a tab's X
   doesn't close it if it's not focused": a click needs pointerdown and pointerup on the
   same LIVE element, and pressing an unfocused surface stirs the host into a setModules
