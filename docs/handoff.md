@@ -11,6 +11,18 @@ that would be expensive to reverse.
 ## START NEW SESSION HERE — 2026-08-04 midday
 
 **2026-08-04 delta (read this first):**
+- **The tab X died a second death and got a second, structural fix.** "Clicking a tab's X
+  doesn't close it if it's not focused": a click needs pointerdown and pointerup on the
+  same LIVE element, and pressing an unfocused surface stirs the host into a setModules
+  echo whose renderTabs rebuild destroyed the pressed X mid-press — the click never fired.
+  Now the X is armed at pointerdown as DATA (module + workbook) and fired at pointerup
+  against whatever twin sits under the release point, so no rebuild can eat it; sliding
+  off still cancels; and renderTabs skips entirely when its render key (order, identity,
+  active pair, badge counts) is unchanged, so echo rebuilds stop happening at all. All
+  three behaviours verified with synthetic pointer events against the demo, including a
+  deterministic mid-press clone-rebuild. UI pinned: Test-ResizeFollow.ps1 and
+  Test-CloseVbe.ps1 joined Test-CutoutHoles.ps1 in tools\harness; .claude/launch.json
+  serves the page demo (npx http-server, port 8123) for browser-side verification.
 - **Two live-test regressions of the morning's work, both fixed** (lesson 27). Closing the
   VBE window crashed Excel: the frame-HIDE event drove placement, whose cutout pass called
   the object model INSIDE the editor's close handling; placement now gates on

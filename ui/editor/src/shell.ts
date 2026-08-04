@@ -200,6 +200,12 @@ export class Shell {
   /** True from a drag until the click it would otherwise become has been swallowed. */
   private dragSuppressesClick = false;
 
+  /** The tab whose close box the pointer went down on, held as data a rebuild cannot destroy. */
+  private pressedClose: { name: string; project: string | null } | null = null;
+
+  /** What the tab strip last rendered, so an echo that changes nothing rebuilds nothing. */
+  private lastTabsKey: string | null = null;
+
   /** A rename asked for from a menu; focused when the properties for it arrive. */
   private pendingRename: string | null = null;
   private panelOpen = true;
@@ -302,11 +308,9 @@ export class Shell {
         return;
       }
 
-      // The close box answers first and unconditionally: a drag can never begin on it, so drag
-      // suppression has no business vetoing it — and a suppression flag gone stale had exactly
-      // that effect, an X that swallowed every click until the page was reloaded.
+      // The close box belongs to the pointer path below, and a click on it must not fall
+      // through to activation.
       if (target.closest(".tab-close")) {
-        this.handlers.closeModule(tab.dataset.module, tab.dataset.project || undefined);
         return;
       }
 
@@ -316,6 +320,47 @@ export class Shell {
       }
 
       this.handlers.activateModule(tab.dataset.module, tab.dataset.project || undefined);
+    });
+
+    // The X is armed at pointerdown and fired at pointerup, never on click. A click needs its
+    // press and release to land on the same LIVE element, and the press itself can rebuild the
+    // strip: pressing an unfocused surface focuses it, focus stirs the host, and a setModules
+    // echo mid-press replaces the pressed element — the click never happens, and the X reads
+    // as dead until a second try. (The second life of this bug; the first was a stale drag
+    // flag.) The press identity is captured as DATA, which no rebuild can destroy; the release
+    // only checks that the pointer is still over the same tab's X, so sliding off to cancel
+    // still cancels, even though the element under the pointer may be a rebuilt twin.
+    this.tabStrip.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      const tab = target.closest("[data-module]") as HTMLElement | null;
+      this.pressedClose = target.closest(".tab-close") && tab?.dataset.module
+        ? { name: tab.dataset.module, project: tab.dataset.project || null }
+        : null;
+    });
+
+    this.tabStrip.addEventListener("pointerup", (event) => {
+      const pressed = this.pressedClose;
+      this.pressedClose = null;
+
+      if (!pressed || event.button !== 0) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      const tab = target.closest("[data-module]") as HTMLElement | null;
+      if (target.closest(".tab-close")
+        && tab?.dataset.module === pressed.name
+        && (tab.dataset.project || null) === pressed.project) {
+        this.handlers.closeModule(pressed.name, pressed.project ?? undefined);
+      }
+    });
+
+    this.tabStrip.addEventListener("pointercancel", () => {
+      this.pressedClose = null;
     });
 
     // The middle button closes, the way every tabbed editor closes — any tab, focused or not.
@@ -958,6 +1003,21 @@ export class Shell {
   }
 
   private renderTabs(): void {
+    // Rebuilt only when something the render consumes has changed. The host echoes setModules
+    // freely — a focus click alone can produce one — and every needless rebuild destroys the
+    // elements a pointer might be pressing at that instant. The key covers everything drawn:
+    // order, identity, the active pair, and each tab's badge count.
+    const renderKey = this.tabOrder
+      .map((tab) => tabKey(tab) + "\u0001" + this.findings.filter((f) => f.module === tab.name
+        && (f.project == null || sameProject(f.project, tab.project))).length)
+      .join("\u0002")
+      + "\u0003" + (this.active ?? "") + "\u0001" + (this.activeProject ?? "");
+
+    if (renderKey === this.lastTabsKey) {
+      return;
+    }
+
+    this.lastTabsKey = renderKey;
     this.tabStrip.replaceChildren();
 
     // A name two workbooks share earns its workbook in the label; a unique name stays bare.
