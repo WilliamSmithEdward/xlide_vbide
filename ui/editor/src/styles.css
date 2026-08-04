@@ -1164,6 +1164,18 @@ span.prop-value.readonly {
   opacity: 0.4;
 }
 
+/*
+ * Monaco's context view — the find widget's button tooltips ride in it — computes offsets
+ * RELATIVE TO THE EDITOR'S CONTAINER and writes them as absolute positions. An absolute
+ * child resolves against the nearest positioned ancestor, and the container was not one, so
+ * the offsets resolved against the shell instead and every tooltip landed shifted by exactly
+ * the container's origin — floating at the top of the page (developer, 2026-08-04).
+ * Positioning the container makes it the ancestor the numbers were computed for.
+ */
+#container {
+  position: relative;
+}
+
 .xlide-breakpoint-refused {
   color: #e8a04c !important;
   font-size: 14px;
