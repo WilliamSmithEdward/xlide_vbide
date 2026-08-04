@@ -1045,7 +1045,6 @@ export class EditorBridge {
           : {
             isWholeLine: false,
             glyphMarginClassName: "xlide-breakpoint-refused codicon codicon-close",
-            glyphMarginHoverMessage: { value: "No breakpoint here: only executable statements can carry one." },
             stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
           },
       },
