@@ -50,7 +50,8 @@ public sealed record SetModulesMessage(
     [property: JsonPropertyName("modules")] string[] Modules,
     [property: JsonPropertyName("projects")] string?[] Projects,
     [property: JsonPropertyName("active")] string? Active,
-    [property: JsonPropertyName("activeProject")] string? ActiveProject);
+    [property: JsonPropertyName("activeProject")] string? ActiveProject,
+    [property: JsonPropertyName("dirty")] bool[]? Dirty = null);
 
 /// <summary>The developer's settings, for the page's dialog and its typing behaviour.</summary>
 public sealed record SetSettingsMessage(
@@ -61,6 +62,23 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
+
+/// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>
+public sealed record SurfaceSearchMatch(
+    [property: JsonPropertyName("workbook")] string? Workbook,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("column")] int Column,
+    [property: JsonPropertyName("length")] int Length,
+    [property: JsonPropertyName("preview")] string Preview);
+
+/// <summary>A search's answer, echoing the id the page asked with.</summary>
+public sealed record SearchResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("matches")] SurfaceSearchMatch[] Matches,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("replaced")] int Replaced = 0);
 
 /// <summary>A breakpoint the host refused, so the page can mark the line briefly.</summary>
 public sealed record BreakpointRefusedMessage(
@@ -316,6 +334,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetLocalsMessage))]
 [JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(BreakpointRefusedMessage))]
+[JsonSerializable(typeof(SearchResultMessage))]
+[JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]

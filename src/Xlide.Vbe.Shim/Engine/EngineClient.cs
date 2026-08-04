@@ -390,6 +390,42 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Finds text across the modules the engine holds, scoped to one module, one project, or
+    /// everything open. The engine searches its live copies, so the results describe the text
+    /// as it stands, unsaved edits included.
+    /// </summary>
+    public async Task<EngineSearchResult?> SearchAsync(
+        string scope,
+        string? projectId,
+        string? module,
+        string query,
+        bool matchCase,
+        bool wholeWord,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["scope"] = scope,
+            ["query"] = query,
+            ["matchCase"] = matchCase,
+            ["wholeWord"] = wholeWord,
+        };
+
+        if (projectId is not null)
+        {
+            payload["projectId"] = projectId;
+        }
+
+        if (module is not null)
+        {
+            payload["module"] = module;
+        }
+
+        var result = await CallAsync("workspace/search", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineSearchResult);
+    }
+
+    /// <summary>
     /// Streams a module's live text, whole or as edits, as a notification: no id, no answer,
     /// and its place in the pipe's order is its meaning. The same one-at-a-time gate the calls
     /// use keeps it ordered among them, and the wait is registered before this returns, so a

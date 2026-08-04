@@ -160,6 +160,9 @@ function boot(): void {
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
+    search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
+    replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
+      bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);

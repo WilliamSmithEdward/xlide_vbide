@@ -11,6 +11,7 @@ import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWo
 import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import { completionsFor } from './completion';
 import { outlineFor, projectWordsFor } from './outline';
+import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
 import { signatureHelpFor } from './signature';
@@ -32,6 +33,8 @@ import {
     type OutlineParams,
     type OutlineResult,
     type ProjectOpenParams,
+    type SearchParams,
+    type SearchResult,
     type SignatureHelpParams,
     type SignatureHelpResult,
     type SmartEnterParams,
@@ -132,14 +135,47 @@ export class Dispatcher {
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
 
-            case 'textDocument/didChange':
-                return this.didChange(this.require<DidChangeParams>(params));
+            case 'workspace/search':
+                return this.search(this.require<SearchParams>(params));
+
+            case 'textDocument/didChange':                return this.didChange(this.require<DidChangeParams>(params));
 
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
         }
     }
 
+    /** Every module in scope, live text over seeded, streamed to the matcher. */
+    private search(params: SearchParams): SearchResult {
+        this.requireInitialized();
+
+        const dispatcher = this;
+        function* inScope(): Generator<{ projectId: string; module: string; source: string }> {
+            for (const [projectId, modules] of dispatcher.seededModules) {
+                if (params.scope !== 'all'
+                    && params.projectId
+                    && projectId.toLowerCase() !== params.projectId.toLowerCase()) {
+                    continue;
+                }
+
+                for (const module of modules) {
+                    if (params.scope === 'module'
+                        && params.module
+                        && module.moduleName.toLowerCase() !== params.module.toLowerCase()) {
+                        continue;
+                    }
+
+                    yield {
+                        projectId,
+                        module: module.moduleName,
+                        source: dispatcher.liveSources.get(liveKey(projectId, module.moduleName)) ?? module.source,
+                    };
+                }
+            }
+        }
+
+        return searchModules(inScope(), params);
+    }
     private openProject(params: ProjectOpenParams): { modules: number; types: string[]; procedures: string[] } {
         this.requireInitialized();
 

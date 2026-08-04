@@ -441,6 +441,28 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Finds text across the engine's modules. Null when there is no engine to ask; an engine
+    /// that answers nothing answers an empty result, which is a different fact.
+    /// </summary>
+    public async Task<EngineSearchResult?> SearchAsync(
+        string scope,
+        string? projectId,
+        string? module,
+        string query,
+        bool matchCase,
+        bool wholeWord,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        return await engine.SearchAsync(scope, projectId, module, query, matchCase, wholeWord, cancellation)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Reads the projects on the host thread, which owns them, and hands the snapshots back to
     /// this pool thread. Null when the read could not be run — the session is between surfaces,
     /// or the host thread never answered — and the pass is abandoned rather than served stale:

@@ -44,13 +44,17 @@ internal static class VbeMenus
     };
 
     /// <summary>
-    /// Items the surface has replaced outright, left out of every menu it serves. 761 is every
-    /// native toolbar's visibility toggle — the native toolbars are hidden and the surface's
-    /// toolbar is the toolbar — and 830 is every entry of the native window list, whose job the
-    /// tab strip does. Each id is shared across exactly its family and nothing else (measured;
-    /// the handoff's command table), which is what makes suppression by id safe.
+    /// Items the surface has replaced outright, left out of every menu it serves — the
+    /// developer's standing rule (2026-08-04): as a native window is ported fully, its menu
+    /// item goes. 761 is every native toolbar's visibility toggle — the native toolbars are
+    /// hidden and the surface's toolbar is the toolbar — and 830 is every entry of the native
+    /// window list, whose job the tab strip does. 2554 Immediate, 2555 Locals, 2557 Project
+    /// Explorer, and 222 Properties Window name windows whose surface replacements are always
+    /// a panel tab away; the Watch window, Call Stack, and Object Browser keep their items
+    /// until their ports land. Each id is shared across exactly its family and nothing else
+    /// (measured; the handoff's command table), which is what makes suppression by id safe.
     /// </summary>
-    private static readonly HashSet<int> Replaced = [761, 830];
+    private static readonly HashSet<int> Replaced = [761, 830, 2554, 2555, 2557, 222];
 
     /// <summary>
     /// Reads the items of one menu: the bar itself for an empty path, or the submenu the path leads

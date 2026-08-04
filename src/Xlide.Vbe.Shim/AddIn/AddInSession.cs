@@ -206,6 +206,8 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.TextChanged = WriteModule;
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
         _editorSurface.LinesShifted = OnLinesShifted;
+        _editorSurface.SearchRequested = OnSearchRequested;
+        _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
         _editorSurface.PanelChanged = OnPanelChanged;
@@ -687,6 +689,13 @@ internal sealed class AddInSession : IDisposable
             ForgetBreakpoints();
         }
 
+        // A save just cleaned the workbook; the tab dots follow at once rather than on the
+        // next pane event.
+        if (command == VbeCommands.Command.Save)
+        {
+            PublishModules();
+        }
+
         WatchDebugState();
     }
 
@@ -764,6 +773,10 @@ internal sealed class AddInSession : IDisposable
 
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
                      + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty));
+
+            // The write just made the workbook dirty; the tab dots follow. The page skips the
+            // rebuild when nothing it draws has changed, so a write that changed no flag is free.
+            PublishModules();
 
             // The full pass re-reads every module, reseeds the engine, and diagnoses the whole
             // project — work worth doing, but not per pause: the live pass keeps the shown
@@ -956,6 +969,163 @@ internal sealed class AddInSession : IDisposable
 
         return false;
     }
+
+    /// <summary>
+    /// Answers the Search panel: the engine searches the modules it holds — live text where a
+    /// module is being edited — and the hits come back with workbook display names. The edits
+    /// the developer has not paused long enough to write are flushed first, so the search
+    /// describes what they see.
+    /// </summary>
+    private void OnSearchRequested(int id, string query, bool matchCase, bool wholeWord, string scope)
+    {
+        _editorSurface?.FlushEdits();
+
+        var projectId = scope is "module" or "project" ? _shownProject : null;
+        var module = scope is "module" ? _editorSurface?.Module : null;
+
+        _ = RunSearchAsync(id, query, matchCase, wholeWord, scope, projectId, module, replacement: null);
+    }
+
+    /// <summary>
+    /// Replace across a scope: the same search, then every hit's line rewritten through the
+    /// module the hit lives in — ReplaceLine, surgical, no module reset. The shown module's
+    /// resync adopts the change the way it adopts any edit made outside the surface.
+    /// </summary>
+    private void OnReplaceAllRequested(int id, string query, bool matchCase, bool wholeWord, string scope, string replacement)
+    {
+        _editorSurface?.FlushEdits();
+
+        var projectId = scope is "module" or "project" ? _shownProject : null;
+        var module = scope is "module" ? _editorSurface?.Module : null;
+
+        _ = RunSearchAsync(id, query, matchCase, wholeWord, scope, projectId, module, replacement);
+    }
+
+    private async Task RunSearchAsync(
+        int id, string query, bool matchCase, bool wholeWord, string scope,
+        string? projectId, string? module, string? replacement)
+    {
+        try
+        {
+            var result = _analysis is null
+                ? null
+                : await _analysis.SearchAsync(scope, projectId, module, query, matchCase, wholeWord, CancellationToken.None)
+                    .ConfigureAwait(false);
+
+            // Back to the host thread: replacement drives the object model, and even a plain
+            // answer touches the surface.
+            _editorSurface?.RunOnHostThread(() =>
+            {
+                var matches = result?.Matches ?? [];
+                var replaced = 0;
+
+                if (replacement is not null && matches.Length > 0)
+                {
+                    replaced = ReplaceMatches(matches, query, matchCase, wholeWord, replacement);
+                    _analysis?.Reanalyse();
+                }
+
+                _editorSurface?.ShowSearchResults(
+                    id,
+                    [.. matches.Select(m => new SurfaceSearchMatch(
+                        DisplayFromProjectId(m.ProjectId), m.Module, m.Line, m.Column, m.Length, m.Preview))],
+                    result?.Truncated ?? false,
+                    replaced);
+
+                Log.Info($"search: '{query}' in {scope} -> {matches.Length} match(es)"
+                         + (replacement is null ? string.Empty : $", {replaced} replaced"));
+            });
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"search: '{query}' failed", ex);
+            _editorSurface?.RunOnHostThread(() => _editorSurface?.ShowSearchResults(id, [], truncated: false));
+        }
+    }
+
+    /// <summary>
+    /// Rewrites every matched line through its own module. Grouped per module and applied
+    /// bottom-up per line so earlier replacements cannot move later ones; each line is re-read
+    /// and re-matched at the moment of writing, so a stale hit rewrites nothing.
+    /// </summary>
+    private int ReplaceMatches(EngineSearchMatch[] matches, string query, bool matchCase, bool wholeWord, string replacement)
+    {
+        var replaced = 0;
+        var comparison = matchCase ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+        foreach (var group in matches.GroupBy(m => (m.ProjectId, m.Module)))
+        {
+            try
+            {
+                using var component = FindComponent(group.Key.Module, group.Key.ProjectId, out _);
+                using var code = component?.GetObject("CodeModule");
+                if (code is null)
+                {
+                    continue;
+                }
+
+                foreach (var line in group.Select(m => m.Line).Distinct().OrderByDescending(l => l))
+                {
+                    var text = code.GetStringIndexed("Lines", line, 1);
+                    if (text is null)
+                    {
+                        continue;
+                    }
+
+                    var rewritten = ReplaceInLine(text, query, replacement, comparison, wholeWord, out var count);
+                    if (count > 0)
+                    {
+                        code.Invoke("ReplaceLine", line, rewritten);
+                        replaced += count;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"search: could not replace in {group.Key.Module} ({ex.GetType().Name})");
+            }
+        }
+
+        return replaced;
+    }
+
+    /// <summary>Every occurrence in one line, with the same matching the engine searched by.</summary>
+    private static string ReplaceInLine(
+        string line, string query, string replacement, StringComparison comparison, bool wholeWord, out int count)
+    {
+        count = 0;
+        var result = new System.Text.StringBuilder(line.Length);
+        var from = 0;
+
+        while (from < line.Length)
+        {
+            var at = line.IndexOf(query, from, comparison);
+            if (at < 0)
+            {
+                break;
+            }
+
+            var boundaryBefore = at == 0 || !IsWordCharacter(line[at - 1]);
+            var boundaryAfter = at + query.Length >= line.Length || !IsWordCharacter(line[at + query.Length]);
+
+            if (wholeWord && (!boundaryBefore || !boundaryAfter))
+            {
+                result.Append(line, from, at + 1 - from);
+                from = at + 1;
+                continue;
+            }
+
+            result.Append(line, from, at - from);
+            result.Append(replacement);
+            from = at + query.Length;
+            count++;
+        }
+
+        result.Append(line, from, line.Length - from);
+        return result.ToString();
+    }
+
+    private static bool IsWordCharacter(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>Moves line-anchored breakpoints with the text they were set on.</summary>
     private void OnLinesShifted(int afterLine, int delta)
@@ -2529,12 +2699,78 @@ internal sealed class AddInSession : IDisposable
         // tracker's recovery republishes it.
         if (ReadOpenModules() is { } modules)
         {
+            // Dirty is a WORKBOOK fact — the editor persists all of a workbook's modules
+            // together (probed 2026-08-04: a module edit flips Workbook.Saved false, Save
+            // flips it true) — so it is read once per workbook and worn by every tab the
+            // workbook owns.
+            var dirtyByProject = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+            bool DirtyOf(string? project)
+            {
+                var display = DisplayFromProjectId(project);
+                if (display is not { Length: > 0 })
+                {
+                    return false;
+                }
+
+                if (!dirtyByProject.TryGetValue(display, out var dirty))
+                {
+                    dirty = IsWorkbookDirty(display);
+                    dirtyByProject[display] = dirty;
+                }
+
+                return dirty;
+            }
+
             surface.ShowModules(
                 [.. modules.Select(m => m.Name)],
                 [.. modules.Select(m => m.Project)],
                 surface.Module,
-                DisplayFromProjectId(_shownProject));
+                DisplayFromProjectId(_shownProject),
+                [.. modules.Select(m => DirtyOf(m.Project))]);
         }
+    }
+
+    /// <summary>The host application, kept between reads; a refusal drops it for a re-find.</summary>
+    private DispatchObject? _hostApp;
+
+    /// <summary>
+    /// Whether a workbook has unsaved changes, by its display name, through the same trust-free
+    /// application route the evaluator uses. Unknown reads as clean: a missing dot is a small
+    /// wrong, a lying dot is a large one.
+    /// </summary>
+    private bool IsWorkbookDirty(string display)
+    {
+        try
+        {
+            _hostApp ??= HostApplication.Find();
+            if (_hostApp is null)
+            {
+                return false;
+            }
+
+            using var books = _hostApp.GetObject("Workbooks");
+            var count = books?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var book = books!.GetItem(i);
+                if (book is not null
+                    && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
+                {
+                    return !book.GetBool("Saved");
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // The application answer went stale — a workbook closed mid-read, or the host is
+            // busy. Re-found on the next read.
+            _hostApp?.Dispose();
+            _hostApp = null;
+        }
+
+        return false;
     }
 
     /// <summary>

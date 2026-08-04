@@ -392,6 +392,27 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public Action<int, int>? LinesShifted { get; set; }
 
+    /// <summary>The page asked to search: id, query, matchCase, wholeWord, scope.</summary>
+    public Action<int, string, bool, bool, string>? SearchRequested { get; set; }
+
+    /// <summary>The page asked to replace across a scope: the search's shape plus the replacement.</summary>
+    public Action<int, string, bool, bool, string, string>? ReplaceAllRequested { get; set; }
+
+    /// <summary>Answers a search, echoing its id; replaced counts a replace-all's edits.</summary>
+    public void ShowSearchResults(int id, SurfaceSearchMatch[] matches, bool truncated, int replaced = 0)
+    {
+        ArgumentNullException.ThrowIfNull(matches);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SearchResultMessage("searchResult", id, matches, truncated, replaced),
+            EditorMessageContext.Default.SearchResultMessage));
+    }
+
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
@@ -623,13 +644,13 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.</summary>
-    public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject)
+    public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject, bool[]? dirty = null)
     {
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(projects);
 
         Send("setModules", JsonSerializer.Serialize(
-            new SetModulesMessage("setModules", modules, projects, active, activeProject),
+            new SetModulesMessage("setModules", modules, projects, active, activeProject, dirty),
             EditorMessageContext.Default.SetModulesMessage));
     }
 
@@ -1219,6 +1240,36 @@ internal sealed class EditorSurface : IDisposable
                             ? outlineOwner.GetString()
                             : null;
                         OutlineRequested?.Invoke(outlineRequestId, outlineModule, outlineProject);
+                    }
+
+                    break;
+
+                case "search":
+                case "replaceAll":
+                    if (document.RootElement.TryGetProperty("id", out var searchId)
+                        && searchId.TryGetInt32(out var searchRequestId)
+                        && document.RootElement.TryGetProperty("query", out var queryElement)
+                        && queryElement.GetString() is { Length: > 0 } query)
+                    {
+                        var matchCase = document.RootElement.TryGetProperty("matchCase", out var caseElement)
+                            && caseElement.ValueKind is JsonValueKind.True;
+                        var wholeWord = document.RootElement.TryGetProperty("wholeWord", out var wordElement)
+                            && wordElement.ValueKind is JsonValueKind.True;
+                        var scope = document.RootElement.TryGetProperty("scope", out var scopeElement)
+                            ? scopeElement.GetString() ?? "module"
+                            : "module";
+
+                        if (type.GetString() == "search")
+                        {
+                            SearchRequested?.Invoke(searchRequestId, query, matchCase, wholeWord, scope);
+                        }
+                        else
+                        {
+                            var replacement = document.RootElement.TryGetProperty("replacement", out var replacementElement)
+                                ? replacementElement.GetString() ?? string.Empty
+                                : string.Empty;
+                            ReplaceAllRequested?.Invoke(searchRequestId, query, matchCase, wholeWord, scope, replacement);
+                        }
                     }
 
                     break;

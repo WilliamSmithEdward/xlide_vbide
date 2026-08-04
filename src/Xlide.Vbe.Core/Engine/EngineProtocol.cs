@@ -88,6 +88,20 @@ public sealed record EngineOutlineProcedure(
 public sealed record EngineOutline(
     [property: JsonPropertyName("procedures")] EngineOutlineProcedure[] Procedures);
 
+/// <summary>One search hit: where it is, and the line it sits on for the results list.</summary>
+public sealed record EngineSearchMatch(
+    [property: JsonPropertyName("projectId")] string ProjectId,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("column")] int Column,
+    [property: JsonPropertyName("length")] int Length,
+    [property: JsonPropertyName("preview")] string Preview);
+
+/// <summary>What a workspace search found; truncated says the limit spoke, not the text.</summary>
+public sealed record EngineSearchResult(
+    [property: JsonPropertyName("matches")] EngineSearchMatch[] Matches,
+    [property: JsonPropertyName("truncated")] bool Truncated);
+
 /// <summary>
 /// What opening a project taught the engine: how many modules, and the project's own words —
 /// names that denote types and names that denote procedures, for the surface's tokenizer.
@@ -131,6 +145,8 @@ public sealed record EngineProjectOpened(
 // type is registered; leaving it out fails at run time, in the middle of a keystroke.
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+[JsonSerializable(typeof(EngineSearchResult))]
+[JsonSerializable(typeof(EngineSearchMatch))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;
 
 /// <summary>

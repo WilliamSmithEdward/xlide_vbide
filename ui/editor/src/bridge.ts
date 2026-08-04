@@ -50,7 +50,7 @@ export type HostMessage =
   | { type: "notice"; text: string }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
-  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null }
+  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[] }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
   | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
@@ -70,6 +70,7 @@ export type HostMessage =
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
+  | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
   | {
     type: "setSettings";
     blockLayout: string;
@@ -87,6 +88,15 @@ export interface HostProcedure {
   line: number;
 }
 
+/** One search hit as the host answers it; workbook is the display name, or null unsaid. */
+export interface HostSearchMatch {
+  workbook?: string | null;
+  module: string;
+  line: number;
+  column: number;
+  length: number;
+  preview: string;
+}
 /** A text replacement, UTF-16 offsets into the live source; an insertion has start === end. */
 export interface HostTextEdit {
   start: number;
@@ -176,6 +186,8 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "outline"; id: number; module: string; project?: string }
+  | { type: "search"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string }
+  | { type: "replaceAll"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string; replacement: string }
   | {
     type: "updateSettings";
     blockLayout: string;
@@ -611,7 +623,7 @@ export class EditorBridge {
         this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");
         return;
       case "setModules":
-        this.shell?.setModules(message.modules, message.projects ?? [], message.active, message.activeProject ?? null);
+        this.shell?.setModules(message.modules, message.projects ?? [], message.active, message.activeProject ?? null, message.dirty ?? []);
         return;
       case "setFindings":
         this.shell?.setFindings(message.findings);
@@ -700,6 +712,9 @@ export class EditorBridge {
       case "setLanguageFacts":
         updateVbaLanguageFacts(message.types, message.procedures);
         return;
+      case "searchResult":
+        this.shell?.showSearchResults(message.id, message.matches, message.truncated, message.replaced ?? 0);
+        return;
       case "setLocals":
         this.shell?.setLocals(message.context ?? null, message.rows ?? []);
         return;
@@ -739,6 +754,21 @@ export class EditorBridge {
    * Writes a line into the host's log, because the page has no log of its own that support can
    * read. For the moments when the question is which side of the bridge went quiet.
    */
+  private nextSearchId = 1;
+
+  /** Sends a search to the host; the answer returns as a searchResult with the same id. */
+  requestSearch(query: string, matchCase: boolean, wholeWord: boolean, scope: string): number {
+    const id = this.nextSearchId++;
+    this.transport.post({ type: "search", id, query, matchCase, wholeWord, scope });
+    return id;
+  }
+
+  /** Sends a replace-all; the answer lists what remained matched, plus the replaced count. */
+  requestReplaceAll(query: string, matchCase: boolean, wholeWord: boolean, scope: string, replacement: string): number {
+    const id = this.nextSearchId++;
+    this.transport.post({ type: "replaceAll", id, query, matchCase, wholeWord, scope, replacement });
+    return id;
+  }
   trace(text: string): void {
     this.transport.post({ type: "trace", text });
   }
@@ -1218,7 +1248,7 @@ export function demoTransport(): HostTransport {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
-        send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1" });
+        send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1", dirty: [true, true] });
         send({
           type: "setSettings",
           blockLayout: "comfy",
@@ -1336,6 +1366,18 @@ export function demoTransport(): HostTransport {
       }
       // The demo persists nothing, so the echo IS the write: what the dialog asks for comes
       // straight back, which exercises the same applied-on-echo path the host uses.
+      if (message.type === "search" || message.type === "replaceAll") {
+        send({
+          type: "searchResult",
+          id: message.id,
+          matches: [
+            { workbook: "Book1.xlsm", module: "Module1", line: 4, column: 8, length: message.query.length, preview: "    Const Banner As String = (demo match)" },
+            { workbook: "Book1.xlsm", module: "Module2", line: 12, column: 5, length: message.query.length, preview: "    total = total + 1 (demo match)" },
+          ],
+          truncated: false,
+          replaced: message.type === "replaceAll" ? 2 : 0,
+        });
+      }
       if (message.type === "updateSettings") {
         send({
           type: "setSettings",

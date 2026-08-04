@@ -304,3 +304,31 @@ export interface DidChangeParams {
     source?: string;
     edits?: TextEditPayload[];
 }
+
+/**
+ * workspace/search: find text across the modules the engine holds. Scope narrows by project
+ * and module; the engine searches its live text where it has one, seeded text otherwise.
+ */
+export interface SearchParams {
+    scope: 'module' | 'project' | 'all';
+    projectId?: string;
+    module?: string;
+    query: string;
+    matchCase?: boolean;
+    wholeWord?: boolean;
+}
+
+/** One hit: where, and the line it sits on, trimmed for the results list. */
+export interface SearchMatchPayload {
+    projectId: string;
+    module: string;
+    line: number;
+    column: number;
+    length: number;
+    preview: string;
+}
+
+export interface SearchResult {
+    matches: SearchMatchPayload[];
+    truncated: boolean;
+}
