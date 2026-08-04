@@ -6,21 +6,18 @@ using Xlide.Vbe.Shim.Interop;
 namespace Xlide.Vbe.Shim.Editor;
 
 /// <summary>
-/// Reads what the editor's own Locals window shows, through the accessibility interface: each
+/// Reads what the editor's own Locals window holds, through the accessibility interface: each
 /// variable is a list item whose name is the row's columns run together, and an edit control
 /// names the broken procedure. The editor exposes no debugger object — no stack, no frames, no
 /// variables — so its own window is the only place this information surfaces.
 ///
-/// DORMANT. Nothing attaches this reader today, and the reason is worth more than the code:
-/// the editor only feeds an ON-SCREEN Locals window. Hidden, it reads "&lt;No Variables&gt;"
-/// through every break. Visible but fully covered by the surface, it is fed unreliably — at
-/// some break entries, late or never, and never on a step — while any genuinely visible part,
-/// even half the window through a region hole, tracks perfectly (probed at length 2026-08-02;
-/// lesson 25 has the whole investigation). A debug panel that is sometimes right is worse than
-/// the native window through a cutout, so the native window through a cutout is what ships.
-/// This reader, the SetLocals message, and the page's Locals panel stay for the day the data
-/// has a reliable source: the debugger integration era (#14), or a restyled native window
-/// positioned inside the surface's panel.
+/// The window it reads is the GHOST PALETTE (see AddInSession.PrepareLocalsGhost): the native
+/// Locals window floated through the object model, made layered at alpha zero, and parked off
+/// the virtual screen. The editor only feeds a window with a paintable surface (lesson 25 —
+/// hidden never fills, covered fills unreliably and never on a step), and a layered window
+/// renders into its own surface regardless of position or occlusion, so the ghost is fed
+/// faithfully through every break and step while being impossible to see. Probed 2026-08-04:
+/// counter tracked 1 through 4 across steps at alpha 0, off screen (Probe-GhostLocals.ps1).
 /// </summary>
 internal sealed class LocalsReader : IDisposable
 {

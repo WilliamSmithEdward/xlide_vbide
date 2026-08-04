@@ -593,6 +593,44 @@ internal sealed class CodePaneTracker : IDisposable
         }
     }
 
+    /// <summary>
+    /// The top-level window in this process carrying this exact caption, or zero. This is how a
+    /// FLOATING tool palette is found: it is nobody's child, so the frame walks above cannot
+    /// reach it.
+    /// </summary>
+    internal static unsafe nint FindTopLevelByCaption(string caption)
+    {
+        _captionWanted = caption;
+        _captionFound = 0;
+
+        try
+        {
+            Win32.EnumWindows(
+                (nint)(delegate* unmanaged<nint, nint, int>)&OnTopLevelCaptionCandidate,
+                0);
+            return _captionFound;
+        }
+        finally
+        {
+            _captionWanted = null;
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    private static int OnTopLevelCaptionCandidate(nint window, nint parameter)
+    {
+        Win32.GetWindowThreadProcessId(window, out var owner);
+        if (owner == Win32.GetCurrentProcessId()
+            && _captionWanted is { } wanted
+            && ReadWindowText(window) == wanted)
+        {
+            _captionFound = window;
+            return 0;
+        }
+
+        return 1;
+    }
+
     /// <summary>Every descendant of a window carrying this exact class.</summary>
     internal static unsafe List<nint> FindChildrenByClass(nint root, string className)
     {

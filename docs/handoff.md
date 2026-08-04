@@ -92,7 +92,22 @@ editor only feeds an on-screen Locals window (machinery dormant in-tree; lesson 
 thread 4 has the detail). Cutout state: tools `[2,3,4,6,7]` get holes; Immediate stays
 hidden-and-mirrored. The developer has since asked for maximum creativity on getting
 Locals (and the debug windows generally) into OUR UI regardless — and on 2026-08-04 the
-CAPTIVE PALETTE route was PROVEN end to end (`tools\harness\Probe-FloatLocals.ps1`):
+GHOST PALETTE shipped the same day: **Locals is now OURS** — the themed panel is live,
+fed by the native window floated, made WS_EX_LAYERED at ALPHA ZERO, click-through, and
+parked at -20000,-20000. The feed gate was never about being SEEN: a layered window
+renders into its own surface regardless of position or occlusion, so the invisible ghost
+is fed through every break and step (`Probe-GhostLocals.ps1` tracked counter 1→4 across
+steps at alpha 0 off-screen; lesson 29). `PrepareLocalsGhost` (AddInSession) floats it via
+`LinkedWindows.Remove`, ghosts it, and attaches the once-dormant LocalsReader;
+PublishLocals pushes on the debug watch; the page's Locals tab is visible and 2555 routes
+to it; `RestoreLocalsPalette` on Stop gives a bare editor back a normal window.
+`Test-GhostLocalsPanel.ps1` is the standing PASS/FAIL probe (PASSED: 3 rows at entry,
+clear on run-end). Known nits: the context strip reads null through the COM reader (the
+Edit element's name — panel-header polish), and external-command steps outrun the poll
+cadence (real steps go through our command path, which arms the fast watch). NEXT: the
+Watch window by the identical route, then Call Stack. The earlier hole-based findings
+below stand as history; the CAPTIVE PALETTE route (visible, caption-stripped, in-panel)
+remains proven (`tools\harness\Probe-FloatLocals.ps1`):
 `window.LinkedWindowFrame.LinkedWindows.Remove(window)` UNDOCKS the Locals window through
 pure object model (its linked frame is type 11); geometry is then settable on the WINDOW
 (`.Left/.Top/.Width/.Height`, points — a 260x160-point request produced a 173x107-pixel

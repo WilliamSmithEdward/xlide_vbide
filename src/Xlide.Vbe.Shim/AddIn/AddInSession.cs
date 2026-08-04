@@ -267,6 +267,7 @@ internal sealed class AddInSession : IDisposable
         // there is nothing to identify afterwards.
         HideReplacedWindows();
         HideNativeToolbars();
+        PrepareLocalsGhost();
         DarkenTitleBar(host);
 
         return true;
@@ -1926,6 +1927,10 @@ internal sealed class AddInSession : IDisposable
                 _editorSurface?.RunEditorCommand("xlide.panel.immediate");
                 return true;
 
+            case VbeCommands.Command.LocalsWindow:
+                _editorSurface?.RunEditorCommand("xlide.panel.locals");
+                return true;
+
             case VbeCommands.Command.PropertiesWindow:
                 _editorSurface?.RunEditorCommand("xlide.panel.properties");
                 return true;
@@ -2767,13 +2772,139 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    /// <summary>
-    /// Never attached today: the Locals mirror is dormant, because the editor only feeds an
-    /// on-screen Locals window (see LocalsReader's remarks). The publish path below no-ops
-    /// while this stays null; attaching is the Immediate pattern — caption to handle to
-    /// LocalsReader.Create — the day the data has a reliable source.
-    /// </summary>
     private LocalsReader? _localsReader;
+
+    /// <summary>The floated Locals palette, its original extended styles kept for restoration.</summary>
+    private nint _localsPalette;
+    private long _localsPaletteExStyle;
+
+    /// <summary>
+    /// Turns the native Locals window into the panel's invisible data engine: floated through
+    /// the object model, ghosted, parked off screen, and read by handle.
+    ///
+    /// The editor only feeds an on-screen Locals window (lesson 25) — but "on screen" turned
+    /// out to mean "has a paintable surface". A LAYERED window renders into its own surface
+    /// regardless of occlusion or position, so a floated palette with WS_EX_LAYERED at alpha
+    /// zero, parked far off the virtual screen, is fed faithfully through every break and
+    /// step while being impossible to see, click, or discover. Probed 2026-08-04: counter
+    /// tracked 1 through 4 across steps at alpha 1, alpha 0, and at -20000,-20000
+    /// (Probe-GhostLocals.ps1). The themed panel renders what the reader reads; nothing
+    /// native is ever visible.
+    ///
+    /// Floating uses LinkedWindows.Remove on the window's own linked frame — pure object
+    /// model. If any step refuses, the ghost is skipped and the native window stays reachable
+    /// through a cutout, which is the graceful end of it.
+    /// </summary>
+    private void PrepareLocalsGhost()
+    {
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is null || window.GetInt32("Type") != 4)
+                {
+                    continue;
+                }
+
+                window.SetBool("Visible", true);
+
+                // Undocked; a window already floating answers Remove with an error worth
+                // nothing.
+                try
+                {
+                    using var frame = window.GetObject("LinkedWindowFrame");
+                    using var linked = frame?.GetObject("LinkedWindows");
+                    linked?.InvokeWithObject("Remove", window);
+                }
+                catch (Exception)
+                {
+                }
+
+                // Small: the reader reads the store, not the viewport, and the store does not
+                // shrink with the window.
+                try
+                {
+                    window.SetInt32("Left", 300);
+                    window.SetInt32("Top", 300);
+                    window.SetInt32("Width", 240);
+                    window.SetInt32("Height", 150);
+                }
+                catch (Exception)
+                {
+                }
+
+                var caption = window.GetString("Caption");
+                var palette = caption is { Length: > 0 }
+                    ? CodePaneTracker.FindTopLevelByCaption(caption)
+                    : 0;
+
+                if (palette == 0)
+                {
+                    Log.Info("locals: the floated palette was not found; the native window stays");
+                    return;
+                }
+
+                _localsPalette = palette;
+                _localsPaletteExStyle = Win32.GetWindowLongPtr(palette, Win32.GwlExStyle);
+                Win32.SetWindowLongPtr(palette, Win32.GwlExStyle,
+                    (nint)(_localsPaletteExStyle | Win32.WsExLayered | Win32.WsExTransparent | Win32.WsExNoActivate));
+                Win32.SetLayeredWindowAttributes(palette, 0, 0, Win32.LwaAlpha);
+                Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
+                    Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
+
+                _localsReader = LocalsReader.Create(palette);
+                Log.Info(_localsReader is null
+                    ? "locals: the ghost palette could not be read; the native window stays"
+                    : $"locals: ghost palette {palette:X} feeding the panel");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"locals: the ghost could not be prepared ({ex.GetType().Name}: {ex.Message})");
+        }
+    }
+
+    /// <summary>
+    /// Gives the palette back to the native editor: opaque, its styles restored, on screen,
+    /// and hidden until someone asks for it. A stopped session must leave a usable window.
+    /// </summary>
+    private void RestoreLocalsPalette()
+    {
+        if (_localsPalette == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Win32.SetWindowPos(_localsPalette, 0, 300, 300, 0, 0,
+                Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
+            Win32.SetLayeredWindowAttributes(_localsPalette, 0, 255, Win32.LwaAlpha);
+            Win32.SetWindowLongPtr(_localsPalette, Win32.GwlExStyle, (nint)_localsPaletteExStyle);
+
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is not null && window.GetInt32("Type") == 4)
+                {
+                    window.SetBool("Visible", false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"locals: the palette could not be restored ({ex.GetType().Name})");
+        }
+
+        _localsPalette = 0;
+    }
 
     /// <summary>
     /// Hides every docked native toolbar, which the surface's toolbar and menus replace.
@@ -3804,6 +3935,8 @@ internal sealed class AddInSession : IDisposable
 
         _immediateReader?.Dispose();
         _immediateReader = null;
+
+        RestoreLocalsPalette();
 
         _localsReader?.Dispose();
         _localsReader = null;

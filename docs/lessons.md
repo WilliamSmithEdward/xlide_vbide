@@ -553,3 +553,26 @@ before asking what went wrong - and when the answer is "not this", re-derive fro
 source of truth on a signal cruder than the change itself. And instrument the observer
 first: one line per pass, collapsed when identical, named this in one probe run after
 theory had missed it three times.
+
+## 29. On screen means a paintable surface, and a layered window always has one
+
+Lesson 25 ended at a wall: the editor only feeds an on-screen Locals window, and on-screen
+seemed to mean visible to the developer - which a themed product cannot allow. The wall had
+a door. The feed gate is not about being seen; it is about having somewhere to paint. A
+window with the layered extended style renders into its own off-screen surface no matter
+what covers it or where it sits, so a floated Locals palette with WS_EX_LAYERED at alpha
+zero, click-through, parked at -20000,-20000, is fed by the editor as faithfully as one the
+developer is staring at. The probe tracked a counter 1 through 4 across four steps with the
+window fully invisible and off the virtual screen.
+
+The chain that gets there is all supported surface: LinkedWindowFrame.LinkedWindows.Remove
+undocks the window through the object model; geometry is settable on the floating window in
+points; the palette is a top-level in our own process, so its styles are ours to edit. The
+ghost feeds the accessibility reader, the reader feeds the themed panel, and nothing native
+is ever visible. The reverted mirror machinery - reader, message, panel - came back to life
+unchanged; only the data source was ever wrong.
+
+Consequence: when a component gates behaviour on visibility, find out WHICH visibility it
+means. Style-visible, region-visible, and surface-visible are three different facts, and
+the layered style decouples the third from the other two - a window can be impossible to
+see and still, as far as its owner can tell, fully on display.

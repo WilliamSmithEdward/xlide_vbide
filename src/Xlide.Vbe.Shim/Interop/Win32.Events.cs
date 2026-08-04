@@ -133,4 +133,23 @@ internal static unsafe partial class Win32
 
     [LibraryImport("comctl32.dll")]
     public static partial nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
+
+    /// <summary>GWL_EXSTYLE.</summary>
+    public const int GwlExStyle = -20;
+
+    public const long WsExLayered = 0x80000;
+    public const long WsExTransparent = 0x20;
+    public const long WsExNoActivate = 0x8000000;
+
+    /// <summary>LWA_ALPHA.</summary>
+    public const uint LwaAlpha = 2;
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetLayeredWindowAttributes(nint window, uint colorKey, byte alpha, uint flags);
+
+    /// <summary>Enumerates every top-level window on the desktop; the callback filters.</summary>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EnumWindows(nint callback, nint parameter);
 }
