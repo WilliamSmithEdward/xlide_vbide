@@ -100,6 +100,13 @@ function boot(): void {
       showSlider: "always",
     },
     scrollBeyondLastLine: false,
+    // The find widget floats over the text instead of reserving a band above it: opening it
+    // pushed the first line down a widget's height, which read as the document jumping
+    // (developer, 2026-08-04). Floating, it may cover the top line while open — the trade
+    // every editor with a floating find makes.
+    find: {
+      addExtraSpaceOnTop: false,
+    },
     renderLineHighlight: "line",
     renderWhitespace: "selection",
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',

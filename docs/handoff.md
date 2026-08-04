@@ -11,6 +11,19 @@ that would be expensive to reverse.
 ## START NEW SESSION HERE — 2026-08-04 midday
 
 **2026-08-04 delta (read this first):**
+- **Afternoon batch** (commits `eb31423`..`HEAD`, each message carries its story): tabs
+  indent by default; the engine finally calls `resolveTypeCompletions` (types after `As`);
+  toolbar gained Clear-all-breakpoints and a comment/uncomment/toggle suite; breakpoints
+  tell the truth (hover previews dim-dot-or-orange-X via a page mirror of CanBreakOn, click
+  draws nothing on refusal, clears never validity-gated, and the record SHIFTS with edits —
+  the ghost dot was line-drift the log named); a maximised Object Browser is restored to a
+  window by the cutout pass (it had no close box and no way back); WM_SIZE places bounds
+  only (PlaceSurfaceFast — the lag was OM work per drag tick; developer confirms mostly
+  gone, residual canvas flicker = compositor catch-up, known); the find widget floats
+  instead of pushing line 1 down. QUEUED with specs in tasks #38/#39: the scoped search
+  panel (module/workbook/all — engine-side search over its seeded live text) and per-
+  workbook unsaved tab dots (verify the all-modules-save-together model via Workbook.Saved
+  first; the developer believes it but asked it be checked).
 - **The tab X's REAL mechanism, found third: the tracker cannot see a hidden pane close.**
   The pointer-path and render-skip fixes below were sound but fixed a different (real,
   demo-proven) race; the live bug was host-side, and the per-pass verbose instrumentation

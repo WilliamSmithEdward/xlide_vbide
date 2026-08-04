@@ -48,7 +48,11 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "editor.action.quickCommand", target: "editor", icon: "list-flat", label: "Command palette (F1)" },
   { id: "editor.action.gotoLine", target: "editor", icon: "go-to-file", label: "Go to line (Ctrl+G)" },
 
-  { id: "editor.action.commentLine", target: "editor", icon: "comment", label: "Toggle comment (Ctrl+/)", separatorBefore: true },
+  // The comment suite, the way the native editor's Edit toolbar offered it: comment and
+  // uncomment as their own buttons for block work, the toggle for the quick single line.
+  { id: "editor.action.addCommentLine", target: "editor", icon: "comment", label: "Comment lines", separatorBefore: true },
+  { id: "editor.action.removeCommentLine", target: "editor", icon: "comment-draft", label: "Uncomment lines" },
+  { id: "editor.action.commentLine", target: "editor", icon: "comment-discussion", label: "Toggle comment (Ctrl+/)" },
   { id: "editor.action.indentLines", target: "editor", icon: "arrow-right", label: "Indent" },
   { id: "editor.action.outdentLines", target: "editor", icon: "arrow-left", label: "Outdent" },
   { id: "editor.action.formatDocument", target: "editor", icon: "symbol-namespace", label: "Format module" },
