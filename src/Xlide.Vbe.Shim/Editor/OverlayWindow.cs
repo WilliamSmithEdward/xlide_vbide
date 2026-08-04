@@ -512,7 +512,18 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         return 0;
                     }
 
-                    // The browser owns the pixels; the default handling just validates.
+                    // The browser owns the pixels — but only the ones it covers. During a
+                    // resize this window grows before the browser child has, and the fringe
+                    // beyond it holds whatever was on screen before: the old native editor,
+                    // bleeding through every drag tick. The fringe is painted the theme's
+                    // ground instead; the browser's own area is clipped out by WS_CLIPCHILDREN,
+                    // so this costs nothing once the child has caught up.
+                    if (overlay is not null)
+                    {
+                        PaintGround(window);
+                        return 0;
+                    }
+
                     break;
                 }
 
@@ -562,6 +573,35 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
         var handle = GCHandle.FromIntPtr(stored);
         return handle.IsAllocated ? handle.Target as OverlayWindow : null;
+    }
+
+    /// <summary>
+    /// Fills the update region with the theme's ground colour. This is what shows in the
+    /// moments the browser child does not yet cover: the fringe of a resize, and the beat
+    /// between placement and the child's own catch-up.
+    /// </summary>
+    private static void PaintGround(nint window)
+    {
+        PaintStruct paint;
+        var dc = Win32.BeginPaint(window, &paint);
+        if (dc == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var background = Win32.CreateSolidBrush(LoaderBackground);
+            if (background != 0)
+            {
+                _ = Win32.FillRect(dc, &paint.Paint, background);
+                Win32.DeleteObject(background);
+            }
+        }
+        finally
+        {
+            Win32.EndPaint(window, &paint);
+        }
     }
 
     /// <summary>

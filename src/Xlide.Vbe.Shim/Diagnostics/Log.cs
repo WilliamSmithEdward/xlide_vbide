@@ -62,6 +62,37 @@ internal static class Log
     public static void Error(string message, Exception exception) =>
         Write("error", $"{message}: {exception.GetType().Name}: {exception.Message}");
 
+    /// <summary>
+    /// Whether verbose lines are written. ON by default while the product is in its development
+    /// phase: the developer runs live tests, and the log is the only witness anyone can read
+    /// afterwards, so it errs towards telling everything. Set XLIDE_VERBOSE=0 to quiet it;
+    /// release engineering (#15) owns flipping the default.
+    /// </summary>
+    public static bool VerboseEnabled { get; } =
+        Environment.GetEnvironmentVariable("XLIDE_VERBOSE") != "0";
+
+    /// <summary>
+    /// A line for the development log: state transitions, event traffic, decisions taken.
+    /// Callers building an expensive message should check <see cref="VerboseEnabled"/> first.
+    /// </summary>
+    public static void Verbose(string message)
+    {
+        if (VerboseEnabled)
+        {
+            Write("verb", message);
+        }
+    }
+
+    /*
+     * Consecutive duplicate collapsing. Verbose logging turns window-event storms into log
+     * storms — a resize drag repeats one identical line hundreds of times — and a log that is
+     * mostly repetition hides the line that matters. An identical consecutive line is counted
+     * instead of written; the count is flushed when a different line arrives, so the shape of
+     * the burst is preserved in one line.
+     */
+    private static string? _lastKey;
+    private static int _suppressed;
+
     private static void Write(string level, string message)
     {
         if (_failed)
@@ -77,20 +108,38 @@ internal static class Log
             var thread = Environment.CurrentManagedThreadId;
             var origin = thread == _hostThread ? "host" : $"t{thread}";
 
-            var line = string.Create(CultureInfo.InvariantCulture,
-                $"{DateTime.Now:HH:mm:ss.fff} [{level}] [{origin}] {message}{Environment.NewLine}");
-
-            Debug.Write(line);
-
-            var path = _path;
-            if (path is null)
-            {
-                return;
-            }
+            var key = string.Concat(level, "|", origin, "|", message);
 
             lock (Gate)
             {
-                File.AppendAllText(path, line, Encoding.UTF8);
+                if (key == _lastKey)
+                {
+                    _suppressed++;
+                    return;
+                }
+
+                var text = new StringBuilder(message.Length + 64);
+
+                if (_suppressed > 0)
+                {
+                    text.Append(CultureInfo.InvariantCulture,
+                        $"{DateTime.Now:HH:mm:ss.fff} [info] [host] … last line repeated {_suppressed} more time(s){Environment.NewLine}");
+                    _suppressed = 0;
+                }
+
+                _lastKey = key;
+
+                text.Append(CultureInfo.InvariantCulture,
+                    $"{DateTime.Now:HH:mm:ss.fff} [{level}] [{origin}] {message}{Environment.NewLine}");
+
+                var line = text.ToString();
+                Debug.Write(line);
+
+                var path = _path;
+                if (path is not null)
+                {
+                    File.AppendAllText(path, line, Encoding.UTF8);
+                }
             }
         }
         catch

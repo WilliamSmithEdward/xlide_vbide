@@ -30,7 +30,6 @@ const INDEX_HTML = `<!doctype html>
   <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
   <div id="main">
     <div id="sidebar">
-      <div id="sidebar-head">Project</div>
       <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
       <div id="properties-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the properties panel" tabindex="0" hidden></div>
       <div id="properties" hidden>

@@ -162,6 +162,33 @@ internal partial interface ICoreWebView2Controller
 }
 
 /// <summary>
+/// The controller's second revision, which adds the colour the browser shows wherever it has
+/// nothing newer to draw: behind a page that is still loading, and in the fringe of a resize
+/// before the renderer catches up. Left at its default that colour is white, and a white flash
+/// through a dark editor reads as a defect all by itself.
+/// </summary>
+[GeneratedComInterface]
+[Guid("c979903e-d4ca-4228-92eb-47ee3fa96eab")]
+internal partial interface ICoreWebView2Controller2 : ICoreWebView2Controller
+{
+    [PreserveSig]
+    int GetDefaultBackgroundColor(out WebViewColor color);
+
+    [PreserveSig]
+    int PutDefaultBackgroundColor(WebViewColor color);
+}
+
+/// <summary>COREWEBVIEW2_COLOR: alpha first, then red, green, blue.</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct WebViewColor
+{
+    public byte A;
+    public byte R;
+    public byte G;
+    public byte B;
+}
+
+/// <summary>
 /// The content surface: navigation, scripting, and the message channel that will eventually carry
 /// everything between the editor surface and the shim.
 /// </summary>
@@ -613,6 +640,7 @@ internal static class WebViewIid
     public static readonly Guid WebMessageReceivedEventArgs = new("0f99a40c-e962-4207-9e92-e3d542eff849");
     public static readonly Guid Environment = new("b96d755e-0319-4e92-a296-23436f46a1fc");
     public static readonly Guid Controller = new("4d00c0d1-9434-4eb6-8078-8697a560334f");
+    public static readonly Guid Controller2 = new("c979903e-d4ca-4228-92eb-47ee3fa96eab");
     public static readonly Guid WebView = new("76eceacb-0462-4d94-ac83-423a6793775e");
 
     /// <summary>

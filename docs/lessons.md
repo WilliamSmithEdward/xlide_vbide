@@ -461,3 +461,31 @@ that it is on screen. A text buffer (Immediate) keeps its content wherever it is
 what the owner never wrote. And when a probe contradicts the last one, suspect the probe's
 model of the system before the system: two of five contradictions here were the probe's own
 misreadings.
+
+## 26. Covering loses to unclipped painters, hiding loses to the owner, a region wins
+
+The native menu bar kept flickering through the surface on every resize, after the surface
+was already covering it and already re-placing itself synchronously inside WM_SIZE. The
+bands the menu and toolbars live in - MsoCommandBarDock and their children - paint without
+clipping their siblings, so being covered does not stop them: they stamp their pixels
+straight over whatever is above them, and the surface repaints a beat later. That is the
+whole flicker.
+
+Escalation one, hiding their windows, converted the fight into a different fight: the
+editor's own layout shows the docks again on every resize, and the beat between its
+ShowWindow and the next placement pass is the same flash. The log told that story plainly -
+"chrome bands: hid 1 of 8" repeating once per resize, forever.
+
+Escalation two ended it: give each band window an EMPTY region. A zero-region window owns no
+pixels and cannot paint, while its visibility, its layout slot, and everything the editor
+believes about it stay exactly as they were - so nothing re-shows, nothing relayouts, and
+nothing fights back, because nothing in Office ever sets or resets a region on these
+windows. One log line per session: "chrome bands: silenced 8 of 8", set once, holds through
+every resize. Restored (SetWindowRgn null) whenever the surface is not covering the chrome
+and when the session stops, so a bare editor keeps its menus.
+
+Consequence: to keep a sibling window from showing, pick the mechanism the OWNER does not
+manage. Visibility and position belong to the window's owner and it will reassert them;
+window regions belong to nobody in Office code, so a region is not a fight but a fact. And
+when two mechanisms churn against each other, the deduplicated log names the loser - the
+repeated line IS the fight.

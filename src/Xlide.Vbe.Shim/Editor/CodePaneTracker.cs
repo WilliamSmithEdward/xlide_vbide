@@ -96,12 +96,26 @@ internal sealed class CodePaneTracker : IDisposable
         Refresh();
     }
 
+    /// <summary>
+    /// Raised when the editor's own frame or its document area moves or resizes.
+    ///
+    /// This is a different fact from <see cref="Changed"/>, and the difference bit: Changed
+    /// fires only when the PANE list differs, so an editor with no visible pane — the empty
+    /// workspace — resized in silence, and the surface sat at its old size while the window
+    /// grew around it (the developer's report, 2026-08-04). The frame's own window events are
+    /// the one signal that exists in every state.
+    /// </summary>
+    public Action? FrameChanged { get; set; }
+
     private void OnWindowEvent(WindowEvent windowEvent)
     {
         if (!windowEvent.AffectsLayout || windowEvent.IsCaret)
         {
             return;
         }
+
+        var className = ReadClassName(windowEvent.Window);
+        Log.Verbose($"window event: {windowEvent.Describe()} {className} {windowEvent.Window:X}");
 
         // A pane appearing or disappearing is the only thing that can change which components have
         // panes open, so it is the only thing that invalidates the expensive half of a refresh.
@@ -112,6 +126,13 @@ internal sealed class CodePaneTracker : IDisposable
         }
 
         Refresh();
+
+        // After the refresh, so a pane-driven placement (via Changed) has already happened and
+        // the frame-driven one sees final rectangles.
+        if (className == FrameClass || className == "MDIClient")
+        {
+            FrameChanged?.Invoke();
+        }
     }
 
     /// <summary>Rebuilds the picture from both sources.</summary>
@@ -481,6 +502,40 @@ internal sealed class CodePaneTracker : IDisposable
         {
             _captionWanted = null;
         }
+    }
+
+    /// <summary>Every descendant of a window carrying this exact class.</summary>
+    internal static unsafe List<nint> FindChildrenByClass(nint root, string className)
+    {
+        _classWanted = className;
+        _classFound = [];
+
+        try
+        {
+            Win32.EnumChildWindows(
+                root,
+                (nint)(delegate* unmanaged<nint, nint, int>)&OnClassCandidate,
+                0);
+            return _classFound;
+        }
+        finally
+        {
+            _classWanted = null;
+        }
+    }
+
+    private static string? _classWanted;
+    private static List<nint> _classFound = [];
+
+    [UnmanagedCallersOnly]
+    private static int OnClassCandidate(nint window, nint parameter)
+    {
+        if (_classWanted is { } wanted && ReadClassName(window) == wanted)
+        {
+            _classFound.Add(window);
+        }
+
+        return 1;
     }
 
     private static string? _captionWanted;

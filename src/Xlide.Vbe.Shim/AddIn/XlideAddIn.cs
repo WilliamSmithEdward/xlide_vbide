@@ -140,11 +140,13 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     }
 
     /// <summary>
-    /// A tick after OnBeginShutdown, on a host thread that is evidently still pumping. If the
-    /// editor's frame is standing, the developer cancelled the shutdown, and the session is
-    /// stood up again from the retained pointers, exactly as OnConnection stood it up. A real
-    /// shutdown never gets here: the thread stops pumping, and OnDisconnection retires the
-    /// watchdog anyway.
+    /// A tick after the shutdown began, on a host thread that is evidently still pumping. If
+    /// the editor's frame is standing, visible, and enabled, the developer cancelled the
+    /// shutdown, and the session is stood up again from the retained pointers, exactly as
+    /// OnConnection stood it up. The watchdog survives OnDisconnection(HostShutdown) for this:
+    /// the host disconnects BEFORE the save prompt, so on a cancellation the watchdog is the
+    /// only thing left alive that can answer. A real shutdown stops pumping and dies with the
+    /// process.
     /// </summary>
     private void OnWatchdogTick()
     {
@@ -159,17 +161,19 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             var frame = CodePaneTracker.FindFrame();
             if (frame == 0)
             {
-                // No editor frame yet: either the teardown is mid-flight after all, or the
-                // frame is briefly gone. A few patient ticks tell the difference.
+                // No editor frame: the teardown is mid-flight, or the editor window is gone
+                // until the developer next opens it. Both are the same wait. A dying process
+                // takes the watchdog with it, and in a living one the tick costs a window
+                // enumeration, so there is no budget to spend — standing down here is what
+                // would strand a cancelled shutdown whose editor window did not survive.
                 _watchdogEnabledTicks = 0;
-                if (++_watchdogTicks >= 8)
-                {
-                    Log.Info("watchdog: no editor frame returned, standing down");
-                    RetireWatchdog();
-                }
-
+                _watchdogTicks++;
+                Log.Verbose($"watchdog: no frame yet, tick {_watchdogTicks}");
                 return;
             }
+
+            Log.Verbose($"watchdog: frame {frame:X}, visible {Win32.IsWindowVisible(frame)}, " +
+                        $"enabled {Win32.IsWindowEnabled(frame)}, ticks {_watchdogEnabledTicks}");
 
             // A standing frame is not yet the answer. The host asks about unsaved changes with
             // an app-modal dialog AFTER OnBeginShutdown, and a modal loop pumps timers, so a
@@ -181,7 +185,13 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             // across consecutive ticks is the cancellation. The wait costs nothing — while the
             // dialog is up the developer is looking at the dialog — and it does not spend the
             // patience budget above, because a dialog can sit unanswered for minutes.
-            if (!Win32.IsWindowEnabled(frame))
+            //
+            // Visible as well as enabled, now that the watchdog also outlives OnDisconnection:
+            // a real teardown that briefly re-enables windows on its way down hides them first,
+            // and a cancellation with the editor window closed simply waits here — ticking
+            // costs a window enumeration — until the developer reopens it, which is the first
+            // moment a revival has anything to serve anyway.
+            if (!Win32.IsWindowEnabled(frame) || !Win32.IsWindowVisible(frame))
             {
                 _watchdogEnabledTicks = 0;
                 return;
@@ -231,14 +241,30 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
         {
             Log.Info($"OnDisconnection, mode {disconnectMode}");
 
-            RetireWatchdog();
-
             var session = _session;
             _session = null;
 
             session?.Stop();
             session?.Dispose();
 
+            if (disconnectMode == ExtDisconnectMode.HostShutdown)
+            {
+                // Not goodbye yet. The host says HostShutdown BEFORE it asks about unsaved
+                // changes, and Cancel abandons the whole shutdown with no callback that ever
+                // says so — observed 2026-08-02: OnBeginShutdown and OnDisconnection landed
+                // three seconds before the save prompt appeared, the developer cancelled, and
+                // the editor came back with the add-in dead and nothing listening. The editor
+                // never re-calls OnConnection inside that Excel, so the watchdog and the
+                // retained pointers are the only route back. A real shutdown simply stops
+                // pumping and the process exit cleans all of this up.
+                _watchdogTicks = 0;
+                _watchdogEnabledTicks = 0;
+                _watchdog ??= ShutdownWatchdog.Create(OnWatchdogTick);
+                Log.Info("disconnected for host shutdown; the watchdog stands by for a cancellation");
+                return HResult.Ok;
+            }
+
+            RetireWatchdog();
             ReleaseHostPointers();
 
             Log.Info("disconnected cleanly");

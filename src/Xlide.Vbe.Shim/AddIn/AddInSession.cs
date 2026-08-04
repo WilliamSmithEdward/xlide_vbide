@@ -178,6 +178,9 @@ internal sealed class AddInSession : IDisposable
             Log.Info("editor surface: the document area changed, rebuilding");
             _editorSurface.Dispose();
             _editorSurface = null;
+
+            _frameSubclass?.Dispose();
+            _frameSubclass = null;
         }
 
         if (_editorSurface is not null)
@@ -190,6 +193,11 @@ internal sealed class AddInSession : IDisposable
         {
             return false;
         }
+
+        // In the frame's message chain, so a resize re-places the surface synchronously —
+        // before the native layout paints — instead of a posted event later. The event route
+        // stays as the correcting pass.
+        _frameSubclass ??= FrameSubclass.Install(host, RefreshSurfacePlacement);
 
         _editorSurface.KeyPressed = OnSurfaceKey;
         _editorSurface.ModuleRequested = ShowModule;
@@ -277,6 +285,9 @@ internal sealed class AddInSession : IDisposable
 
     /// <summary>Which panes existed and showed when they were last logged. See TrackCodePanes.</summary>
     private string? _lastPaneComposition;
+
+    /// <summary>In the frame's message chain while the surface lives. See EnsureSurfaceForFrame.</summary>
+    private FrameSubclass? _frameSubclass;
 
     /// <summary>
     /// Puts the surface over an editor that has no panes at all, which is what a fresh
@@ -454,12 +465,15 @@ internal sealed class AddInSession : IDisposable
         {
             var pane = panes.FirstOrDefault(p => p.IsVisible && !IsScratchComponent(p.Component));
 
+            Log.Verbose($"follow: {panes.Count} pane(s), covering '{pane.Component ?? "(none)"}'");
+
             if (pane.Window == 0)
             {
                 // A visible pane that was filtered out is the evaluator's scratch module mid
                 // evaluation. Everything stays as it is; the pane is gone a moment later.
                 if (panes.Any(p => p.IsVisible))
                 {
+                    Log.Verbose("follow: only the evaluator's scratch pane is visible, staying put");
                     return;
                 }
 
@@ -1450,6 +1464,9 @@ internal sealed class AddInSession : IDisposable
         {
             using var project = _editor.GetObject("ActiveVBProject");
             var mode = project?.GetInt32("Mode") ?? DesignMode;
+
+            // Collapses to one line per state in the development log.
+            Log.Verbose($"debug: mode {mode} ({(mode == BreakMode ? "break" : mode == DesignMode ? "design" : "run")})");
 
             // The read answered, so the busy episode, if there was one, is over.
             _debugReadFailureLogged = false;
@@ -3377,11 +3394,21 @@ internal sealed class AddInSession : IDisposable
     {
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0)
         {
+            Log.Verbose($"placement: skipped (surface {(_editorSurface is null ? "none" : "up")}, " +
+                        $"shown {_surfaceShown}, frame {_frame:X}, documents {_documentArea:X})");
             return;
         }
 
         var covering = CanCoverChrome();
-        _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, covering), visible: true);
+
+        // Before anything paints this cycle: on the synchronous WM_SIZE route this runs ahead
+        // of the native layout, so a hidden band never gets to draw at all.
+        SetNativeChromeBands(visible: !covering);
+
+        var bounds = SurfaceBounds(_frame, _documentArea, covering);
+        Log.Verbose($"placement: {bounds.Width}x{bounds.Height} at {bounds.Left},{bounds.Top}, covering {covering}");
+
+        _editorSurface.Follow(bounds, visible: true);
         _editorSurface.SetChrome(menuBar: covering);
 
         // After Follow, so the holes are cut against the placement they were computed for.
@@ -3411,6 +3438,63 @@ internal sealed class AddInSession : IDisposable
     private string? _lastHoleKey;
 
     /// <summary>
+    /// Silences or restores the windows the native menu bar and toolbars live in, by region
+    /// rather than by visibility.
+    ///
+    /// Covering them was not enough: the bands paint without clipping their siblings, so
+    /// every resize stamped the native menu bar straight over the surface — "the native menu
+    /// bar bleeds thru", 2026-08-04. Hiding their windows was not enough either: the editor's
+    /// own layout shows them again on every resize, and the beat between its show and our
+    /// next hide is the same flash. An EMPTY window region ends the argument: the window
+    /// stays exactly as visible as the editor believes, its layout never changes, and it owns
+    /// no pixels to paint with — Office never sets or resets regions on these, so nothing
+    /// fights back. The commands lose nothing: menu reading and execution go through the
+    /// object model, which has driven invisible bars since the Standard toolbar was retired.
+    ///
+    /// Restored whenever the surface is not covering the chrome, which is the loading phase:
+    /// a stalled loader retreats below the native menu bar, and the bar it retreats below
+    /// must be a real one.
+    /// </summary>
+    private void SetNativeChromeBands(bool visible)
+    {
+        if (_frame == 0)
+        {
+            return;
+        }
+
+        var docks = CodePaneTracker.FindChildrenByClass(_frame, "MsoCommandBarDock");
+        var changed = 0;
+
+        foreach (var dock in docks)
+        {
+            // Region complexity: 0 is no region set, 1 is an empty one. Checked first because
+            // setting a region forces a repaint, and this runs on every placement pass.
+            var probe = Win32.CreateRectRgn(0, 0, 0, 0);
+            var kind = Win32.GetWindowRgn(dock, probe);
+            Win32.DeleteObject(probe);
+
+            if (visible)
+            {
+                if (kind != 0)
+                {
+                    _ = Win32.SetWindowRgn(dock, 0, true);
+                    changed++;
+                }
+            }
+            else if (kind != 1)
+            {
+                _ = Win32.SetWindowRgn(dock, Win32.CreateRectRgn(0, 0, 0, 0), false);
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+        {
+            Log.Info($"chrome bands: {(visible ? "restored" : "silenced")} {changed} of {docks.Count} native band window(s)");
+        }
+    }
+
+    /// <summary>
     /// The rectangles of the editor's own tool windows that are showing, in the frame's client
     /// space: the holes the surface must leave open.
     ///
@@ -3436,6 +3520,10 @@ internal sealed class AddInSession : IDisposable
 
         List<PixelRect>? holes = null;
 
+        // One line per pass rather than one per window, so an unchanged layout collapses to a
+        // single deduplicated line in the development log.
+        var story = Log.VerboseEnabled ? new System.Text.StringBuilder() : null;
+
         try
         {
             using var windows = _editor.GetObject("Windows");
@@ -3444,10 +3532,16 @@ internal sealed class AddInSession : IDisposable
             for (var i = 1; i <= count; i++)
             {
                 using var window = windows!.GetItem(i);
-                if (window is null
-                    || !tools.Contains(window.GetInt32("Type"))
-                    || !window.GetBool("Visible")
-                    || window.GetString("Caption") is not { Length: > 0 } caption)
+                if (window is null || !tools.Contains(window.GetInt32("Type")))
+                {
+                    continue;
+                }
+
+                var visible = window.GetBool("Visible");
+                var caption = window.GetString("Caption");
+                story?.Append($"; type {window.GetInt32("Type")} '{caption}' vis={visible}");
+
+                if (!visible || caption is not { Length: > 0 })
                 {
                     continue;
                 }
@@ -3458,6 +3552,7 @@ internal sealed class AddInSession : IDisposable
                 var handle = CodePaneTracker.FindChildByCaption(caption);
                 if (handle == 0 || !Win32.IsWindowVisible(handle))
                 {
+                    story?.Append(handle == 0 ? " unfound" : " win-hidden");
                     continue;
                 }
 
@@ -3472,6 +3567,8 @@ internal sealed class AddInSession : IDisposable
                     hole = hole.Intersect(ClientAreaIn(parent, _frame));
                 }
 
+                story?.Append($" hole={hole.Left},{hole.Top},{hole.Right},{hole.Bottom}");
+
                 if (!hole.IsEmpty)
                 {
                     (holes ??= []).Add(hole);
@@ -3481,6 +3578,13 @@ internal sealed class AddInSession : IDisposable
         catch (Exception ex)
         {
             Log.Info($"surface: the editor's windows could not be read for cutouts ({ex.GetType().Name})");
+        }
+
+        if (story is not null)
+        {
+            Log.Verbose(story.Length == 0
+                ? "cutouts: no native tool windows"
+                : $"cutouts:{story}");
         }
 
         return holes is null ? [] : [.. holes];
@@ -3597,6 +3701,11 @@ internal sealed class AddInSession : IDisposable
                 UpdatePolling();
             };
 
+            // The frame resizing is not a pane event. With no visible pane — the empty
+            // workspace — nothing else hears it, and the surface sat at its old size while the
+            // window grew around it. The frame's own events re-derive placement in every state.
+            _codePanes.FrameChanged = RefreshSurfacePlacement;
+
             _codePanes.Start();
         }
         catch (Exception ex)
@@ -3632,6 +3741,14 @@ internal sealed class AddInSession : IDisposable
         // Before anything is torn down, and before the engine is stopped: whatever the developer
         // typed last must reach the module, or closing the host loses it.
         _editorSurface?.FlushEdits();
+
+        _frameSubclass?.Dispose();
+        _frameSubclass = null;
+
+        // The native menu and toolbar windows come back before the surface goes: a session
+        // that stops — shutdown, disconnection, revival teardown — must leave the editor
+        // whole, not silently menu-less.
+        SetNativeChromeBands(visible: true);
 
         _immediateReader?.Dispose();
         _immediateReader = null;

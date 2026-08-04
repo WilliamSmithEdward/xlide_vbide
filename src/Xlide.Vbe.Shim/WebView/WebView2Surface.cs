@@ -361,6 +361,19 @@ internal sealed class WebView2Surface : IDisposable
 
         Log.Info("webview: controller created");
 
+        // The browser's own idle colour, shown wherever the renderer has nothing newer: behind
+        // a loading page and in the fringe of a resize. Its default is white, and a white flash
+        // through a dark editor reads as a defect on its own. Asked for by interface revision,
+        // and skipped without complaint on a runtime old enough to lack it.
+        if (Marshal.QueryInterface(controllerPointer, in WebViewIid.Controller2, out var controller2Pointer) >= 0
+            && controller2Pointer != 0)
+        {
+            using var controller2 = ComHandle<ICoreWebView2Controller2>.Own(controller2Pointer);
+            controller2?.Target.PutDefaultBackgroundColor(
+                new WebViewColor { A = 255, R = 0x1E, G = 0x1E, B = 0x1E });
+            Log.Verbose("webview: idle background set to the theme ground");
+        }
+
         SetBounds(_bounds);
 
         // Held invisible until the page reports ready. A controller shown now is the

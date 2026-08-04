@@ -152,4 +152,18 @@ internal readonly record struct WindowEvent(uint EventId, nint Window, int Objec
     /// Anything positioned over a pane has to react to all of these.
     /// </summary>
     public bool AffectsLayout => IsCreate || IsDestroy || IsShow || IsHide || IsLocationChange;
+
+    /// <summary>The event as one word, for the development log.</summary>
+    public string Describe() => EventId switch
+    {
+        Win32.EventObjectCreate => "create",
+        Win32.EventObjectDestroy => "destroy",
+        Win32.EventObjectShow => "show",
+        Win32.EventObjectHide => "hide",
+        Win32.EventObjectReorder => "reorder",
+        Win32.EventObjectFocus => "focus",
+        Win32.EventObjectLocationChange => "move",
+        Win32.EventObjectNameChange => "rename",
+        _ => $"event {EventId:X}",
+    };
 }

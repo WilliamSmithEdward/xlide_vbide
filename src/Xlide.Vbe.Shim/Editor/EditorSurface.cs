@@ -776,6 +776,8 @@ internal sealed class EditorSurface : IDisposable
             return;
         }
 
+        Log.Verbose($"page <- {kind} held for a page that is not ready, {json.Length} chars");
+
         if (!_pending.ContainsKey(kind))
         {
             _pendingOrder.Add(kind);
@@ -812,6 +814,10 @@ internal sealed class EditorSurface : IDisposable
             {
                 return;
             }
+
+            // Traffic in, one line per message. Bursts of identical shapes collapse in the log;
+            // the payload length keeps two different edits from reading as a repeat.
+            Log.Verbose($"page -> {type.GetString()}, {payload.Length} chars");
 
             switch (type.GetString())
             {
@@ -1351,6 +1357,14 @@ internal sealed class EditorSurface : IDisposable
     {
         try
         {
+            // Traffic out. The type sits at the front of every payload this side writes, so the
+            // first stretch of the text names it without parsing.
+            if (Log.VerboseEnabled)
+            {
+                var head = json.Length <= 48 ? json : json[..48];
+                Log.Verbose($"page <- {head}…, {json.Length} chars");
+            }
+
             _browser?.PostMessage(json);
         }
         catch (Exception ex)

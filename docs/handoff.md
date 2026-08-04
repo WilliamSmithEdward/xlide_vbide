@@ -8,16 +8,62 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START NEW SESSION HERE — 2026-08-02 21:00
+## START NEW SESSION HERE — 2026-08-04 midday
 
-**Late-evening delta (read this first):** the developer's "opening non xlide windows reverts
+**2026-08-04 delta (read this first):**
+- **Resize follows everywhere now.** The developer's "resizing window no longer adjusts
+  canvas": placement only ever followed PANE events, and the empty workspace has none, so
+  nothing re-placed the surface. Two routes fixed it: the tracker's new `FrameChanged`
+  (frame/MDIClient window events → RefreshSurfacePlacement, works in every state) and
+  `FrameSubclass` (comctl32 subclass on the frame; WM_SIZE re-places the surface
+  SYNCHRONOUSLY, before the native layout paints — that ordering is the fix for the
+  developer's follow-up "on resize, the old native UI flickers and bleeds through"). Three
+  more anti-bleed layers: the overlay paints the theme ground wherever the browser child
+  has not caught up (PaintGround; WM_PAINT when not loading); the browser's own idle
+  colour is dark via ICoreWebView2Controller2.DefaultBackgroundColor; and the native
+  menu/toolbar band windows are SILENCED BY EMPTY WINDOW REGION (SetNativeChromeBands) —
+  they paint without clipping siblings, so covering never stopped them, and hiding them
+  lost to the editor re-showing them per resize; a zero-region window cannot paint and
+  nothing in Office resets it (lesson 26). Regions are cleared when not covering and on
+  session stop, so a bare editor keeps its menus. Probe-verified pixel-exact in both pane
+  states; the flicker feel awaits the developer's live test. The explorer's PROJECT header
+  label is gone (developer request).
+- **Verbose dev logging is a standing directive** (developer, 2026-08-04: "as verbose as
+  possible, for dev, so that you can discern as much as possible during my live tests").
+  `Log.Verbose` is ON by default (`XLIDE_VERBOSE=0` quiets; #15 flips the ship default),
+  and the logger collapses consecutive duplicate lines so event storms read as one line
+  with a count. Instrumented seams: window events (kind/class/hwnd), placement decisions
+  and skips, cutout candidates per pass, page traffic BOTH directions (type + length),
+  debug-state transitions, follow decisions, watchdog ticks, frame-subclass hits. When
+  adding features, instrument as you go — dedupe-friendly single lines per state change.
+- **A cancelled Excel shutdown no longer strands the add-in.** The 08-02 log showed
+  OnBeginShutdown AND OnDisconnection(HostShutdown) both land BEFORE the save prompt;
+  cancel then left a corpse (the watchdog used to be retired in OnDisconnection). The
+  watchdog and retained pointers now survive a HostShutdown-mode disconnection; revival
+  requires the frame standing + VISIBLE + enabled for two 1.5s ticks (visible: a real
+  teardown hides windows before destroying them, and a cancellation with the editor window
+  closed just waits until the developer reopens it). The no-frame patience stand-down is
+  gone — the watchdog waits as long as it takes; a dying process takes it along.
+
+**2026-08-02 late delta:** the developer's "opening non xlide windows reverts
 the toolbar" is FIXED and probe-guarded — the surface never retreats; it punches
 `SetWindowRgn` holes where native tool windows sit (`tools\harness\Test-CutoutHoles.ps1`,
 lesson 24). All docked native toolbars are hidden at start-up. Then the Locals-panel
 replacement was built end to end and deliberately REVERTED after five probes proved the
 editor only feeds an on-screen Locals window (machinery dormant in-tree; lesson 25; open
 thread 4 has the detail). Cutout state: tools `[2,3,4,6,7]` get holes; Immediate stays
-hidden-and-mirrored. Everything below still holds.
+hidden-and-mirrored. The developer has since asked for maximum creativity on getting
+Locals (and the debug windows generally) into OUR UI regardless — the sketched routes, in
+promise order: (a) captive palette: force the Locals window to FLOAT (registry dock-state
+pre-arrangement, or probe whether OM Left/Top writes undock it), strip its caption styles
+with SetWindowLong, position it INSIDE our panel body and resize it with the panel — it is
+genuinely on-screen so the editor feeds it, it reads as embedded, and its light colours
+are the accepted price of v1; (b) tiny-feeder: if a SMALL floating Locals window still
+feeds (its whole self visible — the feed gate may be fraction-visible, untested), park it
+minimised-small in a corner and render THE READER's rows in the themed panel (all the
+dormant machinery lights up); (c) registry window-layout pre-arrangement alone. Probe (b)'s
+feed threshold and the OM-undock question first; both are one-script experiments on the
+lifecycle-probe pattern. Everything below still holds.
 
 **State.** The editor is in daily live use against a real 26,000-line workbook, and today's
 second stretch closed every reported defect and the start-up complaint:

@@ -118,4 +118,19 @@ internal static unsafe partial class Win32
     /// <summary>The window owns the region after a successful call; do not delete it.</summary>
     [LibraryImport("user32.dll")]
     public static partial int SetWindowRgn(nint window, nint region, [MarshalAs(UnmanagedType.Bool)] bool redraw);
+
+    /// <summary>Region complexity answers: 0 none set, 1 empty, 2 simple, 3 complex.</summary>
+    [LibraryImport("user32.dll")]
+    public static partial int GetWindowRgn(nint window, nint region);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowSubclass(nint window, nint callback, nuint id, nuint reference);
+
+    [LibraryImport("comctl32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool RemoveWindowSubclass(nint window, nint callback, nuint id);
+
+    [LibraryImport("comctl32.dll")]
+    public static partial nint DefSubclassProc(nint window, uint message, nint wParam, nint lParam);
 }
