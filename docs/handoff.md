@@ -91,17 +91,26 @@ replacement was built end to end and deliberately REVERTED after five probes pro
 editor only feeds an on-screen Locals window (machinery dormant in-tree; lesson 25; open
 thread 4 has the detail). Cutout state: tools `[2,3,4,6,7]` get holes; Immediate stays
 hidden-and-mirrored. The developer has since asked for maximum creativity on getting
-Locals (and the debug windows generally) into OUR UI regardless — the sketched routes, in
-promise order: (a) captive palette: force the Locals window to FLOAT (registry dock-state
-pre-arrangement, or probe whether OM Left/Top writes undock it), strip its caption styles
-with SetWindowLong, position it INSIDE our panel body and resize it with the panel — it is
-genuinely on-screen so the editor feeds it, it reads as embedded, and its light colours
-are the accepted price of v1; (b) tiny-feeder: if a SMALL floating Locals window still
-feeds (its whole self visible — the feed gate may be fraction-visible, untested), park it
-minimised-small in a corner and render THE READER's rows in the themed panel (all the
-dormant machinery lights up); (c) registry window-layout pre-arrangement alone. Probe (b)'s
-feed threshold and the OM-undock question first; both are one-script experiments on the
-lifecycle-probe pattern. Everything below still holds.
+Locals (and the debug windows generally) into OUR UI regardless — and on 2026-08-04 the
+CAPTIVE PALETTE route was PROVEN end to end (`tools\harness\Probe-FloatLocals.ps1`):
+`window.LinkedWindowFrame.LinkedWindows.Remove(window)` UNDOCKS the Locals window through
+pure object model (its linked frame is type 11); geometry is then settable on the WINDOW
+(`.Left/.Top/.Width/.Height`, points — a 260x160-point request produced a 173x107-pixel
+`VBFloatingPalette` top-level); and the tiny floating window FEEDS PERFECTLY, tracking
+break entry AND EVERY STEP live (counter 1 → 1-pending → 2 across two steps) — the
+step-freshness that was impossible covered is fully alive floating, because floating is
+genuinely on-screen. BUILD PLAN (next stretch): float it at session start, strip
+WS_CAPTION/WS_THICKFRAME/WS_SYSMENU via SetWindowLong + SWP_FRAMECHANGED, position it
+exactly over the panel's Locals tab body (page ships the body rect in physical pixels —
+multiply by devicePixelRatio — host adds the overlay's screen origin), re-place on
+FrameChanged and page layout changes (owned top-levels do not follow their owner), show
+only while the Locals tab is selected (Visible toggle; show-during-break refreshes,
+proven), un-hide the page's Locals tab, route 2555 to it, and on session Stop RESTORE the
+caption styles and leave it hidden-floating so a bare editor keeps a usable window. Being
+top-level and owned by the frame it naturally floats ABOVE the surface — no holes, no
+z-fights; native expansion and in-place value editing come free inside our panel chrome.
+The dormant themed-table machinery stays for a later fully-drawn skin. Watch window: same
+route, same API, afterwards. Everything below still holds.
 
 **State.** The editor is in daily live use against a real 26,000-line workbook, and today's
 second stretch closed every reported defect and the start-up complaint:
