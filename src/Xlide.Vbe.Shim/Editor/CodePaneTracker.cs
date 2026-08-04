@@ -115,7 +115,16 @@ internal sealed class CodePaneTracker : IDisposable
         }
 
         var className = ReadClassName(windowEvent.Window);
-        Log.Verbose($"window event: {windowEvent.Describe()} {className} {windowEvent.Window:X}");
+
+        // Moves are logged only for the editor's own windows. The hook hears the whole
+        // process, and resizing the HOST streams thousands of move events for its own
+        // controls per second — a line each was most of the resize lag all by itself.
+        // Appearing and disappearing stays logged for everything: those are rare and every
+        // one of them is a story.
+        if (!windowEvent.IsLocationChange || IsEditorClass(className))
+        {
+            Log.Verbose($"window event: {windowEvent.Describe()} {className} {windowEvent.Window:X}");
+        }
 
         // A pane appearing or disappearing is the only thing that can change which components have
         // panes open, so it is the only thing that invalidates the expensive half of a refresh.
@@ -134,6 +143,11 @@ internal sealed class CodePaneTracker : IDisposable
             FrameChanged?.Invoke();
         }
     }
+
+    /// <summary>The window classes whose movements concern the editor surface.</summary>
+    private static bool IsEditorClass(string? className) => className
+        is FrameClass or "MDIClient" or PaneClass or "XlideEditorOverlay"
+        or "MsoCommandBarDock" or "MsoCommandBar";
 
     /// <summary>Rebuilds the picture from both sources.</summary>
     public void Refresh()

@@ -18,6 +18,16 @@ internal static class Log
     private static string? _path;
     private static bool _failed;
 
+    /// <summary>
+    /// The file, held open. Opening per line was the whole cost of logging: a fresh
+    /// CreateFile invites the antivirus to every append, and verbose logging writes thousands
+    /// of lines during a resize storm — the host's UI thread was visibly dragging under it
+    /// ("resizing is slippery", 2026-08-04). A kept-open stream flushed per line is two
+    /// orders of magnitude cheaper and loses nothing in a crash, because every line is
+    /// flushed before the call returns.
+    /// </summary>
+    private static StreamWriter? _writer;
+
     /// <summary>The thread the log opened on, which is the host's own. See Write.</summary>
     private static readonly int _hostThread = Environment.CurrentManagedThreadId;
 
@@ -42,6 +52,10 @@ internal static class Log
 
             var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
             _path = System.IO.Path.Combine(directory, $"shim-{stamp}-{Environment.ProcessId}.log");
+
+            _writer = new StreamWriter(
+                new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read),
+                Encoding.UTF8);
 
             Write("info", $"log opened, pid {Environment.ProcessId}, {RuntimeDescription()}");
             PruneOldLogs(directory);
@@ -135,10 +149,11 @@ internal static class Log
                 var line = text.ToString();
                 Debug.Write(line);
 
-                var path = _path;
-                if (path is not null)
+                if (_writer is { } writer)
                 {
-                    File.AppendAllText(path, line, Encoding.UTF8);
+                    // Flushed per line: a crash must not eat the line that names it.
+                    writer.Write(line);
+                    writer.Flush();
                 }
             }
         }

@@ -489,3 +489,34 @@ manage. Visibility and position belong to the window's owner and it will reasser
 window regions belong to nobody in Office code, so a region is not a fight but a fact. And
 when two mechanisms churn against each other, the deduplicated log names the loser - the
 repeated line IS the fight.
+
+## 27. The event that announces a closing window is not an invitation to call its owner
+
+Closing the editor window crashed the host, three times in three minutes, with three
+different modules taking the blame - VBE7.DLL, ntdll, the shim itself. The deduplicated
+verbose log named the sequence in its last four lines: the frame HIDE event arrived, the
+new frame-follow fired placement immediately, placement posted its chrome message, and the
+next thing it does - enumerate the editor's windows through the object model for the cutout
+pass - never logged. Object-model calls had landed INSIDE the editor's own window-close
+handling, three milliseconds after the hide, and the editor faulted under them. The faulting
+module varied because a native fault propagating through ahead-of-time frames surfaces
+wherever it lands; the trigger never varied.
+
+The fix is a gate, not a retreat: placement checks IsWindowVisible on the frame first. A
+hidden frame needs nothing covered, so the surface hides with it and does no other work -
+no cutout enumeration, no band regions, no chrome message - and the SHOW event that brings
+the frame back re-derives everything. Three scripted close-and-reopen cycles now leave the
+host standing.
+
+The same live tests found the cost of the logging that diagnosed this: File.AppendAllText
+per line opens the file per line, which invites the antivirus per line, and a host resize
+streams thousands of window events per second - the UI thread dragged visibly ("resizing is
+slippery"). The log now holds its file open and flushes per line, two orders of magnitude
+cheaper with nothing lost in a crash; move events are logged only for the editor's own
+window classes; and the chrome message sends only on change.
+
+Consequence: reacting to a teardown announcement by calling the thing being torn down is a
+crash with a delay measured in milliseconds - gate on the state the event implies before
+doing work in the state that no longer exists. And verbose logging is a feature with a
+budget: hold the file open, flush per line, and spend lines on signal, not on another
+process's window moves.

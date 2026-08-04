@@ -536,9 +536,21 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetMenuMessage));
     }
 
+    /// <summary>The chrome state last sent, so a placement pass repeating it costs nothing.</summary>
+    private bool? _chromeSent;
+
     /// <summary>Shows or withdraws the surface's own menu bar.</summary>
     public void SetChrome(bool menuBar)
     {
+        // Placement re-derives on every resize tick and almost never changes this; a message
+        // per tick is a cross-process hop the page answers by doing nothing.
+        if (_chromeSent == menuBar)
+        {
+            return;
+        }
+
+        _chromeSent = menuBar;
+
         Send("setChrome", JsonSerializer.Serialize(
             new SetChromeMessage("setChrome", menuBar),
             EditorMessageContext.Default.SetChromeMessage));

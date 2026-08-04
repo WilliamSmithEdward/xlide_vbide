@@ -3399,6 +3399,20 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        // The frame hiding is the editor's window closing: Alt+F4, its X, a shutdown's first
+        // act. Placement work there is worse than pointless — reacting to the hide event with
+        // the cutout pass put object-model calls INSIDE the editor's own close handling, and
+        // the editor faulted under them, taking the host down (three crash records,
+        // 2026-08-04: VBE7, ntdll, and this shim faulting by turn, each at a close). A hidden
+        // frame needs nothing covered; the surface hides with it, and the show event that
+        // brings the frame back re-derives everything.
+        if (!Win32.IsWindowVisible(_frame))
+        {
+            Log.Verbose("placement: the frame is not visible, hiding the surface with it");
+            _editorSurface.Follow(default, visible: false);
+            return;
+        }
+
         var covering = CanCoverChrome();
 
         // Before anything paints this cycle: on the synchronous WM_SIZE route this runs ahead

@@ -11,6 +11,15 @@ that would be expensive to reverse.
 ## START NEW SESSION HERE — 2026-08-04 midday
 
 **2026-08-04 delta (read this first):**
+- **Two live-test regressions of the morning's work, both fixed** (lesson 27). Closing the
+  VBE window crashed Excel: the frame-HIDE event drove placement, whose cutout pass called
+  the object model INSIDE the editor's close handling; placement now gates on
+  `IsWindowVisible(_frame)` — hidden frame → surface hides with it, zero OM work — and
+  `Probe-CloseVbe`-style close/reopen cycles leave Excel standing. Resizing was "slippery":
+  `File.AppendAllText` per verbose line opened the file (and woke the antivirus) thousands
+  of times a second during event storms; the log now holds its file open and flushes per
+  line, move events log only for editor-relevant window classes, and `SetChrome` sends only
+  on change.
 - **Resize follows everywhere now.** The developer's "resizing window no longer adjusts
   canvas": placement only ever followed PANE events, and the empty workspace has none, so
   nothing re-placed the surface. Two routes fixed it: the tracker's new `FrameChanged`
