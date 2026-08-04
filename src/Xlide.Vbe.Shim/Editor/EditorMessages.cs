@@ -62,6 +62,11 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
 
+/// <summary>A breakpoint the host refused, so the page can mark the line briefly.</summary>
+public sealed record BreakpointRefusedMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("line")] int Line);
+
 /// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
 public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("expression")] string Expression,
@@ -310,6 +315,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetSettingsMessage))]
 [JsonSerializable(typeof(SetLocalsMessage))]
 [JsonSerializable(typeof(SurfaceLocalRow))]
+[JsonSerializable(typeof(BreakpointRefusedMessage))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]

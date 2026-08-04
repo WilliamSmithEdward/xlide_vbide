@@ -1164,6 +1164,14 @@ span.prop-value.readonly {
   opacity: 0.4;
 }
 
+.xlide-breakpoint-refused {
+  color: #e8a04c !important;
+  font-size: 14px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
 .xlide-breakpoint-glyph::after {
   content: "";
   position: absolute;

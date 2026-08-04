@@ -29,9 +29,10 @@ public sealed record ProductSettings
     [JsonPropertyName("format.indentSize")]
     public int FormatIndentSize { get; init; } = 4;
 
-    /// <summary>Format Module: indent with tabs rather than spaces.</summary>
+    /// <summary>Format Module: indent with tabs rather than spaces. Tabs, by the developer's
+    /// standing choice (2026-08-04).</summary>
     [JsonPropertyName("format.useTabs")]
-    public bool FormatUseTabs { get; init; }
+    public bool FormatUseTabs { get; init; } = true;
 
     /// <summary>Format Module: respell keywords in their canonical case.</summary>
     [JsonPropertyName("format.canonicalKeywords")]

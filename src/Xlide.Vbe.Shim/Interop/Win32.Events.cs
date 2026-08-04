@@ -152,4 +152,15 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool EnumWindows(nint callback, nint parameter);
+
+    /// <summary>GWL_STYLE.</summary>
+    public const int GwlStyle = -16;
+
+    public const long WsMaximize = 0x01000000;
+
+    /// <summary>WM_MDIRESTORE, sent to the MDI client naming the child to restore.</summary>
+    public const uint WmMdiRestore = 0x0223;
+
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageW")]
+    public static partial nint SendMessage(nint window, uint message, nint wParam, nint lParam);
 }

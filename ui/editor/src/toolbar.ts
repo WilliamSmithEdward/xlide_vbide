@@ -41,6 +41,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "stepOver", target: "host", icon: "debug-step-over", label: "Step over (Shift+F8)" },
   { id: "stepOut", target: "host", icon: "debug-step-out", label: "Step out" },
   { id: "toggleBreakpoint", target: "host", icon: "debug-breakpoint", label: "Toggle breakpoint (F9)" },
+  { id: "clearAllBreakpoints", target: "host", icon: "clear-all", label: "Clear all breakpoints" },
 
   { id: "actions.find", target: "editor", icon: "search", label: "Find (Ctrl+F)", separatorBefore: true },
   { id: "editor.action.startFindReplaceAction", target: "editor", icon: "replace", label: "Replace (Ctrl+H)" },

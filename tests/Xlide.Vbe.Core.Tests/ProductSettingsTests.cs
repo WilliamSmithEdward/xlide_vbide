@@ -18,7 +18,7 @@ public class ProductSettingsTests
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.True(settings.MirrorCommentSpacing);
         Assert.Equal(4, settings.FormatIndentSize);
-        Assert.False(settings.FormatUseTabs);
+        Assert.True(settings.FormatUseTabs);
         Assert.True(settings.FormatCanonicalKeywords);
     }
 

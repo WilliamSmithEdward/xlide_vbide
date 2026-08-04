@@ -23,7 +23,7 @@ export interface FormatOptions {
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   indentSize: 4,
-  useTabs: false,
+  useTabs: true,
   canonicalKeywords: true,
 };
 

@@ -386,6 +386,12 @@ internal sealed class EditorSurface : IDisposable
     /// properties reflect it. This is what releases the hold.</summary>
     public Action<int>? CaretLineSettled { get; set; }
 
+    /// <summary>
+    /// Raised when an edit added or removed lines: everything anchored below afterLine moves by
+    /// delta. This is how line-anchored bookkeeping — breakpoints — follows the text.
+    /// </summary>
+    public Action<int, int>? LinesShifted { get; set; }
+
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
 
@@ -674,6 +680,19 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetLocalsMessage));
     }
 
+    /// <summary>Marks a line whose breakpoint the host refused: a brief orange cross.</summary>
+    public void ShowBreakpointRefused(int line)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new BreakpointRefusedMessage("breakpointRefused", line),
+            EditorMessageContext.Default.BreakpointRefusedMessage));
+    }
+
     /// <summary>Replaces the breakpoints shown on the module currently displayed.</summary>
     public void ShowBreakpoints(int[] lines)
     {
@@ -908,6 +927,44 @@ internal sealed class EditorSurface : IDisposable
                             _unwritten = true;
                             _overlay?.StartWriteTimer(WriteDelayMilliseconds);
 
+                            // Breakpoints are line-anchored bookkeeping, and edits move lines.
+                            // Each change that adds or removes lines shifts every anchor below
+                            // it, so a dot stays on the statement it was set on instead of
+                            // drifting onto whatever scrolled into its number — the ghost dot
+                            // no click could remove (2026-08-04).
+                            if (document.RootElement.TryGetProperty("changes", out var shiftSet)
+                                && shiftSet.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var change in shiftSet.EnumerateArray())
+                                {
+                                    if (!change.TryGetProperty("startLine", out var startElement)
+                                        || !startElement.TryGetInt32(out var startLine)
+                                        || !change.TryGetProperty("endLine", out var endElement)
+                                        || !endElement.TryGetInt32(out var endLine))
+                                    {
+                                        continue;
+                                    }
+
+                                    var newlines = 0;
+                                    var body = change.TryGetProperty("text", out var textElement)
+                                        ? textElement.GetString() ?? string.Empty
+                                        : string.Empty;
+                                    foreach (var character in body)
+                                    {
+                                        if (character == '\n')
+                                        {
+                                            newlines++;
+                                        }
+                                    }
+
+                                    var delta = newlines - (endLine - startLine);
+                                    if (delta != 0)
+                                    {
+                                        LinesShifted?.Invoke(startLine, delta);
+                                    }
+                                }
+                            }
+
                             // The findings shown must describe this text, not the text as of
                             // the last write: a deleted error must go, and it must go soon —
                             // where soon costs little, and on the line's own goodbye otherwise.
@@ -1042,8 +1099,8 @@ internal sealed class EditorSurface : IDisposable
                         && indentValue.TryGetInt32(out var asked)
                         ? asked
                         : 4;
-                    var useTabs = document.RootElement.TryGetProperty("formatUseTabs", out var tabsValue)
-                        && tabsValue.ValueKind is JsonValueKind.True;
+                    var useTabs = !document.RootElement.TryGetProperty("formatUseTabs", out var tabsValue)
+                        || tabsValue.ValueKind is not JsonValueKind.False;
                     var canonicalKeywords = !document.RootElement.TryGetProperty("formatCanonicalKeywords", out var keywordsValue)
                         || keywordsValue.ValueKind is not (JsonValueKind.False);
 

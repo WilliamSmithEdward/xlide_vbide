@@ -197,7 +197,7 @@ internal sealed class AddInSession : IDisposable
         // In the frame's message chain, so a resize re-places the surface synchronously —
         // before the native layout paints — instead of a posted event later. The event route
         // stays as the correcting pass.
-        _frameSubclass ??= FrameSubclass.Install(host, RefreshSurfacePlacement);
+        _frameSubclass ??= FrameSubclass.Install(host, PlaceSurfaceFast);
 
         _editorSurface.KeyPressed = OnSurfaceKey;
         _editorSurface.ModuleRequested = ShowModule;
@@ -205,6 +205,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.CommandRequested = RunCommand;
         _editorSurface.TextChanged = WriteModule;
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
+        _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
         _editorSurface.PanelChanged = OnPanelChanged;
@@ -956,6 +957,29 @@ internal sealed class AddInSession : IDisposable
         return false;
     }
 
+    /// <summary>Moves line-anchored breakpoints with the text they were set on.</summary>
+    private void OnLinesShifted(int afterLine, int delta)
+    {
+        var module = _editorSurface?.Module;
+        if (module is null || !_breakpoints.TryGetValue(module, out var lines) || lines.Count == 0)
+        {
+            return;
+        }
+
+        var moved = new SortedSet<int>();
+        foreach (var line in lines)
+        {
+            moved.Add(line > afterLine ? Math.Max(afterLine, line + delta) : line);
+        }
+
+        if (!moved.SetEquals(lines))
+        {
+            _breakpoints[module] = moved;
+            PublishBreakpoints();
+            Log.Verbose($"breakpoint: shifted with the text, now [{string.Join(",", moved)}]");
+        }
+    }
+
     /// <summary>Toggles a breakpoint on a line of the module currently shown.</summary>
     private void ToggleBreakpoint(int line)
     {
@@ -965,12 +989,18 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        if (!CanBreakOn(_editorSurface?.LineAt(line)))
+        // Clearing is never validity-gated. A recorded dot must always answer a click,
+        // whatever its line has since become: gating the clear on the line still being
+        // executable left a drifted dot that five clicks could not remove (2026-08-04).
+        var clearing = _breakpoints.TryGetValue(module, out var recorded) && recorded.Contains(line);
+
+        if (!clearing && !CanBreakOn(_editorSurface?.LineAt(line)))
         {
-            // Said out loud, not only logged. The developer pressed something and nothing happened,
-            // and "nothing happened" is indistinguishable from a fault unless the reason is given.
+            // Refused silently on screen, by design (the developer, 2026-08-04): the hover
+            // preview already showed an orange cross where no breakpoint can go, and a click
+            // there draws nothing — nothing may ever appear that looks like a breakpoint the
+            // developer did not get. The page mirrors CanBreakOn for that preview.
             Log.Info($"breakpoint: {module}({line}) is not an executable statement");
-            _editorSurface?.Notify($"No breakpoint on line {line}: only executable statements can carry one.");
             return;
         }
 
@@ -3548,6 +3578,31 @@ internal sealed class AddInSession : IDisposable
     /// window, or the page has just come up. Waiting for the next window event leaves the wrong
     /// thing covered in the meantime.
     /// </summary>
+    /// <summary>
+    /// The synchronous resize path: bounds and nothing else. The full pass reads the object
+    /// model for cutouts and sweeps children for band regions, and per WM_SIZE tick of a drag
+    /// that was the visible lag ("the resize draw lags behind the mouse", 2026-08-04). Inside
+    /// the resize only the rectangle matters; the full pass follows on the event route a beat
+    /// later. While holes are open the full pass runs here too, so their regions track the
+    /// drag instead of lagging it.
+    /// </summary>
+    private void PlaceSurfaceFast()
+    {
+        if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0
+            || !Win32.IsWindowVisible(_frame))
+        {
+            return;
+        }
+
+        if (_watchingCutouts)
+        {
+            RefreshSurfacePlacement();
+            return;
+        }
+
+        _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
+    }
+
     private void RefreshSurfacePlacement()
     {
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0)
@@ -3726,6 +3781,17 @@ internal sealed class AddInSession : IDisposable
                 {
                     story?.Append(handle == 0 ? " unfound" : " win-hidden");
                     continue;
+                }
+
+                // A maximised document window — the Object Browser most of all — merges its
+                // caption into a menu bar the surface covers: it filled the hole edge to edge
+                // with no close box anywhere, and there was no way back to the product
+                // (2026-08-04). Restored, it is a window again: caption, close box, and the
+                // surface around it.
+                if (((long)Win32.GetWindowLongPtr(handle, Win32.GwlStyle) & Win32.WsMaximize) != 0)
+                {
+                    Win32.SendMessage(Win32.GetParent(handle), Win32.WmMdiRestore, handle, 0);
+                    story?.Append(" restored");
                 }
 
                 // Clipped to the parent, because only the parent-clipped part is ever on screen.

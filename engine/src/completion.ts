@@ -9,9 +9,11 @@ import {
     resolveIdentifierCompletions,
     resolveKeywordCompletions,
     resolveMemberCompletions,
+    resolveTypeCompletions,
     type IdentifierCompletion,
     type KeywordCompletion,
     type MemberCompletion,
+    type TypeCompletion,
 } from '../../../xlide_vscode/src/analyzer';
 import { assembleContext } from './moduleContext';
 import type { CompletionItemPayload, CompletionParams, ModulePayload } from './protocol';
@@ -21,6 +23,18 @@ export function completionsFor(
     params: CompletionParams & { source: string },
 ): CompletionItemPayload[] {
     const ctx = assembleContext(seeded, params);
+
+    // In a declaration's type position — after As, most visibly — type names are the whole
+    // answer: built-ins, the host model's objects, and the project's own classes and types.
+    // First, the way the extension orders it; this resolver was simply never called here, and
+    // "Dim i As Int" offered nothing (2026-08-04).
+    const types = resolveTypeCompletions(params.source, params.offset, {
+        projectTypes: ctx.projectTypes,
+    });
+
+    if (types.length > 0) {
+        return types.map(typeItem);
+    }
 
     // After a dot, the members of the receiver are the only sensible answer.
     const members = resolveMemberCompletions(params.source, params.offset, {
@@ -51,6 +65,15 @@ export function completionsFor(
     });
 
     return [...identifiers.map(identifierItem), ...keywords.items.map(keywordItem)];
+}
+
+function typeItem(type: TypeCompletion): CompletionItemPayload {
+    return {
+        label: type.name,
+        kind: type.kind,
+        detail: type.detail,
+        documentation: type.documentation,
+    };
 }
 
 function memberItem(member: MemberCompletion): CompletionItemPayload {

@@ -58,6 +58,7 @@ export type HostMessage =
   | { type: "setDiagnostics"; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
+  | { type: "breakpointRefused"; line: number }
   | { type: "revealLine"; line: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
@@ -634,6 +635,10 @@ export class EditorBridge {
       case "setBreakpoints":
         this.setBreakpoints(message.lines);
         return;
+      case "breakpointRefused":
+        // The hover preview owns the affordance now; a refusal after a click draws nothing,
+        // so nothing ever appears that looks like a breakpoint the developer did not get.
+        return;
       case "revealLine":
         this.editor.revealLineInCenterIfOutsideViewport(message.line);
         return;
@@ -704,7 +709,7 @@ export class EditorBridge {
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           formatIndentSize: message.formatIndentSize ?? 4,
-          formatUseTabs: message.formatUseTabs ?? false,
+          formatUseTabs: message.formatUseTabs ?? true,
           formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
         });
         return;
@@ -1023,14 +1028,26 @@ export class EditorBridge {
       return;
     }
 
+    // The preview tells the truth before the click: a dim dot where a breakpoint can go, an
+    // orange cross where one cannot — and a click on a refused line does nothing at all, so
+    // the red dot only ever appears where it is real (the developer's design, 2026-08-04).
+    const breakable = lineCanCarryBreakpoint(this.model()?.getLineContent(line) ?? "");
+
     this.breakpointHover.set([
       {
         range: new monaco.Range(line, 1, line, 1),
-        options: {
-          isWholeLine: false,
-          glyphMarginClassName: "xlide-breakpoint-hover",
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-        },
+        options: breakable
+          ? {
+            isWholeLine: false,
+            glyphMarginClassName: "xlide-breakpoint-hover",
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          }
+          : {
+            isWholeLine: false,
+            glyphMarginClassName: "xlide-breakpoint-refused codicon codicon-close",
+            glyphMarginHoverMessage: { value: "No breakpoint here: only executable statements can carry one." },
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          },
       },
     ]);
   }
@@ -1087,6 +1104,45 @@ function safeParse(text: string): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a line can carry a breakpoint. The mirror of the host's CanBreakOn, so the hover
+ * preview and the host's verdict on the click always agree; a preview that promises what the
+ * click then refuses is worse than no preview.
+ */
+function lineCanCarryBreakpoint(line: string): boolean {
+  const code = line.trim();
+  if (code.length === 0 || code.startsWith("'") || startsWithWord(code, "Rem")) {
+    return false;
+  }
+
+  if (startsWithWord(code, "Option", "Attribute", "Declare", "Dim", "Const", "Type", "Enum")
+    || /^end\s+(type|enum)\b/i.test(code)) {
+    return false;
+  }
+
+  for (const modifier of ["Public", "Private", "Friend", "Static", "Global"]) {
+    if (startsWithWord(code, modifier)) {
+      const rest = code.slice(modifier.length).trimStart();
+      return startsWithWord(rest, "Sub", "Function", "Property");
+    }
+  }
+
+  return true;
+}
+
+function startsWithWord(text: string, ...words: string[]): boolean {
+  for (const word of words) {
+    if (!text.toLowerCase().startsWith(word.toLowerCase())) {
+      continue;
+    }
+    const next = text[word.length];
+    if (next === undefined || !/[A-Za-z0-9_]/.test(next)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function isHostMessage(value: unknown): value is HostMessage {
@@ -1170,7 +1226,7 @@ export function demoTransport(): HostTransport {
           continueCommentOnNewline: true,
           mirrorCommentSpacing: true,
           formatIndentSize: 4,
-          formatUseTabs: false,
+          formatUseTabs: true,
           formatCanonicalKeywords: true,
         });
         send({

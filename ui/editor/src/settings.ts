@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   continueCommentOnNewline: true,
   mirrorCommentSpacing: true,
   formatIndentSize: 4,
-  formatUseTabs: false,
+  formatUseTabs: true,
   formatCanonicalKeywords: true,
 };
 
