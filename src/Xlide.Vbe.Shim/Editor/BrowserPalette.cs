@@ -107,6 +107,21 @@ internal sealed unsafe class BrowserPalette : IDisposable
         return palette;
     }
 
+    /// <summary>
+    /// Hides the palette. An owned window does not follow its owner out of sight, so the
+    /// editor closing must say this explicitly — otherwise the palette outlives the editor
+    /// window and is standing there, ownerless-looking, when the editor next opens
+    /// ("this pops up when I first open xlide", 2026-08-05). Pure user32, so it is safe on
+    /// the editor's close path (lesson 27).
+    /// </summary>
+    public void Hide()
+    {
+        if (_handle != 0)
+        {
+            Win32.ShowWindow(_handle, Win32.SwHide);
+        }
+    }
+
     /// <summary>Brings the palette back, shown, forward, and focused for its search box.</summary>
     public void Present()
     {

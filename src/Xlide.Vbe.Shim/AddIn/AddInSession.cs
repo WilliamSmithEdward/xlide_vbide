@@ -4792,6 +4792,11 @@ internal sealed class AddInSession : IDisposable
         {
             Log.Verbose("placement: the frame is not visible, hiding the surface with it");
             _editorSurface.Follow(default, visible: false);
+
+            // The palette is owned, and owned windows do not follow a hidden owner. Left
+            // alone it floats over the workbook after the editor closes and greets the next
+            // Alt+F11 uninvited; it returns only when summoned.
+            _browserPalette?.Hide();
             return;
         }
 
