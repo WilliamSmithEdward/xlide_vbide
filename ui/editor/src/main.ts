@@ -122,14 +122,23 @@ function boot(): void {
 
   const createMs = performance.now();
 
-  // Automatic layout rides ResizeObserver and tracks the window live; this is only the
-  // safety net for a final frame the observer missed. It waits for the resize to pause —
-  // running it per event doubled every layout of a drag, which read as latency and churn
-  // (2026-08-05) — and a measure that finds nothing changed costs nothing.
+  // Automatic layout rides ResizeObserver and tracks the window live; the settle here is
+  // only the safety net for a final frame the observer missed. It waits for the resize to
+  // pause — running it per event doubled every layout of a drag, which read as latency and
+  // churn (2026-08-05) — and a measure that finds nothing changed costs nothing.
+  //
+  // The live-resize class is the minimap's peace: its canvas repaints a frame behind the
+  // layout that moved it, so during a drag its blocks were alternately stale, clipped, and
+  // redrawn — a flicker at the right edge. Faded out while events stream and back in at
+  // the settle, the same deliberate quiet native apps keep during a live resize.
   let resizeSettled: ReturnType<typeof setTimeout> | undefined;
   window.addEventListener("resize", () => {
+    document.body.classList.add("live-resize");
     clearTimeout(resizeSettled);
-    resizeSettled = setTimeout(() => editor.layout(), 150);
+    resizeSettled = setTimeout(() => {
+      editor.layout();
+      document.body.classList.remove("live-resize");
+    }, 150);
   });
 
   const transport = webView2Transport();

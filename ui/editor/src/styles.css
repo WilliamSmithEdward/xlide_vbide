@@ -430,6 +430,18 @@ span.prop-value.readonly {
   overflow: hidden;
 }
 
+/* The minimap's canvas repaints a frame behind the layout that moves it, so a live resize
+   showed it stale, clipped, redrawn, per tick. It rests during the drag and returns at the
+   settle: out fast enough to beat the churn, back gently enough to read as deliberate. */
+.minimap {
+  transition: opacity 120ms ease-out;
+}
+
+body.live-resize .minimap {
+  opacity: 0;
+  transition: opacity 50ms ease-out;
+}
+
 /* The empty workspace: what the editor area becomes when every tab is closed. It occupies the
    editor's grid row so the layout does not move, and the shell class decides which of the two is
    real. */
