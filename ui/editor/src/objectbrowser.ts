@@ -186,7 +186,18 @@ export function bootObjectBrowserPage(): void {
   search.placeholder = "Search";
   search.setAttribute("aria-label", "Search types and members");
 
-  head.append(picker, search);
+  // What the search reads: the left pane's groups, the selected type's members, or both.
+  const scopePick = document.createElement("select");
+  scopePick.id = "objbrowser-scope";
+  scopePick.setAttribute("aria-label", "Search scope");
+  for (const [value, label] of [["group", "Group"], ["object", "Object"], ["all", "All"]] as const) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    scopePick.appendChild(option);
+  }
+
+  head.append(picker, search, scopePick);
 
   const body = document.createElement("div");
   body.id = "objbrowser-body";
@@ -298,23 +309,38 @@ export function bootObjectBrowserPage(): void {
   const renderMembers = (): void => {
     membersPane.replaceChildren();
     const wanted = query();
+    const mode = scopePick.value;
+
+    // Group mode leaves this pane alone; Object mode filters the selected type's members;
+    // All mode searches the members of every loaded type.
+    const filterMembers = wanted.length > 0 && mode !== "group";
+    const spanTypes = wanted.length > 0 && mode === "all";
     let shown = 0;
 
     if (scope) {
       const library = scope;
       const types = typesOf.get(library.name) ?? [];
       for (const type of types) {
-        if (wanted.length === 0 && type.name !== selectedType) {
+        if (!spanTypes && type.name !== selectedType) {
           continue;
         }
 
+        // In All mode a group whose own name matches brings its whole membership along,
+        // loading it on first sight so the pull is not limited to types already visited.
+        // Two characters before loading, or a lone letter fans out across the library.
+        const pullWhole = spanTypes && wanted.length >= 2 && type.name.toLowerCase().includes(wanted);
+
         const held = membersOf.get(`${library.name} ${type.name}`);
         if (!held) {
+          if (pullWhole) {
+            loadMembers(type.name);
+          }
+
           continue;
         }
 
         for (const member of [...held].sort(byName)) {
-          if (wanted.length > 0 && !member.name.toLowerCase().includes(wanted)) {
+          if (filterMembers && !pullWhole && !member.name.toLowerCase().includes(wanted)) {
             continue;
           }
 
@@ -334,7 +360,7 @@ export function bootObjectBrowserPage(): void {
 
           const trailing = document.createElement("span");
           trailing.className = "objbrowser-context";
-          trailing.textContent = wanted.length > 0 ? type.name : member.kind;
+          trailing.textContent = spanTypes ? type.name : member.kind;
 
           item.append(glyph, label, trailing);
 
@@ -370,26 +396,39 @@ export function bootObjectBrowserPage(): void {
     if (shown === 0) {
       const empty = document.createElement("div");
       empty.className = "objbrowser-empty";
-      empty.textContent = wanted.length > 0
-        ? "Nothing matches among the loaded members."
-        : selectedType
-          ? "No members here."
-          : "Pick a type on the left, or search.";
+      empty.textContent = !selectedType && !spanTypes
+        ? "Pick a type on the left."
+        : filterMembers
+          ? "Nothing matches among the loaded members."
+          : "No members here.";
       membersPane.appendChild(empty);
     }
   };
 
   // --- types pane ----------------------------------------------------------------------
 
+  /** Requests in flight, so a re-render mid-flight does not ask twice. */
+  const loadingMembers = new Set<string>();
+
   const loadMembers = (typeName: string): void => {
-    if (!scope || membersOf.has(`${scope.name} ${typeName}`)) {
+    if (!scope) {
       return;
     }
 
+    const key = `${scope.name} ${typeName}`;
+    if (membersOf.has(key) || loadingMembers.has(key)) {
+      return;
+    }
+
+    loadingMembers.add(key);
     const library = scope;
     void host.members(library.name, typeName).then((rows) => {
+      loadingMembers.delete(key);
       if (rows) {
-        membersOf.set(`${library.name} ${typeName}`, rows);
+        membersOf.set(key, rows);
+
+        // Both panes: an arrival can add member matches to the types pane in All mode.
+        renderTypes();
         renderMembers();
       }
     });
@@ -405,6 +444,7 @@ export function bootObjectBrowserPage(): void {
   const renderTypes = (): void => {
     typesPane.replaceChildren();
     const wanted = query();
+    const mode = scopePick.value;
 
     if (!scope) {
       return;
@@ -419,8 +459,14 @@ export function bootObjectBrowserPage(): void {
       return;
     }
 
+    // Object mode leaves this pane alone. Group mode filters it by name; All mode also
+    // keeps a type whose loaded members match, so the other pane has something to show.
     for (const type of [...types].sort(byName)) {
-      if (wanted.length > 0 && !type.name.toLowerCase().includes(wanted)) {
+      if (wanted.length > 0 && mode !== "object" && !type.name.toLowerCase().includes(wanted)) {
+        if (mode === "group") {
+          continue;
+        }
+
         const held = membersOf.get(`${scope.name} ${type.name}`);
         if (!held || !held.some((member) => member.name.toLowerCase().includes(wanted))) {
           continue;
@@ -490,6 +536,11 @@ export function bootObjectBrowserPage(): void {
   });
 
   search.addEventListener("input", () => {
+    renderTypes();
+    renderMembers();
+  });
+
+  scopePick.addEventListener("change", () => {
     renderTypes();
     renderMembers();
   });

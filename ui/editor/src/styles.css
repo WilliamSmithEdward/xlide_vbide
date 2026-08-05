@@ -1158,13 +1158,17 @@ body.objbrowser-page #objbrowser-card {
   border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
 }
 
-#objbrowser-library {
+#objbrowser-library,
+#objbrowser-scope {
   background: var(--vscode-dropdown-background, #3c3c3c);
   color: inherit;
   border: 1px solid var(--vscode-dropdown-border, #5a5a5a);
   border-radius: 3px;
   padding: 3px 6px;
   font: inherit;
+}
+
+#objbrowser-library {
   max-width: 240px;
 }
 
