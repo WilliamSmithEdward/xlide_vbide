@@ -8,9 +8,90 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START NEW SESSION HERE — 2026-08-04 midday
+## START NEW SESSION HERE — 2026-08-04 evening
 
-**2026-08-04 delta (read this first):**
+**Full context dump, written at the developer's request at session end. HEAD is `47da928`;
+the publish tree matches it; Excel was left running the latest build. Read this block, then
+the day's detailed history below it, then the rest of the document.**
+
+**Where the product stands.** The surface IS the visible editor: menus, toolbar (with a
+comment suite and Clear-all-breakpoints), tabs (dirty dots, pointer-armed close, drag,
+collision labels), explorer (no header label), Problems/Immediate/Locals/Search panels,
+settings (tabs indent by default now), find that floats, tooltips that land on their
+buttons, breakpoints that preview honestly (dim dot where one can go, orange X on hover
+where one cannot, no tooltip on the X) and whose record shifts with edits and always
+answers a clearing click. The native editor never retreats — cutout holes for the
+unreplaced windows (Object Browser auto-restored from maximised so it always has a close
+box), empty-region-silenced chrome bands, synchronous WM_SIZE placement with a bounds-only
+fast path. Locals is fully ours, fed by the invisible layered ghost palette. Search/replace
+runs engine-side over live text, scoped module/workbook/all. The View menu sheds items as
+their windows are ported (2554/2555/2557/222 suppressed today; the STANDING RULE is to keep
+shedding as ports land).
+
+**The evening's endgame, not yet in the history below:**
+- The Search panel (#38) shipped end to end: engine `workspace/search` (engine/src/search.ts
+  + dispatcher case; protocol in both repos' shapes), EngineClient/AnalysisService
+  SearchAsync, session handlers (FlushEdits first; scope resolves module/project from
+  `_shownProject`), grouped clickable results, monotonic-id acceptance (equality raced a
+  synchronous transport — the demo — and dropped its own answer). Replace All searches then
+  rewrites per line via CodeModule ReplaceLine, bottom-up per module, re-matched at write
+  time; it then RESYNCS THE SHOWN MODULE IMMEDIATELY (waiting for a pane event left the
+  editor showing old text while the panel claimed the count — the developer's "replace is
+  not working"), arms the resync polls for the rest, reanalyses, and answers with the count
+  plus an EMPTY list ("No matches remain") rather than re-listing what it destroyed.
+- Unsaved dots (#39) shipped through three corrections, each developer-reported:
+  (1) "always showing" — the host was RIGHT (`modules: publish … dirty [False]` in the log);
+  the codicon base class ties a single-class `.tab-dirty` display rule on specificity and
+  wins on bundle order, so the dot rendered regardless — the selector now carries an extra
+  class (`.tab .tab-dirty`); note the close box always used opacity to dodge exactly this.
+  (2) Save timing and coverage — `Workbook.Saved` flips a beat AFTER the save command
+  returns, and Excel-side saves flip it with no event we hear: PublishModules now diffs
+  against what it last sent (`_lastModulesKey`), runs on EVERY poll tick, logs
+  `modules: publish […] dirty […]` on change, and Save arms a short resync burst.
+  (3) "revert should lift the dot" — the host flag never un-dirties, so the host keeps
+  SAVED-TEXT BASELINES (`_savedBaselines`, keyed workbook\0module, snapshotted whenever a
+  workbook is KNOWN clean) and, while the flag says dirty, the dot shows only if some
+  module's known text differs from its snapshot; unknown keeps the flag's verdict. Probed
+  live: save→False, insert line→True, delete it→False with the flag still dirty. SEMANTIC
+  NOTE: the dot now means "code differs from saved" — cell-only changes no longer dot the
+  tabs, deliberately.
+- Deploy-order gotcha met today: package the ENGINE only after killing Excel — the running
+  sidecar holds `engine/dist/xlide-engine.exe` and the copy fails EBUSY, leaving a stale
+  engine deployed (a stale engine answers workspace/search with MethodNotFound and the
+  panel sits at "Searching...").
+
+**Known nits and edges, all small, none blocking:**
+- Locals panel: the context strip (procedure name) reads null through the COM reader; the
+  ghost has the data (the Edit element) — reader-side parse nit. External-command steps
+  outrun the poll cadence; real steps go through our command path which arms the fast watch.
+- Residual canvas flicker during resize drags is the browser compositor catching up — the
+  dark ground keeps it subtle; accepted for now.
+- `_writtenModules` is keyed by bare module name — two same-named modules in different
+  workbooks can cross-talk in the dirty comparison's current-text lookup and in replace's
+  baseline; the project-qualified rework is a known small refactor.
+- Search matching is literal with match-case/whole-word only (no regex); replace re-matches
+  host-side with the same rules. The results list caps at 500 with a truncated flag.
+- The Toolbars POPUP menu item id is unknown (its child toggles 761 are suppressed) — find
+  it via VbeCommands.Describe someday and suppress the popup itself.
+- Baselines only exist for modules whose text we have seen (shown once, or written); other
+  modules of a dirty workbook keep the flag's verdict until the next save snapshots them.
+- The hidden-pane caption-match question stands (below, tab-X bullet): why the tracker
+  cannot match hidden panes — cosmetic now that resync covers it.
+
+**Standing probes (tools\harness), each self-describing:** Test-CutoutHoles,
+Test-ResizeFollow, Test-CloseVbe, Test-CloseHiddenPane (PASS/FAIL), Test-GhostLocalsPanel
+(PASS/FAIL), Probe-FloatLocals, Probe-GhostLocals, Probe-LocalsLifecycle. The page demo
+serves via `.claude/launch.json` (npx http-server :8123) for browser-side verification —
+the demo transport answers search, settings, locals, and modules with canned data.
+
+**Suggested next, in order:** the Watch window by the ghost-palette route (same API chain
+as Locals — float via LinkedWindows.Remove, layer to alpha 0, park off-screen, read by
+UIA; the dormant-panel pattern is proven); a live click-through of Search on a real
+workbook (the engine path is typed and packaged but the only full verify was the demo);
+the Locals context-strip nit; then the Object Browser replacement (ties #10 typelibs),
+which retires the biggest remaining hole.
+
+**The day's detailed history (still accurate):**
 - **Afternoon batch** (commits `eb31423`..`HEAD`, each message carries its story): tabs
   indent by default; the engine finally calls `resolveTypeCompletions` (types after `As`);
   toolbar gained Clear-all-breakpoints and a comment/uncomment/toggle suite; breakpoints
