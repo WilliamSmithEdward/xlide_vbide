@@ -71,6 +71,7 @@ export type HostMessage =
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
+  | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
   | {
     type: "setSettings";
@@ -729,6 +730,9 @@ export class EditorBridge {
       case "setLocals":
         this.shell?.setLocals(message.context ?? null, message.rows ?? []);
         return;
+      case "setWatches":
+        this.shell?.setWatches(message.stopped, message.rows ?? []);
+        return;
       case "setSettings":
         applySettings({
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
@@ -1291,6 +1295,14 @@ export function demoTransport(): HostTransport {
             { expression: "counter", value: "42", kind: "Long" },
             { expression: "label", value: '"hello"', kind: "String" },
             { expression: "cells", value: "", kind: "Object/Range" },
+          ],
+        });
+        send({
+          type: "setWatches",
+          stopped: true,
+          rows: [
+            { expression: "counter > 40", value: "True", kind: "Boolean", context: "Module1.Demo" },
+            { expression: "label", value: '"hello"', kind: "String", context: "Module1.Demo" },
           ],
         });
         send({

@@ -272,6 +272,7 @@ internal sealed class AddInSession : IDisposable
         HideReplacedWindows();
         HideNativeToolbars();
         PrepareLocalsGhost();
+        PrepareWatchGhost();
         DarkenTitleBar(host);
 
         return true;
@@ -1729,6 +1730,54 @@ internal sealed class AddInSession : IDisposable
         Log.Info($"locals: {rows.Length} row(s) at {snapshot.Context ?? "(no context)"}");
     }
 
+    /// <summary>What the Watch panel was last sent, so an unchanged reading sends nothing.</summary>
+    private string? _lastWatchesKey;
+
+    /// <summary>
+    /// Reads the mirrored Watches window and forwards what changed to the Watch panel, on the
+    /// same cadence as the Locals mirror above.
+    /// </summary>
+    private void PublishWatches(bool stopped)
+    {
+        if (_editorSurface is null)
+        {
+            return;
+        }
+
+        if (!stopped)
+        {
+            if (_lastWatchesKey is not null)
+            {
+                _lastWatchesKey = null;
+                _editorSurface.ShowWatches(stopped: false, []);
+            }
+
+            return;
+        }
+
+        if (_watchReader?.Read() is not { } reading)
+        {
+            return;
+        }
+
+        var rows = new SurfaceWatchRow[reading.Count];
+        for (var i = 0; i < rows.Length; i++)
+        {
+            var row = reading[i];
+            rows[i] = new SurfaceWatchRow(row.Expression, row.Value, row.Type, row.Context);
+        }
+
+        var key = string.Join("|", rows.Select(r => $"{r.Expression}={r.Value}:{r.Kind}@{r.Context}"));
+        if (key == _lastWatchesKey)
+        {
+            return;
+        }
+
+        _lastWatchesKey = key;
+        _editorSurface.ShowWatches(stopped: true, rows);
+        Log.Info($"watch: {rows.Length} row(s)");
+    }
+
     private void UpdateDebugState()
     {
         try
@@ -1749,6 +1798,7 @@ internal sealed class AddInSession : IDisposable
                     _inBreak = false;
                     _editorSurface?.ShowCurrentLine(null);
                     PublishLocals(stopped: false);
+                    PublishWatches(stopped: false);
                     Log.Info($"debug: mode {mode}, not stopped");
                 }
 
@@ -1756,6 +1806,7 @@ internal sealed class AddInSession : IDisposable
             }
 
             PublishLocals(stopped: true);
+            PublishWatches(stopped: true);
 
             using var pane = _editor.GetObject("ActiveCodePane");
             if (pane is null)
@@ -3334,6 +3385,125 @@ internal sealed class AddInSession : IDisposable
         _localsPalette = 0;
     }
 
+    private WatchReader? _watchReader;
+
+    /// <summary>The floated Watches palette, its original extended styles kept for restoration.</summary>
+    private nint _watchPalette;
+    private long _watchPaletteExStyle;
+
+    /// <summary>
+    /// Turns the native Watches window into the Watch panel's invisible data engine, by the
+    /// same route as the Locals ghost above (lesson 29): floated through the object model,
+    /// layered at alpha zero, parked off screen, read by handle. If any step refuses, the
+    /// ghost is skipped and the native window stays reachable through a cutout.
+    /// </summary>
+    private void PrepareWatchGhost()
+    {
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is null || window.GetInt32("Type") != 3)
+                {
+                    continue;
+                }
+
+                window.SetBool("Visible", true);
+
+                try
+                {
+                    using var frame = window.GetObject("LinkedWindowFrame");
+                    using var linked = frame?.GetObject("LinkedWindows");
+                    linked?.InvokeWithObject("Remove", window);
+                }
+                catch (Exception)
+                {
+                }
+
+                try
+                {
+                    window.SetInt32("Left", 300);
+                    window.SetInt32("Top", 300);
+                    window.SetInt32("Width", 240);
+                    window.SetInt32("Height", 150);
+                }
+                catch (Exception)
+                {
+                }
+
+                var caption = window.GetString("Caption");
+                var palette = caption is { Length: > 0 }
+                    ? CodePaneTracker.FindTopLevelByCaption(caption)
+                    : 0;
+
+                if (palette == 0)
+                {
+                    Log.Info("watch: the floated palette was not found; the native window stays");
+                    return;
+                }
+
+                _watchPalette = palette;
+                _watchPaletteExStyle = Win32.GetWindowLongPtr(palette, Win32.GwlExStyle);
+                Win32.SetWindowLongPtr(palette, Win32.GwlExStyle,
+                    (nint)(_watchPaletteExStyle | Win32.WsExLayered | Win32.WsExTransparent | Win32.WsExNoActivate));
+                Win32.SetLayeredWindowAttributes(palette, 0, 0, Win32.LwaAlpha);
+                Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
+                    Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
+
+                _watchReader = WatchReader.Create(palette);
+                Log.Info(_watchReader is null
+                    ? "watch: the ghost palette could not be read; the native window stays"
+                    : $"watch: ghost palette {palette:X} feeding the panel");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"watch: the ghost could not be prepared ({ex.GetType().Name}: {ex.Message})");
+        }
+    }
+
+    /// <summary>
+    /// Gives the Watches palette back to the native editor: opaque, its styles restored, on
+    /// screen, and hidden until someone asks for it.
+    /// </summary>
+    private void RestoreWatchPalette()
+    {
+        if (_watchPalette == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Win32.SetWindowPos(_watchPalette, 0, 300, 300, 0, 0,
+                Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
+            Win32.SetLayeredWindowAttributes(_watchPalette, 0, 255, Win32.LwaAlpha);
+            Win32.SetWindowLongPtr(_watchPalette, Win32.GwlExStyle, (nint)_watchPaletteExStyle);
+
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is not null && window.GetInt32("Type") == 3)
+                {
+                    window.SetBool("Visible", false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"watch: the palette could not be restored ({ex.GetType().Name})");
+        }
+
+        _watchPalette = 0;
+    }
+
     /// <summary>
     /// Hides every docked native toolbar, which the surface's toolbar and menus replace.
     ///
@@ -4593,6 +4763,11 @@ internal sealed class AddInSession : IDisposable
 
         _localsReader?.Dispose();
         _localsReader = null;
+
+        RestoreWatchPalette();
+
+        _watchReader?.Dispose();
+        _watchReader = null;
 
         _codePanes?.Dispose();
         _codePanes = null;

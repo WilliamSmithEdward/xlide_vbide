@@ -69,8 +69,18 @@ internal static class VbeMenus
     /// pane, not on the surface — traps as much as duplicates. Bookmarks stays: nothing on
     /// the surface does its job yet.
     /// </summary>
+    /// <remarks>
+    /// 2026-08-05, the second half: the Edit and View menus are GONE ENTIRELY (30003, 30004 —
+    /// the top-level popups themselves). Bookmarks became the surface's own (page-side, in the
+    /// command palette and context menu); Watch became a panel fed by its own ghost palette;
+    /// Call Stack sits on the toolbar's debug cluster; Definition and Last Position ride their
+    /// native keys (Shift+F2, Ctrl+Shift+F2) and the editor's context menu; the Object Browser
+    /// was already a toolbar button. The designer's entry points (View Object, Toolbox, Tab
+    /// Order) return with the designer itself (#14), not with a menu.
+    /// </remarks>
     private static readonly HashSet<int> Replaced =
     [
+        30003, 30004,
         761, 830, 2554, 2555, 2557, 222, 30045,
         128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
     ];

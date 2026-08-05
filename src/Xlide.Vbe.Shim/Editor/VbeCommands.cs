@@ -42,6 +42,8 @@ internal static class VbeCommands
         public const int QuickWatch = 229;
         public const int AddWatch = 1820;
         public const int CallStack = 620;
+        public const int Definition = 939;
+        public const int LastPosition = 1822;
         public const int CommentBlock = 192;
         public const int Save = 3;
         public const int ObjectBrowser = 473;
@@ -255,6 +257,8 @@ internal static class VbeCommands
         "quickWatch" => Command.QuickWatch,
         "addWatch" => Command.AddWatch,
         "callStack" => Command.CallStack,
+        "goToDefinition" => Command.Definition,
+        "lastPosition" => Command.LastPosition,
         "clearAllBreakpoints" => Command.ClearAllBreakpoints,
         "references" => Command.References,
         "projectProperties" => Command.ProjectProperties,
@@ -291,6 +295,11 @@ internal static class VbeCommands
     {
         return virtualKey switch
         {
+            // The View menu's navigation pair, kept on their native keys after the menu went
+            // (2026-08-05): both execute through the caret-synced command path, and the
+            // pane-follow machinery brings the surface to wherever the editor lands.
+            VirtualKey.F2 when shift && control => Command.LastPosition,
+            VirtualKey.F2 when shift => Command.Definition,
             VirtualKey.F5 when control => Command.Break,
             VirtualKey.F5 when shift => Command.Reset,
             VirtualKey.F5 => Command.Run,
@@ -357,6 +366,7 @@ internal static class VbeCommands
 internal static class VirtualKey
 {
     public const uint F1 = 0x70;
+    public const uint F2 = 0x71;
     public const uint F4 = 0x73;
     public const uint F5 = 0x74;
     public const uint F8 = 0x77;

@@ -1111,6 +1111,20 @@ body.live-resize .minimap {
   opacity: 0.55;
 }
 
+/* The Watch panel reuses the Locals rows with a fourth column for the watch's context. */
+.locals-row.watch-row {
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) minmax(90px, 1fr) minmax(110px, 1fr);
+}
+
+/* A bookmark's glyph, beside the breakpoint's in the same margin. */
+.xlide-bookmark {
+  color: var(--vscode-charts-blue, #3794ff);
+  font-size: 13px;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
 #panel-head {
   display: flex;
   align-items: center;

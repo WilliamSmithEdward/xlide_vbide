@@ -57,6 +57,7 @@ const INDEX_HTML = `<!doctype html>
             <button class="panel-tab active" data-panel="problems" role="tab" aria-selected="true" type="button">Problems</button>
             <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
             <button class="panel-tab" data-panel="locals" role="tab" aria-selected="false" type="button">Locals</button>
+            <button class="panel-tab" data-panel="watch" role="tab" aria-selected="false" type="button">Watch</button>
             <button class="panel-tab" data-panel="search" role="tab" aria-selected="false" type="button">Search</button>
           </div>
         </div>
@@ -78,6 +79,9 @@ const INDEX_HTML = `<!doctype html>
           <div id="locals" hidden>
             <div id="locals-context" aria-live="polite" hidden></div>
             <div id="locals-table" role="table" aria-label="Local variables"></div>
+          </div>
+          <div id="watch" hidden>
+            <div id="watch-table" role="table" aria-label="Watch expressions"></div>
           </div>          <div id="search" hidden>
             <div id="search-controls">
               <input id="search-query" type="text" spellcheck="false" autocomplete="off" placeholder="Find" aria-label="Search text">

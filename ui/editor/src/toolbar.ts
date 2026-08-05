@@ -42,6 +42,9 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "stepOut", target: "host", icon: "debug-step-out", label: "Step out" },
   { id: "toggleBreakpoint", target: "host", icon: "debug-breakpoint", label: "Toggle breakpoint (F9)" },
   { id: "clearAllBreakpoints", target: "host", icon: "clear-all", label: "Clear all breakpoints" },
+  // The View menu's Call Stack, rehomed when the menu went (2026-08-05): a break-mode
+  // dialog belongs beside the stepping it narrates.
+  { id: "callStack", target: "host", icon: "list-tree", label: "Call stack" },
 
   { id: "actions.find", target: "editor", icon: "search", label: "Find (Ctrl+F)", separatorBefore: true },
   { id: "editor.action.startFindReplaceAction", target: "editor", icon: "replace", label: "Replace (Ctrl+H)" },

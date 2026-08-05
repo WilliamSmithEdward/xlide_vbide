@@ -43,6 +43,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openSettingsDialog } from "./settingsdialog.js";
+import { installBookmarks } from "./bookmarks.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
@@ -293,22 +294,32 @@ function boot(): void {
   });
 
   // The host's own commands, present in the editor's context menu and the command palette so
-  // they are discoverable where a developer already looks for commands.
-  const hostActions: Array<[string, string, string]> = [
+  // they are discoverable where a developer already looks for commands. The navigation pair
+  // rode the View menu until it went (2026-08-05); their keys are claimed host-side while
+  // the surface has focus, and bound here as well for every moment it does not.
+  const hostActions: Array<[string, string, string, number[]?]> = [
     ["xlide.run", "Run Sub/UserForm (F5)", "run"],
     ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
     ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
+    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "goToDefinition",
+      [monaco.KeyMod.Shift | monaco.KeyCode.F2]],
+    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "lastPosition",
+      [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2]],
   ];
 
-  for (const [id, label, command] of hostActions) {
+  for (const [id, label, command, keys] of hostActions) {
     editor.addAction({
       id,
       label,
       contextMenuGroupId: "1_xlide",
       contextMenuOrder: 1,
+      ...(keys ? { keybindings: keys } : {}),
       run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
     });
   }
+
+  // Bookmarks are the surface's own now: the Edit menu that carried the native ones is gone.
+  installBookmarks(editor);
 
   // The margin's own menu. The editor would otherwise offer its text menu there, which is a menu
   // for a place the click was not.

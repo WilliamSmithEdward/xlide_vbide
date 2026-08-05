@@ -736,6 +736,16 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.BreakpointRefusedMessage));
     }
 
+    /// <summary>Replaces the Watch panel's rows; not stopped clears it to its idle text.</summary>
+    public void ShowWatches(bool stopped, SurfaceWatchRow[] rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        Send("setWatches", JsonSerializer.Serialize(
+            new SetWatchesMessage("setWatches", stopped, rows),
+            EditorMessageContext.Default.SetWatchesMessage));
+    }
+
     /// <summary>
     /// Asks the developer what to do about a module's unsaved changes before its tab closes.
     /// Not held: the request answers a close the page just asked for, so the page is there.

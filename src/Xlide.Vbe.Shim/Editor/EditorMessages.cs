@@ -85,6 +85,19 @@ public sealed record BreakpointRefusedMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("line")] int Line);
 
+/// <summary>One row of the Watch panel: a watch expression and where it stands.</summary>
+public sealed record SurfaceWatchRow(
+    [property: JsonPropertyName("expression")] string Expression,
+    [property: JsonPropertyName("value")] string Value,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("context")] string Context);
+
+/// <summary>The Watch panel's rows, replaced whole; stopped false is the idle state.</summary>
+public sealed record SetWatchesMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("stopped")] bool Stopped,
+    [property: JsonPropertyName("rows")] SurfaceWatchRow[] Rows);
+
 /// <summary>
 /// A tab close the host is holding until the developer answers for the module's unsaved
 /// changes. The page asks again with their choice.
@@ -344,6 +357,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(BreakpointRefusedMessage))]
 [JsonSerializable(typeof(ConfirmCloseMessage))]
+[JsonSerializable(typeof(SetWatchesMessage))]
+[JsonSerializable(typeof(SurfaceWatchRow))]
 [JsonSerializable(typeof(SearchResultMessage))]
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]

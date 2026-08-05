@@ -189,6 +189,8 @@ export class Shell {
   private readonly immediateLog: HTMLElement;
   private readonly immediateInput: HTMLInputElement;
   private readonly localsBody: HTMLElement;
+  private readonly watchBody: HTMLElement;
+  private readonly watchTable: HTMLElement;
   private readonly localsContext: HTMLElement;
   private readonly localsTable: HTMLElement;
   private readonly searchBody: HTMLElement;
@@ -320,6 +322,8 @@ export class Shell {
     this.immediateLog = root.querySelector("#immediate-log") as HTMLElement;
     this.immediateInput = root.querySelector("#immediate-input") as HTMLInputElement;
     this.localsBody = root.querySelector("#locals") as HTMLElement;
+    this.watchBody = root.querySelector("#watch") as HTMLElement;
+    this.watchTable = root.querySelector("#watch-table") as HTMLElement;
     this.localsContext = root.querySelector("#locals-context") as HTMLElement;
     this.localsTable = root.querySelector("#locals-table") as HTMLElement;
     this.searchBody = root.querySelector("#search") as HTMLElement;
@@ -821,6 +825,51 @@ export class Shell {
     }
   }
 
+  /**
+   * Replaces the Watch panel content. Not stopped is the idle state; stopped with no rows
+   * means no watches are set.
+   */
+  setWatches(stopped: boolean, rows: { expression: string; value: string; kind: string; context: string }[]): void {
+    this.watchTable.replaceChildren();
+
+    if (rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "locals-empty";
+      empty.textContent = stopped
+        ? "No watches. Add one from the Debug menu."
+        : "Not stopped. Watches report here in break mode.";
+      this.watchTable.appendChild(empty);
+      return;
+    }
+
+    const header = document.createElement("div");
+    header.className = "locals-row watch-row locals-header";
+    header.setAttribute("role", "row");
+    for (const title of ["Expression", "Value", "Type", "Context"]) {
+      const cell = document.createElement("span");
+      cell.setAttribute("role", "columnheader");
+      cell.textContent = title;
+      header.appendChild(cell);
+    }
+    this.watchTable.appendChild(header);
+
+    for (const row of rows) {
+      const line = document.createElement("div");
+      line.className = "locals-row watch-row";
+      line.setAttribute("role", "row");
+
+      for (const text of [row.expression, row.value, row.kind, row.context]) {
+        const cell = document.createElement("span");
+        cell.setAttribute("role", "cell");
+        cell.textContent = text;
+        cell.title = text;
+        line.appendChild(cell);
+      }
+
+      this.watchTable.appendChild(line);
+    }
+  }
+
   private installSearch(): void {
     const toggle = (button: HTMLButtonElement) => {
       button.addEventListener("click", () => {
@@ -953,6 +1002,7 @@ export class Shell {
     this.problemsFilters.hidden = name !== "problems";
     this.immediateBody.hidden = name !== "immediate";
     this.localsBody.hidden = name !== "locals";
+    this.watchBody.hidden = name !== "watch";
     this.searchBody.hidden = name !== "search";
     this.shown = name;
 
