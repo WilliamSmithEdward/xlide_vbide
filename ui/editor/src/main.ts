@@ -122,6 +122,13 @@ function boot(): void {
 
   const createMs = performance.now();
 
+  // Automatic layout rides ResizeObserver, which rides the frame pipeline; the viewport
+  // resize event is delivered regardless. Asking for an explicit re-measure on it costs an
+  // offset read when nothing changed and is what guarantees the editor tracks the window
+  // DOWN as well as up — the grid below it shrinks first (styles.css: #container), and this
+  // makes certain the editor follows even if the observer's frame is late (2026-08-05).
+  window.addEventListener("resize", () => editor.layout());
+
   const transport = webView2Transport();
 
   // The shell is built before the bridge, because the bridge routes host messages into it. The

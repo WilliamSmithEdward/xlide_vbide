@@ -420,6 +420,14 @@ span.prop-value.readonly {
 
 #container {
   min-height: 0;
+
+  /* A grid item refuses to shrink below its content, and the editor sets an explicit pixel
+     width on itself after every measure — so growth tracked but shrink ratcheted: the cell
+     could never go below the editor's own last width, and narrowing the window pushed the
+     minimap and scrollbar off the right edge (2026-08-05). Zero lets the cell shrink first;
+     the editor's own observer then measures it and follows down. */
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* The empty workspace: what the editor area becomes when every tab is closed. It occupies the
