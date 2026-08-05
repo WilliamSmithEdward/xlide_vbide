@@ -10,6 +10,22 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 menu curation (developer directives, STANDING):** the end goal is the menu
+bar stripped to what only menus can reach. TODAY: the Edit menu lost its editing half —
+Undo/Redo, Cut/Copy/Paste/Clear/Select All, Find/Find Next/Replace, Indent/Outdent, and
+the five IntelliSense items (List Properties/Methods, List Constants, Quick Info,
+Parameter Info, Complete Word) — all duplicative of the toolbar, the find widget, or the
+engine, and all acting on the COVERED native pane besides (traps as much as duplicates).
+Only Bookmarks survives (nothing on the surface does its job — a future surface feature).
+Also gone: the View menu's Toolbars popup itself — its id, 30045, was the old "unknown
+popup id" nit, now MEASURED and suppressed alongside its 761 children. QUEUED: the View
+menu goes ENTIRELY once Watch + Call Stack port via the ghost-palette route; the UserForm
+items (Toolbox 548, Tab Order 469) move to the designer backlog (#14), not back into a
+menu. The full menu-bar id map was measured 2026-08-05 (every suppressed id verified
+unique across the bar; 746 is the repeating generic id and must never be suppressed) —
+the enumeration one-liner lives in the transcript; suppression is `VbeMenus.Replaced`.
+Verified live: WM-click into the render widget opened Edit showing exactly [Bookmarks].
+
 **2026-08-05 resize arc (`c0bce55`..`91b412b`, developer-accepted):** the minimap/scrollbar
 "pushed off canvas" report unwound into three findings, lessons 30-31. (1) THE RATCHET: a
 grid cell cannot shrink below its content, and the editor sets its own pixel width — grow

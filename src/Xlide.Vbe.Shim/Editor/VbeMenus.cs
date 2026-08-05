@@ -45,16 +45,35 @@ internal static class VbeMenus
 
     /// <summary>
     /// Items the surface has replaced outright, left out of every menu it serves — the
-    /// developer's standing rule (2026-08-04): as a native window is ported fully, its menu
-    /// item goes. 761 is every native toolbar's visibility toggle — the native toolbars are
-    /// hidden and the surface's toolbar is the toolbar — and 830 is every entry of the native
-    /// window list, whose job the tab strip does. 2554 Immediate, 2555 Locals, 2557 Project
-    /// Explorer, and 222 Properties Window name windows whose surface replacements are always
-    /// a panel tab away; the Watch window, Call Stack, and Object Browser keep their items
-    /// until their ports land. Each id is shared across exactly its family and nothing else
-    /// (measured; the handoff's command table), which is what makes suppression by id safe.
+    /// developer's standing rule (2026-08-04, extended 2026-08-05: the end goal is menus
+    /// stripped to what only they can reach). Suppression is by id, which is safe exactly
+    /// because every id here was MEASURED unique across the menu bar (2026-08-05 full
+    /// enumeration; the one id that repeats everywhere, 746, is not here).
+    ///
+    /// The window replacements: 761 is every native toolbar's visibility toggle and 30045
+    /// the Toolbars popup that held them — the surface's toolbar is the toolbar; 830 is the
+    /// native window list, whose job the tab strip does; 2554 Immediate, 2555 Locals, 2557
+    /// Project Explorer, 222 Properties Window are panels now. Watch (2556), Call Stack
+    /// (620), and Object Browser (473) keep their items until their ports land — and the
+    /// View menu goes ENTIRELY when Watch and Call Stack do (developer, 2026-08-05), with
+    /// the UserForm designer's Toolbox (548) and Tab Order (469) moving to the designer
+    /// backlog rather than surviving here.
+    ///
+    /// The Edit menu's editing half (developer, 2026-08-05: anything duplicative or already
+    /// on the toolbar goes): Undo 128, Redo 129, Cut 21, Copy 19, Paste 22, Clear 478, and
+    /// Select All 756 are the editor's own keys; Find 141, Find Next 570, and Replace 313
+    /// are the find widget and the Search panel; Indent 15 and Outdent 14 are toolbar
+    /// buttons and the Tab key itself; List Properties/Methods 2529, List Constants 2530,
+    /// Quick Info 2531, Parameter Info 2532, and Complete Word 2533 are the engine's
+    /// completions, hovers, and signature help. These also acted on the COVERED native
+    /// pane, not on the surface — traps as much as duplicates. Bookmarks stays: nothing on
+    /// the surface does its job yet.
     /// </summary>
-    private static readonly HashSet<int> Replaced = [761, 830, 2554, 2555, 2557, 222];
+    private static readonly HashSet<int> Replaced =
+    [
+        761, 830, 2554, 2555, 2557, 222, 30045,
+        128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
+    ];
 
     /// <summary>
     /// Reads the items of one menu: the bar itself for an empty path, or the submenu the path leads
