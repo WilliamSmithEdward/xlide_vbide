@@ -735,6 +735,13 @@ internal sealed class AddInSession : IDisposable
         }
 
         WatchDebugState();
+
+        // A command can open or close a native window the surface must make room for — the
+        // Object Browser above all. The menu route always re-derived placement after
+        // executing; this route did not, and once the View menu was the toolbar button
+        // (2026-08-05), the Browser opened INVISIBLE under the surface: the command executed,
+        // no event the tracker recognises fired, and no pass ever cut its hole.
+        RefreshSurfacePlacement();
     }
 
     /// <summary>
