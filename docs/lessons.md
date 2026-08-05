@@ -650,7 +650,16 @@ Project Explorer and Properties are panels - so the cutout machinery went entire
 replaced by a police pass on the settle: replaced windows re-hidden, a docked Browser
 adopted, docked ghost strays hidden. The canvas is purely xlide.
 
-Consequence: when a component refuses to rearrange its own windows, take the window - but
-take its bookkeeping too. Every fight above was the editor reconciling its records with a
-world that changed without it; quiet the records (not-visible), absorb the one reflex, and
-retry on the cadence of the thing that actually lags.
+POSTSCRIPT, same day: the adoption LOST. Quieting the record (not-visible) stopped the
+closes but shipped a BLANK Browser - the editor only services, fills, and paints a window
+its records call on-screen, exactly the ghost-feed rule cutting the other way. Leaving the
+record visible kept the content path alive in theory but the reconciliation escalated: the
+reflex close also arrives as WM_SYSCOMMAND/SC_CLOSE, indistinguishable from the developer's
+own close box, every few seconds. Blank content OR an unwinnable close war - both measured.
+The native Object Browser is retired; the toolbar button says so in the status line, and
+the real answer is the xlide Object Browser built from the typelib model (#10).
+
+Consequence: when a component refuses to rearrange its own windows, taking the window is
+not enough - its OWNER keeps the paint, the layout, and the lifecycle, and it reconciles
+against you on its own clock. Adoption works for windows whose content is self-contained;
+a window whose owner draws its insides can only be replaced, never stolen.

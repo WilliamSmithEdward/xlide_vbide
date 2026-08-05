@@ -221,6 +221,10 @@ internal static unsafe partial class Win32
 
     /// <summary>Asks a window to close, exactly as its own close box would.</summary>
     public const uint WmClose = 0x0010;
+    public const uint WmSysCommand = 0x0112;
+
+    /// <summary>The system-menu close command, masked to its command bits.</summary>
+    public const nint ScClose = 0xF060;
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

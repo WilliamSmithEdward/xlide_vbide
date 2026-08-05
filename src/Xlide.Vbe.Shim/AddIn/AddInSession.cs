@@ -707,12 +707,15 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        // An adopted Browser is already open in its own frame; running the native command
-        // again would tell the editor to re-show a window whose child we hold. Presenting
-        // the frame is what the second click means.
-        if (command == VbeCommands.Command.ObjectBrowser && _objectBrowserFloat is not null)
+        // The native Object Browser is retired: it cannot show on a purely xlide canvas (no
+        // holes, by directive), the editor cannot float it (an MDI document window;
+        // LinkedWindows.Remove is a silent no-op), and adopting its window produced a blank
+        // shell the editor fought to close — all measured 2026-08-05, lesson 32. Its xlide
+        // replacement rides the typelib model (#10). Executing the native command would only
+        // open a window nobody can see.
+        if (command == VbeCommands.Command.ObjectBrowser)
         {
-            _objectBrowserFloat.Present();
+            _editorSurface?.Notify("The Object Browser is being replaced; its xlide version is on the roadmap.");
             return;
         }
 
@@ -743,17 +746,6 @@ internal sealed class AddInSession : IDisposable
             _resyncPanePolls = Math.Max(_resyncPanePolls, 3);
         }
 
-        // The Browser lives beside the surface, never on it (developer, 2026-08-05):
-        // adopted into a floating frame of our own, it is a real window to move and close,
-        // and the canvas underneath stays purely xlide. The adoption tries now and again at
-        // the settle — the native window's creation can outrun both the command's return
-        // and the immediate pass below.
-        if (ran && command == VbeCommands.Command.ObjectBrowser)
-        {
-            AdoptObjectBrowser();
-            _editorSurface?.ArmPlacementSettle(PlacementSettleMilliseconds);
-        }
-
         WatchDebugState();
 
         // A command can change the native window landscape — the Object Browser above all —
@@ -761,116 +753,6 @@ internal sealed class AddInSession : IDisposable
         // placement after executing; this route learned the same manners (2026-08-05, the
         // Browser opening invisible under the surface).
         RefreshSurfacePlacement();
-    }
-
-    /// <summary>The frame the Object Browser lives in while adopted; null when it is home.</summary>
-    private FloatFrame? _objectBrowserFloat;
-
-    /// <summary>
-    /// Puts the Object Browser in a floating frame of our own, beside the surface. The editor
-    /// cannot float it itself — it is an MDI document window, and LinkedWindows.Remove answers
-    /// it with a silent shrug (measured 2026-08-05) — so the frame adopts the native window
-    /// outright: reparented in, its own caption stripped, ours dark. A second summons while
-    /// adopted just brings the frame forward.
-    /// </summary>
-    private void AdoptObjectBrowser()
-    {
-        if (_objectBrowserFloat is not null)
-        {
-            _objectBrowserFloat.Present();
-            return;
-        }
-
-        try
-        {
-            using var windows = _editor.GetObject("Windows");
-            var count = windows?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= count; i++)
-            {
-                using var window = windows!.GetItem(i);
-                if (window is null || window.GetInt32("Type") != 2)
-                {
-                    continue;
-                }
-
-                // Not gated on the Visible flag: it flips a beat AFTER the command returns
-                // (the same lag the Save flag has), and the first click after a close read
-                // it false and adopted nothing ("I have to click it again", 2026-08-05).
-                // The child window existing is the real fact.
-                var caption = window.GetString("Caption");
-                var child = caption is { Length: > 0 } ? CodePaneTracker.FindChildByCaption(caption) : 0;
-                if (child == 0)
-                {
-                    // Not there yet either — creation can outrun this call. The settle armed
-                    // by the summons runs the police pass a beat later, which adopts it.
-                    Log.Verbose("object browser: no window to adopt yet; the settle will look again");
-                    return;
-                }
-
-                // A maximised document child first becomes a window again.
-                if (((long)Win32.GetWindowLongPtr(child, Win32.GwlStyle) & Win32.WsMaximize) != 0)
-                {
-                    Win32.SendMessage(Win32.GetParent(child), Win32.WmMdiRestore, child, 0);
-                }
-
-                _objectBrowserFloat = FloatFrame.Adopt(
-                    _frame, child, caption ?? "Object Browser", OnObjectBrowserFloatClosed);
-
-                if (_objectBrowserFloat is null)
-                {
-                    Log.Info("object browser: the float frame could not be created");
-                    return;
-                }
-
-                DarkenTitleBar(_objectBrowserFloat.Handle);
-
-                // The editor's own record of the window goes quiet while we hold its child:
-                // left "visible" with no child in sight, the editor noticed and closed the
-                // adopting frame about two seconds in (measured 2026-08-05). Hidden in the
-                // object model, the HWND lives on in our frame — the same split the ghost
-                // palettes prove every session. The hide itself makes the editor send one
-                // reflex WM_CLOSE at the frame; it is swallowed, not obeyed.
-                _objectBrowserFloat.IgnoreCloseBriefly(800);
-                window.SetBool("Visible", false);
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"object browser: could not be adopted ({ex.GetType().Name})");
-        }
-    }
-
-    /// <summary>
-    /// The developer closed the float frame: the native window goes home to the document area,
-    /// hidden, ready for its next summons through the toolbar.
-    /// </summary>
-    private void OnObjectBrowserFloatClosed()
-    {
-        var floated = _objectBrowserFloat;
-        _objectBrowserFloat = null;
-        floated?.Release();
-
-        try
-        {
-            using var windows = _editor.GetObject("Windows");
-            var count = windows?.GetInt32("Count") ?? 0;
-            for (var i = 1; i <= count; i++)
-            {
-                using var window = windows!.GetItem(i);
-                if (window is not null && window.GetInt32("Type") == 2)
-                {
-                    window.SetBool("Visible", false);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"object browser: could not be hidden after its return ({ex.GetType().Name})");
-        }
-
-        Log.Info("object browser: returned home");
     }
 
     /// <summary>
@@ -4623,14 +4505,12 @@ internal sealed class AddInSession : IDisposable
                 var caption = window.GetString("Caption");
                 if (type == 2)
                 {
-                    // The float frame is the Browser's home, and an adopted window is not a
-                    // frame child — finding one docked is the only case with work in it. Not
-                    // gated on the Visible flag: it lags the command that opens the window.
-                    if (_objectBrowserFloat is null
-                        && caption is { Length: > 0 } && CodePaneTracker.FindChildByCaption(caption) != 0)
+                    // The native Object Browser is retired (lesson 32): any route that shows
+                    // it puts an invisible window under the canvas, so it is put away.
+                    if (window.GetBool("Visible"))
                     {
-                        AdoptObjectBrowser();
-                        story?.Append($"; adopted '{caption}'");
+                        window.SetBool("Visible", false);
+                        story?.Append($"; hid '{caption}'");
                     }
 
                     continue;
@@ -4813,14 +4693,6 @@ internal sealed class AddInSession : IDisposable
 
         _immediateReader?.Dispose();
         _immediateReader = null;
-
-        // The Browser goes home before the editor is left: a stopped session must leave a
-        // native window where the native editor expects one.
-        if (_objectBrowserFloat is { } floatedBrowser)
-        {
-            _objectBrowserFloat = null;
-            floatedBrowser.Release();
-        }
 
         RestoreLocalsPalette();
 

@@ -11,27 +11,30 @@ that would be expensive to reverse.
 ## START NEW SESSION HERE — 2026-08-04 evening
 
 **2026-08-05 PURELY-XLIDE CANVAS (developer directive, STANDING): the cutout-hole
-machinery is GONE.** "I'd like our canvas to be purely xlide" — nothing native shows
-through the surface, ever. Every native tool window now has a better home: Immediate,
-Project Explorer, Properties are panels; Locals and Watches are ghost palettes; the OBJECT
-BROWSER is ADOPTED — reparented into `FloatFrame` (new: Editor/FloatFrame.cs), a top-level
-dark-titled window of ours beside the surface, because the editor CANNOT float it
-(MDI document window; LinkedWindows.Remove is a measured silent no-op — lesson 32). The
-adoption protocol, each step measured: OM window set not-visible while its HWND lives in
-our frame (left visible, the editor closed the frame ~2s in); the hide's one reflex
-WM_CLOSE swallowed by an 800ms grace; adoption gated on the CHILD WINDOW existing, never
-the Visible flag (lags like the Saved flag — "click again" bug), retried at command +
-immediate pass + settle. Close box → child reparented home, styles restored, OM-hidden,
-ready for the next summons; second summons while open just presents the frame (native
-command NOT re-executed). Cutout remains removed: NativeToolWindowCutouts, SetCutouts
+machinery is GONE, and the native OBJECT BROWSER is RETIRED with it.** "I'd like our
+canvas to be purely xlide" — nothing native shows through the surface, ever. Every native
+tool window now has its home: Immediate, Project Explorer, Properties are panels; Locals
+and Watches are ghost palettes; the Object Browser has NONE until its xlide replacement
+ships from the typelib model (#10 — now the priority route). The full story is lesson 32,
+every step measured: the editor cannot float it (MDI document window; LinkedWindows.Remove
+is a silent no-op); ADOPTING its window into a frame of ours (FloatFrame, built then
+deleted same day — git history has it) hit an unwinnable pair — OM-hidden, the editor
+stops servicing the window and the Browser ships BLANK (the ghost-feed rule cutting the
+other way); OM-visible, the editor's reconciliation closes the frame every few seconds,
+arriving as both bare WM_CLOSE and WM_SYSCOMMAND/SC_CLOSE, indistinguishable from the
+developer's close box. A window whose owner draws its insides can only be replaced, never
+stolen. TODAY: the toolbar button answers with a status notice ("being replaced; on the
+roadmap"), the native command is never executed, and the police pass hides any type-2
+window that appears. Cutout removal stands: NativeToolWindowCutouts, SetCutouts
 (surface+overlay), `_watchingCutouts`, the 200ms hole poll, Test-CutoutHoles.ps1 — all
-deleted; `PoliceNativeToolWindows` on the settle full pass keeps the canvas pure (re-hides
-6/7, adopts a docked 2, hides docked ghost strays 3/4). Call stack button greys outside
-break (`setDebugState` mode publish; declined click → status notice). MACHINE NOTE: Smart
-App Control began BLOCKING the fresh RELEASE shim publish mid-morning (CodeIntegrity 3033/
-3077 events; LoadBehavior reset to 0 twice before diagnosis) — the dev loop now publishes
-`-Configuration Debug` (SAC-clean, registered at debug_win-x64; ui dist mirrored there
-too). Re-registering + LoadBehavior=3 is the recovery; NEVER change SAC itself (standing).
+deleted; `PoliceNativeToolWindows` on the settle full pass keeps the canvas pure (hides
+2/6/7, hides docked ghost strays 3/4). Call stack button greys outside break
+(`setDebugState` mode publish; declined click → status notice). MACHINE NOTE: Smart App
+Control began BLOCKING the fresh RELEASE shim publish mid-morning (CodeIntegrity 3033/
+3077 events; LoadBehavior silently reset to 0, no shim log at all — that pair is the
+diagnostic signature) — the dev loop now publishes `-Configuration Debug` (SAC-clean,
+registered at debug_win-x64; ui dist mirrored there too). Recovery: LoadBehavior back to
+3 + relaunch on the Debug publish; NEVER change SAC itself (standing).
 
 **2026-08-05 menu curation (developer directives, STANDING):** the end goal is the menu
 bar stripped to what only menus can reach. TODAY: the Edit menu lost its editing half —
