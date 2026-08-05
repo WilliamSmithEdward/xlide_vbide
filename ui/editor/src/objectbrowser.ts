@@ -148,7 +148,7 @@ function demoPaletteTransport(): HostTransport {
               { name: "Total", kind: "Function", signature: "Public Function Total() As Double", description: "", line: 9 },
             ]
             : [
-              { name: "Address", kind: "Property", signature: "Property Get Address([RowAbsolute As Variant]) As String", description: "", line: 0 },
+              { name: "Address", kind: "Property", signature: "Property Get Address([RowAbsolute As Variant]) As String", description: "Returns the address.", line: 0 },
               { name: "Select", kind: "Function", signature: "Function Select() As Variant", description: "", line: 0 },
             ],
         });

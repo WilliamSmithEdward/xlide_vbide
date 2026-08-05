@@ -62,7 +62,7 @@ Test-Seam 'Ctrl\+W goes through the same gate' (Join-Path $repo 'src\Xlide.Vbe.S
 Test-Seam 'built bundle carries the modal' (Join-Path $repo 'ui\editor\dist\editor.js') @(
     'close-confirm-backdrop', 'confirmClose')
 
-$published = Join-Path $repo 'artifacts\publish\Xlide.Vbe.Shim\release_win-x64\ui\editor\dist\editor.js'
+$published = Join-Path $repo 'artifacts\publish\Xlide.Vbe.Shim\debug_win-x64\ui\editor\dist\editor.js'
 if (Test-Path $published) {
     Test-Seam 'PUBLISHED bundle carries the modal (stale deploy)' $published @('close-confirm-backdrop')
 } else {
