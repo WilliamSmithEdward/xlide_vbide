@@ -10,6 +10,28 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 THE XLIDE OBJECT BROWSER IS REAL (`44deb00`).** The native one is retired
+(below); its replacement ships: F2 / the toolbar button open a themed view whose LIBRARY
+PICKER holds each open workbook's project AND every referenced type library — VBA, Excel
+16.0, stdole, Office all confirmed loading live through `VBProject.References` (works from
+the add-in without the trust setting) + `LoadTypeLibEx`. New pieces:
+Interop/TypeLibrary.cs (ITypeLib/ITypeInfo as GeneratedComInterface with exact vtable
+order + TYPEATTR/FUNCDESC/VARDESC/ELEMDESC/TYPEDESC as sequential structs) and
+Editor/TypeLibraryCatalog.cs (types filtered of hidden/restricted/underscored; coclass
+members read through the default impl; dual-interface HRESULT+retval collapsed; Property
+Get/Let pairs collapsed to one row; VBA-spelled signatures with VT map, VT_PTR deref,
+VT_USERDEFINED resolution, optional [param] brackets; enum/module constants with values).
+Protocol: obLibraries/obTypes/obMembers request-response pairs (id-matched, cached
+host-side per library). Page: objectbrowser.ts — picker, types pane, members pane, detail
+strip with the full signature, search within the scope, project members Enter/dblclick
+NAVIGATE to their definition. Demo transport serves a canned mini-Excel for the lab.
+VERIFIED: demo full flow; live open + 4 libraries loaded + project browsing + detail
+strip. NOT yet exercised live: a real library's type/member reads (the picker flip
+resisted synthetic driving) — failure modes are bounded (per-item try/catch, HRESULT
+checks, empty lists + log counts "Excel -> N type(s)"), and the developer's first
+dropdown flip is the test. Backlog from here: <All Libraries> scope, member search across
+unloaded types, engine-side completion backfill from the same catalog (#10's other half).
+
 **2026-08-05 PURELY-XLIDE CANVAS (developer directive, STANDING): the cutout-hole
 machinery is GONE, and the native OBJECT BROWSER is RETIRED with it.** "I'd like our
 canvas to be purely xlide" — nothing native shows through the surface, ever. Every native
