@@ -2720,7 +2720,26 @@ internal sealed class AddInSession : IDisposable
             // together (probed 2026-08-04: a module edit flips Workbook.Saved false, Save
             // flips it true) — so it is read once per workbook and worn by every tab the
             // workbook owns.
+            //
+            // But the host's flag alone over-reports: it never flips back when an edit is
+            // undone to the saved text, because the host does not diff. The dot should
+            // (developer, 2026-08-04), so module text is snapshotted whenever the workbook is
+            // known clean, and while the host says dirty the dot shows only if some module's
+            // known text actually differs from its snapshot. A module with no snapshot to
+            // compare keeps the flag's word.
             var dirtyByProject = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var shownDisplay = DisplayFromProjectId(_shownProject);
+
+            string? CurrentTextOf(string module, string? display)
+            {
+                if (string.Equals(module, surface.Module, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(display, shownDisplay, StringComparison.OrdinalIgnoreCase))
+                {
+                    return surface.Text;
+                }
+
+                return _writtenModules.TryGetValue(module, out var written) ? written : null;
+            }
 
             bool DirtyOf(string? project)
             {
@@ -2730,12 +2749,56 @@ internal sealed class AddInSession : IDisposable
                     return false;
                 }
 
-                if (!dirtyByProject.TryGetValue(display, out var dirty))
+                if (dirtyByProject.TryGetValue(display, out var known))
                 {
-                    dirty = IsWorkbookDirty(display);
-                    dirtyByProject[display] = dirty;
+                    return known;
                 }
 
+                var saved = WorkbookSaved(display);
+                var siblings = modules.Where(m => string.Equals(
+                    DisplayFromProjectId(m.Project), display, StringComparison.OrdinalIgnoreCase));
+
+                bool dirty;
+                if (saved != false)
+                {
+                    // Clean (or unreadable, which must not invent a dot). A clean moment is
+                    // also the moment the snapshots are the saved truth.
+                    dirty = false;
+                    if (saved == true)
+                    {
+                        foreach (var sibling in siblings)
+                        {
+                            if (CurrentTextOf(sibling.Name, display) is { } text)
+                            {
+                                _savedBaselines[BaselineKey(display, sibling.Name)] = text;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // The host says dirty; the code decides the dot. Any module whose text
+                    // cannot be compared keeps the host's verdict.
+                    dirty = false;
+                    foreach (var sibling in siblings)
+                    {
+                        var text = CurrentTextOf(sibling.Name, display);
+                        if (text is null
+                            || !_savedBaselines.TryGetValue(BaselineKey(display, sibling.Name), out var baseline))
+                        {
+                            dirty = true;
+                            break;
+                        }
+
+                        if (!string.Equals(text, baseline, StringComparison.Ordinal))
+                        {
+                            dirty = true;
+                            break;
+                        }
+                    }
+                }
+
+                dirtyByProject[display] = dirty;
                 return dirty;
             }
 
@@ -2767,18 +2830,28 @@ internal sealed class AddInSession : IDisposable
     private DispatchObject? _hostApp;
 
     /// <summary>
-    /// Whether a workbook has unsaved changes, by its display name, through the same trust-free
-    /// application route the evaluator uses. Unknown reads as clean: a missing dot is a small
-    /// wrong, a lying dot is a large one.
+    /// Each module's text as of the workbook's last known-clean moment, keyed by workbook and
+    /// module. This is what lets an edit undone back to the saved text drop its dot: the host
+    /// flag never un-dirties, but the text can be compared.
     /// </summary>
-    private bool IsWorkbookDirty(string display)
+    private readonly Dictionary<string, string> _savedBaselines = new(StringComparer.Ordinal);
+
+    private static string BaselineKey(string display, string module) =>
+        (display + "\0" + module).ToLowerInvariant();
+
+    /// <summary>
+    /// A workbook's Saved flag, by display name, through the same trust-free application route
+    /// the evaluator uses. Null when it cannot be read — a missing dot is a small wrong, a
+    /// lying dot is a large one, so unknown must never invent one.
+    /// </summary>
+    private bool? WorkbookSaved(string display)
     {
         try
         {
             _hostApp ??= HostApplication.Find();
             if (_hostApp is null)
             {
-                return false;
+                return null;
             }
 
             using var books = _hostApp.GetObject("Workbooks");
@@ -2790,7 +2863,7 @@ internal sealed class AddInSession : IDisposable
                 if (book is not null
                     && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
                 {
-                    return !book.GetBool("Saved");
+                    return book.GetBool("Saved");
                 }
             }
         }
@@ -2802,7 +2875,7 @@ internal sealed class AddInSession : IDisposable
             _hostApp = null;
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
