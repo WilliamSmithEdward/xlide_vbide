@@ -1370,7 +1370,7 @@ export function demoTransport(): HostTransport {
         send({
           type: "searchResult",
           id: message.id,
-          matches: [
+          matches: message.type === "replaceAll" ? [] : [
             { workbook: "Book1.xlsm", module: "Module1", line: 4, column: 8, length: message.query.length, preview: "    Const Banner As String = (demo match)" },
             { workbook: "Book1.xlsm", module: "Module2", line: 12, column: 5, length: message.query.length, preview: "    total = total + 1 (demo match)" },
           ],

@@ -689,11 +689,13 @@ internal sealed class AddInSession : IDisposable
             ForgetBreakpoints();
         }
 
-        // A save just cleaned the workbook; the tab dots follow at once rather than on the
-        // next pane event.
+        // A save just cleaned the workbook — but the flag flips a beat AFTER the command
+        // returns, so one immediate republish read the old value and the dot lingered. The
+        // next few polls re-derive it; the change-key keeps the repeats free.
         if (command == VbeCommands.Command.Save)
         {
             PublishModules();
+            _resyncPanePolls = Math.Max(_resyncPanePolls, 3);
         }
 
         WatchDebugState();
@@ -1022,13 +1024,24 @@ internal sealed class AddInSession : IDisposable
                 if (replacement is not null && matches.Length > 0)
                 {
                     replaced = ReplaceMatches(matches, query, matchCase, wholeWord, replacement);
+
+                    // The modules changed under everything that mirrors them. The shown one is
+                    // resynced NOW — waiting for a pane event left the editor showing the old
+                    // text while the panel claimed the replacement had happened ("replace is
+                    // not working", 2026-08-04) — and the full pass re-reads the rest.
+                    ResyncFromModule();
+                    _resyncPanePolls = Math.Max(_resyncPanePolls, 2);
                     _analysis?.Reanalyse();
                 }
 
+                // A replace answers with its count and an empty list rather than the matches
+                // it just destroyed: re-listing the old previews read as "still matching".
                 _editorSurface?.ShowSearchResults(
                     id,
-                    [.. matches.Select(m => new SurfaceSearchMatch(
-                        DisplayFromProjectId(m.ProjectId), m.Module, m.Line, m.Column, m.Length, m.Preview))],
+                    replacement is not null
+                        ? []
+                        : [.. matches.Select(m => new SurfaceSearchMatch(
+                            DisplayFromProjectId(m.ProjectId), m.Module, m.Line, m.Column, m.Length, m.Preview))],
                     result?.Truncated ?? false,
                     replaced);
 
@@ -1877,13 +1890,17 @@ internal sealed class AddInSession : IDisposable
         {
             _resyncPanePolls--;
             _codePanes?.Refresh();
-            PublishModules();
         }
         else if (_codePanes is { Stale: true })
         {
             _codePanes.Refresh();
-            PublishModules();
         }
+
+        // Every tick, not only the resync ones: a save made on the host's side of the fence —
+        // Excel's own Ctrl+S, an autosave — flips the dirty flags with no event we hear, and
+        // the dots must follow. The change-key inside makes an unchanged strip cost a read
+        // and no message.
+        PublishModules();
 
         UpdateDebugState();
 
@@ -2722,14 +2739,29 @@ internal sealed class AddInSession : IDisposable
                 return dirty;
             }
 
-            surface.ShowModules(
-                [.. modules.Select(m => m.Name)],
-                [.. modules.Select(m => m.Project)],
-                surface.Module,
-                DisplayFromProjectId(_shownProject),
-                [.. modules.Select(m => DirtyOf(m.Project))]);
+            string[] names = [.. modules.Select(m => m.Name)];
+            string?[] projects = [.. modules.Select(m => m.Project)];
+            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Project))];
+            var active = surface.Module;
+            var activeProject = DisplayFromProjectId(_shownProject);
+
+            // Sent on change only: the polls re-derive this several times a second during an
+            // episode, and an identical strip is not news to the page or the log.
+            var key = string.Join("|", names) + "\n" + string.Join("|", projects)
+                + "\n" + string.Join("|", dirty) + "\n" + active + "\n" + activeProject;
+            if (key == _lastModulesKey)
+            {
+                return;
+            }
+
+            _lastModulesKey = key;
+            Log.Verbose($"modules: publish [{string.Join(",", names)}] dirty [{string.Join(",", dirty)}]");
+            surface.ShowModules(names, projects, active, activeProject, dirty);
         }
     }
+
+    /// <summary>What the strip was last sent, so unchanged republishes send nothing.</summary>
+    private string? _lastModulesKey;
 
     /// <summary>The host application, kept between reads; a refusal drops it for a re-find.</summary>
     private DispatchObject? _hostApp;
