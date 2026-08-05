@@ -728,8 +728,11 @@ span.prop-value.readonly {
 }
 
 /* The unsaved dot wears the close box's seat: the dot while the workbook is dirty, the X the
-   moment the pointer arrives — the studio's own choreography. */
-.tab-dirty {
+   moment the pointer arrives — the studio's own choreography. The selectors carry an extra
+   class on purpose: the codicon base class also sets display, ties on specificity, and wins
+   on bundle order — a single-class .tab-dirty rule left the dot showing on every tab
+   whatever the host said (2026-08-04). */
+.tab .tab-dirty {
   display: none;
   align-items: center;
   justify-content: center;
