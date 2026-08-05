@@ -10,9 +10,23 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
-**Full context dump, written at the developer's request at session end. HEAD is `47da928`;
-the publish tree matches it; Excel was left running the latest build. Read this block, then
-the day's detailed history below it, then the rest of the document.**
+**2026-08-05 morning delta:** closing a dirty tab now asks Save / Don't Save / Cancel in a
+themed modal (`66f269a`, developer-confirmed live). The host gates every close route (tab X,
+middle-click, Ctrl+W both sides, tab menu) on the module's OWN text vs its saved baseline —
+not the workbook dot — and holds the close with a `confirmClose` message; the page asks one
+question at a time, dedupes repeat asks, and answers back through `closeModule`'s `action`.
+Save = `SaveWorkbookOf` (trust-free `Workbook.Save`) then close, keep the tab on failure;
+Don't Save = `WriteModule(baseline, owner)` revert (+`DiscardEdits` so the debounced old
+text cannot chase it) then close; no baseline = close keeping text, honestly logged. PINNED
+by `Test-CloseConfirm.ps1` (PASS/FAIL): seam tripwires incl. the published-bundle stale-
+deploy trap, plus `close-confirm-page-probe.mjs` — a dependency-free headless-Edge DevTools
+driver that walks the built page's whole flow (ask, Escape, dedupe, queue, all three
+answers, both routes). That probe pattern is NEW and reusable: any page behaviour can now
+be pinned the same way.
+
+**Full context dump, written at the developer's request at session end (2026-08-04). HEAD
+was `47da928`; Excel was left running the latest build. Read this block, then the day's
+detailed history below it, then the rest of the document.**
 
 **Where the product stands.** The surface IS the visible editor: menus, toolbar (with a
 comment suite and Clear-all-breakpoints), tabs (dirty dots, pointer-armed close, drag,
@@ -80,7 +94,8 @@ shedding as ports land).
 
 **Standing probes (tools\harness), each self-describing:** Test-CutoutHoles,
 Test-ResizeFollow, Test-CloseVbe, Test-CloseHiddenPane (PASS/FAIL), Test-GhostLocalsPanel
-(PASS/FAIL), Probe-FloatLocals, Probe-GhostLocals, Probe-LocalsLifecycle. The page demo
+(PASS/FAIL), Test-CloseConfirm (PASS/FAIL; drives the built page headless via
+close-confirm-page-probe.mjs), Probe-FloatLocals, Probe-GhostLocals, Probe-LocalsLifecycle. The page demo
 serves via `.claude/launch.json` (npx http-server :8123) for browser-side verification —
 the demo transport answers search, settings, locals, and modules with canned data.
 
