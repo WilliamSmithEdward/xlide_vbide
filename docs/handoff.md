@@ -25,6 +25,25 @@ menu. The full menu-bar id map was measured 2026-08-05 (every suppressed id veri
 unique across the bar; 746 is the repeating generic id and must never be suppressed) —
 the enumeration one-liner lives in the transcript; suppression is `VbeMenus.Replaced`.
 Verified live: WM-click into the render widget opened Edit showing exactly [Bookmarks].
+COMPLETED same day (`51547d9`): both menus are GONE (top-level ids 30003, 30004). The
+menu bar now reads File Insert Format Debug Run Tools Add-Ins Window Help. What replaced
+the survivors: BOOKMARKS are the surface's own (ui/editor/src/bookmarks.ts — Monaco
+decorations that ride edits, captured per model at onWillDispose and restored by URI on
+return; Toggle Ctrl+Alt+K, Next/Prev Ctrl+Alt+N/P, Clear All Ctrl+Alt+Shift+K, all in the
+palette and context menu; session-lifetime like the native ones); the WATCH WINDOW is a
+panel fed by its own ghost palette (PrepareWatchGhost type 3 + WatchReader four-column
+parse Expression/Value/Type/Context + PublishWatches on the Locals cadence — both ghosts
+confirmed live: "locals/watch: ghost palette ... feeding the panel"); CALL STACK is a
+toolbar debug-cluster button (native dialog 620, a scriptable-dialog port later);
+DEFINITION (939, Shift+F2) and LAST POSITION (1822, Ctrl+Shift+F2) are claimed keys plus
+editor context actions through the caret-synced execute path. The demo drove bookmarks
+end to end and the Watch panel rows; live capture shows the pruned bar, the Watch tab,
+and the Call stack button. NOTE: the WatchReader row parse mirrors the Locals pattern but
+its exact accessible-name shape is unverified against a real watch (adding one needs the
+native Add Watch dialog) — if the panel stays empty during a break with watches set, dump
+the ghost's UIA names first. Bundle-size trap met en route: import monaco from
+"monaco-editor/editor/editor.api.js" like every other page module — the bare
+"monaco-editor" specifier bundles a second megabyte of language contributions.
 
 **2026-08-05 resize arc (`c0bce55`..`91b412b`, developer-accepted):** the minimap/scrollbar
 "pushed off canvas" report unwound into three findings, lessons 30-31. (1) THE RATCHET: a
