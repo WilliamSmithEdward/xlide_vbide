@@ -10,6 +10,25 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 resize arc (`c0bce55`..`91b412b`, developer-accepted):** the minimap/scrollbar
+"pushed off canvas" report unwound into three findings, lessons 30-31. (1) THE RATCHET: a
+grid cell cannot shrink below its content, and the editor sets its own pixel width — grow
+tracked, shrink never did; `#container { min-width: 0; overflow: hidden }` lets the cell
+shrink first and the editor's observer follows. Repro requires grow-THEN-shrink in one
+session; the hidden browser pane cannot verify it (no frames → no ResizeObserver/rAF —
+assert stylesheet rules + class toggles, prove visuals with PrintWindow captures of the
+real VBE). (2) THE SETTLE DISCIPLINE: a 60-step drag storm ran 60 full placement passes
+(three event routes each treating geometry ticks as news); now every route follows BOUNDS
+synchronously per tick and one full pass runs at a 150ms settle — pane events gate on
+SUBSTANCE (`_lastFollowSubstance`: pane list + active module + workbook), with two
+event-synchronous exceptions (hiding frame per lesson 27; open cutout holes). Same storm
+after: ONE pass. (3) THE MINIMAP REST: its canvas repaints a frame behind layout, so it
+fades out under `body.live-resize` while events stream and returns at the settle (page
+settle timer toggles the class). Also hardened en route: `Follow` asserts browser bounds
+every pass (change-guarded, `webview: bounds` verbose line), and Test-ResizeFollow gained
+a third column — the Chromium child must match the frame client too. Storm driver pattern
+lives in the transcript: SetWindowPos loop + log-line counting between markers.
+
 **2026-08-05 morning delta:** closing a dirty tab now asks Save / Don't Save / Cancel in a
 themed modal (`66f269a`, developer-confirmed live). The host gates every close route (tab X,
 middle-click, Ctrl+W both sides, tab menu) on the module's OWN text vs its saved baseline —

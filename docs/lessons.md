@@ -576,3 +576,50 @@ Consequence: when a component gates behaviour on visibility, find out WHICH visi
 means. Style-visible, region-visible, and surface-visible are three different facts, and
 the layered style decouples the third from the other two - a window can be impossible to
 see and still, as far as its owner can tell, fully on display.
+
+## 30. A grid cell grows freely and shrinks never, when its content sets its own width
+
+The minimap and scrollbar fell off the right edge of the window and stayed there, but only
+after the window shrank; growing tracked perfectly. The editor writes an explicit pixel
+width onto its own element after every measure, and a grid item's implicit minimum is its
+content's width - so the cell could follow the editor up but never come back down below the
+editor's last size. A one-way ratchet: every shrink left the editor laid out for a width
+the window no longer had, and freeing width elsewhere (narrowing the sidebar) "fixed" it by
+letting the propped width fit again. min-width: 0 plus overflow: hidden on the cell lets
+the layout shrink first; the editor's own observer then measures and follows down.
+
+Two investigation traps preserved for the future. The host chain was innocent and PROVABLY
+so - frame client, overlay, and every Chromium child measured identical while the bug was
+on screen - so the divergence had to be inside the page, not the windows. And the browser
+pane lab could not reproduce it at first: loading FRESH at the small size never engages a
+ratchet whose trigger is shrinking; the repro is grow-then-shrink in one session. The same
+lab cannot verify the fix's second half at all: a hidden pane composites no frames, so
+ResizeObserver and requestAnimationFrame never fire there - assert stylesheet rules and
+class toggles instead, and prove the moving parts with pixel captures of the real window.
+
+Consequence: when a layout follows growth but not shrinkage, suspect min-content propping
+before anything in the resize plumbing - and reproduce by walking the same direction the
+user walked, not by loading the end state.
+
+## 31. Follow bounds every tick; re-derive the world once, when the ticks pause
+
+Resize latency came back wearing new clothes: a 60-step drag storm logged SIXTY full
+placement passes - cutout enumeration, band silencing, module and project publishes, debug
+state, resync - because three different event routes (frame subclass, tracker frame events,
+tracker pane events) each treated every geometry tick as news. The surface only needs its
+BOUNDS per tick, and bounds are cheap and synchronous. Everything else describes WHAT is on
+screen, which a drag does not change.
+
+The discipline: every route follows bounds synchronously per event, arms a 150ms settle,
+and the full pass runs once when the events pause. Pane events compare what the event
+AMOUNTS to - the pane list, the active module, its workbook - and take the fast path when
+only rectangles moved. Two exceptions stay event-synchronous on purpose: a hiding frame is
+the editor closing (lesson 27 keeps the object model out of that moment), and open cutout
+holes must track their native windows exactly. Same storm after: ONE full pass. The
+minimap's canvas - repainted a frame behind every layout that moves it - rests during the
+storm under a live-resize class and fades back at the settle, so the one artifact the
+discipline cannot remove is not seen.
+
+Consequence: in event-driven placement, separate "where its edges are" from "what it is";
+the first is per-tick work, the second is per-pause work, and conflating them makes every
+mouse move pay for the whole world.
