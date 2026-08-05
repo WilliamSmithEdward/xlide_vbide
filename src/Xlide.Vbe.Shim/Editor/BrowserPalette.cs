@@ -101,10 +101,48 @@ internal sealed unsafe class BrowserPalette : IDisposable
         }
 
         palette._browser.MessageReceived = palette.OnMessage;
+        AdoptOwnerIcon(handle, owner);
         Win32.ShowWindow(handle, Win32.SwShow);
         Win32.SetForegroundWindow(handle);
         Log.Info("palette: the Object Browser window is open");
         return palette;
+    }
+
+    /// <summary>
+    /// Stamps the editor's own icon onto the window, so an xlide window reads as part of
+    /// the editor (developer, 2026-08-05). The running editor is the source: its window is
+    /// asked via WM_GETICON, its class is the fallback, and the handles are shared rather
+    /// than copied — the palette lives strictly inside the editor's lifetime, so borrowing
+    /// is safe, and no icon resource is taken from anyone's files.
+    /// </summary>
+    private static void AdoptOwnerIcon(nint window, nint owner)
+    {
+        var small = Win32.SendMessage(owner, Win32.WmGetIcon, Win32.IconSmall2, 0);
+        if (small == 0)
+        {
+            small = Win32.SendMessage(owner, Win32.WmGetIcon, Win32.IconSmall, 0);
+        }
+
+        if (small == 0)
+        {
+            small = Win32.GetClassLongPtr(owner, Win32.GclpHIconSm);
+        }
+
+        var big = Win32.SendMessage(owner, Win32.WmGetIcon, Win32.IconBig, 0);
+        if (big == 0)
+        {
+            big = Win32.GetClassLongPtr(owner, Win32.GclpHIcon);
+        }
+
+        if (small != 0)
+        {
+            Win32.SendMessage(window, Win32.WmSetIcon, Win32.IconSmall, small);
+        }
+
+        if (big != 0)
+        {
+            Win32.SendMessage(window, Win32.WmSetIcon, Win32.IconBig, big);
+        }
     }
 
     /// <summary>

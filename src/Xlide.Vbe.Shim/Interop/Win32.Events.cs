@@ -102,6 +102,20 @@ internal static unsafe partial class Win32
     /// <summary>SW_SHOWNOACTIVATE. Shows a window without taking focus from whatever has it.</summary>
     public const int SwShowNoActivate = 4;
 
+    /// <summary>WM_GETICON / WM_SETICON, with the icon-size selectors they take.</summary>
+    public const uint WmGetIcon = 0x007F;
+    public const uint WmSetIcon = 0x0080;
+    public const nint IconSmall = 0;
+    public const nint IconBig = 1;
+    public const nint IconSmall2 = 2;
+
+    /// <summary>GCLP_HICON / GCLP_HICONSM: a window class's icons, the WM_GETICON fallback.</summary>
+    public const int GclpHIcon = -14;
+    public const int GclpHIconSm = -34;
+
+    [LibraryImport("user32.dll", EntryPoint = "GetClassLongPtrW")]
+    public static partial nint GetClassLongPtr(nint window, int index);
+
     /// <summary>SW_SHOW. Shows a window and activates it.</summary>
     public const int SwShow = 5;
 
