@@ -532,6 +532,11 @@ export class Shell {
   }
 
   /** Replaces the project explorer's contents. */
+  /** The workspace as last published, for the Object Browser. */
+  currentProjects(): ExplorerProject[] {
+    return this.explorer.snapshot();
+  }
+
   setProjects(projects: ExplorerProject[]): void {
     this.explorer.setProjects(projects);
   }

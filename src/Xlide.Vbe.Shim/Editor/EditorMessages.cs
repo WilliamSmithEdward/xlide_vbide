@@ -92,6 +92,41 @@ public sealed record SurfaceWatchRow(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("context")] string Context);
 
+/// <summary>One referenced type library, as the Object Browser lists them.</summary>
+public sealed record ObLibraryRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("description")] string Description);
+
+/// <summary>One browsable type of a library.</summary>
+public sealed record ObTypeRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind);
+
+/// <summary>One member of a type: its signature spelled the way VBA would.</summary>
+public sealed record ObMemberRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("signature")] string Signature,
+    [property: JsonPropertyName("description")] string Description);
+
+/// <summary>The referenced libraries, answering an Object Browser request.</summary>
+public sealed record ObLibrariesResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("libraries")] ObLibraryRow[] Libraries);
+
+/// <summary>A library's types, answering an Object Browser request.</summary>
+public sealed record ObTypesResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("types")] ObTypeRow[] Types);
+
+/// <summary>A type's members, answering an Object Browser request.</summary>
+public sealed record ObMembersResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("members")] ObMemberRow[] Members);
+
 /// <summary>Which debug mode the editor is in: design, run, or break.</summary>
 public sealed record SetDebugStateMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -365,6 +400,12 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetWatchesMessage))]
 [JsonSerializable(typeof(SurfaceWatchRow))]
 [JsonSerializable(typeof(SetDebugStateMessage))]
+[JsonSerializable(typeof(ObLibraryRow))]
+[JsonSerializable(typeof(ObTypeRow))]
+[JsonSerializable(typeof(ObMemberRow))]
+[JsonSerializable(typeof(ObLibrariesResultMessage))]
+[JsonSerializable(typeof(ObTypesResultMessage))]
+[JsonSerializable(typeof(ObMembersResultMessage))]
 [JsonSerializable(typeof(SearchResultMessage))]
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]

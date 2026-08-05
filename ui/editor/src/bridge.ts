@@ -73,6 +73,9 @@ export type HostMessage =
   | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "setDebugState"; mode: string }
+  | { type: "obLibrariesResult"; id: number; libraries: ObLibrary[] }
+  | { type: "obTypesResult"; id: number; types: ObType[] }
+  | { type: "obMembersResult"; id: number; members: ObMember[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
   | {
     type: "setSettings";
@@ -83,6 +86,26 @@ export type HostMessage =
     formatUseTabs?: boolean;
     formatCanonicalKeywords?: boolean;
   };
+
+/** One referenced type library, as the Object Browser lists them. */
+export interface ObLibrary {
+  name: string;
+  description: string;
+}
+
+/** One browsable type of a library. */
+export interface ObType {
+  name: string;
+  kind: string;
+}
+
+/** One member of a type, its signature spelled the way VBA would. */
+export interface ObMember {
+  name: string;
+  kind: string;
+  signature: string;
+  description: string;
+}
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
 export interface HostProcedure {
@@ -189,6 +212,9 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "outline"; id: number; module: string; project?: string }
+  | { type: "obLibraries"; id: number }
+  | { type: "obTypes"; id: number; library: string }
+  | { type: "obMembers"; id: number; library: string; typeName: string }
   | { type: "search"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string }
   | { type: "replaceAll"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string; replacement: string }
   | {
@@ -309,6 +335,24 @@ export class EditorBridge {
     resolve: (procedures: HostProcedure[] | null) => void;
     timer: ReturnType<typeof setTimeout>;
   }>();
+
+  /** Object Browser requests awaiting their answers, one map per shape. */
+  private readonly pendingObLibraries = new Map<number, {
+    resolve: (libraries: ObLibrary[] | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private readonly pendingObTypes = new Map<number, {
+    resolve: (types: ObType[] | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private readonly pendingObMembers = new Map<number, {
+    resolve: (members: ObMember[] | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private nextObRequestId = 1;
 
   private nextCompletionId = 1;
   private nextHoverId = 1;
@@ -573,6 +617,45 @@ export class EditorBridge {
     });
   }
 
+  /** The referenced libraries, for the Object Browser; null when no answer comes. */
+  requestObLibraries(): Promise<ObLibrary[] | null> {
+    const id = this.nextObRequestId++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingObLibraries.delete(id);
+        resolve(null);
+      }, 8000);
+      this.pendingObLibraries.set(id, { resolve, timer });
+      this.transport.post({ type: "obLibraries", id });
+    });
+  }
+
+  /** A library's browsable types; null when no answer comes. */
+  requestObTypes(library: string): Promise<ObType[] | null> {
+    const id = this.nextObRequestId++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingObTypes.delete(id);
+        resolve(null);
+      }, 8000);
+      this.pendingObTypes.set(id, { resolve, timer });
+      this.transport.post({ type: "obTypes", id, library });
+    });
+  }
+
+  /** A type's members with signatures; null when no answer comes. */
+  requestObMembers(library: string, typeName: string): Promise<ObMember[] | null> {
+    const id = this.nextObRequestId++;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingObMembers.delete(id);
+        resolve(null);
+      }, 8000);
+      this.pendingObMembers.set(id, { resolve, timer });
+      this.transport.post({ type: "obMembers", id, library, typeName });
+    });
+  }
+
   /** True while a host edit is being written into the model, so listeners can tell it from typing. */
   get isApplyingHostEdit(): boolean {
     return this.applyingHostEdit;
@@ -737,6 +820,33 @@ export class EditorBridge {
       case "setDebugState":
         this.shell?.setDebugMode(message.mode);
         return;
+      case "obLibrariesResult": {
+        const waiter = this.pendingObLibraries.get(message.id);
+        if (waiter) {
+          this.pendingObLibraries.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.libraries ?? []);
+        }
+        return;
+      }
+      case "obTypesResult": {
+        const waiter = this.pendingObTypes.get(message.id);
+        if (waiter) {
+          this.pendingObTypes.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.types ?? []);
+        }
+        return;
+      }
+      case "obMembersResult": {
+        const waiter = this.pendingObMembers.get(message.id);
+        if (waiter) {
+          this.pendingObMembers.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.members ?? []);
+        }
+        return;
+      }
       case "setSettings":
         applySettings({
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
@@ -795,11 +905,19 @@ export class EditorBridge {
   /** Opens the settings dialog; wired by the page's entry point, which owns the dialog. */
   openSettings: (() => void) | null = null;
 
+  /** Opens the Object Browser; wired by the page's entry point, which owns the view. */
+  openObjectBrowser: (() => void) | null = null;
+
   private runEditorCommand(id: string): void {
     this.trace(`editorCommand ${id}`);
 
     if (id === "xlide.openSettings") {
       this.openSettings?.();
+      return;
+    }
+
+    if (id === "xlide.objectBrowser") {
+      this.openObjectBrowser?.();
       return;
     }
 
@@ -1457,6 +1575,42 @@ export function demoTransport(): HostTransport {
       // answers at all, which also makes the demo the place they can be exercised without a host.
       if (message.type === "canonicalCase") {
         send({ type: "canonicalCaseResult", id: message.id, edits: [] });
+      }
+      if (message.type === "obLibraries") {
+        send({
+          type: "obLibrariesResult",
+          id: message.id,
+          libraries: [
+            { name: "Excel", description: "Microsoft Excel Object Library" },
+            { name: "VBA", description: "Visual Basic For Applications" },
+          ],
+        });
+      }
+      if (message.type === "obTypes") {
+        send({
+          type: "obTypesResult",
+          id: message.id,
+          types: message.library === "Excel"
+            ? [
+              { name: "Range", kind: "class" },
+              { name: "Worksheet", kind: "class" },
+              { name: "XlDirection", kind: "enum" },
+            ]
+            : [{ name: "Strings", kind: "module" }],
+        });
+      }
+      if (message.type === "obMembers") {
+        send({
+          type: "obMembersResult",
+          id: message.id,
+          members: message.typeName === "Range"
+            ? [
+              { name: "Address", kind: "Property", signature: "Property Get Address([RowAbsolute As Variant]) As String", description: "" },
+              { name: "Select", kind: "Function", signature: "Function Select() As Variant", description: "" },
+              { name: "Value", kind: "Property", signature: "Property Get Value([RangeValueDataType As Variant]) As Variant", description: "" },
+            ]
+            : [{ name: "xlDown", kind: "Const", signature: "Const xlDown = -4121", description: "" }],
+        });
       }
       if (message.type === "outline") {
         send({

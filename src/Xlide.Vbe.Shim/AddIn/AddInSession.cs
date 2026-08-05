@@ -208,6 +208,9 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
+        _editorSurface.ObLibrariesRequested = OnObLibrariesRequested;
+        _editorSurface.ObTypesRequested = OnObTypesRequested;
+        _editorSurface.ObMembersRequested = OnObMembersRequested;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
@@ -707,15 +710,12 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        // The native Object Browser is retired: it cannot show on a purely xlide canvas (no
-        // holes, by directive), the editor cannot float it (an MDI document window;
-        // LinkedWindows.Remove is a silent no-op), and adopting its window produced a blank
-        // shell the editor fought to close — all measured 2026-08-05, lesson 32. Its xlide
-        // replacement rides the typelib model (#10). Executing the native command would only
-        // open a window nobody can see.
+        // The native Object Browser is retired (lesson 32): the page owns the browser now
+        // and never sends this command, but any stale route that does must not open a
+        // window nobody can see.
         if (command == VbeCommands.Command.ObjectBrowser)
         {
-            _editorSurface?.Notify("The Object Browser is being replaced; its xlide version is on the roadmap.");
+            _editorSurface?.RunEditorCommand("xlide.objectBrowser");
             return;
         }
 
@@ -1035,6 +1035,90 @@ internal sealed class AddInSession : IDisposable
     /// the developer has not paused long enough to write are flushed first, so the search
     /// describes what they see.
     /// </summary>
+    /// <summary>The referenced type libraries, loaded on the browser's first question.</summary>
+    private TypeLibraryCatalog? _typeLibraries;
+
+    /// <summary>
+    /// The catalog of every library the open projects reference, built once. References are
+    /// read through the same object model the rest of the session lives on; a reference whose
+    /// file is missing or refuses to load is skipped with a log line, not a failure.
+    /// </summary>
+    private TypeLibraryCatalog TypeLibraries()
+    {
+        if (_typeLibraries is not null)
+        {
+            return _typeLibraries;
+        }
+
+        var catalog = new TypeLibraryCatalog();
+
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var projectCount = projects?.GetInt32("Count") ?? 0;
+
+            for (var p = 1; p <= projectCount; p++)
+            {
+                using var project = projects!.GetItem(p);
+                using var references = project?.GetObject("References");
+                var referenceCount = references?.GetInt32("Count") ?? 0;
+
+                for (var r = 1; r <= referenceCount; r++)
+                {
+                    try
+                    {
+                        using var reference = references!.GetItem(r);
+                        if (reference is null || reference.GetBool("IsBroken"))
+                        {
+                            continue;
+                        }
+
+                        var name = reference.GetString("Name");
+                        var description = reference.GetString("Description");
+                        var path = reference.GetString("FullPath");
+                        if (name is { Length: > 0 } && path is { Length: > 0 })
+                        {
+                            catalog.AddLibrary(name, description ?? name, path);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Verbose($"typelib: a reference could not be read ({ex.GetType().Name})");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"typelib: the references could not be enumerated ({ex.GetType().Name})");
+        }
+
+        _typeLibraries = catalog;
+        return catalog;
+    }
+
+    private void OnObLibrariesRequested(int id)
+    {
+        var rows = TypeLibraries().Libraries();
+        _editorSurface?.ShowObLibraries(id, [.. rows.Select(row => new ObLibraryRow(row.Name, row.Description))]);
+        Log.Verbose($"object browser: {rows.Count} librarie(s)");
+    }
+
+    private void OnObTypesRequested(int id, string library)
+    {
+        var rows = TypeLibraries().TypesOf(library) ?? [];
+        _editorSurface?.ShowObTypes(id, [.. rows.Select(row => new ObTypeRow(row.Name, row.Kind))]);
+        Log.Verbose($"object browser: {library} -> {rows.Count} type(s)");
+    }
+
+    private void OnObMembersRequested(int id, string library, string type)
+    {
+        var rows = TypeLibraries().MembersOf(library, type) ?? [];
+        _editorSurface?.ShowObMembers(
+            id, [.. rows.Select(row => new ObMemberRow(row.Name, row.Kind, row.Signature, row.Description))]);
+        Log.Verbose($"object browser: {library}.{type} -> {rows.Count} member(s)");
+    }
+
     private void OnSearchRequested(int id, string query, bool matchCase, bool wholeWord, string scope)
     {
         _editorSurface?.FlushEdits();
@@ -4703,6 +4787,9 @@ internal sealed class AddInSession : IDisposable
 
         _watchReader?.Dispose();
         _watchReader = null;
+
+        _typeLibraries?.Dispose();
+        _typeLibraries = null;
 
         _codePanes?.Dispose();
         _codePanes = null;

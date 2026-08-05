@@ -276,6 +276,7 @@ internal static class VbeCommands
     public static string? SurfaceCommandForKey(uint virtualKey, bool shift, bool control) => virtualKey switch
     {
         VirtualKey.F1 when !shift && !control => "editor.action.quickCommand",
+        VirtualKey.F2 when !shift && !control => "xlide.objectBrowser",
         VirtualKey.PageDown when control && !shift => "xlide.tab.next",
         VirtualKey.PageUp when control && !shift => "xlide.tab.previous",
         _ => null,

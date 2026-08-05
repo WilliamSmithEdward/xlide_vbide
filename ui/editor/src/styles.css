@@ -1116,6 +1116,151 @@ body.live-resize .minimap {
   grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) minmax(90px, 1fr) minmax(110px, 1fr);
 }
 
+/* The Object Browser: a large card over the editor — search, modules, members, detail. */
+
+#objbrowser-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 92;
+}
+
+#objbrowser-card {
+  display: flex;
+  flex-direction: column;
+  width: min(880px, calc(100vw - 60px));
+  height: min(620px, calc(100vh - 80px));
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+#objbrowser-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+#objbrowser-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#objbrowser-library {
+  background: var(--vscode-dropdown-background, #3c3c3c);
+  color: inherit;
+  border: 1px solid var(--vscode-dropdown-border, #5a5a5a);
+  border-radius: 3px;
+  padding: 3px 6px;
+  font: inherit;
+  max-width: 240px;
+}
+
+#objbrowser-search {
+  flex: 1;
+  min-width: 0;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  border: 1px solid var(--vscode-input-border, #5a5a5a);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font: inherit;
+}
+
+#objbrowser-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 3px;
+}
+
+#objbrowser-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+#objbrowser-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) 2fr;
+  flex: 1;
+  min-height: 0;
+}
+
+#objbrowser-modules,
+#objbrowser-members {
+  overflow: auto;
+  padding: 6px 0;
+}
+
+#objbrowser-modules {
+  border-right: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+.objbrowser-project {
+  padding: 6px 12px 2px;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.objbrowser-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.objbrowser-row:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.12));
+}
+
+.objbrowser-row.selected {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+}
+
+.objbrowser-row .codicon {
+  flex: none;
+  opacity: 0.85;
+}
+
+.objbrowser-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.objbrowser-context {
+  margin-left: auto;
+  padding-left: 12px;
+  opacity: 0.55;
+  font-size: 12px;
+}
+
+.objbrowser-empty {
+  padding: 10px 14px;
+  opacity: 0.55;
+}
+
+#objbrowser-detail {
+  padding: 8px 14px;
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+  opacity: 0.8;
+  font-size: 12px;
+  min-height: 18px;
+}
+
 /* A command that cannot run right now says so by resting, not by clicking into silence. */
 .toolbar-button:disabled {
   opacity: 0.35;

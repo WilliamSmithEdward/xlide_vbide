@@ -216,6 +216,11 @@ export class Explorer {
     return item?.dataset.workbook || undefined;
   }
 
+  /** The workspace as last published, for whoever else browses it (the Object Browser). */
+  snapshot(): ExplorerProject[] {
+    return this.projects;
+  }
+
   setProjects(projects: ExplorerProject[]): void {
     // The host republishes the tree on all sorts of occasions, usually unchanged. An identical
     // push must change nothing on screen: acting on it cleared and refetched the unfolded
