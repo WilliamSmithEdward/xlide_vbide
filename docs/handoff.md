@@ -51,6 +51,19 @@ developer's first double-click on a project member is the test). Parity backlog 
 global cross-library search results pane, Back/Forward history, hidden-members toggle,
 F1 help.
 
+**2026-08-05 POSTSCRIPT — THE TWO-BUILDS MORNING.** After the palette shipped, the
+developer kept seeing the OLD in-canvas browser card and a white float at startup while
+every scripted session showed the new palette. Cause: their long-running Excel had the
+07:21 RELEASE-era shim loaded IN-PROCESS all morning — a DLL survives the VBE window
+closing, and reopening the VBE reconnects the same loaded DLL, so re-registration never
+reaches that process; it served `release_win-x64`'s bundle, whose strings were never even
+committed (transient working-tree build), which is why history greps found nothing. The
+shim log's `serving from` and `build` lines are the ground truth for what a session runs.
+The stale `release_win-x64` publish is DELETED; the developer's testing requires a full
+Excel exit after a deploy. Also fixed in the same stretch: the palette hides when the
+editor frame hides (`df9b29e` — owned windows do not follow a hidden owner), and search
+gained its scope dropdown with the whole-group pull in All mode (`fbffa1d`).
+
 **2026-08-05 SUPERSEDED — THE HOLE RESOLUTION (`c49595e`, worked and was confirmed, then
 replaced by the palette above).** The developer wants THE NATIVE
 Browser, and the native Browser paints ONLY as a child inside the editor's own tree —
