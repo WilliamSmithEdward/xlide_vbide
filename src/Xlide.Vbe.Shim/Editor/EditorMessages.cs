@@ -92,22 +92,30 @@ public sealed record SurfaceWatchRow(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("context")] string Context);
 
-/// <summary>One referenced type library, as the Object Browser lists them.</summary>
+/// <summary>
+/// One library the Object Browser lists: a referenced type library, or an open project —
+/// the kind says which, because only a project's members can be navigated to.
+/// </summary>
 public sealed record ObLibraryRow(
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("description")] string Description);
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("kind")] string Kind);
 
 /// <summary>One browsable type of a library.</summary>
 public sealed record ObTypeRow(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("kind")] string Kind);
 
-/// <summary>One member of a type: its signature spelled the way VBA would.</summary>
+/// <summary>
+/// One member of a type: its signature spelled the way VBA would. The line is where the
+/// member lives in its module — meaningful only for project members, zero elsewhere.
+/// </summary>
 public sealed record ObMemberRow(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("signature")] string Signature,
-    [property: JsonPropertyName("description")] string Description);
+    [property: JsonPropertyName("description")] string Description,
+    [property: JsonPropertyName("line")] int Line);
 
 /// <summary>The referenced libraries, answering an Object Browser request.</summary>
 public sealed record ObLibrariesResultMessage(

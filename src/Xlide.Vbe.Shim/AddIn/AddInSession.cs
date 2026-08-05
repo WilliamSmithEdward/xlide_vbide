@@ -208,9 +208,6 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
-        _editorSurface.ObLibrariesRequested = OnObLibrariesRequested;
-        _editorSurface.ObTypesRequested = OnObTypesRequested;
-        _editorSurface.ObMembersRequested = OnObMembersRequested;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
@@ -694,6 +691,15 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        // The Object Browser is ours (developer, 2026-08-05): a floating themed window of our
+        // own over the typelib catalog, outside the canvas. The native window — which cannot
+        // float, cannot be adopted, and paints only docked (lesson 32) — is never opened at all.
+        if (command == VbeCommands.Command.ObjectBrowser)
+        {
+            OpenBrowserPalette();
+            return;
+        }
+
         // The editor runs what the module holds, and acts on its own caret. Both are brought up to
         // date here, at the one moment it matters: running code the developer has not finished
         // typing is worse than a short pause before it starts. A toolbar button also takes focus
@@ -739,18 +745,6 @@ internal sealed class AddInSession : IDisposable
             _resyncPanePolls = Math.Max(_resyncPanePolls, 3);
         }
 
-        // The Browser shows as a live native window over the canvas, through the one hole
-        // the surface still cuts (developer, 2026-08-05 — the only arrangement in which the
-        // editor PAINTS it: it cannot float, and reparented it never draws; lesson 32). It
-        // is restored from maximised and sized like a floating window; its own close box
-        // works through the hole. The settle looks again for a window whose creation
-        // outran the command.
-        if (ran && command == VbeCommands.Command.ObjectBrowser)
-        {
-            PlaceObjectBrowserWindow();
-            _editorSurface?.ArmPlacementSettle(PlacementSettleMilliseconds);
-        }
-
         WatchDebugState();
 
         // A command can change the native window landscape — the Object Browser above all —
@@ -758,126 +752,6 @@ internal sealed class AddInSession : IDisposable
         // placement after executing; this route learned the same manners (2026-08-05, the
         // Browser opening invisible under the surface).
         RefreshSurfacePlacement();
-    }
-
-    /// <summary>
-    /// Restores the Object Browser from maximised and sizes it like a floating window over
-    /// the canvas: centred on the document area at most of its size. Its hole is cut by the
-    /// placement pass that follows.
-    /// </summary>
-    private void PlaceObjectBrowserWindow()
-    {
-        var child = FindObjectBrowserChild();
-        if (child == 0)
-        {
-            Log.Verbose("object browser: no window to place yet; the settle will look again");
-            return;
-        }
-
-        if (((long)Win32.GetWindowLongPtr(child, Win32.GwlStyle) & Win32.WsMaximize) != 0)
-        {
-            Win32.SendMessage(Win32.GetParent(child), Win32.WmMdiRestore, child, 0);
-        }
-
-        // Centred and roomy, in the document area's client space.
-        var parent = Win32.GetParent(child);
-        var area = ClientAreaIn(parent, parent);
-        if (!area.IsEmpty)
-        {
-            var width = Math.Max(480, (int)(area.Width * 0.78));
-            var height = Math.Max(360, (int)(area.Height * 0.82));
-            var left = (area.Width - width) / 2;
-            var top = (area.Height - height) / 2;
-            Win32.SetWindowPos(child, Win32.HwndTop, left, top, width, height, Win32.SwpNoActivate);
-        }
-
-        Log.Info("object browser: placed over the canvas");
-    }
-
-    /// <summary>The Browser's docked window, when it exists and shows.</summary>
-    private nint FindObjectBrowserChild()
-    {
-        try
-        {
-            using var windows = _editor.GetObject("Windows");
-            var count = windows?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= count; i++)
-            {
-                using var window = windows!.GetItem(i);
-                if (window is null || window.GetInt32("Type") != 2)
-                {
-                    continue;
-                }
-
-                var caption = window.GetString("Caption");
-                return caption is { Length: > 0 } ? CodePaneTracker.FindChildByCaption(caption) : 0;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Verbose($"object browser: could not be looked up ({ex.GetType().Name})");
-        }
-
-        return 0;
-    }
-
-    /// <summary>
-    /// The one hole the surface still cuts: the Object Browser's window, parent-clipped. A
-    /// maximised one is restored first — maximised, its caption merges into a band the
-    /// surface covers and there is no way back (2026-08-04).
-    /// </summary>
-    private PixelRect[] ObjectBrowserCutout()
-    {
-        var child = FindObjectBrowserChild();
-        if (child == 0 || !Win32.IsWindowVisible(child))
-        {
-            return [];
-        }
-
-        if (((long)Win32.GetWindowLongPtr(child, Win32.GwlStyle) & Win32.WsMaximize) != 0)
-        {
-            Win32.SendMessage(Win32.GetParent(child), Win32.WmMdiRestore, child, 0);
-        }
-
-        var hole = WindowRectIn(child, _frame);
-        var parent = Win32.GetParent(child);
-        if (parent != 0)
-        {
-            hole = hole.Intersect(ClientAreaIn(parent, _frame));
-        }
-
-        return hole.IsEmpty ? [] : [hole];
-    }
-
-    /// <summary>
-    /// A window's full rectangle — borders and title band included — in another window's
-    /// client coordinates. The hole must start at the window's own frame, or its title
-    /// cannot be seen, dragged, or closed.
-    /// </summary>
-    private static unsafe PixelRect WindowRectIn(nint window, nint target)
-    {
-        Rect rect;
-        if (target == 0 || !Win32.GetWindowRect(window, &rect))
-        {
-            return default;
-        }
-
-        var corners = stackalloc Point[2];
-        corners[0] = new Point { X = rect.Left, Y = rect.Top };
-        corners[1] = new Point { X = rect.Right, Y = rect.Bottom };
-
-        Marshal.SetLastSystemError(0);
-        if (Win32.MapWindowPoints(0, target, corners, 2) == 0 && Marshal.GetLastSystemError() != 0)
-        {
-            return default;
-        }
-
-        return new PixelRect(
-            Math.Min(corners[0].X, corners[1].X),
-            Math.Min(corners[0].Y, corners[1].Y),
-            Math.Max(corners[0].X, corners[1].X),
-            Math.Max(corners[0].Y, corners[1].Y));
     }
 
     /// <summary>
@@ -1222,27 +1096,342 @@ internal sealed class AddInSession : IDisposable
         return catalog;
     }
 
-    private void OnObLibrariesRequested(int id)
+    /// <summary>The floating Object Browser window, kept across closes once opened.</summary>
+    private BrowserPalette? _browserPalette;
+
+    /// <summary>
+    /// Summons the Object Browser: a floating themed window of our own (developer,
+    /// 2026-08-05), browsing the open projects and every referenced type library. Opened
+    /// once and hidden on close, so a second summons brings the same view straight back.
+    /// </summary>
+    private void OpenBrowserPalette()
     {
-        var rows = TypeLibraries().Libraries();
-        _editorSurface?.ShowObLibraries(id, [.. rows.Select(row => new ObLibraryRow(row.Name, row.Description))]);
+        if (_browserPalette is not null)
+        {
+            _browserPalette.Present();
+            return;
+        }
+
+        var palette = BrowserPalette.Open(_frame);
+        if (palette is null)
+        {
+            _editorSurface?.Notify("The Object Browser window could not be opened.");
+            return;
+        }
+
+        palette.LibrariesRequested = BrowseLibraries;
+        palette.TypesRequested = BrowseTypes;
+        palette.MembersRequested = BrowseMembers;
+        palette.NavigateRequested = (module, line, project) =>
+        {
+            // The editor's window comes forward first: the palette holds the foreground,
+            // and a navigation nobody can see is a navigation that did not happen.
+            if (_frame != 0)
+            {
+                Win32.SetForegroundWindow(_frame);
+            }
+
+            GoTo(module, line, 1, project);
+        };
+
+        DarkenTitleBar(palette.Handle);
+        _browserPalette = palette;
+    }
+
+    /// <summary>
+    /// What the Browser lists at its top level: the open projects first — the developer's
+    /// own code is what they browse most — then every referenced type library.
+    /// </summary>
+    private ObLibraryRow[] BrowseLibraries()
+    {
+        var rows = new List<ObLibraryRow>();
+
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var count = projects?.GetInt32("Count") ?? 0;
+
+            for (var p = 1; p <= count; p++)
+            {
+                using var project = projects!.GetItem(p);
+                if (project is null)
+                {
+                    continue;
+                }
+
+                var identity = ProjectReader.Identity(project);
+                rows.Add(new ObLibraryRow(
+                    identity.DisplayName,
+                    project.GetString("Name") ?? "VBA project",
+                    "project"));
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"object browser: the projects could not be listed ({ex.GetType().Name})");
+        }
+
+        foreach (var row in TypeLibraries().Libraries())
+        {
+            rows.Add(new ObLibraryRow(row.Name, row.Description, "library"));
+        }
+
         Log.Verbose($"object browser: {rows.Count} librarie(s)");
+        return [.. rows];
     }
 
-    private void OnObTypesRequested(int id, string library)
+    /// <summary>A library's types: a project answers with its modules, a typelib with its catalog.</summary>
+    private ObTypeRow[] BrowseTypes(string library)
     {
-        var rows = TypeLibraries().TypesOf(library) ?? [];
-        _editorSurface?.ShowObTypes(id, [.. rows.Select(row => new ObTypeRow(row.Name, row.Kind))]);
-        Log.Verbose($"object browser: {library} -> {rows.Count} type(s)");
+        using var project = FindProjectByDisplayName(library);
+        if (project is not null)
+        {
+            var rows = new List<ObTypeRow>();
+
+            try
+            {
+                using var components = project.GetObject("VBComponents");
+                var count = components?.GetInt32("Count") ?? 0;
+
+                for (var i = 1; i <= count; i++)
+                {
+                    using var component = components!.GetItem(i);
+                    var name = component?.GetString("Name");
+                    if (name is { Length: > 0 })
+                    {
+                        rows.Add(new ObTypeRow(name, ComponentKind(component!.GetInt32("Type"))));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose($"object browser: {library}'s modules could not be listed ({ex.GetType().Name})");
+            }
+
+            Log.Verbose($"object browser: {library} -> {rows.Count} module(s)");
+            return [.. rows];
+        }
+
+        var types = TypeLibraries().TypesOf(library) ?? [];
+        Log.Verbose($"object browser: {library} -> {types.Count} type(s)");
+        return [.. types.Select(row => new ObTypeRow(row.Name, row.Kind))];
     }
 
-    private void OnObMembersRequested(int id, string library, string type)
+    /// <summary>
+    /// A type's members. A project module's are read from its own code, line numbers and
+    /// all, which is what makes them navigable; a typelib's come from the catalog.
+    /// </summary>
+    private void BrowseMembers(string library, string type, Action<ObMemberRow[]> reply)
     {
+        var projectId = ProjectIdFromDisplay(library);
+        if (projectId is not null)
+        {
+            var members = ScanProjectMembers(type, projectId);
+            Log.Verbose($"object browser: {library}.{type} -> {members.Length} member(s) from code");
+            reply(members);
+            return;
+        }
+
         var rows = TypeLibraries().MembersOf(library, type) ?? [];
-        _editorSurface?.ShowObMembers(
-            id, [.. rows.Select(row => new ObMemberRow(row.Name, row.Kind, row.Signature, row.Description))]);
         Log.Verbose($"object browser: {library}.{type} -> {rows.Count} member(s)");
+        reply([.. rows.Select(row => new ObMemberRow(row.Name, row.Kind, row.Signature, row.Description, 0))]);
     }
+
+    /// <summary>A module's members, read from the module itself.</summary>
+    private ObMemberRow[] ScanProjectMembers(string module, string projectId)
+    {
+        try
+        {
+            using var component = FindComponent(module, projectId, out _);
+            using var code = component?.GetObject("CodeModule");
+            var count = code?.GetInt32("CountOfLines") ?? 0;
+            var source = count > 0 ? code!.GetStringIndexed("Lines", 1, count) : null;
+            return source is null ? [] : ScanModuleMembers(source);
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"object browser: {module} could not be read ({ex.GetType().Name})");
+            return [];
+        }
+    }
+
+    /// <summary>The Browser's word for a component type number.</summary>
+    private static string ComponentKind(int componentType) => componentType switch
+    {
+        2 => "class",
+        3 => "form",
+        100 => "document",
+        _ => "module",
+    };
+
+    /// <summary>
+    /// Finds a module's members by reading its declarations: procedures, module-level
+    /// variables and constants, events, API declares, and Enum and Type blocks. A line
+    /// scan, not a parse — it reads the declaration lines the developer wrote and skips
+    /// procedure bodies, which is exactly the list the Browser shows.
+    /// </summary>
+    private static ObMemberRow[] ScanModuleMembers(string source)
+    {
+        var members = new List<ObMemberRow>();
+        var lines = source.Replace("\r\n", "\n").Split('\n');
+        var inProcedure = false;
+        var inBlock = false;
+
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (line.Length == 0 || line.StartsWith('\''))
+            {
+                continue;
+            }
+
+            if (inBlock)
+            {
+                if (StartsWithKeyword(line, "End Enum") || StartsWithKeyword(line, "End Type"))
+                {
+                    inBlock = false;
+                }
+
+                continue;
+            }
+
+            if (inProcedure)
+            {
+                if (StartsWithKeyword(line, "End Sub") || StartsWithKeyword(line, "End Function")
+                    || StartsWithKeyword(line, "End Property"))
+                {
+                    inProcedure = false;
+                }
+
+                continue;
+            }
+
+            // The access modifiers say nothing about what follows; strip them and look.
+            var rest = line;
+            var hadModifier = false;
+            while (TakeKeyword(ref rest, "Public") || TakeKeyword(ref rest, "Private")
+                   || TakeKeyword(ref rest, "Friend") || TakeKeyword(ref rest, "Global")
+                   || TakeKeyword(ref rest, "Static"))
+            {
+                hadModifier = true;
+            }
+
+            var signature = line.TrimEnd('_').TrimEnd();
+            var lineNumber = i + 1;
+
+            if (TakeKeyword(ref rest, "Declare"))
+            {
+                _ = TakeKeyword(ref rest, "PtrSafe");
+                var kind = TakeKeyword(ref rest, "Function") ? "Function"
+                    : TakeKeyword(ref rest, "Sub") ? "Sub"
+                    : null;
+                if (kind is not null && LeadingIdentifier(rest) is { Length: > 0 } declared)
+                {
+                    members.Add(new ObMemberRow(declared, kind, signature, string.Empty, lineNumber));
+                }
+            }
+            else if (TakeKeyword(ref rest, "Sub"))
+            {
+                AddNamed(members, rest, "Sub", signature, lineNumber);
+                inProcedure = true;
+            }
+            else if (TakeKeyword(ref rest, "Function"))
+            {
+                AddNamed(members, rest, "Function", signature, lineNumber);
+                inProcedure = true;
+            }
+            else if (TakeKeyword(ref rest, "Property"))
+            {
+                _ = TakeKeyword(ref rest, "Get") || TakeKeyword(ref rest, "Let") || TakeKeyword(ref rest, "Set");
+
+                // Get, Let, and Set share the one name; the Browser lists it once.
+                var name = LeadingIdentifier(rest);
+                if (name.Length > 0
+                    && !members.Exists(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    members.Add(new ObMemberRow(name, "Property", signature, string.Empty, lineNumber));
+                }
+
+                inProcedure = true;
+            }
+            else if (TakeKeyword(ref rest, "Enum"))
+            {
+                AddNamed(members, rest, "Enum", signature, lineNumber);
+                inBlock = true;
+            }
+            else if (TakeKeyword(ref rest, "Type"))
+            {
+                AddNamed(members, rest, "Type", signature, lineNumber);
+                inBlock = true;
+            }
+            else if (TakeKeyword(ref rest, "Const"))
+            {
+                AddNamed(members, rest, "Const", signature, lineNumber);
+            }
+            else if (TakeKeyword(ref rest, "Event"))
+            {
+                AddNamed(members, rest, "Event", signature, lineNumber);
+            }
+            else if (TakeKeyword(ref rest, "WithEvents"))
+            {
+                AddNamed(members, rest, "Field", signature, lineNumber);
+            }
+            else if (hadModifier || TakeKeyword(ref rest, "Dim"))
+            {
+                // A declaration line can carry several names: Dim a As Long, b As String.
+                foreach (var piece in rest.Split(','))
+                {
+                    var name = LeadingIdentifier(piece.Trim());
+                    if (name.Length > 0)
+                    {
+                        members.Add(new ObMemberRow(name, "Field", piece.Trim(), string.Empty, lineNumber));
+                    }
+                }
+            }
+        }
+
+        return [.. members];
+    }
+
+    private static void AddNamed(List<ObMemberRow> members, string rest, string kind, string signature, int line)
+    {
+        var name = LeadingIdentifier(rest);
+        if (name.Length > 0)
+        {
+            members.Add(new ObMemberRow(name, kind, signature, string.Empty, line));
+        }
+    }
+
+    /// <summary>Whether the line begins with the keyword as a whole word.</summary>
+    private static bool StartsWithKeyword(string text, string keyword) =>
+        text.StartsWith(keyword, StringComparison.OrdinalIgnoreCase)
+        && (text.Length == keyword.Length || !IsIdentifierChar(text[keyword.Length]));
+
+    /// <summary>Consumes a leading keyword and the space after it, reporting whether it was there.</summary>
+    private static bool TakeKeyword(ref string text, string keyword)
+    {
+        if (!StartsWithKeyword(text, keyword))
+        {
+            return false;
+        }
+
+        text = text[keyword.Length..].TrimStart();
+        return true;
+    }
+
+    /// <summary>The identifier the text starts with, or empty.</summary>
+    private static string LeadingIdentifier(string text)
+    {
+        var end = 0;
+        while (end < text.Length && IsIdentifierChar(text[end]))
+        {
+            end++;
+        }
+
+        return text[..end];
+    }
+
+    private static bool IsIdentifierChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     private void OnSearchRequested(int id, string query, bool matchCase, bool wholeWord, string scope)
     {
@@ -2140,7 +2329,6 @@ internal sealed class AddInSession : IDisposable
     private void UpdatePolling()
     {
         var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
-            : _watchingCutouts ? CutoutPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
             : _watchingEmpty ? EmptyWorkspacePollMilliseconds
             : 0;
@@ -2216,13 +2404,6 @@ internal sealed class AddInSession : IDisposable
         if (_watchingEmpty)
         {
             PublishProjects();
-        }
-
-        // While the Browser's hole is open, this is what keeps it under the window: the
-        // Browser moves without a word to the pane tracker.
-        if (_watchingCutouts)
-        {
-            RefreshSurfacePlacement();
         }
 
         _immediateReader?.Poll();
@@ -4555,14 +4736,6 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        if (_watchingCutouts)
-        {
-            // While the Browser's hole is open, its region must be rebuilt against every
-            // new size, or the hole lags the drag.
-            RefreshSurfacePlacement();
-            return;
-        }
-
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
 
         // The full pass — window policing, band silencing, chrome — is object-model work,
@@ -4591,13 +4764,6 @@ internal sealed class AddInSession : IDisposable
         if (_frame != 0 && !Win32.IsWindowVisible(_frame))
         {
             // The full pass takes its hide branch before any object-model call.
-            RefreshSurfacePlacement();
-            return;
-        }
-
-        if (_watchingCutouts)
-        {
-            // The Browser's hole must track its window through the drag exactly.
             RefreshSurfacePlacement();
             return;
         }
@@ -4641,38 +4807,15 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.Follow(bounds, visible: true);
         _editorSurface.SetChrome(menuBar: covering);
 
-        // The canvas is purely xlide (developer, 2026-08-05) with exactly ONE licensed
-        // exception: the Object Browser lives through its own hole, because that is the only
-        // arrangement in which the editor paints it (lesson 32). Everything else is a panel,
-        // a ghost, or policed away.
+        // The canvas is purely xlide (developer, 2026-08-05), no exceptions: every native
+        // window is a panel, a ghost, a palette of our own, or policed away. The cutout-hole
+        // machinery that once let the Object Browser live here is dormant in the overlay,
+        // retired with the native Browser itself.
         if (covering)
         {
             PoliceNativeToolWindows();
         }
-
-        PixelRect[] holes = covering ? ObjectBrowserCutout() : [];
-        _editorSurface.SetCutouts(holes);
-
-        var watching = holes.Length > 0;
-        if (watching != _watchingCutouts)
-        {
-            _watchingCutouts = watching;
-            Log.Info(watching
-                ? "surface: the Object Browser's hole is open"
-                : "surface: whole again");
-            UpdatePolling();
-        }
     }
-
-    /// <summary>
-    /// How often placement is recomputed while the Browser's hole is open. Its window has
-    /// its own class, so the pane tracker never hears it move, resize, or close; the timer
-    /// is what keeps the hole under it, and the overlay skips identical states.
-    /// </summary>
-    private const uint CutoutPollMilliseconds = 200;
-
-    /// <summary>Whether the Browser's hole is open, which is a reason to poll.</summary>
-    private bool _watchingCutouts;
 
     /// <summary>
     /// Silences or restores the windows the native menu bar and toolbars live in, by region
@@ -4737,9 +4880,10 @@ internal sealed class AddInSession : IDisposable
     /// our canvas to be purely xlide") — holes meant tracking native windows pixel-for-pixel
     /// through a poll, and every window turned out to have a better home. The replaced
     /// windows (Project Explorer 6, Properties 7) are re-hidden if any native route re-shows
-    /// them; a docked Object Browser (2) is floated to its own palette; the Locals and
-    /// Watches ghosts (4, 3) are already exactly where they belong, visible to the object
-    /// model and to nothing else. The Immediate window (5) stays hidden behind its mirror.
+    /// them, and so is the Object Browser (2) now that its floating palette replaces it
+    /// outright; the Locals and Watches ghosts (4, 3) are already exactly where they belong,
+    /// visible to the object model and to nothing else. The Immediate window (5) stays
+    /// hidden behind its mirror.
     /// </summary>
     private void PoliceNativeToolWindows()
     {
@@ -4760,13 +4904,6 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 var caption = window.GetString("Caption");
-                if (type == 2)
-                {
-                    // The Browser is the one native window allowed on the canvas — live
-                    // through its own hole. Nothing to police.
-                    continue;
-                }
-
                 if (!window.GetBool("Visible"))
                 {
                     continue;
@@ -4957,6 +5094,11 @@ internal sealed class AddInSession : IDisposable
 
         _typeLibraries?.Dispose();
         _typeLibraries = null;
+
+        // The palette owns a browser and a top-level window of its own; both go the same way
+        // the surface's do, before the host can unload the library their code lives in.
+        _browserPalette?.Dispose();
+        _browserPalette = null;
 
         _codePanes?.Dispose();
         _codePanes = null;

@@ -44,6 +44,7 @@ import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openSettingsDialog } from "./settingsdialog.js";
 import { installBookmarks } from "./bookmarks.js";
+import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
@@ -443,8 +444,15 @@ function toSuggestion(item: HostCompletionItem, range: monaco.Range): monaco.lan
   return suggestion;
 }
 
+// One bundle, two documents: the editor surface, and the Object Browser palette the host
+// opens in its own floating window. The palette wants none of the editor's machinery —
+// no Monaco boot, no shell, no bridge — so it takes its own door before any of that starts.
+const entry = new URLSearchParams(window.location.search).get("view") === "objbrowser"
+  ? bootObjectBrowserPage
+  : boot;
+
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", boot, { once: true });
+  document.addEventListener("DOMContentLoaded", entry, { once: true });
 } else {
-  boot();
+  entry();
 }

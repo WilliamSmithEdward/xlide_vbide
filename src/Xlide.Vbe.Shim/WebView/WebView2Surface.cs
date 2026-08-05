@@ -61,9 +61,12 @@ internal sealed class WebView2Surface : IDisposable
 
     /// <summary>
     /// Begins creating a browser inside <paramref name="parentWindow"/>. Returns as soon as the
-    /// work is started; nothing is rendered until the two callbacks have run.
+    /// work is started; nothing is rendered until the two callbacks have run. The optional
+    /// <paramref name="entryQuery"/> rides the bundle navigation ("?view=..."), which is how a
+    /// second surface — the Object Browser palette — boots the same bundle into a different
+    /// page.
     /// </summary>
-    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds)
+    public static WebView2Surface? Start(nint parentWindow, PixelRect bounds, string entryQuery = "")
     {
         if (parentWindow == 0)
         {
@@ -71,8 +74,12 @@ internal sealed class WebView2Surface : IDisposable
         }
 
         var surface = new WebView2Surface(parentWindow, bounds);
+        surface._entryQuery = entryQuery;
         return surface.BeginEnvironment() ? surface : null;
     }
+
+    /// <summary>Appended to the bundle's entry address on navigation.</summary>
+    private string _entryQuery = string.Empty;
 
     /// <summary>
     /// Raised with the text of each message the page posts through
@@ -599,7 +606,7 @@ internal sealed class WebView2Surface : IDisposable
         // bytes in tens of milliseconds. The mapping remains the fallback below, because a
         // slow editor beats no editor.
         _pageServer ??= LoopbackPageServer.Start(WebViewPaths.EditorContentRoot(directory));
-        if (_pageServer is not null && NavigateToUrl($"{_pageServer.BaseUrl}/index.html"))
+        if (_pageServer is not null && NavigateToUrl($"{_pageServer.BaseUrl}/index.html{_entryQuery}"))
         {
             return;
         }
@@ -614,7 +621,7 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
-        if (!NavigateToUrl(WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName)))
+        if (!NavigateToUrl(WebViewPaths.EditorEntryUrl(WebViewPaths.EditorHostName) + _entryQuery))
         {
             // The mapping outlives a failed navigation and would shadow the host name for anything
             // that came later, so it is taken back rather than left behind.

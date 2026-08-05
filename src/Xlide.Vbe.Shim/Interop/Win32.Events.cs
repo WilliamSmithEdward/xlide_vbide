@@ -102,9 +102,16 @@ internal static unsafe partial class Win32
     /// <summary>SW_SHOWNOACTIVATE. Shows a window without taking focus from whatever has it.</summary>
     public const int SwShowNoActivate = 4;
 
+    /// <summary>SW_SHOW. Shows a window and activates it.</summary>
+    public const int SwShow = 5;
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ShowWindow(nint window, int command);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetForegroundWindow(nint window);
 
     [LibraryImport("gdi32.dll")]
     public static partial nint CreateRectRgn(int left, int top, int right, int bottom);

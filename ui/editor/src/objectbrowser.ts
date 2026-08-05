@@ -1,46 +1,29 @@
 /*
- * The xlide Object Browser: the referenced type libraries and the project itself, browsable
- * and searchable, in place of the native browser the canvas retired (lesson 32 — it could
- * neither float nor be adopted).
+ * The xlide Object Browser page: the whole document of the floating palette window the host
+ * opens beside the editor (the developer's choice, 2026-08-05 — the native browser can
+ * neither float nor be adopted, lesson 32, so it retired in favour of this).
  *
  * A library picker chooses the subject: each open workbook's project, or any type library
  * the projects reference — Excel, VBA, Office, stdole — served by the host's typelib reader.
  * Types on the left, members with VBA-spelled signatures on the right, the selected member's
- * full signature in the detail strip. Project members jump to their definition.
+ * full signature in the detail strip. Project members carry their line and jump to their
+ * definition in the editor; Escape asks the host to hide the window, exactly like its
+ * close box.
+ *
+ * The page speaks to its own host window directly — it is a second browser surface with its
+ * own transport, not a view inside the editor page.
  */
 
-import type { ExplorerProcedure, ExplorerProject } from "./explorer.js";
-import type { ObLibrary, ObMember, ObType } from "./bridge.js";
-
-export interface ObjectBrowserDeps {
-  /** The workspace as the host last published it. */
-  projects(): ExplorerProject[];
-  /** A module's procedures, from the engine; null when no answer came. */
-  outline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
-  /** The referenced libraries; null when no answer came. */
-  libraries(): Promise<ObLibrary[] | null>;
-  /** A library's types; null when no answer came. */
-  types(library: string): Promise<ObType[] | null>;
-  /** A type's members; null when no answer came. */
-  members(library: string, typeName: string): Promise<ObMember[] | null>;
-  /** Jump to a member's definition, for the project's own members. */
-  navigate(module: string, line: number, workbook?: string): void;
-  /** The view closed; focus belongs to the editor again. */
-  closed(): void;
-}
-
-const MODULE_ICONS: Record<number, string> = {
-  1: "symbol-namespace",
-  2: "symbol-class",
-  3: "window",
-  100: "file",
-};
+import { webView2Transport } from "./bridge.js";
+import type { HostTransport, ObLibrary, ObMember, ObType } from "./bridge.js";
 
 const TYPE_ICONS: Record<string, string> = {
   class: "symbol-class",
   enum: "symbol-enum",
   module: "symbol-namespace",
   type: "symbol-structure",
+  form: "window",
+  document: "file",
 };
 
 function memberIcon(kind: string): string {
@@ -55,43 +38,143 @@ function memberIcon(kind: string): string {
       return "symbol-field";
     case "Event":
       return "symbol-event";
+    case "Enum":
+      return "symbol-enum";
+    case "Type":
+      return "symbol-structure";
     default:
       return "symbol-method";
   }
 }
 
-/** What the picker points at: one of the workbook projects, or one host library. */
-type Scope =
-  | { project: ExplorerProject }
-  | { library: ObLibrary };
+const byName = <T extends { name: string }>(a: T, b: T): number =>
+  a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 
-/**
- * Opens the browser. One at a time: opening while open focuses the search box of the one
- * that exists, which is also what a second press of its key should mean.
- */
-export function openObjectBrowser(deps: ObjectBrowserDeps): void {
-  const existing = document.getElementById("objbrowser-search") as HTMLInputElement | null;
-  if (existing) {
-    existing.focus();
-    existing.select();
-    return;
+/** The palette's questions to its host, id-matched with a timeout apiece. */
+class PaletteHost {
+  private nextId = 1;
+  private readonly pending = new Map<number, { resolve(rows: unknown): void; timer: number }>();
+
+  constructor(private readonly transport: HostTransport) {
+    transport.subscribe((message) => {
+      if (message.type === "obLibrariesResult" || message.type === "obTypesResult"
+        || message.type === "obMembersResult") {
+        const waiter = this.pending.get(message.id);
+        if (waiter) {
+          this.pending.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(
+            message.type === "obLibrariesResult" ? message.libraries ?? []
+              : message.type === "obTypesResult" ? message.types ?? []
+                : message.members ?? []);
+        }
+      }
+    });
   }
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "objbrowser-backdrop";
+  libraries(): Promise<ObLibrary[] | null> {
+    return this.ask((id) => ({ type: "obLibraries", id }));
+  }
 
-  const card = document.createElement("div");
-  card.id = "objbrowser-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "Object Browser");
+  types(library: string): Promise<ObType[] | null> {
+    return this.ask((id) => ({ type: "obTypes", id, library }));
+  }
+
+  members(library: string, typeName: string): Promise<ObMember[] | null> {
+    return this.ask((id) => ({ type: "obMembers", id, library, typeName }));
+  }
+
+  navigate(module: string, line: number, project?: string): void {
+    this.transport.post({ type: "navigate", module, line, column: 1, ...(project ? { project } : {}) });
+  }
+
+  close(): void {
+    this.transport.post({ type: "close" });
+  }
+
+  private ask<T>(message: (id: number) => Parameters<HostTransport["post"]>[0]): Promise<T | null> {
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(id);
+        resolve(null);
+      }, 8000);
+      this.pending.set(id, { resolve: resolve as (rows: unknown) => void, timer });
+      this.transport.post(message(id));
+    });
+  }
+}
+
+/** Canned answers for opening the page in a plain browser, where there is no host. */
+function demoPaletteTransport(): HostTransport {
+  let deliver: ((message: never) => void) | null = null;
+  const send = (message: unknown): void => {
+    setTimeout(() => deliver?.(message as never), 30);
+  };
+
+  return {
+    post(message) {
+      if (message.type === "obLibraries") {
+        send({
+          type: "obLibrariesResult",
+          id: message.id,
+          libraries: [
+            { name: "scratch.xlsm", description: "VBAProject", kind: "project" },
+            { name: "Excel", description: "Microsoft Excel Object Library", kind: "library" },
+            { name: "VBA", description: "Visual Basic For Applications", kind: "library" },
+          ],
+        });
+      }
+      if (message.type === "obTypes") {
+        send({
+          type: "obTypesResult",
+          id: message.id,
+          types: message.library === "scratch.xlsm"
+            ? [{ name: "Module1", kind: "module" }, { name: "ThisWorkbook", kind: "document" }]
+            : [
+              { name: "Range", kind: "class" },
+              { name: "Worksheet", kind: "class" },
+              { name: "XlDirection", kind: "enum" },
+            ],
+        });
+      }
+      if (message.type === "obMembers") {
+        send({
+          type: "obMembersResult",
+          id: message.id,
+          members: message.library === "scratch.xlsm"
+            ? [
+              { name: "Greet", kind: "Sub", signature: "Public Sub Greet(name As String)", description: "", line: 3 },
+              { name: "Total", kind: "Function", signature: "Public Function Total() As Double", description: "", line: 9 },
+            ]
+            : [
+              { name: "Address", kind: "Property", signature: "Property Get Address([RowAbsolute As Variant]) As String", description: "", line: 0 },
+              { name: "Select", kind: "Function", signature: "Function Select() As Variant", description: "", line: 0 },
+            ],
+        });
+      }
+    },
+    subscribe(handler) {
+      deliver = handler as (message: never) => void;
+    },
+  };
+}
+
+/** Boots the palette page: builds the whole document and starts asking. */
+export function bootObjectBrowserPage(): void {
+  document.title = "Object Browser";
+  document.body.classList.add("objbrowser-page");
+
+  // The document is the editor's index.html; its shell skeleton belongs to the other view.
+  document.getElementById("shell")?.remove();
+
+  const host = new PaletteHost(webView2Transport() ?? demoPaletteTransport());
+
+  const root = document.createElement("div");
+  root.id = "objbrowser-card";
 
   const head = document.createElement("div");
   head.id = "objbrowser-head";
-
-  const title = document.createElement("span");
-  title.id = "objbrowser-title";
-  title.textContent = "Object Browser";
 
   const picker = document.createElement("select");
   picker.id = "objbrowser-library";
@@ -103,14 +186,7 @@ export function openObjectBrowser(deps: ObjectBrowserDeps): void {
   search.placeholder = "Search";
   search.setAttribute("aria-label", "Search types and members");
 
-  const close = document.createElement("button");
-  close.type = "button";
-  close.id = "objbrowser-close";
-  close.title = "Close (Esc)";
-  close.setAttribute("aria-label", "Close the Object Browser");
-  close.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
-
-  head.append(title, picker, search, close);
+  head.append(picker, search);
 
   const body = document.createElement("div");
   body.id = "objbrowser-body";
@@ -127,149 +203,166 @@ export function openObjectBrowser(deps: ObjectBrowserDeps): void {
 
   body.append(typesPane, membersPane);
 
+  // The details pane sits under both lists behind its own splitter, the way the native
+  // browser stacked its member pane: signature in the code face, then where the member
+  // lives, then whatever the library documents about it.
+  const splitter = document.createElement("div");
+  splitter.id = "objbrowser-splitter";
+  splitter.setAttribute("role", "separator");
+  splitter.setAttribute("aria-orientation", "horizontal");
+  splitter.setAttribute("aria-label", "Resize the details pane");
+  splitter.tabIndex = 0;
+
   const detail = document.createElement("div");
   detail.id = "objbrowser-detail";
-  detail.textContent = "Loading…";
+  detail.setAttribute("aria-live", "polite");
 
-  card.append(head, body, detail);
-  backdrop.appendChild(card);
-  document.body.appendChild(backdrop);
+  const detailSignature = document.createElement("div");
+  detailSignature.id = "objbrowser-detail-signature";
+
+  const detailContext = document.createElement("div");
+  detailContext.id = "objbrowser-detail-context";
+
+  const detailDescription = document.createElement("div");
+  detailDescription.id = "objbrowser-detail-description";
+
+  detail.append(detailSignature, detailContext, detailDescription);
+
+  const setDetail = (signature: string, context = "", description = ""): void => {
+    detailSignature.textContent = signature;
+    detailContext.textContent = context;
+    detailContext.hidden = context.length === 0;
+    detailDescription.textContent = description;
+    detailDescription.hidden = description.length === 0;
+  };
+
+  setDetail("Loading...");
+
+  const sizeDetail = (height: number): void => {
+    const clamped = Math.max(48, Math.min(Math.round(window.innerHeight * 0.6), height));
+    detail.style.height = `${clamped}px`;
+  };
+
+  splitter.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    splitter.setPointerCapture(event.pointerId);
+    const startY = event.clientY;
+    const startHeight = detail.getBoundingClientRect().height;
+    const move = (moved: PointerEvent): void => sizeDetail(startHeight + (startY - moved.clientY));
+    const stop = (): void => {
+      splitter.removeEventListener("pointermove", move);
+      splitter.removeEventListener("pointerup", stop);
+      splitter.removeEventListener("pointercancel", stop);
+    };
+    splitter.addEventListener("pointermove", move);
+    splitter.addEventListener("pointerup", stop);
+    splitter.addEventListener("pointercancel", stop);
+  });
+
+  splitter.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const held = detail.getBoundingClientRect().height;
+      sizeDetail(held + (event.key === "ArrowUp" ? 16 : -16));
+    }
+  });
+
+  root.append(head, body, splitter, detail);
+  document.body.appendChild(root);
   search.focus();
 
   // --- state ---------------------------------------------------------------------------
 
-  const scopes: Scope[] = [];
-  let scope: Scope | null = null;
+  let libraries: ObLibrary[] = [];
+  let scope: ObLibrary | null = null;
   let selectedType: string | null = null;
-  let disposed = false;
 
-  /** Outlines by "workbook module"; library members by "library type". */
-  const outlines = new Map<string, ExplorerProcedure[]>();
-  const libraryTypes = new Map<string, ObType[]>();
-  const libraryMembers = new Map<string, ObMember[]>();
-
-  const dismiss = (): void => {
-    disposed = true;
-    document.removeEventListener("keydown", onKey, true);
-    backdrop.remove();
-    deps.closed();
-  };
-
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  };
-
-  document.addEventListener("keydown", onKey, true);
-  close.addEventListener("click", dismiss);
-  backdrop.addEventListener("click", (event) => {
-    if (event.target === backdrop) {
-      dismiss();
-    }
-  });
+  const typesOf = new Map<string, ObType[]>();
+  const membersOf = new Map<string, ObMember[]>();
 
   const query = (): string => search.value.trim().toLowerCase();
 
-  // --- members pane --------------------------------------------------------------------
-
-  const showMember = (icon: string, name: string, context: string, description: string, jump?: () => void): void => {
-    const item = document.createElement("div");
-    item.className = "objbrowser-row";
-    item.setAttribute("role", "option");
-    item.tabIndex = 0;
-
-    const glyph = document.createElement("span");
-    glyph.className = `codicon codicon-${icon}`;
-    glyph.setAttribute("aria-hidden", "true");
-
-    const label = document.createElement("span");
-    label.className = "objbrowser-name";
-    label.textContent = name;
-
-    const trailing = document.createElement("span");
-    trailing.className = "objbrowser-context";
-    trailing.textContent = context;
-
-    item.append(glyph, label, trailing);
-    item.addEventListener("click", () => {
-      detail.textContent = description;
-      for (const other of membersPane.querySelectorAll(".objbrowser-row.selected")) {
-        other.classList.remove("selected");
-      }
-      item.classList.add("selected");
-    });
-
-    if (jump) {
-      item.addEventListener("dblclick", jump);
-      item.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          jump();
-        }
-      });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      host.close();
     }
+  });
 
-    membersPane.appendChild(item);
-  };
+  // The window can be hidden and summoned again; coming back, the search box should be
+  // ready to type into, exactly as it was on first open.
+  window.addEventListener("focus", () => search.focus());
+
+  // --- members pane --------------------------------------------------------------------
 
   const renderMembers = (): void => {
     membersPane.replaceChildren();
     const wanted = query();
     let shown = 0;
 
-    if (scope && "project" in scope) {
-      const project = scope.project;
-      for (const component of project.components) {
-        if (wanted.length === 0 && component.name !== selectedType) {
-          continue;
-        }
-
-        const held = outlines.get(`${project.name} ${component.name}`) ?? [];
-        for (const procedure of held) {
-          if (wanted.length > 0 && !procedure.name.toLowerCase().includes(wanted)) {
-            continue;
-          }
-
-          shown++;
-          showMember(
-            memberIcon(procedure.kind),
-            procedure.name,
-            wanted.length > 0 ? component.name : procedure.kind,
-            `${procedure.kind} ${procedure.name} — ${project.name}.${component.name}, line ${procedure.line}`,
-            () => {
-              deps.navigate(component.name, procedure.line, project.name);
-              dismiss();
-            });
-        }
-      }
-    } else if (scope && "library" in scope) {
-      const library = scope.library.name;
-      const types = libraryTypes.get(library) ?? [];
+    if (scope) {
+      const library = scope;
+      const types = typesOf.get(library.name) ?? [];
       for (const type of types) {
         if (wanted.length === 0 && type.name !== selectedType) {
           continue;
         }
 
-        const held = libraryMembers.get(`${library} ${type.name}`);
+        const held = membersOf.get(`${library.name} ${type.name}`);
         if (!held) {
           continue;
         }
 
-        for (const member of held) {
+        for (const member of [...held].sort(byName)) {
           if (wanted.length > 0 && !member.name.toLowerCase().includes(wanted)) {
             continue;
           }
 
           shown++;
-          showMember(
-            memberIcon(member.kind),
-            member.name,
-            wanted.length > 0 ? type.name : member.kind,
-            member.signature + ` — Member of ${library}.${type.name}`
-              + (member.description.length > 0 ? ` — ${member.description}` : ""));
+          const item = document.createElement("div");
+          item.className = "objbrowser-row";
+          item.setAttribute("role", "option");
+          item.tabIndex = 0;
+
+          const glyph = document.createElement("span");
+          glyph.className = `codicon codicon-${memberIcon(member.kind)}`;
+          glyph.setAttribute("aria-hidden", "true");
+
+          const label = document.createElement("span");
+          label.className = "objbrowser-name";
+          label.textContent = member.name;
+
+          const trailing = document.createElement("span");
+          trailing.className = "objbrowser-context";
+          trailing.textContent = wanted.length > 0 ? type.name : member.kind;
+
+          item.append(glyph, label, trailing);
+
+          const describe = (): void => {
+            const where = library.kind === "project" && member.line > 0 ? `, line ${member.line}` : "";
+            setDetail(member.signature, `Member of ${library.name}.${type.name}${where}`, member.description);
+          };
+
+          item.addEventListener("click", () => {
+            describe();
+            for (const other of membersPane.querySelectorAll(".objbrowser-row.selected")) {
+              other.classList.remove("selected");
+            }
+            item.classList.add("selected");
+          });
+
+          if (library.kind === "project" && member.line > 0) {
+            const jump = (): void => host.navigate(type.name, member.line, library.name);
+            item.addEventListener("dblclick", jump);
+            item.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                jump();
+              }
+            });
+          }
+
+          membersPane.appendChild(item);
         }
       }
     }
@@ -288,128 +381,101 @@ export function openObjectBrowser(deps: ObjectBrowserDeps): void {
 
   // --- types pane ----------------------------------------------------------------------
 
-  const pickType = (name: string): void => {
-    selectedType = name;
-
-    if (scope && "library" in scope) {
-      const library = scope.library.name;
-      if (!libraryMembers.has(`${library} ${name}`)) {
-        void deps.members(library, name).then((rows) => {
-          if (!disposed && rows) {
-            libraryMembers.set(`${library} ${name}`, rows);
-            renderMembers();
-          }
-        });
-      }
+  const loadMembers = (typeName: string): void => {
+    if (!scope || membersOf.has(`${scope.name} ${typeName}`)) {
+      return;
     }
 
-    renderTypes();
-    renderMembers();
-  };
-
-  const showType = (icon: string, name: string, trailing: string): void => {
-    const item = document.createElement("div");
-    item.className = "objbrowser-row";
-    item.setAttribute("role", "option");
-    item.tabIndex = 0;
-
-    if (name === selectedType) {
-      item.classList.add("selected");
-    }
-
-    const glyph = document.createElement("span");
-    glyph.className = `codicon codicon-${icon}`;
-    glyph.setAttribute("aria-hidden", "true");
-
-    const label = document.createElement("span");
-    label.className = "objbrowser-name";
-    label.textContent = name;
-
-    const context = document.createElement("span");
-    context.className = "objbrowser-context";
-    context.textContent = trailing;
-
-    item.append(glyph, label, context);
-    item.addEventListener("click", () => pickType(name));
-    item.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        pickType(name);
+    const library = scope;
+    void host.members(library.name, typeName).then((rows) => {
+      if (rows) {
+        membersOf.set(`${library.name} ${typeName}`, rows);
+        renderMembers();
       }
     });
+  };
 
-    typesPane.appendChild(item);
+  const pickType = (name: string): void => {
+    selectedType = name;
+    loadMembers(name);
+    renderTypes();
+    renderMembers();
   };
 
   const renderTypes = (): void => {
     typesPane.replaceChildren();
     const wanted = query();
 
-    if (scope && "project" in scope) {
-      for (const component of scope.project.components) {
-        if (wanted.length > 0 && !component.name.toLowerCase().includes(wanted)) {
-          const held = outlines.get(`${scope.project.name} ${component.name}`) ?? [];
-          if (!held.some((procedure) => procedure.name.toLowerCase().includes(wanted))) {
-            continue;
-          }
+    if (!scope) {
+      return;
+    }
+
+    const types = typesOf.get(scope.name);
+    if (!types) {
+      const loading = document.createElement("div");
+      loading.className = "objbrowser-empty";
+      loading.textContent = "Loading...";
+      typesPane.appendChild(loading);
+      return;
+    }
+
+    for (const type of [...types].sort(byName)) {
+      if (wanted.length > 0 && !type.name.toLowerCase().includes(wanted)) {
+        const held = membersOf.get(`${scope.name} ${type.name}`);
+        if (!held || !held.some((member) => member.name.toLowerCase().includes(wanted))) {
+          continue;
         }
-
-        showType(MODULE_ICONS[component.kind] ?? "symbol-namespace", component.name, "");
-      }
-    } else if (scope && "library" in scope) {
-      const types = libraryTypes.get(scope.library.name);
-      if (!types) {
-        const loading = document.createElement("div");
-        loading.className = "objbrowser-empty";
-        loading.textContent = "Loading types…";
-        typesPane.appendChild(loading);
-        return;
       }
 
-      for (const type of types) {
-        if (wanted.length > 0 && !type.name.toLowerCase().includes(wanted)) {
-          const held = libraryMembers.get(`${scope.library.name} ${type.name}`);
-          if (!held || !held.some((member) => member.name.toLowerCase().includes(wanted))) {
-            continue;
-          }
+      const item = document.createElement("div");
+      item.className = "objbrowser-row";
+      item.setAttribute("role", "option");
+      item.tabIndex = 0;
+
+      if (type.name === selectedType) {
+        item.classList.add("selected");
+      }
+
+      const glyph = document.createElement("span");
+      glyph.className = `codicon codicon-${TYPE_ICONS[type.kind] ?? "symbol-class"}`;
+      glyph.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.className = "objbrowser-name";
+      label.textContent = type.name;
+
+      const context = document.createElement("span");
+      context.className = "objbrowser-context";
+      context.textContent = type.kind;
+
+      item.append(glyph, label, context);
+      item.addEventListener("click", () => pickType(type.name));
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          pickType(type.name);
         }
+      });
 
-        showType(TYPE_ICONS[type.kind] ?? "symbol-class", type.name, type.kind);
-      }
+      typesPane.appendChild(item);
     }
   };
 
   // --- scope switching -----------------------------------------------------------------
 
-  const adoptScope = (next: Scope): void => {
+  const adoptScope = (next: ObLibrary): void => {
     scope = next;
     selectedType = null;
+    setDetail(next.name, next.description);
 
-    if ("project" in next) {
-      detail.textContent = `${next.project.name} — this workbook's project`;
-      for (const component of next.project.components) {
-        const key = `${next.project.name} ${component.name}`;
-        if (!outlines.has(key)) {
-          void deps.outline(component.name, next.project.name).then((procedures) => {
-            if (!disposed && procedures) {
-              outlines.set(key, procedures);
-              renderTypes();
-              renderMembers();
-            }
-          });
+    if (!typesOf.has(next.name)) {
+      void host.types(next.name).then((rows) => {
+        if (rows && scope === next) {
+          typesOf.set(next.name, rows);
+          renderTypes();
+          renderMembers();
         }
-      }
-    } else {
-      detail.textContent = `${next.library.name} — ${next.library.description}`;
-      if (!libraryTypes.has(next.library.name)) {
-        void deps.types(next.library.name).then((rows) => {
-          if (!disposed && rows) {
-            libraryTypes.set(next.library.name, rows);
-            renderTypes();
-            renderMembers();
-          }
-        });
-      }
+      });
     }
 
     renderTypes();
@@ -417,7 +483,7 @@ export function openObjectBrowser(deps: ObjectBrowserDeps): void {
   };
 
   picker.addEventListener("change", () => {
-    const picked = scopes[picker.selectedIndex];
+    const picked = libraries[picker.selectedIndex];
     if (picked) {
       adoptScope(picked);
     }
@@ -430,36 +496,22 @@ export function openObjectBrowser(deps: ObjectBrowserDeps): void {
 
   // --- data ----------------------------------------------------------------------------
 
-  for (const project of deps.projects()) {
-    scopes.push({ project });
-    const option = document.createElement("option");
-    option.textContent = `${project.name} (project)`;
-    picker.appendChild(option);
-  }
-
-  void deps.libraries().then((rows) => {
-    if (disposed || !rows) {
+  void host.libraries().then((rows) => {
+    const first = rows?.[0];
+    if (!rows || !first) {
+      setDetail("No libraries answered. Close this window and open the Object Browser again.");
       return;
     }
 
+    libraries = rows;
     for (const library of rows) {
-      scopes.push({ library });
       const option = document.createElement("option");
-      option.textContent = library.name;
+      option.textContent = library.kind === "project" ? `${library.name} (project)` : library.name;
       option.title = library.description;
       picker.appendChild(option);
     }
 
-    if (scope === null && scopes.length > 0) {
-      picker.selectedIndex = 0;
-      adoptScope(scopes[0]);
-    }
-  });
-
-  if (scopes.length > 0) {
     picker.selectedIndex = 0;
-    adoptScope(scopes[0]);
-  } else {
-    detail.textContent = "Loading…";
-  }
+    adoptScope(first);
+  });
 }

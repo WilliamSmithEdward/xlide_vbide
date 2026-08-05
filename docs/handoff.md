@@ -10,6 +10,69 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 THE OBJECT BROWSER ENDGAME — A FLOATING XLIDE PALETTE (developer-chosen,
+confirmed live; supersedes every OB delta below).** After the hole shipped, the developer
+asked for theming and true outside-the-canvas floating — both impossible for the native
+window — and chose, by explicit question, the xlide typelib browser rehomed into a real
+top-level window of ours. The native Browser retires for good; the canvas is purely xlide
+with NO exceptions. SHIPPED AND VERIFIED LIVE: F2 / the toolbar button intercept command
+473 BEFORE the native execute and summon `Editor/BrowserPalette.cs` — a registered
+"XlidePalette" WS_OVERLAPPEDWINDOW owned by the editor's frame, DarkenTitleBar'd, hosting
+a SECOND WebView2Surface (Start grew an entryQuery parameter) navigating the same bundle
+with `?view=objbrowser`; main.ts branches to bootObjectBrowserPage() (drops the editor's
+#shell skeleton), and objectbrowser.ts is now that page — its own PaletteHost transport
+speaking id-matched obLibraries/obTypes/obMembers plus navigate and close. The window
+hides on close and re-presents on the next summons, state intact; Escape posts close.
+THE WHITE-WINDOW LESSON: the surface creates its browser INVISIBLE until Reveal (the
+editor's loader discipline); calling Reveal right after Start is a call on a controller
+that does not exist yet, and the window stays white forever — the palette reveals on the
+page's FIRST MESSAGE instead. Session side: BrowseLibraries lists open projects (kind
+"project", display-name currency) ahead of the typelib catalog (kind "library");
+BrowseTypes answers a project with its VBComponents; BrowseMembers scans the project
+module's CodeModule text by declaration line (Sub/Function/Property collapsed per name,
+Const, Field with comma splits, Event, WithEvents, Enum/Type blocks, Declare) so project
+members carry REAL LINE NUMBERS — ObMemberRow grew `line`, ObLibraryRow grew `kind` —
+and navigate goes SetForegroundWindow(frame) + GoTo. The editor surface's ObX plumbing is
+REMOVED (the palette owns the protocol; bridge requestOb* and the editor demo's canned ob
+answers went with it). The cutout machinery is EXCISED from AddInSession
+(PlaceObjectBrowserWindow, FindObjectBrowserChild, ObjectBrowserCutout, WindowRectIn,
+_watchingCutouts, the 200ms tier and every branch); OverlayWindow.SetCutouts stays as
+dormant API; the police pass hides type 2 again. DETAILS PANE (developer request): the
+one-line strip became a stacked pane under both lists behind its own splitter (pointer
+drag + ArrowUp/Down, 48px..60% clamp) — monospace signature, "Member of X.Y, line N"
+context, description paragraph. UI-TEXT RULE (developer, STANDING): product UI strings
+use plain ASCII punctuation — no em dashes, no ellipsis glyphs ("Loading...", periods,
+commas, parentheses); source comments keep house style. VERIFIED LIVE: palette opens dark
+and floating from the toolbar click; scratch.xlsm project (4 modules, members from code:
+"Sub Test(), line 14"); the developer live-drove VBA (35 types, ColorConstants,
+Conversion), stdole (10), Office (318). NOT yet observed: the navigate leg (synthetic
+double-click does not register in Chrome; the wiring is the proven GoTo path — the
+developer's first double-click on a project member is the test). Parity backlog (told):
+global cross-library search results pane, Back/Forward history, hidden-members toggle,
+F1 help.
+
+**2026-08-05 SUPERSEDED — THE HOLE RESOLUTION (`c49595e`, worked and was confirmed, then
+replaced by the palette above).** The developer wants THE NATIVE
+Browser, and the native Browser paints ONLY as a child inside the editor's own tree —
+every alternative was measured dead: LinkedWindows.Remove registers in the layout without
+moving the live window (a fresh session opens it floating, mid-session it stays docked;
+Visible-toggling recreates it docked); a reparent-adopted window NEVER paints, record
+visible or not; and the editor's reconciliation closes an adopting frame in both message
+spellings. SHIPPED: the cutout hole came back for EXACTLY ONE TENANT. F2 / the toolbar
+button execute native 473; the window is restored from maximised and placed centred at
+~78%x82% of the document area (PlaceObjectBrowserWindow) so it reads as a floating
+window; ObjectBrowserCutout punches its parent-clipped hole; the 200ms hole-watch,
+per-event full pass, and settle retry are scoped to the hole being open; its own close box
+works through the hole and the canvas goes whole again. The police ignores type 2; the
+startup HideReplacedWindows hides a remembered one (no blank apparition at launch — the
+VBE saves it open otherwise). The purely-xlide rule stands everywhere else, with this one
+licensed exception. The xlide typelib BROWSER VIEW was built, then UNSANCTIONED by the
+developer (built without agreement — process error, owned): its UI has no entry points;
+objectbrowser.ts sits unimported; the typelib CATALOG (Interop/TypeLibrary.cs +
+Editor/TypeLibraryCatalog.cs + obLibraries/obTypes/obMembers protocol) stays as DORMANT
+#10 infrastructure — References + LoadTypeLibEx + ITypeLib walking are proven live (VBA,
+Excel, stdole, Office loaded). Do not resurface that UI without the developer asking.
+
 **2026-08-05 THE XLIDE OBJECT BROWSER IS REAL (`44deb00`).** The native one is retired
 (below); its replacement ships: F2 / the toolbar button open a themed view whose LIBRARY
 PICKER holds each open workbook's project AND every referenced type library — VBA, Excel

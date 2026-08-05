@@ -1118,14 +1118,24 @@ body.live-resize .minimap {
 
 /* The Object Browser: a large card over the editor — search, modules, members, detail. */
 
-#objbrowser-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 92;
+/* The Object Browser is a page of its own in a floating host window; the card IS the
+   document, edge to edge, with the window's real title bar above it. */
+body.objbrowser-page {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  color: var(--vscode-foreground, #cccccc);
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.objbrowser-page #objbrowser-card {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 #objbrowser-card {
@@ -1146,11 +1156,6 @@ body.live-resize .minimap {
   gap: 10px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
-}
-
-#objbrowser-title {
-  font-weight: 600;
-  white-space: nowrap;
 }
 
 #objbrowser-library {
@@ -1174,19 +1179,6 @@ body.live-resize .minimap {
   font: inherit;
 }
 
-#objbrowser-close {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 2px;
-  border-radius: 3px;
-}
-
-#objbrowser-close:hover {
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
-}
-
 #objbrowser-body {
   display: grid;
   grid-template-columns: minmax(200px, 1fr) 2fr;
@@ -1202,15 +1194,6 @@ body.live-resize .minimap {
 
 #objbrowser-modules {
   border-right: 1px solid var(--vscode-editorWidget-border, #454545);
-}
-
-.objbrowser-project {
-  padding: 6px 12px 2px;
-  font-weight: 600;
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.6;
 }
 
 .objbrowser-row {
@@ -1253,12 +1236,48 @@ body.live-resize .minimap {
   opacity: 0.55;
 }
 
-#objbrowser-detail {
-  padding: 8px 14px;
+/* The details pane stacks under both lists behind its own splitter: the signature in the
+   code face, where the member lives, and the library's description when it has one. */
+#objbrowser-splitter {
+  flex: none;
+  height: 5px;
+  cursor: ns-resize;
   border-top: 1px solid var(--vscode-editorWidget-border, #454545);
-  opacity: 0.8;
+}
+
+#objbrowser-splitter:hover,
+#objbrowser-splitter:focus-visible {
+  background: var(--vscode-focusBorder, #007fd4);
+  outline: none;
+}
+
+#objbrowser-detail {
+  flex: none;
+  height: 110px;
+  min-height: 48px;
+  overflow: auto;
+  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   font-size: 12px;
-  min-height: 18px;
+}
+
+#objbrowser-detail-signature {
+  font-family: var(--vscode-editor-font-family, Consolas, "Courier New", monospace);
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#objbrowser-detail-context {
+  opacity: 0.65;
+}
+
+#objbrowser-detail-description {
+  opacity: 0.85;
+  white-space: pre-wrap;
+  max-width: 72ch;
 }
 
 /* A command that cannot run right now says so by resting, not by clicking into silence. */

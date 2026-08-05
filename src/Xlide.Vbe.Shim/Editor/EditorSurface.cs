@@ -736,39 +736,6 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.BreakpointRefusedMessage));
     }
 
-    /// <summary>The Object Browser asked which libraries exist: (id).</summary>
-    public Action<int>? ObLibrariesRequested { get; set; }
-
-    /// <summary>The Object Browser asked for a library's types: (id, library).</summary>
-    public Action<int, string>? ObTypesRequested { get; set; }
-
-    /// <summary>The Object Browser asked for a type's members: (id, library, type).</summary>
-    public Action<int, string, string>? ObMembersRequested { get; set; }
-
-    /// <summary>Answers an Object Browser library request.</summary>
-    public void ShowObLibraries(int id, ObLibraryRow[] libraries)
-    {
-        Post(JsonSerializer.Serialize(
-            new ObLibrariesResultMessage("obLibrariesResult", id, libraries),
-            EditorMessageContext.Default.ObLibrariesResultMessage));
-    }
-
-    /// <summary>Answers an Object Browser types request.</summary>
-    public void ShowObTypes(int id, ObTypeRow[] types)
-    {
-        Post(JsonSerializer.Serialize(
-            new ObTypesResultMessage("obTypesResult", id, types),
-            EditorMessageContext.Default.ObTypesResultMessage));
-    }
-
-    /// <summary>Answers an Object Browser members request.</summary>
-    public void ShowObMembers(int id, ObMemberRow[] members)
-    {
-        Post(JsonSerializer.Serialize(
-            new ObMembersResultMessage("obMembersResult", id, members),
-            EditorMessageContext.Default.ObMembersResultMessage));
-    }
-
     /// <summary>Which debug mode the editor is in; held so a late page still learns it.</summary>
     public void ShowDebugMode(string mode)
     {
@@ -1195,38 +1162,6 @@ internal sealed class EditorSurface : IDisposable
 
                     break;
 
-                case "obLibraries":
-                    if (document.RootElement.TryGetProperty("id", out var obLibrariesId)
-                        && obLibrariesId.TryGetInt32(out var obLibrariesRequest))
-                    {
-                        ObLibrariesRequested?.Invoke(obLibrariesRequest);
-                    }
-
-                    break;
-
-                case "obTypes":
-                    if (document.RootElement.TryGetProperty("id", out var obTypesId)
-                        && obTypesId.TryGetInt32(out var obTypesRequest)
-                        && document.RootElement.TryGetProperty("library", out var obTypesLibrary)
-                        && obTypesLibrary.GetString() is { Length: > 0 } obTypesLibraryName)
-                    {
-                        ObTypesRequested?.Invoke(obTypesRequest, obTypesLibraryName);
-                    }
-
-                    break;
-
-                case "obMembers":
-                    if (document.RootElement.TryGetProperty("id", out var obMembersId)
-                        && obMembersId.TryGetInt32(out var obMembersRequest)
-                        && document.RootElement.TryGetProperty("library", out var obMembersLibrary)
-                        && obMembersLibrary.GetString() is { Length: > 0 } obMembersLibraryName
-                        && document.RootElement.TryGetProperty("typeName", out var obMembersType)
-                        && obMembersType.GetString() is { Length: > 0 } obMembersTypeName)
-                    {
-                        ObMembersRequested?.Invoke(obMembersRequest, obMembersLibraryName, obMembersTypeName);
-                    }
-
-                    break;
 
                 case "closeModule":
                     if (document.RootElement.TryGetProperty("name", out var closing)
