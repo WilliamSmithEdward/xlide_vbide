@@ -51,6 +51,8 @@ Test-Seam 'surface can ask and can drop edits' (Join-Path $repo 'src\Xlide.Vbe.S
     'public void ConfirmClose', 'public void DiscardEdits')
 Test-Seam 'session gates, saves, and reverts' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
     'OnModuleCloseRequested', 'case "save"', 'case "discard"', 'SaveWorkbookOf', 'ModuleDiffersFromSaved')
+Test-Seam 'a revert corrects the engine live copy (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+    'hostRewrite: true', 'NotifyLiveText')
 Test-Seam 'Ctrl\+W goes through the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
     'OnModuleCloseRequested\(shown')
 Test-Seam 'built bundle carries the modal' (Join-Path $repo 'ui\editor\dist\editor.js') @(

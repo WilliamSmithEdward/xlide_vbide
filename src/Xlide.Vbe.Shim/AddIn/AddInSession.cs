@@ -722,7 +722,7 @@ internal sealed class AddInSession : IDisposable
     /// editor does when a module is edited, so it is parity rather than a regression, and it is
     /// why this is debounced rather than done per keystroke.
     /// </summary>
-    private void WriteModule(string component, string text, string? ownerProject = null)
+    private void WriteModule(string component, string text, string? ownerProject = null, bool hostRewrite = false)
     {
         try
         {
@@ -779,8 +779,20 @@ internal sealed class AddInSession : IDisposable
             var stored = ProjectReader.ReadSource(found);
             _writtenModules[component] = stored ?? text;
 
+            if (hostRewrite)
+            {
+                // The engine's live copy of a module OUTRANKS its seeded copy everywhere —
+                // search, completion, diagnosis — which is what keeps answers exact
+                // mid-keystroke, and the typing path maintains it by streaming edits ahead of
+                // the write. A host rewrite bypasses the page, so the live copy is corrected
+                // here, or the engine keeps diagnosing text that no longer exists — the
+                // problems of a discarded edit survived the close and the reopen (2026-08-05).
+                _analysis?.NotifyLiveText(component, stored ?? text, null, owner);
+            }
+
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
-                     + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty));
+                     + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty)
+                     + (hostRewrite ? " (host rewrite; the engine's live copy follows)" : string.Empty));
 
             // The write just made the workbook dirty; the tab dots follow. The page skips the
             // rebuild when nothing it draws has changed, so a write that changed no flag is free.
@@ -790,8 +802,10 @@ internal sealed class AddInSession : IDisposable
             // project — work worth doing, but not per pause: the live pass keeps the shown
             // module honest between full passes, and a full pass running is what a completion
             // queues behind. It runs when the write was structural, or when its turn has come.
+            // A host rewrite never waits its turn: the developer just watched the text change,
+            // and the Problems pane must follow it now, not a quiet-period later.
             var now = Environment.TickCount64;
-            if (!wroteDiff || now - _lastFullAnalysis > FullAnalysisQuietMilliseconds)
+            if (hostRewrite || !wroteDiff || now - _lastFullAnalysis > FullAnalysisQuietMilliseconds)
             {
                 _lastFullAnalysis = now;
                 _fullAnalysisDeferred = false;
@@ -1083,6 +1097,7 @@ internal sealed class AddInSession : IDisposable
                     continue;
                 }
 
+                var inModule = 0;
                 foreach (var line in group.Select(m => m.Line).Distinct().OrderByDescending(l => l))
                 {
                     var text = code.GetStringIndexed("Lines", line, 1);
@@ -1095,8 +1110,21 @@ internal sealed class AddInSession : IDisposable
                     if (count > 0)
                     {
                         code.Invoke("ReplaceLine", line, rewritten);
-                        replaced += count;
+                        inModule += count;
                     }
+                }
+
+                replaced += inModule;
+
+                // A replace is a host rewrite: the engine's live copy of this module — which
+                // outranks its seeded copy in every answer — still holds the pre-replace text
+                // for any module the developer has typed in, and the dirty-dot comparison
+                // still holds the pre-replace text as current. Both adopt the truth here.
+                if (inModule > 0 && component is not null
+                    && ProjectReader.ReadSource(component) is { } adopted)
+                {
+                    _writtenModules[group.Key.Module] = adopted;
+                    _analysis?.NotifyLiveText(group.Key.Module, adopted, null, group.Key.ProjectId);
                 }
             }
             catch (Exception ex)
@@ -3500,7 +3528,7 @@ internal sealed class AddInSession : IDisposable
                         _editorSurface?.DiscardEdits();
                     }
 
-                    WriteModule(component, baseline, ProjectIdFromDisplay(display));
+                    WriteModule(component, baseline, ProjectIdFromDisplay(display), hostRewrite: true);
                     if (shown)
                     {
                         // The surface still shows the abandoned text. The close below replaces

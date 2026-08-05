@@ -212,21 +212,25 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// <summary>
     /// Streams a module's live text to the engine, whole or as edits. Fire-and-forget, but its
     /// place in the pipe's order is registered before this returns, so a request made a moment
-    /// later is always about text the engine already holds.
+    /// later is always about text the engine already holds. A caller who knows the module's
+    /// project says so; the rest resolve by name, shown project first.
     /// </summary>
-    public void NotifyLiveText(string moduleName, string? source, EngineTextEdit[]? edits)
+    public void NotifyLiveText(string moduleName, string? source, EngineTextEdit[]? edits, string? projectId = null)
     {
         if (_engine is not { IsRunning: true } engine)
         {
             return;
         }
 
-        if (ResolveHome(moduleName) is not { } home)
+        var home = projectId is { Length: > 0 }
+            ? projectId
+            : ResolveHome(moduleName) is { } found ? found.ProjectId : null;
+        if (home is null)
         {
             return;
         }
 
-        engine.NotifyDidChange(home.ProjectId, moduleName, source, edits);
+        engine.NotifyDidChange(home, moduleName, source, edits);
     }
 
     /// <summary>
