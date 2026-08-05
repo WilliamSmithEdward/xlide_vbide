@@ -87,13 +87,18 @@ internal sealed class WebView2Surface : IDisposable
     /// </summary>
     public Func<uint, bool>? AcceleratorPressed { get; set; }
 
-    /// <summary>Sizes the browser to the window's client area.</summary>
+    /// <summary>
+    /// Sizes the browser to the window's client area. Idempotent: an unchanged size is not
+    /// re-sent, so callers may assert the bounds freely — placement does, on every pass, which
+    /// is what keeps a resize message that never arrived from leaving the page laid out for a
+    /// width the window no longer has (the clipped minimap of 2026-08-05).
+    /// </summary>
     public void SetBounds(PixelRect bounds)
     {
         _bounds = bounds;
 
         var controller = _controller;
-        if (controller is null)
+        if (controller is null || _appliedBounds == bounds)
         {
             return;
         }
@@ -107,7 +112,12 @@ internal sealed class WebView2Surface : IDisposable
         };
 
         controller.Target.PutBounds(rect);
+        _appliedBounds = bounds;
+        Log.Verbose($"webview: bounds {bounds.Width}x{bounds.Height}");
     }
+
+    /// <summary>The bounds the controller last accepted; null until it exists to accept any.</summary>
+    private PixelRect? _appliedBounds;
 
     /// <summary>Gives keyboard focus to the browser.</summary>
     public void Focus() => _controller?.Target.MoveFocus(MoveFocusReason.Programmatic);
@@ -358,6 +368,9 @@ internal sealed class WebView2Surface : IDisposable
             Log.Error("webview: the created controller does not answer to the controller interface");
             return;
         }
+
+        // A fresh controller has accepted nothing yet, whatever an earlier one was told.
+        _appliedBounds = null;
 
         Log.Info("webview: controller created");
 

@@ -415,7 +415,20 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
-    public void Follow(PixelRect bounds, bool visible) => _overlay?.Place(bounds, visible);
+    public void Follow(PixelRect bounds, bool visible)
+    {
+        _overlay?.Place(bounds, visible);
+
+        // The browser's size normally rides the WM_SIZE the placement above produces; it is
+        // asserted here as well, so a size message that never arrived — a raced resize storm —
+        // cannot leave the page laid out for a width the window no longer has, with its right
+        // edge (minimap, scrollbar) falling outside the visible surface (2026-08-05). The
+        // browser side skips the call when nothing changed, so the assertion is free.
+        if (_overlay is { } overlay)
+        {
+            _browser?.SetBounds(overlay.ClientBounds());
+        }
+    }
 
     /// <summary>
     /// Punches holes in the surface where native tool windows must show through, in the frame's
