@@ -72,6 +72,7 @@ export type HostMessage =
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
+  | { type: "setDebugState"; mode: string }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
   | {
     type: "setSettings";
@@ -733,6 +734,9 @@ export class EditorBridge {
       case "setWatches":
         this.shell?.setWatches(message.stopped, message.rows ?? []);
         return;
+      case "setDebugState":
+        this.shell?.setDebugMode(message.mode);
+        return;
       case "setSettings":
         applySettings({
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
@@ -1343,6 +1347,7 @@ export function demoTransport(): HostTransport {
         send({ type: "setBreakpoints", lines: [17, 30] });
         send({ type: "setCurrentLine", line: 17 });
         send({ type: "revealLine", line: 17 });
+        send({ type: "setDebugState", mode: "break" });
         send({
           type: "setProperties",
           component: "Module1",

@@ -191,6 +191,7 @@ export class Shell {
   private readonly localsBody: HTMLElement;
   private readonly watchBody: HTMLElement;
   private readonly watchTable: HTMLElement;
+  private readonly toolbarRoot: HTMLElement;
   private readonly localsContext: HTMLElement;
   private readonly localsTable: HTMLElement;
   private readonly searchBody: HTMLElement;
@@ -293,8 +294,9 @@ export class Shell {
     this.propertiesHead.addEventListener("click", () => this.togglePropertiesOpen());
     this.installPropertiesSplitter();
 
+    this.toolbarRoot = root.querySelector("#toolbar") as HTMLElement;
     buildToolbar(
-      root.querySelector("#toolbar") as HTMLElement,
+      this.toolbarRoot,
       (command) => handlers.command(command),
       (command) => handlers.commandAvailable(command));
     this.panel = root.querySelector("#panel") as HTMLElement;
@@ -822,6 +824,18 @@ export class Shell {
       }
 
       this.localsTable.appendChild(line);
+    }
+  }
+
+  /**
+   * The editor's debug mode — "design", "run", or "break". Controls that only mean
+   * something stopped (the Call Stack button) grey with it, honestly, instead of
+   * clicking into silence.
+   */
+  setDebugMode(mode: string): void {
+    const stopped = mode === "break";
+    for (const button of this.toolbarRoot.querySelectorAll<HTMLButtonElement>("[data-needs-break]")) {
+      button.disabled = !stopped;
     }
   }
 

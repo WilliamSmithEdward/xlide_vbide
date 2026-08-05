@@ -736,6 +736,14 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.BreakpointRefusedMessage));
     }
 
+    /// <summary>Which debug mode the editor is in; held so a late page still learns it.</summary>
+    public void ShowDebugMode(string mode)
+    {
+        Send("setDebugState", JsonSerializer.Serialize(
+            new SetDebugStateMessage("setDebugState", mode),
+            EditorMessageContext.Default.SetDebugStateMessage));
+    }
+
     /// <summary>Replaces the Watch panel's rows; not stopped clears it to its idle text.</summary>
     public void ShowWatches(bool stopped, SurfaceWatchRow[] rows)
     {

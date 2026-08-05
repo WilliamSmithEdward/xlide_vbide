@@ -92,6 +92,11 @@ public sealed record SurfaceWatchRow(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("context")] string Context);
 
+/// <summary>Which debug mode the editor is in: design, run, or break.</summary>
+public sealed record SetDebugStateMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("mode")] string Mode);
+
 /// <summary>The Watch panel's rows, replaced whole; stopped false is the idle state.</summary>
 public sealed record SetWatchesMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -359,6 +364,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ConfirmCloseMessage))]
 [JsonSerializable(typeof(SetWatchesMessage))]
 [JsonSerializable(typeof(SurfaceWatchRow))]
+[JsonSerializable(typeof(SetDebugStateMessage))]
 [JsonSerializable(typeof(SearchResultMessage))]
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]

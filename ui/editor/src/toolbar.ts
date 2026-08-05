@@ -22,6 +22,8 @@ export interface ToolbarCommand {
   label: string;
   /** Draws a divider before this one. */
   separatorBefore?: boolean;
+  /** Only means something in break mode; drawn disabled until the host says stopped. */
+  needsBreak?: boolean;
 }
 
 /**
@@ -43,8 +45,10 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "toggleBreakpoint", target: "host", icon: "debug-breakpoint", label: "Toggle breakpoint (F9)" },
   { id: "clearAllBreakpoints", target: "host", icon: "clear-all", label: "Clear all breakpoints" },
   // The View menu's Call Stack, rehomed when the menu went (2026-08-05): a break-mode
-  // dialog belongs beside the stepping it narrates.
-  { id: "callStack", target: "host", icon: "list-tree", label: "Call stack" },
+  // dialog belongs beside the stepping it narrates — and greyed anywhere else, because
+  // the native command is disabled outside a break and a click into silence reads as a
+  // defect ("won't appear again", 2026-08-05).
+  { id: "callStack", target: "host", icon: "list-tree", label: "Call stack (break mode)", needsBreak: true },
 
   { id: "actions.find", target: "editor", icon: "search", label: "Find (Ctrl+F)", separatorBefore: true },
   { id: "editor.action.startFindReplaceAction", target: "editor", icon: "replace", label: "Replace (Ctrl+H)" },
@@ -107,6 +111,12 @@ export function buildToolbar(
     button.title = command.label;
     // The icon is decorative; the label is what carries the meaning.
     button.setAttribute("aria-label", command.label);
+
+    // Disabled until the host says break mode: the shell flips these with setDebugState.
+    if (command.needsBreak) {
+      button.dataset.needsBreak = "1";
+      button.disabled = true;
+    }
 
     const icon = document.createElement("span");
     icon.className = `codicon codicon-${command.icon}`;

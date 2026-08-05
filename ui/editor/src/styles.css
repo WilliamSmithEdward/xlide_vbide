@@ -1116,6 +1116,12 @@ body.live-resize .minimap {
   grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) minmax(90px, 1fr) minmax(110px, 1fr);
 }
 
+/* A command that cannot run right now says so by resting, not by clicking into silence. */
+.toolbar-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* A bookmark's glyph, beside the breakpoint's in the same margin. */
 .xlide-bookmark {
   color: var(--vscode-charts-blue, #3794ff);

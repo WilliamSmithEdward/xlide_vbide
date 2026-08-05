@@ -707,7 +707,16 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        VbeCommands.Execute(_editor, command);
+        var ran = VbeCommands.Execute(_editor, command);
+
+        // A refused Call Stack looked broken rather than declined ("won't appear again",
+        // 2026-08-05: the break had ended and the native command was disabled). The button
+        // greys with the debug mode now, but a race between click and mode change still
+        // deserves words instead of silence.
+        if (!ran && command == VbeCommands.Command.CallStack)
+        {
+            _editorSurface?.Notify("Call Stack shows the stopped procedure chain; it needs break mode.");
+        }
 
         // Clearing all breakpoints clears the editor's; the drawn record must follow, whichever
         // route asked for it.
@@ -1730,6 +1739,26 @@ internal sealed class AddInSession : IDisposable
         Log.Info($"locals: {rows.Length} row(s) at {snapshot.Context ?? "(no context)"}");
     }
 
+    /// <summary>The debug mode the page last heard, so an unchanged mode sends nothing.</summary>
+    private string? _lastPublishedMode;
+
+    /// <summary>
+    /// Tells the page which debug mode the editor is in — "design", "run", or "break" — so
+    /// controls that only mean something stopped (the Call Stack button) can grey honestly
+    /// instead of clicking into silence.
+    /// </summary>
+    private void PublishDebugMode(int mode)
+    {
+        var name = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "run";
+        if (name == _lastPublishedMode)
+        {
+            return;
+        }
+
+        _lastPublishedMode = name;
+        _editorSurface?.ShowDebugMode(name);
+    }
+
     /// <summary>What the Watch panel was last sent, so an unchanged reading sends nothing.</summary>
     private string? _lastWatchesKey;
 
@@ -1787,6 +1816,8 @@ internal sealed class AddInSession : IDisposable
 
             // Collapses to one line per state in the development log.
             Log.Verbose($"debug: mode {mode} ({(mode == BreakMode ? "break" : mode == DesignMode ? "design" : "run")})");
+
+            PublishDebugMode(mode);
 
             // The read answered, so the busy episode, if there was one, is over.
             _debugReadFailureLogged = false;
