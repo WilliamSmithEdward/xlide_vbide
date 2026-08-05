@@ -330,6 +330,7 @@ internal sealed class EditorSurface : IDisposable
         surface._overlay.Resized += size => surface._browser?.SetBounds(size);
         surface._overlay.Elapsed = surface.FlushEdits;
         surface._overlay.Polled = () => surface.Polled?.Invoke();
+        surface._overlay.SettleDue = () => surface.PlacementSettled?.Invoke();
 
         // Asked for the editing document, then left alone. Creating a browser is asynchronous in two
         // stages, so mapping the content root and navigating from here would run before the browser
@@ -429,6 +430,13 @@ internal sealed class EditorSurface : IDisposable
             _browser?.SetBounds(overlay.ClientBounds());
         }
     }
+
+    /// <summary>Raised once, on the host thread, a quiet moment after the last armed frame
+    /// event — when whoever owns placement runs its full pass once instead of per event.</summary>
+    public Action? PlacementSettled { get; set; }
+
+    /// <summary>Starts or restarts the settle debounce; each frame event pushes it out.</summary>
+    public void ArmPlacementSettle(uint milliseconds) => _overlay?.StartSettleTimer(milliseconds);
 
     /// <summary>
     /// Punches holes in the surface where native tool windows must show through, in the frame's

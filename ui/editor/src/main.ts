@@ -122,12 +122,15 @@ function boot(): void {
 
   const createMs = performance.now();
 
-  // Automatic layout rides ResizeObserver, which rides the frame pipeline; the viewport
-  // resize event is delivered regardless. Asking for an explicit re-measure on it costs an
-  // offset read when nothing changed and is what guarantees the editor tracks the window
-  // DOWN as well as up — the grid below it shrinks first (styles.css: #container), and this
-  // makes certain the editor follows even if the observer's frame is late (2026-08-05).
-  window.addEventListener("resize", () => editor.layout());
+  // Automatic layout rides ResizeObserver and tracks the window live; this is only the
+  // safety net for a final frame the observer missed. It waits for the resize to pause —
+  // running it per event doubled every layout of a drag, which read as latency and churn
+  // (2026-08-05) — and a measure that finds nothing changed costs nothing.
+  let resizeSettled: ReturnType<typeof setTimeout> | undefined;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeSettled);
+    resizeSettled = setTimeout(() => editor.layout(), 150);
+  });
 
   const transport = webView2Transport();
 

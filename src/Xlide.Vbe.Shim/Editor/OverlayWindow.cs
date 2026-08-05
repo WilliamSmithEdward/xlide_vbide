@@ -27,6 +27,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private const nuint ActionTimerId = 3;
     private const nuint LoaderTimerId = 4;
     private const nuint AnalyseTimerId = 5;
+    private const nuint SettleTimerId = 6;
 
     /// <summary>One pulse step of the loader; three steps make its cycle.</summary>
     private const uint LoaderTickMilliseconds = 240;
@@ -146,6 +147,21 @@ internal sealed unsafe class OverlayWindow : IDisposable
         if (_handle != 0)
         {
             Win32.KillTimer(_handle, WriteTimerId);
+        }
+    }
+
+    /// <summary>Raised once, on the host thread, after <see cref="StartSettleTimer"/> elapses.</summary>
+    public Action? SettleDue { get; set; }
+
+    /// <summary>
+    /// Starts or restarts the placement-settle debounce: each frame event pushes the deadline
+    /// out, and the full placement pass runs once per pause instead of once per event.
+    /// </summary>
+    public void StartSettleTimer(uint milliseconds)
+    {
+        if (_handle != 0)
+        {
+            Win32.SetTimer(_handle, SettleTimerId, milliseconds, 0);
         }
     }
 
@@ -499,6 +515,12 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         Win32.KillTimer(window, AnalyseTimerId);
                         overlay.AnalysisDue?.Invoke();
                     }
+                    else if ((nuint)wParam == SettleTimerId)
+                    {
+                        // One shot per pause in the frame events.
+                        Win32.KillTimer(window, SettleTimerId);
+                        overlay.SettleDue?.Invoke();
+                    }
 
                     return 0;
                 }
@@ -736,6 +758,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
             Win32.KillTimer(handle, ActionTimerId);
             Win32.KillTimer(handle, LoaderTimerId);
             Win32.KillTimer(handle, AnalyseTimerId);
+            Win32.KillTimer(handle, SettleTimerId);
         }
 
         // Anything still queued was for a surface that no longer exists.

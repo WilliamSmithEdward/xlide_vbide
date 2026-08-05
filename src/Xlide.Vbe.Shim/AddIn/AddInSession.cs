@@ -209,6 +209,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.SearchRequested = OnSearchRequested;
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
+        _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
@@ -522,6 +523,25 @@ internal sealed class AddInSession : IDisposable
             _watchingEmpty = false;
             UpdatePolling();
 
+            // A drag is the same answer per mouse move with only rectangles changed, and the
+            // frame routes already follow rectangles synchronously. Everything below — the
+            // full placement with cutouts and bands, the module and project publishes, debug
+            // state, resync — is for events that changed WHAT is on screen, not where its
+            // edges sit this instant; running it per move tick was the drag latency of
+            // 2026-08-05. A geometry-only event takes the fast path and arms the settle,
+            // whose full pass re-derives placement once the events pause. Debug freshness
+            // rides the poll bursts the step commands arm, as it already does.
+            var substance = string.Join("|",
+                    panes.Select(p => p.Component + (p.IsVisible ? string.Empty : "~")))
+                + "\0" + pane.Window + "\0" + pane.Component + "\0" + (pane.Project ?? string.Empty);
+            if (substance == _lastFollowSubstance)
+            {
+                PlaceSurfaceFast();
+                return;
+            }
+
+            _lastFollowSubstance = substance;
+
             // One placement path for every trigger, so cutouts, chrome, and bounds cannot drift
             // apart between the window-event route and the recomputed one.
             RefreshSurfacePlacement();
@@ -621,6 +641,9 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void OnNoVisiblePane()
     {
+        // The next pane to appear is a change of substance whatever its identity says.
+        _lastFollowSubstance = null;
+
         if (_editorSurface is null || _frame == 0 || _documentArea == 0)
         {
             // No surface yet and no pane to hang one on: the empty-workspace path can still
@@ -4127,6 +4150,44 @@ internal sealed class AddInSession : IDisposable
         }
 
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
+
+        // The full pass — cutout enumeration, band silencing, chrome — is object-model work,
+        // and it was running once per frame event of a drag: measurable latency and repaint
+        // churn (2026-08-05). The bounds followed above; everything else holds still until
+        // the events pause, and then ONE full pass re-derives it all.
+        _editorSurface.ArmPlacementSettle(PlacementSettleMilliseconds);
+    }
+
+    /// <summary>One quiet moment after the last frame event; then the full pass, once.</summary>
+    private const uint PlacementSettleMilliseconds = 150;
+
+    /// <summary>What the last followed pane event amounted to, geometry aside. An event that
+    /// amounts to the same takes the fast path instead of the full cascade.</summary>
+    private string? _lastFollowSubstance;
+
+    /// <summary>
+    /// A frame or document-area event: the frame moved, resized, was shown, or is going away.
+    /// Bounds follow synchronously — that is what keeps the surface glued to the window — and
+    /// the full pass waits for the settle, EXCEPT where eventfulness is the point: a hiding
+    /// frame is the editor closing and the surface must go with it now, with no object-model
+    /// work at all (lesson 27), and open holes must track their native windows exactly.
+    /// </summary>
+    private void OnFrameChanged()
+    {
+        if (_frame != 0 && !Win32.IsWindowVisible(_frame))
+        {
+            // The full pass takes its hide branch before any object-model call.
+            RefreshSurfacePlacement();
+            return;
+        }
+
+        if (_watchingCutouts)
+        {
+            RefreshSurfacePlacement();
+            return;
+        }
+
+        PlaceSurfaceFast();
     }
 
     private void RefreshSurfacePlacement()
@@ -4468,7 +4529,7 @@ internal sealed class AddInSession : IDisposable
             // The frame resizing is not a pane event. With no visible pane — the empty
             // workspace — nothing else hears it, and the surface sat at its old size while the
             // window grew around it. The frame's own events re-derive placement in every state.
-            _codePanes.FrameChanged = RefreshSurfacePlacement;
+            _codePanes.FrameChanged = OnFrameChanged;
 
             // Any destroy might have been a hidden pane, which the tracker's own picture cannot
             // show (it only holds panes it can match — the active one, in practice). A moment of
