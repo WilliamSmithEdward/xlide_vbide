@@ -431,6 +431,12 @@ internal sealed class EditorSurface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Punches holes in the surface where a native window must show through, in the frame's
+    /// client space — one tenant today: the Object Browser. An empty set makes it whole.
+    /// </summary>
+    public void SetCutouts(ReadOnlySpan<PixelRect> holes) => _overlay?.SetCutouts(holes);
+
     /// <summary>Raised once, on the host thread, a quiet moment after the last armed frame
     /// event — when whoever owns placement runs its full pass once instead of per event.</summary>
     public Action? PlacementSettled { get; set; }

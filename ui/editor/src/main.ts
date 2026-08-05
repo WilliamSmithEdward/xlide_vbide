@@ -44,7 +44,6 @@ import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openSettingsDialog } from "./settingsdialog.js";
 import { installBookmarks } from "./bookmarks.js";
-import { openObjectBrowser } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
@@ -156,13 +155,6 @@ function boot(): void {
       bridge.navigate(module, line, column, selectLine, workbook),
     layoutChanged: () => editor.layout(),
     command: (command) => {
-      // The Object Browser is the page's own view now: the native one is retired
-      // (lesson 32), and this one browses the workspace the engine already knows.
-      if (command.id === "objectBrowser") {
-        bridge.openObjectBrowser?.();
-        return;
-      }
-
       // The settings dialog is the page's own, not a Monaco action and not the host's.
       if (command.id === "openSettings") {
         openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
@@ -203,17 +195,6 @@ function boot(): void {
   // the product's settings are where the choices that matter live.
   bridge.openSettings = () =>
     openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
-
-  // The toolbar button and F2 both land here, wherever they were pressed.
-  bridge.openObjectBrowser = () => openObjectBrowser({
-    projects: () => shell.currentProjects(),
-    outline: (module, workbook) => bridge.requestOutline(module, workbook),
-    libraries: () => bridge.requestObLibraries(),
-    types: (library) => bridge.requestObTypes(library),
-    members: (library, typeName) => bridge.requestObMembers(library, typeName),
-    navigate: (module, line, workbook) => bridge.navigate(module, line, 1, true, workbook),
-    closed: () => editor.focus(),
-  });
 
   // Typing automation: Smart Enter block closers, canonical casing, loop-iterator sync. After
   // the bridge, deliberately: the bridge's content listener registered first, so the text a

@@ -128,6 +128,9 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     public static partial nint SetParent(nint child, nint parent);
 
+    [LibraryImport("user32.dll")]
+    public static partial nint GetForegroundWindow();
+
     public const uint CsHRedraw = 0x0002;
     public const uint CsVRedraw = 0x0001;
     public const uint CsDblClks = 0x0008;

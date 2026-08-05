@@ -905,19 +905,11 @@ export class EditorBridge {
   /** Opens the settings dialog; wired by the page's entry point, which owns the dialog. */
   openSettings: (() => void) | null = null;
 
-  /** Opens the Object Browser; wired by the page's entry point, which owns the view. */
-  openObjectBrowser: (() => void) | null = null;
-
   private runEditorCommand(id: string): void {
     this.trace(`editorCommand ${id}`);
 
     if (id === "xlide.openSettings") {
       this.openSettings?.();
-      return;
-    }
-
-    if (id === "xlide.objectBrowser") {
-      this.openObjectBrowser?.();
       return;
     }
 
