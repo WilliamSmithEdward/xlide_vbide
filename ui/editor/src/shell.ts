@@ -61,8 +61,10 @@ export interface ShellHandlers {
   menuClosed(): void;
   /** The developer edited a property of the shown component. */
   editProperty(component: string, name: string, value: string): void;
-  /** The developer closed a module's tab, however they did it; the workbook when known. */
-  closeModule(name: string, workbook?: string): void;
+  /** The developer closed a module's tab, however they did it; the workbook when known. The
+   * action carries their answer to the unsaved-changes question — "save" or "discard" — and
+   * is absent on the plain close the host checks. */
+  closeModule(name: string, workbook?: string, action?: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
   /** A module's procedures, for its unfolded node in the tree; null when no answer came. */
@@ -226,6 +228,12 @@ export class Shell {
 
   /** The tab whose close box the pointer went down on, held as data a rebuild cannot destroy. */
   private pressedClose: { name: string; project: string | null } | null = null;
+
+  /** Closes the host is holding for an answer about unsaved changes, asked one at a time. */
+  private readonly closeConfirms: TabIdentity[] = [];
+
+  /** The close currently being asked about, so a repeated Ctrl+W does not ask twice. */
+  private askedCloseConfirm: TabIdentity | null = null;
 
   /** What the tab strip last rendered, so an echo that changes nothing rebuilds nothing. */
   private lastTabsKey: string | null = null;
@@ -1017,6 +1025,112 @@ export class Shell {
       this.statusNotice.textContent = "";
       this.noticeTimer = undefined;
     }, 5000);
+  }
+
+  /**
+   * The host is holding a tab close because the module has unsaved changes. Ask, and answer
+   * the close with the choice: Save writes the workbook and closes, Don't Save puts the
+   * module back to its saved text and closes, Cancel leaves everything as it is. Questions
+   * queue one at a time — a Close Others across several dirty modules asks about each in
+   * turn, the way answering one file at a time reads everywhere else.
+   */
+  confirmClose(name: string, project: string | null): void {
+    // Asking twice about the same tab answers nothing twice: a repeated Ctrl+W while the
+    // question is up would otherwise queue the same question behind itself.
+    const mine = tabKey({ name, project });
+    if ((this.askedCloseConfirm && tabKey(this.askedCloseConfirm) === mine)
+      || this.closeConfirms.some((waiting) => tabKey(waiting) === mine)) {
+      return;
+    }
+
+    this.closeConfirms.push({ name, project });
+    this.showNextCloseConfirm();
+  }
+
+  private showNextCloseConfirm(): void {
+    if (document.getElementById("close-confirm-backdrop")) {
+      return;
+    }
+
+    const asked = this.closeConfirms.shift();
+    if (!asked) {
+      return;
+    }
+
+    this.askedCloseConfirm = asked;
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "close-confirm-backdrop";
+
+    const card = document.createElement("div");
+    card.id = "close-confirm-card";
+    card.setAttribute("role", "alertdialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-label", "Unsaved changes");
+
+    const title = document.createElement("div");
+    title.id = "close-confirm-title";
+    title.textContent = `Do you want to save the changes you made to ${asked.name}?`;
+
+    const detail = document.createElement("div");
+    detail.id = "close-confirm-detail";
+    detail.textContent = "Your changes will be lost if you don't save them.";
+
+    const buttons = document.createElement("div");
+    buttons.id = "close-confirm-buttons";
+
+    const resolve = (action: "save" | "discard" | null): void => {
+      this.askedCloseConfirm = null;
+      document.removeEventListener("keydown", onKey, true);
+      backdrop.remove();
+
+      if (action) {
+        this.handlers.closeModule(asked.name, asked.project ?? undefined, action);
+      }
+
+      if (this.closeConfirms.length > 0) {
+        this.showNextCloseConfirm();
+      } else {
+        // The question took focus; the editor is where it belongs afterwards.
+        this.handlers.menuClosed();
+      }
+    };
+
+    const button = (label: string, action: "save" | "discard" | null, primary = false): HTMLButtonElement => {
+      const control = document.createElement("button");
+      control.type = "button";
+      control.className = primary ? "close-confirm-button primary" : "close-confirm-button";
+      control.textContent = label;
+      control.addEventListener("click", () => resolve(action));
+      buttons.appendChild(control);
+      return control;
+    };
+
+    const save = button("Save", "save", true);
+    button("Don't Save", "discard");
+    button("Cancel", null);
+
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        resolve(null);
+      }
+    };
+
+    // A click beside the card is a Cancel: the safe answer for a gesture that was not one
+    // of the three, and the same dismissal the settings card gives.
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        resolve(null);
+      }
+    });
+    document.addEventListener("keydown", onKey, true);
+
+    card.append(title, detail, buttons);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    save.focus();
   }
 
   /** Shows where the caret is. */

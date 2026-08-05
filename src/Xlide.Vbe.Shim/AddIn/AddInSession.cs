@@ -203,7 +203,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ModuleRequested = ShowModule;
         _editorSurface.NavigateRequested = GoTo;
         _editorSurface.CommandRequested = RunCommand;
-        _editorSurface.TextChanged = WriteModule;
+        _editorSurface.TextChanged = (component, text) => WriteModule(component, text);
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
         _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
@@ -215,7 +215,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
         _editorSurface.PropertyEditRequested = OnPropertyEdit;
         _editorSurface.ComponentSelected = OnComponentSelected;
-        _editorSurface.ModuleCloseRequested = CloseModule;
+        _editorSurface.ModuleCloseRequested = OnModuleCloseRequested;
         _editorSurface.ComponentInsertRequested = InsertComponent;
         _editorSurface.CompletionRequested = OnCompletionRequested;
         _editorSurface.HoverRequested = OnHoverRequested;
@@ -587,7 +587,10 @@ internal sealed class AddInSession : IDisposable
             if (_editorSurface?.Module is { } shown)
             {
                 Log.Info($"key: 0x{virtualKey:X2} ctrl -> close {shown}");
-                CloseModule(shown);
+
+                // Through the same gate as the tab's X: a module with unsaved changes gets
+                // the question, not the guillotine.
+                OnModuleCloseRequested(shown, DisplayFromProjectId(_shownProject), null);
             }
 
             return true;
@@ -719,16 +722,19 @@ internal sealed class AddInSession : IDisposable
     /// editor does when a module is edited, so it is parity rather than a regression, and it is
     /// why this is debounced rather than done per keystroke.
     /// </summary>
-    private void WriteModule(string component, string text)
+    private void WriteModule(string component, string text, string? ownerProject = null)
     {
         try
         {
-            // A write is always about the module on the surface, so it goes to the shown
+            // A write is normally about the module on the surface, so it goes to the shown
             // project's component — never to a same-named module in another workbook that
-            // happened to enumerate first.
-            var owner = string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
-                ? _shownProject
-                : null;
+            // happened to enumerate first. A caller who knows better says so: the close
+            // path reverts background tabs, whose owner is the tab's workbook, not the
+            // shown one.
+            var owner = ownerProject
+                ?? (string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
+                    ? _shownProject
+                    : null);
 
             using var found = FindComponent(component, owner, out _);
             using var module = found?.GetObject("CodeModule");
@@ -3442,6 +3448,157 @@ internal sealed class AddInSession : IDisposable
                 f.StartLine,
                 f.StartColumn,
                 DisplayFromProjectId(f.Project)))]);
+    }
+
+    /// <summary>
+    /// A close asked for by the developer — the tab's X, its middle-click, Ctrl+W, or the tab
+    /// menu. A module whose text still differs from the workbook's last saved text does not just
+    /// close: the developer is asked first, and the answer comes back through the same message
+    /// with a choice on it. "save" saves the workbook — the editor persists all of a workbook's
+    /// modules together, so saving the workbook is what saving a module means — and "discard"
+    /// writes the saved text back over the module, which is the closest thing to closing without
+    /// saving that a document living inside a workbook can have.
+    ///
+    /// The question gates on the module's OWN text, not the workbook dot. The dot is a workbook
+    /// fact and can stand on a sibling's changes; a question here offers a revert of THIS module,
+    /// so it is only asked when this module's changes can be named — and therefore reverted.
+    /// </summary>
+    private void OnModuleCloseRequested(string component, string? projectDisplay, string? action)
+    {
+        var display = projectDisplay is { Length: > 0 }
+            ? projectDisplay
+            : DisplayFromProjectId(_shownProject);
+
+        switch (action)
+        {
+            case "save":
+            {
+                // Whatever is mid-debounce belongs to the save.
+                _editorSurface?.FlushEdits();
+
+                if (display is null || !SaveWorkbookOf(display))
+                {
+                    // Closing on a failed save would lose the very thing the developer asked
+                    // to keep. The tab stays; the log says why.
+                    Log.Warn($"close: {display ?? "the workbook"} would not save; {component}'s tab stays");
+                    return;
+                }
+
+                CloseModule(component, projectDisplay);
+                return;
+            }
+
+            case "discard":
+            {
+                if (display is not null
+                    && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline))
+                {
+                    var shown = IsShownModule(component, display);
+                    if (shown)
+                    {
+                        // The debounced write of the abandoned text must not chase the revert.
+                        _editorSurface?.DiscardEdits();
+                    }
+
+                    WriteModule(component, baseline, ProjectIdFromDisplay(display));
+                    if (shown)
+                    {
+                        // The surface still shows the abandoned text. The close below replaces
+                        // the document anyway; this covers the close that cannot find a pane,
+                        // so whatever stays on screen is the module's truth.
+                        ResyncFromModule();
+                    }
+
+                    Log.Info($"close: {component} reverted to {display}'s saved text");
+                }
+                else
+                {
+                    // No snapshot to go back to. Closing with the text kept is the only honest
+                    // remainder — inventing a revert target would destroy real work.
+                    Log.Info($"close: {component} has no saved text to revert to; closing as it is");
+                }
+
+                CloseModule(component, projectDisplay);
+                return;
+            }
+
+            default:
+            {
+                if (display is not null && ModuleDiffersFromSaved(component, display))
+                {
+                    Log.Verbose($"close: {component} differs from {display}'s saved text; asking");
+                    _editorSurface?.ConfirmClose(component, projectDisplay);
+                    return;
+                }
+
+                CloseModule(component, projectDisplay);
+                return;
+            }
+        }
+    }
+
+    /// <summary>Whether this module is the one on the surface, of the workbook shown.</summary>
+    private bool IsShownModule(string component, string? display) =>
+        string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(display, DisplayFromProjectId(_shownProject), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a module's current text is known to differ from the workbook's last saved text.
+    /// The same comparison the tab dot makes, with the opposite default: unknown is not
+    /// different here, because this gates a question whose "Don't Save" performs a revert, and
+    /// a revert needs both sides of the difference in hand.
+    /// </summary>
+    private bool ModuleDiffersFromSaved(string component, string display)
+    {
+        var current = IsShownModule(component, display)
+            ? _editorSurface?.Text
+            : _writtenModules.TryGetValue(component, out var written) ? written : null;
+
+        return current is not null
+            && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline)
+            && !string.Equals(current, baseline, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Saves a workbook by display name, through the same trust-free application route the
+    /// Saved flag is read by. False when the workbook cannot be found or the save is refused —
+    /// the caller keeps the tab open on false, so it needs the truth, not best effort.
+    /// </summary>
+    private bool SaveWorkbookOf(string display)
+    {
+        try
+        {
+            _hostApp ??= HostApplication.Find();
+            if (_hostApp is null)
+            {
+                return false;
+            }
+
+            using var books = _hostApp.GetObject("Workbooks");
+            var count = books?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var book = books!.GetItem(i);
+                if (book is not null
+                    && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
+                {
+                    book.Invoke("Save");
+                    Log.Info($"close: saved {display}");
+                    return true;
+                }
+            }
+
+            Log.Warn($"close: {display} is not among the application's workbooks");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"close: {display} could not be saved", ex);
+            _hostApp?.Dispose();
+            _hostApp = null;
+        }
+
+        return false;
     }
 
     /// <summary>

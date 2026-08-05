@@ -59,6 +59,7 @@ export type HostMessage =
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "breakpointRefused"; line: number }
+  | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "revealLine"; line: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
@@ -179,7 +180,7 @@ export type ClientMessage =
   | { type: "menuExecute"; path: number[] }
   | { type: "editProperty"; component: string; name: string; value: string }
   | { type: "selectComponent"; name: string }
-  | { type: "closeModule"; name: string; project?: string }
+  | { type: "closeModule"; name: string; project?: string; action?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
@@ -424,9 +425,16 @@ export class EditorBridge {
     this.transport.post({ type: "selectComponent", name });
   }
 
-  /** Asks the host to close a module's pane, which is what closes its tab. */
-  closeModule(name: string, project?: string): void {
-    this.transport.post({ type: "closeModule", name, ...(project ? { project } : {}) });
+  /** Asks the host to close a module's pane, which is what closes its tab. The host holds a
+   * close whose module has unsaved changes and asks back with confirmClose; the developer's
+   * choice returns through the same message as the action — "save" or "discard". */
+  closeModule(name: string, project?: string, action?: string): void {
+    this.transport.post({
+      type: "closeModule",
+      name,
+      ...(project ? { project } : {}),
+      ...(action ? { action } : {}),
+    });
   }
 
   /**
@@ -650,6 +658,9 @@ export class EditorBridge {
       case "breakpointRefused":
         // The hover preview owns the affordance now; a refusal after a click draws nothing,
         // so nothing ever appears that looks like a breakpoint the developer did not get.
+        return;
+      case "confirmClose":
+        this.shell?.confirmClose(message.name, message.project ?? null);
         return;
       case "revealLine":
         this.editor.revealLineInCenterIfOutsideViewport(message.line);
@@ -1243,12 +1254,27 @@ export function demoTransport(): HostTransport {
     deliver?.(message);
   };
 
+  // The demo's open tabs and which of them carry unsaved changes, so the close-confirm
+  // loop is exercisable in a plain browser: a dirty close is answered with the question,
+  // and the answer closes the tab the way the host would.
+  const openModules = ["Module1", "Module2"];
+  const dirtyModules = new Set(openModules);
+
+  const sendModules = (): void => {
+    send({
+      type: "setModules",
+      modules: [...openModules],
+      active: openModules[0] ?? null,
+      dirty: openModules.map((name) => dirtyModules.has(name)),
+    });
+  };
+
   return {
     post(message) {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
         send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
-        send({ type: "setModules", modules: ["Module1", "Module2"], active: "Module1", dirty: [true, true] });
+        sendModules();
         send({
           type: "setSettings",
           blockLayout: "comfy",
@@ -1311,6 +1337,26 @@ export function demoTransport(): HostTransport {
           kind: "Module",
           properties: [{ name: "(Name)", value: "Module1", writable: true, boolean: false }],
         });
+      }
+      if (message.type === "closeModule") {
+        if (!message.action && dirtyModules.has(message.name)) {
+          // The host holds a dirty close and asks; the page's modal answers.
+          send({ type: "confirmClose", name: message.name, project: message.project ?? null });
+        } else {
+          if (message.action === "save") {
+            // Saving the workbook cleans every module in it, the way the editor saves.
+            dirtyModules.clear();
+          } else {
+            dirtyModules.delete(message.name);
+          }
+
+          const at = openModules.indexOf(message.name);
+          if (at >= 0) {
+            openModules.splice(at, 1);
+          }
+
+          sendModules();
+        }
       }
       if (message.type === "selectComponent") {
         // A worksheet-shaped answer, so the boolean dropdowns and the header are reachable.

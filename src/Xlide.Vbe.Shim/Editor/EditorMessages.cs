@@ -85,6 +85,15 @@ public sealed record BreakpointRefusedMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("line")] int Line);
 
+/// <summary>
+/// A tab close the host is holding until the developer answers for the module's unsaved
+/// changes. The page asks again with their choice.
+/// </summary>
+public sealed record ConfirmCloseMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("project")] string? Project);
+
 /// <summary>One row of the Locals panel: a variable in scope at the break.</summary>
 public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("expression")] string Expression,
@@ -334,6 +343,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetLocalsMessage))]
 [JsonSerializable(typeof(SurfaceLocalRow))]
 [JsonSerializable(typeof(BreakpointRefusedMessage))]
+[JsonSerializable(typeof(ConfirmCloseMessage))]
 [JsonSerializable(typeof(SearchResultMessage))]
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]

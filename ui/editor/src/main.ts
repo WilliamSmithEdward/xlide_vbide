@@ -156,7 +156,7 @@ function boot(): void {
     menuClosed: () => editor.focus(),
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
     selectComponent: (name) => bridge.selectComponent(name),
-    closeModule: (name, workbook) => bridge.closeModule(name, workbook),
+    closeModule: (name, workbook, action) => bridge.closeModule(name, workbook, action),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),

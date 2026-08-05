@@ -854,6 +854,77 @@ span.prop-value.readonly {
   font-size: 12px;
 }
 
+/* The unsaved-changes question a closing tab asks: a small centred card, three answers. */
+
+#close-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18vh;
+  z-index: 95;
+}
+
+#close-confirm-card {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  padding: 16px;
+  font-size: 13px;
+}
+
+#close-confirm-title {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+#close-confirm-detail {
+  margin-top: 6px;
+  opacity: 0.7;
+  font-size: 12px;
+}
+
+#close-confirm-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.close-confirm-button {
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 3px;
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #cccccc);
+  font: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+.close-confirm-button:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+.close-confirm-button.primary {
+  border-color: transparent;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+}
+
+.close-confirm-button.primary:hover {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.close-confirm-button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
+}
+
 #panel {
   display: flex;
   flex-direction: column;

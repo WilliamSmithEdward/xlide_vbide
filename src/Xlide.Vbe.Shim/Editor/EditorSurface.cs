@@ -112,8 +112,9 @@ internal sealed class EditorSurface : IDisposable
     public Action<string>? ComponentSelected { get; set; }
 
     /// <summary>Raised when the developer closes a module's tab, with its workbook when the
-    /// tab carries one.</summary>
-    public Action<string, string?>? ModuleCloseRequested { get; set; }
+    /// tab carries one. The third value is their answer for unsaved changes — "save" or
+    /// "discard" — and null on the first ask, before any question has been put.</summary>
+    public Action<string, string?, string?>? ModuleCloseRequested { get; set; }
 
     /// <summary>Raised when the developer changed a setting in the page's dialog.</summary>
     public Action<ProductSettings>? SettingsChangeRequested { get; set; }
@@ -714,6 +715,22 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.BreakpointRefusedMessage));
     }
 
+    /// <summary>
+    /// Asks the developer what to do about a module's unsaved changes before its tab closes.
+    /// Not held: the request answers a close the page just asked for, so the page is there.
+    /// </summary>
+    public void ConfirmClose(string module, string? project)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ConfirmCloseMessage("confirmClose", module, project),
+            EditorMessageContext.Default.ConfirmCloseMessage));
+    }
+
     /// <summary>Replaces the breakpoints shown on the module currently displayed.</summary>
     public void ShowBreakpoints(int[] lines)
     {
@@ -817,6 +834,17 @@ internal sealed class EditorSurface : IDisposable
 
         _unwritten = false;
         TextChanged?.Invoke(_module, _text);
+    }
+
+    /// <summary>
+    /// Forgets the developer's unwritten edits instead of writing them. For the moment they have
+    /// chosen to discard: the module is about to be put back to its saved text, and the debounced
+    /// write of the abandoned text must not land on top of it.
+    /// </summary>
+    public void DiscardEdits()
+    {
+        _unwritten = false;
+        _overlay?.StopWriteTimer();
     }
 
     /// <summary>Sends a message, or holds it until the page is ready for it.</summary>
@@ -1102,7 +1130,10 @@ internal sealed class EditorSurface : IDisposable
                         var closingProject = document.RootElement.TryGetProperty("project", out var closingOwner)
                             ? closingOwner.GetString()
                             : null;
-                        ModuleCloseRequested?.Invoke(closingName, closingProject);
+                        var closingAction = document.RootElement.TryGetProperty("action", out var closingChoice)
+                            ? closingChoice.GetString()
+                            : null;
+                        ModuleCloseRequested?.Invoke(closingName, closingProject, closingAction);
                     }
 
                     break;
