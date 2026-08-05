@@ -51,18 +51,28 @@ developer's first double-click on a project member is the test). Parity backlog 
 global cross-library search results pane, Back/Forward history, hidden-members toggle,
 F1 help.
 
-**2026-08-05 POSTSCRIPT — THE TWO-BUILDS MORNING.** After the palette shipped, the
-developer kept seeing the OLD in-canvas browser card and a white float at startup while
-every scripted session showed the new palette. Cause: their long-running Excel had the
-07:21 RELEASE-era shim loaded IN-PROCESS all morning — a DLL survives the VBE window
-closing, and reopening the VBE reconnects the same loaded DLL, so re-registration never
-reaches that process; it served `release_win-x64`'s bundle, whose strings were never even
-committed (transient working-tree build), which is why history greps found nothing. The
-shim log's `serving from` and `build` lines are the ground truth for what a session runs.
-The stale `release_win-x64` publish is DELETED; the developer's testing requires a full
-Excel exit after a deploy. Also fixed in the same stretch: the palette hides when the
-editor frame hides (`df9b29e` — owned windows do not follow a hidden owner), and search
-gained its scope dropdown with the whole-group pull in All mode (`fbffa1d`).
+**2026-08-05 POSTSCRIPT — THE TWO-BUILDS MORNING, TRUE MECHANISM (corrected by the
+developer's own diagnosis).** After the palette shipped, the developer kept seeing the
+OLD in-canvas browser card and a white float at startup while every scripted session
+showed the new palette. The REAL cause: the agent's shell runs in a sandbox whose HKCU
+registry (and parts of AppData, including the local .NET 10 SDK) are a PRIVATE OVERLAY.
+Agent-side registrations never reach the developer's real hive; agent-launched Excels
+inherit the overlay and always look healthy. The developer's hive still pointed at
+`release_win-x64` — the 07:21 FloatFrame-era build, whose bundle strings were never even
+committed — so HIS Excel faithfully loaded that, and when the agent deleted the stale
+release publish (believing it unregistered, having read only the overlay), his add-in
+broke outright: "cannot be loaded", then an emptied Addins64 key. RESOLUTION: the
+developer re-registered HIMSELF with a pure-registry PowerShell block (no .NET — his
+machine has only .NET 8/9 for real; the repo's local SDK exists only in the overlay),
+pointing at `debug_win-x64`, and confirmed working. STANDING RULES: anything that must
+change the developer's registry or run on his side is handed to him as a plain command
+(registry writes, or a NativeAOT tool on F:\ — F:\ is shared both ways); the shim log's
+`serving from` + `build` lines are ground truth for what any session runs; and ANY
+change to the registered DLL path must be flagged to the developer immediately and
+clearly, with the ready-to-paste fix (his explicit directive). Also fixed in the same
+stretch: the palette hides when the editor frame hides (`df9b29e` — owned windows do not
+follow a hidden owner), and search gained its scope dropdown with the whole-group pull
+in All mode (`fbffa1d`).
 
 **2026-08-05 SUPERSEDED — THE HOLE RESOLUTION (`c49595e`, worked and was confirmed, then
 replaced by the palette above).** The developer wants THE NATIVE
