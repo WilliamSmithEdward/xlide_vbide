@@ -526,7 +526,7 @@ internal sealed class AddInSession : IDisposable
 
             // A drag is the same answer per mouse move with only rectangles changed, and the
             // frame routes already follow rectangles synchronously. Everything below — the
-            // full placement with cutouts and bands, the module and project publishes, debug
+            // full placement with policing and bands, the module and project publishes, debug
             // state, resync — is for events that changed WHAT is on screen, not where its
             // edges sit this instant; running it per move tick was the drag latency of
             // 2026-08-05. A geometry-only event takes the fast path and arms the settle,
@@ -543,8 +543,8 @@ internal sealed class AddInSession : IDisposable
 
             _lastFollowSubstance = substance;
 
-            // One placement path for every trigger, so cutouts, chrome, and bounds cannot drift
-            // apart between the window-event route and the recomputed one.
+            // One placement path for every trigger, so policing, chrome, and bounds cannot
+            // drift apart between the window-event route and the recomputed one.
             RefreshSurfacePlacement();
 
             if (pane.Component is not null && pane.Component != _editorSurface.Module)
@@ -707,6 +707,15 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        // An adopted Browser is already open in its own frame; running the native command
+        // again would tell the editor to re-show a window whose child we hold. Presenting
+        // the frame is what the second click means.
+        if (command == VbeCommands.Command.ObjectBrowser && _objectBrowserFloat is not null)
+        {
+            _objectBrowserFloat.Present();
+            return;
+        }
+
         var ran = VbeCommands.Execute(_editor, command);
 
         // A refused Call Stack looked broken rather than declined ("won't appear again",
@@ -734,14 +743,134 @@ internal sealed class AddInSession : IDisposable
             _resyncPanePolls = Math.Max(_resyncPanePolls, 3);
         }
 
+        // The Browser lives beside the surface, never on it (developer, 2026-08-05):
+        // adopted into a floating frame of our own, it is a real window to move and close,
+        // and the canvas underneath stays purely xlide. The adoption tries now and again at
+        // the settle — the native window's creation can outrun both the command's return
+        // and the immediate pass below.
+        if (ran && command == VbeCommands.Command.ObjectBrowser)
+        {
+            AdoptObjectBrowser();
+            _editorSurface?.ArmPlacementSettle(PlacementSettleMilliseconds);
+        }
+
         WatchDebugState();
 
-        // A command can open or close a native window the surface must make room for — the
-        // Object Browser above all. The menu route always re-derived placement after
-        // executing; this route did not, and once the View menu was the toolbar button
-        // (2026-08-05), the Browser opened INVISIBLE under the surface: the command executed,
-        // no event the tracker recognises fired, and no pass ever cut its hole.
+        // A command can change the native window landscape — the Object Browser above all —
+        // and no event the tracker recognises announces it. The menu route always re-derived
+        // placement after executing; this route learned the same manners (2026-08-05, the
+        // Browser opening invisible under the surface).
         RefreshSurfacePlacement();
+    }
+
+    /// <summary>The frame the Object Browser lives in while adopted; null when it is home.</summary>
+    private FloatFrame? _objectBrowserFloat;
+
+    /// <summary>
+    /// Puts the Object Browser in a floating frame of our own, beside the surface. The editor
+    /// cannot float it itself — it is an MDI document window, and LinkedWindows.Remove answers
+    /// it with a silent shrug (measured 2026-08-05) — so the frame adopts the native window
+    /// outright: reparented in, its own caption stripped, ours dark. A second summons while
+    /// adopted just brings the frame forward.
+    /// </summary>
+    private void AdoptObjectBrowser()
+    {
+        if (_objectBrowserFloat is not null)
+        {
+            _objectBrowserFloat.Present();
+            return;
+        }
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is null || window.GetInt32("Type") != 2)
+                {
+                    continue;
+                }
+
+                // Not gated on the Visible flag: it flips a beat AFTER the command returns
+                // (the same lag the Save flag has), and the first click after a close read
+                // it false and adopted nothing ("I have to click it again", 2026-08-05).
+                // The child window existing is the real fact.
+                var caption = window.GetString("Caption");
+                var child = caption is { Length: > 0 } ? CodePaneTracker.FindChildByCaption(caption) : 0;
+                if (child == 0)
+                {
+                    // Not there yet either — creation can outrun this call. The settle armed
+                    // by the summons runs the police pass a beat later, which adopts it.
+                    Log.Verbose("object browser: no window to adopt yet; the settle will look again");
+                    return;
+                }
+
+                // A maximised document child first becomes a window again.
+                if (((long)Win32.GetWindowLongPtr(child, Win32.GwlStyle) & Win32.WsMaximize) != 0)
+                {
+                    Win32.SendMessage(Win32.GetParent(child), Win32.WmMdiRestore, child, 0);
+                }
+
+                _objectBrowserFloat = FloatFrame.Adopt(
+                    _frame, child, caption ?? "Object Browser", OnObjectBrowserFloatClosed);
+
+                if (_objectBrowserFloat is null)
+                {
+                    Log.Info("object browser: the float frame could not be created");
+                    return;
+                }
+
+                DarkenTitleBar(_objectBrowserFloat.Handle);
+
+                // The editor's own record of the window goes quiet while we hold its child:
+                // left "visible" with no child in sight, the editor noticed and closed the
+                // adopting frame about two seconds in (measured 2026-08-05). Hidden in the
+                // object model, the HWND lives on in our frame — the same split the ghost
+                // palettes prove every session. The hide itself makes the editor send one
+                // reflex WM_CLOSE at the frame; it is swallowed, not obeyed.
+                _objectBrowserFloat.IgnoreCloseBriefly(800);
+                window.SetBool("Visible", false);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"object browser: could not be adopted ({ex.GetType().Name})");
+        }
+    }
+
+    /// <summary>
+    /// The developer closed the float frame: the native window goes home to the document area,
+    /// hidden, ready for its next summons through the toolbar.
+    /// </summary>
+    private void OnObjectBrowserFloatClosed()
+    {
+        var floated = _objectBrowserFloat;
+        _objectBrowserFloat = null;
+        floated?.Release();
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var window = windows!.GetItem(i);
+                if (window is not null && window.GetInt32("Type") == 2)
+                {
+                    window.SetBool("Visible", false);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"object browser: could not be hidden after its return ({ex.GetType().Name})");
+        }
+
+        Log.Info("object browser: returned home");
     }
 
     /// <summary>
@@ -944,20 +1073,6 @@ internal sealed class AddInSession : IDisposable
 
     /// <summary>How often the editor's Immediate window is read while it is being looked at.</summary>
     private const uint ImmediatePollMilliseconds = 300;
-
-    /// <summary>
-    /// How often placement is recomputed while the surface has holes cut in it.
-    ///
-    /// The holes track native tool windows, and not every one of those announces its movements:
-    /// the Object Browser has its own window class, so the pane tracker never hears it move,
-    /// resize, or close. Its hole would stay where the window was. While any hole is open, the
-    /// placement is re-derived on a timer instead; the overlay skips identical states, so an
-    /// unchanged layout costs a read and no repaint.
-    /// </summary>
-    private const uint CutoutPollMilliseconds = 200;
-
-    /// <summary>Whether the surface currently has holes cut in it, which is a reason to poll.</summary>
-    private bool _watchingCutouts;
 
     /// <summary>
     /// Polls left before watching stops.
@@ -1934,7 +2049,6 @@ internal sealed class AddInSession : IDisposable
     private void UpdatePolling()
     {
         var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
-            : _watchingCutouts ? CutoutPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
             : _watchingEmpty ? EmptyWorkspacePollMilliseconds
             : 0;
@@ -2010,13 +2124,6 @@ internal sealed class AddInSession : IDisposable
         if (_watchingEmpty)
         {
             PublishProjects();
-        }
-
-        // While holes are open, this is what keeps them under the windows they were cut for:
-        // the Object Browser moves without a word to the pane tracker.
-        if (_watchingCutouts)
-        {
-            RefreshSurfacePlacement();
         }
 
         _immediateReader?.Poll();
@@ -3248,11 +3355,10 @@ internal sealed class AddInSession : IDisposable
 
         // The project explorer and the Immediate window have surface replacements. The properties
         // window does not need its native form; it is closed for the dock space it occupies, and
-        // the menu route opens ours. The Locals and Watch windows stay untouched: both remain
-        // native, reachable through a punched cutout, because the editor only feeds an ON-SCREEN
-        // Locals window — the mirrored-under-the-surface arrangement was built, probed, and
-        // reverted (see LocalsReader's remarks and lesson 25). Hiding a window whose data cannot
-        // be mirrored removes the feature rather than restyling it.
+        // the menu route opens ours. The Locals and Watch windows are NOT hidden here: both
+        // become ghost palettes a moment later — the editor only feeds a window with a paintable
+        // surface (lessons 25 and 29), and hiding one removes the feature rather than restyling
+        // it.
         const int immediateWindow = 5;
         ReadOnlySpan<int> replaced = [immediateWindow, 6, 7];
 
@@ -3309,8 +3415,8 @@ internal sealed class AddInSession : IDisposable
     /// native is ever visible.
     ///
     /// Floating uses LinkedWindows.Remove on the window's own linked frame — pure object
-    /// model. If any step refuses, the ghost is skipped and the native window stays reachable
-    /// through a cutout, which is the graceful end of it.
+    /// model. If any step refuses, the ghost is skipped, and the police pass hides the
+    /// docked native window: the canvas stays pure and the panel sits idle.
     /// </summary>
     private void PrepareLocalsGhost()
     {
@@ -3433,7 +3539,7 @@ internal sealed class AddInSession : IDisposable
     /// Turns the native Watches window into the Watch panel's invisible data engine, by the
     /// same route as the Locals ghost above (lesson 29): floated through the object model,
     /// layered at alpha zero, parked off screen, read by handle. If any step refuses, the
-    /// ghost is skipped and the native window stays reachable through a cutout.
+    /// ghost is skipped, and the police pass hides the docked native window.
     /// </summary>
     private void PrepareWatchGhost()
     {
@@ -4236,8 +4342,8 @@ internal sealed class AddInSession : IDisposable
     /// the frame draws a pale line a pixel or two inside itself that no compositor attribute
     /// reaches. Anything less leaves native chrome showing through a themed product.
     ///
-    /// Native tool windows do not shrink it. The surface keeps the whole client area and is cut
-    /// away exactly where each one sits — see <see cref="NativeToolWindowCutouts"/> — because the
+    /// Native tool windows do not shrink it: the canvas is purely xlide, and every native
+    /// window is replaced, ghosted, floated, or policed away — because the
     /// old retreat to the document area handed the menu bar and toolbar rows back to the native
     /// editor every time one opened, and the product visibly reverted.
     ///
@@ -4322,9 +4428,9 @@ internal sealed class AddInSession : IDisposable
     ///
     /// Only a page that has not loaded yet says no: covering the menu bar with a surface that
     /// cannot draw its own menus takes every menu away, so the native bar stays until the
-    /// replacement is genuinely standing. Native tool windows stopped saying no — the surface
-    /// stays put and leaves a hole where each one sits, because retreating handed the whole
-    /// native chrome back every time one opened.
+    /// replacement is genuinely standing. Native tool windows stopped saying no long ago —
+    /// today every one is replaced, ghosted, floated, or policed away, and the canvas is
+    /// purely xlide.
     /// </summary>
     private bool CanCoverChrome() => _editorSurface is { IsReady: true };
 
@@ -4337,11 +4443,9 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     /// <summary>
     /// The synchronous resize path: bounds and nothing else. The full pass reads the object
-    /// model for cutouts and sweeps children for band regions, and per WM_SIZE tick of a drag
-    /// that was the visible lag ("the resize draw lags behind the mouse", 2026-08-04). Inside
-    /// the resize only the rectangle matters; the full pass follows on the event route a beat
-    /// later. While holes are open the full pass runs here too, so their regions track the
-    /// drag instead of lagging it.
+    /// model and sweeps children for band regions, and per WM_SIZE tick of a drag that was
+    /// the visible lag ("the resize draw lags behind the mouse", 2026-08-04). Inside the
+    /// resize only the rectangle matters; the full pass follows at the settle.
     /// </summary>
     private void PlaceSurfaceFast()
     {
@@ -4351,15 +4455,9 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        if (_watchingCutouts)
-        {
-            RefreshSurfacePlacement();
-            return;
-        }
-
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
 
-        // The full pass — cutout enumeration, band silencing, chrome — is object-model work,
+        // The full pass — window policing, band silencing, chrome — is object-model work,
         // and it was running once per frame event of a drag: measurable latency and repaint
         // churn (2026-08-05). The bounds followed above; everything else holds still until
         // the events pause, and then ONE full pass re-derives it all.
@@ -4378,19 +4476,13 @@ internal sealed class AddInSession : IDisposable
     /// Bounds follow synchronously — that is what keeps the surface glued to the window — and
     /// the full pass waits for the settle, EXCEPT where eventfulness is the point: a hiding
     /// frame is the editor closing and the surface must go with it now, with no object-model
-    /// work at all (lesson 27), and open holes must track their native windows exactly.
+    /// work at all (lesson 27).
     /// </summary>
     private void OnFrameChanged()
     {
         if (_frame != 0 && !Win32.IsWindowVisible(_frame))
         {
             // The full pass takes its hide branch before any object-model call.
-            RefreshSurfacePlacement();
-            return;
-        }
-
-        if (_watchingCutouts)
-        {
             RefreshSurfacePlacement();
             return;
         }
@@ -4411,7 +4503,8 @@ internal sealed class AddInSession : IDisposable
         // act. Placement work there is worse than pointless — reacting to the hide event with
         // the cutout pass put object-model calls INSIDE the editor's own close handling, and
         // the editor faulted under them, taking the host down (three crash records,
-        // 2026-08-04: VBE7, ntdll, and this shim faulting by turn, each at a close). A hidden
+        // 2026-08-04: VBE7, ntdll, and this shim faulting by turn, each at a close; the
+        // object-model pass of that day is the police pass of this one). A hidden
         // frame needs nothing covered; the surface hides with it, and the show event that
         // brings the frame back re-derives everything.
         if (!Win32.IsWindowVisible(_frame))
@@ -4433,31 +4526,14 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.Follow(bounds, visible: true);
         _editorSurface.SetChrome(menuBar: covering);
 
-        // After Follow, so the holes are cut against the placement they were computed for.
-        PixelRect[] holes = covering ? NativeToolWindowCutouts() : [];
-        _editorSurface.SetCutouts(holes);
-
-        // Logged on change, not per poll: the poll re-derives this five times a second while any
-        // hole is open, and an unchanged layout is not news.
-        var holeKey = string.Join(";", holes.Select(h => $"{h.Left},{h.Top},{h.Right},{h.Bottom}"));
-        if (holeKey != _lastHoleKey)
+        // The canvas is purely xlide (developer, 2026-08-05): nothing native shows through
+        // it. Every tool window is replaced by a panel, ghosted as a feed, or floated as its
+        // own palette — and any that a native route re-shows docked is put back in its place.
+        if (covering)
         {
-            _lastHoleKey = holeKey;
-            Log.Info(holes.Length == 0
-                ? "surface: whole again, no native holes"
-                : $"surface: {holes.Length} native hole(s) cut [{holeKey}]");
-        }
-
-        var watching = holes.Length > 0;
-        if (watching != _watchingCutouts)
-        {
-            _watchingCutouts = watching;
-            UpdatePolling();
+            PoliceNativeToolWindows();
         }
     }
-
-    /// <summary>The last hole set that was logged, so the poll only speaks on change.</summary>
-    private string? _lastHoleKey;
 
     /// <summary>
     /// Silences or restores the windows the native menu bar and toolbars live in, by region
@@ -4517,33 +4593,17 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// The rectangles of the editor's own tool windows that are showing, in the frame's client
-    /// space: the holes the surface must leave open.
-    ///
-    /// The surface used to retreat to the document area whenever one of these appeared, which
-    /// handed the native menu bar and toolbar row back and read as the product reverting. It
-    /// never retreats now: it keeps the whole client area and is cut away exactly where each
-    /// native window sits, so the window the developer summoned is live inside its hole while
-    /// everything around it stays ours.
-    ///
-    /// Asked of the object model rather than worked out from windows on screen, because most of
-    /// these share their window class with the code panes and a visible window says nothing about
-    /// what it is. The object model names each one's localised caption; the caption finds the
-    /// handle, and the handle has the rectangle.
+    /// Keeps the canvas purely xlide: no native tool window may stand docked and visible in
+    /// the frame. This replaced the cutout-hole machinery (developer, 2026-08-05: "I'd like
+    /// our canvas to be purely xlide") — holes meant tracking native windows pixel-for-pixel
+    /// through a poll, and every window turned out to have a better home. The replaced
+    /// windows (Project Explorer 6, Properties 7) are re-hidden if any native route re-shows
+    /// them; a docked Object Browser (2) is floated to its own palette; the Locals and
+    /// Watches ghosts (4, 3) are already exactly where they belong, visible to the object
+    /// model and to nothing else. The Immediate window (5) stays hidden behind its mirror.
     /// </summary>
-    private unsafe PixelRect[] NativeToolWindowCutouts()
+    private void PoliceNativeToolWindows()
     {
-        // Object browser, watches, locals, project, properties: the native tool windows without
-        // surface replacements. The Immediate window (5) is absent deliberately: its surface
-        // mirror replaces it, and the native one is kept hidden rather than shown through a hole.
-        // Locals stays here: the editor only feeds it on screen, so on screen through a hole is
-        // the only honest place for it (lesson 25).
-        ReadOnlySpan<int> tools = [2, 3, 4, 6, 7];
-
-        List<PixelRect>? holes = null;
-
-        // One line per pass rather than one per window, so an unchanged layout collapses to a
-        // single deduplicated line in the development log.
         var story = Log.VerboseEnabled ? new System.Text.StringBuilder() : null;
 
         try
@@ -4554,104 +4614,61 @@ internal sealed class AddInSession : IDisposable
             for (var i = 1; i <= count; i++)
             {
                 using var window = windows!.GetItem(i);
-                if (window is null || !tools.Contains(window.GetInt32("Type")))
+                var type = window?.GetInt32("Type") ?? -1;
+                if (window is null || type is not (2 or 3 or 4 or 6 or 7))
                 {
                     continue;
                 }
 
-                var visible = window.GetBool("Visible");
                 var caption = window.GetString("Caption");
-                story?.Append($"; type {window.GetInt32("Type")} '{caption}' vis={visible}");
+                if (type == 2)
+                {
+                    // The float frame is the Browser's home, and an adopted window is not a
+                    // frame child — finding one docked is the only case with work in it. Not
+                    // gated on the Visible flag: it lags the command that opens the window.
+                    if (_objectBrowserFloat is null
+                        && caption is { Length: > 0 } && CodePaneTracker.FindChildByCaption(caption) != 0)
+                    {
+                        AdoptObjectBrowser();
+                        story?.Append($"; adopted '{caption}'");
+                    }
 
-                if (!visible || caption is not { Length: > 0 })
+                    continue;
+                }
+
+                if (!window.GetBool("Visible"))
                 {
                     continue;
                 }
 
-                // A floating palette is not a frame child, so the caption finds nothing — and
-                // needs nothing: it floats above the surface and contests no pixels. Docked is
-                // what must be cut around, and docked is findable.
-                var handle = CodePaneTracker.FindChildByCaption(caption);
-                if (handle == 0 || !Win32.IsWindowVisible(handle))
+                if (type is 3 or 4)
                 {
-                    story?.Append(handle == 0 ? " unfound" : " win-hidden");
+                    // The ghosts are visible to the object model on purpose, and their
+                    // palettes are not frame children. A DOCKED one is a ghost that failed
+                    // to prepare or was re-docked by hand; hiding it keeps the canvas pure,
+                    // at the price of that panel sitting idle until the next session.
+                    if (caption is { Length: > 0 } && CodePaneTracker.FindChildByCaption(caption) != 0)
+                    {
+                        window.SetBool("Visible", false);
+                        story?.Append($"; hid docked '{caption}'");
+                    }
+
                     continue;
                 }
 
-                // A maximised document window — the Object Browser most of all — merges its
-                // caption into a menu bar the surface covers: it filled the hole edge to edge
-                // with no close box anywhere, and there was no way back to the product
-                // (2026-08-04). Restored, it is a window again: caption, close box, and the
-                // surface around it.
-                if (((long)Win32.GetWindowLongPtr(handle, Win32.GwlStyle) & Win32.WsMaximize) != 0)
-                {
-                    Win32.SendMessage(Win32.GetParent(handle), Win32.WmMdiRestore, handle, 0);
-                    story?.Append(" restored");
-                }
-
-                // Clipped to the parent, because only the parent-clipped part is ever on screen.
-                // A maximised Object Browser reports a rectangle a caption-height taller than the
-                // document area it sits in — the merged-caption strip classic MDI hides under the
-                // menu band — and a hole cut to that raw rectangle exposed the native band above.
-                var hole = WindowRectIn(handle, _frame);
-                var parent = Win32.GetParent(handle);
-                if (parent != 0)
-                {
-                    hole = hole.Intersect(ClientAreaIn(parent, _frame));
-                }
-
-                story?.Append($" hole={hole.Left},{hole.Top},{hole.Right},{hole.Bottom}");
-
-                if (!hole.IsEmpty)
-                {
-                    (holes ??= []).Add(hole);
-                }
+                window.SetBool("Visible", false);
+                story?.Append($"; hid '{caption}'");
             }
         }
         catch (Exception ex)
         {
-            Log.Info($"surface: the editor's windows could not be read for cutouts ({ex.GetType().Name})");
+            Log.Verbose($"police: the editor's windows could not be read ({ex.GetType().Name})");
         }
 
-        if (story is not null)
+        if (story is { Length: > 0 })
         {
-            Log.Verbose(story.Length == 0
-                ? "cutouts: no native tool windows"
-                : $"cutouts:{story}");
+            Log.Verbose($"police{story}");
         }
-
-        return holes is null ? [] : [.. holes];
-    }
-
-    /// <summary>
-    /// A window's full rectangle — borders and title band included — in another window's client
-    /// coordinates. The client-area mapping below is wrong for cutouts: a hole that starts at
-    /// the tool window's client area leaves its title band covered, and a window whose title
-    /// cannot be seen cannot be dragged or closed.
-    /// </summary>
-    private static unsafe PixelRect WindowRectIn(nint window, nint target)
-    {
-        Rect rect;
-        if (target == 0 || !Win32.GetWindowRect(window, &rect))
-        {
-            return default;
-        }
-
-        var corners = stackalloc Point[2];
-        corners[0] = new Point { X = rect.Left, Y = rect.Top };
-        corners[1] = new Point { X = rect.Right, Y = rect.Bottom };
-
-        Marshal.SetLastSystemError(0);
-        if (Win32.MapWindowPoints(0, target, corners, 2) == 0 && Marshal.GetLastSystemError() != 0)
-        {
-            return default;
-        }
-
-        return new PixelRect(
-            Math.Min(corners[0].X, corners[1].X),
-            Math.Min(corners[0].Y, corners[1].Y),
-            Math.Max(corners[0].X, corners[1].X),
-            Math.Max(corners[0].Y, corners[1].Y));
     }
 
     /// <summary>
@@ -4796,6 +4813,14 @@ internal sealed class AddInSession : IDisposable
 
         _immediateReader?.Dispose();
         _immediateReader = null;
+
+        // The Browser goes home before the editor is left: a stopped session must leave a
+        // native window where the native editor expects one.
+        if (_objectBrowserFloat is { } floatedBrowser)
+        {
+            _objectBrowserFloat = null;
+            floatedBrowser.Release();
+        }
 
         RestoreLocalsPalette();
 

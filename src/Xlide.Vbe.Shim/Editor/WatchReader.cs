@@ -34,7 +34,7 @@ internal sealed class WatchReader : IDisposable
 
     /// <summary>
     /// Prepares a reader for the window, or null when the accessibility interface cannot reach
-    /// it. A host without it keeps its native Watches window through a cutout instead.
+    /// it. A host without it loses the panel; the police pass hides the native window.
     /// </summary>
     public static WatchReader? Create(nint window)
     {

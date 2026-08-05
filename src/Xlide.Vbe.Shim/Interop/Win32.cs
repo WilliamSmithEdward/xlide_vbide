@@ -114,6 +114,19 @@ internal static unsafe partial class Win32
     public const int WsVisible = 0x10000000;
     public const int WsClipChildren = 0x02000000;
     public const int WsClipSiblings = 0x04000000;
+    public const int WsCaption = 0x00C00000;
+    public const int WsThickFrame = 0x00040000;
+    public const int WsSysMenu = 0x00080000;
+    public const int WsMinimizeBox = 0x00020000;
+    public const int WsMaximizeBox = 0x00010000;
+
+    /// <summary>The style set of an ordinary top-level window: caption, system menu, sizing
+    /// border, and both caption boxes.</summary>
+    public const int WsOverlappedWindow =
+        WsCaption | WsSysMenu | WsThickFrame | WsMinimizeBox | WsMaximizeBox;
+
+    [LibraryImport("user32.dll")]
+    public static partial nint SetParent(nint child, nint parent);
 
     public const uint CsHRedraw = 0x0002;
     public const uint CsVRedraw = 0x0001;

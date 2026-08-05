@@ -623,3 +623,34 @@ discipline cannot remove is not seen.
 Consequence: in event-driven placement, separate "where its edges are" from "what it is";
 the first is per-tick work, the second is per-pause work, and conflating them makes every
 mouse move pay for the whole world.
+
+## 32. A document window cannot float, but it can be adopted - if you keep the editor calm
+
+The developer wanted the Object Browser floating beside the surface, and then wanted the
+cutout holes gone entirely: a purely xlide canvas. The obvious route - the ghost palettes'
+LinkedWindows.Remove - answers the Browser with a SILENT no-op: the call succeeds and
+nothing moves, because the Browser is an MDI document window, not a dockable tool window,
+and the editor has no floating home for it at all.
+
+The route that works is adoption: reparent the native child into a top-level frame of our
+own (owned by the editor's frame, so it rides above like a palette), strip the child's
+caption and sizing border, dark-title the frame. Three fights follow, each measured. The
+editor notices a "visible" window with no child in sight and closes the adopting frame
+about two seconds in - so the object-model window is set not-visible while its HWND lives
+on in our frame, the same visible-to-whom split the ghost palettes prove. The hide itself
+makes the editor send one reflex WM_CLOSE at the frame - swallowed by a short grace window,
+since the developer's own close comes seconds later, not milliseconds. And the native
+window's CREATION outruns the command that summons it, so adoption tries at the command,
+at the immediate pass, and again at the settle: the flag the object model shows lags the
+truth (the same lag the workbook Saved flag has), so gate on the child window existing,
+never on Visible.
+
+With the Browser adopted, nothing needed holes any more - Locals and Watches are ghosts,
+Project Explorer and Properties are panels - so the cutout machinery went entirely,
+replaced by a police pass on the settle: replaced windows re-hidden, a docked Browser
+adopted, docked ghost strays hidden. The canvas is purely xlide.
+
+Consequence: when a component refuses to rearrange its own windows, take the window - but
+take its bookkeeping too. Every fight above was the editor reconciling its records with a
+world that changed without it; quiet the records (not-visible), absorb the one reflex, and
+retry on the cadence of the thing that actually lags.

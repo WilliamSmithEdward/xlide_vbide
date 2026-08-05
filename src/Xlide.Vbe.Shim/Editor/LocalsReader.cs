@@ -39,7 +39,7 @@ internal sealed class LocalsReader : IDisposable
 
     /// <summary>
     /// Prepares a reader for the window, or null when the accessibility interface cannot reach
-    /// it. A host without it keeps its native Locals window through a cutout instead.
+    /// it. A host without it loses the panel; the police pass hides the native window.
     /// </summary>
     public static LocalsReader? Create(nint window)
     {
