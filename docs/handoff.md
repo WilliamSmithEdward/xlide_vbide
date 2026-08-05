@@ -17,12 +17,20 @@ not the workbook dot — and holds the close with a `confirmClose` message; the 
 question at a time, dedupes repeat asks, and answers back through `closeModule`'s `action`.
 Save = `SaveWorkbookOf` (trust-free `Workbook.Save`) then close, keep the tab on failure;
 Don't Save = `WriteModule(baseline, owner)` revert (+`DiscardEdits` so the debounced old
-text cannot chase it) then close; no baseline = close keeping text, honestly logged. PINNED
-by `Test-CloseConfirm.ps1` (PASS/FAIL): seam tripwires incl. the published-bundle stale-
-deploy trap, plus `close-confirm-page-probe.mjs` — a dependency-free headless-Edge DevTools
-driver that walks the built page's whole flow (ask, Escape, dedupe, queue, all three
-answers, both routes). That probe pattern is NEW and reusable: any page behaviour can now
-be pinned the same way.
+text cannot chase it) then close; no baseline = close keeping text, honestly logged.
+FOLLOW-UP the live test caught (`7d96cb6`): the engine's live copy of a module (didChange)
+OUTRANKS its seeded copy in every answer, so the revert left the engine diagnosing the
+discarded text — stale problems survived close AND reopen. Any HOST REWRITE that bypasses
+the page (revert, Replace All) now sends a corrective full-source didChange and forces the
+full pass (`WriteModule(..., hostRewrite: true)`, `NotifyLiveText(+projectId)`); Replace
+All also adopts read-backs into `_writtenModules`. PINNED by `Test-CloseConfirm.ps1`
+(PASS/FAIL), three legs: seam tripwires incl. the published-bundle stale-deploy trap;
+`close-confirm-page-probe.mjs` — a dependency-free headless-Edge DevTools driver walking
+the built page's whole flow (ask, Escape, dedupe, queue, all three answers, both routes);
+and `engine-live-probe.mjs` — drives the BUILT engine over its own named pipe through the
+stale-problems story (live outranks seed; reseed alone cannot heal; corrective didChange
+does). Both probe patterns are NEW and reusable: page behaviours and engine contracts can
+now be pinned the same way.
 
 **Full context dump, written at the developer's request at session end (2026-08-04). HEAD
 was `47da928`; Excel was left running the latest build. Read this block, then the day's

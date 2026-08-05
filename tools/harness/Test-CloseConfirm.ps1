@@ -8,13 +8,17 @@
 #   1. Seams — the contract's load-bearing pieces exist in the sources, in the BUILT page
 #      bundle, and in the PUBLISHED bundle (the stale-deploy tripwire: a rebuilt page that
 #      never reached the publish tree has bitten before).
-#   2. Behaviour — close-confirm-page-probe.mjs drives the built page headless through the
-#      whole flow: ask, Escape, dedupe, queue, Don't Save, Cancel, middle-click, Save.
+#   2. Page behaviour — close-confirm-page-probe.mjs drives the built page headless through
+#      the whole flow: ask, Escape, dedupe, queue, Don't Save, Cancel, middle-click, Save.
+#   3. Engine behaviour — engine-live-probe.mjs walks the built engine over its own pipe
+#      through the stale-problems story (2026-08-05): the live copy outranks the seed, a
+#      reseed alone cannot heal it, the corrective didChange the revert now sends does.
 #
 # Needs no Excel and touches none. The host half (baseline compare, workbook save, module
 # revert) lives in AddInSession and speaks in the shim log during live tests:
 #   close: <module> differs from <workbook>'s saved text; asking
 #   close: saved <workbook> / close: <module> reverted to <workbook>'s saved text
+#   write: <module> ... (host rewrite; the engine's live copy follows)
 $ErrorActionPreference = 'Continue'
 
 $here = $PSScriptRoot
@@ -65,32 +69,42 @@ if (Test-Path $published) {
     Write-Output 'seam: skip - no publish tree on this machine; the stale-deploy tripwire has nothing to check'
 }
 
-Write-Output 'page: driving the built bundle headless (Edge + DevTools protocol)...'
-$verdictText = & node (Join-Path $here 'close-confirm-page-probe.mjs') 2>$null | Select-Object -Last 1
+function Invoke-NodeProbe {
+    param([string] $Leg, [string] $Script)
 
-if (-not $verdictText) {
-    Write-Output 'page: FAIL - the probe printed no verdict'
-    $failures += 1
-} else {
+    $verdictText = & node (Join-Path $script:here $Script) 2>$null | Select-Object -Last 1
+
+    if (-not $verdictText) {
+        Write-Output "${Leg}: FAIL - the probe printed no verdict"
+        $script:failures += 1
+        return
+    }
+
     try {
         $verdict = $verdictText | ConvertFrom-Json
         foreach ($check in $verdict.checks) {
             if ($check.ok) {
-                Write-Output "page: ok - $($check.name)"
+                Write-Output "${Leg}: ok - $($check.name)"
             } else {
                 $detail = if ($check.detail) { " ($($check.detail))" } else { '' }
-                Write-Output "page: FAIL - $($check.name)$detail"
-                $failures += 1
+                Write-Output "${Leg}: FAIL - $($check.name)$detail"
+                $script:failures += 1
             }
         }
     } catch {
-        Write-Output "page: FAIL - unreadable verdict: $verdictText"
-        $failures += 1
+        Write-Output "${Leg}: FAIL - unreadable verdict: $verdictText"
+        $script:failures += 1
     }
 }
 
+Write-Output 'page: driving the built bundle headless (Edge + DevTools protocol)...'
+Invoke-NodeProbe 'page' 'close-confirm-page-probe.mjs'
+
+Write-Output 'engine: walking the built engine through the stale-problems story...'
+Invoke-NodeProbe 'engine' 'engine-live-probe.mjs'
+
 if ($failures -eq 0) {
-    Write-Output 'RESULT: PASS - the close question, all three answers, the queue, and the deploy are as pinned'
+    Write-Output 'RESULT: PASS - the close question, its answers, the engine live-copy correction, and the deploy are as pinned'
 } else {
     Write-Output "RESULT: FAIL - $failures check(s) down; the close-confirm behaviour has drifted"
 }
