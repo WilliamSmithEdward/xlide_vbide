@@ -16,6 +16,15 @@
  * none (the chevron went 2026-08-06, by request).
  */
 
+import {
+  firstGroup as firstGroupOf,
+  indexAtMidpoints,
+  prune,
+  splitBeside,
+  type TreeGroup,
+  type TreeNode,
+  type TreeSplit,
+} from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
 
 export type DockSide = "left" | "right" | "top" | "bottom";
@@ -44,20 +53,11 @@ export interface PanelDockHandlers {
   openPanesChanged?(): void;
 }
 
-type Node = Split | Group;
-
-interface Split {
-  kind: "split";
-  direction: "row" | "column";
-  children: Node[];
-  sizes: number[];
-}
-
-interface Group {
-  kind: "group";
-  tabs: string[];
-  active: string;
-}
+// The tree itself, and the arithmetic on it, live in docktree.ts — pure, and unit tested,
+// because pruning and collapsing are where a docking layout's bugs are and a drag is a slow
+// way to find them. Here a tab is a pane's name.
+type Node = TreeNode<string>;
+type Group = TreeGroup<string>;
 
 interface StoredLayout {
   sides?: Partial<Record<DockSide, Node | null>>;
@@ -230,7 +230,7 @@ export class PanelDocks {
     if (!bottom) {
       this.layout.bottom = { kind: "group", tabs: [name], active: name };
     } else {
-      const group = this.firstGroup(bottom);
+      const group = firstGroupOf(bottom);
       if (group) {
         group.tabs.push(name);
         group.active = name;
@@ -325,26 +325,13 @@ export class PanelDocks {
         if (bottom && bottom.kind === "group") {
           bottom.tabs.push(name);
         } else if (bottom && bottom.kind === "split") {
-          const first = this.firstGroup(bottom);
+          const first = firstGroupOf(bottom);
           first?.tabs.push(name);
         } else {
           this.layout.bottom = { kind: "group", tabs: [name], active: name };
         }
       }
     }
-  }
-
-  private firstGroup(node: Node): Group | null {
-    if (node.kind === "group") {
-      return node;
-    }
-    for (const child of node.children) {
-      const found = this.firstGroup(child);
-      if (found) {
-        return found;
-      }
-    }
-    return null;
   }
 
   private load(): Record<DockSide, Node | null> | null {
@@ -649,17 +636,14 @@ export class PanelDocks {
    * before the first tab whose midpoint the pointer has not yet crossed, or at the end.
    */
   private tabIndexAt(strip: HTMLElement, x: number, dragging: string): number {
-    const tabs = [...strip.querySelectorAll<HTMLElement>(".panel-tab")]
-      .filter((tab) => tab.dataset.panel !== dragging);
+    const midpoints = [...strip.querySelectorAll<HTMLElement>(".panel-tab")]
+      .filter((tab) => tab.dataset.panel !== dragging)
+      .map((tab) => {
+        const box = tab.getBoundingClientRect();
+        return box.left + box.width / 2;
+      });
 
-    for (let i = 0; i < tabs.length; i++) {
-      const box = tabs[i]!.getBoundingClientRect();
-      if (x < box.left + box.width / 2) {
-        return i;
-      }
-    }
-
-    return tabs.length;
+    return indexAtMidpoints(midpoints, x);
   }
 
   /** Executes a drop: the pane leaves its group and lands where the preview said. */
@@ -680,7 +664,7 @@ export class PanelDocks {
       if (!existing) {
         this.layout[target.side] = { kind: "group", tabs: [name], active: name };
       } else {
-        const group = this.firstGroup(existing);
+        const group = firstGroupOf(existing);
         if (group) {
           group.tabs.push(name);
           group.active = name;
@@ -734,32 +718,6 @@ export class PanelDocks {
       from.active = from.tabs[0] ?? "";
     }
 
-    const prune = (node: Node | null): Node | null => {
-      if (!node) {
-        return null;
-      }
-      if (node.kind === "group") {
-        return node.tabs.length > 0 ? node : null;
-      }
-      const children: Node[] = [];
-      const sizes: number[] = [];
-      node.children.forEach((child, index) => {
-        const kept = prune(child);
-        if (kept) {
-          children.push(kept);
-          sizes.push(node.sizes[index] ?? 1);
-        }
-      });
-      if (children.length === 0) {
-        return null;
-      }
-      if (children.length === 1) {
-        return children[0]!;
-      }
-      const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
-      return { kind: "split", direction: node.direction, children, sizes: sizes.map((s) => s / total) };
-    };
-
     for (const side of ["left", "right", "top", "bottom"] as DockSide[]) {
       this.layout[side] = prune(this.layout[side]);
     }
@@ -767,44 +725,7 @@ export class PanelDocks {
 
   /** Splits a group within its section, putting the newcomer beside it where the zone said. */
   private splitGroup(side: DockSide, of: Group, zone: "left" | "right" | "top" | "bottom", newcomer: Group): void {
-    const direction: "row" | "column" = zone === "left" || zone === "right" ? "row" : "column";
-    const first = zone === "left" || zone === "top";
-
-    const replace = (node: Node | null): Node | null => {
-      if (!node) {
-        return null;
-      }
-      if (node === of) {
-        return {
-          kind: "split",
-          direction,
-          children: first ? [newcomer, node] : [node, newcomer],
-          sizes: [0.5, 0.5],
-        };
-      }
-      if (node.kind === "split") {
-        const children = node.children.map((child) => replace(child) ?? child);
-
-        // Same-direction splits absorb, the way the editor grid's do.
-        const flattened: Node[] = [];
-        const sizes: number[] = [];
-        children.forEach((child, index) => {
-          if (child.kind === "split" && child.direction === node.direction) {
-            child.children.forEach((inner, innerIndex) => {
-              flattened.push(inner);
-              sizes.push((node.sizes[index] ?? 1) * (child.sizes[innerIndex] ?? 1));
-            });
-          } else {
-            flattened.push(child);
-            sizes.push(node.sizes[index] ?? 1);
-          }
-        });
-        return { ...node, children: flattened, sizes };
-      }
-      return node;
-    };
-
-    this.layout[side] = replace(this.layout[side]);
+    this.layout[side] = splitBeside(this.layout[side], of, zone, newcomer);
   }
 
   /* ------------------------------------------------------------------ splitters */
@@ -861,7 +782,7 @@ export class PanelDocks {
   }
 
   /** The divider between two panes inside a section. */
-  private buildPaneSplitter(node: Split, index: number, container: HTMLElement): HTMLElement {
+  private buildPaneSplitter(node: TreeSplit<string>, index: number, container: HTMLElement): HTMLElement {
     const splitter = document.createElement("div");
     splitter.className = `group-splitter split-${node.direction}`;
     splitter.setAttribute("role", "separator");

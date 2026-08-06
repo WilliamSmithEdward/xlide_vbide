@@ -61,7 +61,7 @@ check — about twenty seconds, with `-Live` adding the standing probes against 
 and prove the running build is the one just made, in about a second and with no restart.
 
 In `tools\harness`, each self-describing and PASS/FAIL where it can be:
-`Test-DebugApi`, `Test-SplitWorkspace`, `Test-WatchPanel`, `Test-GhostLocalsPanel`,
+`Test-DebugApi`, `Test-SplitWorkspace`, `Test-Churn`, `Test-WatchPanel`, `Test-GhostLocalsPanel`,
 `Test-CloseConfirm`, `Test-CloseHiddenPane`, `Test-ObjectBrowser`, `Test-ResizeFollow`,
 `Test-CloseVbe`. `xlide-api.mjs` drives a live session from the command line or a script.
 

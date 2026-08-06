@@ -995,6 +995,21 @@ export class EditorBridge {
     return this.ed()?.getModel() ?? null;
   }
 
+  /**
+   * How many text models exist in the page, against how many documents are open.
+   *
+   * The two must match. A model that outlives the document it belonged to is the leak this
+   * surface is most likely to grow — models are created per open module and disposed when
+   * its pane closes, and nothing else would notice one that stayed. Monaco is bundled
+   * rather than global, so a probe cannot count them without this.
+   */
+  modelCensus(): { models: number; documents: number } {
+    return {
+      models: monaco.editor.getModels().length,
+      documents: this.documents.all().length,
+    };
+  }
+
   /** The host-active document's model, which is what engine answers are computed against. */
   hostActiveModel(): monaco.editor.ITextModel | null {
     return this.hostActive

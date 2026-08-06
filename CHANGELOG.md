@@ -65,6 +65,17 @@ panes that dock wherever the developer puts them.
   native pane. A TypeScript error merged just as green. The workflow now installs the page's
   dependencies, typechecks, builds, runs the bundle checks, and asserts that the published
   shim actually carries the page and that Release carries no debug api.
+- `Test-Churn.ps1` is a leak probe for the churn this release introduced: splitting and
+  dissolving, docking and undocking, a dozen times each, asserting that editors, models, dock
+  groups and DOM come back to where they started. Counts rather than megabytes, because an
+  exact number that must return to its starting value is a far better leak detector than a
+  heap figure nobody can interpret.
+- The split tree's arithmetic moved into `docktree.ts` — pruning, collapsing, same-axis
+  absorption, divider arithmetic — and the docking layout now runs on it, so the 12 unit
+  tests (under a second) cover the code that actually ships rather than a copy of it. The
+  live drags test the gesture; this tests the algebra, where a mis-collapse used to show up
+  as a pane that vanished three drags later. The editor grid keeps its own tree for now: its
+  splits carry DOM references, so sharing this one is a separate change.
 - `docs/ui-lessons.md`: what building this surface inside a host that moves under it taught
   us — pointer gestures that survive rebuilds, one keybinding service across many editors,
   drag targets a person can aim at, and probing a live page honestly.

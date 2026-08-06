@@ -223,6 +223,26 @@ document area it is a child of — the surface is taller, since it draws the men
 toolbar too. A picture of the wrong thing is at least obviously wrong; a number from the
 wrong thing looks like data.
 
+**Churn needs its own probe, and it should count, not weigh.** A surface that rearranges
+creates and destroys real things: an editor per group, a model per open module, DOM per dock
+group. A dispose that misses one leaks quietly and the symptom arrives days later as a
+session that has become slow, by which time the cause is unrecoverable. The probe does the
+churn on purpose — a dozen splits and dissolves, a dozen docks and undocks — and asserts that
+the COUNTS return to where they started. Counts, because an exact number that must come back
+to its starting value is a far better leak detector than a heap figure nobody can interpret;
+memory is reported and never asserted, or the check cries wolf until nobody reads it.
+
+Its first run also showed how a probe measures itself: handles grew by 83, which looked
+alarming until it was clear the probe's own hundred HTTP requests were the source. A
+threshold tight enough to catch that is a threshold that fails on its own traffic.
+
+**Test the algebra separately from the gesture.** The split tree — pruning empty groups,
+collapsing single-child splits, absorbing same-axis splits, keeping sizes a partition of one
+— is the most error-prone code in a docking layout and the slowest to test through drags: a
+mis-collapse appears on screen as a pane that vanished, three drags later, on one machine.
+Pulled into a pure module it is twelve assertions that run in under a second and name the
+case they broke.
+
 **Verify against the demo transport first.** The page runs its own loopback host in a plain
 browser, with two documents and live tabs. Nearly every layout finding above was reproduced
 there in seconds, then confirmed live — the browser tells you what the code does, and the

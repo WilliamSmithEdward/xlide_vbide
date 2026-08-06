@@ -98,13 +98,14 @@ Step 'page build' {
     'no warnings'
 }
 
-Step 'page bundle checks' {
+Step 'page tests' {
+    # The split tree's arithmetic, then the bundle's structure.
     Push-Location $pageRoot
     try {
         npm test 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) { throw 'the bundle checks failed' }
+        if ($LASTEXITCODE -ne 0) { throw 'the page tests failed' }
     } finally { Pop-Location }
-    'passed'
+    'tree algebra, bundle structure'
 }
 
 Step 'page probes (headless)' {
@@ -171,14 +172,14 @@ if ($Live) {
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
 
-        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1') {
+        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-Churn.ps1') {
             $answer = powershell -NoProfile -ExecutionPolicy Bypass `
                 -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
             $answer | Out-Host
             $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
             if ("$verdict" -notmatch 'PASS') { throw "$probe did not pass" }
         }
-        'debug api, split workspace'
+        'debug api, split workspace, churn'
     }
 }
 
