@@ -222,6 +222,24 @@ try {
     $window = $null
     while ($null -eq $window -and (Get-Date) -lt $deadline) {
         $window = [Xlide.Shot]::WorkbookWindowOf($process.Id)
+
+        # Excel sometimes hands the launch off to a fresh process of its own (measured
+        # 2026-08-05 evening: the launched pid exits within seconds and a respawn opens the
+        # workbook; the harness then waited on the corpse, threw, and never opened the VBE).
+        # The session is whichever live Excel answers for the workbook, so the handoff is
+        # followed: everything downstream keys off $process.Id - the shim log pattern, the
+        # editor window, the cleanup - and moves with it.
+        if ($null -eq $window -and $process.HasExited) {
+            foreach ($candidate in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
+                $window = [Xlide.Shot]::WorkbookWindowOf($candidate.Id)
+                if ($null -ne $window) {
+                    Write-Host "Excel $($process.Id) handed off to $($candidate.Id); following."
+                    $process = $candidate
+                    break
+                }
+            }
+        }
+
         if ($null -eq $window) { Start-Sleep -Milliseconds 25 }
     }
 
