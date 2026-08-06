@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.2 (2026-08-05)
+
+Debug panel polish from the first live day of the restored Locals tracking.
+
+### Changed
+
+- The Locals and Watch tables no longer spread their columns across the panel: columns
+  hug the longest content up to a cap and cluster left, header and rows staying aligned,
+  while hover bands and the sticky header still run the full width. The Watch table also
+  gains the scroll and monospace styling only Locals had.
+
+### Added
+
+- The Immediate panel has a clear button beside its prompt: it empties the panel's
+  history and returns focus to the input. Clearing is page-local by design - the hidden
+  native window keeps its text, and the mirror appends only what is new, so cleared
+  output does not return.
+
 ## v0.1.1 (2026-08-05)
 
 Locals and Watch track the debugger again. The panels had gone dark during breaks - and
