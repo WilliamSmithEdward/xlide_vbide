@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-06, after v0.1.5 (the workspace rearrangement is unreleased).
+Updated 2026-08-06, at v0.2.0.
 
 A short, current snapshot. The living documents are [handoff.md](handoff.md) for what happened
 and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.2.0 (2026-08-06)
 
 The workspace becomes arrangeable: every module open at once, editors side by side, and tool
 panes that dock wherever the developer puts them.
@@ -79,6 +79,18 @@ panes that dock wherever the developer puts them.
 - `docs/ui-lessons.md`: what building this surface inside a host that moves under it taught
   us — pointer gestures that survive rebuilds, one keybinding service across many editors,
   drag targets a person can aim at, and probing a live page honestly.
+
+### Known limits
+
+- Still not signed, so no binaries are attached; build from source with `tools\dev.ps1`.
+  Signing and update plumbing remain the next release-engineering milestone (decision 8).
+- Panes dock in the four sections around the editor; floating and OS-popout windows are not
+  built (decision 13). A tool pane cannot join the editor's own tabs, by design.
+- The editor grid and the pane docks keep separate split trees. Only the docks' tree is the
+  unit-tested pure one; the grid's carries DOM references and shares nothing yet.
+- The F1 command palette still lists Monaco's own Find entries, which open the retired native
+  find widget; every key, button, and menu route leads to the surface's own search.
+- The debugger integration and the UserForm designer are still the two large milestones.
 
 ## v0.1.5 (2026-08-06)
 

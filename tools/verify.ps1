@@ -172,12 +172,40 @@ if ($Live) {
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
 
+        # A session that has only just launched is still seeding: the engine is starting, the
+        # first analysis pass has not run, and the ghost readers may not be attached. Probes
+        # that assert a healthy session then fail on the truth that it is not healthy YET —
+        # which is a real answer to the wrong question (2026-08-06, on a release gate).
+        $discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
+        if (Test-Path $discovery) {
+            $api = (Get-Content $discovery -Raw | ConvertFrom-Json)
+            $door = "http://127.0.0.1:$($api.port)/$($api.token)"
+            $ready = $false
+            $deadline = (Get-Date).AddSeconds(30)
+            do {
+                try {
+                    $doctor = Invoke-RestMethod "$door/doctor" -TimeoutSec 5
+                    $ready = $doctor.engineUp -and $doctor.surfaceReady -and $doctor.ghostReadersUp
+                } catch { $ready = $false }
+                if (-not $ready) { Start-Sleep -Milliseconds 500 }
+            } while (-not $ready -and (Get-Date) -lt $deadline)
+
+            if (-not $ready) { throw 'the session never became healthy enough to probe' }
+        }
+
         foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-Churn.ps1') {
             $answer = powershell -NoProfile -ExecutionPolicy Bypass `
                 -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
             $answer | Out-Host
             $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
-            if ("$verdict" -notmatch 'PASS') { throw "$probe did not pass" }
+            if ("$verdict" -notmatch 'PASS') {
+                # Name the checks, not just the file. A summary that says only "did not pass"
+                # sends the reader back through the scrollback for the one line that matters,
+                # and at the end of a run that line has usually scrolled away (2026-08-06).
+                $broken = @($answer | Select-String '\s+FAIL' | ForEach-Object { $_.Line.Trim() })
+                $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
+                throw "$probe did not pass$named"
+            }
         }
         'debug api, split workspace, churn'
     }
