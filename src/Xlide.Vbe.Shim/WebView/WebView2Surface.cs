@@ -104,6 +104,45 @@ internal sealed class WebView2Surface : IDisposable
     public string DebugName { get; set; } = "surface";
 
     /// <summary>
+    /// Runs script in the live page and hands back its result as JSON, for the debug api's
+    /// eval route. The browser answers on the thread that owns it, which is the host thread,
+    /// so the caller must already be on it and must not block waiting: the answer arrives
+    /// through the callback, and the api route parks it where the next request can collect
+    /// it. Debug only - the product never runs script it did not ship.
+    /// </summary>
+    public bool ExecuteScript(string javaScript, Action<int, string> completed)
+    {
+        var view = _view;
+        if (view is null)
+        {
+            return false;
+        }
+
+        var handler = new ExecuteScriptCompletedHandler(completed);
+        var callback = CreateCallback(handler, WebViewIid.ExecuteScriptCompletedHandler);
+        if (callback == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            // The handler is rooted until it fires: nothing else holds it, and a collected
+            // one would be a callback into freed memory.
+            _pendingScripts.Add(handler);
+            return view.Target.ExecuteScript(javaScript, callback) >= 0;
+        }
+        finally
+        {
+            Marshal.Release(callback);
+        }
+    }
+
+    private readonly List<object> _pendingScripts = [];
+
+    internal void ForgetScriptHandler(object handler) => _pendingScripts.Remove(handler);
+
+    /// <summary>
     /// The last messages over every surface's wire, kept for the debug api's messages
     /// route. Protocol mysteries ("did the page ever post it?") become one request. A
     /// bounded ring: old traffic falls off, long payloads are cut, and none of this
@@ -992,6 +1031,31 @@ internal sealed partial class ControllerCompletedHandler : ICoreWebView2CreateCo
         return HResult.Ok;
     }
 }
+
+#if DEBUG
+/// <summary>Receives the JSON result of a script the debug api ran in the page.</summary>
+[GeneratedComClass]
+internal sealed partial class ExecuteScriptCompletedHandler : ICoreWebView2ExecuteScriptCompletedHandler
+{
+    private readonly Action<int, string> _completed;
+
+    public ExecuteScriptCompletedHandler(Action<int, string> completed) => _completed = completed;
+
+    public int Invoke(int errorCode, string resultObjectAsJson)
+    {
+        try
+        {
+            _completed(errorCode, resultObjectAsJson ?? string.Empty);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("webview: the script callback failed", ex);
+        }
+
+        return HResult.Ok;
+    }
+}
+#endif
 
 /// <summary>Reports the outcome of each navigation.</summary>
 [GeneratedComClass]

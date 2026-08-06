@@ -28,6 +28,11 @@ internal sealed unsafe class BrowserPalette : IDisposable
     private nint _handle;
     private WebView2Surface? _browser;
 
+#if DEBUG
+    /// <summary>The palette's page, for the debug api's eval route. Debug builds only.</summary>
+    internal WebView2Surface? Browser => _browser;
+#endif
+
     /// <summary>The libraries to list, projects included.</summary>
     public Func<ObLibraryRow[]>? LibrariesRequested { get; set; }
 

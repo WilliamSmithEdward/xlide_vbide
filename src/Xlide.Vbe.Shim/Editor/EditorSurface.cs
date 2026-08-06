@@ -25,6 +25,11 @@ internal sealed class EditorSurface : IDisposable
 
     private OverlayWindow? _overlay;
     private WebView2Surface? _browser;
+
+#if DEBUG
+    /// <summary>The page itself, for the debug api's eval route. Debug builds only.</summary>
+    internal WebView2Surface? Browser => _browser;
+#endif
     private string? _module;
 
     /// <summary>

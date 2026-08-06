@@ -71,6 +71,53 @@ function Invoke-Step {
     }
 }
 
+<#
+.SYNOPSIS
+    Waits until the published shim can be replaced, naming whoever is holding it.
+
+.DESCRIPTION
+    A host holds the add-in library open for its entire life, and an Excel that has just
+    been asked to close keeps its grip for seconds afterwards. Publishing into that window
+    fails partway through and looks like a compiler problem, which is how a stale DLL gets
+    tested three times in a row while the fix sits undeployed.
+
+    Writability is tested the only way that is not a guess: by opening the file for exclusive
+    writing. Excel processes are named while waiting, because "something has it" is not a
+    thing anyone can act on.
+#>
+function Wait-ForShimUnlocked {
+    param([string] $Path, [int] $TimeoutSeconds = 30)
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $announced = $false
+
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $stream = [IO.File]::Open($Path, 'Open', 'ReadWrite', 'None')
+            $stream.Close()
+            if ($announced) { Write-Host 'The shim is free; publishing.' -ForegroundColor Green }
+            return
+        } catch {
+            if (-not $announced) {
+                $holders = @(Get-Process EXCEL -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+                $who = if ($holders.Count -gt 0) { "Excel $($holders -join ', ')" } else { 'another process' }
+                Write-Host "Waiting for $who to release the shim..." -ForegroundColor Yellow
+                $announced = $true
+            }
+
+            Start-Sleep -Milliseconds 500
+        }
+    }
+
+    $stillThere = @(Get-Process EXCEL -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+    $named = if ($stillThere.Count -gt 0) { " Excel $($stillThere -join ', ') is running." } else { '' }
+    throw "The shim at $Path is still locked after $TimeoutSeconds seconds.$named Close the host and run again; publishing over a locked file leaves a stale build behind."
+}
+
 if ($Unregister) {
     Invoke-Step 'Unregister' {
         dotnet run --project $registerProject -c Debug -- --remove
@@ -91,6 +138,13 @@ if (-not $NoBuild) {
     }
 
     Invoke-Step 'Publish the shim (ahead-of-time, native)' {
+        # A host holds the shim open for its whole life, and Excel takes seconds to let go
+        # after it is asked to close. Publishing into a locked file fails in the middle of
+        # its own output, and the failure reads like a build error rather than what it is -
+        # or worse, an earlier step's output scrolls past and the stale DLL is what gets
+        # tested (2026-08-06: three rounds of "why is my fix not in the log", the answer
+        # being that it was never deployed). So the lock is waited out, by name, first.
+        Wait-ForShimUnlocked -Path $shimPath -TimeoutSeconds 30
         dotnet publish $shimProject -c $Configuration -r win-x64
     }
 }
@@ -102,6 +156,20 @@ if (-not (Test-Path $shimPath)) {
 $shimInfo = Get-Item $shimPath
 Write-Host ''
 Write-Host ("Shim: {0} ({1:N2} MB, built {2:HH:mm:ss})" -f $shimInfo.FullName, ($shimInfo.Length / 1MB), $shimInfo.LastWriteTime)
+
+# A shim older than the newest source it should contain is a stale deploy wearing a fresh
+# report, and every minute spent reading a log for a fix that was never deployed is spent
+# because nothing said so here (2026-08-06).
+if (-not $NoBuild) {
+    $newestSource = Get-ChildItem (Join-Path $repoRoot 'src') -Recurse -Include *.cs |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($newestSource -and $newestSource.LastWriteTime -gt $shimInfo.LastWriteTime) {
+        throw ("The published shim is OLDER than $($newestSource.Name) " +
+            "($($shimInfo.LastWriteTime.ToString('HH:mm:ss')) against " +
+            "$($newestSource.LastWriteTime.ToString('HH:mm:ss'))). The publish did not take; " +
+            'do not test this build.')
+    }
+}
 
 Invoke-Step 'Register for the current user' {
     # Debug, for the same reason the test gate is (see the note above it): Smart App Control

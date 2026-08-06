@@ -169,6 +169,38 @@ function clientFor(entry) {
     /** Puts the caret where a Run or a Step should act. Scrolling alone will not do it. */
     caret: (line, { module, column, project } = {}) =>
       call(`caret${query({ line, module, column, project })}`, { method: "POST" }),
+
+    /** Native dialogs standing right now. Answers even while the host thread is blocked. */
+    dialogs: () => call("dialogs"),
+
+    /** Answers a dialog by button caption. Names the button exactly; "Cancel" is usual. */
+    dismiss: (button, caption) => call(`dismiss${query({ button, caption })}`, { method: "POST" }),
+
+    /** Runs script in the live page and returns its result as JSON text. */
+    eval: (script, surface) =>
+      call(`eval${query({ surface })}`, { method: "POST", body: script, timeout: 15000 }),
+
+    /**
+     * Waits for the editor to be answering again, which is the honest precondition for any
+     * assertion after something that might raise a modal. Reports what is in the way.
+     */
+    async waitUntilResponsive({ timeout = 15000 } = {}) {
+      const deadline = Date.now() + timeout;
+      while (Date.now() < deadline) {
+        try {
+          await this.state(2000);
+          return true;
+        } catch {
+          const standing = await this.dialogs().catch(() => null);
+          if (standing?.dialogs?.length) {
+            throw new Error(
+              `blocked by "${standing.dialogs[0].caption}" (buttons: ${standing.dialogs[0].buttons.join(", ")})`);
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return false;
+    },
     immediate: (text) => call(`immediate${query({ text })}`, { method: "POST" }),
 
     /** state: "on" | "off" | undefined to toggle. Prefer on/off in scripts. */
@@ -228,6 +260,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "messages": return api.messages(rest[0] ?? 20);
       case "module": return api.readModule(rest[0], rest[1]);
       case "command": return api.command(rest[0]);
+      case "dialogs": return api.dialogs();
+      case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
+      case "eval": return api.eval(rest.join(" "));
       case "immediate": return api.immediate(rest.join(" "));
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
       default: throw new Error(`unknown route ${route}`);

@@ -40,7 +40,22 @@ internal static class PerfCounters
 
     public static void LogLine() => Interlocked.Increment(ref _logLines);
 
-    public static void Poll(long intervalMilliseconds) => Interlocked.Exchange(ref _pollIntervalMs, intervalMilliseconds);
+    /// <summary>
+    /// The host thread's own pulse, stamped by every poll tick. Its AGE is the instrument:
+    /// a modal dialog, a running macro, or a wedged call all stop the ticks, and the age
+    /// says how long ago the thread was last seen alive. Every other measure of this needs
+    /// the host thread to answer, which is exactly what it cannot do while stuck.
+    /// </summary>
+    private static long _heartbeat = Environment.TickCount64;
+
+    public static void Poll(long intervalMilliseconds)
+    {
+        Interlocked.Exchange(ref _pollIntervalMs, intervalMilliseconds);
+        Interlocked.Exchange(ref _heartbeat, Environment.TickCount64);
+    }
+
+    /// <summary>Milliseconds since the host thread last completed a poll tick.</summary>
+    public static long HeartbeatAgeMs => Environment.TickCount64 - Interlocked.Read(ref _heartbeat);
 
     public static (long FullPasses, long FastPasses, long LastMs, long MaxMs) PlacementSnapshot() =>
         (Interlocked.Read(ref _placementFullPasses), Interlocked.Read(ref _placementFastPasses),

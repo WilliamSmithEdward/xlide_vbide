@@ -165,8 +165,56 @@ Check 'an unknown route is named, not crashed on' {
     (Invoke-RestMethod "$api/nonesuch" -TimeoutSec 8).error -match 'unknown route'
 }
 
+Check 'dialogs answers when nothing is standing' {
+    $null -ne (Invoke-RestMethod "$api/dialogs" -TimeoutSec 8).dialogs
+}
+
+Check 'eval runs script in the live page' {
+    $r = Invoke-RestMethod "$api/eval" -Method Post -Body 'document.querySelectorAll(".panel-tab").length' -TimeoutSec 15
+    $r.answered -and [int]$r.result -ge 4
+}
+
+Check 'stats carries a fresh host heartbeat' {
+    (Invoke-RestMethod "$api/stats" -TimeoutSec 8).heartbeatAgeMs -lt 5000
+}
+
+# The hardening, tested the only way that counts: raise the modal that hung this api's own
+# development. Run with the caret outside a procedure opens the editor's Macros dialog, which
+# owns the editor until somebody answers it - and note it does NOT block the door, because a
+# VBA modal pumps messages, so no timeout ever fires and only an explicit sweep can help.
+$script:modalDetail = $null
+Check 'a modal this door raised is seen, then cleared by the next request' {
+    Invoke-RestMethod "$api/caret?module=CleanModule&line=1" -Method Post -TimeoutSec 8 | Out-Null
+    Start-Sleep -Milliseconds 500
+    Invoke-RestMethod "$api/command?name=run" -Method Post -TimeoutSec 20 | Out-Null
+    Start-Sleep -Milliseconds 1200
+
+    # Seen: the dialog and its buttons, read without the host thread the dialog is holding.
+    $seen = Invoke-RestMethod "$api/dialogs" -TimeoutSec 8
+    $sawIt = $seen.dialogs.Count -ge 1 -and $seen.dialogs[0].caption -eq 'Macros'
+
+    # Cleared: the guard waits until the editor is genuinely wedged - three seconds of a
+    # stopped poll - before it touches anything, so a dialog that is merely passing through
+    # is never swept. Past that, the next request that needs the editor clears it.
+    Start-Sleep -Seconds 4
+    Invoke-RestMethod "$api/state" -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1500
+    $after = Invoke-RestMethod "$api/dialogs" -TimeoutSec 8
+    $cleared = $after.dialogs.Count -eq 0
+
+    # Recovered: the poll is ticking again, which is what a person would call unstuck.
+    Start-Sleep -Milliseconds 1500
+    $beating = (Invoke-RestMethod "$api/stats" -TimeoutSec 8).heartbeatAgeMs -lt 5000
+
+    # Out of the pipeline on purpose: anything written here joins the return value and
+    # makes the check pass on its own, which is how this check first went green wrongly.
+    $script:modalDetail = "saw '$($seen.dialogs[0].caption)' buttons [$($seen.dialogs[0].buttons -join ', ')], cleared $cleared, beating $beating"
+    [bool] ($sawIt -and $cleared -and $beating)
+}
+
 Write-Output ''
 foreach ($name in $checks.Keys) { "  {0,-52} {1}" -f $name, $checks[$name] }
+if ($script:modalDetail) { Write-Output "  modal guard: $script:modalDetail" }
 $failed = @($checks.Values | Where-Object { $_ -ne 'PASS' })
 Write-Output ''
 if ($failed.Count -eq 0) {

@@ -56,7 +56,10 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `module` | GET | `name`, `project` | a module's text, read through the session's reader |
 | `capture` | GET | `window=frame\|palette` | a BMP of the window, through PrintWindow |
 | `module` | POST | `name`, `project`, body = text | writes the module through the session's writer, with the baseline and engine corrections a host rewrite carries |
-| `command` | POST | `name` | runs an editor command by name (`VbeCommands.ForName`) |
+| `dialogs` | GET | | native dialogs standing now, with their buttons, and how long the host thread has been quiet. Needs no host thread, so it answers while the editor is stuck |
+| `eval` | POST | `surface`, body = script | runs script in the live page and returns its result as JSON |
+| `dismiss` | POST | `button`, `caption` | clicks a dialog button by name. Explicit, so it will press OK if asked |
+| `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |
 | `immediate` | POST | `text` | schedules an Immediate-window evaluation, fire and forget |
@@ -103,6 +106,38 @@ Locals and watches come from the ghost reader thread's published snapshots, so t
 never touch the accessibility layer themselves and cannot disturb a break. That matters: an
 out-of-process accessibility client that dumps a ghost palette during a break can reset the
 project (lesson 33), which is exactly why these routes exist instead.
+
+## Never blocked by a modal
+
+A modal dialog owns the editor until somebody answers it, and the two worst evenings this
+project has had both ended that way: an Add Watch dialog whose filler mis-parsed its
+arguments, and a Macros dialog raised by a Run with the caret on line one. Both times the
+editor simply stopped, and nothing could say why.
+
+Three things now stand between a modal and a wedged session.
+
+**It can be seen.** `dialogs` enumerates windows, which needs no host thread, so it answers
+while every other route would time out. It returns each dialog's caption and buttons, plus
+`heartbeatAgeMs` - how long since the host thread last completed a poll tick. A large
+heartbeat age with a dialog standing is a stuck editor, stated as two numbers.
+
+**It is cleared automatically, if the door raised it.** Every request that touches the
+session first sweeps dialogs this door is answerable for, pressing one SAFE button: Cancel,
+then Close, then No. Never OK, Yes, Save, Delete, or Run - a dialog nobody read must not be
+agreed with, and every safe button means "as you were". A request that means to open a
+dialog passes `keep=1` and what it opens is exempt.
+
+**A dialog you opened is never touched.** Attribution is the whole safety property, and it
+took three attempts. A snapshot taken as a request ends catches nothing, because the dialog
+arrives microseconds after the command returns. Comparing against "whatever stood when the
+door last looked" then cancelled a developer's own Add Watch between requests - the one
+outcome worth avoiding entirely. What works: after each request a pool thread looks again at
+250ms, 750ms, and 1750ms, and the door owns only what appears in that window. A dialog that
+opens while the door is idle is nobody's business but yours, however long it stands.
+
+Verified in `Test-DebugApi.ps1`: a Run with a bad caret raises the Macros dialog, the door
+sees it with its six buttons, clears it on the next request, and the heartbeat returns - and
+separately, an Add Watch opened outside the api survives repeated api traffic untouched.
 
 ## The DevTools door
 
@@ -155,5 +190,7 @@ landing, beyond the fix underneath it:
 - dead instances' discovery files are swept at session start.
 - `breakpoint` gained `state=on|off`, and `caret` is new: without it nothing outside the
   page can aim a Run at a procedure.
-- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 19 checks)
+- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 23 checks)
   ship with it.
+- the modal guard above, `dialogs`, `dismiss`, `eval`, and the host heartbeat are all new in
+  this landing; none of them existed on the branch.

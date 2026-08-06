@@ -510,6 +510,37 @@ public sealed record DebugMessagesReply(
 public sealed record DebugErrorReply(
     [property: JsonPropertyName("error")] string Error);
 
+/// <summary>
+/// A timeout that knows why. The editor's commonest reason for one is a modal dialog owning
+/// the host thread, and window enumeration can see that without the thread the dialog is
+/// holding - so a blocked answer names the dialog, its buttons, how long the host thread has
+/// been silent, and whether the door answered a dialog it had raised itself.
+/// </summary>
+public sealed record DebugBlockedReply(
+    [property: JsonPropertyName("error")] string Error,
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
+    [property: JsonPropertyName("blockedBy")] string? BlockedBy,
+    [property: JsonPropertyName("buttons")] string[] Buttons,
+    [property: JsonPropertyName("dismissed")] string? Dismissed,
+    [property: JsonPropertyName("retried")] bool Retried);
+
+/// <summary>One native dialog standing in the process.</summary>
+public sealed record DebugDialogRow(
+    [property: JsonPropertyName("window")] string Window,
+    [property: JsonPropertyName("caption")] string Caption,
+    [property: JsonPropertyName("buttons")] string[] Buttons,
+    [property: JsonPropertyName("enabled")] bool Enabled);
+
+public sealed record DebugDialogsReply(
+    [property: JsonPropertyName("dialogs")] DebugDialogRow[] Dialogs,
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
+
+/// <summary>What a script run in the page answered with; result is JSON as the browser encodes it.</summary>
+public sealed record DebugEvalReply(
+    [property: JsonPropertyName("answered")] bool Answered,
+    [property: JsonPropertyName("errorCode")] int ErrorCode,
+    [property: JsonPropertyName("result")] string Result);
+
 /// <summary>The Locals ghost's feed as data, for the debug-side suite.</summary>
 public sealed record DebugLocalsReply(
     [property: JsonPropertyName("context")] string? Context,
@@ -555,7 +586,9 @@ public sealed record DebugStatsReply(
     [property: JsonPropertyName("logLines")] long LogLines,
     [property: JsonPropertyName("pollIntervalMs")] long PollIntervalMs,
     [property: JsonPropertyName("messagesToPage")] long MessagesToPage,
-    [property: JsonPropertyName("messagesToHost")] long MessagesToHost);
+    [property: JsonPropertyName("messagesToHost")] long MessagesToHost,
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
+    [property: JsonPropertyName("dialogsStanding")] int DialogsStanding);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DebugStateReply))]
@@ -572,5 +605,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugModuleReply))]
 [JsonSerializable(typeof(DebugStatsReply))]
 [JsonSerializable(typeof(DebugErrorReply))]
+[JsonSerializable(typeof(DebugBlockedReply))]
+[JsonSerializable(typeof(DebugDialogRow))]
+[JsonSerializable(typeof(DebugDialogsReply))]
+[JsonSerializable(typeof(DebugEvalReply))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
 #endif

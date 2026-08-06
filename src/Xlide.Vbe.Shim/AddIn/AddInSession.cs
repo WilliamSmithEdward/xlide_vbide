@@ -319,6 +319,88 @@ internal sealed class AddInSession : IDisposable
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
             }
 
+            case "eval" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
+            {
+                // The page's own DOM, asked directly: the questions that are one line ("how
+                // many tabs does the strip show?", "is the empty view up?") answered without
+                // a DevTools client. Pixels cannot answer those, and this needs no protocol.
+                //
+                // Only the START crosses to the host thread. The browser delivers its answer
+                // by calling back on that same thread, so THIS thread - a pool thread - is
+                // the one that waits; waiting on the host thread would be waiting for a
+                // callback that cannot arrive until the waiting stops.
+                var script = request.Body.Length > 0 ? request.Body : request.Query["script"];
+                request.Query.TryGetValue("surface", out var which);
+
+                var evalHost = _editorSurface;
+                if (evalHost is null)
+                {
+                    return DebugError("the surface is not up yet");
+                }
+
+                string? result = null;
+                var errorCode = 0;
+                var started = false;
+                using var scriptDone = new ManualResetEventSlim(false);
+                using var scheduled = new ManualResetEventSlim(false);
+
+                evalHost.RunOnHostThread(() =>
+                {
+                    try
+                    {
+                        var browser = which == "palette" ? _browserPalette?.Browser : _editorSurface?.Browser;
+                        started = browser is not null && browser.ExecuteScript(script, (code, json) =>
+                        {
+                            errorCode = code;
+                            result = json;
+                            scriptDone.Set();
+                        });
+                    }
+                    finally
+                    {
+                        scheduled.Set();
+                    }
+                });
+
+                if (!scheduled.Wait(TimeSpan.FromSeconds(3)))
+                {
+                    return DebugError("the host thread did not start the script in time");
+                }
+
+                if (!started)
+                {
+                    return DebugError("that surface has no page to run script in");
+                }
+
+                var scriptAnswered = scriptDone.Wait(TimeSpan.FromSeconds(5));
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugEvalReply(scriptAnswered, errorCode, result ?? string.Empty),
+                    DebugJsonContext.Default.DebugEvalReply));
+            }
+
+            case "dialogs":
+            {
+                // No host thread anywhere in this route, deliberately: it answers while the
+                // editor is blocked, which is the only time it matters.
+                var rows = DialogWatch.Dialogs()
+                    .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Buttons, row.Enabled))
+                    .ToArray();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugDialogsReply(rows, PerfCounters.HeartbeatAgeMs),
+                    DebugJsonContext.Default.DebugDialogsReply));
+            }
+
+            case "dismiss" when request.Query.TryGetValue("button", out var button) && button.Length > 0:
+            {
+                // Explicit, unlike the automatic guard: the caller names the button, so this
+                // one will press OK if asked. The guard's safe-button rule protects requests
+                // that never meant to open a dialog at all; a person asking by name knows.
+                request.Query.TryGetValue("caption", out var caption);
+                var dismissed = DialogWatch.Dismiss(caption, button);
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(dismissed, 0), DebugJsonContext.Default.DebugCommandReply));
+            }
+
             case "stats":
             {
                 var placement = PerfCounters.PlacementSnapshot();
@@ -342,7 +424,9 @@ internal sealed class AddInSession : IDisposable
                         LogLines: PerfCounters.LogLineCount,
                         PollIntervalMs: PerfCounters.PollIntervalMs,
                         MessagesToPage: messages.ToPage,
-                        MessagesToHost: messages.ToHost),
+                        MessagesToHost: messages.ToHost,
+                        HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
+                        DialogsStanding: DialogWatch.Dialogs().Length),
                     DebugJsonContext.Default.DebugStatsReply));
             }
         }
@@ -352,6 +436,20 @@ internal sealed class AddInSession : IDisposable
         {
             return DebugError("the surface is not up yet");
         }
+
+        // Heal before working. A modal this door raised earlier may still be standing, and
+        // waiting for a timeout to notice is the wrong instrument for two reasons: a VBA
+        // modal PUMPS messages, so marshaled work still runs and no timeout ever comes
+        // (measured 2026-08-06 - state answered normally while the Macros dialog owned the
+        // editor), and the developer is looking at a stuck editor the whole time. So every
+        // request first clears what this door left behind, and only what it left behind.
+        ClearDialogsWeRaised();
+
+        // What was already standing before this request. Anything that appears while it is
+        // in flight was raised BY it, and only those may be answered automatically: a dialog
+        // the developer opened is theirs, and closing it under them would be worse than any
+        // hang. See the timeout path below.
+        var standingBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
 
         string? answer = null;
         using var done = new ManualResetEventSlim(false);
@@ -379,9 +477,226 @@ internal sealed class AddInSession : IDisposable
         // the stats route serves what this line measures.
         PerfCounters.Marshal(Environment.TickCount64 - marshalStarted);
 
-        return answered && answer is not null
+        // Whatever appeared while this request ran, the door raised - and the dangerous case
+        // is the one that ANSWERS successfully and leaves a modal standing behind it: Run
+        // with the caret outside a procedure returns "ran" and then opens the Macros dialog,
+        // which owns the host thread from that moment on. Recording it here is what lets the
+        // NEXT request heal instead of timing out forever.
+        if (request.Query.ContainsKey("keep"))
+        {
+            KeepDialogsRaisedBy(standingBefore);
+        }
+
+        RememberRaisedDialogs(standingBefore);
+
+        if (answered && answer is not null)
+        {
+            return DebugServer.DebugReply.Json(answer);
+        }
+
+        return AnswerBlockedRequest(standingBefore, done, () => answer);
+    }
+
+    /// <summary>
+    /// Dialogs this door is answerable for: they were absent when a request began and present
+    /// in the moments after it, so that request raised them.
+    ///
+    /// Attribution took three tries and the failures are the design. A snapshot taken as the
+    /// request ends catches nothing, because a dialog arrives microseconds after the command
+    /// returns - Run answers "ran" and the Macros dialog comes next. Comparing against
+    /// "whatever was standing when the door last looked" then swept a dialog the DEVELOPER
+    /// had opened between requests, which is the one outcome worth avoiding entirely
+    /// (measured 2026-08-06: an Add Watch opened by hand was cancelled underneath). What
+    /// works is watching for a short while AFTER each request, on a pool thread, and owning
+    /// only what appears in that window.
+    /// </summary>
+    private readonly HashSet<string> _dialogsWeRaised = new(StringComparer.Ordinal);
+    private readonly Lock _dialogGate = new();
+
+    /// <summary>How long after a request a dialog may appear and still be counted as its doing.</summary>
+    private static readonly int[] DialogWatchDelaysMs = [250, 750, 1750];
+
+    /// <summary>
+    /// Answers any dialog that appeared while this door was working, with a SAFE button:
+    /// Cancel, then Close, then No. Never OK, Yes, Save, Delete, or Run - a dialog nobody
+    /// read must not be agreed with, and every safe button means "as you were".
+    ///
+    /// Two conditions, both required. The dialog must have appeared since the door last
+    /// looked, and the host thread must have stopped ticking for three seconds - a poll that
+    /// is still running means nothing is wedged and nothing needs rescuing. A dialog the
+    /// developer opened while the door was idle is in the snapshot already and is left alone,
+    /// however long it stands.
+    /// </summary>
+    private void ClearDialogsWeRaised()
+    {
+        string[] ours;
+        lock (_dialogGate)
+        {
+            if (_dialogsWeRaised.Count == 0)
+            {
+                return;
+            }
+
+            ours = [.. _dialogsWeRaised];
+        }
+
+        foreach (var dialog in DialogWatch.Dialogs())
+        {
+            if (!ours.Contains(dialog.Window) || _dialogsToKeep.Contains(dialog.Window))
+            {
+                continue;
+            }
+
+            string[] safeButtons = ["Cancel", "Close", "No"];
+            var pressed = safeButtons.FirstOrDefault(button =>
+                dialog.Buttons.Any(have => have.Equals(button, StringComparison.OrdinalIgnoreCase))
+                && DialogWatch.Dismiss(dialog.Caption, button));
+
+            Log.Info(pressed is null
+                ? $"debug api: \"{dialog.Caption}\" has the editor and offers no safe button; leaving it"
+                : $"debug api: cleared \"{dialog.Caption}\" with {pressed}, "
+                    + $"host thread quiet for {PerfCounters.HeartbeatAgeMs}ms");
+
+            lock (_dialogGate)
+            {
+                _dialogsWeRaised.Remove(dialog.Window);
+            }
+        }
+
+        // Anything that closed on its own stops being this door's business.
+        var alive = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
+        lock (_dialogGate)
+        {
+            _dialogsWeRaised.RemoveWhere(window => !alive.Contains(window));
+        }
+    }
+
+    /// <summary>
+    /// Dialogs a caller asked to keep. A request that means to open one - Call Stack is the
+    /// standing example - passes keep=1, and what it raises is exempted from the sweep for
+    /// as long as it stands. Without this the guard would helpfully cancel the very dialog
+    /// the request existed to open.
+    /// </summary>
+    private readonly HashSet<string> _dialogsToKeep = new(StringComparer.Ordinal);
+
+    private void KeepDialogsRaisedBy(HashSet<string> standingBefore)
+    {
+        foreach (var dialog in DialogWatch.Dialogs())
+        {
+            if (!standingBefore.Contains(dialog.Window))
+            {
+                _dialogsToKeep.Add(dialog.Window);
+                Log.Info($"debug api: keeping \"{dialog.Caption}\", as the request asked");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Watches, briefly and on a pool thread, for a dialog this request raised. The delays
+    /// are what makes attribution honest: a dialog appears after the command that opened it
+    /// returns, and a dialog that appears when no request has just run is the developer's.
+    /// </summary>
+    private void RememberRaisedDialogs(HashSet<string> standingBefore)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                foreach (var delay in DialogWatchDelaysMs)
+                {
+                    await Task.Delay(delay).ConfigureAwait(false);
+
+                    foreach (var dialog in DialogWatch.Dialogs())
+                    {
+                        if (standingBefore.Contains(dialog.Window))
+                        {
+                            continue;
+                        }
+
+                        bool noted;
+                        lock (_dialogGate)
+                        {
+                            noted = _dialogsWeRaised.Add(dialog.Window);
+                        }
+
+                        if (noted)
+                        {
+                            Log.Info($"debug api: a request raised \"{dialog.Caption}\"; "
+                                + "it will be cleared unless the request asked to keep it");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("debug api: the dialog watch failed", ex);
+            }
+        });
+    }
+
+    /// <summary>
+    /// What to say - and do - when the host thread did not answer.
+    ///
+    /// A bare timeout is the least useful true statement an api can make, and the editor's
+    /// commonest reason for one is a MODAL DIALOG: it owns the host thread until somebody
+    /// answers it, and every route that needs that thread goes dark for as long as it stands
+    /// (twice in one day, a probe left one up and the editor simply stopped). Window
+    /// enumeration needs no host thread, so the door can still see what is in the way.
+    ///
+    /// A dialog that was NOT standing when this request began was raised by this request, and
+    /// answering it is undoing our own mess, so it is dismissed and the request retried once.
+    /// Only a SAFE button is ever pressed: Cancel, then Close, then No. Never OK, Yes, Save,
+    /// Delete, or Run - a dialog nobody read must not be agreed with. A dialog that was
+    /// already standing belongs to the developer and is only reported.
+    /// </summary>
+    private static DebugServer.DebugReply AnswerBlockedRequest(
+        HashSet<string> standingBefore,
+        ManualResetEventSlim done,
+        Func<string?> answerSoFar)
+    {
+        var blocking = DialogWatch.Dialogs()
+            .FirstOrDefault(row => !standingBefore.Contains(row.Window));
+
+        if (blocking is null)
+        {
+            var standing = DialogWatch.Dialogs();
+            return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                new DebugBlockedReply(
+                    Error: "the host thread did not answer in time",
+                    HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
+                    BlockedBy: standing.Length > 0 ? standing[0].Caption : null,
+                    Buttons: standing.Length > 0 ? standing[0].Buttons : [],
+                    Dismissed: null,
+                    Retried: false),
+                DebugJsonContext.Default.DebugBlockedReply));
+        }
+
+        string[] safeButtons = ["Cancel", "Close", "No"];
+        var pressed = safeButtons.FirstOrDefault(button =>
+            blocking.Buttons.Any(have => have.Equals(button, StringComparison.OrdinalIgnoreCase))
+            && DialogWatch.Dismiss(blocking.Caption, button));
+
+        Log.Info(pressed is null
+            ? $"debug api: \"{blocking.Caption}\" is blocking the host thread and has no safe button"
+            : $"debug api: \"{blocking.Caption}\" was raised by this request; answered with {pressed}");
+
+        // The dismissal releases the host thread, and the work this request asked for was
+        // queued before the dialog appeared, so it may complete on its own.
+        var completed = pressed is not null && done.Wait(TimeSpan.FromSeconds(3));
+
+        return completed && answerSoFar() is { } answer
             ? DebugServer.DebugReply.Json(answer)
-            : DebugError("the host thread did not answer in time");
+            : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                new DebugBlockedReply(
+                    Error: pressed is null
+                        ? "a dialog this request raised is blocking the host thread, and it has no safe button to press"
+                        : "a dialog this request raised was dismissed, but the request did not finish",
+                    HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
+                    BlockedBy: blocking.Caption,
+                    Buttons: blocking.Buttons,
+                    Dismissed: pressed,
+                    Retried: false),
+                DebugJsonContext.Default.DebugBlockedReply));
     }
 
     private unsafe string AnswerDebugRequestOnHost(DebugServer.DebugRequest request)

@@ -229,7 +229,12 @@ internal static unsafe partial class Win32
     /// <summary>The system-menu close command, masked to its command bits.</summary>
     public const nint ScClose = 0xF060;
 
-    [LibraryImport("user32.dll", SetLastError = true)]
+    // Named PostMessageW explicitly: user32 exports only the A and W forms, and an import
+    // spelled "PostMessage" throws EntryPointNotFoundException the first time it is called.
+    // This one sat unexercised in the pane-close fallback until the dialog watch called it
+    // (2026-08-06) - a path that only runs when the pane collection is refusing, which is
+    // exactly when its failure would be hardest to read.
+    [LibraryImport("user32.dll", EntryPoint = "PostMessageW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool PostMessage(nint window, uint message, nint wParam, nint lParam);
 
