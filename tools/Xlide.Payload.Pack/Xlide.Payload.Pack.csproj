@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Xlide.Payload.Pack</RootNamespace>
+    <AssemblyName>xlide-payload-pack</AssemblyName>
+    <Description>Compresses the installer's payload before it is embedded, so the shipped executable carries the runtime compressed rather than raw.</Description>
+  </PropertyGroup>
+
+</Project>

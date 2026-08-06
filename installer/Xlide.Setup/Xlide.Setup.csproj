@@ -7,6 +7,10 @@
     <AssemblyName>xlide-setup</AssemblyName>
     <Description>Single-file installer for xlide. Installs per user and needs no administrator rights.</Description>
 
+    <!-- Built by tools\Generate-Icon.ps1 from assets\images. This is the only executable a user
+         ever sees before anything is installed, so it should not wear the default one. -->
+    <ApplicationIcon>xlide.ico</ApplicationIcon>
+
     <!-- The installer is itself native, so a user who has nothing installed can still run it. -->
     <PublishAot>true</PublishAot>
     <IsAotCompatible>true</IsAotCompatible>

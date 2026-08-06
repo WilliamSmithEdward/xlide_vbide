@@ -38,7 +38,14 @@ $uiSource = Join-Path $repoRoot 'ui\editor\dist'
 $uiRelative = 'ui\editor\dist'
 
 $localDotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet'
-if (Test-Path (Join-Path $localDotnet 'dotnet.exe')) { $env:PATH = "$localDotnet;$env:PATH" }
+if (Test-Path (Join-Path $localDotnet 'dotnet.exe')) {
+    $env:PATH = "$localDotnet;$env:PATH"
+
+    # A built program launches through a small native host that locates the runtime through the
+    # registry or this variable, not through PATH. Without it the payload packer reports that .NET
+    # is not installed, on a machine whose only runtime lives under the user's profile.
+    $env:DOTNET_ROOT = $localDotnet
+}
 
 $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
 if (Test-Path $vsInstaller) { $env:PATH = "$vsInstaller;$env:PATH" }
@@ -107,6 +114,18 @@ New-Item -ItemType Directory -Path $uiTarget -Force | Out-Null
 Copy-Item (Join-Path $uiSource '*') $uiTarget -Recurse -Force
 $uiBytes = (Get-ChildItem $uiTarget -Recurse -File | Measure-Object -Property Length -Sum).Sum
 Write-Host ("    {0} ({1} file(s), {2:N1} MB)" -f $uiRelative, @(Get-ChildItem $uiTarget -Recurse -File).Count, ($uiBytes / 1MB))
+
+Write-Host '==> Compressing the payload' -ForegroundColor Cyan
+# Built and invoked rather than "dotnet run", which forwards its own arguments to the program and
+# makes the program's argument list depend on the SDK's parsing rather than on what was written here.
+dotnet build (Join-Path $repoRoot 'tools\Xlide.Payload.Pack\Xlide.Payload.Pack.csproj') -c Release --nologo -v q
+if ($LASTEXITCODE -ne 0) { throw 'Building the payload packer failed.' }
+
+$packer = Join-Path $repoRoot 'artifacts\bin\Xlide.Payload.Pack\release\xlide-payload-pack.exe'
+if (-not (Test-Path $packer)) { throw "The payload packer was not produced at $packer." }
+
+& $packer $payloadDir (Join-Path $repoRoot 'artifacts\payload-pack-cache')
+if ($LASTEXITCODE -ne 0) { throw 'Compressing the payload failed.' }
 
 Write-Host '==> Building the installer' -ForegroundColor Cyan
 dotnet publish $setupProject -c $Configuration -r win-x64

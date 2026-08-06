@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Reflection;
 using Microsoft.Win32;
 using Xlide.Vbe.Core;
@@ -25,6 +26,7 @@ namespace Xlide.Setup;
 internal static class Program
 {
     private const string PayloadPrefix = "payload/";
+    private const string CompressedSuffix = ".br";
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\xlide";
 
     private static int Main(string[] args)
@@ -215,9 +217,24 @@ internal static class Program
                 continue;
             }
 
+            var name = resource[PayloadPrefix.Length..];
+
+            // tools\Xlide.Payload.Pack compresses the payload before it is embedded, because most of
+            // it is a language runtime and a runtime binary is about seventy per cent air. An
+            // uncompressed entry is still honoured, so a payload staged by hand installs too.
             using var buffer = new MemoryStream();
-            stream.CopyTo(buffer);
-            files.Add((resource[PayloadPrefix.Length..].Replace('/', Path.DirectorySeparatorChar), buffer.ToArray()));
+            if (name.EndsWith(CompressedSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                name = name[..^CompressedSuffix.Length];
+                using var brotli = new BrotliStream(stream, CompressionMode.Decompress);
+                brotli.CopyTo(buffer);
+            }
+            else
+            {
+                stream.CopyTo(buffer);
+            }
+
+            files.Add((name.Replace('/', Path.DirectorySeparatorChar), buffer.ToArray()));
         }
 
         return files;
