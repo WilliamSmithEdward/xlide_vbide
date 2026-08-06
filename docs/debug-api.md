@@ -48,7 +48,9 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `state` | GET | | shown module and project, debug mode, unwritten edits, engine up, frame and document-area handles and rects, palette open and visible, surface ready, DevTools port |
 | `windows` | GET | | every editor window: type, caption, visible |
 | `stats` | GET | | uptime, managed and working memory, handle count, GC counts, placement pass counts and timings, host-thread marshal count and timings, log lines, poll interval, message totals |
-| `log` | GET | `since`, `match`, `max` | a slice of the shim log and the next byte offset |
+| `log` | GET | `since`, `match`, `max`, `waitMs` | a slice of the shim log and the next byte offset. With `waitMs` it BLOCKS until a matching line appears, so an event can be awaited rather than slept for |
+| `doctor` | GET | | the start-of-session checklist: shim and bundle build times, the page's own build stamp, engine and ghost readers attached, dialogs standing. `findings` is empty when nothing is wrong |
+| `perf` | GET | | recent raw placement and marshal durations, for medians and percentiles |
 | `messages` | GET | `last` | recent page traffic both directions, per surface |
 | `problems` | GET | `module` | the analyzer's current findings |
 | `locals` | GET | | the Locals panel's context and rows |
@@ -142,6 +144,29 @@ separately, an Add Watch opened outside the api survives repeated api traffic un
 The mechanism behind all of this, and the rules for opening a modal at all, are in
 [working-with-modals.md](working-with-modals.md).
 
+## Awaiting instead of sleeping
+
+`log?match=...&waitMs=15000` returns the moment a matching line is written, or when the wait
+expires. That removes the whole sleep-and-hope class of harness bug: a probe that slept a
+guessed interval is slow when the guess is generous and flaky when it is not, and it can
+never say whether the thing it wanted actually happened. Measured: a wait for a publish line
+returned in 3.4 seconds, when the event occurred, not at the 15 second limit.
+
+```js
+const api = await open({ workbook: "scratch.xlsm" });
+await api.command("save");
+await api.waitForLog("modules: publish", { timeout: 10000 });
+```
+
+## When the page itself throws
+
+A page exception is invisible without a DevTools client attached, which is never the case
+during a live test: the surface misbehaves, the shim log says nothing, and all anyone has is
+a description of symptoms. The page now forwards `error` and `unhandledrejection` to the host,
+where they appear in the log as `page: page error: ...` with the message, the source
+location, and the stack. Errors only - ordinary console noise would drown the log it is
+meant to help.
+
 ## The DevTools door
 
 Debug builds also start the browser's own DevTools protocol on a per-process port,
@@ -193,7 +218,8 @@ landing, beyond the fix underneath it:
 - dead instances' discovery files are swept at session start.
 - `breakpoint` gained `state=on|off`, and `caret` is new: without it nothing outside the
   page can aim a Run at a procedure.
-- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 23 checks)
+- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 27 checks)
   ship with it.
-- the modal guard above, `dialogs`, `dismiss`, `eval`, and the host heartbeat are all new in
-  this landing; none of them existed on the branch.
+- the modal guard above, `dialogs`, `dismiss`, `eval`, `doctor`, `perf`, the log wait, the
+  host heartbeat, and page-error forwarding are all new in this landing; none of them
+  existed on the branch.

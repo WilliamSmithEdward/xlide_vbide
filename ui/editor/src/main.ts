@@ -71,6 +71,31 @@ function boot(): void {
     throw new Error("missing #container");
   }
 
+  // A page exception is invisible without a DevTools client attached, which is exactly the
+  // situation during a live test: the surface misbehaves, the shim log says nothing, and the
+  // developer is left describing symptoms. Both failure channels are forwarded to the host,
+  // where they land in the log beside everything else that happened at that moment. Errors
+  // only - never ordinary console noise, which would drown the log it is trying to help.
+  const reportToHost = (what: string, detail: string) => {
+    try {
+      bridge?.trace(`page error: ${what}: ${detail}`);
+    } catch {
+      // The bridge may not exist yet; a page that fails before it is built is a page that
+      // never reached ready, which the loader already reports.
+    }
+  };
+
+  window.addEventListener("error", (event) => {
+    const where = event.filename ? ` (${event.filename}:${event.lineno}:${event.colno})` : "";
+    reportToHost("uncaught", `${event.message}${where}\n${event.error?.stack ?? ""}`.trim());
+  });
+
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    reportToHost("unhandled rejection",
+      reason instanceof Error ? `${reason.message}\n${reason.stack ?? ""}`.trim() : String(reason));
+  });
+
   registerVba();
   defineThemes();
 

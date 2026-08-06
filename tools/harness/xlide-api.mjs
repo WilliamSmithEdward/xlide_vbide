@@ -159,7 +159,8 @@ function clientFor(entry) {
     locals: () => call("locals"),
     watches: () => call("watches"),
     problems: (module) => call(`problems${query({ module })}`),
-    log: ({ since, match, max } = {}) => call(`log${query({ since, match, max })}`),
+    log: ({ since, match, max, waitMs } = {}) =>
+      call(`log${query({ since, match, max, waitMs })}`, { timeout: (waitMs ?? 0) + 10000 }),
     messages: (last) => call(`messages${query({ last })}`),
     capture: (window) => call(`capture${query({ window })}`, { raw: true, timeout: 20000 }),
 
@@ -172,6 +173,22 @@ function clientFor(entry) {
 
     /** Native dialogs standing right now. Answers even while the host thread is blocked. */
     dialogs: () => call("dialogs"),
+
+    /** The start-of-session sanity check: right build, everything attached, nothing standing. */
+    doctor: () => call("doctor"),
+
+    /** Recent raw durations for percentile work, rather than a max one outlier owns. */
+    perf: () => call("perf"),
+
+    /**
+     * Waits for a log line to appear, instead of sleeping and hoping. Returns the matching
+     * lines and the offset to continue from, so a test can await an event the way it would
+     * await a promise: "the module was written", "the break was entered".
+     */
+    async waitForLog(match, { since, timeout = 10000, max = 50 } = {}) {
+      const from = since ?? (await this.log({ max: 1 })).next;
+      return this.log({ since: from, match, max, waitMs: timeout });
+    },
 
     /** Answers a dialog by button caption. Names the button exactly; "Cancel" is usual. */
     dismiss: (button, caption) => call(`dismiss${query({ button, caption })}`, { method: "POST" }),
@@ -261,6 +278,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "module": return api.readModule(rest[0], rest[1]);
       case "command": return api.command(rest[0]);
       case "dialogs": return api.dialogs();
+      case "doctor": return api.doctor();
+      case "perf": return api.perf();
+      case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
       case "eval": return api.eval(rest.join(" "));
       case "immediate": return api.immediate(rest.join(" "));

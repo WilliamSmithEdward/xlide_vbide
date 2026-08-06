@@ -27,6 +27,7 @@ internal static class PerfCounters
         Interlocked.Increment(ref _placementFullPasses);
         Interlocked.Exchange(ref _placementLastMs, milliseconds);
         RaiseToAtLeast(ref _placementMaxMs, milliseconds);
+        Sample(PlacementSamples, ref _placementCursor, milliseconds);
     }
 
     public static void PlacementFast() => Interlocked.Increment(ref _placementFastPasses);
@@ -36,6 +37,7 @@ internal static class PerfCounters
         Interlocked.Increment(ref _marshalCount);
         Interlocked.Exchange(ref _marshalLastMs, milliseconds);
         RaiseToAtLeast(ref _marshalMaxMs, milliseconds);
+        Sample(MarshalSamples, ref _marshalCursor, milliseconds);
     }
 
     public static void LogLine() => Interlocked.Increment(ref _logLines);
@@ -56,6 +58,52 @@ internal static class PerfCounters
 
     /// <summary>Milliseconds since the host thread last completed a poll tick.</summary>
     public static long HeartbeatAgeMs => Environment.TickCount64 - Interlocked.Read(ref _heartbeat);
+
+    /*
+     * Recent durations, kept raw. The running max answers "did anything ever stall", which
+     * is the wrong question for tuning: one 400ms outlier and a steady 40ms both show a max
+     * of 400. A short ring of the last samples lets a probe compute a median and a p95 and
+     * say whether a change actually moved the distribution or just got lucky.
+     */
+    private const int SampleCount = 64;
+    private static readonly long[] PlacementSamples = new long[SampleCount];
+    private static readonly long[] MarshalSamples = new long[SampleCount];
+    private static int _placementCursor;
+    private static int _marshalCursor;
+    private static readonly Lock SampleGate = new();
+
+    private static void Sample(long[] ring, ref int cursor, long value)
+    {
+        lock (SampleGate)
+        {
+            ring[cursor] = value;
+            cursor = (cursor + 1) % SampleCount;
+        }
+    }
+
+    /// <summary>The most recent placement and marshal durations, newest last, zeros trimmed.</summary>
+    public static (long[] Placement, long[] Marshal) Samples()
+    {
+        lock (SampleGate)
+        {
+            return (Ordered(PlacementSamples, _placementCursor), Ordered(MarshalSamples, _marshalCursor));
+        }
+    }
+
+    private static long[] Ordered(long[] ring, int cursor)
+    {
+        var taken = new List<long>(SampleCount);
+        for (var i = 0; i < SampleCount; i++)
+        {
+            var value = ring[(cursor + i) % SampleCount];
+            if (value > 0)
+            {
+                taken.Add(value);
+            }
+        }
+
+        return [.. taken];
+    }
 
     public static (long FullPasses, long FastPasses, long LastMs, long MaxMs) PlacementSnapshot() =>
         (Interlocked.Read(ref _placementFullPasses), Interlocked.Read(ref _placementFastPasses),

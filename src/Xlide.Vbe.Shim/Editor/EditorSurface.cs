@@ -966,6 +966,12 @@ internal sealed class EditorSurface : IDisposable
                 case "ready":
                     _loaded = true;
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
+#if DEBUG
+                    PageBuildStamp = document.RootElement.TryGetProperty("timings", out var readyTimings)
+                        && readyTimings.TryGetProperty("build", out var readyBuild)
+                        ? readyBuild.GetString()
+                        : null;
+#endif
                     Flush();
 
                     // Only now is the browser worth looking at: the page is styled and has its
@@ -1535,6 +1541,15 @@ internal sealed class EditorSurface : IDisposable
     /// Renders what the page reported about its own start-up, so the cost of putting a surface over
     /// a pane is a measured number in the log rather than an impression.
     /// </summary>
+#if DEBUG
+    /// <summary>
+    /// The bundle stamp the page reported when it booted, kept for the debug api's doctor
+    /// route. A page and a shim built at different times is the commonest cause of "my fix
+    /// is not in the log", and the only cure is being able to ask.
+    /// </summary>
+    internal string? PageBuildStamp { get; private set; }
+#endif
+
     private static string DescribeTimings(JsonElement message)
     {
         if (!message.TryGetProperty("timings", out var timings) || timings.ValueKind != JsonValueKind.Object)

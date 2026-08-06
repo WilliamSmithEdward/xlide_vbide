@@ -178,6 +178,41 @@ Check 'stats carries a fresh host heartbeat' {
     (Invoke-RestMethod "$api/stats" -TimeoutSec 8).heartbeatAgeMs -lt 5000
 }
 
+Check 'doctor finds a healthy session' {
+    $d = Invoke-RestMethod "$api/doctor" -TimeoutSec 10
+    $d.engineUp -and $d.ghostReadersUp -and $d.surfaceReady -and $d.pageBuildStamp -ne '(none reported)'
+}
+
+Check 'perf answers with raw samples' {
+    $p = Invoke-RestMethod "$api/perf" -TimeoutSec 8
+    $p.marshalMs.Count -gt 0
+}
+
+Check 'log waits for an event instead of sleeping for it' {
+    # The point is the TIMING: it must return when the line arrives, not when the wait
+    # expires, which is what makes it usable as an await instead of a guess.
+    $since = (Invoke-RestMethod "$api/log?max=1" -TimeoutSec 8).next
+    $job = Start-Job -ArgumentList $api {
+        param($api)
+        Start-Sleep 2
+        Invoke-RestMethod "$api/command?name=save" -Method Post -TimeoutSec 10
+    }
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $answer = Invoke-RestMethod "$api/log?since=$since&match=modules: publish&waitMs=15000" -TimeoutSec 30
+    $clock.Stop()
+    Remove-Job $job -Force -ErrorAction SilentlyContinue
+
+    $answer.lines.Count -ge 1 -and $clock.Elapsed.TotalSeconds -lt 12
+}
+
+Check 'a page exception reaches the shim log' {
+    Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 `
+        -Body 'setTimeout(() => { throw new Error("probe: a deliberate page fault"); }, 0); "thrown"' | Out-Null
+    Start-Sleep -Milliseconds 1500
+    @((Invoke-RestMethod "$api/log?match=deliberate page fault&max=5" -TimeoutSec 8).lines).Count -ge 1
+}
+
 # The hardening, tested the only way that counts: raise the modal that hung this api's own
 # development. Run with the caret outside a procedure opens the editor's Macros dialog, which
 # owns the editor until somebody answers it - and note it does NOT block the door, because a

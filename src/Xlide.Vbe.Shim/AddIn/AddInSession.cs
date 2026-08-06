@@ -208,24 +208,27 @@ internal sealed class AddInSession : IDisposable
                 var max = request.Query.TryGetValue("max", out var maxText)
                     && int.TryParse(maxText, out var cap) ? Math.Clamp(cap, 1, 5000) : 500;
 
-                using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                if (since > 0 && since <= file.Length)
-                {
-                    file.Position = since;
-                }
+                // waitMs turns the log into something a probe can AWAIT. Without it every
+                // test that cares about an event sleeps a guessed interval and greps, which
+                // is slow when the guess is generous and flaky when it is not - the whole
+                // sleep-and-hope class of harness bug. With it, "wait until the log says the
+                // module was written, or three seconds pass" is one request that returns the
+                // moment it is true.
+                var waitMs = request.Query.TryGetValue("waitMs", out var waitText)
+                    && int.TryParse(waitText, out var waited) ? Math.Clamp(waited, 0, 30000) : 0;
 
-                using var reader = new StreamReader(file, System.Text.Encoding.UTF8);
-                var lines = new List<string>();
-                while (reader.ReadLine() is { } line && lines.Count < max)
+                var deadline = Environment.TickCount64 + waitMs;
+                while (true)
                 {
-                    if (match is null || line.Contains(match, StringComparison.OrdinalIgnoreCase))
+                    var (lines, next) = ReadLogSlice(path, since, match, max);
+                    if (lines.Count > 0 || Environment.TickCount64 >= deadline)
                     {
-                        lines.Add(line);
+                        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                            new DebugLogReply([.. lines], next), DebugJsonContext.Default.DebugLogReply));
                     }
-                }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugLogReply([.. lines], file.Length), DebugJsonContext.Default.DebugLogReply));
+                    Thread.Sleep(100);
+                }
             }
 
             case "messages":
@@ -317,6 +320,16 @@ internal sealed class AddInSession : IDisposable
                     .ToArray();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
+            }
+
+            case "perf":
+            {
+                // Raw recent durations, so a probe can compute a median and a p95 rather
+                // than reason from a running maximum that one outlier owns forever.
+                var (placementSamples, marshalSamples) = PerfCounters.Samples();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugPerfReply(placementSamples, marshalSamples, PerfCounters.HeartbeatAgeMs),
+                    DebugJsonContext.Default.DebugPerfReply));
             }
 
             case "eval" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
@@ -649,6 +662,28 @@ internal sealed class AddInSession : IDisposable
     /// Delete, or Run - a dialog nobody read must not be agreed with. A dialog that was
     /// already standing belongs to the developer and is only reported.
     /// </summary>
+    /// <summary>One read of the log from an offset, filtered, with the offset to ask from next.</summary>
+    private static (List<string> Lines, long Next) ReadLogSlice(string path, long since, string? match, int max)
+    {
+        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (since > 0 && since <= file.Length)
+        {
+            file.Position = since;
+        }
+
+        using var reader = new StreamReader(file, System.Text.Encoding.UTF8);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line && lines.Count < max)
+        {
+            if (match is null || line.Contains(match, StringComparison.OrdinalIgnoreCase))
+            {
+                lines.Add(line);
+            }
+        }
+
+        return (lines, file.Length);
+    }
+
     private static DebugServer.DebugReply AnswerBlockedRequest(
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
@@ -734,6 +769,82 @@ internal sealed class AddInSession : IDisposable
                         SurfaceReady: _surfaceShown,
                         DevToolsPort: WebView.WebView2Surface.DevToolsPort),
                     DebugJsonContext.Default.DebugStateReply);
+            }
+
+            case "doctor":
+            {
+                // The questions that are asked at the START of every confusing session, and
+                // that cost the most when nobody thinks to ask them. Chief among them: is
+                // the code running the code I just built? A shim and a page built minutes
+                // apart, or a session serving a bundle from somewhere else entirely, produce
+                // symptoms that look like anything except what they are - three rounds of
+                // "why is my fix not in the log" on 2026-08-06 were exactly this.
+                var shimPath = Interop.ShimModule.Directory;
+                var shimFile = shimPath is null ? null : Path.Combine(shimPath, "Xlide.Vbe.Shim.dll");
+                var bundle = shimPath is null
+                    ? null
+                    : Path.Combine(shimPath, "ui", "editor", "dist", "editor.js");
+
+                var findings = new List<string>();
+
+                if (shimFile is not null && File.Exists(shimFile) && bundle is not null && File.Exists(bundle))
+                {
+                    var shimBuilt = File.GetLastWriteTimeUtc(shimFile);
+                    var bundleBuilt = File.GetLastWriteTimeUtc(bundle);
+                    var apart = (shimBuilt - bundleBuilt).Duration();
+                    if (apart > TimeSpan.FromMinutes(30))
+                    {
+                        findings.Add($"the shim and the page bundle were built {apart.TotalMinutes:N0} "
+                            + "minutes apart; one of them is probably stale");
+                    }
+                }
+                else
+                {
+                    findings.Add("the shim directory does not hold both a shim and a page bundle");
+                }
+
+                if (_editorSurface?.PageBuildStamp is null)
+                {
+                    findings.Add("the page never reported a build stamp; it may not have finished booting");
+                }
+
+                if (_analysis is null)
+                {
+                    findings.Add("the analysis engine is not up, so diagnostics will stay empty");
+                }
+
+                if (_ghostReaders is null)
+                {
+                    findings.Add("the ghost readers are not attached, so Locals and Watch cannot fill");
+                }
+
+                if (PerfCounters.HeartbeatAgeMs > 5000)
+                {
+                    findings.Add($"the host thread has not ticked for {PerfCounters.HeartbeatAgeMs}ms; "
+                        + "something is holding it (check the dialogs route)");
+                }
+
+                if (DialogWatch.Dialogs() is { Length: > 0 } standingDialogs)
+                {
+                    findings.Add($"a dialog is standing: \"{standingDialogs[0].Caption}\"");
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugDoctorReply(
+                        Healthy: findings.Count == 0,
+                        ShimPath: shimFile ?? "(unknown)",
+                        ShimBuiltUtc: shimFile is not null && File.Exists(shimFile)
+                            ? File.GetLastWriteTimeUtc(shimFile).ToString("O")
+                            : "(missing)",
+                        BundleBuiltUtc: bundle is not null && File.Exists(bundle)
+                            ? File.GetLastWriteTimeUtc(bundle).ToString("O")
+                            : "(missing)",
+                        PageBuildStamp: _editorSurface?.PageBuildStamp ?? "(none reported)",
+                        EngineUp: _analysis is not null,
+                        GhostReadersUp: _ghostReaders is not null,
+                        SurfaceReady: _surfaceShown,
+                        Findings: [.. findings]),
+                    DebugJsonContext.Default.DebugDoctorReply);
             }
 
             case "windows":

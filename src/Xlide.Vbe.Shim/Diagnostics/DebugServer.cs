@@ -535,6 +535,28 @@ public sealed record DebugDialogsReply(
     [property: JsonPropertyName("dialogs")] DebugDialogRow[] Dialogs,
     [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
 
+/// <summary>
+/// The start-of-session questions, answered together: is this session running the code that
+/// was just built, and is everything that should be attached attached. Findings is empty when
+/// nothing is wrong, which is the only summary worth trusting.
+/// </summary>
+public sealed record DebugDoctorReply(
+    [property: JsonPropertyName("healthy")] bool Healthy,
+    [property: JsonPropertyName("shimPath")] string ShimPath,
+    [property: JsonPropertyName("shimBuiltUtc")] string ShimBuiltUtc,
+    [property: JsonPropertyName("bundleBuiltUtc")] string BundleBuiltUtc,
+    [property: JsonPropertyName("pageBuildStamp")] string PageBuildStamp,
+    [property: JsonPropertyName("engineUp")] bool EngineUp,
+    [property: JsonPropertyName("ghostReadersUp")] bool GhostReadersUp,
+    [property: JsonPropertyName("surfaceReady")] bool SurfaceReady,
+    [property: JsonPropertyName("findings")] string[] Findings);
+
+/// <summary>Recent raw durations, for percentiles a running maximum cannot give.</summary>
+public sealed record DebugPerfReply(
+    [property: JsonPropertyName("placementMs")] long[] PlacementMs,
+    [property: JsonPropertyName("marshalMs")] long[] MarshalMs,
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
+
 /// <summary>What a script run in the page answered with; result is JSON as the browser encodes it.</summary>
 public sealed record DebugEvalReply(
     [property: JsonPropertyName("answered")] bool Answered,
@@ -609,5 +631,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogRow))]
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]
+[JsonSerializable(typeof(DebugDoctorReply))]
+[JsonSerializable(typeof(DebugPerfReply))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
 #endif
