@@ -52,9 +52,20 @@ internal static class Program
         try
         {
             var keepData = args.Contains("--keep-data", StringComparer.OrdinalIgnoreCase);
-            var result = uninstall ? Uninstall(silent, relaunched, keepData) : Install(silent);
 
-            if (!silent && !relaunched)
+            // A running executable cannot delete itself, so an uninstall started from the copy in
+            // the installation folder re-runs from a temporary one. The process that hands over
+            // must then exit AT ONCE: while it lives, its own image stays mapped, and the copy
+            // trying to delete it is refused by Windows. Waiting for a keypress here is what made
+            // an uninstall started from the installed-apps list fail on its own executable.
+            if (uninstall && !relaunched && RelaunchFromTemp(silent, keepData))
+            {
+                return 0;
+            }
+
+            var result = uninstall ? Uninstall(silent, keepData) : Install(silent);
+
+            if (!silent)
             {
                 WaitForAcknowledgement();
             }
@@ -88,13 +99,15 @@ internal static class Program
 
         Report(silent, $"Installing {ProductIdentity.FriendlyName} to {target}");
 
-        if (IsHostRunning(out var hostPid))
+        if (!WaitForHostToClose(silent))
         {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Excel is running (process {hostPid}).");
-            Console.Error.WriteLine("Close it and run this installer again. The editor holds the add-in open while it runs.");
             return 3;
         }
+
+        // An install replaces what is there rather than merging with it. Writing each payload file
+        // over the top leaves behind anything an older version shipped that this one does not, and
+        // a folder that is part one version and part another is a support problem nobody can see.
+        ClearPreviousInstall(target, silent);
 
         Directory.CreateDirectory(target);
 
@@ -140,43 +153,24 @@ internal static class Program
         return 0;
     }
 
-    private static int Uninstall(bool silent, bool relaunched, bool keepData)
+    private static int Uninstall(bool silent, bool keepData)
     {
         var target = DefaultInstallFolder();
-        var self = Environment.ProcessPath;
-
-        // A running executable cannot delete itself. When the uninstaller is the copy living in the
-        // installation folder, it re-runs from a temporary location so the folder can be removed
-        // whole rather than left behind with one file in it.
-        if (!relaunched && self is not null && self.StartsWith(target, StringComparison.OrdinalIgnoreCase))
-        {
-            var staged = Path.Combine(Path.GetTempPath(), $"xlide-setup-{Environment.ProcessId}.exe");
-            File.Copy(self, staged, overwrite: true);
-
-            var arguments = "--uninstall --relaunched"
-                + (silent ? " --silent" : string.Empty)
-                + (keepData ? " --keep-data" : string.Empty);
-            Process.Start(new ProcessStartInfo(staged, arguments) { UseShellExecute = false });
-            return 0;
-        }
 
         Report(silent, $"Removing {ProductIdentity.FriendlyName}");
 
-        if (IsHostRunning(out var hostPid))
+        if (!WaitForHostToClose(silent))
         {
-            Console.Error.WriteLine();
-            Console.Error.WriteLine($"Excel is running (process {hostPid}). Close it and try again.");
             return 3;
         }
 
         RemoveRegistration();
-        RemoveOverlaySupplement(silent);
-        DeleteKeyIfPresent(UninstallKey);
 
-        if (Directory.Exists(target))
-        {
-            TryDeleteDirectory(target);
-        }
+        // Symmetric with install: neither asks for elevation, and both act on the machine hive only
+        // when the run already has the rights. What we planted, we remove under the same condition.
+        RemoveOverlaySupplement(silent);
+
+        var removed = !Directory.Exists(target) || TryDeleteDirectory(target);
 
         // Logs and the browser surface's cache are ours, not the user's work. Their VBA lives in
         // their workbooks and is never touched by any of this, so removing the data folder leaves
@@ -190,6 +184,18 @@ internal static class Program
             TryDeleteDirectory(data);
         }
 
+        // The installed-apps entry goes LAST, and only if the files really went. An entry removed
+        // ahead of a failed deletion leaves a product that is installed, loaded by the editor, and
+        // impossible to remove through Windows, which is a worse state than not having tried.
+        if (!removed)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"Files remain under {target}, so {ProductIdentity.FriendlyName} is still listed in Settings.");
+            Console.Error.WriteLine("Close anything using them and run the uninstall again.");
+            return 4;
+        }
+
+        DeleteKeyIfPresent(UninstallKey);
         Report(silent, "Removed.");
         return 0;
     }
@@ -417,28 +423,185 @@ internal static class Program
         Registry.CurrentUser.DeleteSubKeyTree(path, throwOnMissingSubKey: false);
     }
 
-    private static void TryDeleteDirectory(string path)
+    /// <summary>
+    /// Removes a directory and everything under it, reporting whether it actually went. Windows
+    /// refuses with UnauthorizedAccessException, not IOException, when a file is a mapped
+    /// executable image, and catching only the latter is what turned a locked file into an
+    /// unhandled failure at the top of the program.
+    /// </summary>
+    private static bool TryDeleteDirectory(string path)
     {
-        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+        if (!Directory.Exists(path))
         {
+            return true;
+        }
+
+        // The process that handed this uninstall over may still be exiting, and its image stays
+        // mapped until it does. A few short retries cover the handover rather than reporting a
+        // failure that would have resolved itself in a fraction of a second.
+        for (var attempt = 0; ; attempt++)
+        {
+            foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Reported by the directory removal below rather than one line per file.
+                }
+            }
+
             try
             {
-                File.Delete(file);
+                Directory.Delete(path, recursive: true);
+                return true;
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The staged uninstaller may still be mapped. Leave it; the folder removal below
-                // reports what remains rather than pretending the removal was complete.
+                if (attempt >= 20)
+                {
+                    Console.Error.WriteLine($"Some files under {path} are in use and remain.");
+                    return false;
+                }
+
+                Thread.Sleep(250);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands an uninstall started from inside the installation folder to a copy in the temporary
+    /// folder, because a running executable cannot delete itself. Returns true when the work has
+    /// been handed over, in which case this process must exit at once: while it lives its own
+    /// image stays mapped, and the copy trying to remove it is refused.
+    /// </summary>
+    private static bool RelaunchFromTemp(bool silent, bool keepData)
+    {
+        var target = DefaultInstallFolder();
+        var self = Environment.ProcessPath;
+
+        if (self is null || !self.StartsWith(target, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var staged = Path.Combine(Path.GetTempPath(), $"xlide-setup-{Environment.ProcessId}.exe");
+        File.Copy(self, staged, overwrite: true);
+
+        var arguments = "--uninstall --relaunched"
+            + (silent ? " --silent" : string.Empty)
+            + (keepData ? " --keep-data" : string.Empty);
+
+        Process.Start(new ProcessStartInfo(staged, arguments) { UseShellExecute = false });
+        return true;
+    }
+
+    /// <summary>
+    /// Waits while the editor holds the add-in open, offering to try again instead of making
+    /// someone start over. Returns false when they gave up, or when there is nobody to ask.
+    /// </summary>
+    private static bool WaitForHostToClose(bool silent)
+    {
+        if (!IsHostRunning(out var processId))
+        {
+            return true;
+        }
+
+        if (silent || Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine();
+            Console.Error.WriteLine($"Excel is running (process {processId}) and holds the add-in open. Close it and run this again.");
+            return false;
+        }
+
+        while (IsHostRunning(out processId))
+        {
+            Console.WriteLine();
+            Console.WriteLine($"Excel is running (process {processId}) and holds the add-in open.");
+            Console.Write("Close Excel, then press Enter to try again, or Esc to cancel. ");
+
+            ConsoleKeyInfo key;
+            try
+            {
+                key = Console.ReadKey(intercept: true);
+            }
+            catch (InvalidOperationException)
+            {
+                Console.WriteLine();
+                return false;
+            }
+
+            Console.WriteLine();
+
+            if (key.Key == ConsoleKey.Escape)
+            {
+                Console.WriteLine("Cancelled. Nothing was changed.");
+                return false;
             }
         }
 
-        try
+        return true;
+    }
+
+    /// <summary>
+    /// Empties a previous installation so that what ends up on disk is this version, not this
+    /// version merged with whatever an older one left behind. The running executable is skipped:
+    /// an install started from the installed copy cannot delete itself, and that file is replaced
+    /// by a fresh copy at the end of the install anyway.
+    /// </summary>
+    private static void ClearPreviousInstall(string target, bool silent)
+    {
+        if (!Directory.Exists(target))
         {
-            Directory.Delete(path, recursive: true);
+            return;
         }
-        catch (IOException)
+
+        var self = Environment.ProcessPath;
+        var removed = 0;
+
+        foreach (var file in Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories))
         {
-            Console.WriteLine($"Some files under {path} were in use and remain. They can be deleted manually.");
+            if (self is not null && string.Equals(file, self, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                File.Delete(file);
+                removed++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Refusing here beats installing over the top of it. A half-replaced folder is an
+                // installation nobody can reason about, including us when it is reported.
+                throw new InvalidOperationException(
+                    $"{file} is in use and could not be replaced. Close whatever is using it and run this again.", ex);
+            }
+        }
+
+        foreach (var directory in Directory
+                     .EnumerateDirectories(target, "*", SearchOption.AllDirectories)
+                     .OrderByDescending(d => d.Length))
+        {
+            try
+            {
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    Directory.Delete(directory);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // An empty folder left behind changes nothing about what runs.
+            }
+        }
+
+        if (removed > 0)
+        {
+            Report(silent, $"  cleared {removed} file(s) from the previous installation");
         }
     }
 
