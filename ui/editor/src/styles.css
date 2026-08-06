@@ -917,16 +917,25 @@ body.live-resize .minimap {
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
-/* Only the code commands scroll. Anything end-aligned is a sibling of this, so it keeps its
-   place at the right edge however narrow the window gets. */
-.toolbar-scroll {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+/* Nothing scrolls and nothing is clipped. What does not fit moves into the overflow menu, which
+   is the only control here that is allowed to stay when the strip runs out of room. */
+#toolbar {
+  overflow: hidden;
+}
+
+/* A class that sets display outranks the hidden attribute's own rule, so hiding one of these does
+   nothing without saying so here. */
+.toolbar-button[hidden],
+.toolbar-divider[hidden] {
+  display: none;
+}
+
+.toolbar-overflow {
+  margin-left: auto;
+}
+
+#toolbar-overflow-menu .menu-item {
+  gap: 8px;
 }
 
 .toolbar-button {

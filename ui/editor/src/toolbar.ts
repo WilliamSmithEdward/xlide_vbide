@@ -24,8 +24,6 @@ export interface ToolbarCommand {
   separatorBefore?: boolean;
   /** Only means something in break mode; drawn disabled until the host says stopped. */
   needsBreak?: boolean;
-  /** Pushed to the far right of the strip, away from the commands that act on the code. */
-  alignEnd?: boolean;
 }
 
 /**
@@ -82,10 +80,7 @@ export const COMMANDS: ToolbarCommand[] = [
 
   { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
-
-  // Alone at the far end. Help is not a thing you do to the code, and putting it beside Compile
-  // invites the press nobody meant.
-  { id: "openHelp", target: "editor", icon: "question", label: "About xlide", alignEnd: true },
+  { id: "openHelp", target: "editor", icon: "question", label: "About xlide" },
 ];
 
 /**
@@ -104,14 +99,8 @@ export function buildToolbar(
 ): void {
   root.replaceChildren();
 
-  // The commands that act on the code scroll when the window is too narrow for them. The
-  // end-aligned ones sit outside that scroller so they stay put: a toolbar that hides its
-  // scrollbar and then scrolls Help out of sight has no way back to it.
-  const scroller = document.createElement("div");
-  scroller.className = "toolbar-scroll";
-  root.appendChild(scroller);
-
   const missing: string[] = [];
+  const entries: { command: ToolbarCommand; button: HTMLButtonElement; divider: HTMLElement | null }[] = [];
 
   for (const command of COMMANDS) {
     if (command.target === "editor" && !available(command)) {
@@ -119,14 +108,13 @@ export function buildToolbar(
       continue;
     }
 
-    const parent = command.alignEnd ? root : scroller;
-
+    let divider: HTMLElement | null = null;
     if (command.separatorBefore) {
-      const divider = document.createElement("span");
+      divider = document.createElement("span");
       divider.className = "toolbar-divider";
       // Decorative: the grouping is already conveyed by the labels.
       divider.setAttribute("aria-hidden", "true");
-      parent.appendChild(divider);
+      root.appendChild(divider);
     }
 
     const button = document.createElement("button");
@@ -149,10 +137,154 @@ export function buildToolbar(
 
     button.appendChild(icon);
     button.addEventListener("click", () => run(command));
-    parent.appendChild(button);
+    root.appendChild(button);
+    entries.push({ command, button, divider });
   }
+
+  // The overflow control, last and only drawn when it is needed. The pane a developer works in is
+  // often half a screen wide, and a strip that simply clips its right-hand end takes commands away
+  // with nothing to say they existed. This keeps them one press away instead.
+  const overflow = document.createElement("button");
+  overflow.type = "button";
+  overflow.className = "toolbar-button toolbar-overflow";
+  overflow.title = "More commands";
+  overflow.setAttribute("aria-label", "More commands");
+  overflow.setAttribute("aria-haspopup", "true");
+  overflow.hidden = true;
+  overflow.innerHTML = '<span class="codicon codicon-more" aria-hidden="true"></span>';
+  overflow.addEventListener("click", () => openOverflowMenu(overflow, hidden(), run));
+  root.appendChild(overflow);
+
+  function hidden(): ToolbarCommand[] {
+    return entries.filter((entry) => entry.button.hidden).map((entry) => entry.command);
+  }
+
+  const relayout = (): void => {
+    // Measured from a clean slate every time, because the answer when the pane grows is not
+    // derivable from the answer when it shrank.
+    for (const entry of entries) {
+      entry.button.hidden = false;
+      if (entry.divider) entry.divider.hidden = false;
+    }
+    overflow.hidden = true;
+
+    if (root.scrollWidth <= root.clientWidth) {
+      return;
+    }
+
+    overflow.hidden = false;
+
+    // Drop from the right, which keeps the commands in the order they were designed in and takes
+    // the least used away first.
+    for (let index = entries.length - 1; index >= 0; index--) {
+      if (root.scrollWidth <= root.clientWidth) break;
+      const entry = entries[index]!;
+      entry.button.hidden = true;
+      if (entry.divider) entry.divider.hidden = true;
+    }
+
+    // A divider whose whole group went with it would otherwise be left leading the strip.
+    for (const entry of entries) {
+      if (!entry.divider) continue;
+      entry.divider.hidden = entry.button.hidden;
+    }
+  };
+
+  relayout();
+
+  // The pane is resized by dragging a splitter, not only by resizing the window, so the element
+  // itself is what has to be watched.
+  observers.get(root)?.disconnect();
+  const observer = new ResizeObserver(() => relayout());
+  observer.observe(root);
+  observers.set(root, observer);
 
   if (missing.length > 0) {
     console.warn(`[xlide] toolbar commands not available in this build: ${missing.join(", ")}`);
   }
+}
+
+/** One observer per toolbar, replaced whenever it is rebuilt, so rebuilds do not accumulate them. */
+const observers = new WeakMap<HTMLElement, ResizeObserver>();
+
+/**
+ * The commands that did not fit, as a menu under the overflow button. Built from the live buttons
+ * rather than from the command list, so a command the host has greyed out for break mode is greyed
+ * out here too rather than offering a press that does nothing.
+ */
+function openOverflowMenu(
+  anchor: HTMLElement,
+  commands: ToolbarCommand[],
+  run: (command: ToolbarCommand) => void,
+): void {
+  const existing = document.getElementById("toolbar-overflow-menu");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const menu = document.createElement("div");
+  menu.id = "toolbar-overflow-menu";
+  // The surface's own dropdown chrome, so this is the menu the developer already knows.
+  menu.className = "menu-dropdown";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "More commands");
+
+  const dismiss = (): void => {
+    menu.remove();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+
+  function onPointerDown(event: PointerEvent): void {
+    if (!menu.contains(event.target as Node) && !anchor.contains(event.target as Node)) {
+      dismiss();
+    }
+  }
+
+  function onKey(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+    }
+  }
+
+  for (const command of commands) {
+    const source = document.querySelector<HTMLButtonElement>(`#toolbar [data-command="${command.id}"]`);
+
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "menu-item" + (source?.disabled ? " disabled" : "");
+    item.setAttribute("role", "menuitem");
+    item.disabled = source?.disabled ?? false;
+
+    const icon = document.createElement("span");
+    icon.className = `codicon codicon-${command.icon}`;
+    icon.setAttribute("aria-hidden", "true");
+
+    const caption = document.createElement("span");
+    caption.className = "menu-caption";
+    caption.textContent = command.label;
+
+    item.append(icon, caption);
+    item.addEventListener("click", () => {
+      dismiss();
+      run(command);
+    });
+
+    menu.appendChild(item);
+  }
+
+  document.body.appendChild(menu);
+
+  // Under its button, pulled back on-screen when the button sits near the right edge.
+  const box = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  menu.style.left = `${Math.max(4, Math.min(box.left, window.innerWidth - width - 4))}px`;
+  menu.style.top = `${box.bottom + 2}px`;
+
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKey, true);
+  menu.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
 }
