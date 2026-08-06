@@ -733,6 +733,17 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetChromeMessage));
     }
 
+    /// <summary>
+    /// Tells the surface where this library is loaded from, so its About dialog can say whether it
+    /// is the installed build or one published straight out of the repository.
+    /// </summary>
+    public void ShowInstallPath(string? path)
+    {
+        Send("setInstallPath", JsonSerializer.Serialize(
+            new SetInstallPathMessage("setInstallPath", path),
+            EditorMessageContext.Default.SetInstallPathMessage));
+    }
+
     /// <summary>Replaces the properties panel's contents with the selected component's properties.</summary>
     public void ShowProperties(string component, string kind, SurfacePropertyEntry[] properties)
     {

@@ -291,6 +291,15 @@ public sealed record SetChromeMessage(
     [property: JsonPropertyName("menuBar")] bool MenuBar);
 
 /// <summary>
+/// Where the add-in is loaded from, for the surface's About dialog. Only the host can answer it:
+/// the page has no filesystem, and the question behind it is always the same one, which is whether
+/// the build being looked at is the installed one or a development publish.
+/// </summary>
+public sealed record SetInstallPathMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("path")] string? Path);
+
+/// <summary>
 /// One property of the selected component, rendered for display. Writable says whether an edit
 /// will be attempted, not promised: the editor can still refuse one, and the refusal is reported.
 /// Boolean marks a value that offers True and False rather than free text.
@@ -450,6 +459,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetBreakpointsMessage))]
 [JsonSerializable(typeof(SetMenuMessage))]
 [JsonSerializable(typeof(SetChromeMessage))]
+[JsonSerializable(typeof(SetInstallPathMessage))]
 [JsonSerializable(typeof(SurfaceMenuItem))]
 [JsonSerializable(typeof(SetPropertiesMessage))]
 [JsonSerializable(typeof(SurfacePropertyEntry))]

@@ -24,6 +24,8 @@ export interface ToolbarCommand {
   separatorBefore?: boolean;
   /** Only means something in break mode; drawn disabled until the host says stopped. */
   needsBreak?: boolean;
+  /** Pushed to the far right of the strip, away from the commands that act on the code. */
+  alignEnd?: boolean;
 }
 
 /**
@@ -80,6 +82,10 @@ export const COMMANDS: ToolbarCommand[] = [
 
   { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
+
+  // Alone at the far end. Help is not a thing you do to the code, and putting it beside Compile
+  // invites the press nobody meant.
+  { id: "openHelp", target: "editor", icon: "question", label: "About xlide", alignEnd: true },
 ];
 
 /**
@@ -98,6 +104,13 @@ export function buildToolbar(
 ): void {
   root.replaceChildren();
 
+  // The commands that act on the code scroll when the window is too narrow for them. The
+  // end-aligned ones sit outside that scroller so they stay put: a toolbar that hides its
+  // scrollbar and then scrolls Help out of sight has no way back to it.
+  const scroller = document.createElement("div");
+  scroller.className = "toolbar-scroll";
+  root.appendChild(scroller);
+
   const missing: string[] = [];
 
   for (const command of COMMANDS) {
@@ -106,12 +119,14 @@ export function buildToolbar(
       continue;
     }
 
+    const parent = command.alignEnd ? root : scroller;
+
     if (command.separatorBefore) {
       const divider = document.createElement("span");
       divider.className = "toolbar-divider";
       // Decorative: the grouping is already conveyed by the labels.
       divider.setAttribute("aria-hidden", "true");
-      root.appendChild(divider);
+      parent.appendChild(divider);
     }
 
     const button = document.createElement("button");
@@ -134,7 +149,7 @@ export function buildToolbar(
 
     button.appendChild(icon);
     button.addEventListener("click", () => run(command));
-    root.appendChild(button);
+    parent.appendChild(button);
   }
 
   if (missing.length > 0) {

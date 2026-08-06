@@ -45,6 +45,7 @@ import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
+import { openHelpDialog } from "./helpdialog.js";
 import { Bookmarks } from "./bookmarks.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
@@ -55,6 +56,10 @@ import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 
 // Stamped by the build; reported to the host so the log names the running bundle.
 declare const __XLIDE_BUILD__: string;
+
+// Read out of Directory.Build.props at build time, so the surface and the add-in cannot disagree
+// about which release this is.
+declare const __XLIDE_VERSION__: string;
 
 // The worker is a sibling of index.html in dist, addressed relative to the document base so a
 // virtual host mapping, a static server and a subdirectory deployment all resolve the same.
@@ -72,6 +77,13 @@ function boot(): void {
   const emptyView = document.getElementById("empty-view");
   if (!editorArea || !emptyView) {
     throw new Error("missing #editor-area or #empty-view");
+  }
+
+  // The wordmark's version, filled in here rather than baked into the skeleton, so the number
+  // lives in exactly one place in the bundle.
+  const brandVersion = document.getElementById("brand-version");
+  if (brandVersion) {
+    brandVersion.textContent = __XLIDE_VERSION__;
   }
 
   // A page exception is invisible without a DevTools client attached, which is exactly the
@@ -264,6 +276,11 @@ function boot(): void {
       // The Panes menu: its own dropdown under its own toolbar button, beside settings
       // (developer, 2026-08-06). Showing and hiding a pane is done while working, not
       // visited once like a preference.
+      if (command.id === "openHelp") {
+        openHelpDialog(() => workspace.activeEditor().focus());
+        return;
+      }
+
       if (command.id === "openPanes") {
         const button = document.querySelector<HTMLElement>('#toolbar [data-command="openPanes"]');
         if (button && shell) {
@@ -279,7 +296,7 @@ function boot(): void {
     // and the Panes menu are the page's own and always exist.
     commandAvailable: (command) =>
       command.id === "undo" || command.id === "redo"
-      || command.id === "openSettings" || command.id === "openPanes"
+      || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),

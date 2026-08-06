@@ -1,6 +1,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
+import { setInstallPath } from "./helpdialog.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { SearchWidget } from "./searchwidget.js";
@@ -67,6 +68,7 @@ export type HostMessage =
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
+  | { type: "setInstallPath"; path: string | null }
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
   | { type: "completionResult"; id: number; items: HostCompletionItem[] }
   | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
@@ -811,6 +813,9 @@ export class EditorBridge {
         return;
       case "setChrome":
         this.shell?.setMenuBarVisible(message.menuBar);
+        return;
+      case "setInstallPath":
+        setInstallPath(message.path);
         return;
       case "setProperties":
         this.shell?.setProperties(message.component, message.kind, message.properties);

@@ -49,3 +49,4 @@ tools/harness/fixtures/*.xlsx
 Thumbs.db
 desktop.ini
 .DS_Store
+ui/editor/.build-number

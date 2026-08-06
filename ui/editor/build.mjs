@@ -6,11 +6,39 @@ import { build } from "esbuild";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { access, copyFile, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 
 const require = createRequire(import.meta.url);
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(root, "dist");
+
+// The product version, read from where the C# build reads it. The page shows it in the corner and
+// in its help dialog, and a second copy of the number in a JSON file somewhere is a second thing to
+// forget at release time.
+const VERSION = (() => {
+  const props = readFileSync(path.resolve(root, "../../Directory.Build.props"), "utf8");
+  const match = props.match(/<Version>([^<]+)<\/Version>/);
+  if (!match) throw new Error("No <Version> in Directory.Build.props, so the page cannot say which build it is.");
+  return match[1].trim();
+})();
+
+// A number that goes up by one every build, so "which build are you on" has a one-word answer
+// rather than a timestamp to compare digit by digit. Local to the machine and not in source
+// control: it counts what this machine has built, which is exactly the question being asked
+// during a dev session.
+const BUILD_NUMBER = (() => {
+  const file = path.join(root, ".build-number");
+  let previous = 0;
+  try {
+    previous = Number.parseInt(readFileSync(file, "utf8").trim(), 10) || 0;
+  } catch {
+    // First build on this machine.
+  }
+  const next = previous + 1;
+  writeFileSync(file, `${next}\n`);
+  return next;
+})();
 
 const INDEX_HTML = `<!doctype html>
 <html lang="en">
@@ -26,6 +54,10 @@ const INDEX_HTML = `<!doctype html>
 </head>
 <body>
 <div id="shell">
+  <!-- The wordmark sits over the menu bar's empty right end rather than inside it, because the
+       menu bar replaces its own children whenever it rebuilds. It never takes the pointer, so a
+       menu opened beneath it still behaves as though it were not there. -->
+  <div id="brand" aria-hidden="true"><span id="brand-name">XLIDE</span><span id="brand-version"></span></div>
   <div id="menubar" role="menubar" aria-label="Menus"></div>
   <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
   <!-- The four dock sections around the editor. Each holds a split tree of tabbed pane
@@ -127,7 +159,11 @@ async function main() {
     bundle: true,
     // Stamped into the bundle and reported in the ready message, so the host log always proves
     // WHICH build the page is running: a cached stale bundle is otherwise invisible.
-    define: { __XLIDE_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 19)) },
+    define: {
+      __XLIDE_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 19)),
+      __XLIDE_VERSION__: JSON.stringify(VERSION),
+      __XLIDE_BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
+    },
     target: ["chrome120"],
     platform: "browser",
     minify: true,
@@ -172,6 +208,7 @@ async function main() {
   }
 
   const width = Math.max(...rows.map((row) => row.name.length));
+  console.log(`xlide ${VERSION}, build ${BUILD_NUMBER}`);
   console.log("dist:");
   for (const row of rows) {
     console.log(`  ${row.name.padEnd(width)}  ${String(row.bytes).padStart(9)} bytes`);

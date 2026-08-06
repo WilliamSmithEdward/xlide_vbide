@@ -784,6 +784,36 @@ body.live-resize .minimap {
   display: none;
 }
 
+/* The wordmark, over the menu bar's empty right end. Out of the grid's flow, so it does not take
+   a row; out of the pointer's way, so a menu that opens under it is unaffected. Quiet on purpose:
+   it should be legible when looked for and invisible when working. */
+
+#brand {
+  position: absolute;
+  top: 0;
+  right: 10px;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+#brand-name {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  opacity: 0.42;
+}
+
+#brand-version {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.3;
+}
+
 .menu-top {
   border: 0;
   background: transparent;
@@ -883,10 +913,20 @@ body.live-resize .minimap {
   align-items: center;
   gap: 2px;
   padding: 3px 6px;
-  overflow-x: auto;
-  scrollbar-width: none;
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+/* Only the code commands scroll. Anything end-aligned is a sibling of this, so it keeps its
+   place at the right edge however narrow the window gets. */
+.toolbar-scroll {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .toolbar-button {
@@ -925,6 +965,153 @@ body.live-resize .minimap {
   height: 16px;
   margin: 0 4px;
   background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+}
+
+/* The About dialog. Same card as settings, so the surface has one kind of modal rather than a
+   collection of them. */
+
+#help-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 90;
+}
+
+#help-card {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  padding-bottom: 4px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+#help-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+#help-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+#help-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+#help-version {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+#help-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+#help-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.help-blurb {
+  margin: 0;
+  padding: 0 14px 12px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+.help-facts,
+.help-keys {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0 14px 12px;
+}
+
+.help-facts dt,
+.help-keys dt {
+  opacity: 0.6;
+}
+
+.help-facts dd,
+.help-keys dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.help-section {
+  padding: 0 14px 6px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.help-keys kbd {
+  display: inline-block;
+  min-width: 78px;
+  padding: 1px 6px;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 3px;
+  background: var(--vscode-keybindingLabel-background, rgba(128, 128, 128, 0.17));
+  font-family: inherit;
+  font-size: 11px;
+  text-align: center;
+}
+
+#help-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.help-repo {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.help-copy {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.help-copy:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.3));
 }
 
 #status {

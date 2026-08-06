@@ -2089,6 +2089,7 @@ internal sealed class AddInSession : IDisposable
             // setModules, 2026-08-06).
             _lastModulesKey = null;
             _lastLanguageFactsKey = null;
+            _editorSurface?.ShowInstallPath(Interop.ShimModule.Directory);
             PublishModules();
             PublishProjects();
             PublishFindingsToSurface();
