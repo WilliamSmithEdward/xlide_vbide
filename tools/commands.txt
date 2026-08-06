@@ -1,74 +1,69 @@
 xlide dev commands
 ==================
 
-Run all of these from the repo root: F:\GitHub\xlide\xlide_vbide
+
+Register the dev build
+
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1"
 
 
-DO THIS ONCE
-------------
-Scripts are blocked on this machine by policy, which is why running one prints "running scripts is
-disabled on this system" and nothing happens. This allows local scripts for your account only:
+Register the Debug build specifically
 
-    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-
-Everything below works as written after that.
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1" -Configuration Debug
 
 
-REGISTER THE DEV BUILD
-----------------------
-Points the editor at the published dev build instead of an installed one.
+Take registration back after testing the installer
 
-    .\tools\Register-DevShim.ps1
-
-It prints the values it read back afterwards. If regedit still shows an empty Addins64, press F5
-in regedit: it caches a branch it has already drawn.
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Restore-DevRegistration.ps1"
 
 
-AFTER TESTING THE INSTALLER
----------------------------
-Uninstalls the product, then registers the dev build again.
+Remove the registration
 
-    .\tools\Restore-DevRegistration.ps1
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -Unregister
 
 
-EVERY DAY
----------
-    .\tools\dev.ps1                     build, test, register, open Excel
-    .\tools\dev.ps1 -Configuration Debug    the same, with the debug api
-    .\tools\dev.ps1 -NoRun              stop after registering
-    .\tools\dev.ps1 -KeepOpen           leave Excel open when it finishes
-    .\tools\dev.ps1 -Unregister         remove the registration
+Build, test, register, open Excel
 
-    .\tools\page.ps1                    rebuild the editor surface and reload it, about a second
-    .\tools\page.ps1 -Watch             the same, on every save
-
-    .\tools\verify.ps1                  the full local check, about twenty seconds
-    .\tools\verify.ps1 -Live            the same, plus probes against an open editor
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1"
 
 
-SHIPPING
---------
-    .\installer\build.ps1               produce artifacts\xlide-setup.exe
-    .\tools\release.ps1 -Tag v0.2.2     gate, build, attach it to a tag that already exists
+Build, test, register, stop before opening Excel
 
-If the installer refuses because there is no engine, build one:
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -NoRun
 
-    cd engine
+
+Rebuild the editor surface and reload it, about a second
+
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1"
+
+
+The same, on every save
+
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1" -Watch
+
+
+The full local check, about twenty seconds
+
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\verify.ps1"
+
+
+Build the installer
+
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\installer\build.ps1"
+
+
+Build the language engine, if the installer says it is missing
+
+    cd F:\GitHub\xlide\xlide_vbide\engine
     npm run package
-    cd ..
 
 
-IF YOU CANNOT CHANGE THE POLICY
--------------------------------
-Any single script runs without changing anything, by naming the interpreter yourself:
+Build the installer and attach it to a release tag
 
-    powershell -ExecutionPolicy Bypass -File .\tools\Register-DevShim.ps1
+    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\release.ps1" -Tag v0.2.2
 
 
-LEFTOVER MACHINE-HIVE KEYS
---------------------------
-Only if the uninstaller says one remains. Needs an elevated prompt. These are duplicates of the
-per-user registration and nothing else reads them.
+Remove a leftover machine-hive key, from an elevated prompt
 
     $o='HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE'
     'Software\Microsoft\VBA\VBE\6.0\Addins64\Xlide.VbeAddIn','Software\Classes\CLSID\{588903F2-4CDE-4607-828A-6870A1F3FDC1}','Software\Classes\Xlide.VbeAddIn' | ForEach-Object { $p=Join-Path $o $_; if (Test-Path $p) { Remove-Item $p -Recurse -Force; "removed $_" } }
