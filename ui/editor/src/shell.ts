@@ -71,20 +71,6 @@ export interface ShellHandlers {
   requestOutline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A line for the host's log, from the corners only the log's data cadence explains. */
   trace(text: string): void;
-  /** The developer ran a search from the Search panel. Returns the request id. */
-  search(query: string, matchCase: boolean, wholeWord: boolean, scope: string): number;
-  /** Replace across the scope; answered like a search, plus the replaced count. */
-  replaceAll(query: string, matchCase: boolean, wholeWord: boolean, scope: string, replacement: string): number;
-}
-
-/** One search hit as the panel draws it. */
-export interface ShellSearchMatch {
-  workbook?: string | null;
-  module: string;
-  line: number;
-  column: number;
-  length: number;
-  preview: string;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -194,16 +180,6 @@ export class Shell {
   private readonly toolbarRoot: HTMLElement;
   private readonly localsContext: HTMLElement;
   private readonly localsTable: HTMLElement;
-  private readonly searchBody: HTMLElement;
-  private readonly searchQuery: HTMLInputElement;
-  private readonly searchReplace: HTMLInputElement;
-  private readonly searchCase: HTMLButtonElement;
-  private readonly searchWord: HTMLButtonElement;
-  private readonly searchScope: HTMLSelectElement;
-  private readonly searchResults: HTMLElement;
-
-  /** The search whose answer the panel is waiting for; older answers are ignored. */
-  private pendingSearchId = 0;
 
   /** Lines entered in the Immediate panel, newest last, walked with the arrow keys. */
   private readonly history: string[] = [];
@@ -328,14 +304,6 @@ export class Shell {
     this.watchTable = root.querySelector("#watch-table") as HTMLElement;
     this.localsContext = root.querySelector("#locals-context") as HTMLElement;
     this.localsTable = root.querySelector("#locals-table") as HTMLElement;
-    this.searchBody = root.querySelector("#search") as HTMLElement;
-    this.searchQuery = root.querySelector("#search-query") as HTMLInputElement;
-    this.searchReplace = root.querySelector("#search-replace") as HTMLInputElement;
-    this.searchCase = root.querySelector("#search-case") as HTMLButtonElement;
-    this.searchWord = root.querySelector("#search-word") as HTMLButtonElement;
-    this.searchScope = root.querySelector("#search-scope") as HTMLSelectElement;
-    this.searchResults = root.querySelector("#search-results") as HTMLElement;
-    this.installSearch();
 
     this.installPanelTabs();
     this.installImmediate();
@@ -898,113 +866,6 @@ export class Shell {
     }
   }
 
-  private installSearch(): void {
-    const toggle = (button: HTMLButtonElement) => {
-      button.addEventListener("click", () => {
-        button.setAttribute("aria-pressed", String(button.getAttribute("aria-pressed") !== "true"));
-      });
-    };
-    toggle(this.searchCase);
-    toggle(this.searchWord);
-
-    const run = (replace: boolean) => {
-      const query = this.searchQuery.value;
-      if (query.length === 0) {
-        return;
-      }
-
-      const matchCase = this.searchCase.getAttribute("aria-pressed") === "true";
-      const wholeWord = this.searchWord.getAttribute("aria-pressed") === "true";
-      const scope = this.searchScope.value;
-
-      this.searchResults.replaceChildren(this.searchNote("Searching..."));
-      this.pendingSearchId = replace
-        ? this.handlers.replaceAll(query, matchCase, wholeWord, scope, this.searchReplace.value)
-        : this.handlers.search(query, matchCase, wholeWord, scope);
-    };
-
-    (this.searchBody.querySelector("#search-run") as HTMLButtonElement)
-      .addEventListener("click", () => run(false));
-    (this.searchBody.querySelector("#search-replace-run") as HTMLButtonElement)
-      .addEventListener("click", () => run(true));
-    this.searchQuery.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        run(false);
-      }
-    });
-  }
-
-  private searchNote(text: string): HTMLElement {
-    const note = document.createElement("div");
-    note.className = "search-note";
-    note.textContent = text;
-    return note;
-  }
-
-  /** Renders a search's answer; an answer to a superseded search is ignored. */
-  showSearchResults(id: number, matches: ShellSearchMatch[], truncated: boolean, replaced: number): void {
-    // Ids are monotonic, so "not older than what we asked for last" is the acceptance test.
-    // Equality was a race: a transport that answers synchronously — the demo does — delivered
-    // the result before the id assignment landed, and the panel ignored its own answer.
-    if (id < this.pendingSearchId) {
-      return;
-    }
-
-    this.pendingSearchId = id;
-
-    this.searchResults.replaceChildren();
-
-    if (replaced > 0) {
-      this.searchResults.appendChild(this.searchNote(
-        `${replaced} occurrence${replaced === 1 ? "" : "s"} replaced.`));
-    }
-
-    if (matches.length === 0) {
-      this.searchResults.appendChild(this.searchNote(replaced > 0 ? "No matches remain." : "No matches."));
-      return;
-    }
-
-    this.searchResults.appendChild(this.searchNote(
-      `${matches.length}${truncated ? "+" : ""} match${matches.length === 1 ? "" : "es"}`
-      + (truncated ? " (narrow the query for the rest)" : "")));
-
-    let groupKey = "";
-    for (const match of matches) {
-      const key = `${(match.workbook ?? "").toLowerCase()}|${match.module.toLowerCase()}`;
-      if (key !== groupKey) {
-        groupKey = key;
-        const header = document.createElement("div");
-        header.className = "search-group";
-        header.textContent = match.workbook ? `${match.module} - ${match.workbook}` : match.module;
-        this.searchResults.appendChild(header);
-      }
-
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "search-row";
-      row.setAttribute("role", "listitem");
-
-      const where = document.createElement("span");
-      where.className = "search-line";
-      where.textContent = String(match.line);
-      row.appendChild(where);
-
-      const preview = document.createElement("span");
-      preview.className = "search-preview";
-      preview.textContent = match.preview.trim();
-      preview.title = match.preview;
-      row.appendChild(preview);
-
-      const target = match;
-      row.addEventListener("click", () => {
-        this.handlers.navigate(target.module, target.line, target.column, true, target.workbook ?? undefined);
-      });
-
-      this.searchResults.appendChild(row);
-    }
-  }
-
   private installPanelTabs(): void {
     this.panelTabs.addEventListener("click", (event) => {
       const tab = (event.target as HTMLElement).closest("[data-panel]") as HTMLElement | null;
@@ -1031,7 +892,6 @@ export class Shell {
     this.immediateBody.hidden = name !== "immediate";
     this.localsBody.hidden = name !== "locals";
     this.watchBody.hidden = name !== "watch";
-    this.searchBody.hidden = name !== "search";
     this.shown = name;
 
     // The host only watches what it has to. Reading the editor's Immediate window costs a call

@@ -2,6 +2,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { ExplorerProject } from "./explorer.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
+import type { SearchWidget } from "./searchwidget.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import { applySettings, type EditorSettings } from "./settings.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
@@ -284,6 +285,10 @@ export class EditorBridge {
   private readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly transport: HostTransport;
   private readonly shell: Shell | null;
+
+  /** The floating search widget; assigned after construction, the same way openSettings is.
+   * Search answers from the host route here — the widget owns the whole search UI. */
+  searchWidget: SearchWidget | null = null;
   private readonly disposables: monaco.IDisposable[] = [];
   private readonly currentLine: monaco.editor.IEditorDecorationsCollection;
   private readonly breakpoints: monaco.editor.IEditorDecorationsCollection;
@@ -761,7 +766,7 @@ export class EditorBridge {
         updateVbaLanguageFacts(message.types, message.procedures);
         return;
       case "searchResult":
-        this.shell?.showSearchResults(message.id, message.matches, message.truncated, message.replaced ?? 0);
+        this.searchWidget?.showSearchResults(message.id, message.matches, message.truncated, message.replaced ?? 0);
         return;
       case "setLocals":
         this.shell?.setLocals(message.stopped ?? false, message.context ?? null, message.rows ?? []);

@@ -50,8 +50,8 @@ export const COMMANDS: ToolbarCommand[] = [
   // defect ("won't appear again", 2026-08-05).
   { id: "callStack", target: "host", icon: "list-tree", label: "Call stack (break mode)", needsBreak: true },
 
-  { id: "actions.find", target: "editor", icon: "search", label: "Find (Ctrl+F)", separatorBefore: true },
-  { id: "editor.action.startFindReplaceAction", target: "editor", icon: "replace", label: "Replace (Ctrl+H)" },
+  { id: "xlide.search.open", target: "editor", icon: "search", label: "Find (Ctrl+F)", separatorBefore: true },
+  { id: "xlide.search.replace", target: "editor", icon: "replace", label: "Replace (Ctrl+H)" },
   { id: "editor.action.quickCommand", target: "editor", icon: "list-flat", label: "Command palette (F1)" },
   { id: "editor.action.gotoLine", target: "editor", icon: "go-to-file", label: "Go to line (Ctrl+G)" },
 

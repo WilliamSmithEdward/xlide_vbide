@@ -1560,27 +1560,37 @@ body.objbrowser-page #objbrowser-card {
 }
 
 /* The Search panel: a control row, then results grouped by module. */
-#search {
+/* The search widget: the one search UI, floating where Monaco's find widget sat. Module
+   scope highlights live in the editor; wider scopes grow a results region below the rows. */
+#search-widget {
+  position: absolute;
+  top: 6px;
+  right: 24px;
+  z-index: 40;
+  min-width: 460px;
+  max-width: min(640px, calc(100% - 48px));
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  flex: 1;
+  gap: 3px;
+  padding: 5px 6px;
+  border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, #252526);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  font-size: 12px;
 }
 
-#search[hidden] {
+#search-widget[hidden] {
   display: none;
 }
 
-#search-controls {
+.search-widget-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-  flex-wrap: wrap;
+  gap: 5px;
 }
 
-#search-controls input[type="text"] {
+.search-widget-row input[type="text"] {
   flex: 1;
   min-width: 120px;
   padding: 3px 8px;
@@ -1592,7 +1602,7 @@ body.objbrowser-page #objbrowser-card {
   font-size: 12px;
 }
 
-#search-controls input[type="text"]:focus {
+.search-widget-row input[type="text"]:focus {
   outline: none;
   border-color: var(--vscode-focusBorder, #0078d4);
 }
@@ -1613,9 +1623,8 @@ body.objbrowser-page #objbrowser-card {
   opacity: 1;
 }
 
-#search-scope,
-#search-run,
-#search-replace-run {
+#search-widget select,
+.search-widget-run {
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -1625,17 +1634,53 @@ body.objbrowser-page #objbrowser-card {
   cursor: pointer;
 }
 
-#search-scope option {
+#search-widget select option {
   background: var(--vscode-menu-background, #252526);
   color: var(--vscode-menu-foreground, #cccccc);
 }
 
-#search-results {
-  flex: 1;
-  min-height: 0;
+.search-widget-counter {
+  min-width: 58px;
+  text-align: right;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.search-widget-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.search-widget-icon:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+.search-widget-icon .codicon {
+  font-size: 14px;
+}
+
+#search-widget-results {
+  max-height: 40vh;
   overflow-y: auto;
-  padding: 4px 0;
+  margin-top: 2px;
+  padding: 2px 0;
+  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
   font-size: 12px;
+}
+
+#search-widget-results[hidden] {
+  display: none;
 }
 
 .search-note {

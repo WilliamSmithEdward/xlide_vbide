@@ -58,7 +58,6 @@ const INDEX_HTML = `<!doctype html>
             <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
             <button class="panel-tab" data-panel="locals" role="tab" aria-selected="false" type="button">Locals</button>
             <button class="panel-tab" data-panel="watch" role="tab" aria-selected="false" type="button">Watch</button>
-            <button class="panel-tab" data-panel="search" role="tab" aria-selected="false" type="button">Search</button>
           </div>
         </div>
         <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
@@ -84,21 +83,6 @@ const INDEX_HTML = `<!doctype html>
           </div>
           <div id="watch" hidden>
             <div id="watch-table" role="table" aria-label="Watch expressions"></div>
-          </div>          <div id="search" hidden>
-            <div id="search-controls">
-              <input id="search-query" type="text" spellcheck="false" autocomplete="off" placeholder="Find" aria-label="Search text">
-              <input id="search-replace" type="text" spellcheck="false" autocomplete="off" placeholder="Replace" aria-label="Replacement text">
-              <button id="search-case" class="search-toggle" type="button" title="Match case" aria-pressed="false">Aa</button>
-              <button id="search-word" class="search-toggle" type="button" title="Whole word" aria-pressed="false">ab</button>
-              <select id="search-scope" aria-label="Search scope">
-                <option value="module">Module</option>
-                <option value="project">Workbook</option>
-                <option value="all">All workbooks</option>
-              </select>
-              <button id="search-run" type="button">Find All</button>
-              <button id="search-replace-run" type="button">Replace All</button>
-            </div>
-            <div id="search-results" role="list" aria-label="Search results"></div>
           </div>
         </div>
       </div>

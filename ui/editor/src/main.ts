@@ -40,6 +40,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
+import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openSettingsDialog } from "./settingsdialog.js";
@@ -150,6 +151,20 @@ function boot(): void {
   // that is assigned immediately below: nothing can call them before then, because both a tab and
   // a finding need the host to have sent something first.
   let bridge: EditorBridge;
+
+  // The one search UI: a floating widget over the editor, in the spot Monaco's find had.
+  // Module scope runs live against the current model; wider scopes ask the host's engine
+  // through the bridge and render their results inside the widget. Built BEFORE the shell,
+  // because the shell's toolbar keeps only the commands that resolve as actions at build
+  // time, and the widget is what registers the search actions.
+  const searchWidget = new SearchWidget(container, editor, {
+    search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
+    replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
+      bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
+    navigate: (module, line, column, selectLine, workbook) =>
+      bridge.navigate(module, line, column, selectLine, workbook),
+  });
+
   const shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     navigate: (module, line, column, selectLine, workbook) =>
@@ -181,12 +196,10 @@ function boot(): void {
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
-    search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
-    replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
-      bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
   });
 
   bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
+  bridge.searchWidget = searchWidget;
 
   // Reachable from a devtools console, which is how the page half of a host defect gets isolated
   // from the transport half.

@@ -10,6 +10,31 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 NIGHT — ONE SEARCH UI (developer: "move the search pane into the search popup
+window, so we're not duplicating UIs").** The bottom panel's Search tab is GONE and so is
+Monaco's find widget from view; `ui/editor/src/searchwidget.ts` is the one search UI — a
+floating widget where Monaco's find sat (absolute in #container, z 40). MODULE scope is
+live: find-as-you-type via model.findMatches, painted with Monaco's own findMatch/
+currentFindMatch decoration classes plus overview-ruler marks, Enter/F3 cycling, "n of m"
+counter; Replace All is ONE executeEdits (one undo step, flows the normal didChange path —
+better than the panel's old host-side ReplaceLine for the shown module). WORKBOOK/ALL
+scopes use the panel's old engine protocol UNCHANGED (search/replaceAll/searchResult ids,
+monotonic acceptance) with the grouped results rendered inside the widget; rows navigate
+the problem-row route. Actions registered by the widget: xlide.search.open (Ctrl+F),
+.replace (Ctrl+H), .workbook (Ctrl+Shift+F), .next/.previous (F3/Shift+F3), Escape claimed
+in-editor behind a context key (xlideSearchOpen). TRAP MET: the toolbar keeps only
+commands that resolve as actions AT BUILD TIME, so the widget must be constructed BEFORE
+the Shell (it registers the actions the toolbar's find/replace buttons name). KNOWN
+RESIDUE: Monaco's own find cannot be unbundled — the multicursor feature imports
+findController.js, which self-registers actions at import — so the F1 palette still lists
+Monaco's Find/Replace entries and they open the native find widget; our keybindings
+outrank Monaco's (verified: Ctrl+F opens ours, Monaco's stays hidden) and Ctrl+D
+multicursor still works. Page-only change; shell.ts lost its whole search section
+(ShellHandlers.search/replaceAll, ShellSearchMatch, showSearchResults), bridge routes
+searchResult to bridge.searchWidget. Demo-verified end to end: tab gone, live count 1 of
+3 → cycle → scope flip clears decorations, engine answers render (2 rows), module Replace
+All 3-in-one-undo, Escape closes and refocuses, toolbar buttons open the widget.**
+
 **2026-08-05 EVENING — LOCALS TRACKING IN BREAK IS FIXED (lesson 33 has the full story).**
 The developer's report: in a live break the Locals panel said "Not stopped. Variables
 appear here in break mode." while the code pane showed the stopped line. Root cause found
