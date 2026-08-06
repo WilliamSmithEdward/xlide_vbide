@@ -1072,6 +1072,11 @@ body.live-resize .minimap {
   display: none;
 }
 
+/* The tables own the columns and each row subgrids into them: columns hug the longest
+   content (header included) up to a cap, clustering left instead of spreading across a
+   wide panel ("columns are too spread out", 2026-08-05). The trailing 1fr track is a
+   spacer so row boxes still span the full width — hover bands and the sticky header
+   would otherwise stop at the last column's edge. */
 #locals-table {
   flex: 1;
   min-height: 0;
@@ -1079,12 +1084,16 @@ body.live-resize .minimap {
   padding: 2px 0 4px;
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
   font-size: 12px;
+  display: grid;
+  grid-template-columns: fit-content(30%) fit-content(45%) fit-content(25%) 1fr;
+  column-gap: 24px;
+  align-content: start;
 }
 
 .locals-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr) minmax(100px, 1fr);
-  gap: 12px;
+  grid-template-columns: subgrid;
   padding: 1px 10px;
 }
 
@@ -1107,13 +1116,36 @@ body.live-resize .minimap {
 }
 
 .locals-empty {
+  grid-column: 1 / -1;
   padding: 6px 10px;
   opacity: 0.55;
 }
 
-/* The Watch panel reuses the Locals rows with a fourth column for the watch's context. */
-.locals-row.watch-row {
-  grid-template-columns: minmax(120px, 1fr) minmax(140px, 2fr) minmax(90px, 1fr) minmax(110px, 1fr);
+/* The Watch panel is the Locals table's twin with a fourth column for the watch's
+   context; its rows subgrid into these tracks the same way, so no per-row column
+   override is needed. */
+#watch {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+#watch[hidden] {
+  display: none;
+}
+
+#watch-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 0 4px;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  display: grid;
+  grid-template-columns: fit-content(25%) fit-content(35%) fit-content(15%) fit-content(25%) 1fr;
+  column-gap: 24px;
+  align-content: start;
 }
 
 /* The Object Browser: a large card over the editor — search, modules, members, detail. */
