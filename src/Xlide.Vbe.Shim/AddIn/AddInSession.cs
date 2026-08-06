@@ -673,6 +673,67 @@ internal sealed class AddInSession : IDisposable
     /// editor with no module yet stays native gray, and the explorer shown here is how the first
     /// module gets opened or inserted at all.
     /// </summary>
+    /// <summary>
+    /// Leaves the empty workspace when the object model says modules are open after all.
+    ///
+    /// The empty view and the tab strip answer to different authorities: the strip is the
+    /// object model's open list, while the shown document waits for the PANE TRACKER to
+    /// follow a pane. The tracker only ever holds the pane windows it can match by caption
+    /// (lesson 28), and when it can match none - every pass "saw 0" while CodePanes held two
+    /// - nothing ever showed a module, so the surface drew tabs above its own "No module is
+    /// open" (the developer, 2026-08-06). The object model is the authority on whether
+    /// anything is open at all, so the empty view defers to it: the active pane's module goes
+    /// up, and the workspace stops calling itself empty.
+    /// </summary>
+    private void AdoptOpenModuleIfEmpty()
+    {
+        if (!_watchingEmpty || _editorSurface is null || _editorSurface.Module is not null)
+        {
+            return;
+        }
+
+        if (ReadOpenModules() is not { Count: > 0 } open)
+        {
+            return;
+        }
+
+        // The active pane names the module the developer would expect to be looking at; with
+        // no active pane the first open one is as good an answer as the editor has.
+        var component = ActiveComponentName() ?? open[0].Name;
+
+        // ReadOpenModules carries the workbook by the DISPLAY name the tab strip shows, and
+        // everything downstream of here addresses projects by ID. Handing the display name
+        // straight on found no component and returned in silence, leaving the very empty view
+        // this method exists to clear (2026-08-06).
+        var display = open.FirstOrDefault(entry =>
+            string.Equals(entry.Name, component, StringComparison.OrdinalIgnoreCase)).Project;
+        var project = ProjectIdFromDisplay(display) ?? ActivePaneOwner(component);
+
+        Log.Info($"editor surface: {open.Count} module(s) are open after all, showing {component}");
+
+        _watchingEmpty = false;
+        ShowModuleInSurface(component, project);
+        PublishModules();
+        UpdatePolling();
+    }
+
+    /// <summary>The active code pane's component name, or null when there is no active pane.</summary>
+    private string? ActiveComponentName()
+    {
+        try
+        {
+            using var active = _editor.GetObject("ActiveCodePane");
+            using var module = active?.GetObject("CodeModule");
+            using var component = module?.GetObject("Parent");
+            return component?.GetString("Name");
+        }
+        catch (Exception ex)
+        {
+            Log.Verbose($"editor surface: no active pane to adopt ({ex.GetType().Name})");
+            return null;
+        }
+    }
+
     private void TryShowEmptyWorkspace()
     {
         if (_editorSurface is not null || _stopped)
@@ -2814,6 +2875,7 @@ internal sealed class AddInSession : IDisposable
         if (_watchingEmpty)
         {
             PublishProjects();
+            AdoptOpenModuleIfEmpty();
         }
 
         _immediateReader?.Poll();
@@ -3659,6 +3721,19 @@ internal sealed class AddInSession : IDisposable
         // tracker's recovery republishes it.
         if (ReadOpenModules() is { } modules)
         {
+            // Closing the LAST pane leaves the surface holding a document nobody can see a
+            // tab for, when no window event reaches the tracker to say so - the mirror of
+            // the empty view that outlived its panes (2026-08-06). The object model is the
+            // authority both ways: an empty open list with a module still shown IS the
+            // empty workspace, and every close route passes through this publish.
+            if (modules.Count == 0 && surface.Module is not null)
+            {
+                Log.Info("editor surface: the last module closed, showing the empty workspace");
+                _watchingEmpty = true;
+                surface.Clear();
+                UpdatePolling();
+            }
+
             // Dirty is a WORKBOOK fact — the editor persists all of a workbook's modules
             // together (probed 2026-08-04: a module edit flips Workbook.Saved false, Save
             // flips it true) — so it is read once per workbook and worn by every tab the
