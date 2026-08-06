@@ -520,6 +520,29 @@ internal sealed class AddInSession : IDisposable
                         DebugJsonContext.Default.DebugModuleReply);
             }
 
+            case "caret"
+                when request.Query.TryGetValue("line", out var caretLineText)
+                    && int.TryParse(caretLineText, out var caretLine) && caretLine >= 1:
+            {
+                // Aiming, not scrolling. Every editor command acts on the caret - the host
+                // syncs it into the native pane first - so a Run or a Step meant for one
+                // procedure has to put the caret inside it, and revealLine cannot: pressing
+                // Run with the caret on line 1 opens the editor's Macros dialog and waits
+                // (2026-08-06). An optional module navigates there first.
+                var caretColumn = request.Query.TryGetValue("column", out var columnText)
+                    && int.TryParse(columnText, out var parsedColumn) ? parsedColumn : 1;
+
+                if (request.Query.TryGetValue("module", out var caretModule) && caretModule.Length > 0)
+                {
+                    request.Query.TryGetValue("project", out var caretProject);
+                    GoTo(caretModule, caretLine, caretColumn, caretProject);
+                }
+
+                _editorSurface?.SetCaret(caretLine, caretColumn);
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+            }
+
             case "placement":
                 RefreshSurfacePlacement();
                 return System.Text.Json.JsonSerializer.Serialize(

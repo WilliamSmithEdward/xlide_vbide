@@ -860,6 +860,19 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.RevealLineMessage));
     }
 
+    /// <summary>Puts the caret on a line and reveals it. See SetCaretMessage for why both.</summary>
+    public void SetCaret(int line, int column)
+    {
+        if (!_loaded || line < 1)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SetCaretMessage("setCaret", line, Math.Max(1, column)),
+            EditorMessageContext.Default.SetCaretMessage));
+    }
+
     /// <summary>
     /// Writes the developer's edits back to the module now, if there are any.
     ///

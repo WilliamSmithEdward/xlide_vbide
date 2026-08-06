@@ -62,6 +62,7 @@ export type HostMessage =
   | { type: "breakpointRefused"; line: number }
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "revealLine"; line: number }
+  | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
@@ -705,6 +706,13 @@ export class EditorBridge {
         this.shell?.confirmClose(message.name, message.project ?? null);
         return;
       case "revealLine":
+        this.editor.revealLineInCenterIfOutsideViewport(message.line);
+        return;
+      case "setCaret":
+        // The caret decides what an editor command acts on, and the host copies it into the
+        // native pane before running one, so this is how anything outside the page aims a
+        // Run or a Step at a particular procedure.
+        this.editor.setPosition({ lineNumber: message.line, column: message.column });
         this.editor.revealLineInCenterIfOutsideViewport(message.line);
         return;
       case "setMenu":

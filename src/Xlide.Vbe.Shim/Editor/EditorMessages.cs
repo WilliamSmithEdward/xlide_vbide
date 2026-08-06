@@ -41,6 +41,17 @@ public sealed record RevealLineMessage(
     [property: JsonPropertyName("line")] int Line);
 
 /// <summary>
+/// Puts the caret somewhere and reveals it. Distinct from revealLine, which only scrolls:
+/// the caret decides what the editor's own commands act on, and the host syncs it into the
+/// native pane before every one of them, so nothing that wants to run a particular procedure
+/// can get there by scrolling alone.
+/// </summary>
+public sealed record SetCaretMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("column")] int Column);
+
+/// <summary>
 /// The modules the editor has open, and which one is showing. Projects runs parallel to
 /// Modules — the workbook each tab belongs to, by the name the tree uses — so the strip can
 /// say WHICH Module1 when two workbooks hold one.
@@ -401,6 +412,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(SetThemeMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]
+[JsonSerializable(typeof(SetCaretMessage))]
 [JsonSerializable(typeof(SetModulesMessage))]
 [JsonSerializable(typeof(SetSettingsMessage))]
 [JsonSerializable(typeof(SetLocalsMessage))]

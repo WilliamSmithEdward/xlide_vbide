@@ -111,11 +111,25 @@ Check 'breakpoint is idempotent with state=on' {
     $first -and $again
 }
 
+Check 'caret lands inside the procedure to be run' {
+    # Run acts on the caret, and the host copies the SURFACE's caret into the native pane
+    # before every command, so scrolling is not aiming: with the caret on line 1 the editor
+    # opens its Macros dialog and waits for a person (2026-08-06). Line 16 is inside RunTotal.
+    (Invoke-RestMethod "$api/caret?module=CleanModule&line=16" -Method Post -TimeoutSec 8).ran
+}
+
 $reachedBreak = $false
 Check 'a run reaches the breakpoint and state says break' {
-    $app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-    $book = Split-Path -Leaf $app.ActiveWorkbook.FullName
-    $app.OnTime([DateTime]::Now.AddSeconds(1), "'$book'!RunTotal")
+    # Through the product's own Run, in process. Never Application.Run from a killable job:
+    # that call BLOCKS inside the break, and killing its caller while Excel is suspended in
+    # it took Excel down (2026-08-06).
+    try {
+        Invoke-RestMethod "$api/command?name=run" -Method Post -TimeoutSec 8 | Out-Null
+    } catch {
+        # A run that reaches a breakpoint does not let the host thread answer until it does;
+        # the timeout is expected, and the state poll below is the real assertion.
+    }
+
     $deadline = (Get-Date).AddSeconds(25)
     do {
         Start-Sleep -Milliseconds 400

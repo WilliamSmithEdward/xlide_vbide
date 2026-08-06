@@ -57,6 +57,7 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `capture` | GET | `window=frame\|palette` | a BMP of the window, through PrintWindow |
 | `module` | POST | `name`, `project`, body = text | writes the module through the session's writer, with the baseline and engine corrections a host rewrite carries |
 | `command` | POST | `name` | runs an editor command by name (`VbeCommands.ForName`) |
+| `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |
 | `immediate` | POST | `text` | schedules an Immediate-window evaluation, fire and forget |
 | `placement` | POST | | forces a placement pass |
@@ -76,11 +77,27 @@ The round trip the debugger milestone needs, and what `Test-DebugApi.ps1` walks:
 
 1. `POST module?name=X` with the code, so the module has something to run.
 2. `POST breakpoint?module=X&line=N&state=on`.
-3. Start the macro (from outside: `Application.OnTime` with a workbook-qualified name; not
-   `Application.Run`, which blocks while the code is stopped).
-4. Poll `state` until `debugMode` reads `break`.
-5. `GET locals` and `GET watches`.
-6. `POST command?name=reset`.
+3. `POST caret?module=X&line=M` with M inside the procedure to run.
+4. `POST command?name=run`. Expect this request to TIME OUT: a run that reaches a
+   breakpoint does not let the host thread answer until it gets there. The timeout is not a
+   failure, and the next step is the real assertion.
+5. Poll `state` until `debugMode` reads `break`.
+6. `GET locals` and `GET watches`.
+7. `POST command?name=reset`.
+
+Step 3 is not optional and not obvious. Every editor command acts on the CARET, and the host
+copies the surface's caret into the native pane before running one, so a Run with the caret
+on line 1 does what the editor always does there: it opens the Macros dialog and waits for a
+person. `revealLine` scrolls without moving the caret and cannot substitute.
+
+Two ways NOT to start the run, both learned the hard way on 2026-08-06:
+
+- `Application.Run` from a process you might kill. The call BLOCKS inside the break, and
+  killing its caller while Excel is suspended in it takes Excel down. It was a background
+  job with a `Remove-Job -Force`; Excel crashed and restarted itself.
+- `Application.OnTime`, which is silently unreliable here: it needs Excel idle and the macro
+  name resolvable at fire time, and a module written seconds earlier did not always qualify.
+  It works often enough to look correct and fail a probe at random.
 
 Locals and watches come from the ghost reader thread's published snapshots, so these routes
 never touch the accessibility layer themselves and cannot disturb a break. That matters: an
@@ -136,6 +153,7 @@ landing, beyond the fix underneath it:
   the session had to maintain.
 - the DevTools port and the discovery file are per process, for several Excels at once.
 - dead instances' discovery files are swept at session start.
-- `breakpoint` gained `state=on|off`.
-- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 18 checks)
+- `breakpoint` gained `state=on|off`, and `caret` is new: without it nothing outside the
+  page can aim a Run at a procedure.
+- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 19 checks)
   ship with it.

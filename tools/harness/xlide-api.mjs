@@ -165,6 +165,10 @@ function clientFor(entry) {
 
     command: (name) => call(`command${query({ name })}`, { method: "POST" }),
     placement: () => call("placement", { method: "POST" }),
+
+    /** Puts the caret where a Run or a Step should act. Scrolling alone will not do it. */
+    caret: (line, { module, column, project } = {}) =>
+      call(`caret${query({ line, module, column, project })}`, { method: "POST" }),
     immediate: (text) => call(`immediate${query({ text })}`, { method: "POST" }),
 
     /** state: "on" | "off" | undefined to toggle. Prefer on/off in scripts. */
