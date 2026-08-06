@@ -27,6 +27,7 @@ internal static class Program
 {
     private const string PayloadPrefix = "payload/";
     private const string CompressedSuffix = ".br";
+    private const string UninstallerFileName = "xlide-setup.exe";
     private const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\xlide";
 
     private static int Main(string[] args)
@@ -119,11 +120,15 @@ internal static class Program
             Report(silent, $"  {name} ({content.Length / 1024.0:N0} KB)");
         }
 
-        // Keep a copy of the installer so the product can be removed without the original download.
-        var uninstaller = Path.Combine(target, "xlide-setup.exe");
+        // The retained uninstaller lives in the data folder, not among the program files, so that
+        // deleting the installation by hand does not strand the entry in Windows' installed-apps
+        // list pointing at an executable that is no longer there. Deleting a program folder is a
+        // thing people do; the entry has to survive it and still be able to clean up what is left.
+        var uninstaller = Path.Combine(DataFolder(), UninstallerFileName);
         var self = Environment.ProcessPath;
         if (self is not null && !string.Equals(self, uninstaller, StringComparison.OrdinalIgnoreCase))
         {
+            Directory.CreateDirectory(DataFolder());
             File.Copy(self, uninstaller, overwrite: true);
         }
 
@@ -170,18 +175,25 @@ internal static class Program
         // when the run already has the rights. What we planted, we remove under the same condition.
         RemoveOverlaySupplement(silent);
 
+        // A folder someone already deleted is a folder that is gone, which is the outcome this step
+        // exists to reach. It is not a failure, and treating it as one would keep the entry in
+        // Windows' list forever with nothing left to remove.
         var removed = !Directory.Exists(target) || TryDeleteDirectory(target);
 
         // Logs and the browser surface's cache are ours, not the user's work. Their VBA lives in
         // their workbooks and is never touched by any of this, so removing the data folder leaves
         // the machine as it was before installation.
-        var data = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            ProductIdentity.DataFolderName);
+        var data = DataFolder();
 
-        if (Directory.Exists(data) && !keepData)
+        if (!keepData)
         {
             TryDeleteDirectory(data);
+        }
+        else
+        {
+            // The retained uninstaller goes even when the logs stay. Keeping data means keeping
+            // what is worth reading, not a copy of the installer for a product that is gone.
+            TryDeleteFile(Path.Combine(data, UninstallerFileName));
         }
 
         // The installed-apps entry goes LAST, and only if the files really went. An entry removed
@@ -204,6 +216,14 @@ internal static class Program
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Programs",
         "xlide");
+
+    /// <summary>
+    /// Logs, the browser surface's cache, and the retained uninstaller. Separate from the program
+    /// files on purpose: this is the copy that has to still be there when the other folder is not.
+    /// </summary>
+    private static string DataFolder() => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        ProductIdentity.DataFolderName);
 
     private static List<(string Name, byte[] Content)> ReadPayload()
     {
@@ -471,6 +491,18 @@ internal static class Program
         }
     }
 
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Nothing here is load-bearing once the registration is gone.
+        }
+    }
+
     /// <summary>
     /// Hands an uninstall started from inside the installation folder to a copy in the temporary
     /// folder, because a running executable cannot delete itself. Returns true when the work has
@@ -479,10 +511,14 @@ internal static class Program
     /// </summary>
     private static bool RelaunchFromTemp(bool silent, bool keepData)
     {
-        var target = DefaultInstallFolder();
         var self = Environment.ProcessPath;
 
-        if (self is null || !self.StartsWith(target, StringComparison.OrdinalIgnoreCase))
+        // Either folder: the program files, and the data folder where the retained uninstaller
+        // lives. Both are removed by an uninstall, so running from inside either one means this
+        // process is standing on something it is about to delete.
+        if (self is null ||
+            !(self.StartsWith(DefaultInstallFolder(), StringComparison.OrdinalIgnoreCase) ||
+              self.StartsWith(DataFolder(), StringComparison.OrdinalIgnoreCase)))
         {
             return false;
         }

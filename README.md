@@ -79,6 +79,13 @@ screen, and the editor remembers the window layout it was last left with. So the
 the VBE after removing xlide, it will be empty. Use the View menu to bring back the ones you want:
 Project Explorer, Properties Window, Immediate Window, Locals Window, and Watch Window.
 
+---
+
+# For developers
+
+Everything below this line is about working on xlide. None of it is needed to use it. If you
+installed from the release, you are done: start Excel and press Alt+F11.
+
 ## Building from source
 
 You need the .NET 10 SDK, the C++ build tools that ahead-of-time compilation links with, and Node
