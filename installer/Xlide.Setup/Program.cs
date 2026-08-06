@@ -525,7 +525,7 @@ internal static class Program
         {
             Console.WriteLine();
             Console.WriteLine($"Excel is open (process {processId}).");
-            Console.Write("Close Excel, then press Enter. Press F to close it now, or Esc to cancel. ");
+            Console.Write("Close Excel, then press Enter. F force closes it (unsaved work is lost). Esc cancels. ");
 
             ConsoleKeyInfo key;
             try
@@ -548,7 +548,7 @@ internal static class Program
 
             if (key.Key == ConsoleKey.F)
             {
-                CloseHost();
+                ForceCloseHost();
             }
         }
 
@@ -556,52 +556,20 @@ internal static class Program
     }
 
     /// <summary>
-    /// Closes Excel on request. It asks first, through the same close every window button sends,
-    /// so Excel can raise its own save prompt and the person can answer it. Only if that is left
-    /// unanswered does it end the process, which is what they asked for and is still worth being
-    /// slow about: unsaved work is theirs, not ours.
+    /// Ends Excel, without asking it to close first. The prompt that offers this says unsaved work
+    /// is lost, so someone pressing F has said what they want; a polite close that then sits behind
+    /// an unanswered save prompt would not be doing it.
     /// </summary>
-    private static void CloseHost()
+    private static void ForceCloseHost()
     {
-        var processes = Process.GetProcessesByName("EXCEL");
-        if (processes.Length == 0)
-        {
-            return;
-        }
-
-        Console.WriteLine("Asking Excel to close. Answer any save prompt it raises.");
-
-        foreach (var process in processes)
-        {
-            try
-            {
-                process.CloseMainWindow();
-            }
-            catch (InvalidOperationException)
-            {
-                // Already gone between the enumeration and here.
-            }
-        }
-
-        var deadline = DateTime.UtcNow.AddSeconds(20);
-        while (DateTime.UtcNow < deadline && IsHostRunning(out _))
-        {
-            Thread.Sleep(250);
-        }
-
-        if (!IsHostRunning(out _))
-        {
-            Console.WriteLine("Excel closed.");
-            DisposeAll(processes);
-            return;
-        }
-
-        Console.WriteLine("Excel did not close, so it is being ended. Unsaved changes in it are lost.");
+        Console.WriteLine("Force closing Excel.");
 
         foreach (var process in Process.GetProcessesByName("EXCEL"))
         {
             try
             {
+                // The tree, because Excel starts helpers, and one surviving child can keep a file
+                // locked after the window everyone was looking at has gone.
                 process.Kill(entireProcessTree: true);
                 process.WaitForExit(10_000);
             }
@@ -613,16 +581,6 @@ internal static class Program
             {
                 process.Dispose();
             }
-        }
-
-        DisposeAll(processes);
-    }
-
-    private static void DisposeAll(Process[] processes)
-    {
-        foreach (var process in processes)
-        {
-            process.Dispose();
         }
     }
 
