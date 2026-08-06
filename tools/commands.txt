@@ -1,69 +1,16 @@
-xlide dev commands
-==================
+SWITCH BACK TO THE DEV BUILD
+============================
+
+1. Close Excel.
+
+2. Paste this into PowerShell:
+
+powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Restore-DevRegistration.ps1"
+
+3. Open Excel and press Alt+F11.
 
 
-Register the dev build
+That one command does everything: it removes the installed product if it is there, points the
+editor back at your dev build, and checks that it worked before it says it worked.
 
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1"
-
-
-Register the Debug build specifically
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1" -Configuration Debug
-
-
-Take registration back after testing the installer
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Restore-DevRegistration.ps1"
-
-
-Remove the registration
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -Unregister
-
-
-Build, test, register, open Excel
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1"
-
-
-Build, test, register, stop before opening Excel
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -NoRun
-
-
-Rebuild the editor surface and reload it, about a second
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1"
-
-
-The same, on every save
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1" -Watch
-
-
-The full local check, about twenty seconds
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\verify.ps1"
-
-
-Build the installer
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\installer\build.ps1"
-
-
-Build the language engine, if the installer says it is missing
-
-    cd F:\GitHub\xlide\xlide_vbide\engine
-    npm run package
-
-
-Build the installer and attach it to a release tag
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\release.ps1" -Tag v0.2.2
-
-
-Remove a leftover machine-hive key, from an elevated prompt
-
-    $o='HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE'
-    'Software\Microsoft\VBA\VBE\6.0\Addins64\Xlide.VbeAddIn','Software\Classes\CLSID\{588903F2-4CDE-4607-828A-6870A1F3FDC1}','Software\Classes\Xlide.VbeAddIn' | ForEach-Object { $p=Join-Path $o $_; if (Test-Path $p) { Remove-Item $p -Recurse -Force; "removed $_" } }
+It works whether or not the installer was ever run.
