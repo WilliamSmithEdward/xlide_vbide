@@ -7,12 +7,12 @@
     "vbaSmartTab"
   ],
   "files": {
-    "analyzer/lexer/keywordTable.ts": "1cc3dc5bde5df7eabe41ab8f69d2d224d77b14c1c81834cabaa5ab52001abef2",
-    "analyzer/lexer/strippedLines.ts": "7da9a60b32805437da5d8159f4a01d004306a395bae9a22059d247ee9ccf3185",
-    "analyzer/lexer/tokenKinds.ts": "0bad76f804c132172f1d510225beccfb704b46c8777997b42ae13a97f797ad1a",
-    "analyzer/lexer/tokenize.ts": "6d04f61720a2265c5183ae8f1c5726337887dddcb88f6f76fdfaa1c2b5150307",
-    "analyzer/lexer/trivia.ts": "e98a5c93b8edd9aedea0d5452c1f299c0233323c496dec29ff8b39569324def1",
-    "vbaSmartEnter.ts": "9773688a338ab89c3642637a74b1b0094881a809910e30c2e02a6abb8fd71085",
+    "analyzer/lexer/keywordTable.ts": "8ad84b78d73c56012d2912d7296817ab22e59a00aec53f5d19a755fd687713ba",
+    "analyzer/lexer/strippedLines.ts": "c5fc6cb2a7f53fd3165f5a5d7ba37ef3cbe841e0a39ab0f7d3fcd307538ff45f",
+    "analyzer/lexer/tokenKinds.ts": "2032c749c1290f2c40e4c7d5882984e092a74e451f0e2dcbc21443fbcee6194e",
+    "analyzer/lexer/tokenize.ts": "fc40e684b1f8e9f9b16083960ecf31204cf0c59623856353c194639dfe725844",
+    "analyzer/lexer/trivia.ts": "6fad65c2a9b540b241ddb430eb2898c834210cf59919811aabaf2eebc13cb6d7",
+    "vbaSmartEnter.ts": "4c5ac885df44efcc26024ad242f110b80c763d44630415b26ff657ecbda010bc",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
     "vbaSourceScan.ts": "7673b0a018cdf9bdd7c375ace071986a66c9842c4887d25520a40914ae8c138d",
     "vbaStructuralDiagnostics.ts": "a6f580e6005ffd2f0ff6ece659443d09c160692565615b2f98806d9a8d700ec6"

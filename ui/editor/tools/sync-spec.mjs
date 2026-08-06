@@ -39,6 +39,15 @@ function fail(message) {
   process.exit(1);
 }
 
+// Line endings are git's business, not ours. The copy is written exactly as the spec repo holds it,
+// but every comparison normalises first: git rewrites line endings on the way in and out of a
+// checkout, so hashing raw bytes would make this check pass or fail on a clone's autocrlf setting
+// rather than on whether the code is the same code. (Nothing in the vendored set spans a line
+// inside a template literal, so normalising cannot change what the bundle does.)
+function read(file) {
+  return fs.readFileSync(file, "utf8").split("\r\n").join("\n");
+}
+
 function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
 }
@@ -131,15 +140,15 @@ if (write) {
   fs.rmSync(vendorRoot, { recursive: true, force: true });
   const manifest = { source: "xlide_vscode", commit: specCommit(), entries, files: {} };
   for (const rel of files) {
-    const text = fs.readFileSync(path.join(specRoot, rel), "utf8");
+    const source = path.join(specRoot, rel);
     const target = path.join(vendorRoot, rel);
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, text);
-    manifest.files[rel] = sha256(text);
+    fs.copyFileSync(source, target);
+    manifest.files[rel] = sha256(read(source));
   }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
 
-  const lines = files.reduce((n, rel) => n + fs.readFileSync(path.join(specRoot, rel), "utf8").split("\n").length, 0);
+  const lines = files.reduce((n, rel) => n + read(path.join(specRoot, rel)).split("\n").length, 0);
   console.log(`vendored ${files.length} files (${lines} lines) from ${manifest.commit?.slice(0, 7) ?? "an unknown commit"}`);
   process.exit(0);
 }
@@ -152,7 +161,7 @@ const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const edited = [];
 for (const rel of vendored) {
   const recorded = manifest.files[rel];
-  const actual = sha256(fs.readFileSync(path.join(vendorRoot, rel), "utf8"));
+  const actual = sha256(read(path.join(vendorRoot, rel)));
   if (recorded !== actual) edited.push(rel);
 }
 const unlisted = vendored.filter((rel) => !(rel in manifest.files));
@@ -177,7 +186,7 @@ if (outside.length) fail(`These imports reach outside the spec sources:\n  ${out
 
 const stale = files.filter((rel) => {
   const mine = path.join(vendorRoot, rel);
-  return !fs.existsSync(mine) || fs.readFileSync(mine, "utf8") !== fs.readFileSync(path.join(specRoot, rel), "utf8");
+  return !fs.existsSync(mine) || read(mine) !== read(path.join(specRoot, rel));
 });
 const extra = vendored.filter((rel) => !files.includes(rel));
 
