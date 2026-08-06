@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.1.5 (2026-08-06)
+
+A fix for tabs that showed above an empty canvas, page errors that no longer disappear, and a
+local diagnostic door for development that no shipped build contains.
+
+### Fixed
+
+- Opening the editor could show module tabs above the "No module is open" view, and closing
+  every tab could leave the code on screen with no tabs. The tab strip and the canvas were
+  answering to different authorities; the object model now decides both.
+
+### Added
+
+- An uncaught error or unhandled rejection in the editor page is written to the shim log,
+  with its message, source location, and stack. Previously these were invisible without
+  developer tools attached, which left a misbehaving surface with nothing to report.
+  Bounded at twenty per session so a fault in a loop cannot flood the log.
+
+### Development
+
+- A local HTTP api into a running session, for diagnosis and automated testing: session
+  state, native windows, analyzer findings, locals and watches, module read and write,
+  commands by name, breakpoints, caret placement, page script, window capture, an awaitable
+  log, performance samples, a one-request evidence capture, and a session replay script. It
+  detects a modal dialog holding the editor, clears one it raised itself using only safe
+  buttons, and never touches a dialog opened by hand. See `docs/debug-api.md`.
+- Debug builds only. A Release publish contains none of it, verified by inspecting the
+  built binary.
+- `tools\dev.ps1` waits for the shim to be unlocked before publishing and refuses to report
+  a publish older than its own sources, so a stale build cannot be tested by accident.
+- Three investigation writeups: `docs/locals-break-investigation.md`,
+  `docs/watch-window-investigation.md`, and `docs/working-with-modals.md`.
+
 ## v0.1.4 (2026-08-05)
 
 The Watch panel works against real watches, and it carries its own controls. Two more menus

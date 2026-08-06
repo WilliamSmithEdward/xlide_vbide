@@ -76,9 +76,32 @@ function boot(): void {
   // developer is left describing symptoms. Both failure channels are forwarded to the host,
   // where they land in the log beside everything else that happened at that moment. Errors
   // only - never ordinary console noise, which would drown the log it is trying to help.
+  //
+  // BOUNDED, because this ships to users. The host log collapses consecutive IDENTICAL lines
+  // but not ones that vary, and every forwarded error is also a message across the bridge
+  // handled on the host's user interface thread - so a fault thrown once per animation frame
+  // with a changing value in its text would flood the log and push the editor around while
+  // doing it. The first errors are the ones that explain a session anyway: the first failure
+  // usually causes the rest.
+  const errorBudget = 20;
+  let errorsForwarded = 0;
+  let lastReported = "";
+
   const reportToHost = (what: string, detail: string) => {
+    const line = `page error: ${what}: ${detail}`;
+
+    // A repeat costs nothing and buys nothing; it must not spend the budget either.
+    if (line === lastReported || errorsForwarded > errorBudget) {
+      return;
+    }
+
+    lastReported = line;
+    errorsForwarded += 1;
+
     try {
-      bridge?.trace(`page error: ${what}: ${detail}`);
+      bridge?.trace(errorsForwarded > errorBudget
+        ? `page error: too many page errors this session; the rest are in DevTools only`
+        : line);
     } catch {
       // The bridge may not exist yet; a page that fails before it is built is a page that
       // never reached ready, which the loader already reports.
