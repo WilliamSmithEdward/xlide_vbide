@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.1.4 (2026-08-05)
+
+The Watch panel works against real watches, and it carries its own controls. Two more menus
+leave the bar, which is down to seven.
+
+### Fixed
+
+- The Watch panel stayed empty while watches were defined. Its row parse expected a header
+  word that real watch rows do not carry; measured against a watch made through the
+  editor's dialog, the parse now reads expression, value, type, and context correctly and
+  tracks values as you step. `tools\harness\Test-WatchPanel.ps1` pins it.
+- Building from source: `tools\dev.ps1` failed at registration on machines with Smart App
+  Control enabled, leaving a published shim unregistered. The registration tool now builds
+  Debug, like the test gate. The screenshot harness also follows Excel's launch handoff,
+  which had been leaving it waiting on a process Excel replaced.
+
+### Added
+
+- The Watch panel has Add, Edit, and Quick buttons above its table, so watches are managed
+  where they are read. They open the editor's own watch dialogs by design: those dialogs
+  are modal, and driving one invisibly can hang the editor with no window left to dismiss
+  (decisions.md, 11).
+- The toolbar gained Compile, Run to Cursor, Set Next Statement, and Show Next Statement.
+  The last three grey outside break mode, like the Call Stack button.
+
+### Changed
+
+- The Format and Debug menus are gone; the bar reads File, Insert, Run, Tools, Add-Ins,
+  Window, Help. Every Debug command has a home on the toolbar or in the Watch panel. Format
+  held only UserForm layout commands, which return with the designer that gives them
+  meaning.
+
 ## v0.1.3 (2026-08-05)
 
 One search UI. The bottom panel's Search tab and Monaco's find widget duplicated each
