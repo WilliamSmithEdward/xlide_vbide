@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.1.1 (2026-08-05)
+
+Locals and Watch track the debugger again. The panels had gone dark during breaks - and
+taken a day of crashes with them - because the buffer behind every accessibility property
+read was sized for 32-bit Windows in a 64-bit process, corrupting eight bytes of stack per
+read. Release builds happened to survive the overwrite; the Debug builds the dev loop
+switched to did not. [docs/locals-break-investigation.md](docs/locals-break-investigation.md)
+has the full story.
+
+### Fixed
+
+- The Locals panel fills at break entry and tracks every step, and the Watch panel rides
+  the same pipeline. Root cause: `UiVariant`/`ComVariantBlock` were `Size = 16`; an x64
+  VARIANT is 24 bytes.
+- In a break with nothing readable, the Locals panel says "No variables to show." instead
+  of claiming "Not stopped" - the message now knows the debugger's state.
+- An unreadable element or a failed read no longer silences the panel for the session:
+  faults are isolated per element, logged once per streak with the failing stage named,
+  and retried after a five-second backoff.
+
+### Changed
+
+- The ghost palette readers moved off the editor's own thread onto a dedicated reading
+  thread (`GhostReaderThread`): the host never blocks on a read, readings are cleared at
+  break exit so a new break starts empty, and the client now has the shape the
+  accessibility framework actually supports.
+
+### Known limits
+
+- The context strip (the broken procedure's name) stays hidden: the context box reads
+  empty through the in-process channel even though the data is visibly there from outside.
+- The Watch row parse is unverified against a real watch; setting one through the native
+  Add Watch dialog is the outstanding test.
+
 ## v0.1.0 (2026-08-05)
 
 First tagged milestone. xlide turns the Visual Basic Editor into a modern development
