@@ -37,9 +37,14 @@ COM) — break enters, honest empty first tick, `locals: 3 row(s)` next tick, br
 and mirrored. TRAP FOR PROBES: dumping the ghost's UIA from OUTSIDE while the in-proc
 reader is alive can RESET THE PROJECT mid-break (measured twice) — never do both at once.
 Watch rows' accessible-name shape against a REAL watch remains unverified (needs the
-native Add Watch dialog — developer's first watch is the test). NOTE: the debug api and
-CDP flags my session memory mentioned are NOT in this tree — they were part of the
-discarded 2026-08-05 working copy; treat them as never shipped.**
+native Add Watch dialog — developer's first watch is the test). THE BIGGER MEANING: the
+2026-08-05 crash storm that forced the reset to v0.1.0 is ROOT-CAUSED by this same
+variant — the branch `post-v010-experiments` (tip 269a2b3, the debug api + CDP doors +
+eleven routes) concluded from those crashes that the provider was unsafe from anywhere
+in-process and only an out-of-process reader could work; that conclusion is RETIRED. The
+crashes were our own 8-byte overwrite, differently dressed per stack layout. When
+re-landing the branch, rebase it onto this fix first, and re-land commit by commit with
+the developer testing between steps as planned.**
 
 **2026-08-05 THE OBJECT BROWSER ENDGAME — A FLOATING XLIDE PALETTE (developer-chosen,
 confirmed live; supersedes every OB delta below).** After the hole shipped, the developer
