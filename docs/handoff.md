@@ -38,7 +38,9 @@ FOLLOW-UP same night (developer request): a Find All button in the find row — 
 renders every match as clickable line-and-preview rows in the results region (clicks
 select and reveal, the counter tracks, the table rides every re-find live and resets when
 the query empties; capped at 500 rows with a note); wider scopes run the engine search,
-restoring the old panel's explicit button.**
+restoring the old panel's explicit button. And a left-edge chevron expander folds the
+widget to find-only (the fresh state); Ctrl+H forces it open with replace focused, the
+toggle is sticky otherwise.**
 
 **2026-08-05 EVENING — LOCALS TRACKING IN BREAK IS FIXED (lesson 33 has the full story).**
 The developer's report: in a live break the Locals panel said "Not stopped. Variables

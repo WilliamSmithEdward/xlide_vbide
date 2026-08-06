@@ -1584,10 +1584,51 @@ body.objbrowser-page #objbrowser-card {
   display: none;
 }
 
+.search-widget-head {
+  display: flex;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.search-widget-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.search-widget-expand:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+.search-widget-expand .codicon {
+  font-size: 14px;
+}
+
+.search-widget-rows {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .search-widget-row {
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+.search-widget-row[hidden] {
+  display: none;
 }
 
 .search-widget-row input[type="text"] {

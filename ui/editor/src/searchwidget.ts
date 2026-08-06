@@ -43,6 +43,8 @@ export class SearchWidget {
   private readonly handlers: SearchWidgetHandlers;
 
   private readonly root: HTMLElement;
+  private readonly expandButton: HTMLButtonElement;
+  private readonly replaceRow: HTMLElement;
   private readonly findInput: HTMLInputElement;
   private readonly replaceInput: HTMLInputElement;
   private readonly caseButton: HTMLButtonElement;
@@ -104,12 +106,35 @@ export class SearchWidget {
     findRow.append(this.findInput, this.caseButton, this.wordButton, this.scopeSelect,
       this.findAllButton, this.counter, this.previousButton, this.nextButton, closeButton);
 
-    const replaceRow = document.createElement("div");
-    replaceRow.className = "search-widget-row";
+    this.replaceRow = document.createElement("div");
+    this.replaceRow.className = "search-widget-row";
     this.replaceInput = this.makeInput("Replace", "Replacement text");
     this.replaceButton = this.makeTextButton("Replace");
     this.replaceAllButton = this.makeTextButton("Replace All");
-    replaceRow.append(this.replaceInput, this.replaceButton, this.replaceAllButton);
+    this.replaceRow.append(this.replaceInput, this.replaceButton, this.replaceAllButton);
+
+    // The expander: find-only until asked, the way the developer wants it and the way
+    // every editor's find widget folds. It spans the input rows' left edge; Ctrl+H forces
+    // it open, the chevron remembers its state otherwise.
+    this.expandButton = document.createElement("button");
+    this.expandButton.type = "button";
+    this.expandButton.className = "search-widget-expand";
+    this.expandButton.title = "Toggle replace";
+    this.expandButton.setAttribute("aria-label", "Toggle replace");
+    this.expandButton.setAttribute("aria-expanded", "false");
+    const chevron = document.createElement("span");
+    chevron.className = "codicon codicon-chevron-right";
+    chevron.setAttribute("aria-hidden", "true");
+    this.expandButton.appendChild(chevron);
+    this.replaceRow.hidden = true;
+
+    const rows = document.createElement("div");
+    rows.className = "search-widget-rows";
+    rows.append(findRow, this.replaceRow);
+
+    const head = document.createElement("div");
+    head.className = "search-widget-head";
+    head.append(this.expandButton, rows);
 
     this.results = document.createElement("div");
     this.results.id = "search-widget-results";
@@ -117,7 +142,7 @@ export class SearchWidget {
     this.results.setAttribute("aria-label", "Search results");
     this.results.hidden = true;
 
-    this.root.append(findRow, replaceRow, this.results);
+    this.root.append(head, this.results);
     host.appendChild(this.root);
 
     this.wire();
@@ -265,6 +290,8 @@ export class SearchWidget {
       }
     });
 
+    this.expandButton.addEventListener("click", () => this.setReplaceShown(this.replaceRow.hidden));
+
     this.root.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -380,12 +407,25 @@ export class SearchWidget {
       this.findInput.value = model.getValueInRange(selection);
     }
 
+    if (options?.withReplace) {
+      this.setReplaceShown(true);
+    }
+
     this.root.hidden = false;
     this.openKey.set(true);
     this.scopeChanged();
     const focused = options?.withReplace ? this.replaceInput : this.findInput;
     focused.focus();
     focused.select();
+  }
+
+  /** Shows or folds the replace row; the chevron and its announcement follow. */
+  private setReplaceShown(shown: boolean): void {
+    this.replaceRow.hidden = !shown;
+    this.expandButton.setAttribute("aria-expanded", String(shown));
+    const chevron = this.expandButton.querySelector(".codicon");
+    chevron?.classList.toggle("codicon-chevron-right", !shown);
+    chevron?.classList.toggle("codicon-chevron-down", shown);
   }
 
   close(): void {
