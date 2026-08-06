@@ -10,6 +10,21 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 LATE — THE FORMAT AND DEBUG MENUS ARE GONE; THE BAR IS DOWN TO SEVEN
+(developer).** `File Insert Run Tools Add-Ins Window Help`, verified live in the capture.
+FORMAT (30006) needed nothing on the toolbar: every item arranges controls on a UserForm
+(Align, Make Same Size, Size to Fit/Grid, Spacing, Center in Form, Arrange Buttons,
+Group/Ungroup, Order) and the designer that gives them meaning is #14, which brings its own
+surfaces. DEBUG (30165) emptied into the toolbar's debug cluster: Compile 578 leads the run
+cluster (check-all icon, always enabled), and Run To Cursor 1811, Set Next Statement 1812,
+Show Next Statement 1813 sit after Step Out, GREYED OUTSIDE A BREAK like the Call Stack
+button — verified in the demo flipping design/break. New in VbeCommands: compile,
+setNextStatement, showNextStatement. Everything else Debug held already had a home
+(stepping, breakpoints, Call Stack on the toolbar; the watches in the panel, below).
+CODICON NOTE: the glyph rules are registered at RUNTIME from
+`base/common/codiconsLibrary.js`, not present in the built css — check a name there before
+using it, never by grepping dist.**
+
 **2026-08-05 LATE — THE WATCH TRIGGERS MOVED INTO THE PANEL, AND THE DEBUG MENU SHED THEM
 (developer: "move those watch triggers to our menu and out of the ribbon").** The Watch
 panel grew a button row — Add, Edit, Quick — that runs the native commands 1820 / 940 / 229

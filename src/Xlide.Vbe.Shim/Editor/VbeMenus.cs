@@ -87,9 +87,22 @@ internal static class VbeMenus
     /// forever" clause was about there being NO other route; the panel is that route, and
     /// these items may only be suppressed while it carries them.
     /// </remarks>
+    /// <remarks>
+    /// 2026-08-05, the last of that evening: the DEBUG menu (30165) and the FORMAT menu
+    /// (30006) are gone entirely, and the bar reads File Insert Run Tools Add-Ins Window
+    /// Help. Debug's commands all have homes — stepping, breakpoints, and the Call Stack
+    /// were already toolbar buttons, the watches are the panel's, and Compile 578, Run To
+    /// Cursor 1811, Set Next Statement 1812, and Show Next Statement 1813 joined the
+    /// toolbar's debug cluster the same day (the last three greyed outside a break, the way
+    /// the Call Stack button is). Format needed nothing: every item on it — Align 32787,
+    /// Make Same Size 32790, Size to Fit 551, Size to Grid 550, Horizontal Spacing 32791,
+    /// Vertical Spacing 32800, Center in Form 32789, Arrange Buttons 31215, Group 164,
+    /// Ungroup 165, Order 32809 — arranges controls on a UserForm, and the designer that
+    /// would give them meaning is backlog #14, which brings its own surfaces when it lands.
+    /// </remarks>
     private static readonly HashSet<int> Replaced =
     [
-        30003, 30004,
+        30003, 30004, 30006, 30165,
         761, 830, 2554, 2555, 2557, 222, 30045,
         128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
         1820, 940, 229,

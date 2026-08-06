@@ -35,13 +35,22 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "undo", target: "editor", icon: "discard", label: "Undo (Ctrl+Z)" },
   { id: "redo", target: "editor", icon: "redo", label: "Redo (Ctrl+Y)" },
 
-  { id: "run", target: "host", icon: "play", label: "Run (F5)", separatorBefore: true },
+  // Compile leads the run cluster the way it leads the editor's own Debug menu — the menu
+  // that is gone as of 2026-08-05, its commands rehomed here.
+  { id: "compile", target: "host", icon: "check-all", label: "Compile project", separatorBefore: true },
+  { id: "run", target: "host", icon: "play", label: "Run (F5)" },
   { id: "break", target: "host", icon: "debug-pause", label: "Break (Ctrl+F5)" },
   { id: "reset", target: "host", icon: "debug-stop", label: "Reset (Shift+F5)" },
 
   { id: "stepInto", target: "host", icon: "debug-step-into", label: "Step into (F8)", separatorBefore: true },
   { id: "stepOver", target: "host", icon: "debug-step-over", label: "Step over (Shift+F8)" },
   { id: "stepOut", target: "host", icon: "debug-step-out", label: "Step out" },
+  // The rest of the Debug menu's stepping half, greyed outside a break like the Call Stack
+  // button: each is disabled in the editor when nothing is stopped, and a click into
+  // silence reads as a defect.
+  { id: "runToCursor", target: "host", icon: "debug-continue", label: "Run to cursor (break mode)", needsBreak: true },
+  { id: "setNextStatement", target: "host", icon: "arrow-circle-right", label: "Set next statement (break mode)", needsBreak: true },
+  { id: "showNextStatement", target: "host", icon: "target", label: "Show next statement (break mode)", needsBreak: true },
   { id: "toggleBreakpoint", target: "host", icon: "debug-breakpoint", label: "Toggle breakpoint (F9)" },
   { id: "clearAllBreakpoints", target: "host", icon: "clear-all", label: "Clear all breakpoints" },
   // The View menu's Call Stack, rehomed when the menu went (2026-08-05): a break-mode

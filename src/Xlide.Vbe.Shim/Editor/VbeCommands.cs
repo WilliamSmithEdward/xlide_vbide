@@ -39,6 +39,9 @@ internal static class VbeCommands
         public const int StepOver = 194;
         public const int StepOut = 2559;
         public const int RunToCursor = 1811;
+        public const int Compile = 578;
+        public const int SetNextStatement = 1812;
+        public const int ShowNextStatement = 1813;
         public const int QuickWatch = 229;
         public const int AddWatch = 1820;
         public const int EditWatch = 940;
@@ -254,6 +257,9 @@ internal static class VbeCommands
         "stepOver" => Command.StepOver,
         "stepOut" => Command.StepOut,
         "runToCursor" => Command.RunToCursor,
+        "compile" => Command.Compile,
+        "setNextStatement" => Command.SetNextStatement,
+        "showNextStatement" => Command.ShowNextStatement,
         "toggleBreakpoint" => Command.ToggleBreakpoint,
         "quickWatch" => Command.QuickWatch,
         "addWatch" => Command.AddWatch,
