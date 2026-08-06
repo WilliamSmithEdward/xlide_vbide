@@ -1,61 +1,97 @@
-# xlide_vbide
+# xlide
 
-A modern development experience for VBA, inside the editor you already use.
+The Visual Basic Editor has looked the same since 1998. One module on screen at a time, a find
+dialog that covers the code you are searching, no completion worth the name, and no idea that
+anything is wrong until you press F5 and it stops. xlide replaces that surface with Monaco, the
+editor behind VS Code, running inside the VBE itself. Your workbooks stay where they are, your
+macros run the way they always did, and F5, F8, and break mode behave exactly as before.
 
-xlide_vbide is an add-in for the Visual Basic Editor. It aims at a modern code editing surface, live
-diagnostics with quick fixes, real completion and navigation, refactoring, and test tooling, all
-rendered inside the editor itself rather than in a separate application. It installs from a single
-executable, needs no other runtime or tool on the machine, and installs for the current user without
-administrator rights.
+It installs in one double click, for your account only, with no administrator rights and nothing to
+install first.
 
-## Status
+## What it is
 
-Early, and honest about it. The foundation is built and verified against a real host; the features
-that make it worth installing are not there yet. See [docs/status.md](docs/status.md) for what is
-proven and [docs/architecture.md](docs/architecture.md) for the design.
+xlide is a native add-in that Excel's editor loads through its own extensibility model. It draws
+over the VBE's document area and puts a modern editing surface there: every open module live at
+once, editors side by side, diagnostics as you type. The native editor keeps running underneath as
+the text of record, the compile target, and the debugger, so nothing about how your code compiles or
+runs changes.
 
-Working today:
+The analysis comes from a VBA analyzer validated against the real compiler over a corpus of
+thousands of modules, and it runs in its own process. That matters because the VBE is single
+threaded and owns the thread you type on: a project large enough to take seconds to analyse cannot
+stall your typing if the analysis is not happening there. The add-in is compiled ahead of time to
+native code, so Excel never loads a .NET runtime on its account.
 
-- The add-in loads into the editor as a native in-process server, with no managed runtime loaded
-  into the host.
-- The editor docks a tool window on our own control, and a browser surface renders inside it.
-- Code panes are located and followed as the editor is rearranged.
-- A language engine answers real analysis out of process, over a named pipe.
-- The whole product installs and uninstalls cleanly from one executable.
+## What you get
 
-Not built yet: the editor surface over code panes, the UserForm designer, debugging integration, and
-the panels that surface any of the analysis to the user.
+- Monaco editing over every code pane, with VBA syntax highlighting, folding, multi-cursor, and
+  bookmarks that stay with the module.
+- Diagnostics as you type, with severity filters and a Problems panel that navigates to the line.
+- Completion, hover, and signature help from the analyzer, plus typing that follows VBA's own
+  conventions: auto-casing, block closers, smart Enter and Tab, and auto-indent.
+- Every open module holds a live editor. Switching tabs takes a median of 2.5ms and keeps your undo
+  history, scroll position, and squiggles.
+- Editor groups. Split right or down with Ctrl+\, drag a tab to a group's edge, and work in two
+  modules at once.
+- Six tool panes that dock where you put them: Explorer, Properties, Problems, Immediate, Locals,
+  and Watch. Drag one by its title and a five-zone compass appears over the region under the
+  pointer. The arrangement persists.
+- Search as one floating widget, scoped to the module, the workbook, or every open workbook. Find
+  All lists every match with a preview, and Replace All applies as a single edit that one undo
+  reverts.
+- Locals and Watch track the debugger through every step, with breakpoints, Run to Cursor, Set Next
+  Statement, and the rest of the debug commands on the toolbar.
+- An Object Browser as a floating themed window, covering your open projects and every referenced
+  type library, read directly from the type libraries themselves. Members of your own modules jump
+  to their definition on a double click.
+- A project explorer rooted at each open workbook, with project-qualified addressing, so two
+  workbooks can both hold a Module1 and xlide knows which one you mean.
+- An Immediate panel that mirrors the native window live, and a close-confirm on a dirty tab that
+  reverts everywhere when you choose not to save.
 
-## How it works
+## Installing
 
-The add-in is a COM in-process server that the editor loads through its documented extensibility
-model, registered per user. It is compiled ahead of time to a native library, so no runtime is
-deployed with it or loaded into the host process.
+Download `xlide-setup.exe` from [Releases](https://github.com/WilliamSmithEdward/xlide_vbide/releases)
+and run it.
 
-Inside the editor it hosts web-based UI in native docked tool windows, and it talks to a language
-engine running in its own process. Keeping analysis outside the host is deliberate: the editor is
-single threaded and owns the thread the user types on, and a separate process cannot block it, grow
-its memory, or crash it.
+It installs to `%LOCALAPPDATA%\Programs\xlide` for the current user. It asks for no administrator
+rights, changes nothing outside your own profile, and needs no runtime, framework, or tool to be
+present first. Everything it needs is inside the one executable. Windows will warn before running
+it, because it carries no code signature yet.
 
-The analyzer is the one from the
-[XLIDE editor extension](https://github.com/WilliamSmithEdward/xlide_vscode), validated against the
-real VBA compiler and shared between both products. It is being ported to C# layer by layer, gated
-by differential testing against that implementation, to remove the language runtime the current
-engine has to ship.
+Close Excel first. If it is open, the installer says so and offers to wait while you close it, or to
+force close it for you.
 
-## Building
+Then start Excel and press Alt+F11.
 
-Needs the .NET 10 SDK, the C++ build tools (for the native linker that ahead-of-time compilation
-uses), and Node for the current engine. Excel is needed only for the integration check.
+## Uninstalling
+
+Settings, then Apps, then Installed apps. Find xlide and choose Uninstall. You can also run
+`xlide-setup.exe --uninstall` from `%LOCALAPPDATA%\Programs\xlide`, where a copy of the installer is
+kept so that removing xlide never depends on still having the download.
+
+Removal takes out the program files, the per-user registration, and xlide's own logs and cache.
+Your VBA is untouched throughout: it lives in your workbooks and xlide never writes to them.
+
+One thing to expect afterwards. xlide hides the VBE's own tool windows while it is covering the
+screen, and the editor remembers the window layout it was last left with. So the first time you open
+the VBE after removing xlide, it will be empty. Use the View menu to bring back the ones you want:
+Project Explorer, Properties Window, Immediate Window, Locals Window, and Watch Window.
+
+## Building from source
+
+You need the .NET 10 SDK, the C++ build tools that ahead-of-time compilation links with, and Node
+for the language engine. Excel is needed only for the integration check.
 
 ```powershell
 tools\dev.ps1            # build, test, register, and verify inside a real editor
-tools\dev.ps1 -Unregister
+tools\verify.ps1         # the whole local gate, about twenty seconds
 installer\build.ps1      # produce the installer
 ```
 
-The development loop completes in about one and a half seconds, and a repeat check that reuses the
-open host takes about a quarter of a second.
+The development loop finishes in about a second and a half. `tools\page.ps1` rebuilds and reloads
+the editor surface in about a second without restarting Excel.
 
 ## Repository layout
 
@@ -63,30 +99,31 @@ open host takes about a quarter of a second.
 | --- | --- |
 | `src/Xlide.Vbe.Shim` | The native add-in: editor integration, tool windows, browser surface |
 | `src/Xlide.Vbe.Core` | Host-independent logic for the add-in, with no COM or Win32 |
-| `src/Xlide.Vba.Analysis` | The analyzer being ported to C# |
-| `engine/` | The language engine sidecar in its current form |
-| `ui/` | Web UI rendered in the browser surface |
+| `src/Xlide.Vba.Analysis` | The analyzer as it is ported to C# |
+| `engine/` | The language engine sidecar |
+| `ui/` | The editor surface rendered in the browser control |
 | `installer/` | The single-file installer |
 | `tools/` | Development scripts and the integration harness |
 | `tests/` | Unit tests. None of them need Excel |
 | `docs/` | Architecture, decisions, and findings |
 
-## Picking this up
+## Documentation
 
-[docs/handoff.md](docs/handoff.md) is written for someone starting cold: machine setup, how to run
-everything, the behaviour of the host that cost real time to discover, what is open, and what to do
-next in order.
+[docs/status.md](docs/status.md) is the current snapshot: what is proven and how.
+[docs/architecture.md](docs/architecture.md) covers the design, and
+[docs/decisions.md](docs/decisions.md) records the choices that would be expensive to reverse along
+with the reasoning behind each. [docs/lessons.md](docs/lessons.md),
+[docs/ui-lessons.md](docs/ui-lessons.md), and [docs/editor-windows.md](docs/editor-windows.md) hold
+behaviour of the host that is documented nowhere else and was established by measurement.
+[docs/handoff.md](docs/handoff.md) is written for someone starting cold.
 
-## Notes on the design
-
-[docs/decisions.md](docs/decisions.md) records the choices that would be expensive to reverse, with
-the reasoning behind each. [docs/lessons.md](docs/lessons.md) and
-[docs/editor-windows.md](docs/editor-windows.md) record behaviour of the host that is not documented
-anywhere and was established by measurement.
+## About the code
 
 This is a clean-room implementation built on Microsoft's documented interfaces: the editor
 extensibility model, the forms designer object model, Win32, and published binary format
-specifications. Its analyzer is the author's own prior work.
+specifications. The analyzer is the author's own prior work, shared with the
+[XLIDE editor extension](https://github.com/WilliamSmithEdward/xlide_vscode) so that both products
+agree on what VBA means.
 
 ## License
 
