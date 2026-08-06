@@ -59,10 +59,13 @@ if (-not $Shim) {
         }
 
         if (-not $Configuration) {
+            # Debug first, and not by timestamp. The gate publishes Release on every run, so the
+            # most recently written shim is almost always Release even on a machine that has been
+            # developing against Debug all day. Debug is also the one carrying the debug api, which
+            # is what dev testing is for.
             $published = 'Debug', 'Release' |
                 ForEach-Object { [pscustomobject]@{ Name = $_; Path = (Get-ShimPath $_) } } |
-                Where-Object { Test-Path $_.Path } |
-                Sort-Object { (Get-Item $_.Path).LastWriteTime } -Descending
+                Where-Object { Test-Path $_.Path }
 
             if (-not $published) {
                 throw 'No published shim in either configuration. Run tools\dev.ps1 -NoRun first, then this.'

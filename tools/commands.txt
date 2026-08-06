@@ -5,10 +5,12 @@ SWITCH BACK TO THE DEV BUILD
 
 2. Paste this into PowerShell:
 
-powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1"
+powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1" -Configuration Debug
 
 3. Open Excel and press Alt+F11.
 
+
+Debug is the dev build: it is the one carrying the debug api. Release is what ships.
 
 This rewrites the registry entries the editor uses to find the add-in, and nothing else. No
 building, no SDK, no dotnet.
