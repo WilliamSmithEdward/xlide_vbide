@@ -646,6 +646,40 @@ public sealed record DebugAwaitReply(
     [property: JsonPropertyName("elapsedMs")] int ElapsedMs,
     [property: JsonPropertyName("detail")] string Detail);
 
+/// <summary>
+/// One element the page holds: where it is, what it is, and — when asked — which CSS rules
+/// claim a property and what the winner computed to. The rule list is the point: a page
+/// sharing a stylesheet with a large bundle loses arguments it never knew it was having.
+/// </summary>
+public sealed record DebugElementRow(
+    [property: JsonPropertyName("tag")] string Tag,
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("classes")] string Classes,
+    [property: JsonPropertyName("hidden")] bool Hidden,
+    [property: JsonPropertyName("x")] int X,
+    [property: JsonPropertyName("y")] int Y,
+    [property: JsonPropertyName("w")] int W,
+    [property: JsonPropertyName("h")] int H,
+    [property: JsonPropertyName("styles")] Dictionary<string, string> Styles,
+    [property: JsonPropertyName("rules")] string[] Rules);
+
+/// <summary>Elements matching a selector, and how many there were before any cap.</summary>
+public sealed record DebugInspectReply(
+    [property: JsonPropertyName("selector")] string Selector,
+    [property: JsonPropertyName("matched")] int Matched,
+    [property: JsonPropertyName("elements")] DebugElementRow[] Elements);
+
+/// <summary>One timed run of a named scenario, in milliseconds.</summary>
+public sealed record DebugBenchReply(
+    [property: JsonPropertyName("what")] string What,
+    [property: JsonPropertyName("runs")] int Runs,
+    [property: JsonPropertyName("minMs")] double MinMs,
+    [property: JsonPropertyName("medianMs")] double MedianMs,
+    [property: JsonPropertyName("p95Ms")] double P95Ms,
+    [property: JsonPropertyName("maxMs")] double MaxMs,
+    [property: JsonPropertyName("samplesMs")] double[] SamplesMs,
+    [property: JsonPropertyName("detail")] string Detail);
+
 /// <summary>A page reload, and what came back: how long to ready, and which bundle it is.</summary>
 public sealed record DebugReloadReply(
     [property: JsonPropertyName("ready")] bool Ready,
@@ -724,6 +758,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugEvalReply))]
 [JsonSerializable(typeof(DebugAwaitReply))]
 [JsonSerializable(typeof(DebugReloadReply))]
+[JsonSerializable(typeof(DebugElementRow))]
+[JsonSerializable(typeof(DebugInspectReply))]
+[JsonSerializable(typeof(DebugBenchReply))]
 [JsonSerializable(typeof(DebugDoctorReply))]
 [JsonSerializable(typeof(DebugPerfReply))]
 [JsonSerializable(typeof(DebugJournalReply))]

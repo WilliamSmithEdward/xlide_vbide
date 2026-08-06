@@ -37,7 +37,9 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   reconciliation, protocol handling, and the analyzer.
 - **A debug api** (Debug builds only, compiled out of Release and verified absent from the
   published binary) exposes the running session for diagnosis and automated testing:
-  [debug-api.md](debug-api.md). `Test-DebugApi.ps1` is 32 checks.
+  [debug-api.md](debug-api.md). `Test-DebugApi.ps1` is 41 checks. Beyond reading state it
+  can await a condition in the page, answer the whole visible layout and reset it, say which
+  CSS rule set a property, time the surface, and keep the page's console.
 
 ## What is not done
 

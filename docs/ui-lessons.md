@@ -87,6 +87,12 @@ cell to its tab strip's height. The layout looked broken in a way that read as a
 our own code. Class names for structural things are prefixed now (`split-row`, not `row`),
 and a structural property that MUST hold is stated explicitly rather than left to inherit.
 
+The diagnosis is worth keeping too, because it generalises: walk `document.styleSheets`,
+keep every rule whose selector the element matches, and read what each one says about the
+property in question. Computed style tells you the answer; the rule list tells you who
+decided it. That loop is now the debug api's `inspect?rules=1`, so the next collision costs
+one request rather than an hour.
+
 **A flex child does not grow unless told.** Moving the workspace from grid to flex left the
 editor area with `grid-row` properties that meant nothing and no `flex`, so it sized to its
 content — which, for a Monaco container, is nothing — and the bottom dock swallowed the

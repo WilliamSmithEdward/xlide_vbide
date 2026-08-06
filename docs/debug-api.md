@@ -65,6 +65,10 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `eval` | POST | `surface`, `waitMs`, body = script | runs script in the live page and returns its result as JSON. A PROMISE is awaited, so `(async () => ...)()` works |
 | `await` | POST | `surface`, `waitMs`, body = predicate | polls a predicate IN the page until it is true, answering `met` and how long it took. One request instead of a caller's poll loop |
 | `layout` | GET | | the whole visible arrangement: dock sections and their groups, editor groups and their tabs, sizes, open documents, whether a drag is live |
+| `layout` | POST | `reset=1`, `waitMs` | puts the arrangement back to the default and waits for the page, so a probe that dragged panes about can clean up in one line |
+| `inspect` | GET | `selector`, `styles`, `rules=1`, `max` | elements matching a selector: box, classes, hidden, the computed values of the styles asked for, and which CSS rules claim them |
+| `bench` | GET | `what=tabswitch\|layout\|type`, `n` | times a scenario in the page and answers min, median, p95, max, and the raw samples |
+| `console` | GET | `last` | what the page said to itself: a ring of console lines, installed at page ready |
 | `reload` | POST | `waitMs` | reloads the page and waits for it to come back, answering with the bundle stamp it is now running and whether that is behind the one on disk |
 | `dismiss` | POST | `button`, `caption` | clicks a dialog button by name. Explicit, so it will press OK if asked |
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
@@ -111,6 +115,49 @@ had dragged it there and not put it back.)
 the build stamp the page is now running, and whether that stamp is behind the bundle on
 disk. The manual version — reload, sleep a guess, hope — was run a dozen times in one
 afternoon, and a guess that is too short reports on the page that is going away.
+
+`layout?reset=1` (POST) puts the arrangement back and waits for the page. A probe that drags
+panes about is testing the right thing and leaving the wrong thing behind — the layout is
+persistent state, and clearing its storage key does not undo what the page already holds in
+memory.
+
+### Seeing why the page looks like that
+
+`inspect` answers with the elements a selector matches: their boxes, classes, whether they
+are hidden, the computed value of any styles named, and — with `rules=1` — which CSS rules
+claim those properties, spelled out.
+
+```powershell
+Invoke-RestMethod "$api/inspect?selector=.dock-split&styles=align-items,display&rules=1"
+```
+
+The rule list is the point. This page shares a document with a large bundled stylesheet, and
+a structural class of ours once inherited `align-items: baseline` from an unrelated rule,
+collapsing every pane to its tab strip's height. It read as a flex bug in our own code and
+cost an hour; the loop that eventually found it — walk every stylesheet, keep the rules this
+element matches — is now this route.
+
+`console` answers with what the page said to itself. Only UNCAUGHT errors reach the shim log,
+deliberately, because forwarding every line would drown it — so a handled `console.error` or
+a warning is invisible without DevTools attached, which is exactly the situation during a
+live test. The ring is installed at page ready (including a reload's), wraps rather than
+replaces the console, and keeps the last 500 lines.
+
+### Numbers for what a developer feels
+
+`bench` times a named scenario in the page and answers min, median, p95, max, and the raw
+samples. The counters elsewhere say what the HOST spent; this says what the surface costs,
+which is where the risk moved when the workspace learned to split and dock.
+
+| `what` | measures |
+| --- | --- |
+| `tabswitch` | putting another open document's model on screen — the live-model claim, in milliseconds |
+| `layout` | re-measuring every editor, which is what a splitter drag and every dock change costs |
+| `type` | an edit applied to the model and the page's work to show it |
+
+```powershell
+Invoke-RestMethod "$api/bench?what=tabswitch&n=40"
+```
 
 Two arguments deserve their reasons.
 

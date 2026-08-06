@@ -241,6 +241,36 @@ Check 'layout answers with the whole visible arrangement' {
     $l.editorGroups.Count -ge 1 -and $l.editorArea.w -gt 0 -and $bottom.standing -and $l.documents.Count -ge 1
 }
 
+Check 'inspect names the rule that set a property' {
+    # The diagnosis this route exists for: a structural class of ours losing an argument to
+    # a rule in the bundled stylesheet, which read as a flex bug in our own code and cost an
+    # hour (2026-08-06).
+    $i = Invoke-RestMethod "$api/inspect?selector=.dock-tabs&styles=display,align-items&rules=1&max=3" -TimeoutSec 20
+    $first = $i.elements[0]
+    $i.matched -ge 1 -and $first.w -gt 0 -and $first.styles.display -eq 'flex' `
+        -and ($first.rules -join ' ') -match 'dock-tabs'
+}
+
+Check 'console keeps what the page said to itself' {
+    # Only UNCAUGHT errors reach the shim log; a handled warning is invisible without a
+    # DevTools client, which is exactly the live-test situation.
+    Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 `
+        -Body 'console.warn("probe: a handled warning"); "said"' | Out-Null
+    Start-Sleep -Milliseconds 400
+    $c = Invoke-RestMethod "$api/console?last=20" -TimeoutSec 15
+    $c.installed -and ($c.lines -join "`n") -match 'probe: a handled warning'
+}
+
+Check 'bench times the surface and answers a shape' {
+    $b = Invoke-RestMethod "$api/bench?what=type&n=15" -TimeoutSec 60
+    $b.runs -eq 15 -and $b.samplesMs.Count -eq 15 `
+        -and $b.minMs -le $b.medianMs -and $b.medianMs -le $b.maxMs -and $b.maxMs -lt 2000
+}
+
+Check 'an unknown benchmark is named, not guessed at' {
+    (Invoke-RestMethod "$api/bench?what=nonesuch" -TimeoutSec 15).error -match 'unknown benchmark'
+}
+
 Check 'assert reports what it saw, not just a verdict' {
     $held = Invoke-RestMethod "$api/assert?that=surfaceReady&timeoutMs=3000" -Method Post -TimeoutSec 20
     $missed = Invoke-RestMethod "$api/assert?that=shownModule&value=NoSuchModule&timeoutMs=1000" -Method Post -TimeoutSec 20
@@ -331,6 +361,30 @@ Check 'a modal this door raised is seen, then cleared by the next request' {
 Check 'reload brings the page back and names the bundle it runs' {
     $r = Invoke-RestMethod "$api/reload" -Method Post -TimeoutSec 45
     $r.ready -and $r.elapsedMs -lt 25000 -and $r.pageBuildStamp -ne '(none reported)' -and (-not $r.stale)
+}
+
+Check 'layout reset puts a rearranged workspace back' {
+    # Also this suite's own cleanup: it leaves the arrangement the way it found it.
+    Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 -Body @'
+(() => {
+  localStorage.setItem("xlide.docks.v1", JSON.stringify({
+    sides: { left: null, right: { kind: "group", tabs: ["problems"], active: "problems" }, top: null,
+             bottom: { kind: "group", tabs: ["immediate","locals","watch","explorer","properties"], active: "immediate" } },
+    sizes: {}, closed: []
+  }));
+  return "rearranged";
+})()
+'@ | Out-Null
+
+    $reset = Invoke-RestMethod "$api/layout?reset=1" -Method Post -TimeoutSec 45
+    Start-Sleep -Milliseconds 800
+
+    $l = Invoke-RestMethod "$api/layout" -TimeoutSec 20
+    $left = $l.sections | Where-Object { $_.side -eq 'left' }
+    $bottom = $l.sections | Where-Object { $_.side -eq 'bottom' }
+    $panes = ($bottom.groups | ForEach-Object { $_.tabs.pane }) -join ','
+
+    $reset.ran -and $left.standing -and $bottom.standing -and $panes -match 'problems'
 }
 
 Write-Output ''

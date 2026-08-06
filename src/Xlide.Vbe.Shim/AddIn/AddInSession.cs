@@ -383,6 +383,51 @@ internal sealed class AddInSession : IDisposable
         return (answered, errorCode, result ?? string.Empty, null);
     }
 
+    /// <summary>
+    /// Puts a small ring buffer in front of the page's console, so the `console` route can
+    /// answer what the page said. Installed at every ready, including a reload's — the page
+    /// that comes back is a new one and carries none of this.
+    ///
+    /// The console is WRAPPED rather than replaced: everything still reaches DevTools when a
+    /// client is attached. Only uncaught errors go to the shim log (bounded, deliberately);
+    /// this is for the rest, which is otherwise invisible during a live test.
+    /// </summary>
+    private void InstallConsoleRing()
+    {
+        const string install = """
+            (function () {
+              if (window.__xlideConsoleInstalled) { return "already"; }
+              window.__xlideConsoleInstalled = true;
+              window.__xlideConsole = [];
+
+              ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+                var original = console[level];
+                console[level] = function () {
+                  try {
+                    var parts = [];
+                    for (var i = 0; i < arguments.length; i++) {
+                      var one = arguments[i];
+                      parts.push(typeof one === "string" ? one
+                        : (one && one.message) ? String(one.message)
+                        : (function () { try { return JSON.stringify(one); } catch (e) { return String(one); } })());
+                    }
+                    window.__xlideConsole.push(level + ": " + parts.join(" "));
+                    if (window.__xlideConsole.length > 500) { window.__xlideConsole.shift(); }
+                  } catch (ignored) { }
+                  return original.apply(console, arguments);
+                };
+              });
+
+              return "installed";
+            })()
+            """;
+
+        // Fire and forget on a pool thread: this runs from the ready handler, which is ON
+        // the host thread, and the script's answer arrives on that same thread — waiting
+        // here would wait for a callback that cannot arrive until the waiting stops.
+        _ = Task.Run(() => RunPageScriptOnce(install, null, 4000));
+    }
+
     /// <summary>When the page bundle beside the running shim was built, or "(unknown)".</summary>
     private static string BundleBuiltUtc()
     {
@@ -833,6 +878,274 @@ internal sealed class AddInSession : IDisposable
 
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugAwaitReply(met, elapsed, detail), DebugJsonContext.Default.DebugAwaitReply));
+            }
+
+            case "console":
+            {
+                // What the page said to itself. Only UNCAUGHT errors reach the shim log —
+                // deliberately, because forwarding every line would drown it — so a warning
+                // or a console.error the page handled is invisible without a DevTools client
+                // attached, which is exactly the situation during a live test. The ring is
+                // installed at page ready and read here.
+                var last = request.Query.TryGetValue("last", out var lastText) && int.TryParse(lastText, out var asked)
+                    ? Math.Clamp(asked, 1, 500)
+                    : 100;
+
+                var read = RunPageScript(
+                    $$"""
+                    (function () {
+                      var ring = window.__xlideConsole;
+                      if (!ring) { return { installed: false, lines: [] }; }
+                      return { installed: true, lines: ring.slice(-{{last}}) };
+                    })()
+                    """,
+                    null,
+                    4000);
+
+                return read.Error is { } consoleError
+                    ? DebugError(consoleError)
+                    : DebugServer.DebugReply.Json(read.Result);
+            }
+
+            case "inspect" when request.Query.TryGetValue("selector", out var selector) && selector.Length > 0:
+            {
+                // What the page actually has, where it is, and — with `styles` — what those
+                // properties computed to, plus WHICH RULES claimed them.
+                //
+                // The rule list is the point. This page shares a document with a large
+                // bundled stylesheet, and a structural class of ours (`.row` on a split
+                // container) silently inherited `align-items: baseline` from an unrelated
+                // rule, collapsing every cell to its tab strip's height. It read as a flex
+                // bug in our own code and took an hour; the loop that finally found it —
+                // walk every stylesheet, keep the rules this element matches — is this
+                // route (2026-08-06).
+                request.Query.TryGetValue("styles", out var wanted);
+                var withRules = request.Query.TryGetValue("rules", out var rulesFlag) && rulesFlag != "0";
+                var cap = request.Query.TryGetValue("max", out var maxText) && int.TryParse(maxText, out var asked)
+                    ? Math.Clamp(asked, 1, 50)
+                    : 10;
+
+                var inspect = $$"""
+                    (function () {
+                      var found = [].slice.call(document.querySelectorAll({{JsonString(selector)}}));
+                      var wanted = {{JsonString(wanted ?? string.Empty)}}
+                        .split(",").map(function (one) { return one.trim(); }).filter(Boolean);
+
+                      return {
+                        selector: {{JsonString(selector)}},
+                        matched: found.length,
+                        elements: found.slice(0, {{cap}}).map(function (element) {
+                          var box = element.getBoundingClientRect();
+                          var computed = getComputedStyle(element);
+                          var styles = {};
+                          wanted.forEach(function (name) { styles[name] = computed.getPropertyValue(name); });
+
+                          var rules = [];
+                          if ({{(withRules ? "true" : "false")}}) {
+                            for (var s = 0; s < document.styleSheets.length; s++) {
+                              var sheet = document.styleSheets[s];
+                              var list;
+                              try { list = sheet.cssRules; } catch (blocked) { continue; }
+                              for (var r = 0; r < list.length; r++) {
+                                var rule = list[r];
+                                if (!rule.selectorText) { continue; }
+                                var matches = false;
+                                try { matches = element.matches(rule.selectorText); } catch (bad) { matches = false; }
+                                if (!matches) { continue; }
+                                // Only rules that speak to a property being asked about, or
+                                // every matching rule when nothing was named.
+                                if (wanted.length === 0) { rules.push(rule.selectorText); continue; }
+                                for (var w = 0; w < wanted.length; w++) {
+                                  if (rule.style.getPropertyValue(wanted[w])) {
+                                    rules.push(rule.selectorText + " { " + wanted[w] + ": "
+                                      + rule.style.getPropertyValue(wanted[w]) + " }");
+                                  }
+                                }
+                              }
+                            }
+                          }
+
+                          return {
+                            tag: element.tagName.toLowerCase(),
+                            id: element.id || "",
+                            classes: element.className && element.className.toString ? element.className.toString() : "",
+                            hidden: !!element.hidden || computed.display === "none",
+                            x: Math.round(box.x), y: Math.round(box.y),
+                            w: Math.round(box.width), h: Math.round(box.height),
+                            styles: styles,
+                            rules: rules
+                          };
+                        })
+                      };
+                    })()
+                    """;
+
+                var inspected = RunPageScript(inspect, null, 5000);
+                return inspected.Error is { } inspectError
+                    ? DebugError(inspectError)
+                    : DebugServer.DebugReply.Json(inspected.Result);
+            }
+
+            case "bench" when request.Query.TryGetValue("what", out var what) && what.Length > 0:
+            {
+                // Numbers for the things a developer feels, run enough times to have a
+                // shape. The counters elsewhere say what the host spent; this says what the
+                // SURFACE costs, which is where the risk moved when the workspace learned to
+                // split and dock.
+                var runs = request.Query.TryGetValue("n", out var runsText) && int.TryParse(runsText, out var count)
+                    ? Math.Clamp(count, 1, 200)
+                    : 20;
+
+                var body = what switch
+                {
+                    // The live-model claim, measured: switching tabs should be page-local
+                    // and free, where the old one-model surface paid a host round trip and
+                    // a full document load for every switch.
+                    "tabswitch" => """
+                        var groups = window.xlideBridge.workspace;
+                        var docs = window.xlideBridge.documents.all();
+                        if (docs.length < 2) { return { detail: "needs two open documents", samples: [] }; }
+                        var editor = groups.activeEditor();
+                        var samples = [];
+                        for (var i = 0; i < RUNS; i++) {
+                          var target = docs[i % docs.length];
+                          var model = window.xlideBridge.documents.get(target.module, target.project);
+                          var began = performance.now();
+                          editor.setModel(model);
+                          editor.render(true);
+                          samples.push(performance.now() - began);
+                        }
+                        return { detail: docs.length + " documents", samples: samples };
+                        """,
+
+                    // A full re-measure of every editor, which is what a splitter drag and
+                    // every dock change costs.
+                    "layout" => """
+                        var editors = window.xlideBridge.workspace.editors();
+                        var samples = [];
+                        for (var i = 0; i < RUNS; i++) {
+                          var began = performance.now();
+                          editors.forEach(function (one) { one.layout(); });
+                          samples.push(performance.now() - began);
+                        }
+                        return { detail: editors.length + " editor(s)", samples: samples };
+                        """,
+
+                    // Typing, as the editor sees it: an edit applied to the model and the
+                    // page's own work to show it. The host's half is the write timer, which
+                    // the log and the marshal counters already carry.
+                    "type" => """
+                        var editor = window.xlideBridge.workspace.activeEditor();
+                        var model = editor.getModel();
+                        if (!model) { return { detail: "no model", samples: [] }; }
+                        var samples = [];
+                        for (var i = 0; i < RUNS; i++) {
+                          var began = performance.now();
+                          model.pushEditOperations(null, [{
+                            range: { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 },
+                            text: "'x\n"
+                          }], function () { return null; });
+                          editor.render(true);
+                          samples.push(performance.now() - began);
+                        }
+                        for (var u = 0; u < RUNS; u++) { model.undo(); }
+                        return { detail: model.uri.toString(), samples: samples };
+                        """,
+
+                    _ => null,
+                };
+
+                if (body is null)
+                {
+                    return DebugError($"unknown benchmark {what}; try tabswitch, layout, or type");
+                }
+
+                var bench = RunPageScript(
+                    $$"""
+                    (function () {
+                      var RUNS = {{runs}};
+                      {{body}}
+                    })()
+                    """,
+                    null,
+                    Math.Max(15000, runs * 200));
+
+                if (bench.Error is { } benchError)
+                {
+                    return DebugError(benchError);
+                }
+
+                var samples = new List<double>();
+                var detail = string.Empty;
+                try
+                {
+                    using var parsed = System.Text.Json.JsonDocument.Parse(bench.Result);
+                    detail = parsed.RootElement.TryGetProperty("detail", out var detailValue)
+                        ? detailValue.GetString() ?? string.Empty : string.Empty;
+                    if (parsed.RootElement.TryGetProperty("samples", out var sampleValues))
+                    {
+                        foreach (var sample in sampleValues.EnumerateArray())
+                        {
+                            samples.Add(Math.Round(sample.GetDouble(), 3));
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return DebugError($"the benchmark's answer could not be read ({ex.GetType().Name})");
+                }
+
+                if (samples.Count == 0)
+                {
+                    return DebugError($"the benchmark ran nothing: {detail}");
+                }
+
+                var ordered = samples.OrderBy(one => one).ToArray();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugBenchReply(
+                        what,
+                        ordered.Length,
+                        ordered[0],
+                        ordered[ordered.Length / 2],
+                        ordered[Math.Min(ordered.Length - 1, (int)(ordered.Length * 0.95))],
+                        ordered[^1],
+                        [.. samples],
+                        detail),
+                    DebugJsonContext.Default.DebugBenchReply));
+            }
+
+            case "layout" when request.Query.TryGetValue("reset", out var resetFlag) && resetFlag != "0":
+            {
+                // Putting the arrangement back. A probe that drags panes about is testing
+                // the right thing and leaving the wrong thing behind: the layout is
+                // persistent state, and clearing its storage key does not undo what the
+                // page already holds in memory. This resets and reloads in one request, so
+                // a probe's cleanup is one line that cannot half-work (2026-08-06).
+                var reset = $$"""
+                    (function () {
+                      try { localStorage.removeItem("xlide.docks.v1"); } catch (blocked) { }
+                      location.reload();
+                      return "reset";
+                    })()
+                    """;
+
+                _ = RunPageScript(reset, null, 3000);
+
+                var back = Environment.TickCount64;
+                var restored = false;
+                while (Environment.TickCount64 - back < WaitMilliseconds(request, 20000))
+                {
+                    Thread.Sleep(150);
+                    var probe = RunPageScript("!!(window.xlideBridge && window.xlideBridge.workspace)", null, 1500);
+                    if (probe.Error is null && probe.Result.Trim() == "true")
+                    {
+                        restored = true;
+                        break;
+                    }
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(restored, 0), DebugJsonContext.Default.DebugCommandReply));
             }
 
             case "layout":
@@ -1686,6 +1999,10 @@ internal sealed class AddInSession : IDisposable
             PublishBreakpoints();
             PublishProperties();
             UpdateDebugState();
+
+#if DEBUG
+            InstallConsoleRing();
+#endif
         };
 
         // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
