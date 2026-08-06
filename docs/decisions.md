@@ -258,4 +258,6 @@ proving its half through
 `Test-WatchPanel.ps1`, which drives the native dialog from a HARNESS process, where a hang
 costs a test run rather than a developer's session. If this is ever revisited, the watchdog
 comes first: a driver that guarantees dismissal, and that restores the dialog to a visible,
-centred window whenever it cannot, before anything is hidden.
+centred window whenever it cannot, before anything is hidden. The measurements behind this
+decision, including the full control map of both dialogs and the hang that settled it, are
+in [watch-window-investigation.md](watch-window-investigation.md).

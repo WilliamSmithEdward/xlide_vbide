@@ -54,7 +54,9 @@ with unsaved work inside it and no window the developer can find. It happened du
 measurement (a mangled driver argument; the developer's screenshot showed an empty Add
 Watch box with Excel frozen). CONSEQUENCE: Debug > Add Watch (1820), Edit Watch (940), and
 Quick Watch (229) are permanently reachable — menu curation must NEVER suppress them.
-Do not re-attempt without building the dismissal watchdog first. Also fixed in the same
+Do not re-attempt without building the dismissal watchdog first. The whole investigation —
+the parse discovery, the dialog control map, the probe mechanics, and the hang — is written
+up in [watch-window-investigation.md](watch-window-investigation.md). Also fixed in the same
 stretch: `Get-EditorScreenshot.ps1` follows Excel's launch handoff (`9406448`) — Excel
 respawns itself at launch, the harness waited on the dead pid and died before opening the
 VBE, which is why several launches that evening left Excel sitting with no editor.**
