@@ -5,12 +5,10 @@ SWITCH BACK TO THE DEV BUILD
 
 2. Paste this into PowerShell:
 
-powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Restore-DevRegistration.ps1"
+powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1"
 
 3. Open Excel and press Alt+F11.
 
 
-That one command does everything: it removes the installed product if it is there, points the
-editor back at your dev build, and checks that it worked before it says it worked.
-
-It works whether or not the installer was ever run.
+This rewrites the registry entries the editor uses to find the add-in, and nothing else. No
+building, no SDK, no dotnet.
