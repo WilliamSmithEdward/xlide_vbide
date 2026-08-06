@@ -1031,6 +1031,30 @@ body.live-resize .minimap {
   border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
+#immediate-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+#immediate-clear:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+#immediate-clear .codicon {
+  font-size: 14px;
+}
+
 #immediate-prompt {
   opacity: 0.6;
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;

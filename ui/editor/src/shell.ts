@@ -483,6 +483,14 @@ export class Shell {
       ]);
     });
 
+    // The visible twin of the context menu's Clear, sitting in the entry row. It clears
+    // this panel's history only; the hidden native window keeps its text, and the mirror
+    // appends only what is new, so nothing cleared ever comes back on its own.
+    (root.querySelector("#immediate-clear") as HTMLButtonElement).addEventListener("click", () => {
+      this.immediateLog.replaceChildren();
+      this.immediateInput.focus();
+    });
+
     this.panelList.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();

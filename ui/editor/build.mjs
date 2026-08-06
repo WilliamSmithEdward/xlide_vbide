@@ -71,6 +71,8 @@ const INDEX_HTML = `<!doctype html>
           <div id="immediate" hidden>
             <div id="immediate-log" role="log" aria-live="polite" aria-label="Immediate window output"></div>
             <div id="immediate-entry">
+              <button id="immediate-clear" type="button" title="Clear the output"
+                      aria-label="Clear the Immediate output"><span class="codicon codicon-clear-all" aria-hidden="true"></span></button>
               <span id="immediate-prompt" aria-hidden="true">&gt;</span>
               <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
                      aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
