@@ -73,7 +73,7 @@ function Invoke-Step {
 
 if ($Unregister) {
     Invoke-Step 'Unregister' {
-        dotnet run --project $registerProject -c Release -- --remove
+        dotnet run --project $registerProject -c Debug -- --remove
     }
 
     Write-Host ''
@@ -104,7 +104,11 @@ Write-Host ''
 Write-Host ("Shim: {0} ({1:N2} MB, built {2:HH:mm:ss})" -f $shimInfo.FullName, ($shimInfo.Length / 1MB), $shimInfo.LastWriteTime)
 
 Invoke-Step 'Register for the current user' {
-    dotnet run --project $registerProject -c Release -- --apply --shim $shimPath
+    # Debug, for the same reason the test gate is (see the note above it): Smart App Control
+    # blocks a FRESHLY BUILT unsigned RELEASE managed assembly from loading (0x800711C7), and
+    # this tool is managed. It ran on a stale Release build until its sources changed, then
+    # every dev loop died at registration with the shim already published (2026-08-05).
+    dotnet run --project $registerProject -c Debug -- --apply --shim $shimPath
 }
 
 if ($NoRun) {
