@@ -33,7 +33,12 @@ multicursor still works. Page-only change; shell.ts lost its whole search sectio
 (ShellHandlers.search/replaceAll, ShellSearchMatch, showSearchResults), bridge routes
 searchResult to bridge.searchWidget. Demo-verified end to end: tab gone, live count 1 of
 3 → cycle → scope flip clears decorations, engine answers render (2 rows), module Replace
-All 3-in-one-undo, Escape closes and refocuses, toolbar buttons open the widget.**
+All 3-in-one-undo, Escape closes and refocuses, toolbar buttons open the widget.
+FOLLOW-UP same night (developer request): a Find All button in the find row — module scope
+renders every match as clickable line-and-preview rows in the results region (clicks
+select and reveal, the counter tracks, the table rides every re-find live and resets when
+the query empties; capped at 500 rows with a note); wider scopes run the engine search,
+restoring the old panel's explicit button.**
 
 **2026-08-05 EVENING — LOCALS TRACKING IN BREAK IS FIXED (lesson 33 has the full story).**
 The developer's report: in a live break the Locals panel said "Not stopped. Variables

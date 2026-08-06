@@ -51,9 +51,13 @@ export class SearchWidget {
   private readonly counter: HTMLElement;
   private readonly previousButton: HTMLButtonElement;
   private readonly nextButton: HTMLButtonElement;
+  private readonly findAllButton: HTMLButtonElement;
   private readonly replaceButton: HTMLButtonElement;
   private readonly replaceAllButton: HTMLButtonElement;
   private readonly results: HTMLElement;
+
+  /** Whether the module-scope match table is showing; it rides every re-find while true. */
+  private moduleResultsOpen = false;
 
   /** Whether the widget is showing; mirrored into a context key so Escape can be claimed
    * inside the editor only while it matters. */
@@ -93,11 +97,12 @@ export class SearchWidget {
     this.counter = document.createElement("span");
     this.counter.className = "search-widget-counter";
     this.counter.setAttribute("aria-live", "polite");
+    this.findAllButton = this.makeTextButton("Find All");
     this.previousButton = this.makeIconButton("arrow-up", "Previous match (Shift+Enter)");
     this.nextButton = this.makeIconButton("arrow-down", "Next match (Enter)");
     const closeButton = this.makeIconButton("close", "Close (Escape)");
     findRow.append(this.findInput, this.caseButton, this.wordButton, this.scopeSelect,
-      this.counter, this.previousButton, this.nextButton, closeButton);
+      this.findAllButton, this.counter, this.previousButton, this.nextButton, closeButton);
 
     const replaceRow = document.createElement("div");
     replaceRow.className = "search-widget-row";
@@ -251,6 +256,14 @@ export class SearchWidget {
     this.nextButton.addEventListener("click", () => this.next());
     this.replaceButton.addEventListener("click", () => this.replaceCurrent());
     this.replaceAllButton.addEventListener("click", () => this.replaceAllRun());
+    this.findAllButton.addEventListener("click", () => {
+      if (this.scope() === "module") {
+        this.moduleResultsOpen = true;
+        this.showModuleResults();
+      } else {
+        this.runScoped(false);
+      }
+    });
 
     this.root.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -381,6 +394,7 @@ export class SearchWidget {
     this.decorations.clear();
     this.matches = [];
     this.current = -1;
+    this.moduleResultsOpen = false;
     this.editor.focus();
   }
 
@@ -392,6 +406,7 @@ export class SearchWidget {
 
   private scopeChanged(): void {
     if (this.scope() === "module") {
+      this.moduleResultsOpen = false;
       this.results.hidden = true;
       this.results.replaceChildren();
       this.findInModule(false);
@@ -435,6 +450,15 @@ export class SearchWidget {
       this.matches = [];
       this.current = -1;
       this.counter.textContent = "";
+
+      // An emptied query resets the match table too, rather than parking "No matches."
+      // over nothing.
+      if (this.moduleResultsOpen) {
+        this.moduleResultsOpen = false;
+        this.results.hidden = true;
+        this.results.replaceChildren();
+      }
+
       return;
     }
 
@@ -456,6 +480,71 @@ export class SearchWidget {
 
     this.decorate();
     this.updateCounter();
+
+    if (this.moduleResultsOpen) {
+      this.showModuleResults();
+    }
+  }
+
+  /**
+   * The module-scope match table: every match as a clickable line-and-preview row under the
+   * inputs, refreshed by every re-find while open, so the rows always mirror the matches the
+   * counter is counting. A row's click selects and reveals its match in the editor.
+   */
+  private showModuleResults(): void {
+    if (this.findInput.value.length === 0) {
+      // A Find All with nothing typed is a no-op; the emptied-query reset lives in
+      // findInModule, which every query change runs through.
+      this.moduleResultsOpen = false;
+      return;
+    }
+
+    this.results.replaceChildren();
+    this.results.hidden = false;
+
+    if (this.matches.length === 0) {
+      this.results.appendChild(this.note("No matches."));
+      return;
+    }
+
+    const shown = Math.min(this.matches.length, 500);
+    this.results.appendChild(this.note(
+      `${this.matches.length} match${this.matches.length === 1 ? "" : "es"}`
+      + (shown < this.matches.length ? ` (showing the first ${shown})` : "")));
+
+    const model = this.editor.getModel();
+    for (let i = 0; i < shown; i++) {
+      const range = this.matches[i].range;
+
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "search-row";
+      row.setAttribute("role", "listitem");
+
+      const where = document.createElement("span");
+      where.className = "search-line";
+      where.textContent = String(range.startLineNumber);
+      row.appendChild(where);
+
+      const preview = document.createElement("span");
+      preview.className = "search-preview";
+      const line = model?.getLineContent(range.startLineNumber) ?? "";
+      preview.textContent = line.trim();
+      preview.title = line;
+      row.appendChild(preview);
+
+      const index = i;
+      row.addEventListener("click", () => {
+        // The table re-renders with every re-find, so the index matches the live list
+        // unless an edit landed in the same beat; a stale click is dropped, not misaimed.
+        if (this.scope() === "module" && index < this.matches.length) {
+          this.current = index;
+          this.step(0);
+        }
+      });
+
+      this.results.appendChild(row);
+    }
   }
 
   /** The first match at or after the position, wrapping to the first match. */
