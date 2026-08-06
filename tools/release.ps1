@@ -76,4 +76,10 @@ if ($LASTEXITCODE -ne 0) { throw "Uploading to $Tag failed." }
 
 Write-Host ''
 Write-Host "Attached to $Tag." -ForegroundColor Green
-gh release view $Tag --json assets --jq '.assets[] | "  \(.name)  \(.size / 1048576 | floor) MB"'
+# Tab-separated, and formatted here. PowerShell re-parses arguments on their way to a native
+# command, so a jq expression containing double quotes arrives as eight arguments instead of one.
+$assets = gh release view $Tag --json assets --jq '.assets[] | [.name, (.size / 1048576 | floor | tostring)] | @tsv'
+foreach ($asset in $assets) {
+    $fields = $asset -split "`t"
+    Write-Host ("  {0}  {1} MB" -f $fields[0], $fields[1])
+}
