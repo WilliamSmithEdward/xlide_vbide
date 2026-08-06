@@ -191,6 +191,284 @@ internal sealed class AddInSession : IDisposable
         DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
             new DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply));
 
+    /// <summary>A request's wait budget, clamped to something a stuck page cannot outlast.</summary>
+    private static int WaitMilliseconds(DebugServer.DebugRequest request, int fallback)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return request.Query.TryGetValue("waitMs", out var text) && int.TryParse(text, out var asked)
+            ? Math.Clamp(asked, 100, 120_000)
+            : fallback;
+    }
+
+    /// <summary>A string as a JavaScript (JSON) literal, quotes included.</summary>
+    private static string JsonString(string value) =>
+        "\"" + System.Text.Json.JsonEncodedText.Encode(value) + "\"";
+
+    /// <summary>Identifies each pending script, so two callers cannot collect each other's.</summary>
+    private static int _pageScriptId;
+
+    /// <summary>
+    /// Runs a script in a page and answers with its result as JSON.
+    ///
+    /// A PROMISE is awaited rather than reported as an empty object, which is what the
+    /// browser's own ExecuteScript does with one: every async probe written against this
+    /// door returned `{}` and looked like a page fault until the shape was recognised
+    /// (2026-08-06). The script is evaluated inside a wrapper that stashes a pending promise
+    /// on the page and hands back a ticket; the ticket is collected on a poll until the
+    /// promise settles or the budget runs out.
+    ///
+    /// Only the START of each call crosses to the host thread. The browser delivers its
+    /// answer by calling back on that same thread, so THIS thread — a pool thread — is the
+    /// one that waits; waiting on the host thread would be waiting for a callback that
+    /// cannot arrive until the waiting stops.
+    /// </summary>
+    private (bool Answered, int ErrorCode, string Result, string? Error) RunPageScript(
+        string script, string? surface, int budgetMs)
+    {
+        var host = _editorSurface;
+        if (host is null)
+        {
+            return (false, 0, string.Empty, "the surface is not up yet");
+        }
+
+        var ticket = Interlocked.Increment(ref _pageScriptId);
+        var wrapper = $$"""
+            (function () {
+              var script = {{JsonString(script)}};
+              var id = {{ticket}};
+              window.__xlideEval = window.__xlideEval || {};
+              try {
+                var value = (0, eval)(script);
+                if (value && typeof value.then === "function") {
+                  window.__xlideEval[id] = { pending: true };
+                  Promise.resolve(value).then(
+                    function (settled) { window.__xlideEval[id] = { value: settled === undefined ? null : settled }; },
+                    function (failed) { window.__xlideEval[id] = { error: String((failed && failed.message) || failed) }; });
+                  return JSON.stringify({ pending: id });
+                }
+                return JSON.stringify({ value: value === undefined ? null : value });
+              } catch (error) {
+                return JSON.stringify({ error: String((error && error.message) || error) });
+              }
+            })()
+            """;
+
+        var first = RunPageScriptOnce(wrapper, surface, Math.Min(budgetMs, 10_000));
+        if (first.Error is not null)
+        {
+            return first;
+        }
+
+        var opened = ReadWrapped(first.Result);
+        if (!opened.Pending)
+        {
+            return (first.Answered, first.ErrorCode, opened.Payload, null);
+        }
+
+        // A promise: collect the ticket until it settles. The page keeps running between
+        // polls, which is the whole point — this thread is not holding anything it needs.
+        var deadline = Environment.TickCount64 + budgetMs;
+        var collector = $$"""
+            (function () {
+              var id = {{ticket}};
+              var held = (window.__xlideEval || {})[id];
+              if (!held) { return JSON.stringify({ error: "the pending result was lost" }); }
+              if (held.pending) { return JSON.stringify({ pending: id }); }
+              delete window.__xlideEval[id];
+              return JSON.stringify(held);
+            })()
+            """;
+
+        while (Environment.TickCount64 < deadline)
+        {
+            Thread.Sleep(40);
+
+            var poll = RunPageScriptOnce(collector, surface, 3000);
+            if (poll.Error is not null)
+            {
+                return poll;
+            }
+
+            var settled = ReadWrapped(poll.Result);
+            if (!settled.Pending)
+            {
+                return (true, poll.ErrorCode, settled.Payload, null);
+            }
+        }
+
+        return (false, 0, string.Empty, $"the script did not settle within {budgetMs}ms");
+    }
+
+    /// <summary>Unwraps one wrapper answer: its payload, and whether it is still a ticket.</summary>
+    private static (bool Pending, string Payload) ReadWrapped(string answer)
+    {
+        try
+        {
+            // The wrapper returns a STRING, so the browser's answer is that string as JSON.
+            using var outer = System.Text.Json.JsonDocument.Parse(answer);
+            var inner = outer.RootElement.ValueKind == System.Text.Json.JsonValueKind.String
+                ? outer.RootElement.GetString() ?? "{}"
+                : answer;
+
+            using var parsed = System.Text.Json.JsonDocument.Parse(inner);
+            if (parsed.RootElement.TryGetProperty("pending", out _))
+            {
+                return (true, string.Empty);
+            }
+
+            if (parsed.RootElement.TryGetProperty("error", out var error))
+            {
+                return (false, System.Text.Json.JsonSerializer.Serialize(
+                    new DebugErrorReply(error.GetString() ?? "the script failed"),
+                    DebugJsonContext.Default.DebugErrorReply));
+            }
+
+            return (false, parsed.RootElement.TryGetProperty("value", out var value)
+                ? value.GetRawText()
+                : "null");
+        }
+        catch (Exception)
+        {
+            // An answer that is not the wrapper's shape is passed through as it came: a
+            // caller reading a raw result is better served than one told nothing.
+            return (false, answer);
+        }
+    }
+
+    /// <summary>One ExecuteScript round trip, with the host-thread hop and its deadlines.</summary>
+    private (bool Answered, int ErrorCode, string Result, string? Error) RunPageScriptOnce(
+        string script, string? surface, int budgetMs)
+    {
+        var host = _editorSurface;
+        if (host is null)
+        {
+            return (false, 0, string.Empty, "the surface is not up yet");
+        }
+
+        string? result = null;
+        var errorCode = 0;
+        var started = false;
+        using var scriptDone = new ManualResetEventSlim(false);
+        using var scheduled = new ManualResetEventSlim(false);
+
+        host.RunOnHostThread(() =>
+        {
+            try
+            {
+                var browser = surface == "palette" ? _browserPalette?.Browser : _editorSurface?.Browser;
+                started = browser is not null && browser.ExecuteScript(script, (code, json) =>
+                {
+                    errorCode = code;
+                    result = json;
+                    scriptDone.Set();
+                });
+            }
+            finally
+            {
+                scheduled.Set();
+            }
+        });
+
+        if (!scheduled.Wait(TimeSpan.FromSeconds(3)))
+        {
+            return (false, 0, string.Empty, "the host thread did not start the script in time");
+        }
+
+        if (!started)
+        {
+            return (false, 0, string.Empty, "that surface has no page to run script in");
+        }
+
+        var answered = scriptDone.Wait(budgetMs);
+        return (answered, errorCode, result ?? string.Empty, null);
+    }
+
+    /// <summary>When the page bundle beside the running shim was built, or "(unknown)".</summary>
+    private static string BundleBuiltUtc()
+    {
+        var directory = Interop.ShimModule.Directory;
+        var bundle = directory is null ? null : Path.Combine(directory, "ui", "editor", "dist", "editor.js");
+        return bundle is not null && File.Exists(bundle)
+            ? File.GetLastWriteTimeUtc(bundle).ToString("s", System.Globalization.CultureInfo.InvariantCulture)
+            : "(unknown)";
+    }
+
+    /// <summary>
+    /// Whether the page is running a bundle older than the one on disk — the question behind
+    /// "why is my fix not in the page", which cost three rounds of confusion in one day. The
+    /// page stamps itself to the second at build time; a stamp before the file's own write
+    /// time by more than a minute means the browser is serving something cached.
+    /// </summary>
+    private static bool StampIsBehind(string pageStamp, string bundleStamp) =>
+        DateTime.TryParse(pageStamp, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var page)
+        && DateTime.TryParse(bundleStamp, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var bundle)
+        && bundle - page > TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// The whole visible arrangement, read from the page: the four dock sections with their
+    /// group trees, the editor groups with what each shows, and the sizes. One answer in
+    /// place of the dozen ad-hoc measurements this layout's development needed.
+    /// </summary>
+    private const string LayoutScript = """
+        (function () {
+          var round = function (n) { return Math.round(n); };
+          var boxOf = function (el) {
+            var b = el.getBoundingClientRect();
+            return { x: round(b.x), y: round(b.y), w: round(b.width), h: round(b.height) };
+          };
+
+          var sections = ["left", "right", "top", "bottom"].map(function (side) {
+            var dock = document.getElementById("dock-" + side);
+            if (!dock || dock.hidden) { return { side: side, standing: false, groups: [] }; }
+            var groups = [].slice.call(dock.querySelectorAll(".dock-group")).map(function (group) {
+              return {
+                tabs: [].slice.call(group.querySelectorAll(".panel-tab")).map(function (tab) {
+                  return { pane: tab.dataset.panel, active: tab.classList.contains("active") };
+                }),
+                box: boxOf(group)
+              };
+            });
+            return { side: side, standing: true, box: boxOf(dock), groups: groups };
+          });
+
+          var workspace = window.xlideBridge && window.xlideBridge.workspace;
+          var editors = [];
+          if (workspace) {
+            editors = [].slice.call(document.querySelectorAll(".editor-group")).map(function (group) {
+              return {
+                tabs: [].slice.call(group.querySelectorAll(".tab")).map(function (tab) {
+                  return {
+                    module: tab.dataset.module,
+                    project: tab.dataset.project || null,
+                    active: tab.classList.contains("active"),
+                    dirty: tab.classList.contains("dirty")
+                  };
+                }),
+                activeGroup: group.classList.contains("active-group"),
+                box: boxOf(group)
+              };
+            });
+          }
+
+          var area = document.getElementById("editor-area");
+          var empty = document.getElementById("empty-view");
+
+          // An OBJECT, not a string: the runner already carries the value across as JSON,
+          // and stringifying here would deliver the whole answer as one quoted string that
+          // every caller then has to unescape.
+          return {
+            sections: sections,
+            editorGroups: editors,
+            editorArea: area ? boxOf(area) : null,
+            emptyWorkspace: !!(empty && !empty.hidden),
+            documents: workspace ? window.xlideBridge.documents.all() : [],
+            dragging: !!document.querySelector(".drag-dim")
+          };
+        })()
+        """;
+
     /// <summary>
     /// Answers one debug-door request. Arrives on a pool thread. Routes that read files,
     /// ring buffers, or the reader thread's published snapshots answer right here; routes
@@ -466,58 +744,149 @@ internal sealed class AddInSession : IDisposable
                 // The page's own DOM, asked directly: the questions that are one line ("how
                 // many tabs does the strip show?", "is the empty view up?") answered without
                 // a DevTools client. Pixels cannot answer those, and this needs no protocol.
-                //
-                // Only the START crosses to the host thread. The browser delivers its answer
-                // by calling back on that same thread, so THIS thread - a pool thread - is
-                // the one that waits; waiting on the host thread would be waiting for a
-                // callback that cannot arrive until the waiting stops.
                 var script = request.Body.Length > 0 ? request.Body : request.Query["script"];
                 request.Query.TryGetValue("surface", out var which);
 
-                var evalHost = _editorSurface;
-                if (evalHost is null)
+                var run = RunPageScript(script, which, WaitMilliseconds(request, 5000));
+                return run.Error is { } evalError
+                    ? DebugError(evalError)
+                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugEvalReply(run.Answered, run.ErrorCode, run.Result),
+                        DebugJsonContext.Default.DebugEvalReply));
+            }
+
+            case "await" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
+            {
+                // A condition, waited for IN the page rather than by a caller looping over
+                // eval. Every such loop was a round trip per tick and a sleep chosen by
+                // guess; the ones written during the workspace work raced the thing they
+                // were watching more than once (2026-08-06). One request, one answer, and
+                // the elapsed time says whether the condition was already true or arrived.
+                var predicate = request.Body.Length > 0 ? request.Body : request.Query["script"];
+                request.Query.TryGetValue("surface", out var awaitSurface);
+                var budget = WaitMilliseconds(request, 10000);
+
+                // The predicate is compiled to a function ONCE, here, while this script is
+                // still the browser's own synchronous evaluation — which the page's content
+                // policy exempts. Evaluating a string from inside a later timer callback is
+                // not exempt and is refused outright ("unsafe-eval is not an allowed
+                // source"), so a waiter that eval'd per tick never ran its predicate at all
+                // and reported every condition as unmet (2026-08-06).
+                var waiter = $$"""
+                    (function () {
+                      var test;
+                      try {
+                        test = (0, eval)("(function () { return (" + {{JsonString(predicate)}} + "); })");
+                      } catch (error) {
+                        return Promise.resolve({ met: false, elapsedMs: 0,
+                          detail: "the predicate would not compile: " + String((error && error.message) || error) });
+                      }
+
+                      var deadline = Date.now() + {{budget}};
+                      var started = Date.now();
+                      return new Promise(function (resolve) {
+                        (function tick() {
+                          var met = false;
+                          var detail = "";
+                          try {
+                            var value = test();
+                            met = !!value;
+                            detail = met ? "" : String(value);
+                          } catch (error) {
+                            detail = String((error && error.message) || error);
+                          }
+                          if (met || Date.now() > deadline) {
+                            resolve({ met: met, elapsedMs: Date.now() - started, detail: detail });
+                            return;
+                          }
+                          setTimeout(tick, 60);
+                        })();
+                      });
+                    })()
+                    """;
+
+                // The page's own deadline expires first; the transport's is the backstop for
+                // a page that stopped running timers at all.
+                var awaited = RunPageScript(waiter, awaitSurface, budget + 4000);
+                if (awaited.Error is { } awaitError)
+                {
+                    return DebugError(awaitError);
+                }
+
+                var met = false;
+                var elapsed = 0;
+                var detail = string.Empty;
+                try
+                {
+                    using var parsed = System.Text.Json.JsonDocument.Parse(awaited.Result);
+                    met = parsed.RootElement.TryGetProperty("met", out var metValue)
+                        && metValue.ValueKind == System.Text.Json.JsonValueKind.True;
+                    elapsed = parsed.RootElement.TryGetProperty("elapsedMs", out var elapsedValue)
+                        && elapsedValue.TryGetInt32(out var ms) ? ms : 0;
+                    detail = parsed.RootElement.TryGetProperty("detail", out var detailValue)
+                        ? detailValue.GetString() ?? string.Empty : string.Empty;
+                }
+                catch (Exception ex)
+                {
+                    detail = $"the page's answer could not be read ({ex.GetType().Name})";
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugAwaitReply(met, elapsed, detail), DebugJsonContext.Default.DebugAwaitReply));
+            }
+
+            case "layout":
+            {
+                // The whole visible arrangement in one answer: which panes are docked where,
+                // which editor groups exist and what each shows, and the sizes. Built by
+                // hand out of a dozen ad-hoc evals while the layout was being written, which
+                // is the argument for it existing (2026-08-06).
+                var layout = RunPageScript(LayoutScript, null, 5000);
+                return layout.Error is { } layoutError
+                    ? DebugError(layoutError)
+                    : DebugServer.DebugReply.Json(layout.Result);
+            }
+
+            case "reload":
+            {
+                // Reload the page and WAIT for it to come back, answering with the bundle it
+                // is now running. The manual version — reload, sleep a guess, hope — was run
+                // a dozen times in one afternoon, and a guess that is too short reports on
+                // the page that is going away (2026-08-06).
+                var reloadHost = _editorSurface;
+                if (reloadHost is null)
                 {
                     return DebugError("the surface is not up yet");
                 }
 
-                string? result = null;
-                var errorCode = 0;
-                var started = false;
-                using var scriptDone = new ManualResetEventSlim(false);
-                using var scheduled = new ManualResetEventSlim(false);
+                var startedAt = Environment.TickCount64;
+                _ = RunPageScript("location.reload()", null, 2000);
 
-                evalHost.RunOnHostThread(() =>
+                // Ready is the PAGE's own word for it, not a script answering: a page part
+                // way through booting can run script and still have no bridge.
+                var reloadBudget = WaitMilliseconds(request, 20000);
+                var ready = false;
+                while (Environment.TickCount64 - startedAt < reloadBudget)
                 {
-                    try
+                    Thread.Sleep(150);
+                    var probe = RunPageScript("!!(window.xlideBridge && window.xlideBridge.workspace)", null, 1500);
+                    if (probe.Error is null && probe.Result.Trim() == "true")
                     {
-                        var browser = which == "palette" ? _browserPalette?.Browser : _editorSurface?.Browser;
-                        started = browser is not null && browser.ExecuteScript(script, (code, json) =>
-                        {
-                            errorCode = code;
-                            result = json;
-                            scriptDone.Set();
-                        });
+                        ready = true;
+                        break;
                     }
-                    finally
-                    {
-                        scheduled.Set();
-                    }
-                });
-
-                if (!scheduled.Wait(TimeSpan.FromSeconds(3)))
-                {
-                    return DebugError("the host thread did not start the script in time");
                 }
 
-                if (!started)
-                {
-                    return DebugError("that surface has no page to run script in");
-                }
-
-                var scriptAnswered = scriptDone.Wait(TimeSpan.FromSeconds(5));
+                var stamp = reloadHost.PageBuildStamp ?? "(none reported)";
+                var bundle = BundleBuiltUtc();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugEvalReply(scriptAnswered, errorCode, result ?? string.Empty),
-                    DebugJsonContext.Default.DebugEvalReply));
+                    new DebugReloadReply(
+                        ready,
+                        (int)(Environment.TickCount64 - startedAt),
+                        stamp,
+                        bundle,
+                        Stale: StampIsBehind(stamp, bundle)),
+                    DebugJsonContext.Default.DebugReloadReply));
             }
 
             case "dialogs":

@@ -399,9 +399,30 @@ Check 'the reload brought the explorer back' {
     WaitFor 'explorer rows after the reload' { [int](Page 'document.querySelectorAll("#sidebar-tree [role=treeitem]").length') -ge 1 }
 }
 
-Check 'the layout resets clean for the next probe' {
+Check 'the layout is put back the way it was found' {
+    # This probe DRAGS panes around to test the compass, and the arrangement is persistent
+    # UI state. Clearing the storage key is not enough: the page still holds the rearranged
+    # layout in memory and writes it back on the next render, so the developer opens the
+    # editor to find Problems docked on the left with no explanation (2026-08-06). Clearing
+    # AND reloading is what actually restores the default.
     Page 'localStorage.removeItem("xlide.docks.v1"); "cleared"' | Out-Null
-    $true
+    Page 'location.reload()' | Out-Null
+
+    WaitFor 'the default arrangement to come back' {
+        try {
+            $where = (Page @'
+(() => {
+  if (!window.xlideBridge) return "";
+  const side = ["left","right","top","bottom"].find(s => {
+    const dock = document.getElementById("dock-" + s);
+    return dock && !dock.hidden && dock.querySelector('.panel-tab[data-panel="problems"]');
+  });
+  return side || "";
+})()
+'@)
+            $where -eq 'bottom'
+        } catch { $false }
+    } 25
 }
 
 $failed = @($checks.GetEnumerator() | Where-Object { $_.Value -ne 'PASS' })

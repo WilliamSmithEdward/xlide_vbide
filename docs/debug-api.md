@@ -62,13 +62,55 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `capture` | GET | `window=frame\|palette` | a BMP of the window, through PrintWindow |
 | `module` | POST | `name`, `project`, body = text | writes the module through the session's writer, with the baseline and engine corrections a host rewrite carries |
 | `dialogs` | GET | | native dialogs standing now, with their buttons, and how long the host thread has been quiet. Needs no host thread, so it answers while the editor is stuck |
-| `eval` | POST | `surface`, body = script | runs script in the live page and returns its result as JSON |
+| `eval` | POST | `surface`, `waitMs`, body = script | runs script in the live page and returns its result as JSON. A PROMISE is awaited, so `(async () => ...)()` works |
+| `await` | POST | `surface`, `waitMs`, body = predicate | polls a predicate IN the page until it is true, answering `met` and how long it took. One request instead of a caller's poll loop |
+| `layout` | GET | | the whole visible arrangement: dock sections and their groups, editor groups and their tabs, sizes, open documents, whether a drag is live |
+| `reload` | POST | `waitMs` | reloads the page and waits for it to come back, answering with the bundle stamp it is now running and whether that is behind the one on disk |
 | `dismiss` | POST | `button`, `caption` | clicks a dialog button by name. Explicit, so it will press OK if asked |
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |
 | `immediate` | POST | `text` | schedules an Immediate-window evaluation, fire and forget |
 | `placement` | POST | | forces a placement pass |
+
+### Awaiting, rather than sleeping
+
+`eval` awaits a promise. The browser's own `ExecuteScript` hands back `{}` for one, which
+looks exactly like a page fault: every async probe written against this door returned an
+empty object and was read as broken until the shape was recognised. The script is evaluated
+inside a wrapper that stashes a pending promise on the page and returns a ticket, and the
+ticket is collected on a poll until it settles. So this works:
+
+```powershell
+Invoke-RestMethod "$api/eval" -Method Post -Body '(async () => { await something(); return answer; })()'
+```
+
+`await` takes a predicate instead of a script and polls it IN the page until it is true,
+answering `met` and `elapsedMs`. It replaces the caller-side poll loop, which costs a round
+trip per tick and invites a `Start-Sleep` chosen by guess — the loops written during the
+workspace work raced the thing they were watching more than once. The elapsed time is the
+interesting half of a PASS: a condition met in 4ms was already true, one met in 4 seconds
+arrived.
+
+One trap is written into the implementation. The page's content policy exempts the browser's
+own synchronous evaluation, but NOT a later callback: a waiter that evaluated its predicate
+string inside `setTimeout` was refused ("unsafe-eval is not an allowed source") and reported
+every condition as unmet. The predicate is compiled to a function once, up front, and the
+timer calls the function.
+
+### Seeing the arrangement
+
+`layout` answers with the whole visible shape in one request: each dock section with its
+group tree and each group's tabs, the editor groups with their module tabs, the sizes, the
+open documents, and whether a drag is live. It exists because building the docking layout
+needed a dozen ad-hoc `eval` measurements per question — and it earned itself the day it
+landed, answering "why is the Problems pane on the left?" in one call. (It was a probe that
+had dragged it there and not put it back.)
+
+`reload` reloads the page and WAITS for it to come back, answering with how long that took,
+the build stamp the page is now running, and whether that stamp is behind the bundle on
+disk. The manual version — reload, sleep a guess, hope — was run a dozen times in one
+afternoon, and a guess that is too short reports on the page that is going away.
 
 Two arguments deserve their reasons.
 

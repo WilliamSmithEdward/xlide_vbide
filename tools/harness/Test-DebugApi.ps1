@@ -206,6 +206,41 @@ Check 'log waits for an event instead of sleeping for it' {
     $answer.lines.Count -ge 1 -and $clock.Elapsed.TotalSeconds -lt 12
 }
 
+Check 'eval awaits a promise instead of answering an empty object' {
+    # The browser's own ExecuteScript hands back {} for a promise, which reads as a page
+    # fault; every async probe written against this door looked broken until the shape was
+    # recognised (2026-08-06). Both halves are checked: a promise resolves, and a plain
+    # value still comes straight back.
+    $async = (Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 25 `
+        -Body '(async () => { await new Promise(r => setTimeout(r, 400)); return { awaited: true }; })()').result
+    $plain = (Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 -Body '2 + 3').result
+    $async -match '"awaited":true' -and $plain.Trim() -eq '5'
+}
+
+Check 'await waits for a condition and times out honestly' {
+    # A predicate that is already true costs nothing; one that arrives is waited for; one
+    # that never comes gives up at its budget rather than at the transport's.
+    $now = Invoke-RestMethod "$api/await" -Method Post -Body '!!window.xlideBridge' -TimeoutSec 30
+
+    Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 `
+        -Body 'window.__apiProbeFlag = false; setTimeout(() => { window.__apiProbeFlag = true; }, 700); "armed"' | Out-Null
+    $arrives = Invoke-RestMethod "$api/await" -Method Post -Body 'window.__apiProbeFlag === true' -TimeoutSec 40
+
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $never = Invoke-RestMethod "$api/await?waitMs=2000" -Method Post -Body 'window.__neverEver === 42' -TimeoutSec 40
+    $clock.Stop()
+
+    $now.met -and $now.elapsedMs -lt 200 `
+        -and $arrives.met -and $arrives.elapsedMs -ge 500 `
+        -and (-not $never.met) -and $clock.Elapsed.TotalSeconds -lt 8
+}
+
+Check 'layout answers with the whole visible arrangement' {
+    $l = Invoke-RestMethod "$api/layout" -TimeoutSec 20
+    $bottom = $l.sections | Where-Object { $_.side -eq 'bottom' }
+    $l.editorGroups.Count -ge 1 -and $l.editorArea.w -gt 0 -and $bottom.standing -and $l.documents.Count -ge 1
+}
+
 Check 'assert reports what it saw, not just a verdict' {
     $held = Invoke-RestMethod "$api/assert?that=surfaceReady&timeoutMs=3000" -Method Post -TimeoutSec 20
     $missed = Invoke-RestMethod "$api/assert?that=shownModule&value=NoSuchModule&timeoutMs=1000" -Method Post -TimeoutSec 20
@@ -288,6 +323,14 @@ Check 'a modal this door raised is seen, then cleared by the next request' {
     # makes the check pass on its own, which is how this check first went green wrongly.
     $script:modalDetail = "saw '$($seen.dialogs[0].caption)' buttons [$($seen.dialogs[0].buttons -join ', ')], cleared $cleared, beating $beating"
     [bool] ($sawIt -and $cleared -and $beating)
+}
+
+# Last, deliberately: this one RESTARTS the page. Every check above depends on host state
+# built up in order, and a reload mid-suite left the modal check watching an editor whose
+# caret had been re-established underneath it (2026-08-06).
+Check 'reload brings the page back and names the bundle it runs' {
+    $r = Invoke-RestMethod "$api/reload" -Method Post -TimeoutSec 45
+    $r.ready -and $r.elapsedMs -lt 25000 -and $r.pageBuildStamp -ne '(none reported)' -and (-not $r.stale)
 }
 
 Write-Output ''

@@ -42,6 +42,17 @@ panes that dock wherever the developer puts them.
   the surface covers — the editor groups are that job done where the developer looks.
 - Every divider that resizes something wears the same centred grip.
 
+### Development
+
+- The debug api's `eval` now AWAITS a promise instead of answering `{}`, so an async probe
+  works; `await` polls a predicate in the page and answers when it comes true, replacing
+  caller-side poll loops; `layout` returns the whole visible arrangement in one request; and
+  `reload` reloads the page, waits for it, and says which bundle came back and whether it is
+  behind the one on disk. See `docs/debug-api.md`.
+- `docs/ui-lessons.md`: what building this surface inside a host that moves under it taught
+  us — pointer gestures that survive rebuilds, one keybinding service across many editors,
+  drag targets a person can aim at, and probing a live page honestly.
+
 ## v0.1.5 (2026-08-06)
 
 A fix for tabs that showed above an empty canvas, page errors that no longer disappear, and a

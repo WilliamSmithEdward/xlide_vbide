@@ -509,7 +509,7 @@ export class PanelDocks {
    * listeners so a fast drag survives leaving the strip; pointercancel handled because the
    * host steals focus mid-gesture; the click a drag would become is swallowed.
    */
-  private armDrag(event: PointerEvent, fromGroup: Group): void {
+  private armDrag(event: PointerEvent, from: Group): void {
     if (event.button !== 0) {
       return;
     }
@@ -578,7 +578,14 @@ export class PanelDocks {
 
         const box = host.body.getBoundingClientRect();
         if (inside(box)) {
-          const zone = compass.over(box, during.clientX, during.clientY, ALL_ZONES);
+          // Only what the group can honour: over the pane's OWN group, centre is where it
+          // already is, and a split is impossible when it is the only tab there — a zone
+          // that does nothing is a promise the drop cannot keep.
+          const allowed = host.group !== from ? ALL_ZONES
+            : from.tabs.length > 1 ? EDGE_ZONES
+            : [];
+
+          const zone = compass.over(box, during.clientX, during.clientY, allowed);
           target = zone ? { kind: "group", side: host.side, path: host.path, zone } : null;
           // The centre joins this group's tabs; an edge carves a new group beside it.
           compass.preview(zone ? zoneRect(box, zone) : null, zone === "center" ? "join" : "new");
@@ -629,7 +636,7 @@ export class PanelDocks {
         return;
       }
 
-      this.dropPane(name, fromGroup, target);
+      this.dropPane(name, from, target);
     };
 
     window.addEventListener("pointermove", move);

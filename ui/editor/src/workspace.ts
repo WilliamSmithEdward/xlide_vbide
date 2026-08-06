@@ -25,7 +25,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
-import { ALL_ZONES, DragCompass, zoneRect, type DropZone } from "./dragcompass.js";
+import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
 
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
@@ -1006,11 +1006,21 @@ export class Workspace {
 
         // Over a group body, the compass names the outcome: centre joins that group's tabs,
         // an edge splits it.
+        //
+        // A group is offered only what it can honour. Over the tab's OWN group, centre is
+        // where it already is, and a split is impossible when it is the only tab — the tab
+        // would leave the group and dissolve it, which is the same picture one splitter
+        // wider. Showing a zone that does nothing is a promise the drop cannot keep, and it
+        // reads as a bug from outside (developer, 2026-08-06).
         for (const candidate of this.groups) {
           const bounds = candidate.body.getBoundingClientRect();
           if (during.clientX >= bounds.left && during.clientX <= bounds.right
             && during.clientY >= bounds.top && during.clientY <= bounds.bottom) {
-            const zone = compass.over(bounds, during.clientX, during.clientY, ALL_ZONES);
+            const allowed = candidate !== group ? ALL_ZONES
+              : group.tabs.length > 1 ? EDGE_ZONES
+              : [];
+
+            const zone = compass.over(bounds, during.clientX, during.clientY, allowed);
             drop = zone ? { group: candidate, zone } : null;
             compass.preview(zone ? zoneRect(bounds, zone) : null, zone === "center" ? "join" : "new");
             return;

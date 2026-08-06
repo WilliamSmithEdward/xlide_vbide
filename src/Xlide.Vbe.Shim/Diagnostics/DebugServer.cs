@@ -636,6 +636,24 @@ public sealed record DebugEvalReply(
     [property: JsonPropertyName("errorCode")] int ErrorCode,
     [property: JsonPropertyName("result")] string Result);
 
+/// <summary>
+/// A condition waited for in the page: whether it came true, and how long it took. Elapsed
+/// is the interesting half when it did — a condition met in 4ms and one met in 4 seconds are
+/// different facts about the same PASS.
+/// </summary>
+public sealed record DebugAwaitReply(
+    [property: JsonPropertyName("met")] bool Met,
+    [property: JsonPropertyName("elapsedMs")] int ElapsedMs,
+    [property: JsonPropertyName("detail")] string Detail);
+
+/// <summary>A page reload, and what came back: how long to ready, and which bundle it is.</summary>
+public sealed record DebugReloadReply(
+    [property: JsonPropertyName("ready")] bool Ready,
+    [property: JsonPropertyName("elapsedMs")] int ElapsedMs,
+    [property: JsonPropertyName("pageBuildStamp")] string PageBuildStamp,
+    [property: JsonPropertyName("bundleBuiltUtc")] string BundleBuiltUtc,
+    [property: JsonPropertyName("stale")] bool Stale);
+
 /// <summary>The Locals ghost's feed as data, for the debug-side suite.</summary>
 public sealed record DebugLocalsReply(
     [property: JsonPropertyName("context")] string? Context,
@@ -704,6 +722,8 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogRow))]
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]
+[JsonSerializable(typeof(DebugAwaitReply))]
+[JsonSerializable(typeof(DebugReloadReply))]
 [JsonSerializable(typeof(DebugDoctorReply))]
 [JsonSerializable(typeof(DebugPerfReply))]
 [JsonSerializable(typeof(DebugJournalReply))]
