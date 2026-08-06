@@ -10,6 +10,21 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 LATE — A CUSTOM WATCH UI IS ABANDONED (developer's call; DECISION 11).** The
+Watch PANEL is ours and verified (below); creating, editing, and deleting a watch stays
+with the editor's native Add Watch / Edit Watch dialogs. The mechanism was measured and
+works — every control drives by message, including Edit Watch's Delete (4859) — but the
+dialogs are MODAL, so the driver must run on another thread, and any mismatch leaves a
+modal nobody dismisses; hidden off screen as the mechanism requires, that is a hung editor
+with unsaved work inside it and no window the developer can find. It happened during the
+measurement (a mangled driver argument; the developer's screenshot showed an empty Add
+Watch box with Excel frozen). CONSEQUENCE: Debug > Add Watch (1820), Edit Watch (940), and
+Quick Watch (229) are permanently reachable — menu curation must NEVER suppress them.
+Do not re-attempt without building the dismissal watchdog first. Also fixed in the same
+stretch: `Get-EditorScreenshot.ps1` follows Excel's launch handoff (`9406448`) — Excel
+respawns itself at launch, the harness waited on the dead pid and died before opening the
+VBE, which is why several launches that evening left Excel sitting with no editor.**
+
 **2026-08-05 LATE — THE WATCH PANE IS VERIFIED AGAINST A REAL WATCH (the last unverified
 seam of the debug panels).** The developer's manual test showed "No watches" with a watch
 defined; the reader was reading cleanly and parsing zero rows. MEASURED (design-mode UIA
