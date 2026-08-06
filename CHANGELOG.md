@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.1.3 (2026-08-05)
+
+One search UI. The bottom panel's Search tab and Monaco's find widget duplicated each
+other; both give way to a single floating search widget where the find widget sat.
+
+### Changed
+
+- Search is one floating widget with a scope dropdown. Module scope finds live as you
+  type, with match highlights, an n-of-m counter, and Enter/F3 cycling; its Replace All
+  applies every match as one edit, so a single undo reverts the whole operation. Workbook
+  and All-workbooks scopes run the engine search and render the grouped, clickable
+  results inside the widget.
+- Keys: Ctrl+F opens find (seeded from the selection), Ctrl+H opens with replace
+  unfolded and focused, Ctrl+Shift+F opens in Workbook scope, F3 and Shift+F3 cycle and
+  reopen the last search, Escape closes from anywhere. The toolbar's Find and Replace
+  buttons open the widget.
+
+### Added
+
+- Find All: in module scope it opens a table under the widget listing every match as a
+  line-and-preview row; a click selects and reveals the match in the editor and the
+  counter follows. The table tracks edits and query changes live, and caps at 500 rows
+  with the count naming the cap. In wider scopes the button runs the engine search.
+- A left-edge chevron folds the widget to find-only; the replace row unfolds on the
+  chevron or Ctrl+H and the state sticks while you work.
+
+### Known limits
+
+- The F1 command palette still lists Monaco's own Find entries, which open the retired
+  native find widget; every key, button, and menu route leads to the new widget.
+
 ## v0.1.2 (2026-08-05)
 
 Debug panel polish from the first live day of the restored Locals tracking.
