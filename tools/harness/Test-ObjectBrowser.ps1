@@ -8,12 +8,15 @@
 #      bundle, and in the PUBLISHED bundle (the stale-deploy tripwire).
 #   2. Page behaviour - objbrowser-page-probe.mjs drives the built page headless: boot,
 #      Group/Object/All scopes, the whole-group pull, details rows, splitter keyboard.
-#   3. Live behaviour - its own Excel: no palette at startup, the toolbar click summons a
-#      visible XlidePalette wearing an icon, the typelib catalog answers, the native type-2
-#      window never shows, the palette hides with the editor and stays hidden, and a second
-#      summons re-presents the same window.
+#   3. Live behaviour - its own Excel, driven SEMANTICALLY through the dev build's two
+#      doors: the DevTools protocol clicks real elements on the live pages, and the shim's
+#      debug api answers with the native truth. This is what pins the double-click
+#      navigate leg that posted mouse messages never could. Window lifecycle (hide with
+#      the editor, stay away, re-present) runs through the same doors; only the icon check
+#      still asks Win32, because an icon is not a page's business.
 #
 # The live leg launches and kills its own Excel; run it with no Excel you care about open.
+# It needs a DEBUG publish: the doors do not exist in Release, by design.
 $ErrorActionPreference = 'Continue'
 
 $here = $PSScriptRoot
@@ -54,6 +57,16 @@ Test-Seam 'the page carries scopes, the group pull, and the details pane' (Join-
     'objbrowser-scope', 'pullWhole', 'objbrowser-splitter', 'objbrowser-detail-signature')
 Test-Seam 'built bundle carries the palette page' (Join-Path $repo 'ui\editor\dist\editor.js') @(
     'objbrowser-scope', 'Pick a type on the left')
+Test-Seam 'the dev doors are gated to Debug' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\DebugServer.cs') @(
+    '^#if DEBUG', 'DebugReply', '\\"api\\":')
+Test-Seam 'the dev build asks for the DevTools protocol' (Join-Path $repo 'src\Xlide.Vbe.Shim\WebView\WebView2Surface.cs') @(
+    'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'DevToolsPort', 'MessageTap')
+Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+    'case "log"', 'case "messages"', 'case "capture"', 'case "breakpoint"', 'case "immediate"')
+Test-Seam 'the api carries the locals, watches, problems, module, and stats routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+    'case "locals"', 'case "watches"', 'case "problems"', 'case "module"', 'case "stats"')
+Test-Seam 'the perf counters exist and are Debug-gated' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\PerfCounters.cs') @(
+    '^#if DEBUG', 'PlacementFull', 'Marshal', 'RaiseToAtLeast')
 
 $published = Join-Path $repo 'artifacts\publish\Xlide.Vbe.Shim\debug_win-x64\ui\editor\dist\editor.js'
 if (Test-Path $published) {
@@ -63,9 +76,9 @@ if (Test-Path $published) {
 }
 
 function Invoke-NodeProbe {
-    param([string] $Leg, [string] $Script)
+    param([string] $Leg, [string] $Script, [string[]] $Arguments = @())
 
-    $verdictText = & node (Join-Path $script:here $Script) 2>$null | Select-Object -Last 1
+    $verdictText = & node (Join-Path $script:here $Script) @Arguments 2>$null | Select-Object -Last 1
 
     if (-not $verdictText) {
         Write-Output "${Leg}: FAIL - the probe printed no verdict"
@@ -96,23 +109,16 @@ Invoke-NodeProbe 'page' 'objbrowser-page-probe.mjs'
 # --- live leg -------------------------------------------------------------------------
 
 Add-Type -Namespace XlideObTest -Name Native -MemberDefinition @'
-[DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
 [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
-[DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr h, EnumProc cb, IntPtr l);
 [DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
-[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hgt, uint flags);
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll")] public static extern IntPtr SendMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
-[DllImport("user32.dll")] static extern IntPtr PostMessageW(IntPtr h, uint m, IntPtr w, IntPtr l);
 [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] public static extern IntPtr GetClassLongPtr(IntPtr h, int index);
 
 delegate bool EnumProc(IntPtr h, IntPtr l);
 
-public static void UseRealPixels() { SetProcessDpiAwarenessContext(new IntPtr(-4)); }
-
-public static IntPtr TopLevel(int processId, string className, bool visibleOnly)
+public static IntPtr TopLevel(int processId, string className)
 {
     IntPtr found = IntPtr.Zero;
     EnumWindows((h, l) =>
@@ -120,7 +126,6 @@ public static IntPtr TopLevel(int processId, string className, bool visibleOnly)
         int owner;
         GetWindowThreadProcessId(h, out owner);
         if (owner != processId) { return true; }
-        if (visibleOnly && !IsWindowVisible(h)) { return true; }
         var name = new System.Text.StringBuilder(128);
         GetClassNameW(h, name, 128);
         if (name.ToString() != className) { return true; }
@@ -128,27 +133,6 @@ public static IntPtr TopLevel(int processId, string className, bool visibleOnly)
         return false;
     }, IntPtr.Zero);
     return found;
-}
-
-public static IntPtr ChildOfClass(IntPtr parent, string className)
-{
-    IntPtr found = IntPtr.Zero;
-    EnumChildWindows(parent, (h, l) =>
-    {
-        var name = new System.Text.StringBuilder(128);
-        GetClassNameW(h, name, 128);
-        if (name.ToString() == className) { found = h; return false; }
-        return true;
-    }, IntPtr.Zero);
-    return found;
-}
-
-public static void Click(IntPtr window, int x, int y)
-{
-    IntPtr point = (IntPtr)((y << 16) | (x & 0xFFFF));
-    PostMessageW(window, 0x0200, IntPtr.Zero, point);
-    PostMessageW(window, 0x0201, (IntPtr)1, point);
-    PostMessageW(window, 0x0202, IntPtr.Zero, point);
 }
 '@
 
@@ -165,9 +149,7 @@ function Test-Live {
 }
 
 Write-Output 'live: launching Excel with the VBE...'
-[XlideObTest.Native]::UseRealPixels()
 
-$logRoot = Join-Path $env:LOCALAPPDATA 'xlide_vbide\logs'
 $excelPath = "$env:ProgramFiles\Microsoft Office\root\Office16\EXCEL.EXE"
 $scratch = Join-Path $here 'fixtures\scratch.xlsm'
 $process = $null
@@ -184,91 +166,47 @@ try {
 
     $excel.VBE.MainWindow.Visible = $true
 
-    $frame = [IntPtr]::Zero
-    while ($frame -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline) {
-        $frame = [XlideObTest.Native]::TopLevel($process.Id, 'wndclass_desked_gsk', $true)
-        if ($frame -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 200 }
+    # The dev door announces itself in a per-process discovery file; its presence IS the
+    # session being up, and its contents are how everything below asks and acts.
+    $discoveryPath = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($process.Id).json"
+    while (-not (Test-Path $discoveryPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
+    if (-not (Test-Path $discoveryPath)) { throw 'no debug api discovery file; is this a Debug publish?' }
+
+    $discovery = Get-Content $discoveryPath -Raw | ConvertFrom-Json
+    $api = "http://127.0.0.1:$($discovery.port)/$($discovery.token)"
+
+    $state = $null
+    while ((Get-Date) -lt $deadline) {
+        try { $state = Invoke-RestMethod "$api/state"; if ($state.surfaceReady) { break } } catch { }
+        Start-Sleep -Milliseconds 250
     }
-    if ($frame -eq [IntPtr]::Zero) { throw 'the editor window never appeared.' }
+    Test-Live 'the debug api answers and the surface is ready' ($null -ne $state -and $state.surfaceReady)
 
-    # The surface must be up before the toolbar exists to click.
-    $logPattern = "shim-*-$($process.Id).log"
-    $ready = $false
-    while (-not $ready -and (Get-Date) -lt $deadline) {
-        $log = Get-ChildItem $logRoot -Filter $logPattern -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTime -Descending | Select-Object -First 1
-        if ($log -and (Select-String -Path $log.FullName -Pattern 'editor surface: ready' -Quiet)) { $ready = $true }
-        else { Start-Sleep -Milliseconds 200 }
-    }
-    Test-Live 'the editor surface reports ready' $ready
+    # The whole in-page story - summon by real click, real libraries, members from real
+    # code, and the double-click navigate - runs in the node probe over the two doors.
+    Invoke-NodeProbe 'live' 'objbrowser-live-probe.mjs' @('--api', $api, '--cdp', "$($discovery.devtoolsPort)")
 
-    Test-Live 'no palette exists at startup' `
-        ([XlideObTest.Native]::TopLevel($process.Id, 'XlidePalette', $false) -eq [IntPtr]::Zero)
-
-    # Summon: the toolbar button at its measured spot in a 1500-wide frame.
-    [void] [XlideObTest.Native]::SetWindowPos($frame, [IntPtr]::Zero, 60, 40, 1500, 900, 0x0004)
-    [void] [XlideObTest.Native]::SetForegroundWindow($frame)
-    Start-Sleep -Milliseconds 700
-    $browser = [XlideObTest.Native]::ChildOfClass($frame, 'Chrome_RenderWidgetHostHWND')
-    Test-Live 'the editor hosts a browser child' ($browser -ne [IntPtr]::Zero)
-    [XlideObTest.Native]::Click($browser, 757, 39)
-
-    $palette = [IntPtr]::Zero
-    $summonDeadline = (Get-Date).AddSeconds(12)
-    while ($palette -eq [IntPtr]::Zero -and (Get-Date) -lt $summonDeadline) {
-        $palette = [XlideObTest.Native]::TopLevel($process.Id, 'XlidePalette', $true)
-        if ($palette -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 200 }
-    }
-    Test-Live 'the toolbar click summons a visible palette' ($palette -ne [IntPtr]::Zero)
-    if ($palette -eq [IntPtr]::Zero) { throw 'no palette; the remaining live checks have no subject.' }
-
-    Start-Sleep -Seconds 3
-
-    # The icon: WM_GETICON small, class small as the fallback - some icon must be there.
-    $icon = [XlideObTest.Native]::SendMessageW($palette, 0x007F, [IntPtr] 0, [IntPtr] 0)
-    if ($icon -eq [IntPtr]::Zero) { $icon = [XlideObTest.Native]::GetClassLongPtr($palette, -34) }
+    # The icon is a window property, not a page's; Win32 answers for it.
+    $palette = [XlideObTest.Native]::TopLevel($process.Id, 'XlidePalette')
+    $icon = if ($palette -ne [IntPtr]::Zero) { [XlideObTest.Native]::SendMessageW($palette, 0x007F, [IntPtr] 0, [IntPtr] 0) } else { [IntPtr]::Zero }
+    if ($icon -eq [IntPtr]::Zero -and $palette -ne [IntPtr]::Zero) { $icon = [XlideObTest.Native]::GetClassLongPtr($palette, -34) }
     Test-Live 'the palette wears an icon' ($icon -ne [IntPtr]::Zero)
 
-    # The catalog answered: the log names the libraries and the project modules.
-    $log = Get-ChildItem $logRoot -Filter $logPattern | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    $libraries = Select-String -Path $log.FullName -Pattern 'object browser: (\d+) librarie' | Select-Object -Last 1
-    $count = if ($libraries) { [int] $libraries.Matches[0].Groups[1].Value } else { 0 }
-    Test-Live 'the catalog lists the project and the referenced libraries' ($count -ge 2) "counted $count"
-    Test-Live 'the project answers with its modules' `
-        (Select-String -Path $log.FullName -Pattern '-> \d+ module\(s\)' -Quiet)
-
-    # The native Browser never shows: every type-2 window in the editor stays invisible.
-    $nativeShown = $false
-    $windows = $excel.VBE.Windows
-    for ($i = 1; $i -le $windows.Count; $i++) {
-        $window = $windows.Item($i)
-        if ($window.Type -eq 2 -and $window.Visible) { $nativeShown = $true }
-    }
-    Test-Live 'the native Object Browser window stays hidden' (-not $nativeShown)
-
-    # Hide with the editor; stay hidden on its return.
+    # Lifecycle through the doors: hide with the editor, stay away, return on a summons.
     $excel.VBE.MainWindow.Visible = $false
     Start-Sleep -Milliseconds 800
-    Test-Live 'the palette hides when the editor closes' (-not [XlideObTest.Native]::IsWindowVisible($palette))
+    $state = Invoke-RestMethod "$api/state"
+    Test-Live 'the palette hides when the editor closes' (-not $state.paletteVisible)
 
     $excel.VBE.MainWindow.Visible = $true
     Start-Sleep -Seconds 2
-    Test-Live 'the palette stays away until summoned' (-not [XlideObTest.Native]::IsWindowVisible($palette))
+    $state = Invoke-RestMethod "$api/state"
+    Test-Live 'the palette stays away until summoned' (-not $state.paletteVisible)
 
-    # A second summons re-presents the SAME window, state intact.
-    $frame = [XlideObTest.Native]::TopLevel($process.Id, 'wndclass_desked_gsk', $true)
-    [void] [XlideObTest.Native]::SetWindowPos($frame, [IntPtr]::Zero, 60, 40, 1500, 900, 0x0004)
-    [void] [XlideObTest.Native]::SetForegroundWindow($frame)
-    Start-Sleep -Milliseconds 700
-    $browser = [XlideObTest.Native]::ChildOfClass($frame, 'Chrome_RenderWidgetHostHWND')
-    [XlideObTest.Native]::Click($browser, 757, 39)
-    $reshown = $false
-    $summonDeadline = (Get-Date).AddSeconds(8)
-    while (-not $reshown -and (Get-Date) -lt $summonDeadline) {
-        $reshown = [XlideObTest.Native]::IsWindowVisible($palette)
-        if (-not $reshown) { Start-Sleep -Milliseconds 200 }
-    }
-    Test-Live 'a second summons re-presents the same window' $reshown
+    $null = Invoke-RestMethod -Method Post "$api/command?name=objectBrowser"
+    Start-Sleep -Milliseconds 800
+    $state = Invoke-RestMethod "$api/state"
+    Test-Live 'a summons by name re-presents the same palette' ($state.paletteOpen -and $state.paletteVisible)
 }
 catch {
     Write-Output "live: FAIL - $($_.Exception.Message)"
@@ -287,7 +225,7 @@ finally {
 }
 
 if ($failures -eq 0) {
-    Write-Output 'RESULT: PASS - the floating Object Browser, its scopes, its details pane, and its lifecycle are as pinned'
+    Write-Output 'RESULT: PASS - the floating Object Browser, its scopes, its details pane, its navigate, and its lifecycle are as pinned'
 } else {
     Write-Output "RESULT: FAIL - $failures check(s) down; the Object Browser behaviour has drifted"
 }

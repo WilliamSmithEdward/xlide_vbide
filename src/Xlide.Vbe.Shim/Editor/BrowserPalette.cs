@@ -100,6 +100,10 @@ internal sealed unsafe class BrowserPalette : IDisposable
             return null;
         }
 
+#if DEBUG
+        palette._browser.DebugName = "palette";
+#endif
+
         palette._browser.MessageReceived = palette.OnMessage;
         AdoptOwnerIcon(handle, owner);
         Win32.ShowWindow(handle, Win32.SwShow);

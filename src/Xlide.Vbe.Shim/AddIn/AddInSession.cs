@@ -164,7 +164,373 @@ internal sealed class AddInSession : IDisposable
         // arrives on, and a developer opening a fresh workbook's editor would meet the native
         // gray shell. The surface goes up now, showing the empty workspace and the explorer.
         TryShowEmptyWorkspace();
+
+#if DEBUG
+        // The dev build's local door for the harness: state, windows, commands by name.
+        // Compiled out of Release entirely. Re-landed from post-v010-experiments after the
+        // crash storm that retired the first landing was root-caused (the 16-byte variant,
+        // lesson 33); the locals and watches routes now read the ghost reader thread's
+        // published snapshots, which did not exist the first time.
+        _debugServer = DebugServer.Start(AnswerDebugRequest);
+#endif
     }
+
+#if DEBUG
+    private DebugServer? _debugServer;
+
+    private static DebugServer.DebugReply DebugError(string error) =>
+        DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+            new DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply));
+
+    /// <summary>
+    /// Answers one debug-door request. Arrives on a pool thread. Routes that read files,
+    /// ring buffers, or the reader thread's published snapshots answer right here; routes
+    /// that read the session or drive the editor cross to the host thread and wait with a
+    /// deadline. The immediate route only schedules - a statement that hits a breakpoint
+    /// does not return until the developer continues, and an api that waited on it would
+    /// jam.
+    /// </summary>
+    private DebugServer.DebugReply AnswerDebugRequest(DebugServer.DebugRequest request)
+    {
+        switch (request.Route)
+        {
+            case "log":
+            {
+                var path = Log.Path;
+                if (path is null)
+                {
+                    return DebugError("no log file");
+                }
+
+                var since = request.Query.TryGetValue("since", out var sinceText)
+                    && long.TryParse(sinceText, out var parsed) ? parsed : 0;
+                request.Query.TryGetValue("match", out var match);
+                var max = request.Query.TryGetValue("max", out var maxText)
+                    && int.TryParse(maxText, out var cap) ? Math.Clamp(cap, 1, 5000) : 500;
+
+                using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                if (since > 0 && since <= file.Length)
+                {
+                    file.Position = since;
+                }
+
+                using var reader = new StreamReader(file, System.Text.Encoding.UTF8);
+                var lines = new List<string>();
+                while (reader.ReadLine() is { } line && lines.Count < max)
+                {
+                    if (match is null || line.Contains(match, StringComparison.OrdinalIgnoreCase))
+                    {
+                        lines.Add(line);
+                    }
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugLogReply([.. lines], file.Length), DebugJsonContext.Default.DebugLogReply));
+            }
+
+            case "messages":
+            {
+                var last = request.Query.TryGetValue("last", out var lastText)
+                    && int.TryParse(lastText, out var parsed) ? Math.Clamp(parsed, 1, 200) : 50;
+                var rows = WebView.WebView2Surface.MessageTap.Snapshot(last)
+                    .Select(entry => new DebugMessageRow(entry.Seq, entry.At, entry.Surface, entry.Direction, entry.Text))
+                    .ToArray();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugMessagesReply(rows), DebugJsonContext.Default.DebugMessagesReply));
+            }
+
+            case "capture":
+            {
+                request.Query.TryGetValue("window", out var which);
+                var target = which switch
+                {
+                    "palette" => _browserPalette?.Handle ?? 0,
+                    _ => _frame,
+                };
+                var bytes = DebugCapture.CaptureBmp(target);
+                return bytes is null
+                    ? DebugError($"window {which ?? "frame"} would not render")
+                    : new DebugServer.DebugReply("image/bmp", bytes);
+            }
+
+            case "immediate" when request.Query.TryGetValue("text", out var text) && text.Length > 0:
+            {
+                var surface = _editorSurface;
+                if (surface is null)
+                {
+                    return DebugError("the surface is not up yet");
+                }
+
+                surface.RunOnHostThread(() => EvaluateImmediate(text));
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply));
+            }
+
+            case "locals":
+            {
+                // Straight from the reader thread's published snapshot: an immutable record
+                // behind a volatile read, safe from any thread, and exactly what the panel
+                // renders. The first landing kept mirror fields; the thread made them
+                // unnecessary.
+                var snapshot = _ghostReaders?.Locals;
+                var rows = snapshot is null ? [] : new SurfaceLocalRow[snapshot.Rows.Count];
+                for (var i = 0; i < rows.Length; i++)
+                {
+                    var row = snapshot!.Rows[i];
+                    rows[i] = new SurfaceLocalRow(row.Expression, row.Value, row.Type);
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugLocalsReply(snapshot?.Context, rows),
+                    DebugJsonContext.Default.DebugLocalsReply));
+            }
+
+            case "watches":
+            {
+                var reading = _ghostReaders?.Watches;
+                var rows = reading is null ? [] : new SurfaceWatchRow[reading.Count];
+                for (var i = 0; i < rows.Length; i++)
+                {
+                    var row = reading![i];
+                    rows[i] = new SurfaceWatchRow(row.Expression, row.Value, row.Type, row.Context);
+                }
+
+                // _inBreak is written on the host thread; a bool read is atomic and a poll
+                // tick of staleness is the nature of this api.
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugWatchesReply(_inBreak, rows),
+                    DebugJsonContext.Default.DebugWatchesReply));
+            }
+
+            case "problems":
+            {
+                // The findings list is replaced whole, never mutated, so a reference read from
+                // this thread sees a complete edition.
+                var held = _findings;
+                request.Query.TryGetValue("module", out var onlyModule);
+                var rows = held
+                    .Where(finding => onlyModule is null
+                        || string.Equals(finding.Module, onlyModule, StringComparison.OrdinalIgnoreCase))
+                    .Select(finding => new DebugFindingRow(
+                        finding.Module, finding.StartLine, finding.StartColumn,
+                        finding.Severity, finding.Code ?? string.Empty, finding.Message))
+                    .ToArray();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
+            }
+
+            case "stats":
+            {
+                var placement = PerfCounters.PlacementSnapshot();
+                var marshal = PerfCounters.MarshalSnapshot();
+                var messages = WebView.WebView2Surface.MessageTap.Totals;
+                using var self = System.Diagnostics.Process.GetCurrentProcess();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugStatsReply(
+                        UptimeSeconds: (Environment.TickCount64 - PerfCounters.StartedAt) / 1000,
+                        ManagedMemoryBytes: GC.GetTotalMemory(forceFullCollection: false),
+                        WorkingSetBytes: Environment.WorkingSet,
+                        HandleCount: self.HandleCount,
+                        GcCounts: [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)],
+                        PlacementFullPasses: placement.FullPasses,
+                        PlacementFastPasses: placement.FastPasses,
+                        PlacementLastMs: placement.LastMs,
+                        PlacementMaxMs: placement.MaxMs,
+                        MarshalCount: marshal.Count,
+                        MarshalLastMs: marshal.LastMs,
+                        MarshalMaxMs: marshal.MaxMs,
+                        LogLines: PerfCounters.LogLineCount,
+                        PollIntervalMs: PerfCounters.PollIntervalMs,
+                        MessagesToPage: messages.ToPage,
+                        MessagesToHost: messages.ToHost),
+                    DebugJsonContext.Default.DebugStatsReply));
+            }
+        }
+
+        var host = _editorSurface;
+        if (host is null)
+        {
+            return DebugError("the surface is not up yet");
+        }
+
+        string? answer = null;
+        using var done = new ManualResetEventSlim(false);
+        var marshalStarted = Environment.TickCount64;
+        host.RunOnHostThread(() =>
+        {
+            try
+            {
+                answer = AnswerDebugRequestOnHost(request);
+            }
+            catch (Exception ex)
+            {
+                answer = System.Text.Json.JsonSerializer.Serialize(
+                    new DebugErrorReply($"{ex.GetType().Name}: {ex.Message}"), DebugJsonContext.Default.DebugErrorReply);
+            }
+            finally
+            {
+                done.Set();
+            }
+        });
+
+        var answered = done.Wait(TimeSpan.FromSeconds(3));
+
+        // Every marshaled request doubles as a probe of the host thread's responsiveness;
+        // the stats route serves what this line measures.
+        PerfCounters.Marshal(Environment.TickCount64 - marshalStarted);
+
+        return answered && answer is not null
+            ? DebugServer.DebugReply.Json(answer)
+            : DebugError("the host thread did not answer in time");
+    }
+
+    private unsafe string AnswerDebugRequestOnHost(DebugServer.DebugRequest request)
+    {
+        switch (request.Route)
+        {
+            case "state":
+            {
+                Rect frameRect = default;
+                Rect documentsRect = default;
+                if (_frame != 0)
+                {
+                    Win32.GetWindowRect(_frame, &frameRect);
+                }
+
+                if (_documentArea != 0)
+                {
+                    Win32.GetWindowRect(_documentArea, &documentsRect);
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugStateReply(
+                        Configuration: "debug",
+                        ShownModule: _editorSurface?.Module,
+                        ShownProject: DisplayFromProjectId(_shownProject),
+                        DebugMode: _lastPublishedMode,
+                        HasUnwrittenEdits: _editorSurface?.HasUnwrittenEdits ?? false,
+                        EngineUp: _analysis is not null,
+                        Frame: $"0x{_frame:X}",
+                        FrameRect: $"{frameRect.Left},{frameRect.Top},{frameRect.Right},{frameRect.Bottom}",
+                        DocumentArea: $"0x{_documentArea:X}",
+                        DocumentAreaRect: $"{documentsRect.Left},{documentsRect.Top},{documentsRect.Right},{documentsRect.Bottom}",
+                        PaletteOpen: _browserPalette is not null,
+                        PaletteVisible: _browserPalette is { } palette && Win32.IsWindowVisible(palette.Handle),
+                        SurfaceReady: _surfaceShown,
+                        DevToolsPort: WebView.WebView2Surface.DevToolsPort),
+                    DebugJsonContext.Default.DebugStateReply);
+            }
+
+            case "windows":
+            {
+                var rows = new List<DebugWindowRow>();
+                using var windows = _editor.GetObject("Windows");
+                var count = windows?.GetInt32("Count") ?? 0;
+                for (var i = 1; i <= count; i++)
+                {
+                    using var window = windows!.GetItem(i);
+                    if (window is not null)
+                    {
+                        rows.Add(new DebugWindowRow(
+                            window.GetInt32("Type"),
+                            window.GetString("Caption") ?? string.Empty,
+                            window.GetBool("Visible")));
+                    }
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugWindowsReply([.. rows]), DebugJsonContext.Default.DebugWindowsReply);
+            }
+
+            case "command" when request.Query.TryGetValue("name", out var name) && name.Length > 0:
+            {
+                var command = VbeCommands.ForName(name);
+                if (command == 0)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"unknown command name {name}"), DebugJsonContext.Default.DebugErrorReply);
+                }
+
+                ExecuteEditorCommand(command);
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, command), DebugJsonContext.Default.DebugCommandReply);
+            }
+
+            case "breakpoint"
+                when request.Query.TryGetValue("module", out var module) && module.Length > 0
+                    && request.Query.TryGetValue("line", out var lineText)
+                    && int.TryParse(lineText, out var breakLine) && breakLine >= 1:
+            {
+                // The same manner a person uses: go to the line, toggle there. This is what
+                // makes break mode a harness-reachable state, the regression net the
+                // debugger milestone needs before it starts.
+                //
+                // state=on|off makes it IDEMPOTENT, which is what a script wants: the bare
+                // toggle cost a live run its breakpoint when a retry cleared what the first
+                // call had set (2026-08-06). Without the argument it still toggles, the way
+                // the key does.
+                request.Query.TryGetValue("project", out var project);
+                request.Query.TryGetValue("state", out var wanted);
+                GoTo(module, breakLine, 1, project);
+
+                // The record is keyed by the module the surface is showing, which the GoTo
+                // above has just made this one.
+                var alreadySet = _editorSurface?.Module is { } shownModule
+                    && _breakpoints.TryGetValue(shownModule, out var recordedLines)
+                    && recordedLines.Contains(breakLine);
+                var shouldSet = wanted switch
+                {
+                    "on" => true,
+                    "off" => false,
+                    _ => !alreadySet,
+                };
+
+                if (shouldSet != alreadySet)
+                {
+                    ToggleBreakpoint(breakLine);
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(shouldSet, VbeCommands.Command.ToggleBreakpoint), DebugJsonContext.Default.DebugCommandReply);
+            }
+
+            case "module" when request.Query.TryGetValue("name", out var moduleName) && moduleName.Length > 0:
+            {
+                request.Query.TryGetValue("project", out var projectDisplay);
+                var projectId = ProjectIdFromDisplay(projectDisplay);
+
+                if (request.Body.Length > 0)
+                {
+                    // A write goes through the session's own writer, so it carries everything
+                    // a host rewrite carries: the baseline bookkeeping and the engine's
+                    // live-copy correction (the stale-problems lesson). This is also the
+                    // bridge's first limb: another editor pushing code into a running VBE.
+                    WriteModule(moduleName, request.Body, projectId, hostRewrite: true);
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                }
+
+                using var found = FindComponent(moduleName, projectId, out var foundProject);
+                var source = found is null ? null : ProjectReader.ReadSource(found);
+                return source is null
+                    ? System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"no module named {moduleName}"), DebugJsonContext.Default.DebugErrorReply)
+                    : System.Text.Json.JsonSerializer.Serialize(
+                        new DebugModuleReply(moduleName, DisplayFromProjectId(foundProject), source),
+                        DebugJsonContext.Default.DebugModuleReply);
+            }
+
+            case "placement":
+                RefreshSurfacePlacement();
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+
+            default:
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugErrorReply($"unknown route {request.Route}"), DebugJsonContext.Default.DebugErrorReply);
+        }
+    }
+#endif
 
     /// <summary>
     /// Creates the surface over a frame if it is not already there, and wires it. A frame change
@@ -357,7 +723,8 @@ internal sealed class AddInSession : IDisposable
     {
         try
         {
-            using var pane = FindCodePane(component, ProjectIdFromDisplay(projectDisplay));
+            var projectId = ProjectIdFromDisplay(projectDisplay);
+            using var pane = FindCodePane(component, projectId);
             if (pane is null)
             {
                 Log.Info($"navigate: no pane for {component}");
@@ -369,6 +736,18 @@ internal sealed class AddInSession : IDisposable
 
             if (_editorSurface?.Module == component)
             {
+                _editorSurface.Reveal(line);
+            }
+            else if (_editorSurface is not null)
+            {
+                // A navigation can target a module the surface has never shown. The Show
+                // above opens it in the object model, but from the empty workspace that
+                // open arrives with no window event the tracker can hear, and the surface
+                // sat on the empty view while the object model insisted the pane was
+                // active (2026-08-05, caught by the semantic probe on its first run). The
+                // module goes onto the surface the way the explorer puts one there.
+                ShowModuleInSurface(component, projectId);
+                PublishModules();
                 _editorSurface.Reveal(line);
             }
 
@@ -2362,6 +2741,9 @@ internal sealed class AddInSession : IDisposable
             : 0;
 
         _editorSurface?.Poll(interval);
+#if DEBUG
+        PerfCounters.Poll(interval);
+#endif
     }
 
     /// <summary>
@@ -4771,6 +5153,10 @@ internal sealed class AddInSession : IDisposable
         // churn (2026-08-05). The bounds followed above; everything else holds still until
         // the events pause, and then ONE full pass re-derives it all.
         _editorSurface.ArmPlacementSettle(PlacementSettleMilliseconds);
+
+#if DEBUG
+        PerfCounters.PlacementFast();
+#endif
     }
 
     /// <summary>One quiet moment after the last frame event; then the full pass, once.</summary>
@@ -4801,6 +5187,9 @@ internal sealed class AddInSession : IDisposable
 
     private void RefreshSurfacePlacement()
     {
+#if DEBUG
+        var placementStarted = Environment.TickCount64;
+#endif
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0)
         {
             Log.Verbose($"placement: skipped (surface {(_editorSurface is null ? "none" : "up")}, " +
@@ -4848,6 +5237,11 @@ internal sealed class AddInSession : IDisposable
         {
             PoliceNativeToolWindows();
         }
+
+#if DEBUG
+        // Only a pass that did the full object-model work counts; the early exits are free.
+        PerfCounters.PlacementFull(Environment.TickCount64 - placementStarted);
+#endif
     }
 
     /// <summary>
@@ -5085,6 +5479,12 @@ internal sealed class AddInSession : IDisposable
 
         _stopped = true;
         Log.Info("session stopping");
+
+#if DEBUG
+        // First out: no debug request may land on a session mid-teardown.
+        _debugServer?.Dispose();
+        _debugServer = null;
+#endif
 
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.

@@ -74,7 +74,8 @@ internal static class Log
     public static void Error(string message) => Write("error", message);
 
     public static void Error(string message, Exception exception) =>
-        Write("error", $"{message}: {exception.GetType().Name}: {exception.Message}");
+        Write("error", $"{message}: {exception.GetType().Name}: {exception.Message}"
+            + (exception.StackTrace is { Length: > 0 } stack ? $"\n{stack}" : string.Empty));
 
     /// <summary>
     /// Whether verbose lines are written. ON by default while the product is in its development
@@ -113,6 +114,10 @@ internal static class Log
         {
             return;
         }
+
+#if DEBUG
+        PerfCounters.LogLine();
+#endif
 
         try
         {

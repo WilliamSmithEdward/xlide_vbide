@@ -345,6 +345,10 @@ internal sealed class EditorSurface : IDisposable
             return null;
         }
 
+#if DEBUG
+        surface._browser.DebugName = "editor";
+#endif
+
         surface._browser.MessageReceived = surface.OnMessage;
         surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
         surface._overlay.LoaderTicked = () => surface.LoadingPulse?.Invoke();

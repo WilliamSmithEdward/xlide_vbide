@@ -81,6 +81,88 @@ internal sealed class WebView2Surface : IDisposable
     /// <summary>Appended to the bundle's entry address on navigation.</summary>
     private string _entryQuery = string.Empty;
 
+#if DEBUG
+    /// <summary>
+    /// Where dev builds put the browser's DevTools protocol: a free port picked once per
+    /// process. The branch that first built this pinned 9333, and a second Excel then
+    /// either collided or shared a browser cluster with the first, mixing their targets
+    /// on one socket — the developer runs several Excels, so the port is per instance and
+    /// the discovery file (debug-api-{pid}.json) is how tools learn it.
+    /// </summary>
+    public static readonly int DevToolsPort = PickFreeLoopbackPort();
+
+    private static int PickFreeLoopbackPort()
+    {
+        var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        probe.Start();
+        var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        return port;
+    }
+
+    /// <summary>Which surface this is, as the message tap names it: "editor" or "palette".</summary>
+    public string DebugName { get; set; } = "surface";
+
+    /// <summary>
+    /// The last messages over every surface's wire, kept for the debug api's messages
+    /// route. Protocol mysteries ("did the page ever post it?") become one request. A
+    /// bounded ring: old traffic falls off, long payloads are cut, and none of this
+    /// exists in Release.
+    /// </summary>
+    internal static class MessageTap
+    {
+        public sealed record Entry(long Seq, string At, string Surface, string Direction, string Text);
+
+        private const int Keep = 200;
+        private const int LongestText = 2048;
+        private static readonly object TapGate = new();
+        private static readonly Queue<Entry> Entries = new(Keep + 1);
+        private static long _nextSeq;
+        private static long _toPage;
+        private static long _toHost;
+
+        /// <summary>Lifetime totals per direction, for the stats route's rate arithmetic.</summary>
+        public static (long ToPage, long ToHost) Totals =>
+            (System.Threading.Interlocked.Read(ref _toPage), System.Threading.Interlocked.Read(ref _toHost));
+
+        public static void Record(string surface, string direction, string text)
+        {
+            if (direction == "toPage")
+            {
+                System.Threading.Interlocked.Increment(ref _toPage);
+            }
+            else
+            {
+                System.Threading.Interlocked.Increment(ref _toHost);
+            }
+
+            var entry = new Entry(
+                System.Threading.Interlocked.Increment(ref _nextSeq),
+                DateTime.Now.ToString("HH:mm:ss.fff", System.Globalization.CultureInfo.InvariantCulture),
+                surface,
+                direction,
+                text.Length > LongestText ? text[..LongestText] : text);
+
+            lock (TapGate)
+            {
+                Entries.Enqueue(entry);
+                while (Entries.Count > Keep)
+                {
+                    Entries.Dequeue();
+                }
+            }
+        }
+
+        public static Entry[] Snapshot(int last)
+        {
+            lock (TapGate)
+            {
+                return [.. Entries.Skip(Math.Max(0, Entries.Count - last))];
+            }
+        }
+    }
+#endif
+
     /// <summary>
     /// Raised with the text of each message the page posts through
     /// window.chrome.webview.postMessage. Invoked on the host user interface thread, inside the
@@ -226,6 +308,9 @@ internal sealed class WebView2Surface : IDisposable
             return false;
         }
 
+#if DEBUG
+        MessageTap.Record(DebugName, "toPage", json);
+#endif
         return true;
     }
 
@@ -264,6 +349,20 @@ internal sealed class WebView2Surface : IDisposable
             Log.Error($"webview: could not create the user data folder at {userDataFolder}", ex);
             return false;
         }
+
+#if DEBUG
+        // Dev builds open the browser's own DevTools protocol on a per-process local port, so
+        // the harness can drive the LIVE surfaces semantically - real events on real elements -
+        // instead of posting mouse messages at measured pixel coordinates (which cannot make
+        // a double-click at all; the Object Browser's navigate leg went unpinned for a day).
+        // The environment variable is read by the loader at browser launch; a per-process
+        // port also gives each Excel instance its own browser cluster, so two sessions never
+        // mix their targets on one socket. Never in Release: this block does not exist there.
+        Environment.SetEnvironmentVariable(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            $"--remote-debugging-port={DevToolsPort} --remote-allow-origins=*");
+        Log.Info($"webview: dev build; DevTools protocol requested on 127.0.0.1:{DevToolsPort}");
+#endif
 
         _environmentHandler = new EnvironmentCompletedHandler(OnEnvironmentCreated);
         var callback = CreateCallback(_environmentHandler, WebViewIid.EnvironmentCompletedHandler);
@@ -664,6 +763,10 @@ internal sealed class WebView2Surface : IDisposable
             Log.Error("webview: a page message could not be read as text");
             return;
         }
+
+#if DEBUG
+        MessageTap.Record(DebugName, "toHost", message);
+#endif
 
         var handler = MessageReceived;
         if (handler is null)

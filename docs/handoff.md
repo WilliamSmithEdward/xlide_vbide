@@ -10,6 +10,29 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-06 — THE DEBUG API IS BACK, AND IT IS THE BRIDGE'S FIRST LIMB (developer asked
+for it re-landed; [debug-api.md](debug-api.md) is the reference).** A token-gated HTTP door
+on 127.0.0.1, Debug builds only, re-landed from `post-v010-experiments` onto the fixed
+tree. THE ROLLBACK'S CAUSE IS GONE: that branch died in the crash storm now root-caused as
+the 16-byte VARIANT (lesson 33), not the api. Routes: state, windows, stats, log, messages,
+problems, locals, watches, module (GET and POST), capture, command, breakpoint, immediate,
+placement. WHAT IS NEW THIS LANDING: locals/watches read `GhostReaderThread`'s published
+snapshots (no mirrored fields, and no chance of disturbing a break — the very hazard lesson
+33 records); the DevTools port AND the discovery file are PER PROCESS, so several Excels
+never collide or share a browser cluster (the old fixed 9333 did both); dead instances'
+`debug-api-{pid}.json` files are swept at session start; `breakpoint` takes `state=on|off`
+because a bare toggle is unsafe for scripts (a retry cleared what the first call set,
+caught live). MULTI-EXCEL, MEASURED: several workbooks normally share ONE process and ONE
+api (disambiguate with `project=`; verified against two workbooks both holding a
+CleanModule), while `excel /x` gives a second process its own session, port, token, and
+DevTools port (verified: pids 13888 and 22204 answering independently). An add-in session
+exists only once a process OPENS THE VBE — a workbook alone starts nothing. SHIPPED WITH
+IT: `tools\harness\xlide-api.mjs` (discovery, instance selection by workbook or pid, one
+method per route, `waitFor`, and a small CLI) and `tools\harness\Test-DebugApi.ps1` (18
+checks, PASS, including the full round trip: push a module, set a breakpoint, run, read
+live locals, reset). RELEASE PURITY PROVEN: a Release publish contains none of the api's
+strings; the Debug one contains all of them.**
+
 **2026-08-05 LATE — THE FORMAT AND DEBUG MENUS ARE GONE; THE BAR IS DOWN TO SEVEN
 (developer).** `File Insert Run Tools Add-Ins Window Help`, verified live in the capture.
 FORMAT (30006) needed nothing on the toolbar: every item arranges controls on a UserForm
