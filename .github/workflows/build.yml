@@ -38,6 +38,12 @@ jobs:
         working-directory: ui/editor
         run: npm ci
 
+      # No spec repo here to compare against, so this confirms the vendored copy matches the
+      # manifest it was taken with -- enough to catch a file edited in place rather than synced.
+      - name: Check the vendored spec copy
+        working-directory: ui/editor
+        run: npm run spec:check
+
       - name: Typecheck the page
         working-directory: ui/editor
         run: npm run typecheck

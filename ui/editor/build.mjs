@@ -136,11 +136,13 @@ async function main() {
     // Flat names so index.html can reference ./editor.js, ./editor.css and ./codicon.ttf.
     entryNames: "[name]",
     assetNames: "[name]",
-    // The spec repo's smart-editing helpers, bundled from their real sources. tsc resolves the
-    // same specifier to local declarations instead (tsconfig paths): behaviour from the spec,
-    // types from here, and the two cannot disagree about what runs.
+    // The spec repo's smart-editing helpers, bundled from a vendored copy of their real sources so
+    // that this build needs nothing outside the repository. tsc resolves the same specifier to
+    // local declarations instead (tsconfig paths): behaviour from the spec, types from here, and
+    // the two cannot disagree about what runs. tools/sync-spec.mjs refreshes the copy and checks it
+    // against the spec repo whenever a neighbouring checkout is there to check against.
     alias: {
-      "xlide-spec": path.resolve(root, "../../../xlide_vscode/src"),
+      "xlide-spec": path.resolve(root, "vendor/xlide-spec"),
     },
     loader: {
       ".ttf": "file",

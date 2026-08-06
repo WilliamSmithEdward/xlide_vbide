@@ -345,3 +345,41 @@ The costs accepted: floating and OS-popout windows are out of scope until built,
 polish is ours to maintain. Revisit if the layout ambitions outgrow a split tree and two
 docks — the protocol work of decision 12 is what a library would sit on either way, so
 nothing here forecloses that.
+
+## 14. The spec's typing helpers are vendored here, not read from a neighbouring checkout
+
+### Shape (2026-08-06)
+
+Smart Enter, Smart Tab, and the lexer beneath them belong to the spec repo (`xlide_vscode`),
+and the page bundles that code rather than reimplementing it, so that typing in the VBE
+surface and typing in the VS Code extension cannot drift apart. What changes here is only
+WHERE the bundler reads it from: a copy under `ui/editor/vendor/xlide-spec`, committed to
+this repo, instead of `../../../xlide_vscode/src`.
+
+The build must not depend on a directory outside the repository. Reading a sibling checkout
+worked on the one machine that had both repos and nowhere else, which meant the page could
+only ever be built by hand — CI could build the C# and package whatever bundle happened to
+be committed, but it could not build the bundle. That hole stayed invisible until CI was
+asked to build the page and could not resolve a single spec import. A dependency that only
+one machine can satisfy is not a dependency, it is a local habit.
+
+Nine files, 2,316 lines, no imports of their own outside the set. The copy is byte-identical
+to its source and the bundle it produces is byte-identical to the bundle the sibling produced,
+apart from the build stamp — checked, not assumed, because "it should be the same code" is
+the belief this whole change exists to stop relying on.
+
+The split that was already there stays: behaviour resolves to the vendored sources, types
+resolve to hand-written declarations in `src/spec/xlide-spec`, because the spec compiles under
+looser settings than this project's and its sources would not survive this typecheck.
+
+Vendoring buys reproducibility with the risk of a stale copy, so the copy is checked rather
+than trusted. `npm run spec:check` compares it against a neighbouring checkout when there is
+one, and against its own manifest when there is not; the entry points come from the page's
+real imports, so importing something never vendored fails rather than quietly working here
+and breaking there. The gate runs it, which puts the drift failure on the machine that has
+both repos — the only machine that can answer the question.
+
+The cost accepted: a sync is now a deliberate step after the spec changes something the page
+uses, and the hand-written declarations still describe the API by hand. Revisit if the spec
+becomes a published package, at which point the vendored directory is what gets published and
+the check becomes a version bump.

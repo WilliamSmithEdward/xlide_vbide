@@ -7,7 +7,9 @@
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node test/docktree.mjs && node test/smoke.mjs"
+    "test": "node test/docktree.mjs && node test/smoke.mjs",
+    "spec:check": "node tools/sync-spec.mjs",
+    "spec:sync": "node tools/sync-spec.mjs --write"
   },
   "devDependencies": {
     "esbuild": "^0.28.1",

@@ -77,6 +77,20 @@ function Step([string] $name, [scriptblock] $work) {
     }
 }
 
+Step 'vendored spec' {
+    # The page bundles the spec repo's typing helpers from a copy in ui/editor/vendor so that CI can
+    # build without a neighbouring checkout. This is the step that notices when the copy and the
+    # spec have parted ways -- which only this machine can notice, since CI has no spec repo to
+    # compare against.
+    Push-Location $pageRoot
+    try {
+        $out = npm run spec:check 2>&1
+        $out | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the vendored spec copy is out of step' }
+    } finally { Pop-Location }
+    if ($out -match 'not present') { 'manifest only' } else { 'matches the spec repo' }
+}
+
 Step 'page typecheck' {
     Push-Location $pageRoot
     try {
