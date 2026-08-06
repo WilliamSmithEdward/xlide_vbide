@@ -10,6 +10,20 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-06 — MODALS ARE A SOLVED PROBLEM NOW, AND WRITTEN DOWN
+([working-with-modals.md](working-with-modals.md)).** Read it before opening any native
+dialog programmatically. The mechanism that explains every hang this project has had: a
+modal PUMPS, so marshaled work keeps running (the debug api answered normally under the
+Macros dialog) while the shim's POLL stops - "the editor is stuck" and "the api is blocked"
+are different states, and `heartbeatAgeMs` is what tells them apart. The rules: decide the
+exit before the entrance; never hide a modal you cannot dismiss; press only Cancel, Close,
+or No automatically, never OK/Yes/Delete; type with WM_CHAR because the watch dialogs reject
+WM_SETTEXT; attribute positively before dismissing anything; diagnose with window
+enumeration, which needs no host thread; post, never send, a button click; and never kill a
+caller suspended inside the editor (that crashed Excel). The api enforces the sweep itself -
+`dialogs`, `dismiss`, and an automatic clear of dialogs it raised, with `keep=1` to opt
+out - and a dialog the developer opened is provably left alone.**
+
 **2026-08-06 — THE DEBUG API IS BACK, AND IT IS THE BRIDGE'S FIRST LIMB (developer asked
 for it re-landed; [debug-api.md](debug-api.md) is the reference).** A token-gated HTTP door
 on 127.0.0.1, Debug builds only, re-landed from `post-v010-experiments` onto the fixed

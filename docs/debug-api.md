@@ -139,6 +139,9 @@ Verified in `Test-DebugApi.ps1`: a Run with a bad caret raises the Macros dialog
 sees it with its six buttons, clears it on the next request, and the heartbeat returns - and
 separately, an Add Watch opened outside the api survives repeated api traffic untouched.
 
+The mechanism behind all of this, and the rules for opening a modal at all, are in
+[working-with-modals.md](working-with-modals.md).
+
 ## The DevTools door
 
 Debug builds also start the browser's own DevTools protocol on a per-process port,

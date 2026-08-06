@@ -260,4 +260,5 @@ costs a test run rather than a developer's session. If this is ever revisited, t
 comes first: a driver that guarantees dismissal, and that restores the dialog to a visible,
 centred window whenever it cannot, before anything is hidden. The measurements behind this
 decision, including the full control map of both dialogs and the hang that settled it, are
-in [watch-window-investigation.md](watch-window-investigation.md).
+in [watch-window-investigation.md](watch-window-investigation.md), and the rules for working
+with a modal at all are in [working-with-modals.md](working-with-modals.md).
