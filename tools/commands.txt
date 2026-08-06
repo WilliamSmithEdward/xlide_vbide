@@ -1,87 +1,74 @@
 xlide dev commands
 ==================
 
-Every script is invoked through powershell.exe with -ExecutionPolicy Bypass, because running .ps1
-files is disabled on this machine by policy. Without that prefix the script does not run at all:
-PowerShell reports "running scripts is disabled on this system" and nothing happens, which looks
-exactly like a script that ran and did nothing.
+Run all of these from the repo root: F:\GitHub\xlide\xlide_vbide
 
 
-Register the dev shim
----------------------
-Points the editor at the published dev build. Keeps whichever configuration is already registered,
-otherwise takes the most recent publish.
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1"
-
-Pick one explicitly:
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Register-DevShim.ps1" -Configuration Debug
-
-It reads every value back afterwards and prints what it found. If regedit still shows an empty
-Addins64, press F5 in regedit: it caches a branch it has already drawn.
-
-
-Take registration back from the installed product
--------------------------------------------------
-After testing the production installer. Uninstalls it, then registers the dev build again, in that
-order, because the uninstaller strips registration unconditionally.
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\Restore-DevRegistration.ps1"
-
-
-The dev loop
+DO THIS ONCE
 ------------
-Build, test, register, and verify inside a real editor.
+Scripts are blocked on this machine by policy, which is why running one prints "running scripts is
+disabled on this system" and nothing happens. This allows local scripts for your account only:
 
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1"
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -Configuration Debug
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -NoRun
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -KeepOpen
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\dev.ps1" -Unregister
+    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
-
-The editor surface only
------------------------
-Typecheck, build, deploy into the running shim, and reload the live page. About a second, no Excel
-restart. -Watch repeats it on every save.
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1"
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\page.ps1" -Watch
+Everything below works as written after that.
 
 
-The gate
+REGISTER THE DEV BUILD
+----------------------
+Points the editor at the published dev build instead of an installed one.
+
+    .\tools\Register-DevShim.ps1
+
+It prints the values it read back afterwards. If regedit still shows an empty Addins64, press F5
+in regedit: it caches a branch it has already drawn.
+
+
+AFTER TESTING THE INSTALLER
+---------------------------
+Uninstalls the product, then registers the dev build again.
+
+    .\tools\Restore-DevRegistration.ps1
+
+
+EVERY DAY
+---------
+    .\tools\dev.ps1                     build, test, register, open Excel
+    .\tools\dev.ps1 -Configuration Debug    the same, with the debug api
+    .\tools\dev.ps1 -NoRun              stop after registering
+    .\tools\dev.ps1 -KeepOpen           leave Excel open when it finishes
+    .\tools\dev.ps1 -Unregister         remove the registration
+
+    .\tools\page.ps1                    rebuild the editor surface and reload it, about a second
+    .\tools\page.ps1 -Watch             the same, on every save
+
+    .\tools\verify.ps1                  the full local check, about twenty seconds
+    .\tools\verify.ps1 -Live            the same, plus probes against an open editor
+
+
+SHIPPING
 --------
-The whole local check in one command. -Live adds the standing probes against an open editor.
+    .\installer\build.ps1               produce artifacts\xlide-setup.exe
+    .\tools\release.ps1 -Tag v0.2.2     gate, build, attach it to a tag that already exists
 
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\verify.ps1"
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\verify.ps1" -Live
+If the installer refuses because there is no engine, build one:
 
-
-The installer
--------------
-Produces artifacts\xlide-setup.exe. Refuses to build without a language engine or a built page.
-
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\installer\build.ps1"
-
-Build the engine first if it is missing:
-
-    cd F:\GitHub\xlide\xlide_vbide\engine
+    cd engine
     npm run package
+    cd ..
 
 
-Release
--------
-Runs the gate, builds the installer, and attaches it to a tag that must already exist and must be
-what HEAD is on.
+IF YOU CANNOT CHANGE THE POLICY
+-------------------------------
+Any single script runs without changing anything, by naming the interpreter yourself:
 
-    powershell -ExecutionPolicy Bypass -File "F:\GitHub\xlide\xlide_vbide\tools\release.ps1" -Tag v0.2.2
+    powershell -ExecutionPolicy Bypass -File .\tools\Register-DevShim.ps1
 
 
-Removing a leftover machine-hive overlay key
---------------------------------------------
-Only if one exists. Needs an elevated prompt. These are duplicates of the per-user registration and
-nothing else reads them.
+LEFTOVER MACHINE-HIVE KEYS
+--------------------------
+Only if the uninstaller says one remains. Needs an elevated prompt. These are duplicates of the
+per-user registration and nothing else reads them.
 
     $o='HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\REGISTRY\MACHINE'
     'Software\Microsoft\VBA\VBE\6.0\Addins64\Xlide.VbeAddIn','Software\Classes\CLSID\{588903F2-4CDE-4607-828A-6870A1F3FDC1}','Software\Classes\Xlide.VbeAddIn' | ForEach-Object { $p=Join-Path $o $_; if (Test-Path $p) { Remove-Item $p -Recurse -Force; "removed $_" } }
