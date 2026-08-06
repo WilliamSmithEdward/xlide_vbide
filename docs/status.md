@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-06, at v0.2.0.
+Updated 2026-08-06, at v0.2.1.
 
 A short, current snapshot. The living documents are [handoff.md](handoff.md) for what happened
 and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,
@@ -41,10 +41,16 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   can await a condition in the page, answer the whole visible layout and reset it, say which
   CSS rule set a property, time the surface, and keep the page's console.
 
+- **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe` —
+  28 MB, per user, no administrator rights, nothing required to be present beforehand. It
+  refuses to build without a language engine or a built page rather than producing something
+  that installs and does half of what it should. `tools\release.ps1` attaches it to a tag.
+
 ## What is not done
 
-- **Not signed.** No binaries are attached to releases; the product is built from source.
-  Signing and update plumbing are the next release-engineering milestone (decision 8).
+- **Not signed.** The installer is attached to releases now, but it carries no code
+  signature, so Windows warns before running it. Signing and update plumbing are the next
+  release-engineering milestone (decision 8).
 - **The debugger and the UserForm designer** are the two large remaining milestones. Break
   mode is now reachable from the harness, which is the regression net the debugger needs
   before it starts.

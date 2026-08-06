@@ -43,6 +43,13 @@ if ($head -ne $tagged) {
     throw "HEAD is $($head.Substring(0,7)) but $Tag is $($tagged.Substring(0,7)). Check out the tag before building what it will carry."
 }
 
+# Checked before anything is built, because the alternative is finding out after the gate and a
+# compressed installer that there was nothing to attach it to.
+gh release view $Tag --json tagName 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "No release for $Tag. Create it first: gh release create $Tag --title ... --notes ..."
+}
+
 if (-not $SkipGate) {
     Write-Host '==> Gate' -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot 'verify.ps1')

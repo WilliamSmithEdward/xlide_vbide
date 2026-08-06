@@ -1,5 +1,41 @@
 # Changelog
 
+## v0.2.1 (2026-08-06)
+
+A packaging release. The installer is a quarter of the size it was, carries the product's
+icon, and now comes with the release instead of staying on the machine that built it.
+
+### Added
+
+- **The installer ships with the release.** `tools\release.ps1` builds it and attaches
+  `xlide-setup.exe` to a tag, so a release hands you the thing that installs rather than the
+  source it was built from. It runs the gate first and refuses to release a build whose
+  engine or page is missing.
+- **The installer carries the product's icon**, rendered at every size Windows asks for
+  rather than downscaled by the shell from one bitmap.
+
+### Changed
+
+- **The installer is 28 MB, down from 102 MB.** Its payload was embedded raw, and most of it
+  is a language runtime that compresses by three quarters. It is compressed now and unpacked
+  on install. Compression is cached by content, so only a payload that actually changed pays
+  the cost of it.
+- The page's smart-editing helpers live in this repository instead of being read from a
+  neighbouring checkout, so the page builds anywhere — including in CI, which had never
+  built it at all and had been publishing whatever bundle happened to be committed
+  (decision 14).
+
+### Fixed
+
+- The installer packaged the entire `ui` folder, so `node_modules` — monaco's sources,
+  esbuild's binaries, typescript — travelled inside it: 146 MB of build tooling that nothing
+  on a user's machine ever runs. Only the built page ships.
+- The installer would build without a language engine and mention it in grey, producing
+  something that installs an editor with no diagnostics, completion, or hover. It refuses
+  now. An editor-only build has to be asked for, and is named so it cannot be handed over as
+  the product.
+- Assemblies reported version 0.1.0 whatever release they shipped in.
+
 ## v0.2.0 (2026-08-06)
 
 The workspace becomes arrangeable: every module open at once, editors side by side, and tool
