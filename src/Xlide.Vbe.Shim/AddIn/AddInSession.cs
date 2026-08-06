@@ -615,19 +615,21 @@ internal sealed class AddInSession : IDisposable
         // with the caret outside a procedure returns "ran" and then opens the Macros dialog,
         // which owns the host thread from that moment on. Recording it here is what lets the
         // NEXT request heal instead of timing out forever.
-        if (request.Query.ContainsKey("keep"))
-        {
-            KeepDialogsRaisedBy(standingBefore);
-        }
-
-        RememberRaisedDialogs(standingBefore);
+        // Keep and sweep are the same watch with different destinations. Asking synchronously
+        // whether this request raised a dialog does not work - it lands after the request
+        // returns, which is why the watch is delayed at all - and a synchronous keep check
+        // therefore protected nothing: References opened with keep=1 and was swept anyway
+        // (2026-08-06).
+        RememberRaisedDialogs(standingBefore, keep: request.Query.ContainsKey("keep"));
 
         if (answered && answer is not null)
         {
             return DebugServer.DebugReply.Json(answer);
         }
 
-        return AnswerBlockedRequest(standingBefore, done, () => answer);
+        // A request that asked to keep what it opens is not rescued from it: opening a modal
+        // was the point, and the caller dismisses it when finished.
+        return AnswerBlockedRequest(standingBefore, done, () => answer, request.Query.ContainsKey("keep"));
     }
 
     /// <summary>
@@ -712,24 +714,13 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private readonly HashSet<string> _dialogsToKeep = new(StringComparer.Ordinal);
 
-    private void KeepDialogsRaisedBy(HashSet<string> standingBefore)
-    {
-        foreach (var dialog in DialogWatch.Dialogs())
-        {
-            if (!standingBefore.Contains(dialog.Window))
-            {
-                _dialogsToKeep.Add(dialog.Window);
-                Log.Info($"debug api: keeping \"{dialog.Caption}\", as the request asked");
-            }
-        }
-    }
 
     /// <summary>
     /// Watches, briefly and on a pool thread, for a dialog this request raised. The delays
     /// are what makes attribution honest: a dialog appears after the command that opened it
     /// returns, and a dialog that appears when no request has just run is the developer's.
     /// </summary>
-    private void RememberRaisedDialogs(HashSet<string> standingBefore)
+    private void RememberRaisedDialogs(HashSet<string> standingBefore, bool keep)
     {
         _ = Task.Run(async () =>
         {
@@ -749,13 +740,17 @@ internal sealed class AddInSession : IDisposable
                         bool noted;
                         lock (_dialogGate)
                         {
-                            noted = _dialogsWeRaised.Add(dialog.Window);
+                            noted = keep
+                                ? _dialogsToKeep.Add(dialog.Window)
+                                : _dialogsWeRaised.Add(dialog.Window);
                         }
 
                         if (noted)
                         {
-                            Log.Info($"debug api: a request raised \"{dialog.Caption}\"; "
-                                + "it will be cleared unless the request asked to keep it");
+                            Log.Info(keep
+                                ? $"debug api: keeping \"{dialog.Caption}\", as the request asked"
+                                : $"debug api: a request raised \"{dialog.Caption}\"; "
+                                    + "it will be cleared unless the request asked to keep it");
                         }
                     }
                 }
@@ -898,10 +893,12 @@ internal sealed class AddInSession : IDisposable
     private static DebugServer.DebugReply AnswerBlockedRequest(
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
-        Func<string?> answerSoFar)
+        Func<string?> answerSoFar,
+        bool keep)
     {
-        var blocking = DialogWatch.Dialogs()
-            .FirstOrDefault(row => !standingBefore.Contains(row.Window));
+        var blocking = keep
+            ? null
+            : DialogWatch.Dialogs().FirstOrDefault(row => !standingBefore.Contains(row.Window));
 
         if (blocking is null)
         {

@@ -222,6 +222,33 @@ Check 'history hands the session back as a script' {
     $h.requests.Count -gt 0 -and $h.script -match 'Invoke-RestMethod'
 }
 
+Check 'keep=1 protects a dialog the caller meant to open' {
+    # References is a real native modal. The guard must leave it alone, because opening it was
+    # the point - and the first cut checked for it synchronously, which is too early to see a
+    # dialog that has not appeared yet, so it protected nothing (2026-08-06).
+    try { Invoke-RestMethod "$api/command?name=references&keep=1" -Method Post -TimeoutSec 12 | Out-Null } catch { }
+    Start-Sleep -Seconds 3
+    $opened = @((Invoke-RestMethod "$api/dialogs" -TimeoutSec 8).dialogs).Count -ge 1
+
+    1..4 | ForEach-Object { try { Invoke-RestMethod "$api/state" -TimeoutSec 8 | Out-Null } catch { } }
+    Start-Sleep -Milliseconds 1500
+    $survived = @((Invoke-RestMethod "$api/dialogs" -TimeoutSec 8).dialogs).Count -ge 1
+
+    Invoke-RestMethod "$api/dismiss?button=Cancel" -Method Post -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1500
+    $closed = @((Invoke-RestMethod "$api/dialogs" -TimeoutSec 8).dialogs).Count -eq 0
+
+    $opened -and $survived -and $closed
+}
+
+Check 'eval reaches the palette page as well as the editor' {
+    Invoke-RestMethod "$api/command?name=objectBrowser" -Method Post -TimeoutSec 10 | Out-Null
+    Start-Sleep -Seconds 2
+    $answer = Invoke-RestMethod "$api/eval?surface=palette" -Method Post -Body 'document.title' -TimeoutSec 15
+    Invoke-RestMethod "$api/command?name=objectBrowser" -Method Post -TimeoutSec 10 | Out-Null
+    $answer.answered -and $answer.result -match 'Object Browser'
+}
+
 Check 'a page exception reaches the shim log' {
     Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 `
         -Body 'setTimeout(() => { throw new Error("probe: a deliberate page fault"); }, 0); "thrown"' | Out-Null
