@@ -428,6 +428,41 @@ internal sealed class AddInSession : IDisposable
         _ = Task.Run(() => RunPageScriptOnce(install, null, 4000));
     }
 
+    /// <summary>
+    /// Where a surface's page sits inside the captured frame, in the frame's own pixels.
+    ///
+    /// A page reports coordinates relative to its own client area and cannot see where that
+    /// area is; a frame capture is the whole window. The difference between the two window
+    /// rectangles is what turns one into the other.
+    /// </summary>
+    private (int X, int Y) SurfaceOriginInFrame(string? which)
+    {
+        var surfaceWindow = which == "palette" ? _browserPalette?.Handle ?? 0 : _editorSurface?.SurfaceWindow ?? 0;
+        if (surfaceWindow == 0 || _frame == 0)
+        {
+            return (0, 0);
+        }
+
+        // The palette is captured as its own window, so its page starts at its own origin.
+        if (which == "palette")
+        {
+            return (0, 0);
+        }
+
+        unsafe
+        {
+            Interop.Rect surfaceRect;
+            Interop.Rect frameRect;
+            if (!Interop.Win32.GetWindowRect(surfaceWindow, &surfaceRect)
+                || !Interop.Win32.GetWindowRect(_frame, &frameRect))
+            {
+                return (0, 0);
+            }
+
+            return (surfaceRect.Left - frameRect.Left, surfaceRect.Top - frameRect.Top);
+        }
+    }
+
     /// <summary>When the page bundle beside the running shim was built, or "(unknown)".</summary>
     private static string BundleBuiltUtc()
     {
@@ -583,9 +618,71 @@ internal sealed class AddInSession : IDisposable
                     _ => _frame,
                 };
                 var bytes = DebugCapture.CaptureBmp(target);
-                return bytes is null
-                    ? DebugError($"window {which ?? "frame"} would not render")
-                    : new DebugServer.DebugReply("image/bmp", bytes);
+                if (bytes is null)
+                {
+                    return DebugError($"window {which ?? "frame"} would not render");
+                }
+
+                // With a selector, the picture is cut down to that element. A whole frame is
+                // a big image in which a 54-pixel drop zone cannot be seen, and a surface
+                // built by reading numbers rather than looking at it is built with one eye
+                // shut (2026-08-06). The page says where the element is; the crop is here,
+                // because the pixels are here.
+                if (request.Query.TryGetValue("selector", out var cropSelector) && cropSelector.Length > 0)
+                {
+                    var pad = request.Query.TryGetValue("pad", out var padText) && int.TryParse(padText, out var asked)
+                        ? Math.Clamp(asked, 0, 200)
+                        : 8;
+
+                    var where = RunPageScript(
+                        $$"""
+                        (function () {
+                          var element = document.querySelector({{JsonString(cropSelector)}});
+                          if (!element) { return null; }
+                          var box = element.getBoundingClientRect();
+                          // Page coordinates plus the browser's own origin on screen: the
+                          // page cannot see where its window is, so the host adds that.
+                          return {
+                            x: Math.round(box.x), y: Math.round(box.y),
+                            w: Math.round(box.width), h: Math.round(box.height)
+                          };
+                        })()
+                        """,
+                        which,
+                        4000);
+
+                    if (where.Error is not null || where.Result.Trim() is "null" or "")
+                    {
+                        return DebugError($"nothing matches {cropSelector} on that surface");
+                    }
+
+                    try
+                    {
+                        using var box = System.Text.Json.JsonDocument.Parse(where.Result);
+                        var x = box.RootElement.GetProperty("x").GetInt32();
+                        var y = box.RootElement.GetProperty("y").GetInt32();
+                        var w = box.RootElement.GetProperty("w").GetInt32();
+                        var h = box.RootElement.GetProperty("h").GetInt32();
+
+                        // The page's coordinates are relative to the BROWSER's client area,
+                        // which sits at the surface's own origin inside the frame.
+                        var origin = SurfaceOriginInFrame(which);
+                        var cropped = DebugCapture.CropBmp(
+                            bytes, 0, 0,
+                            origin.X + x - pad, origin.Y + y - pad,
+                            w + pad * 2, h + pad * 2);
+
+                        return cropped is null
+                            ? DebugError($"{cropSelector} is not on screen")
+                            : new DebugServer.DebugReply("image/bmp", cropped);
+                    }
+                    catch (Exception ex)
+                    {
+                        return DebugError($"the element's box could not be read ({ex.GetType().Name})");
+                    }
+                }
+
+                return new DebugServer.DebugReply("image/bmp", bytes);
             }
 
             case "immediate" when request.Query.TryGetValue("text", out var text) && text.Length > 0:

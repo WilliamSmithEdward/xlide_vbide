@@ -54,6 +54,12 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 ## Standing probes
 
+`tools\verify.ps1` is the whole local gate in one command — page typecheck, build, bundle
+checks, headless probes, Release build, unit tests, and the Release-carries-no-debug-api
+check — about twenty seconds, with `-Live` adding the standing probes against an open editor.
+`tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload,
+and prove the running build is the one just made, in about a second and with no restart.
+
 In `tools\harness`, each self-describing and PASS/FAIL where it can be:
 `Test-DebugApi`, `Test-SplitWorkspace`, `Test-WatchPanel`, `Test-GhostLocalsPanel`,
 `Test-CloseConfirm`, `Test-CloseHiddenPane`, `Test-ObjectBrowser`, `Test-ResizeFollow`,

@@ -503,6 +503,71 @@ internal static partial class DebugCapture
             _ = ReleaseDC(0, screen);
         }
     }
+
+    /// <summary>
+    /// Cuts a rectangle out of a captured bitmap, in the SCREEN coordinates a page reports.
+    ///
+    /// A whole editor frame is a big picture in which a 54-pixel drop zone is invisible, and
+    /// a surface built by measuring numbers rather than looking at it is a surface built with
+    /// one eye shut. The page can say where a widget is (`inspect`); this cuts that out of
+    /// the frame so it can actually be seen.
+    ///
+    /// The rows of a bottom-up DIB run last to first, which is why the copy walks backwards.
+    /// </summary>
+    public static byte[]? CropBmp(byte[] source, int frameLeft, int frameTop, int x, int y, int width, int height)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        if (source.Length < 54 || width <= 0 || height <= 0)
+        {
+            return null;
+        }
+
+        var fullWidth = BitConverter.ToInt32(source, 18);
+        var fullHeight = BitConverter.ToInt32(source, 22);
+
+        // Screen coordinates into the frame's own.
+        var left = x - frameLeft;
+        var top = y - frameTop;
+
+        // Clamped rather than refused: a widget half off the frame is still worth seeing.
+        left = Math.Clamp(left, 0, Math.Max(0, fullWidth - 1));
+        top = Math.Clamp(top, 0, Math.Max(0, fullHeight - 1));
+        width = Math.Clamp(width, 1, fullWidth - left);
+        height = Math.Clamp(height, 1, fullHeight - top);
+
+        var pixelBytes = width * height * 4;
+        var file = new byte[54 + pixelBytes];
+
+        file[0] = (byte)'B';
+        file[1] = (byte)'M';
+        BitConverter.GetBytes(file.Length).CopyTo(file, 2);
+        BitConverter.GetBytes(54).CopyTo(file, 10);
+        BitConverter.GetBytes(40).CopyTo(file, 14);
+        BitConverter.GetBytes(width).CopyTo(file, 18);
+        BitConverter.GetBytes(height).CopyTo(file, 22);
+        BitConverter.GetBytes((ushort)1).CopyTo(file, 26);
+        BitConverter.GetBytes((ushort)32).CopyTo(file, 28);
+        BitConverter.GetBytes(pixelBytes).CopyTo(file, 34);
+
+        for (var row = 0; row < height; row++)
+        {
+            // Row 0 of the crop is its BOTTOM, which sits at (top + height - 1) from the
+            // frame's top, and that row lives at (fullHeight - 1 - thatRow) in the file.
+            var sourceRow = fullHeight - 1 - (top + height - 1 - row);
+            var from = 54 + ((sourceRow * fullWidth) + left) * 4;
+            var to = 54 + row * width * 4;
+
+            if (from < 54 || from + width * 4 > source.Length)
+            {
+                continue;
+            }
+
+            Array.Copy(source, from, file, to, width * 4);
+        }
+
+        return file;
+    }
 }
 
 /// <summary>What GET state answers.</summary>

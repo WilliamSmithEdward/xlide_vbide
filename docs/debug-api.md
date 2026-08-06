@@ -59,7 +59,7 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `locals` | GET | | the Locals panel's context and rows |
 | `watches` | GET | | whether stopped, and the Watch panel's rows |
 | `module` | GET | `name`, `project` | a module's text, read through the session's reader |
-| `capture` | GET | `window=frame\|palette` | a BMP of the window, through PrintWindow |
+| `capture` | GET | `window=frame\|palette`, `selector`, `pad` | a BMP of the window, through PrintWindow. With `selector` it is cropped to that element |
 | `module` | POST | `name`, `project`, body = text | writes the module through the session's writer, with the baseline and engine corrections a host rewrite carries |
 | `dialogs` | GET | | native dialogs standing now, with their buttons, and how long the host thread has been quiet. Needs no host thread, so it answers while the editor is stuck |
 | `eval` | POST | `surface`, `waitMs`, body = script | runs script in the live page and returns its result as JSON. A PROMISE is awaited, so `(async () => ...)()` works |
@@ -142,6 +142,23 @@ deliberately, because forwarding every line would drown it — so a handled `con
 a warning is invisible without DevTools attached, which is exactly the situation during a
 live test. The ring is installed at page ready (including a reload's), wraps rather than
 replaces the console, and keeps the last 500 lines.
+
+### Looking at one widget
+
+`capture?selector=` crops the screenshot to an element. A whole frame is a large picture in
+which a 54-pixel drop zone cannot be seen, and a surface built by reading numbers rather than
+looking at it is built with one eye shut. `tools\harness\Get-Shot.ps1` wraps this and
+converts to PNG, which is what most things that want to LOOK at the result can open:
+
+```powershell
+tools\harness\Get-Shot.ps1 -Selector '.drop-compass' -Out compass.png
+```
+
+One trap is recorded in the code. The page reports coordinates inside its own client area,
+and the crop has to place that area inside the captured frame. The surface's overlay window
+is NOT the document area it is a child of — the surface draws the menu bar and toolbar too,
+so it is taller — and a first cut that used the parent landed tens of pixels high, returning
+the toolbar when asked for a pane header.
 
 ### Numbers for what a developer feels
 

@@ -23,6 +23,33 @@ jobs:
         with:
           global-json-file: global.json
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/editor/package-lock.json
+
+      # The surface is most of the product and none of it was reaching this workflow. `dist/`
+      # is not committed, so a run that never built the page published a shim carrying no
+      # editor at all — a green build whose artifact shows the native pane and logs "no
+      # bundle" — and a TypeScript error merged just as green (2026-08-06). Building the page
+      # BEFORE the publish also puts the bundle where the shim's csproj expects to find it.
+      - name: Install the page's dependencies
+        working-directory: ui/editor
+        run: npm ci
+
+      - name: Typecheck the page
+        working-directory: ui/editor
+        run: npm run typecheck
+
+      - name: Build the page
+        working-directory: ui/editor
+        run: npm run build
+
+      - name: Check the page bundle
+        working-directory: ui/editor
+        run: npm test
+
       - name: Restore
         run: dotnet restore
 
@@ -51,6 +78,37 @@ jobs:
           # no-runtime-on-the-user's-machine promise from regressing quietly.
           $runtime = Get-ChildItem (Split-Path $shim) -Filter 'hostfxr.dll' -ErrorAction SilentlyContinue
           if ($runtime) { throw 'A runtime was published next to the shim. The build is no longer ahead-of-time.' }
+
+      - name: Check that the shim carries the editor page
+        shell: pwsh
+        run: |
+          # The shim without its page is a shim that shows the native pane. This used to pass
+          # silently because the glob that copies the bundle matches nothing when the bundle
+          # was never built.
+          $root = 'artifacts/publish/Xlide.Vbe.Shim/release_win-x64/ui/editor/dist'
+          foreach ($needed in 'index.html', 'editor.js', 'editor.css', 'editor.worker.js', 'codicon.ttf') {
+            $file = Join-Path $root $needed
+            if (-not (Test-Path $file)) { throw "The published shim is missing $needed; it would show the native pane." }
+          }
+
+          $bundle = (Get-Item (Join-Path $root 'editor.js')).Length / 1MB
+          Write-Host ('Editor bundle is {0:N2} MB.' -f $bundle)
+          if ($bundle -lt 0.5) { throw 'The editor bundle is implausibly small; the build produced a stub.' }
+
+      # Release carries no debug door: no server, no port, no route. Verified against the
+      # binary rather than trusted, because the whole feature is one #if away from shipping.
+      - name: Check that Release carries no debug api
+        shell: pwsh
+        run: |
+          $shim = 'artifacts/bin/Xlide.Vbe.Shim/release_win-x64/Xlide.Vbe.Shim.dll'
+          if (-not (Test-Path $shim)) { throw "No managed Release assembly at $shim to check." }
+
+          $bytes = [IO.File]::ReadAllBytes($shim)
+          $text = [Text.Encoding]::Unicode.GetString($bytes) + [Text.Encoding]::ASCII.GetString($bytes)
+          foreach ($needle in '__xlideConsole', 'unknown benchmark', 'the pending result was lost', 'debug-api-') {
+            if ($text.Contains($needle)) { throw "Release carries the debug api: found '$needle'." }
+          }
+          Write-Host 'Release carries no debug api.'
 
       - name: Upload artifacts
         if: always()

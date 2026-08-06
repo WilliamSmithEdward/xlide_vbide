@@ -52,6 +52,19 @@ panes that dock wherever the developer puts them.
   what a selector matches with the CSS rules that claim each property; `bench` times tab
   switching, layout, and typing in the page; and `console` keeps what the page said to
   itself, which the log deliberately does not carry. See `docs/debug-api.md`.
+- `capture?selector=` crops a screenshot to one element, so a widget can be looked at rather
+  than inferred from numbers; `tools\harness\Get-Shot.ps1` fetches one and writes a PNG.
+- `tools\page.ps1` is the page loop in one command: typecheck, build, deploy into the running
+  shim, reload the live page, and prove the running build is the one just made — about a
+  second, with no Excel restart. `-Watch` repeats it on every save.
+- `tools\verify.ps1` is the whole local gate in one command — page typecheck, build, bundle
+  checks, headless probes, Release build, unit tests, and the Release-carries-no-debug-api
+  check — with `-Live` adding the standing probes against an open editor.
+- CI now builds and typechecks the page. It never did: `dist/` is not committed, so every
+  run published a shim carrying NO editor bundle, and the artifact would have shown the
+  native pane. A TypeScript error merged just as green. The workflow now installs the page's
+  dependencies, typechecks, builds, runs the bundle checks, and asserts that the published
+  shim actually carries the page and that Release carries no debug api.
 - `docs/ui-lessons.md`: what building this surface inside a host that moves under it taught
   us — pointer gestures that survive rebuilds, one keybinding service across many editors,
   drag targets a person can aim at, and probing a live page honestly.

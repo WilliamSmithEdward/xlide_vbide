@@ -29,6 +29,14 @@ internal sealed class EditorSurface : IDisposable
 #if DEBUG
     /// <summary>The page itself, for the debug api's eval route. Debug builds only.</summary>
     internal WebView2Surface? Browser => _browser;
+
+    /// <summary>
+    /// The overlay the page is drawn in — NOT <see cref="Host"/>, which is the document area
+    /// the overlay is a child of. The surface covers more than the document area (it draws
+    /// the menu bar and the toolbar), so a screenshot crop that used the parent landed tens
+    /// of pixels high. Debug builds only.
+    /// </summary>
+    internal nint SurfaceWindow => _overlay?.Handle ?? 0;
 #endif
 
     /// <summary>

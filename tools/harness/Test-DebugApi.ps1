@@ -191,6 +191,12 @@ Check 'perf answers with raw samples' {
 Check 'log waits for an event instead of sleeping for it' {
     # The point is the TIMING: it must return when the line arrives, not when the wait
     # expires, which is what makes it usable as an await instead of a guess.
+    #
+    # It watches for the line the COMMAND ITSELF writes, not for a publish that follows.
+    # Matching on "modules: publish" made the check depend on modules being open, which they
+    # are early in a fresh session and are not after two suites have run against it — so it
+    # passed all day and then failed on a run where nothing had changed but the order
+    # (2026-08-06). A probe should assert what it is testing, not the weather.
     $since = (Invoke-RestMethod "$api/log?max=1" -TimeoutSec 8).next
     $job = Start-Job -ArgumentList $api {
         param($api)
@@ -199,10 +205,11 @@ Check 'log waits for an event instead of sleeping for it' {
     }
 
     $clock = [Diagnostics.Stopwatch]::StartNew()
-    $answer = Invoke-RestMethod "$api/log?since=$since&match=modules: publish&waitMs=15000" -TimeoutSec 30
+    $answer = Invoke-RestMethod "$api/log?since=$since&match=command: &waitMs=15000" -TimeoutSec 30
     $clock.Stop()
     Remove-Job $job -Force -ErrorAction SilentlyContinue
 
+    # Arrived, and arrived because it was written rather than because the wait gave up.
     $answer.lines.Count -ge 1 -and $clock.Elapsed.TotalSeconds -lt 12
 }
 
@@ -259,6 +266,33 @@ Check 'console keeps what the page said to itself' {
     Start-Sleep -Milliseconds 400
     $c = Invoke-RestMethod "$api/console?last=20" -TimeoutSec 15
     $c.installed -and ($c.lines -join "`n") -match 'probe: a handled warning'
+}
+
+Check 'capture crops to an element, and lands on it' {
+    # A whole frame is a picture in which a 54-pixel drop zone cannot be seen. The crop's
+    # size is checked against what the page says the element measures, which is also what
+    # catches the origin being wrong: the first cut used the surface's PARENT window and
+    # landed tens of pixels high, on the toolbar instead of the pane header (2026-08-06).
+    $box = (Invoke-RestMethod "$api/inspect?selector=%23toolbar" -TimeoutSec 20).elements[0]
+    $shot = Join-Path $env:TEMP 'xlide-crop-probe.bmp'
+    Invoke-WebRequest "$api/capture?selector=%23toolbar&pad=0" -OutFile $shot -TimeoutSec 30
+
+    $bytes = [IO.File]::ReadAllBytes($shot)
+    $isBitmap = $bytes[0] -eq 0x42 -and $bytes[1] -eq 0x4D
+    $width = [BitConverter]::ToInt32($bytes, 18)
+    $height = [BitConverter]::ToInt32($bytes, 22)
+    Remove-Item $shot -Force -ErrorAction SilentlyContinue
+
+    # Within a pixel: the page rounds, and so does the crop.
+    $isBitmap -and ([Math]::Abs($width - $box.w) -le 2) -and ([Math]::Abs($height - $box.h) -le 2)
+}
+
+Check 'a crop of nothing is refused, not guessed at' {
+    $shot = Join-Path $env:TEMP 'xlide-crop-miss.txt'
+    Invoke-WebRequest "$api/capture?selector=.no-such-element-anywhere" -OutFile $shot -TimeoutSec 20
+    $answer = Get-Content $shot -Raw
+    Remove-Item $shot -Force -ErrorAction SilentlyContinue
+    $answer -match 'nothing matches'
 }
 
 Check 'bench times the surface and answers a shape' {

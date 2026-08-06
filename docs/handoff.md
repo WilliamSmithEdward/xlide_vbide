@@ -8,7 +8,38 @@ Read this, then [lessons.md](lessons.md) for the long-form findings with evidenc
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices
 that would be expensive to reverse.
 
-## START NEW SESSION HERE — 2026-08-04 evening
+## START NEW SESSION HERE — 2026-08-06 afternoon
+
+**THE TWO COMMANDS TO KNOW.** `tools\page.ps1` is the page loop: typecheck, build, deploy
+into the running shim, reload the live page, and prove the running build is the one just
+made — about a second, no Excel restart, `-Watch` to repeat on every save. `tools\verify.ps1`
+is the whole local gate in one command (page typecheck, build, bundle checks, headless
+probes, Release build, unit tests, Release-carries-no-debug-api), about twenty seconds, with
+`-Live` adding the standing probes against an open editor. Both exist because both were
+being assembled by hand a dozen times an afternoon.
+
+**2026-08-06 — THE WORKSPACE REARRANGES, AND THE DOCUMENT PROTOCOL CHANGED UNDER IT
+(decisions 12 and 13, [ui-lessons.md](ui-lessons.md)).** The surface used to hold ONE editor
+model — the module on screen — and every message about text implicitly meant "the shown
+module". It now holds a live model per open module, keyed by (workbook, module), and the
+host mirrors that shape: per-document text, unwritten-edit flags, and write-back baselines
+keyed by the pair. That last one closed a latent corruption: a name-only baseline would diff
+one workbook's Module1 against another's and write the merge. On top sit editor groups
+(split right/down, tabs drag between them) and six dockable panes in four sections, both
+driven by one drag gesture with a five-zone compass that IS the drop target. Two bugs found
+underneath, both about one page-wide service serving several editors: `editor.addCommand` is
+not scoped to its editor (Backspace acted on the wrong group — lesson 34), and a reloaded
+page must clear every "what changed" cache before republishing or it comes back with models
+and no tabs (lesson 35). `Test-SplitWorkspace.ps1` is 19 live checks over all of it.
+
+**2026-08-06 — CI WAS NEVER BUILDING THE PAGE.** `dist/` is not committed and the workflow
+never ran npm, so every green run published a shim carrying no editor bundle at all — the
+artifact would have shown the native pane — and a TypeScript error merged just as green. The
+workflow now installs, typechecks, builds, and checks the page before the publish, then
+asserts the published shim actually carries it and that Release carries no debug api. If a
+future workflow change drops the npm steps, that whole class of hole reopens silently.
+
+## Earlier — 2026-08-04 evening
 
 **2026-08-06 — MODALS ARE A SOLVED PROBLEM NOW, AND WRITTEN DOWN
 ([working-with-modals.md](working-with-modals.md)).** Read it before opening any native

@@ -207,6 +207,22 @@ belongs last: everything before it depends on host state built up in sequence, a
 in the middle left a later check watching an editor whose caret had been re-established
 underneath it.
 
+**Assert what the check is testing, not the weather around it.** A check that the log's wait
+returns when a line ARRIVES watched for a line that a save only produces while modules are
+open. That was true early in a fresh session and false after two suites had run against the
+same host, so the check passed all day and then failed on a run where nothing had changed
+but the order. Watching for the line the command itself writes tests the same thing and
+depends on nothing.
+
+**Look at it, do not only measure it.** Most of this surface was built by reading numbers —
+rects, class lists, computed styles — because a screenshot of a whole editor frame is a big
+picture in which a 54-pixel drop zone is invisible. Cropping the capture to one element
+(`capture?selector=`) changes that, and the first thing it caught was itself: the crop landed
+on the toolbar when asked for a pane header, because the surface's overlay window is not the
+document area it is a child of — the surface is taller, since it draws the menu bar and
+toolbar too. A picture of the wrong thing is at least obviously wrong; a number from the
+wrong thing looks like data.
+
 **Verify against the demo transport first.** The page runs its own loopback host in a plain
 browser, with two documents and live tabs. Nearly every layout finding above was reproduced
 there in seconds, then confirmed live — the browser tells you what the code does, and the
