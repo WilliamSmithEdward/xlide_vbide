@@ -194,10 +194,13 @@ internal sealed class DebugServer : IDisposable
                 return;
             }
 
+            var route = path[prefix.Length..];
+            RecordRequest(method, route, query);
+
             DebugReply body;
             try
             {
-                body = _answer(new DebugRequest(path[prefix.Length..], query, requestBody));
+                body = _answer(new DebugRequest(route, query, requestBody));
             }
             catch (Exception ex)
             {
@@ -210,6 +213,48 @@ internal sealed class DebugServer : IDisposable
         catch
         {
             // A connection the client abandoned is routine.
+        }
+    }
+
+    /*
+     * Every request this door has served, so a session that went somewhere interesting can be
+     * replayed instead of remembered. What actually happens after a live investigation is
+     * that the useful sequence is reconstructed from a scrollback, badly; this keeps it.
+     * The history route hands it back as a runnable script. Bounded, and no bodies: a module
+     * write's payload is large and belongs to the workbook, not to a transcript.
+     */
+    private const int HistoryKept = 300;
+    private static readonly Queue<string> History = new(HistoryKept + 1);
+    private static readonly Lock HistoryGate = new();
+
+    private static void RecordRequest(string method, string route, Dictionary<string, string> query)
+    {
+        if (route is "history" or "log" or "journal" or "state" or "dialogs")
+        {
+            // The routes a probe polls would otherwise be the whole transcript.
+            return;
+        }
+
+        var arguments = query.Count == 0
+            ? string.Empty
+            : "?" + string.Join("&", query.Select(pair => $"{pair.Key}={pair.Value}"));
+
+        lock (HistoryGate)
+        {
+            History.Enqueue($"{method} {route}{arguments}");
+            while (History.Count > HistoryKept)
+            {
+                History.Dequeue();
+            }
+        }
+    }
+
+    /// <summary>What this door has been asked to do, oldest first.</summary>
+    public static string[] Requests()
+    {
+        lock (HistoryGate)
+        {
+            return [.. History];
         }
     }
 
@@ -551,6 +596,34 @@ public sealed record DebugDoctorReply(
     [property: JsonPropertyName("surfaceReady")] bool SurfaceReady,
     [property: JsonPropertyName("findings")] string[] Findings);
 
+/// <summary>
+/// Everything a bug report needs, captured at one moment. Evidence gathered request by
+/// request describes several different moments, and the interesting one is usually the one
+/// that has already passed.
+/// </summary>
+public sealed record DebugJournalReply(
+    [property: JsonPropertyName("capturedAt")] string CapturedAt,
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
+    [property: JsonPropertyName("dialogs")] DebugDialogRow[] Dialogs,
+    [property: JsonPropertyName("placementMs")] long[] PlacementMs,
+    [property: JsonPropertyName("marshalMs")] long[] MarshalMs,
+    [property: JsonPropertyName("messages")] DebugMessageRow[] Messages,
+    [property: JsonPropertyName("log")] string[] Log);
+
+/// <summary>Whether a stated claim held, and what was there instead when it did not.</summary>
+public sealed record DebugAssertReply(
+    [property: JsonPropertyName("held")] bool Held,
+    [property: JsonPropertyName("claim")] string Claim,
+    [property: JsonPropertyName("expected")] string Expected,
+    [property: JsonPropertyName("saw")] string Saw);
+
+/// <summary>The requests this door has served, as a script that can be replayed.</summary>
+public sealed record DebugHistoryReply(
+    [property: JsonPropertyName("requests")] string[] Requests,
+    [property: JsonPropertyName("script")] string Script);
+
 /// <summary>Recent raw durations, for percentiles a running maximum cannot give.</summary>
 public sealed record DebugPerfReply(
     [property: JsonPropertyName("placementMs")] long[] PlacementMs,
@@ -633,5 +706,8 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugEvalReply))]
 [JsonSerializable(typeof(DebugDoctorReply))]
 [JsonSerializable(typeof(DebugPerfReply))]
+[JsonSerializable(typeof(DebugJournalReply))]
+[JsonSerializable(typeof(DebugAssertReply))]
+[JsonSerializable(typeof(DebugHistoryReply))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
 #endif

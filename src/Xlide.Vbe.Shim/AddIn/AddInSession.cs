@@ -322,6 +322,126 @@ internal sealed class AddInSession : IDisposable
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
             }
 
+            case "history":
+            {
+                // The session as a script. After a live investigation the useful sequence is
+                // normally reconstructed from a scrollback and gets a step wrong; this hands
+                // it back ready to run, so a bug found by hand becomes a probe by copying.
+                var requests = DebugServer.Requests();
+                var script = new System.Text.StringBuilder();
+                script.AppendLine("# Replay of a debug api session. Point it at a live instance:");
+                script.AppendLine("#   $api = \"http://127.0.0.1:PORT/TOKEN\"");
+                foreach (var line in requests)
+                {
+                    var space = line.IndexOf(' ', StringComparison.Ordinal);
+                    var verb = line[..space];
+                    var rest = line[(space + 1)..];
+                    script.AppendLine(verb == "POST"
+                        ? $"Invoke-RestMethod \"$api/{rest}\" -Method Post -TimeoutSec 20"
+                        : $"Invoke-RestMethod \"$api/{rest}\" -TimeoutSec 20");
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugHistoryReply(requests, script.ToString()),
+                    DebugJsonContext.Default.DebugHistoryReply));
+            }
+
+            case "assert" when request.Query.TryGetValue("that", out var claim) && claim.Length > 0:
+            {
+                // A probe's expectation, stated once and waited on. Every check written here
+                // so far has been the same four lines - poll a route, read a field, compare,
+                // give up eventually - and each rewrite is a chance to sleep instead of wait
+                // or to swallow the answer. The named claims are the ones the harness keeps
+                // needing; anything more specific belongs in eval or a real test.
+                var timeout = request.Query.TryGetValue("timeoutMs", out var timeoutText)
+                    && int.TryParse(timeoutText, out var wanted) ? Math.Clamp(wanted, 0, 60000) : 10000;
+                request.Query.TryGetValue("value", out var expected);
+
+                var deadline = Environment.TickCount64 + timeout;
+                string? saw = null;
+                var held = false;
+
+                while (true)
+                {
+                    (held, saw) = EvaluateClaim(claim, expected);
+                    if (held || Environment.TickCount64 >= deadline)
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(150);
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugAssertReply(held, claim, expected ?? "(none)", saw ?? "(nothing)"),
+                    DebugJsonContext.Default.DebugAssertReply));
+            }
+
+            case "journal":
+            {
+                // Everything a bug report needs, in one request, because evidence gathered
+                // six requests apart is evidence of six different moments - and because the
+                // moment worth capturing is usually the one already passing. State, the
+                // dialogs standing, the counters, the recent log, and the last page traffic,
+                // all read as close together as this door can manage.
+                var lines = request.Query.TryGetValue("lines", out var linesText)
+                    && int.TryParse(linesText, out var wanted) ? Math.Clamp(wanted, 1, 2000) : 200;
+
+                var logLines = Log.Path is { } journalPath
+                    ? ReadLogSlice(journalPath, TailOffset(journalPath, lines), null, lines).Lines
+                    : [];
+
+                var (placementSamples, marshalSamples) = PerfCounters.Samples();
+                var messages = WebView.WebView2Surface.MessageTap.Snapshot(40)
+                    .Select(entry => new DebugMessageRow(entry.Seq, entry.At, entry.Surface, entry.Direction, entry.Text))
+                    .ToArray();
+
+                // The session facts need the host thread, and the whole point of a journal is
+                // that it still says something when that thread is busy - so a failure there
+                // is reported inside the journal rather than instead of it.
+                string? sessionState = null;
+                if (_editorSurface is { } journalHost)
+                {
+                    using var ready = new ManualResetEventSlim(false);
+                    journalHost.RunOnHostThread(() =>
+                    {
+                        try
+                        {
+                            sessionState = AnswerDebugRequestOnHost(
+                                new DebugServer.DebugRequest("state", request.Query, string.Empty));
+                        }
+                        catch (Exception ex)
+                        {
+                            sessionState = $"{{\"error\":\"{ex.GetType().Name}\"}}";
+                        }
+                        finally
+                        {
+                            ready.Set();
+                        }
+                    });
+
+                    if (!ready.Wait(TimeSpan.FromSeconds(3)))
+                    {
+                        sessionState = null;
+                    }
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugJournalReply(
+                        CapturedAt: DateTime.Now.ToString("O"),
+                        Pid: Environment.ProcessId,
+                        State: sessionState ?? "(the host thread did not answer)",
+                        HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
+                        Dialogs: DialogWatch.Dialogs()
+                            .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Buttons, row.Enabled))
+                            .ToArray(),
+                        PlacementMs: placementSamples,
+                        MarshalMs: marshalSamples,
+                        Messages: messages,
+                        Log: [.. logLines]),
+                    DebugJsonContext.Default.DebugJournalReply));
+            }
+
             case "perf":
             {
                 // Raw recent durations, so a probe can compute a median and a p95 rather
@@ -662,6 +782,97 @@ internal sealed class AddInSession : IDisposable
     /// Delete, or Run - a dialog nobody read must not be agreed with. A dialog that was
     /// already standing belongs to the developer and is only reported.
     /// </summary>
+    /// <summary>
+    /// Whether a named claim holds right now, and what was actually seen. Read from the
+    /// snapshots the reader thread publishes and from fields the host thread writes, so a
+    /// claim can be tested while that thread is busy - which is exactly when a harness is
+    /// waiting on one.
+    /// </summary>
+    private (bool Held, string Saw) EvaluateClaim(string claim, string? expected)
+    {
+        switch (claim)
+        {
+            case "stopped":
+                return (_inBreak, _inBreak ? "stopped" : "running");
+
+            case "running":
+                return (!_inBreak, _inBreak ? "stopped" : "running");
+
+            case "surfaceReady":
+                return (_surfaceShown, _surfaceShown ? "ready" : "not ready");
+
+            case "shownModule":
+            {
+                var shown = _editorSurface?.Module;
+                return (shown is not null
+                    && (expected is null || shown.Equals(expected, StringComparison.OrdinalIgnoreCase)),
+                    shown ?? "(none)");
+            }
+
+            case "noDialogs":
+            {
+                var standing = DialogWatch.Dialogs();
+                return (standing.Length == 0, standing.Length == 0 ? "none" : standing[0].Caption);
+            }
+
+            case "localsHas":
+            {
+                var rows = _ghostReaders?.Locals?.Rows;
+                var names = rows is null ? [] : rows.Select(row => row.Expression).ToArray();
+                return (expected is not null
+                    && names.Any(name => name.Equals(expected, StringComparison.OrdinalIgnoreCase)),
+                    names.Length == 0 ? "(no locals)" : string.Join(", ", names));
+            }
+
+            case "watchHas":
+            {
+                var rows = _ghostReaders?.Watches;
+                var names = rows is null ? [] : rows.Select(row => row.Expression).ToArray();
+                return (expected is not null
+                    && names.Any(name => name.Equals(expected, StringComparison.OrdinalIgnoreCase)),
+                    names.Length == 0 ? "(no watches)" : string.Join(", ", names));
+            }
+
+            case "problemFree":
+            {
+                var held = _findings;
+                return (held.Count == 0, held.Count == 0 ? "none" : $"{held.Count} finding(s)");
+            }
+
+            case "responsive":
+            {
+                var age = PerfCounters.HeartbeatAgeMs;
+                return (age < 3000, $"{age}ms since the last poll");
+            }
+
+            default:
+                return (false, $"unknown claim {claim}");
+        }
+    }
+
+    /// <summary>
+    /// An offset far enough back to hold roughly the requested number of lines. A journal
+    /// wants the END of the log, and reading a megabyte to reach it would make the capture
+    /// itself part of the problem it is capturing.
+    /// </summary>
+    private static long TailOffset(string path, int lines)
+    {
+        try
+        {
+            var length = new FileInfo(path).Length;
+
+            // Lines here run long: timestamps, a level, a thread, and often a serialized
+            // message. Two hundred characters apiece is a generous guess that errs towards
+            // reading more than asked, which the line cap then trims.
+            var guess = (long)lines * 200;
+            return length > guess ? length - guess : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     /// <summary>One read of the log from an offset, filtered, with the offset to ask from next.</summary>
     private static (List<string> Lines, long Next) ReadLogSlice(string path, long since, string? match, int max)
     {
@@ -818,10 +1029,13 @@ internal sealed class AddInSession : IDisposable
                     findings.Add("the ghost readers are not attached, so Locals and Watch cannot fill");
                 }
 
-                if (PerfCounters.HeartbeatAgeMs > 5000)
+                // Only diagnostic while something should be ticking. An idle editor stops
+                // polling by design, and a doctor that called that a fault would cry wolf on
+                // every quiet session - which it did, the first time it ran (2026-08-06).
+                if (PerfCounters.PollingExpected && PerfCounters.HeartbeatAgeMs > 5000)
                 {
-                    findings.Add($"the host thread has not ticked for {PerfCounters.HeartbeatAgeMs}ms; "
-                        + "something is holding it (check the dialogs route)");
+                    findings.Add($"the host thread has not ticked for {PerfCounters.HeartbeatAgeMs}ms "
+                        + "while it should be polling; something is holding it (check the dialogs route)");
                 }
 
                 if (DialogWatch.Dialogs() is { Length: > 0 } standingDialogs)
@@ -3319,6 +3533,14 @@ internal sealed class AddInSession : IDisposable
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
     {
+#if DEBUG
+        // Stamped per TICK, not per configuration change: this is the pulse the debug api
+        // reports, and it should mean "the host thread ran our periodic work just now".
+        // Note the honest limit - an idle editor stops polling altogether, so an old
+        // heartbeat means blocked only while something should be watching (see doctor).
+        PerfCounters.Beat();
+#endif
+
         // While the editor has no panes, the tree is the only living thing on screen and the
         // only route to a first module, so it follows the project as it grows.
         if (_watchingEmpty)

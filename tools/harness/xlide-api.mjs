@@ -177,6 +177,20 @@ function clientFor(entry) {
     /** The start-of-session sanity check: right build, everything attached, nothing standing. */
     doctor: () => call("doctor"),
 
+    /** Everything a bug report needs, captured at one moment. */
+    journal: (lines) => call(`journal${query({ lines })}`, { timeout: 20000 }),
+
+    /** The requests this door has served, and a script that replays them. */
+    history: () => call("history"),
+
+    /**
+     * States an expectation and waits for it: stopped, running, surfaceReady, shownModule,
+     * noDialogs, localsHas, watchHas, problemFree, responsive. Returns what was seen when it
+     * did not hold, which is the half a bare false leaves out.
+     */
+    assert: (that, { value, timeoutMs = 10000 } = {}) =>
+      call(`assert${query({ that, value, timeoutMs })}`, { timeout: timeoutMs + 10000 }),
+
     /** Recent raw durations for percentile work, rather than a max one outlier owns. */
     perf: () => call("perf"),
 
@@ -279,6 +293,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "command": return api.command(rest[0]);
       case "dialogs": return api.dialogs();
       case "doctor": return api.doctor();
+      case "journal": return api.journal(rest[0]);
+      case "history": return api.history();
+      case "assert": return api.assert(rest[0], { value: rest[1] });
       case "perf": return api.perf();
       case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);

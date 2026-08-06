@@ -56,6 +56,15 @@ internal static class PerfCounters
         Interlocked.Exchange(ref _heartbeat, Environment.TickCount64);
     }
 
+    /// <summary>One tick of the host thread's periodic work.</summary>
+    public static void Beat() => Interlocked.Exchange(ref _heartbeat, Environment.TickCount64);
+
+    /// <summary>
+    /// Whether anything should be ticking at all. An idle editor stops polling, so a stale
+    /// heartbeat is only evidence of a blockage while the interval is non-zero.
+    /// </summary>
+    public static bool PollingExpected => Interlocked.Read(ref _pollIntervalMs) > 0;
+
     /// <summary>Milliseconds since the host thread last completed a poll tick.</summary>
     public static long HeartbeatAgeMs => Environment.TickCount64 - Interlocked.Read(ref _heartbeat);
 

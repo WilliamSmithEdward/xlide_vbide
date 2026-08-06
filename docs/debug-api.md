@@ -51,6 +51,9 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `log` | GET | `since`, `match`, `max`, `waitMs` | a slice of the shim log and the next byte offset. With `waitMs` it BLOCKS until a matching line appears, so an event can be awaited rather than slept for |
 | `doctor` | GET | | the start-of-session checklist: shim and bundle build times, the page's own build stamp, engine and ghost readers attached, dialogs standing. `findings` is empty when nothing is wrong |
 | `perf` | GET | | recent raw placement and marshal durations, for medians and percentiles |
+| `journal` | GET | `lines` | one capture of a whole moment: state, dialogs, counters, recent log, recent page traffic |
+| `history` | GET | | every request this door has served, and a script that replays them |
+| `assert` | POST | `that`, `value`, `timeoutMs` | states an expectation and waits for it, answering with what was actually seen |
 | `messages` | GET | `last` | recent page traffic both directions, per surface |
 | `problems` | GET | `module` | the analyzer's current findings |
 | `locals` | GET | | the Locals panel's context and rows |
@@ -144,6 +147,29 @@ separately, an Add Watch opened outside the api survives repeated api traffic un
 The mechanism behind all of this, and the rules for opening a modal at all, are in
 [working-with-modals.md](working-with-modals.md).
 
+## Stating expectations, capturing moments, replaying sessions
+
+`assert` takes a named claim and waits for it: `stopped`, `running`, `surfaceReady`,
+`shownModule`, `noDialogs`, `localsHas`, `watchHas`, `problemFree`, `responsive`. It answers
+with what it SAW as well as whether the claim held, which is the half a bare false leaves
+out - `{"held":false,"claim":"shownModule","expected":"NoSuchModule","saw":"BrokenModule"}`
+diagnoses itself.
+
+`journal` captures state, standing dialogs, the counters, the recent log, and the recent page
+traffic in ONE request. Evidence gathered request by request describes several different
+moments, and the interesting one is usually the one that has already passed.
+
+`history` hands back every request the door has served, plus a runnable script of them. After
+an investigation by hand, the useful sequence is normally reconstructed from a scrollback and
+gets a step wrong; this turns a bug found by hand into a probe by copying.
+
+## A note on the heartbeat
+
+`heartbeatAgeMs` is the age of the host thread's last periodic tick, and it means "blocked"
+only while something should be ticking. An idle editor stops polling by design, so a quiet
+session legitimately shows a large age - `doctor` therefore only reports it as a finding when
+polling is expected, after the first version of that check cried wolf on a quiet editor.
+
 ## Awaiting instead of sleeping
 
 `log?match=...&waitMs=15000` returns the moment a matching line is written, or when the wait
@@ -218,8 +244,8 @@ landing, beyond the fix underneath it:
 - dead instances' discovery files are swept at session start.
 - `breakpoint` gained `state=on|off`, and `caret` is new: without it nothing outside the
   page can aim a Run at a procedure.
-- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 27 checks)
+- a client library (`xlide-api.mjs`) and a standing probe (`Test-DebugApi.ps1`, 30 checks)
   ship with it.
-- the modal guard above, `dialogs`, `dismiss`, `eval`, `doctor`, `perf`, the log wait, the
-  host heartbeat, and page-error forwarding are all new in this landing; none of them
-  existed on the branch.
+- the modal guard above, `dialogs`, `dismiss`, `eval`, `doctor`, `perf`, `journal`,
+  `history`, `assert`, the log wait, the host heartbeat, and page-error forwarding are all
+  new in this landing; none of them existed on the branch.

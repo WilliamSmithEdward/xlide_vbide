@@ -206,6 +206,22 @@ Check 'log waits for an event instead of sleeping for it' {
     $answer.lines.Count -ge 1 -and $clock.Elapsed.TotalSeconds -lt 12
 }
 
+Check 'assert reports what it saw, not just a verdict' {
+    $held = Invoke-RestMethod "$api/assert?that=surfaceReady&timeoutMs=3000" -Method Post -TimeoutSec 20
+    $missed = Invoke-RestMethod "$api/assert?that=shownModule&value=NoSuchModule&timeoutMs=1000" -Method Post -TimeoutSec 20
+    $held.held -and (-not $missed.held) -and $missed.saw -and $missed.saw -ne '(nothing)'
+}
+
+Check 'journal captures a whole moment in one request' {
+    $j = Invoke-RestMethod "$api/journal?lines=40" -TimeoutSec 25
+    $j.pid -gt 0 -and $j.log.Count -gt 0 -and $j.state -match 'shownModule' -and $null -ne $j.dialogs
+}
+
+Check 'history hands the session back as a script' {
+    $h = Invoke-RestMethod "$api/history" -TimeoutSec 10
+    $h.requests.Count -gt 0 -and $h.script -match 'Invoke-RestMethod'
+}
+
 Check 'a page exception reaches the shim log' {
     Invoke-RestMethod "$api/eval" -Method Post -TimeoutSec 15 `
         -Body 'setTimeout(() => { throw new Error("probe: a deliberate page fault"); }, 0); "thrown"' | Out-Null
