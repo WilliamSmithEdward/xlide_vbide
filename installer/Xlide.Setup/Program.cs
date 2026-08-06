@@ -393,6 +393,11 @@ internal static class Program
         key.SetValue("DisplayVersion", version);
         key.SetValue("Publisher", "William Smith Edward");
         key.SetValue("InstallLocation", target);
+
+        // Without this the installed-apps list draws a generic placeholder. The icon comes from the
+        // copy of this executable kept in the install folder, which is the only file here that
+        // carries one: the shim is a DLL with no icon resource.
+        key.SetValue("DisplayIcon", uninstaller);
         key.SetValue("UninstallString", $"\"{uninstaller}\" --uninstall");
         key.SetValue("QuietUninstallString", $"\"{uninstaller}\" --uninstall --silent");
         key.SetValue("NoModify", 1, RegistryValueKind.DWord);
