@@ -223,3 +223,34 @@ only be built on one of the gated bridges is a feature that asks every user to w
 setting first, and it gets redesigned or dropped. The development harness scripts do use
 `Workbook.VBProject` to seed fixtures — they run on a development machine, they are not the
 product, and they must never migrate into it.
+
+## 11. Watches are managed by the editor's own dialogs, not replaced by ours
+
+The Watch panel is ours: it renders what the ghost palette holds, and it is the only watch
+display the developer sees. CREATING, editing, and deleting a watch stays with the editor's
+native Add Watch and Edit Watch dialogs.
+
+The mechanism a replacement would need was measured (2026-08-05) and works: both dialogs are
+fully drivable by messages - expression edit 4853 (typed keystrokes only; text planted by
+WM_SETTEXT is rejected as "Empty watch expression"), procedure and module combos 4856/4857 via
+CB_SETCURSEL, the watch-type radios 4850/4851/4852 via BM_CLICK, OK 1, Cancel 2, and Edit
+Watch's Delete 4859, which removes the selected watch cleanly. A themed dialog of ours could
+collect the inputs and drive one of these invisibly, the way the ghost palettes turn native
+windows into machinery.
+
+It is not worth the failure mode. These dialogs are MODAL: opening one blocks the editor's
+thread until something dismisses it. The driver has to run on another thread, and every reason
+it might not find the controls it expects - a different Office build, a localised caption, a
+timing slip - ends with a modal dialog nobody dismisses. Hidden at alpha zero and parked off
+screen, as the mechanism requires, the developer cannot even find the window to close it: the
+editor simply hangs, mid-session, with their unsaved work inside it. That happened during the
+measurement itself when a driver argument was mangled, and it is a hazard no amount of care
+inside our code can remove, because the dangerous half is the timing of a dialog we do not own.
+
+Consequences. The Debug menu's watch commands - Add Watch (1820), Edit Watch (940), Quick
+Watch (229) - are REACHABLE COMMANDS FOREVER: menu curation must never suppress them, because
+they are the only way to manage a watch. The panel keeps proving its half through
+`Test-WatchPanel.ps1`, which drives the native dialog from a HARNESS process, where a hang
+costs a test run rather than a developer's session. If this is ever revisited, the watchdog
+comes first: a driver that guarantees dismissal, and that restores the dialog to a visible,
+centred window whenever it cannot, before anything is hidden.
