@@ -247,9 +247,14 @@ editor simply hangs, mid-session, with their unsaved work inside it. That happen
 measurement itself when a driver argument was mangled, and it is a hazard no amount of care
 inside our code can remove, because the dangerous half is the timing of a dialog we do not own.
 
-Consequences. The Debug menu's watch commands - Add Watch (1820), Edit Watch (940), Quick
-Watch (229) - are REACHABLE COMMANDS FOREVER: menu curation must never suppress them, because
-they are the only way to manage a watch. The panel keeps proving its half through
+Consequences. The commands themselves - Add Watch (1820), Edit Watch (940), Quick Watch (229) -
+must stay REACHABLE FOREVER, because they are the only way to manage a watch. Where they are
+reachable FROM is ours to choose: the same day this was decided, the developer moved them out
+of the menu bar and into the Watch panel's own button row, so the Debug menu's three items are
+suppressed like every other ported item. The rule that survives is the one that matters - these
+commands may only leave a surface when another surface of ours already carries them, and the
+panel's buttons must never be removed without putting them back somewhere. The panel keeps
+proving its half through
 `Test-WatchPanel.ps1`, which drives the native dialog from a HARNESS process, where a hang
 costs a test run rather than a developer's session. If this is ever revisited, the watchdog
 comes first: a driver that guarantees dismissal, and that restores the dialog to a visible,

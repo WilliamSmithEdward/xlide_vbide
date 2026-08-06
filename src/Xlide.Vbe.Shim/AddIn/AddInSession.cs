@@ -735,6 +735,20 @@ internal sealed class AddInSession : IDisposable
             _editorSurface?.Notify("Call Stack shows the stopped procedure chain; it needs break mode.");
         }
 
+        // The Watch panel's own buttons are the only route to these now (the Debug menu's
+        // items are retired), so a declined one has to say why rather than do nothing. The
+        // editor disables Edit Watch until a watch is selected in the window the ghost
+        // palette IS, and Quick Watch until an expression sits under the caret.
+        if (!ran && command == VbeCommands.Command.EditWatch)
+        {
+            _editorSurface?.Notify("Edit Watch works on a selected watch; add one first.");
+        }
+
+        if (!ran && command == VbeCommands.Command.QuickWatch)
+        {
+            _editorSurface?.Notify("Quick Watch reads the expression at the cursor; put the caret on one first.");
+        }
+
         // Clearing all breakpoints clears the editor's; the drawn record must follow, whichever
         // route asked for it.
         if (command == VbeCommands.Command.ClearAllBreakpoints)

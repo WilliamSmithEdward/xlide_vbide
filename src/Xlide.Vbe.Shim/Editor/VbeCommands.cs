@@ -41,6 +41,7 @@ internal static class VbeCommands
         public const int RunToCursor = 1811;
         public const int QuickWatch = 229;
         public const int AddWatch = 1820;
+        public const int EditWatch = 940;
         public const int CallStack = 620;
         public const int Definition = 939;
         public const int LastPosition = 1822;
@@ -256,6 +257,7 @@ internal static class VbeCommands
         "toggleBreakpoint" => Command.ToggleBreakpoint,
         "quickWatch" => Command.QuickWatch,
         "addWatch" => Command.AddWatch,
+        "editWatch" => Command.EditWatch,
         "callStack" => Command.CallStack,
         "goToDefinition" => Command.Definition,
         "lastPosition" => Command.LastPosition,

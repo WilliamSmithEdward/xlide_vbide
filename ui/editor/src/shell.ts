@@ -305,6 +305,7 @@ export class Shell {
     this.localsContext = root.querySelector("#locals-context") as HTMLElement;
     this.localsTable = root.querySelector("#locals-table") as HTMLElement;
 
+    this.installWatchActions(root);
     this.installPanelTabs();
     this.installImmediate();
     this.setLocals(false, null, []);
@@ -864,6 +865,29 @@ export class Shell {
 
       this.watchTable.appendChild(line);
     }
+  }
+
+  /**
+   * The Watch panel's own triggers. Watches are created, edited, and deleted through the
+   * editor's dialogs (decision 11: they are modal, and driving one invisibly can hang the
+   * editor with no window the developer can reach), so these buttons summon those dialogs
+   * directly. The panel is where a watch is looked at, so it is where the work belongs; the
+   * menu route is retired with them.
+   */
+  private installWatchActions(root: HTMLElement): void {
+    const run = (id: string) => this.handlers.command({
+      id,
+      target: "host",
+      icon: "",
+      label: "",
+    });
+
+    (root.querySelector("#watch-add") as HTMLButtonElement)
+      .addEventListener("click", () => run("addWatch"));
+    (root.querySelector("#watch-edit") as HTMLButtonElement)
+      .addEventListener("click", () => run("editWatch"));
+    (root.querySelector("#watch-quick") as HTMLButtonElement)
+      .addEventListener("click", () => run("quickWatch"));
   }
 
   private installPanelTabs(): void {

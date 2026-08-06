@@ -78,11 +78,21 @@ internal static class VbeMenus
     /// was already a toolbar button. The designer's entry points (View Object, Toolbox, Tab
     /// Order) return with the designer itself (#14), not with a menu.
     /// </remarks>
+    /// <remarks>
+    /// 2026-08-05, the Debug menu's watch items: Add Watch 1820, Edit Watch 940, and Quick
+    /// Watch 229 are the Watch PANEL's own buttons now (developer: move the watch triggers
+    /// into our UI and out of the menu bar). They still open the editor's dialogs — decision
+    /// 11 keeps those, because driving a modal invisibly can hang the editor — but the panel
+    /// is where a watch is read, so it is where the work belongs. Decision 11's "reachable
+    /// forever" clause was about there being NO other route; the panel is that route, and
+    /// these items may only be suppressed while it carries them.
+    /// </remarks>
     private static readonly HashSet<int> Replaced =
     [
         30003, 30004,
         761, 830, 2554, 2555, 2557, 222, 30045,
         128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
+        1820, 940, 229,
     ];
 
     /// <summary>

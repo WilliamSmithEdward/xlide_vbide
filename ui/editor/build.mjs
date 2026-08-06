@@ -82,6 +82,11 @@ const INDEX_HTML = `<!doctype html>
             <div id="locals-table" role="table" aria-label="Local variables"></div>
           </div>
           <div id="watch" hidden>
+            <div id="watch-actions" role="toolbar" aria-label="Watch expressions">
+              <button id="watch-add" type="button" title="Add a watch"><span class="codicon codicon-add" aria-hidden="true"></span>Add</button>
+              <button id="watch-edit" type="button" title="Edit or delete the selected watch"><span class="codicon codicon-edit" aria-hidden="true"></span>Edit</button>
+              <button id="watch-quick" type="button" title="Quick watch on the selected expression (Shift+F9)"><span class="codicon codicon-eye" aria-hidden="true"></span>Quick</button>
+            </div>
             <div id="watch-table" role="table" aria-label="Watch expressions"></div>
           </div>
         </div>

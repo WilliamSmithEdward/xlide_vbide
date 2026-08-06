@@ -10,6 +10,25 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 LATE — THE WATCH TRIGGERS MOVED INTO THE PANEL, AND THE DEBUG MENU SHED THEM
+(developer: "move those watch triggers to our menu and out of the ribbon").** The Watch
+panel grew a button row — Add, Edit, Quick — that runs the native commands 1820 / 940 / 229
+through the ordinary host command path (`editWatch` is new in VbeCommands; the other two
+were already wired). Declines speak now, the way the Call Stack button's does: Edit Watch
+needs a selected watch, Quick Watch needs an expression at the caret. With the panel
+carrying them, `VbeMenus.Replaced` gained 1820, 940, 229, so the Debug menu is Compile,
+the four stepping items, Toggle/Clear breakpoints, and the two statement items. DECISION 11
+IS AMENDED, not broken: its "reachable forever" clause was about the COMMANDS, not the
+menu — they may only leave a surface when another surface of ours already carries them.
+Verified: the buttons dispatch addWatch/editWatch/quickWatch in the demo, the live editor
+loads the build clean, and the developer sees the row in the panel. The suppressed menu
+items are verified by construction — the three ids were read from the live Debug menu the
+same session, and Replaced is the same mechanism twenty other ids already use.
+Also fixed en route (`fa1dfdb`): dev.ps1 registers with a DEBUG-built register tool. SAC
+blocks a freshly built unsigned RELEASE managed assembly (0x800711C7), which the tool is;
+it had been living on a stale Release build until its inputs changed, and then every dev
+loop died at registration with the shim already published.**
+
 **2026-08-05 LATE — A CUSTOM WATCH UI IS ABANDONED (developer's call; DECISION 11).** The
 Watch PANEL is ours and verified (below); creating, editing, and deleting a watch stays
 with the editor's native Add Watch / Edit Watch dialogs. The mechanism was measured and
