@@ -187,32 +187,28 @@ internal sealed class WatchReader : IDisposable
     /// <summary>
     /// One row's columns, split back apart.
     ///
-    /// The row's accessible name is its columns run together with the header words in between:
-    /// "Expression counter Value 42 Type Long Context Module1.Demo". The value can be anything,
-    /// including the header words inside a string literal, so it takes everything between the
-    /// first " Value " and the LAST " Type " that still sits before the LAST " Context ". The
-    /// column-header row concatenates to headers alone, has no expression token, and parses as
-    /// nothing.
+    /// A REAL watch row's accessible name carries no "Expression" header word — measured
+    /// 2026-08-05 against a watch added through the native dialog: " counter Value
+    /// &lt;Out of context&gt; Type Empty Context BreakProbe.BreakHere " — the leading space is
+    /// the watch-type icon column's empty cell. The expression is everything before the FIRST
+    /// " Value " (a watch expression can contain spaces: "counter &gt; 40"); the value can be
+    /// anything, including the header words inside a string literal, so it takes everything
+    /// between that first " Value " and the LAST " Type " that still sits before the LAST
+    /// " Context ". A name with the headers missing or out of order parses as nothing.
     /// </summary>
     internal static WatchRow? ParseRow(string text)
     {
-        const string expressionHeader = "Expression ";
         const string valueHeader = " Value ";
         const string typeHeader = " Type ";
         const string contextHeader = " Context ";
 
-        if (!text.StartsWith(expressionHeader, StringComparison.Ordinal))
-        {
-            return null;
-        }
-
-        var valueAt = text.IndexOf(valueHeader, expressionHeader.Length, StringComparison.Ordinal);
+        var valueAt = text.IndexOf(valueHeader, StringComparison.Ordinal);
         if (valueAt < 0)
         {
             return null;
         }
 
-        var expression = text[expressionHeader.Length..valueAt].Trim();
+        var expression = text[..valueAt].Trim();
         if (expression.Length == 0)
         {
             return null;

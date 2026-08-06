@@ -10,6 +10,23 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 LATE — THE WATCH PANE IS VERIFIED AGAINST A REAL WATCH (the last unverified
+seam of the debug panels).** The developer's manual test showed "No watches" with a watch
+defined; the reader was reading cleanly and parsing zero rows. MEASURED (design-mode UIA
+dump of the watch ghost — safe there, the reader only wakes during break polls): a real
+watch row's accessible name has NO "Expression" header word — " counter Value &lt;Out of
+context&gt; Type Empty Context BreakProbe.BreakHere " — the leading space is the watch-type
+icon column's empty cell. WatchReader.ParseRow now anchors on the first " Value " (watch
+expressions can contain spaces, unlike locals) and the last " Type "/" Context " pair.
+`Test-WatchPanel.ps1` is the standing PASS/FAIL probe and it PASSES: it drives the native
+Add Watch dialog (command 1820) from a helper process — the modal blocks Execute — typing
+the expression as WM_CHAR keystrokes into edit 4853 and clicking OK (control 1). TRAP:
+the dialog answers "Empty watch expression" to text planted by WM_SETTEXT; it only
+believes keystrokes. The probe breaks, steps to change the value, and asserts from the
+LOG ONLY (a second non-empty push is the tracking proof; never dump the ghost mid-break,
+lesson 33). Watches are session-scoped: they die with Excel, and deleting a watch's
+module drops the watch.**
+
 **2026-08-05 NIGHT — ONE SEARCH UI (developer: "move the search pane into the search popup
 window, so we're not duplicating UIs").** The bottom panel's Search tab is GONE and so is
 Monaco's find widget from view; `ui/editor/src/searchwidget.ts` is the one search UI — a
