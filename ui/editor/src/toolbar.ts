@@ -99,8 +99,18 @@ export function buildToolbar(
 ): void {
   root.replaceChildren();
 
+  // The strip is one row that slides. A pane half a screen wide cannot show thirty commands, and
+  // the alternatives all cost something worse: clipping takes them away with nothing to say they
+  // existed, a menu hides them behind a second decision, and wrapping spends a row of a pane whose
+  // height is the point. Chevrons appear only when there is something past the edge.
+  const back = scrollButton("chevron-left", "Scroll the commands left", "start");
+  const strip = document.createElement("div");
+  strip.className = "toolbar-strip";
+  const forward = scrollButton("chevron-right", "Scroll the commands right", "end");
+
+  root.append(back, strip, forward);
+
   const missing: string[] = [];
-  const entries: { command: ToolbarCommand; button: HTMLButtonElement; divider: HTMLElement | null }[] = [];
 
   for (const command of COMMANDS) {
     if (command.target === "editor" && !available(command)) {
@@ -108,13 +118,12 @@ export function buildToolbar(
       continue;
     }
 
-    let divider: HTMLElement | null = null;
     if (command.separatorBefore) {
-      divider = document.createElement("span");
+      const divider = document.createElement("span");
       divider.className = "toolbar-divider";
       // Decorative: the grouping is already conveyed by the labels.
       divider.setAttribute("aria-hidden", "true");
-      root.appendChild(divider);
+      strip.appendChild(divider);
     }
 
     const button = document.createElement("button");
@@ -137,66 +146,64 @@ export function buildToolbar(
 
     button.appendChild(icon);
     button.addEventListener("click", () => run(command));
-    root.appendChild(button);
-    entries.push({ command, button, divider });
+    strip.appendChild(button);
   }
 
-  // The overflow control, last and only drawn when it is needed. The pane a developer works in is
-  // often half a screen wide, and a strip that simply clips its right-hand end takes commands away
-  // with nothing to say they existed. This keeps them one press away instead.
-  const overflow = document.createElement("button");
-  overflow.type = "button";
-  overflow.className = "toolbar-button toolbar-overflow";
-  overflow.title = "More commands";
-  overflow.setAttribute("aria-label", "More commands");
-  overflow.setAttribute("aria-haspopup", "true");
-  overflow.hidden = true;
-  overflow.innerHTML = '<span class="codicon codicon-more" aria-hidden="true"></span>';
-  overflow.addEventListener("click", () => openOverflowMenu(overflow, hidden(), run));
-  root.appendChild(overflow);
-
-  function hidden(): ToolbarCommand[] {
-    return entries.filter((entry) => entry.button.hidden).map((entry) => entry.command);
-  }
-
-  const relayout = (): void => {
-    // Measured from a clean slate every time, because the answer when the pane grows is not
-    // derivable from the answer when it shrank.
-    for (const entry of entries) {
-      entry.button.hidden = false;
-      if (entry.divider) entry.divider.hidden = false;
-    }
-    overflow.hidden = true;
-
-    if (root.scrollWidth <= root.clientWidth) {
-      return;
-    }
-
-    overflow.hidden = false;
-
-    // Drop from the right, which keeps the commands in the order they were designed in and takes
-    // the least used away first.
-    for (let index = entries.length - 1; index >= 0; index--) {
-      if (root.scrollWidth <= root.clientWidth) break;
-      const entry = entries[index]!;
-      entry.button.hidden = true;
-      if (entry.divider) entry.divider.hidden = true;
-    }
-
-    // A divider whose whole group went with it would otherwise be left leading the strip.
-    for (const entry of entries) {
-      if (!entry.divider) continue;
-      entry.divider.hidden = entry.button.hidden;
-    }
+  const update = (): void => {
+    const furthest = strip.scrollWidth - strip.clientWidth;
+    // A pixel of slack: fractional widths mean scrollLeft rarely lands exactly on the end.
+    back.hidden = strip.scrollLeft <= 1;
+    forward.hidden = strip.scrollLeft >= furthest - 1;
   };
 
-  relayout();
+  // How far one press travels. Four buttons is enough to feel like progress and short enough that
+  // nothing sails past unseen.
+  const STEP = 4 * 28;
+
+  const slide = (direction: -1 | 1): void => {
+    strip.scrollBy({ left: direction * STEP, behavior: "smooth" });
+  };
+
+  for (const [button, direction] of [[back, -1], [forward, 1]] as const) {
+    button.addEventListener("click", () => slide(direction));
+
+    // Held down, it keeps going. Crossing a strip a press at a time is the kind of small tax that
+    // makes a person stop using the far end of it.
+    button.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const timer = window.setInterval(() => slide(direction), 140);
+      const stop = (): void => {
+        window.clearInterval(timer);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+      };
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    });
+  }
+
+  // A vertical wheel over a horizontal strip should move it, because that is the wheel most mice
+  // have and the strip is the only thing under the pointer.
+  strip.addEventListener(
+    "wheel",
+    (event) => {
+      if (event.deltaX !== 0 || event.deltaY === 0) return;
+      if (strip.scrollWidth <= strip.clientWidth) return;
+      event.preventDefault();
+      strip.scrollLeft += event.deltaY;
+    },
+    { passive: false },
+  );
+
+  strip.addEventListener("scroll", update, { passive: true });
+
+  update();
 
   // The pane is resized by dragging a splitter, not only by resizing the window, so the element
   // itself is what has to be watched.
   observers.get(root)?.disconnect();
-  const observer = new ResizeObserver(() => relayout());
-  observer.observe(root);
+  const observer = new ResizeObserver(() => update());
+  observer.observe(strip);
   observers.set(root, observer);
 
   if (missing.length > 0) {
@@ -207,84 +214,18 @@ export function buildToolbar(
 /** One observer per toolbar, replaced whenever it is rebuilt, so rebuilds do not accumulate them. */
 const observers = new WeakMap<HTMLElement, ResizeObserver>();
 
-/**
- * The commands that did not fit, as a menu under the overflow button. Built from the live buttons
- * rather than from the command list, so a command the host has greyed out for break mode is greyed
- * out here too rather than offering a press that does nothing.
- */
-function openOverflowMenu(
-  anchor: HTMLElement,
-  commands: ToolbarCommand[],
-  run: (command: ToolbarCommand) => void,
-): void {
-  const existing = document.getElementById("toolbar-overflow-menu");
-  if (existing) {
-    existing.remove();
-    return;
-  }
-
-  const menu = document.createElement("div");
-  menu.id = "toolbar-overflow-menu";
-  // The surface's own dropdown chrome, so this is the menu the developer already knows.
-  menu.className = "menu-dropdown";
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "More commands");
-
-  const dismiss = (): void => {
-    menu.remove();
-    document.removeEventListener("pointerdown", onPointerDown, true);
-    document.removeEventListener("keydown", onKey, true);
-  };
-
-  function onPointerDown(event: PointerEvent): void {
-    if (!menu.contains(event.target as Node) && !anchor.contains(event.target as Node)) {
-      dismiss();
-    }
-  }
-
-  function onKey(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  }
-
-  for (const command of commands) {
-    const source = document.querySelector<HTMLButtonElement>(`#toolbar [data-command="${command.id}"]`);
-
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "menu-item" + (source?.disabled ? " disabled" : "");
-    item.setAttribute("role", "menuitem");
-    item.disabled = source?.disabled ?? false;
-
-    const icon = document.createElement("span");
-    icon.className = `codicon codicon-${command.icon}`;
-    icon.setAttribute("aria-hidden", "true");
-
-    const caption = document.createElement("span");
-    caption.className = "menu-caption";
-    caption.textContent = command.label;
-
-    item.append(icon, caption);
-    item.addEventListener("click", () => {
-      dismiss();
-      run(command);
-    });
-
-    menu.appendChild(item);
-  }
-
-  document.body.appendChild(menu);
-
-  // Under its button, pulled back on-screen when the button sits near the right edge.
-  const box = anchor.getBoundingClientRect();
-  const width = menu.offsetWidth;
-  menu.style.left = `${Math.max(4, Math.min(box.left, window.innerWidth - width - 4))}px`;
-  menu.style.top = `${box.bottom + 2}px`;
-
-  document.addEventListener("pointerdown", onPointerDown, true);
-  document.addEventListener("keydown", onKey, true);
-  menu.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+function scrollButton(icon: string, label: string, edge: "start" | "end"): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  // Deliberately not a toolbar-button: it does not run anything, and looking like the things that
+  // do is how a person ends up pressing it expecting a command.
+  button.className = `toolbar-edge toolbar-edge-${edge}`;
+  button.title = label;
+  button.setAttribute("aria-label", label);
+  // Nothing here is reachable only this way: every command is also on a menu or a key, and a
+  // keyboard user tabs straight through the strip rather than paging it.
+  button.tabIndex = -1;
+  button.hidden = true;
+  button.innerHTML = `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
+  return button;
 }

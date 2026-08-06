@@ -917,25 +917,96 @@ body.live-resize .minimap {
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
-/* Nothing scrolls and nothing is clipped. What does not fit moves into the overflow menu, which
-   is the only control here that is allowed to stay when the strip runs out of room. */
+/* The commands live in one row that slides. Nothing is clipped away and nothing is hidden behind
+   a menu; when the pane is too narrow, the row scrolls. */
 #toolbar {
   overflow: hidden;
+  /* No padding of its own: the scroll edges run the full height of the row, top border to bottom
+     border, which is most of what separates them from the buttons floating inside it. */
+  padding: 0;
 }
 
-/* A class that sets display outranks the hidden attribute's own rule, so hiding one of these does
-   nothing without saying so here. */
-.toolbar-button[hidden],
-.toolbar-divider[hidden] {
+.toolbar-strip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.toolbar-strip::-webkit-scrollbar {
   display: none;
 }
 
-.toolbar-overflow {
-  margin-left: auto;
+/* The scroll edges. Everything about them is meant to say "the row continues under here" rather
+   than "press me to do something": full height instead of a button's box, square instead of
+   rounded, a groove tint instead of the strip's own ground, a divider against the commands, and a
+   chevron at half the weight of a command icon. The fade beyond each one is what actually reads,
+   because content dissolving under an edge is how a scrollable thing looks. */
+.toolbar-edge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: rgba(128, 128, 128, 0.3);
+  color: inherit;
+  cursor: pointer;
+  z-index: 1;
 }
 
-#toolbar-overflow-menu .menu-item {
-  gap: 8px;
+.toolbar-edge:hover {
+  background: rgba(128, 128, 128, 0.45);
+}
+
+.toolbar-edge:active {
+  background: rgba(128, 128, 128, 0.6);
+}
+
+.toolbar-edge .codicon {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.toolbar-edge-start {
+  border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+}
+
+.toolbar-edge-end {
+  border-left: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+}
+
+/* The commands fade out as they pass beneath the edge. */
+.toolbar-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 26px;
+  pointer-events: none;
+}
+
+.toolbar-edge-start::after {
+  left: 100%;
+  background: linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent);
+}
+
+.toolbar-edge-end::after {
+  right: 100%;
+  background: linear-gradient(to left, rgba(0, 0, 0, 0.45), transparent);
+}
+
+.toolbar-edge[hidden] {
+  display: none;
 }
 
 .toolbar-button {
