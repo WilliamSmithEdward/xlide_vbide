@@ -57,7 +57,8 @@ internal sealed class AddInSession : IDisposable
     private readonly ActiveLineHold _activeLineHold = new();
 
     /// <summary>
-    /// What each module read back as the last time this add-in wrote it.
+    /// What each module read back as the last time this add-in wrote it, keyed by
+    /// <see cref="WrittenKey"/> — one baseline per (workbook, module), never per bare name.
     ///
     /// This is the baseline a later comparison is made against, and it is deliberately not the
     /// surface's text. The editor rewrites what it is given as it takes a module in: it completes
@@ -65,8 +66,16 @@ internal sealed class AddInSession : IDisposable
     /// the module against the surface would see all of that as a change and pull it back into the
     /// document, on top of somebody who is still typing. Comparing it against this sees only what
     /// changed the module after we wrote it, which is what "something else changed it" means.
+    ///
+    /// The workbook is part of the key because the baseline feeds the line-diff write: with two
+    /// workbooks' Module1 both live (decision 12), a name-keyed baseline would diff one module
+    /// against the other's text and write the resulting merge over real code.
     /// </summary>
-    private readonly Dictionary<string, string> _writtenModules = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _writtenModules = new(StringComparer.Ordinal);
+
+    /// <summary>The written-baseline key: a module of one workbook, by lowercased display name.</summary>
+    private static string WrittenKey(string component, string? projectDisplay) =>
+        $"{(projectDisplay ?? string.Empty).ToLowerInvariant()}\0{component.ToLowerInvariant()}";
 
     /// <summary>
     /// Identity of the project whose module the surface is showing, or null when it could not
@@ -1229,7 +1238,10 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ModuleRequested = ShowModule;
         _editorSurface.NavigateRequested = GoTo;
         _editorSurface.CommandRequested = RunCommand;
-        _editorSurface.TextChanged = (component, text) => WriteModule(component, text);
+        // The document names its workbook by display name; the write path resolves that to the
+        // project identity so a same-named module in another workbook is never the one written.
+        _editorSurface.TextChanged = (component, project, text) =>
+            WriteModule(component, text, ProjectIdFromDisplay(project));
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
         _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
@@ -1262,7 +1274,7 @@ internal sealed class AddInSession : IDisposable
         {
             if (_editorSurface?.Module is { } typedModule && _activeLineHold.Begin(typedModule, line))
             {
-                PublishMarkersForShownModule();
+                PublishMarkersToSurface();
                 PublishFindingsToSurface();
             }
         };
@@ -1270,7 +1282,7 @@ internal sealed class AddInSession : IDisposable
         {
             if (_activeLineHold.Release(_editorSurface?.Module, line))
             {
-                PublishMarkersForShownModule();
+                PublishMarkersToSurface();
                 PublishFindingsToSurface();
             }
         };
@@ -1284,6 +1296,27 @@ internal sealed class AddInSession : IDisposable
         {
             RefreshSurfacePlacement();
             _editorSurface?.ShowSettings(_settings);
+
+            // A ready can be a RELOADED page, not only the first boot. The surface just
+            // re-opened every live document from its own table; everything else the page
+            // draws is re-said here, because the first boot got it from the held-message
+            // replay and a second ready has nothing held (found live 2026-08-06: a reload
+            // came back with models and no tabs, and later without its properties pane).
+            //
+            // The what-was-last-sent caches reset FIRST: they exist to spare a page that
+            // already has the picture, and a page that just booted has nothing. Without
+            // this, PublishModules compared against the pre-reload list, matched, and sent
+            // nothing — the tabs stayed gone (the tap showed every republish EXCEPT
+            // setModules, 2026-08-06).
+            _lastModulesKey = null;
+            _lastLanguageFactsKey = null;
+            PublishModules();
+            PublishProjects();
+            PublishFindingsToSurface();
+            PublishMarkersToSurface();
+            PublishBreakpoints();
+            PublishProperties();
+            UpdateDebugState();
         };
 
         // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
@@ -1551,7 +1584,7 @@ internal sealed class AddInSession : IDisposable
                 // with UI_E_WRONG_THREAD and the panel goes stale until a module switch.
                 _editorSurface?.RunOnHostThread(() =>
                 {
-                    PublishMarkersForShownModule();
+                    PublishMarkersToSurface();
                     PublishFindingsToSurface();
                 });
             };
@@ -1653,15 +1686,21 @@ internal sealed class AddInSession : IDisposable
             // drift apart between the window-event route and the recomputed one.
             RefreshSurfacePlacement();
 
-            if (pane.Component is not null && pane.Component != _editorSurface.Module)
+            // The compare carries the workbook when the tracker could name one: two workbooks'
+            // Module1 are two documents, and a name-only compare would never switch between
+            // them. A tracker that cannot say (its project goes null when two open panes share
+            // a caption) keeps the name-only behaviour.
+            var followedDisplay = DisplayFromProjectId(pane.Project);
+            if (pane.Component is not null
+                && (pane.Component != _editorSurface.Module
+                    || (followedDisplay is not null && _editorSurface.Project is not null
+                        && !string.Equals(followedDisplay, _editorSurface.Project, StringComparison.OrdinalIgnoreCase))))
             {
-                // Before the document is replaced. Loading a module resets the surface, so an edit
-                // that has not been written yet would go with the document it belonged to.
+                // Before the active document changes: activating a pane is the moment the host
+                // may read the module — F5 is one keystroke away — so the text is made true.
                 _editorSurface.FlushEdits();
 
-                // The tracker's project goes null when two open panes share the component's
-                // name — a caption cannot tell them apart. The object model's active pane can,
-                // and the pane being followed is by definition the active one.
+                // The object model's active pane resolves the owner a caption could not.
                 ShowModuleInSurface(pane.Component, pane.Project ?? ActivePaneOwner(pane.Component));
             }
 
@@ -1906,7 +1945,7 @@ internal sealed class AddInSession : IDisposable
                     ? _shownProject
                     : null);
 
-            using var found = FindComponent(component, owner, out _);
+            using var found = FindComponent(component, owner, out var foundOwner);
             using var module = found?.GetObject("CodeModule");
             if (found is null || module is null)
             {
@@ -1914,12 +1953,16 @@ internal sealed class AddInSession : IDisposable
                 return;
             }
 
+            // The baseline belongs to the workbook actually found: a line diff computed against
+            // another workbook's same-named module would write a merge of the two.
+            var writtenKey = WrittenKey(component, DisplayFromProjectId(foundOwner ?? owner));
+
             // The changed lines alone, when the last read-back says where they are. Replacing a
             // whole large module makes the host reparse every line of it — seconds, on the
             // thread the keystrokes live on — where typing only ever touches a few. The whole
             // replace below remains for a module with no baseline or a rewrite too large to
             // call an edit.
-            var baseline = _writtenModules.TryGetValue(component, out var known) ? known : null;
+            var baseline = _writtenModules.TryGetValue(writtenKey, out var known) ? known : null;
             var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text);
 
             if (!wroteDiff)
@@ -1947,7 +1990,7 @@ internal sealed class AddInSession : IDisposable
             // the baseline instead, so a later comparison sees changes made by something else and
             // not the editor's own tidying of our own write.
             var stored = ProjectReader.ReadSource(found);
-            _writtenModules[component] = stored ?? text;
+            _writtenModules[writtenKey] = stored ?? text;
 
             if (hostRewrite)
             {
@@ -2678,7 +2721,7 @@ internal sealed class AddInSession : IDisposable
                 if (inModule > 0 && component is not null
                     && ProjectReader.ReadSource(component) is { } adopted)
                 {
-                    _writtenModules[group.Key.Module] = adopted;
+                    _writtenModules[WrittenKey(group.Key.Module, DisplayFromProjectId(group.Key.ProjectId))] = adopted;
                     _analysis?.NotifyLiveText(group.Key.Module, adopted, null, group.Key.ProjectId);
                 }
             }
@@ -2730,10 +2773,9 @@ internal sealed class AddInSession : IDisposable
     private static bool IsWordCharacter(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>Moves line-anchored breakpoints with the text they were set on.</summary>
-    private void OnLinesShifted(int afterLine, int delta)
+    private void OnLinesShifted(string module, int afterLine, int delta)
     {
-        var module = _editorSurface?.Module;
-        if (module is null || !_breakpoints.TryGetValue(module, out var lines) || lines.Count == 0)
+        if (!_breakpoints.TryGetValue(module, out var lines) || lines.Count == 0)
         {
             return;
         }
@@ -3166,9 +3208,16 @@ internal sealed class AddInSession : IDisposable
     /// <summary>Moves every record keyed by a component's old name to its new one.</summary>
     private void AdoptRename(string oldName, string newName)
     {
-        if (_writtenModules.Remove(oldName, out var baseline))
+        // The baseline key carries the workbook; a rename reaches here for the selected
+        // component, whose workbook is the shown one. The bare-name fallback key migrates
+        // too, for a baseline recorded before the workbook could be told.
+        var display = DisplayFromProjectId(_shownProject);
+        foreach (var owner in new[] { display, null })
         {
-            _writtenModules[newName] = baseline;
+            if (_writtenModules.Remove(WrittenKey(oldName, owner), out var baseline))
+            {
+                _writtenModules[WrittenKey(newName, owner)] = baseline;
+            }
         }
 
         if (_breakpoints.Remove(oldName, out var lines))
@@ -3430,11 +3479,18 @@ internal sealed class AddInSession : IDisposable
     /// <summary>Whether the developer is looking at the Immediate panel.</summary>
     private bool _watchingImmediate;
 
-    /// <summary>Remembers which panel is showing, and watches the output only when it is.</summary>
+    /// <summary>
+    /// Tracks each panel's own visibility transitions. With two docks the page can show more
+    /// than one panel at once, so a message about one panel says nothing about the others —
+    /// and only the Immediate mirror costs anything to watch.
+    /// </summary>
     private void OnPanelChanged(string name, bool open)
     {
-        _watchingImmediate = open && name == "immediate";
-        UpdatePolling();
+        if (name == "immediate")
+        {
+            _watchingImmediate = open;
+            UpdatePolling();
+        }
     }
 
     /// <summary>Starts watching the execution state, for a while.</summary>
@@ -3490,40 +3546,67 @@ internal sealed class AddInSession : IDisposable
     private void ResyncFromModule()
     {
         var surface = _editorSurface;
-        var module = surface?.Module;
-
-        if (surface is null || module is null || surface.HasUnwrittenEdits)
+        if (surface is null)
         {
             return;
         }
 
-        try
+        // Every live document is compared, not just the active one: a macro can rewrite a
+        // module whose tab sits in a background group, and that model must not drift. Project
+        // identities resolve once per workbook rather than once per document — the resolve
+        // walks the project collection, and this runs on every pane follow.
+        Dictionary<string, string?>? identities = null;
+        var adopted = false;
+
+        foreach (var (module, project) in surface.OpenDocuments)
         {
-            // The resync is about the module on the surface, so the shown project's copy is the
-            // one compared, never a same-named module elsewhere.
-            using var found = FindComponent(module, _shownProject, out _);
-            var stored = found is null ? null : ProjectReader.ReadSource(found);
-            if (stored is null)
+            // An edit the developer has not finished is never overwritten. Per document: a
+            // sibling tab's typing does not freeze this one's resync.
+            if (surface.HasUnwritten(module, project))
             {
-                return;
+                continue;
             }
 
-            // Against what the module said last time, not against the surface. The two differ by
-            // the editor's own reformatting from the moment anything is written, and that
-            // difference is not a change anybody made.
-            if (_writtenModules.TryGetValue(module, out var baseline) && baseline == stored)
+            try
             {
-                return;
-            }
+                var displayKey = (project ?? string.Empty).ToLowerInvariant();
+                identities ??= new Dictionary<string, string?>(StringComparer.Ordinal);
+                if (!identities.TryGetValue(displayKey, out var projectId))
+                {
+                    projectId = project is null ? _shownProject : ProjectIdFromDisplay(project);
+                    identities[displayKey] = projectId;
+                }
 
-            Log.Info($"resync: {module} changed outside the surface, adopting the module");
-            _writtenModules[module] = stored;
-            surface.Sync(module, stored);
-            _analysis?.Reanalyse();
+                using var found = FindComponent(module, projectId, out _);
+                var stored = found is null ? null : ProjectReader.ReadSource(found);
+                if (stored is null)
+                {
+                    continue;
+                }
+
+                // Against what the module said last time, not against the surface. The two
+                // differ by the editor's own reformatting from the moment anything is written,
+                // and that difference is not a change anybody made.
+                var key = WrittenKey(module, project);
+                if (_writtenModules.TryGetValue(key, out var baseline) && baseline == stored)
+                {
+                    continue;
+                }
+
+                Log.Info($"resync: {module} changed outside the surface, adopting the module");
+                _writtenModules[key] = stored;
+                surface.Sync(module, project, stored);
+                adopted = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"resync: {module} could not be compared with the module", ex);
+            }
         }
-        catch (Exception ex)
+
+        if (adopted)
         {
-            Log.Error($"resync: {module} could not be compared with the module", ex);
+            _analysis?.Reanalyse();
         }
     }
 
@@ -4265,7 +4348,7 @@ internal sealed class AddInSession : IDisposable
                     }
 
                     _findings = [.. _findings.Where(finding => !SameHome(finding)), .. findings];
-                    PublishMarkersForShownModule();
+                    PublishMarkersToSurface();
                     PublishFindingsToSurface();
                 });
             }
@@ -4350,8 +4433,9 @@ internal sealed class AddInSession : IDisposable
         // Opening a module also selects it, the way the editor's own tree behaves.
         _propertiesTarget = component;
 
-        _writtenModules[component] = source;
-        _editorSurface?.Show(component, source);
+        var display = DisplayFromProjectId(owner);
+        _writtenModules[WrittenKey(component, display)] = source;
+        _editorSurface?.Show(component, display, source);
 
         // The engine's live copy starts from what is being shown; the keystrokes stream from
         // here as edits.
@@ -4363,7 +4447,7 @@ internal sealed class AddInSession : IDisposable
 
         // The findings for this module were computed before it was opened, so they are applied here
         // rather than waiting for the next analysis pass.
-        PublishMarkersForShownModule();
+        PublishMarkersToSurface();
         PublishFindingsToSurface();
         PublishBreakpoints();
         PublishProperties();
@@ -4389,12 +4473,22 @@ internal sealed class AddInSession : IDisposable
         // tracker's recovery republishes it.
         if (ReadOpenModules() is { } modules)
         {
+            // Whether anything was live is read BEFORE the prune empties the table: the
+            // empty-workspace branch below is what tells the page, and pruning first would
+            // leave nothing for its condition to see.
+            var hadDocuments = surface.OpenDocuments.Count > 0;
+
+            // Documents follow the pane list both ways: one closed natively leaves the table
+            // (its unwritten edits flushed on the way out), and the page prunes its models
+            // from the same published list.
+            surface.PruneDocuments([.. modules.Select(m => (m.Name, m.Project))]);
+
             // Closing the LAST pane leaves the surface holding a document nobody can see a
             // tab for, when no window event reaches the tracker to say so - the mirror of
             // the empty view that outlived its panes (2026-08-06). The object model is the
             // authority both ways: an empty open list with a module still shown IS the
             // empty workspace, and every close route passes through this publish.
-            if (modules.Count == 0 && surface.Module is not null)
+            if (modules.Count == 0 && hadDocuments)
             {
                 Log.Info("editor surface: the last module closed, showing the empty workspace");
                 _watchingEmpty = true;
@@ -4414,18 +4508,12 @@ internal sealed class AddInSession : IDisposable
             // known text actually differs from its snapshot. A module with no snapshot to
             // compare keeps the flag's word.
             var dirtyByProject = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            var shownDisplay = DisplayFromProjectId(_shownProject);
 
-            string? CurrentTextOf(string module, string? display)
-            {
-                if (string.Equals(module, surface.Module, StringComparison.OrdinalIgnoreCase)
-                    && string.Equals(display, shownDisplay, StringComparison.OrdinalIgnoreCase))
-                {
-                    return surface.Text;
-                }
-
-                return _writtenModules.TryGetValue(module, out var written) ? written : null;
-            }
+            // Any live document's text counts, not just the active one: a background tab's
+            // typing is exactly as unsaved as the shown one's.
+            string? CurrentTextOf(string module, string? display) =>
+                surface.TextOf(module, display)
+                    ?? (_writtenModules.TryGetValue(WrittenKey(module, display), out var written) ? written : null);
 
             bool DirtyOf(string? project)
             {
@@ -5292,21 +5380,16 @@ internal sealed class AddInSession : IDisposable
                 if (display is not null
                     && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline))
                 {
-                    var shown = IsShownModule(component, display);
-                    if (shown)
-                    {
-                        // The debounced write of the abandoned text must not chase the revert.
-                        _editorSurface?.DiscardEdits();
-                    }
+                    // The debounced write of the abandoned text must not chase the revert —
+                    // this document's write only; a sibling tab's typing keeps its debounce.
+                    _editorSurface?.DiscardEdits(component, display);
 
                     WriteModule(component, baseline, ProjectIdFromDisplay(display), hostRewrite: true);
-                    if (shown)
-                    {
-                        // The surface still shows the abandoned text. The close below replaces
-                        // the document anyway; this covers the close that cannot find a pane,
-                        // so whatever stays on screen is the module's truth.
-                        ResyncFromModule();
-                    }
+
+                    // The surface may still show the abandoned text. The close below replaces
+                    // the document anyway; this covers the close that cannot find a pane, so
+                    // whatever stays on screen is the module's truth.
+                    ResyncFromModule();
 
                     Log.Info($"close: {component} reverted to {display}'s saved text");
                 }
@@ -5336,11 +5419,6 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    /// <summary>Whether this module is the one on the surface, of the workbook shown.</summary>
-    private bool IsShownModule(string component, string? display) =>
-        string.Equals(component, _editorSurface?.Module, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(display, DisplayFromProjectId(_shownProject), StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
     /// Whether a module's current text is known to differ from the workbook's last saved text.
     /// The same comparison the tab dot makes, with the opposite default: unknown is not
@@ -5349,9 +5427,8 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private bool ModuleDiffersFromSaved(string component, string display)
     {
-        var current = IsShownModule(component, display)
-            ? _editorSurface?.Text
-            : _writtenModules.TryGetValue(component, out var written) ? written : null;
+        var current = _editorSurface?.TextOf(component, display)
+            ?? (_writtenModules.TryGetValue(WrittenKey(component, display), out var written) ? written : null);
 
         return current is not null
             && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline)
@@ -5723,37 +5800,39 @@ internal sealed class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Sends the surface the squiggles belonging to whichever module it is showing.
+    /// Sends each open document the squiggles that belong to it.
     ///
-    /// Findings arrive for a whole project and the surface shows one module, so they are filtered
-    /// here. A module with none is sent an empty set rather than skipped: that is what clears
-    /// squiggles the user has just fixed.
+    /// Findings arrive for whole projects and the surface holds one model per open module
+    /// (decision 12), so they are filtered per document. A document with none is sent an empty
+    /// set rather than skipped: that is what clears squiggles the user has just fixed.
     /// </summary>
-    private void PublishMarkersForShownModule()
+    private void PublishMarkersToSurface()
     {
         var surface = _editorSurface;
-        var module = surface?.Module;
-        if (surface is null || module is null)
+        if (surface is null)
         {
             return;
         }
 
-        var markers = _findings
-            .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
-                && (f.Project is null || _shownProject is null
-                    || string.Equals(f.Project, _shownProject, StringComparison.OrdinalIgnoreCase))
-                && !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
-            .Select(f => new EditorMarker(
-                f.StartLine,
-                f.StartColumn,
-                f.EndLine,
-                f.EndColumn,
-                f.Severity,
-                f.Message,
-                f.Code))
-            .ToArray();
+        foreach (var (module, project) in surface.OpenDocuments)
+        {
+            var markers = _findings
+                .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
+                    && (f.Project is null || project is null
+                        || string.Equals(DisplayFromProjectId(f.Project), project, StringComparison.OrdinalIgnoreCase))
+                    && !_activeLineHold.Hides(f.Module, f.StartLine, f.EndLine))
+                .Select(f => new EditorMarker(
+                    f.StartLine,
+                    f.StartColumn,
+                    f.EndLine,
+                    f.EndColumn,
+                    f.Severity,
+                    f.Message,
+                    f.Code))
+                .ToArray();
 
-        surface.ShowDiagnostics(markers);
+            surface.ShowDiagnostics(module, project, markers);
+        }
     }
 
     /// <summary>The editor's frame window, kept for placements recomputed outside window events.</summary>

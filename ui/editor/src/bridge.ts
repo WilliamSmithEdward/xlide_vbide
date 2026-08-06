@@ -1,12 +1,14 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { SearchWidget } from "./searchwidget.js";
 import type { ToolbarCommand } from "./toolbar.js";
+import type { Workspace } from "./workspace.js";
 import { applySettings, type EditorSettings } from "./settings.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
-import { VBA_LANGUAGE_ID, updateVbaLanguageFacts } from "./vba.js";
+import { updateVbaLanguageFacts } from "./vba.js";
 
 /*
  * Position convention
@@ -45,9 +47,9 @@ export interface HostMarker extends HostRange {
 }
 
 export type HostMessage =
-  | { type: "loadDocument"; moduleName: string; text: string }
-  | { type: "clearDocument" }
-  | { type: "syncDocument"; moduleName: string; text: string }
+  | { type: "openDocument"; moduleName: string; project?: string | null; text: string }
+  | { type: "clearDocuments" }
+  | { type: "syncDocument"; moduleName: string; project?: string | null; text: string }
   | { type: "notice"; text: string }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
@@ -56,7 +58,7 @@ export type HostMessage =
   | { type: "setProjects"; projects: ExplorerProject[] }
   | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
   | { type: "setTheme"; theme: XlideTheme }
-  | { type: "setDiagnostics"; markers: HostMarker[] }
+  | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "breakpointRefused"; line: number }
@@ -203,7 +205,7 @@ export interface BootTimings {
 
 export type ClientMessage =
   | { type: "ready"; timings?: BootTimings }
-  | { type: "contentChanged"; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string }
+  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string; project?: string }
@@ -283,43 +285,52 @@ function fromMonacoRange(range: monaco.IRange): HostRange {
 }
 
 export class EditorBridge {
-  private readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly transport: HostTransport;
-  private readonly shell: Shell | null;
+
+  /** The open documents, one live model each. Public: the workspace shows them. */
+  readonly documents: DocumentStore;
+
+  /**
+   * The frame and the editor grid, assigned right after construction and before the ready
+   * message lets the host speak. Assigned rather than constructor-taken because the three —
+   * bridge, workspace, shell — reference each other, and the bridge is built first.
+   */
+  shell: Shell | null = null;
+  workspace: Workspace | null = null;
 
   /** The floating search widget; assigned after construction, the same way openSettings is.
    * Search answers from the host route here — the widget owns the whole search UI. */
   searchWidget: SearchWidget | null = null;
   private readonly disposables: monaco.IDisposable[] = [];
-  private readonly currentLine: monaco.editor.IEditorDecorationsCollection;
-  private readonly breakpoints: monaco.editor.IEditorDecorationsCollection;
 
   /**
-   * The faint dot shown under the pointer in the breakpoint margin.
-   *
-   * The margin is a narrow strip with nothing in it, and nothing about it says it can be clicked.
-   * Showing where the breakpoint would land is what makes the target findable, and it also draws
-   * the edges of the strip, which is the part that was being guessed at.
+   * Debug decorations — the stopped line and the breakpoint dots — ride the host-active
+   * document's MODEL, not an editor: they are visible in whichever group shows that model,
+   * and they survive the model moving between groups.
    */
-  private readonly breakpointHover: monaco.editor.IEditorDecorationsCollection;
+  private currentLineDecor: { model: monaco.editor.ITextModel; ids: string[] } | null = null;
+  private breakpointDecor: { model: monaco.editor.ITextModel; ids: string[] } | null = null;
 
   /** Lines that already carry a breakpoint, so the hover dot is not drawn over a real one. */
   private breakpointLines = new Set<number>();
 
   /**
-   * The squiggles the host last sent.
+   * The squiggles the host last sent, per document.
    *
-   * Kept because replacing the model's text drags every marker to the end of the replacement.
+   * Kept because replacing a model's text drags every marker to the end of the replacement.
    * Markers are anchored to positions in the text, and a whole-document edit is, as far as the
    * editor is concerned, the entire text being deleted and different text arriving: everything
    * anchored inside it collapses to one point. They are set again afterwards, at the positions the
    * host gave, which are still correct because the text either did not change or changed only in
    * ways that do not move lines.
    */
-  private lastMarkers: HostMarker[] = [];
+  private readonly markersByDoc = new Map<string, HostMarker[]>();
 
-  /** Monotonic counter over locally originated edits; reset by loadDocument, adopted from applyEdit. */
-  private revision = 0;
+  /** Monotonic counters over locally originated edits, one per document. */
+  private readonly revisions = new Map<string, number>();
+
+  /** The document the host says is active — the one its native active pane shows. */
+  private hostActive: DocumentId | null = null;
 
   /** Completion requests awaiting their answers, by request identifier. */
   private readonly pendingCompletions = new Map<number, {
@@ -361,23 +372,73 @@ export class EditorBridge {
   /** Once the host names a theme, the OS preference stops overriding it. */
   private themePinned = false;
 
-  constructor(editor: monaco.editor.IStandaloneCodeEditor, transport: HostTransport, shell: Shell | null = null) {
-    this.editor = editor;
+  constructor(
+    transport: HostTransport,
+    documents: DocumentStore = new DocumentStore(),
+  ) {
     this.transport = transport;
-    this.shell = shell;
-    this.currentLine = editor.createDecorationsCollection([]);
-    this.breakpoints = editor.createDecorationsCollection([]);
-    this.breakpointHover = editor.createDecorationsCollection([]);
+    this.documents = documents;
 
-    this.disposables.push(
-      editor.onDidChangeModelContent((event) => this.onContentChanged(event)),
-      editor.onDidChangeCursorSelection((event) => this.onSelectionChanged(event.selection)),
-      editor.onMouseDown((event) => this.onMouseDown(event)),
-      editor.onMouseMove((event) => this.onMouseMove(event)),
-      editor.onMouseLeave(() => this.breakpointHover.clear()),
-    );
+    // Content listeners ride the MODEL, not the editor: an edit is attributed to the document
+    // it changed, whichever editor made it, which is what lets several models live at once.
+    this.documents.onModelCreated = (id, model) => {
+      const key = docKeyOf(id.module, id.project);
+      this.revisions.set(key, 0);
+      model.onDidChangeContent((event) => this.onModelContentChanged(id, model, event));
+    };
+
+    this.documents.onModelClosing = (id, model) => {
+      const key = docKeyOf(id.module, id.project);
+      this.revisions.delete(key);
+      this.markersByDoc.delete(key);
+      if (this.currentLineDecor?.model === model) {
+        this.currentLineDecor = null;
+      }
+      if (this.breakpointDecor?.model === model) {
+        this.breakpointDecor = null;
+      }
+    };
 
     transport.subscribe((message) => this.handle(message));
+  }
+
+  /** The active group's editor, which is what "the editor" means bridge-wide. */
+  private ed(): monaco.editor.IStandaloneCodeEditor | null {
+    return this.workspace?.activeEditor() ?? null;
+  }
+
+  /**
+   * Wires one group's editor into the bridge: the caret authority, the breakpoint margin,
+   * and its hover preview. Called once per editor as the workspace creates groups.
+   *
+   * Only the ACTIVE group's caret reaches the host — the caret decides what a Run acts on,
+   * and there is one native caret — and only the active group's margin toggles breakpoints,
+   * because the toggle targets the host-active module and a background group's margin would
+   * aim at the wrong one.
+   */
+  attachEditor(editor: monaco.editor.IStandaloneCodeEditor): void {
+    const hover = editor.createDecorationsCollection([]);
+
+    this.disposables.push(
+      editor.onDidChangeCursorSelection((event) => {
+        if (editor === this.ed()) {
+          this.onSelectionChanged(event.selection);
+        }
+      }),
+      editor.onMouseDown((event) => {
+        if (editor === this.ed()) {
+          this.onMouseDown(event);
+        }
+      }),
+      editor.onMouseMove((event) => {
+        if (editor === this.ed()) {
+          this.onMouseMove(event, hover);
+        } else {
+          hover.clear();
+        }
+      }),
+      editor.onMouseLeave(() => hover.clear()),
+    );
   }
 
   get isThemePinned(): boolean {
@@ -411,18 +472,18 @@ export class EditorBridge {
    * starts is visible at a glance.
    */
   navigate(module: string, line: number, column: number, selectLine = false, project?: string): void {
-    this.pendingCaret = { module, line, column, selectLine };
+    this.pendingCaret = { module, project: project ?? null, line, column, selectLine };
     this.transport.post({ type: "navigate", module, line, column, ...(project ? { project } : {}) });
     this.applyPendingCaret();
   }
 
-  /** A caret waiting for its module to arrive; applied on the next matching loadDocument. */
-  private pendingCaret: { module: string; line: number; column: number; selectLine: boolean } | null = null;
+  /** A caret waiting for its module to be shown; applied when the active document matches. */
+  private pendingCaret: { module: string; project: string | null; line: number; column: number; selectLine: boolean } | null = null;
 
   /**
-   * Places the waiting caret if the shown module is the one it belongs to. A load of any other
-   * module supersedes the navigation, and the wait is abandoned rather than left to fire on
-   * some later visit.
+   * Places the waiting caret if the shown module is the one it belongs to. A navigation that
+   * named no workbook matches the module by name alone — a finding that could not say still
+   * navigates — and one that named it must match both parts.
    */
   private applyPendingCaret(): void {
     const pending = this.pendingCaret;
@@ -431,21 +492,29 @@ export class EditorBridge {
       return;
     }
 
-    const uri = monaco.Uri.parse(`xlide:/${encodeURIComponent(pending.module)}`);
-    if (model.uri.toString() !== uri.toString()) {
+    const shown = this.documents.idOf(model);
+    if (!shown
+      || shown.module.toLowerCase() !== pending.module.toLowerCase()
+      || (pending.project !== null
+        && (shown.project ?? "").toLowerCase() !== pending.project.toLowerCase())) {
       return;
     }
 
     this.pendingCaret = null;
+    const editor = this.ed();
+    if (!editor) {
+      return;
+    }
+
     const line = Math.min(Math.max(pending.line, 1), model.getLineCount());
     if (pending.selectLine) {
-      this.editor.setSelection(new monaco.Selection(line, 1, line, model.getLineMaxColumn(line)));
+      editor.setSelection(new monaco.Selection(line, 1, line, model.getLineMaxColumn(line)));
     } else {
       const column = Math.min(Math.max(pending.column, 1), model.getLineMaxColumn(line));
-      this.editor.setPosition({ lineNumber: line, column });
+      editor.setPosition({ lineNumber: line, column });
     }
-    this.editor.revealLineInCenterIfOutsideViewport(line);
-    this.editor.focus();
+    editor.revealLineInCenterIfOutsideViewport(line);
+    editor.focus();
   }
 
   /** Asks the host for a menu's items; [] is the bar itself. */
@@ -632,18 +701,23 @@ export class EditorBridge {
       return;
     }
 
+    const editor = this.ed();
+    if (!editor) {
+      return;
+    }
+
     // Focus first. An editor action taken while the button has focus operates on an editor that
     // does not have it, and the ones that open a widget put it somewhere the developer cannot type.
-    this.editor.focus();
+    editor.focus();
 
     // Undo and redo are not actions. They are built into the editor rather than registered like
     // the rest, so looking them up finds nothing and they have to be triggered by name.
     if (command.id === "undo" || command.id === "redo") {
-      this.editor.trigger("xlide", command.id, null);
+      editor.trigger("xlide", command.id, null);
       return;
     }
 
-    this.editor.getAction(command.id)?.run();
+    editor.getAction(command.id)?.run();
   }
 
   dispose(): void {
@@ -655,14 +729,14 @@ export class EditorBridge {
 
   handle(message: HostMessage): void {
     switch (message.type) {
-      case "loadDocument":
-        this.loadDocument(message.moduleName, message.text);
+      case "openDocument":
+        this.openDocument(message.moduleName, message.project ?? null, message.text);
         return;
-      case "clearDocument":
-        this.clearDocument();
+      case "clearDocuments":
+        this.clearDocuments();
         return;
       case "syncDocument":
-        this.syncDocument(message.moduleName, message.text);
+        this.syncDocument(message.moduleName, message.project ?? null, message.text);
         return;
       case "notice":
         this.shell?.notify(message.text);
@@ -673,9 +747,26 @@ export class EditorBridge {
       case "immediateResult":
         this.shell?.appendImmediate(message.text, message.failed ? "failed" : "result");
         return;
-      case "setModules":
-        this.shell?.setModules(message.modules, message.projects ?? [], message.active, message.activeProject ?? null, message.dirty ?? []);
+      case "setModules": {
+        // The open list is the models' truth too: a pane closed anywhere disposes its model
+        // here, undo history and all, the same moment its tab leaves the strip.
+        const open: DocumentId[] = message.modules.map((module, index) => ({
+          module,
+          project: (message.projects ?? [])[index] ?? null,
+        }));
+        this.documents.closeMissing(open);
+
+        this.hostActive = message.active
+          ? { module: message.active, project: message.activeProject ?? null }
+          : null;
+
+        this.workspace?.setOpen(open, message.dirty ?? [], this.hostActive);
+        this.shell?.setActiveModule(message.active, message.activeProject ?? null);
+
+        // A navigation whose module just became the shown one lands its caret now.
+        this.applyPendingCaret();
         return;
+      }
       case "setFindings":
         this.shell?.setFindings(message.findings);
         return;
@@ -690,7 +781,7 @@ export class EditorBridge {
         monaco.editor.setTheme(message.theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK);
         return;
       case "setDiagnostics":
-        this.setDiagnostics(message.markers);
+        this.setDiagnostics(message.moduleName, message.project ?? null, message.markers);
         return;
       case "setCurrentLine":
         this.setCurrentLine(message.line);
@@ -706,14 +797,14 @@ export class EditorBridge {
         this.shell?.confirmClose(message.name, message.project ?? null);
         return;
       case "revealLine":
-        this.editor.revealLineInCenterIfOutsideViewport(message.line);
+        this.ed()?.revealLineInCenterIfOutsideViewport(message.line);
         return;
       case "setCaret":
         // The caret decides what an editor command acts on, and the host copies it into the
         // native pane before running one, so this is how anything outside the page aims a
         // Run or a Step at a particular procedure.
-        this.editor.setPosition({ lineNumber: message.line, column: message.column });
-        this.editor.revealLineInCenterIfOutsideViewport(message.line);
+        this.ed()?.setPosition({ lineNumber: message.line, column: message.column });
+        this.ed()?.revealLineInCenterIfOutsideViewport(message.line);
         return;
       case "setMenu":
         this.shell?.setMenu(message.path, message.items);
@@ -873,87 +964,77 @@ export class EditorBridge {
     }
 
     // Tab cycling arrives from the host because the browser swallows Ctrl+PageDown for its own
-    // tab switching before the page could ever see the key.
+    // tab switching before the page could ever see the key. Cycling is within the active group.
     if (id === "xlide.tab.next" || id === "xlide.tab.previous") {
-      const target = this.shell?.cycleTab(id === "xlide.tab.next" ? 1 : -1);
+      const target = this.workspace?.cycleTab(id === "xlide.tab.next" ? 1 : -1);
       this.trace(`cycle -> ${target ?? "(nothing)"}`);
       return;
     }
 
-    this.editor.focus();
-
-    if (id === "undo" || id === "redo") {
-      this.editor.trigger("xlide", id, null);
+    if (id === "xlide.split.right" || id === "xlide.split.down") {
+      this.workspace?.splitActive(id === "xlide.split.right" ? "right" : "down");
       return;
     }
 
-    this.editor.getAction(id)?.run();
+    const editor = this.ed();
+    if (!editor) {
+      return;
+    }
+
+    editor.focus();
+
+    if (id === "undo" || id === "redo") {
+      editor.trigger("xlide", id, null);
+      return;
+    }
+
+    editor.getAction(id)?.run();
   }
 
   private model(): monaco.editor.ITextModel | null {
-    return this.editor.getModel();
+    return this.ed()?.getModel() ?? null;
+  }
+
+  /** The host-active document's model, which is what engine answers are computed against. */
+  hostActiveModel(): monaco.editor.ITextModel | null {
+    return this.hostActive
+      ? this.documents.get(this.hostActive.module, this.hostActive.project)
+      : null;
   }
 
   /** Shows the empty workspace: every pane is closed and the editor should say so. */
-  private clearDocument(): void {
-    this.lastMarkers = [];
-    this.currentLine.clear();
-    this.breakpoints.clear();
-    this.breakpointHover.clear();
+  private clearDocuments(): void {
+    this.markersByDoc.clear();
+    this.setCurrentLine(null);
+    this.setBreakpoints([]);
 
-    const existing = this.model();
     this.applyingHostEdit = true;
     try {
-      this.editor.setModel(null);
-      existing?.dispose();
+      this.workspace?.clear();
+      this.documents.clear();
     } finally {
       this.applyingHostEdit = false;
     }
 
-    this.revision = 0;
+    this.hostActive = null;
     this.pendingCaret = null;
     this.shell?.setWorkspaceEmpty(true);
   }
 
-  private loadDocument(moduleName: string, text: string): void {
-    // A different module's squiggles are not this one's.
-    this.lastMarkers = [];
+  /**
+   * A module is open: its model exists from here until its pane closes. Idempotent — a model
+   * that already exists adopts the text in place (the host re-opens everything after a page
+   * reload, and re-sends a clean document whose module changed underneath), keeping its undo
+   * stack and caret. Which group shows it is the workspace's business, decided when the tab
+   * list arrives.
+   */
+  private openDocument(moduleName: string, project: string | null, text: string): void {
+    this.documents.open(moduleName, project, text, (model, adopted) => this.adoptText(model, adopted));
     this.shell?.setWorkspaceEmpty(false);
-
-    const existing = this.model();
-    // A fresh model per module keeps the URI meaningful for markers and disposes the old
-    // undo stack, which must not survive a module switch.
-    const uri = monaco.Uri.parse(`xlide:/${encodeURIComponent(moduleName)}`);
-    const previous = monaco.editor.getModel(uri);
-    this.applyingHostEdit = true;
-    try {
-      if (previous) {
-        previous.setValue(text);
-        this.editor.setModel(previous);
-      } else {
-        this.editor.setModel(monaco.editor.createModel(text, VBA_LANGUAGE_ID, uri));
-      }
-      if (existing && existing.uri.toString() !== uri.toString()) {
-        existing.dispose();
-      }
-    } finally {
-      this.applyingHostEdit = false;
-    }
-    this.revision = 0;
-    this.currentLine.clear();
-    this.breakpoints.clear();
-
-    // A navigation that asked for this module lands its caret now; one that asked for a
-    // different module has been superseded by this load and is dropped.
-    if (this.pendingCaret && this.pendingCaret.module === moduleName) {
-      this.applyPendingCaret();
-    } else {
-      this.pendingCaret = null;
-    }
   }
 
   /**
-   * Adopts the host's version of the module in place.
+   * Adopts the host's version of a document in place.
    *
    * The host owns the text; this surface is a view of it. When the two differ the host is right,
    * and the difference is usually its own doing: it respells keywords as it takes a module in.
@@ -962,39 +1043,39 @@ export class EditorBridge {
    * caret stays where the developer left it. Setting the value discards both, and doing that
    * while somebody is typing moves them to the top of the module mid-word.
    */
-  private syncDocument(moduleName: string, text: string): void {
-    const model = this.model();
-    if (!model || model.getValue() === text) {
-      return;
-    }
-
-    // A message for a module that is no longer shown is stale by definition.
-    const uri = monaco.Uri.parse(`xlide:/${encodeURIComponent(moduleName)}`);
-    if (model.uri.toString() !== uri.toString()) {
-      return;
-    }
-
-    const selections = this.editor.getSelections();
+  private adoptText(model: monaco.editor.ITextModel, text: string): void {
+    const showing = this.workspace?.editorShowing(model) ?? null;
+    const selections = showing?.getSelections() ?? null;
 
     this.applyingHostEdit = true;
     try {
       model.pushEditOperations(
-        selections ?? null,
+        selections,
         [{ range: model.getFullModelRange(), text, forceMoveMarkers: false }],
-        () => selections ?? null);
+        () => selections);
     } finally {
       this.applyingHostEdit = false;
     }
 
-    if (selections) {
+    if (showing && selections) {
       // Clamped by Monaco to the new text, so a position past the end lands at the end rather
       // than being rejected.
-      this.editor.setSelections(selections);
+      showing.setSelections(selections);
     }
 
     // Set again, because replacing the text collapsed them all onto its end. Without this a
     // defect reported on line six is drawn under the last line of the module.
-    this.setDiagnostics(this.lastMarkers);
+    const id = this.documents.idOf(model);
+    if (id) {
+      this.applyMarkers(model, this.markersByDoc.get(docKeyOf(id.module, id.project)) ?? []);
+    }
+  }
+
+  private syncDocument(moduleName: string, project: string | null, text: string): void {
+    const model = this.documents.get(moduleName, project);
+    if (model && model.getValue() !== text) {
+      this.adoptText(model, text);
+    }
   }
 
   private applyEdit(revision: number, changes: HostTextChange[]): void {
@@ -1016,19 +1097,23 @@ export class EditorBridge {
     } finally {
       this.applyingHostEdit = false;
     }
+
     // The host is the revision authority once it has written to the document.
-    this.revision = revision;
+    const shown = this.documents.idOf(model);
+    if (shown) {
+      this.revisions.set(docKeyOf(shown.module, shown.project), revision);
+    }
   }
 
-  private onContentChanged(event: monaco.editor.IModelContentChangedEvent): void {
-    if (this.applyingHostEdit) {
+  private onModelContentChanged(id: DocumentId, model: monaco.editor.ITextModel, event: monaco.editor.IModelContentChangedEvent): void {
+    if (this.applyingHostEdit || model.isDisposed()) {
       return;
     }
-    const model = this.model();
-    if (!model) {
-      return;
-    }
-    this.revision += 1;
+
+    const key = docKeyOf(id.module, id.project);
+    const revision = (this.revisions.get(key) ?? 0) + 1;
+    this.revisions.set(key, revision);
+
     // Monaco reports changes bottom-up so that earlier ranges stay valid; the order is
     // preserved here and the host must apply them in the same order.
     const changes: HostTextChange[] = event.changes.map((change) => ({
@@ -1039,11 +1124,15 @@ export class EditorBridge {
     // A small module travels whole, which is simplest. A large one travels as its changes:
     // building and shipping the full text per keystroke is what typing latency is made of,
     // and the host reconstructs the same text from the ranges. The length rides along so a
-    // divergence would be seen the moment it happened rather than believed impossible.
+    // divergence would be seen the moment it happened rather than believed impossible. The
+    // message names its document (decision 12): the edit belongs to the module it changed,
+    // whichever editor made it.
     const fullLength = model.getValueLength();
     const message: Extract<ClientMessage, { type: "contentChanged" }> = {
       type: "contentChanged",
-      revision: this.revision,
+      moduleName: id.module,
+      ...(id.project === null ? {} : { project: id.project }),
+      revision,
       changes,
       fullLength,
     };
@@ -1078,13 +1167,16 @@ export class EditorBridge {
     this.transport.post({ type: "breakpointToggleRequested", line });
   }
 
-  private setDiagnostics(markers: HostMarker[]): void {
-    this.lastMarkers = markers;
+  private setDiagnostics(moduleName: string, project: string | null, markers: HostMarker[]): void {
+    this.markersByDoc.set(docKeyOf(moduleName, project), markers);
 
-    const model = this.model();
-    if (!model) {
-      return;
+    const model = this.documents.get(moduleName, project);
+    if (model) {
+      this.applyMarkers(model, markers);
     }
+  }
+
+  private applyMarkers(model: monaco.editor.ITextModel, markers: HostMarker[]): void {
     const converted: monaco.editor.IMarkerData[] = markers.map((marker) => ({
       severity: SEVERITY[marker.severity] ?? monaco.MarkerSeverity.Error,
       message: marker.message,
@@ -1097,29 +1189,51 @@ export class EditorBridge {
     monaco.editor.setModelMarkers(model, MARKER_OWNER, converted);
   }
 
-  private setCurrentLine(line: number | null): void {
-    if (line === null) {
-      this.currentLine.clear();
-      return;
+  /**
+   * Replaces one held set of model decorations. Clears the previous model's when the target
+   * moved — the stopped line must not survive on a module the debugger has left — and applies
+   * the new set on the model that carries it now.
+   */
+  private applyModelDecor(
+    held: { model: monaco.editor.ITextModel; ids: string[] } | null,
+    model: monaco.editor.ITextModel | null,
+    decorations: monaco.editor.IModelDeltaDecoration[],
+  ): { model: monaco.editor.ITextModel; ids: string[] } | null {
+    if (held && held.model !== model && !held.model.isDisposed()) {
+      held.model.deltaDecorations(held.ids, []);
     }
-    this.currentLine.set([
-      {
-        range: new monaco.Range(line, 1, line, 1),
-        options: {
-          isWholeLine: true,
-          className: "xlide-current-line",
-          glyphMarginClassName: "xlide-current-line-glyph",
-          overviewRuler: {
-            color: "#ffd24a",
-            position: monaco.editor.OverviewRulerLane.Full,
-          },
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-        },
-      },
-    ]);
+
+    if (!model) {
+      return null;
+    }
+
+    const previous = held && held.model === model ? held.ids : [];
+    return { model, ids: model.deltaDecorations(previous, decorations) };
   }
 
-  private onMouseMove(event: monaco.editor.IEditorMouseEvent): void {
+  private setCurrentLine(line: number | null): void {
+    const model = line === null ? null : this.hostActiveModel();
+    this.currentLineDecor = this.applyModelDecor(
+      this.currentLineDecor,
+      model,
+      line === null || model === null ? [] : [
+        {
+          range: new monaco.Range(line, 1, line, 1),
+          options: {
+            isWholeLine: true,
+            className: "xlide-current-line",
+            glyphMarginClassName: "xlide-current-line-glyph",
+            overviewRuler: {
+              color: "#ffd24a",
+              position: monaco.editor.OverviewRulerLane.Full,
+            },
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          },
+        },
+      ]);
+  }
+
+  private onMouseMove(event: monaco.editor.IEditorMouseEvent, hover: monaco.editor.IEditorDecorationsCollection): void {
     const line = event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
       ? event.target.position?.lineNumber
       : undefined;
@@ -1127,7 +1241,7 @@ export class EditorBridge {
     // Nothing under the pointer, or a line that already has one: either way there is nothing
     // useful to preview.
     if (line === undefined || this.breakpointLines.has(line)) {
-      this.breakpointHover.clear();
+      hover.clear();
       return;
     }
 
@@ -1136,7 +1250,7 @@ export class EditorBridge {
     // the red dot only ever appears where it is real (the developer's design, 2026-08-04).
     const breakable = lineCanCarryBreakpoint(this.model()?.getLineContent(line) ?? "");
 
-    this.breakpointHover.set([
+    hover.set([
       {
         range: new monaco.Range(line, 1, line, 1),
         options: breakable
@@ -1157,8 +1271,10 @@ export class EditorBridge {
   private setBreakpoints(lines: number[]): void {
     const sorted = [...new Set(lines)].sort((a, b) => a - b);
     this.breakpointLines = new Set(sorted);
-    this.breakpointHover.clear();
-    this.breakpoints.set(
+
+    this.breakpointDecor = this.applyModelDecor(
+      this.breakpointDecor,
+      this.hostActiveModel(),
       sorted.map((line) => ({
         range: new monaco.Range(line, 1, line, 1),
         options: {
@@ -1303,6 +1419,18 @@ Public Function Describe(ByRef target As Object) As String
 End Function
 `;
 
+const DEMO_MODULE_2 = `Attribute VB_Name = "Module2"
+Option Explicit
+
+' The demo's second document, so tab switching and split groups are exercisable here.
+Public Sub Report(ByVal title As String)
+    Dim total As Double
+    total = 2.5
+
+    Debug.Print title; total
+End Sub
+`;
+
 /**
  * Loopback transport used when the page is opened outside WebView2. It logs everything the
  * page would have sent and replays a scripted set of host messages so the surface is testable
@@ -1318,15 +1446,21 @@ export function demoTransport(): HostTransport {
 
   // The demo's open tabs and which of them carry unsaved changes, so the close-confirm
   // loop is exercisable in a plain browser: a dirty close is answered with the question,
-  // and the answer closes the tab the way the host would.
+  // and the answer closes the tab the way the host would. The active tab follows
+  // activateModule, so switching and splitting behave here the way they do in the host.
   const openModules = ["Module1", "Module2"];
   const dirtyModules = new Set(openModules);
+  let activeModule: string | null = openModules[0] ?? null;
 
   const sendModules = (): void => {
+    if (activeModule !== null && !openModules.includes(activeModule)) {
+      activeModule = openModules[0] ?? null;
+    }
+
     send({
       type: "setModules",
       modules: [...openModules],
-      active: openModules[0] ?? null,
+      active: activeModule,
       dirty: openModules.map((name) => dirtyModules.has(name)),
     });
   };
@@ -1335,7 +1469,8 @@ export function demoTransport(): HostTransport {
     post(message) {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
-        send({ type: "loadDocument", moduleName: "Module1", text: DEMO_MODULE });
+        send({ type: "openDocument", moduleName: "Module1", text: DEMO_MODULE });
+        send({ type: "openDocument", moduleName: "Module2", text: DEMO_MODULE_2 });
         sendModules();
         send({
           type: "setSettings",
@@ -1387,6 +1522,7 @@ export function demoTransport(): HostTransport {
         });
         send({
           type: "setDiagnostics",
+          moduleName: "Module1",
           markers: [
             {
               startLine: 11,
@@ -1409,6 +1545,10 @@ export function demoTransport(): HostTransport {
           kind: "Module",
           properties: [{ name: "(Name)", value: "Module1", writable: true, boolean: false }],
         });
+      }
+      if (message.type === "activateModule") {
+        activeModule = message.moduleName;
+        sendModules();
       }
       if (message.type === "closeModule") {
         if (!message.action && dirtyModules.has(message.name)) {

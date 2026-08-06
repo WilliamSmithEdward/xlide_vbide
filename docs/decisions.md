@@ -262,3 +262,86 @@ centred window whenever it cannot, before anything is hidden. The measurements b
 decision, including the full control map of both dialogs and the hang that settled it, are
 in [watch-window-investigation.md](watch-window-investigation.md), and the rules for working
 with a modal at all are in [working-with-modals.md](working-with-modals.md).
+
+## 12. The surface holds every open module live, not one at a time
+
+Until v0.1.5 the page held one Monaco model: activating a tab was a host round-trip that read
+the module and replaced the model, disposing the previous one, and every message about text —
+edits out, syncs in, squiggles — implicitly meant "the shown module". That shape cannot show
+two modules side by side, so it goes.
+
+The host↔page document protocol is module-addressed. The page keeps a live model per open
+module, keyed by workbook AND name (`xlide:/{project}/{module}` — two workbooks' Module1 are
+two models, where the old name-only URI would have collided the moment both were alive).
+`openDocument` carries the workbook and text; `contentChanged` says which module it edits;
+`syncDocument` and `setDiagnostics` name their module. Which modules are OPEN stays the host's
+truth (the object model's pane list, published as before); which model each editor shows is
+the page's. Tab activation still tells the host — the native pane underneath follows, because
+the debugger and the compiler act on the active pane — but it no longer re-sends text the page
+already holds.
+
+The host mirrors the same shape: per-document text, unwritten-edit flags, and write-back
+baselines keyed by (workbook, module). The name-only baseline dictionary was a latent
+corruption: a line-diff computed against the other workbook's Module1 would have written a
+merge of two unrelated modules. One document per key, everywhere, is the invariant.
+
+Engine requests (completions, hovers, canonical case) stay offset-only against the active
+module. That is safe because typing requires focus, focus posts `activateModule` on the same
+ordered channel before any request the typing produces, and WebView2 delivers messages in
+order. If a surface ever gains a way to edit an inactive module's text, those requests must
+learn module addressing the same day.
+
+## 13. The workspace layout is ours: hand-rolled groups and docks, no docking framework
+
+### Shape (2026-08-06)
+
+Two systems, deliberately separate. TOOL PANES dock in four sections around the editor —
+left, right, top, bottom — each section a split tree of tabbed groups. The EDITOR is one
+contained unit in the middle whose module tabs split against each other the same way. A tool
+pane never enters the editor unit and an editor tab never leaves it: the editor's tabs are
+the host's open panes, and its groups answer to that list.
+
+Both use one gesture, the studio's, from one implementation (`dragcompass.ts`): drag by the
+title, and a five-zone compass appears over the region under the pointer — the centre tabs
+onto that group, an edge splits beside it, and an edge of the editor area docks against the
+editor. The page dims while a drag is live, so a drag reads as a mode.
+
+The compass IS the target. The pointer must come to the zone it means, rather than the code
+guessing an intent from where the pointer happens to be: over a wide short region "near the
+left edge" and "just left of centre" are a few pixels apart, and a guess there is a coin
+toss the developer has to undo. A release off every zone drops nothing.
+
+The preview says which kind of change a release makes. Landing in something that already
+stands is a JOIN, outlined at that thing's own bounds — an editor edge whose section
+already exists previews the SECTION, not a half of the editor the drop would never touch.
+Carving space that does not exist yet is NEW, dashed, because the shape is a proposal.
+
+A drag ends when the window does. Losing focus — alt-tab, a screenshot tool, the host
+stealing focus, which this host does freely — Escape, or the document being hidden all
+abandon it, because a dim and a compass that outlive the gesture leave the surface looking
+permanently mid-drag.
+
+Membership is the host's, geography is the developer's. WHICH modules are open and WHICH
+panes exist are answered by the object model and by the shell; where each one sits, and how
+big, is the developer's arrangement, persisted page-locally beside the splitter positions.
+
+The explorer may not be closed: with every tab shut it is the only route back to a module.
+Every other pane has an X on its group and a checkable row in the Panes menu, which is also
+how a closed one returns.
+
+Editor splits and movable panels are built in this codebase's own idiom — the tab strip,
+splitters, and pointer handling that already survived the host's focus-stealing habits —
+rather than adopted from a docking library (dockview was the candidate: MIT, framework-free,
+and current). Three reasons. The tab strip is not a generic tab strip: its identity model,
+badge and dirty rendering, close-confirm interception, and its defenses against host echoes
+rebuilding elements mid-press are product behaviour a library would have to be bent around.
+The environment is hostile in measured ways — the host steals focus mid-gesture, pointer
+streams end in pointercancel, echoes arrive between press and release — and those lessons are
+encoded in code we own, not in a dependency that never met this host. And the surface ships
+inside a native add-in where every dependency is a supply-chain and size commitment; the frame
+around the editor has needed none so far.
+
+The costs accepted: floating and OS-popout windows are out of scope until built, and drop-zone
+polish is ours to maintain. Revisit if the layout ambitions outgrow a split tree and two
+docks — the protocol work of decision 12 is what a library would sit on either way, so
+nothing here forecloses that.

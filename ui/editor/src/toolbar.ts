@@ -78,7 +78,8 @@ export const COMMANDS: ToolbarCommand[] = [
 
   { id: "objectBrowser", target: "host", icon: "library", label: "Object browser (F2)", separatorBefore: true },
 
-  { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings", separatorBefore: true },
+  { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
+  { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
 ];
 
 /**

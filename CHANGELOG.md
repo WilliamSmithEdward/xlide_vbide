@@ -1,5 +1,47 @@
 # Changelog
 
+## Unreleased
+
+The workspace becomes arrangeable: every module open at once, editors side by side, and tool
+panes that dock wherever the developer puts them.
+
+### Added
+
+- **Editor groups.** Split right or down (Ctrl+\\, the tab menu, or dragging a tab to a
+  group's edge) and work in two modules at once. Tabs move between groups by dragging, and
+  a group dissolves when its last tab leaves. Which modules are open stays the editor's
+  truth; where their tabs sit is the developer's, and survives every host update.
+- **Every open module is live.** The surface holds one editor model per open module instead
+  of one for the module on screen, so switching tabs is instant, undo history and scroll
+  position survive a switch, and a background module's squiggles update while another is
+  being edited. Two workbooks' Module1 are two documents (decision 12).
+- **Dockable panes.** Explorer, Properties, Problems, Immediate, Locals, and Watch dock in
+  four sections around the editor — left, right, top, bottom — each a split of tabbed
+  groups. Drag a pane by its title: a five-zone compass appears over the region under the
+  pointer, the centre tabs it onto that group, an edge splits beside it, and an editor edge
+  docks it against the editor. Dragging along a strip reorders the tabs in it. The preview
+  outlines a section it would join, or dashes the space it would create, and the drag ends
+  if the window loses focus. Layout persists across sessions.
+- **Panes menu**, beside Settings on the toolbar: one checkable row per pane. Every pane
+  also carries an X on its group. The explorer cannot be closed — with every tab shut it is
+  the only route back to a module — and its row says so.
+
+### Fixed
+
+- Backspace and Tab acted on the wrong editor once a second group existed: every editor
+  shares one keybinding service, so two identically-scoped rules matched and the later one
+  won everywhere. Each editor's rules are now scoped to that editor (lesson 34).
+- A page reload came back with its models but no tabs, and later without its properties:
+  the "what changed" caches still described the conversation before the reload, so the
+  republish sent nothing. A second ready clears them first (lesson 35).
+
+### Changed
+
+- The Window menu is gone; the bar reads File, Insert, Run, Tools, Add-Ins, Help. Its window
+  list was already the tab strip's job, and Split, Tile, and Cascade managed native windows
+  the surface covers — the editor groups are that job done where the developer looks.
+- Every divider that resizes something wears the same centred grip.
+
 ## v0.1.5 (2026-08-06)
 
 A fix for tabs that showed above an empty canvas, page errors that no longer disappear, and a

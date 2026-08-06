@@ -40,15 +40,17 @@ import "monaco-editor/features/wordPartOperations/register.js";
 import "./styles.css";
 import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
+import { DocumentStore } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
-import { openSettingsDialog } from "./settingsdialog.js";
-import { installBookmarks } from "./bookmarks.js";
+import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
+import { Bookmarks } from "./bookmarks.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
+import { Workspace } from "./workspace.js";
 import { VBA_LANGUAGE_ID, registerVba } from "./vba.js";
 
 // Stamped by the build; reported to the host so the log names the running bundle.
@@ -66,9 +68,10 @@ globalThis.MonacoEnvironment = {
 const scriptMs = performance.now();
 
 function boot(): void {
-  const container = document.getElementById("container");
-  if (!container) {
-    throw new Error("missing #container");
+  const editorArea = document.getElementById("editor-area");
+  const emptyView = document.getElementById("empty-view");
+  if (!editorArea || !emptyView) {
+    throw new Error("missing #editor-area or #empty-view");
   }
 
   // A page exception is invisible without a DevTools client attached, which is exactly the
@@ -133,16 +136,17 @@ function boot(): void {
     };
   });
 
-  const editor = monaco.editor.create(container, {
+  // What every group's editor is created with. The companion editor's minimap, its settings
+  // included: blocks rather than characters, the slider always visible (the developer's
+  // request: it is the indicator, not a control to be discovered). The find widget floats
+  // over the text instead of reserving a band above it (2026-08-04).
+  const editorOptions: monaco.editor.IStandaloneEditorConstructionOptions = {
     value: "",
     language: VBA_LANGUAGE_ID,
     theme: preferredTheme(),
     automaticLayout: true,
     glyphMargin: true,
     lineNumbersMinChars: 4,
-    // The companion editor's minimap, its settings included: blocks rather than characters.
-    // The slider — the "you are here" of the preview — stays visible instead of appearing on
-    // hover, by the developer's request: it is the indicator, not a control to be discovered.
     minimap: {
       enabled: true,
       renderCharacters: false,
@@ -151,10 +155,6 @@ function boot(): void {
       showSlider: "always",
     },
     scrollBeyondLastLine: false,
-    // The find widget floats over the text instead of reserving a band above it: opening it
-    // pushed the first line down a widget's height, which read as the document jumping
-    // (developer, 2026-08-04). Floating, it may cover the top line while open — the trade
-    // every editor with a floating find makes.
     find: {
       addExtraSpaceOnTop: false,
     },
@@ -169,7 +169,62 @@ function boot(): void {
     wordWrap: "off",
     smoothScrolling: false,
     fixedOverflowWidgets: true,
+  };
+
+  const transport = webView2Transport();
+  const documents = new DocumentStore();
+  const bookmarks = new Bookmarks();
+
+  // Bridge, workspace, and shell reference each other, so they are built in dependency
+  // order and stitched by assignment: the bridge first (it only needs the transport), the
+  // workspace next (its editor factory wires each new editor into everything), the search
+  // widget on the workspace's active editor, and the shell last — its toolbar keeps only
+  // the commands that resolve as actions at build time, so every per-editor action must be
+  // registered before it looks. Nothing host-driven runs before bridge.start().
+  const bridge = new EditorBridge(transport ?? demoTransport(), documents);
+
+  let searchWidget: SearchWidget;
+  let workspace: Workspace;
+  // Declared before the workspace: its constructor announces the first active group, and the
+  // callback below must find an undefined shell, not a const still in its dead zone.
+  let shell: Shell | undefined;
+
+  /** Everything a new group's editor gets, the moment the workspace creates it. */
+  const wireEditor = (editor: monaco.editor.IStandaloneCodeEditor): void => {
+    bridge.attachEditor(editor);
+    searchWidget.registerOn(editor);
+    installTypingAutomation(editor, bridge);
+    bookmarks.attach(editor);
+    registerHostActions(editor, bridge);
+    installMarginMenu(editor, bridge);
+  };
+
+  searchWidget = new SearchWidget(() => workspace.activeEditor(), {
+    search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
+    replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
+      bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
+    navigate: (module, line, column, selectLine, workbook) =>
+      bridge.navigate(module, line, column, selectLine, workbook),
   });
+  bridge.searchWidget = searchWidget;
+
+  workspace = new Workspace(editorArea, emptyView, documents, {
+    createEditor: (groupBody) => {
+      const editor = monaco.editor.create(groupBody, editorOptions);
+      wireEditor(editor);
+      return editor;
+    },
+    activate: (id) => bridge.activateModule(id.module, id.project ?? undefined),
+    close: (id, action) => bridge.closeModule(id.module, id.project ?? undefined, action),
+    activeChanged: (id, editor) => {
+      // The search widget floats over the active group and searches its editor.
+      searchWidget.attachTo(editor.getContainerDomNode());
+      searchWidget.onActiveEditorChanged();
+      shell?.setActiveModule(id?.module ?? null, id?.project ?? null);
+    },
+    layoutChanged: () => workspace?.editors().forEach((editor) => editor.layout()),
+  });
+  bridge.workspace = workspace;
 
   const createMs = performance.now();
 
@@ -187,41 +242,33 @@ function boot(): void {
     document.body.classList.add("live-resize");
     clearTimeout(resizeSettled);
     resizeSettled = setTimeout(() => {
-      editor.layout();
+      workspace.editors().forEach((editor) => editor.layout());
       document.body.classList.remove("live-resize");
     }, 150);
   });
 
-  const transport = webView2Transport();
-
-  // The shell is built before the bridge, because the bridge routes host messages into it. The
-  // handlers close over the bridge, which does not exist yet, so they reach it through a variable
-  // that is assigned immediately below: nothing can call them before then, because both a tab and
-  // a finding need the host to have sent something first.
-  let bridge: EditorBridge;
-
-  // The one search UI: a floating widget over the editor, in the spot Monaco's find had.
-  // Module scope runs live against the current model; wider scopes ask the host's engine
-  // through the bridge and render their results inside the widget. Built BEFORE the shell,
-  // because the shell's toolbar keeps only the commands that resolve as actions at build
-  // time, and the widget is what registers the search actions.
-  const searchWidget = new SearchWidget(container, editor, {
-    search: (query, matchCase, wholeWord, scope) => bridge.requestSearch(query, matchCase, wholeWord, scope),
-    replaceAll: (query, matchCase, wholeWord, scope, replacement) =>
-      bridge.requestReplaceAll(query, matchCase, wholeWord, scope, replacement),
-    navigate: (module, line, column, selectLine, workbook) =>
-      bridge.navigate(module, line, column, selectLine, workbook),
-  });
-
-  const shell = new Shell(document.body, {
+  shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
+    moduleIsOpen: (name) => bridge.documents.all()
+      .some((id) => id.module.toLowerCase() === name.toLowerCase()),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
-    layoutChanged: () => editor.layout(),
+    layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
     command: (command) => {
       // The settings dialog is the page's own, not a Monaco action and not the host's.
       if (command.id === "openSettings") {
-        openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
+        openSettingsDialog((next) => bridge.updateSettings(next), () => workspace.activeEditor().focus());
+        return;
+      }
+
+      // The Panes menu: its own dropdown under its own toolbar button, beside settings
+      // (developer, 2026-08-06). Showing and hiding a pane is done while working, not
+      // visited once like a preference.
+      if (command.id === "openPanes") {
+        const button = document.querySelector<HTMLElement>('#toolbar [data-command="openPanes"]');
+        if (button && shell) {
+          openPanesMenu(shell.paneVisibility(), button);
+        }
         return;
       }
 
@@ -229,15 +276,16 @@ function boot(): void {
     },
     // Undo and redo are built in rather than registered, so they never resolve as actions and
     // would be dropped by a check that only knows about registered ones. The settings dialog
-    // is the page's own and always exists.
+    // and the Panes menu are the page's own and always exist.
     commandAvailable: (command) =>
-      command.id === "undo" || command.id === "redo" || command.id === "openSettings"
-      || editor.getAction(command.id) !== null,
+      command.id === "undo" || command.id === "redo"
+      || command.id === "openSettings" || command.id === "openPanes"
+      || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
     menuRequest: (path) => bridge.requestMenu(path),
     menuExecute: (path) => bridge.executeMenu(path),
-    menuClosed: () => editor.focus(),
+    menuClosed: () => workspace.activeEditor().focus(),
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
     selectComponent: (name) => bridge.selectComponent(name),
     closeModule: (name, workbook, action) => bridge.closeModule(name, workbook, action),
@@ -245,9 +293,30 @@ function boot(): void {
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
   });
+  bridge.shell = shell;
 
-  bridge = new EditorBridge(editor, transport ?? demoTransport(), shell);
-  bridge.searchWidget = searchWidget;
+  // Ctrl+W closes the active group's active tab from anywhere in the surface. The host's key
+  // hook claims it first when it is listening; this is the page's own answer for every moment
+  // it is not, so the shortcut never depends on which corner of the surface has focus.
+  document.addEventListener("keydown", (event) => {
+    if (!event.ctrlKey || event.shiftKey || event.altKey) {
+      return;
+    }
+
+    // Ctrl+\ splits, the studio's own key for it.
+    if (event.code === "Backslash") {
+      event.preventDefault();
+      workspace.splitActive("right");
+      return;
+    }
+
+    if (event.code !== "KeyW" && event.code !== "F4") {
+      return;
+    }
+
+    event.preventDefault();
+    workspace.closeActive();
+  }, { capture: true });
 
   // Reachable from a devtools console, which is how the page half of a host defect gets isolated
   // from the transport half.
@@ -256,20 +325,19 @@ function boot(): void {
   // Tools > Options routes here from the host: the native Options dialog is superseded, and
   // the product's settings are where the choices that matter live.
   bridge.openSettings = () =>
-    openSettingsDialog((next) => bridge.updateSettings(next), () => editor.focus());
-
-  // Typing automation: Smart Enter block closers, canonical casing, loop-iterator sync. After
-  // the bridge, deliberately: the bridge's content listener registered first, so the text a
-  // request describes has always reached the host before the request asking about it does.
-  installTypingAutomation(editor, bridge);
+    openSettingsDialog((next) => bridge.updateSettings(next), () => workspace.activeEditor().focus());
 
   // Completions come from the host's engine: the analyzer that verified the Excel object model
   // decides what a receiver offers, and the page only renders the answer. Triggered on the dot
   // for member access, and by ordinary typing for identifiers and keywords.
+  //
+  // Engine requests are offset-only against the HOST-ACTIVE module (decision 12), so every
+  // provider answers only for its model. A background group's model gets no engine answers —
+  // honest, where an answer computed against the wrong module's text would not be.
   monaco.languages.registerCompletionItemProvider(VBA_LANGUAGE_ID, {
     triggerCharacters: ["."],
     provideCompletionItems: async (model, position) => {
-      if (model !== editor.getModel()) {
+      if (model !== bridge.hostActiveModel()) {
         return { suggestions: [] };
       }
 
@@ -290,7 +358,7 @@ function boot(): void {
   // way the extension renders it.
   monaco.languages.registerHoverProvider(VBA_LANGUAGE_ID, {
     provideHover: async (model, position) => {
-      if (model !== editor.getModel()) {
+      if (model !== bridge.hostActiveModel()) {
         return null;
       }
 
@@ -326,7 +394,7 @@ function boot(): void {
     signatureHelpTriggerCharacters: ["(", ",", " "],
     signatureHelpRetriggerCharacters: [","],
     provideSignatureHelp: async (model, position) => {
-      if (model !== editor.getModel()) {
+      if (model !== bridge.hostActiveModel()) {
         return null;
       }
 
@@ -353,65 +421,6 @@ function boot(): void {
         dispose: () => { },
       };
     },
-  });
-
-  // The host's own commands, present in the editor's context menu and the command palette so
-  // they are discoverable where a developer already looks for commands. The navigation pair
-  // rode the View menu until it went (2026-08-05); their keys are claimed host-side while
-  // the surface has focus, and bound here as well for every moment it does not.
-  const hostActions: Array<[string, string, string, number[]?]> = [
-    ["xlide.run", "Run Sub/UserForm (F5)", "run"],
-    ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
-    ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
-    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "goToDefinition",
-      [monaco.KeyMod.Shift | monaco.KeyCode.F2]],
-    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "lastPosition",
-      [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2]],
-  ];
-
-  for (const [id, label, command, keys] of hostActions) {
-    editor.addAction({
-      id,
-      label,
-      contextMenuGroupId: "1_xlide",
-      contextMenuOrder: 1,
-      ...(keys ? { keybindings: keys } : {}),
-      run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
-    });
-  }
-
-  // Bookmarks are the surface's own now: the Edit menu that carried the native ones is gone.
-  installBookmarks(editor);
-
-  // The margin's own menu. The editor would otherwise offer its text menu there, which is a menu
-  // for a place the click was not.
-  editor.onContextMenu((event) => {
-    const kind = event.target.type;
-    if (kind !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
-      && kind !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
-      return;
-    }
-
-    event.event.preventDefault();
-    event.event.stopPropagation();
-
-    const line = event.target.position?.lineNumber;
-    showContextMenu(event.event.posx, event.event.posy, [
-      {
-        label: "Toggle Breakpoint",
-        enabled: line !== undefined,
-        run: () => bridge.toggleBreakpoint(line ?? 1),
-      },
-      {
-        label: "Clear All Breakpoints",
-        run: () => bridge.runCommand({
-          id: "clearAllBreakpoints",
-          target: "host",
-          icon: "",
-          label: "Clear All Breakpoints",
-        }),
-      },
-    ]);
   });
 
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
@@ -448,6 +457,71 @@ function boot(): void {
   // After ready, so the reply cannot arrive before the host considers the page up. The bar needs
   // its top-level items before anything is clicked: they carry the Alt accelerators.
   shell.requestMenus();
+}
+
+/**
+ * The host's own commands, present in each editor's context menu and the command palette so
+ * they are discoverable where a developer already looks for commands. The navigation pair
+ * rode the View menu until it went (2026-08-05); their keys are claimed host-side while the
+ * surface has focus, and bound here as well for every moment it does not. Registered on
+ * every group's editor, so the palette works wherever it opens.
+ */
+function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge: EditorBridge): void {
+  const hostActions: Array<[string, string, string, number[]?]> = [
+    ["xlide.run", "Run Sub/UserForm (F5)", "run"],
+    ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
+    ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
+    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "goToDefinition",
+      [monaco.KeyMod.Shift | monaco.KeyCode.F2]],
+    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "lastPosition",
+      [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2]],
+  ];
+
+  for (const [id, label, command, keys] of hostActions) {
+    editor.addAction({
+      id,
+      label,
+      contextMenuGroupId: "1_xlide",
+      contextMenuOrder: 1,
+      ...(keys ? { keybindings: keys } : {}),
+      run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
+    });
+  }
+}
+
+/**
+ * The margin's own menu, per editor. The editor would otherwise offer its text menu there,
+ * which is a menu for a place the click was not.
+ */
+function installMarginMenu(editor: monaco.editor.IStandaloneCodeEditor, bridge: EditorBridge): void {
+  editor.onContextMenu((event) => {
+    const kind = event.target.type;
+    if (kind !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+      && kind !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) {
+      return;
+    }
+
+    event.event.preventDefault();
+    event.event.stopPropagation();
+
+    const line = event.target.position?.lineNumber;
+    showContextMenu(event.event.posx, event.event.posy, [
+      {
+        label: "Toggle Breakpoint",
+        enabled: line !== undefined,
+        run: () => bridge.toggleBreakpoint(line ?? 1),
+      },
+      {
+        label: "Clear All Breakpoints",
+        run: () => bridge.runCommand({
+          id: "clearAllBreakpoints",
+          target: "host",
+          icon: "",
+          label: "Clear All Breakpoints",
+        }),
+      },
+    ]);
+  });
 }
 
 /** The analyzer's completion kinds, mapped onto the editor's icons. */

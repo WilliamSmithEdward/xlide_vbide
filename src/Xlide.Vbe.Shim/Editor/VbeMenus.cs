@@ -100,9 +100,17 @@ internal static class VbeMenus
     /// Ungroup 165, Order 32809 — arranges controls on a UserForm, and the designer that
     /// would give them meaning is backlog #14, which brings its own surfaces when it lands.
     /// </remarks>
+    /// <remarks>
+    /// 2026-08-06: the WINDOW menu (30009, from the same 2026-08-05 full enumeration) goes,
+    /// and the bar reads File Insert Run Tools Add-Ins Help. Its window list (830) was
+    /// already replaced by the tab strips; Split, Tile, Cascade, and Arrange Icons manage
+    /// native MDI children the surface covers, and the surface's own editor groups — split
+    /// right, split down, drag a tab between groups — are that job done where the developer
+    /// actually looks (developer: "remove the window ribbon").
+    /// </remarks>
     private static readonly HashSet<int> Replaced =
     [
-        30003, 30004, 30006, 30165,
+        30003, 30004, 30006, 30165, 30009,
         761, 830, 2554, 2555, 2557, 222, 30045,
         128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
         1820, 940, 229,

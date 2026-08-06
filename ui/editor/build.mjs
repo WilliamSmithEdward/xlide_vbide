@@ -28,69 +28,62 @@ const INDEX_HTML = `<!doctype html>
 <div id="shell">
   <div id="menubar" role="menubar" aria-label="Menus"></div>
   <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
+  <!-- The four dock sections around the editor. Each holds a split tree of tabbed pane
+       groups; the panes themselves are the elements below, which the dock system places
+       wherever the developer has dragged them. -->
   <div id="main">
-    <div id="sidebar">
-      <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
-      <div id="properties-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the properties panel" tabindex="0" hidden></div>
-      <div id="properties" hidden>
-        <button id="properties-head" type="button" aria-expanded="true" aria-controls="properties-list">Properties</button>
-        <div id="properties-object" aria-label="Selected object"></div>
-        <div id="properties-list" role="list" aria-label="Properties of the selected component"></div>
-      </div>
-    </div>
-    <div id="sidebar-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the project explorer" tabindex="0"></div>
+    <div id="dock-left" hidden></div>
+    <div id="dock-left-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the left panes" tabindex="0" hidden></div>
     <div id="workspace">
-      <div id="tabs" role="tablist" aria-label="Open modules"></div>
-      <div id="container"></div>
-      <div id="empty-view" aria-hidden="true">
+      <div id="dock-top" hidden></div>
+      <div id="dock-top-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the top panes" tabindex="0" hidden></div>
+      <div id="editor-area"></div>
+      <div id="empty-view" hidden aria-hidden="true">
         <div id="empty-view-message">
           <span class="codicon codicon-files"></span>
           <p>No module is open.</p>
           <p class="empty-hint">Pick one in the explorer, or right-click a workbook to add one.</p>
         </div>
       </div>
-      <div id="panel-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the panel" tabindex="0"></div>
-      <div id="panel">
-        <div id="panel-head">
-          <button id="panel-toggle" type="button" aria-expanded="true" aria-controls="panel-body" aria-label="Show or hide the panel"></button>
-          <div id="panel-tabs" role="tablist" aria-label="Panels">
-            <button class="panel-tab active" data-panel="problems" role="tab" aria-selected="true" type="button">Problems</button>
-            <button class="panel-tab" data-panel="immediate" role="tab" aria-selected="false" type="button">Immediate</button>
-            <button class="panel-tab" data-panel="locals" role="tab" aria-selected="false" type="button">Locals</button>
-            <button class="panel-tab" data-panel="watch" role="tab" aria-selected="false" type="button">Watch</button>
-          </div>
-        </div>
-        <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
-          <button class="problems-filter" data-severity-filter="errors" type="button" aria-pressed="true"><span class="codicon codicon-error" aria-hidden="true"></span><span class="filter-count">0 Errors</span></button>
-          <button class="problems-filter" data-severity-filter="warnings" type="button" aria-pressed="true"><span class="codicon codicon-warning" aria-hidden="true"></span><span class="filter-count">0 Warnings</span></button>
-          <button class="problems-filter" data-severity-filter="messages" type="button" aria-pressed="true"><span class="codicon codicon-info" aria-hidden="true"></span><span class="filter-count">0 Messages</span></button>
-        </div>
-        <div id="panel-body">
-          <div id="panel-list" role="list"></div>
-          <div id="immediate" hidden>
-            <div id="immediate-log" role="log" aria-live="polite" aria-label="Immediate window output"></div>
-            <div id="immediate-entry">
-              <button id="immediate-clear" type="button" title="Clear the output"
-                      aria-label="Clear the Immediate output"><span class="codicon codicon-clear-all" aria-hidden="true"></span></button>
-              <span id="immediate-prompt" aria-hidden="true">&gt;</span>
-              <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
-                     aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
-            </div>
-          </div>
-          <div id="locals" hidden>
-            <div id="locals-context" aria-live="polite" hidden></div>
-            <div id="locals-table" role="table" aria-label="Local variables"></div>
-          </div>
-          <div id="watch" hidden>
-            <div id="watch-actions" role="toolbar" aria-label="Watch expressions">
-              <button id="watch-add" type="button" title="Add a watch"><span class="codicon codicon-add" aria-hidden="true"></span>Add</button>
-              <button id="watch-edit" type="button" title="Edit or delete the selected watch"><span class="codicon codicon-edit" aria-hidden="true"></span>Edit</button>
-              <button id="watch-quick" type="button" title="Quick watch on the selected expression (Shift+F9)"><span class="codicon codicon-eye" aria-hidden="true"></span>Quick</button>
-            </div>
-            <div id="watch-table" role="table" aria-label="Watch expressions"></div>
-          </div>
-        </div>
+      <div id="dock-bottom-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize the bottom panes" tabindex="0" hidden></div>
+      <div id="dock-bottom" hidden></div>
+    </div>
+    <div id="dock-right-splitter" role="separator" aria-orientation="vertical" aria-label="Resize the right panes" tabindex="0" hidden></div>
+    <div id="dock-right" hidden></div>
+  </div>
+  <!-- The pane bodies. Parked here at load; the dock system moves each into the group its
+       tab sits in, so their markup never has to know where they live. -->
+  <div id="pane-bodies" hidden>
+    <div id="sidebar-tree" role="tree" aria-label="Project explorer"></div>
+    <div id="properties-object" aria-label="Selected object"></div>
+    <div id="properties-list" role="list" aria-label="Properties of the selected component"></div>
+    <div id="problems-filters" role="toolbar" aria-label="Filter problems by severity">
+      <button class="problems-filter" data-severity-filter="errors" type="button" aria-pressed="true"><span class="codicon codicon-error" aria-hidden="true"></span><span class="filter-count">0 Errors</span></button>
+      <button class="problems-filter" data-severity-filter="warnings" type="button" aria-pressed="true"><span class="codicon codicon-warning" aria-hidden="true"></span><span class="filter-count">0 Warnings</span></button>
+      <button class="problems-filter" data-severity-filter="messages" type="button" aria-pressed="true"><span class="codicon codicon-info" aria-hidden="true"></span><span class="filter-count">0 Messages</span></button>
+    </div>
+    <div id="panel-list" role="list"></div>
+    <div id="immediate">
+      <div id="immediate-log" role="log" aria-live="polite" aria-label="Immediate window output"></div>
+      <div id="immediate-entry">
+        <button id="immediate-clear" type="button" title="Clear the output"
+                aria-label="Clear the Immediate output"><span class="codicon codicon-clear-all" aria-hidden="true"></span></button>
+        <span id="immediate-prompt" aria-hidden="true">&gt;</span>
+        <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
+               aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
       </div>
+    </div>
+    <div id="locals">
+      <div id="locals-context" aria-live="polite" hidden></div>
+      <div id="locals-table" role="table" aria-label="Local variables"></div>
+    </div>
+    <div id="watch">
+      <div id="watch-actions" role="toolbar" aria-label="Watch expressions">
+        <button id="watch-add" type="button" title="Add a watch"><span class="codicon codicon-add" aria-hidden="true"></span>Add</button>
+        <button id="watch-edit" type="button" title="Edit or delete the selected watch"><span class="codicon codicon-edit" aria-hidden="true"></span>Edit</button>
+        <button id="watch-quick" type="button" title="Quick watch on the selected expression (Shift+F9)"><span class="codicon codicon-eye" aria-hidden="true"></span>Quick</button>
+      </div>
+      <div id="watch-table" role="table" aria-label="Watch expressions"></div>
     </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>

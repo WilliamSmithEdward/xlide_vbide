@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-06, at v0.1.5.
+Updated 2026-08-06, after v0.1.5 (the workspace rearrangement is unreleased).
 
 A short, current snapshot. The living documents are [handoff.md](handoff.md) for what happened
 and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,
@@ -20,9 +20,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   log's `editor surface: ready` line itemises every start-up stage, so a regression names its
   own cause. Recent measurements: ready in about 180ms.
 - **The surface is the whole visible editor.** Menu bar (now File, Insert, Run, Tools,
-  Add-Ins, Window, Help), toolbar, module tabs, project explorer, properties, and the
-  Problems, Immediate, Locals, and Watch panels. The Object Browser is a floating themed
-  window of xlide's own. Nothing native shows through the canvas.
+  Add-Ins, Help), toolbar, module tabs, and six dockable panes — Explorer, Properties,
+  Problems, Immediate, Locals, Watch. The Object Browser is a floating themed window of
+  xlide's own. Nothing native shows through the canvas.
+- **The workspace is arrangeable.** Editor groups split right and down and pass tabs
+  between themselves; tool panes dock in four sections around the editor, each a split of
+  tabbed groups, dragged by one gesture with a five-zone compass (decisions 12 and 13).
+  Every open module holds a live model, so switching tabs keeps undo, scroll, and
+  squiggles. `Test-SplitWorkspace.ps1` is 18 checks over the whole of it.
 - **Locals and Watch are fed from the editor's own windows**, floated and made invisible, read
   through UI Automation on a dedicated thread. Both verified against a live break, with
   standing probes: `Test-GhostLocalsPanel.ps1` and `Test-WatchPanel.ps1`.
@@ -48,6 +53,10 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 ## Standing probes
 
 In `tools\harness`, each self-describing and PASS/FAIL where it can be:
-`Test-DebugApi`, `Test-WatchPanel`, `Test-GhostLocalsPanel`, `Test-CloseConfirm`,
-`Test-CloseHiddenPane`, `Test-ObjectBrowser`, `Test-ResizeFollow`, `Test-CloseVbe`.
-`xlide-api.mjs` drives a live session from the command line or from a script.
+`Test-DebugApi`, `Test-SplitWorkspace`, `Test-WatchPanel`, `Test-GhostLocalsPanel`,
+`Test-CloseConfirm`, `Test-CloseHiddenPane`, `Test-ObjectBrowser`, `Test-ResizeFollow`,
+`Test-CloseVbe`. `xlide-api.mjs` drives a live session from the command line or a script.
+
+The page also runs against its own loopback host in a plain browser — two documents, live
+tabs, the close-confirm loop — which is where a layout change is exercised without an
+Excel: `.claude/launch.json`'s `editor-demo` serves `ui/editor/dist`.

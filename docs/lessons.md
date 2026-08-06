@@ -702,3 +702,49 @@ sees the full procedure path - the strip stays hidden rather than lying with a b
 two UIA clients hitting the editor's provider concurrently (the in-proc reader plus an
 out-of-proc probe dump) can kill the BREAK itself - the project resets, panes are
 destroyed - so probes must never dump the ghost while the product's reader is alive.
+
+## 34. One keybinding service serves every editor, so a when-clause is the only scoping
+
+Splitting the surface into editor groups meant several standalone Monaco editors on one
+page, and the typing automation rebinds Tab and Backspace on each of them. Every editor
+created by `monaco.editor.create` shares ONE keybinding service; `editor.addCommand` is not
+scoped to the editor it was called on. Two groups produced two identical Backspace rules
+with identical when-clauses, both matched, the later registration won everywhere, and its
+handler ran `deleteLeft` on ITS editor — so pressing Backspace in the group being typed in
+deleted a character in the other group, and the key read as dead.
+
+What confirmed it was the shape of the failure, not the symptom: the live page answered
+`prevented: true, handled: false` — the key WAS claimed and the command DID run, so the
+binding was alive and pointed somewhere else. A dead key would have been prevented false.
+
+The fix is a context key created on each editor (`editor.createContextKey`), included in
+that editor's when-clauses. A context key created this way is true only inside its own
+editor's context, so each rule matches exactly the editor it belongs to. Anything else the
+surface binds per editor needs the same treatment; the search widget's Escape claim already
+had it by accident, because its open flag was per editor for another reason entirely.
+
+Two traps in probing this. A synthetic KeyboardEvent is enough to exercise the keybinding
+path — Monaco resolves bindings from the event, and only text INSERTION needs a trusted
+event — so a probe can press Backspace without a focused window. But the caret must start
+somewhere a Backspace can do work: parked at the start of an empty first line it is
+correctly a no-op, and reading that as a fault sent a probe hunting a bug that was not
+there. A check that inserts its own text first asserts the key, not the fixture.
+
+## 35. A page that reloads has heard nothing, so every "what changed" cache must reset
+
+The surface holds caches whose whole job is to spare a page that already has the picture:
+the last tab list, the last language facts, the last chrome state. They compare what is
+about to be sent against what was sent last, and send nothing when the two match.
+
+A page reload — a developer's F5, a devtools reload, a crash recovery — produces a second
+`ready` on the same session. The document table survives it (the surface re-opens every
+live document from its own copy), but everything else the page draws came from the FIRST
+boot's held-message replay, and a second ready has nothing held. Republishing on ready
+looked like the fix and was not: `PublishModules` compared its list against the pre-reload
+list, matched, and sent nothing. The reloaded page came back with its models and no tabs at
+all — and the traffic tap proved it, showing every republish EXCEPT setModules.
+
+So a ready that is not the first must clear the caches before republishing. The rule
+generalises: any "has this changed" memo held ACROSS a client that can restart has to be
+invalidated when the client restarts, because the memo describes a conversation the new
+client was never part of.

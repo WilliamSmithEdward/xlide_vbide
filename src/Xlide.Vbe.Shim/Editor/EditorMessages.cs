@@ -2,15 +2,22 @@ using System.Text.Json.Serialization;
 
 namespace Xlide.Vbe.Shim.Editor;
 
-/// <summary>Tells the surface which module to show and what its text is.</summary>
-public sealed record LoadDocumentMessage(
+/// <summary>
+/// Tells the surface a module is open and what its text is. The page keeps a live model per
+/// open module (decision 12); the project is the workbook display name that, with the module
+/// name, is the document's identity. Idempotent on the page: a model that already exists
+/// adopts the text instead of being replaced.
+/// </summary>
+public sealed record OpenDocumentMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("text")] string Text);
 
 /// <summary>
-/// Tells the surface there is nothing to show: every pane is closed. The surface stays on screen
-/// with its empty workspace rather than yielding the frame back to the native editor.
+/// Tells the surface there is nothing to show: every pane is closed. The surface drops every
+/// model and stays on screen with its empty workspace rather than yielding the frame back to
+/// the native editor.
 /// </summary>
 public sealed record ClearDocumentMessage(
     [property: JsonPropertyName("type")] string Type);
@@ -25,9 +32,11 @@ public sealed record EditorMarker(
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("code")] string? Code);
 
-/// <summary>Replaces every squiggle shown on the module.</summary>
+/// <summary>Replaces every squiggle shown on one open module's model.</summary>
 public sealed record SetDiagnosticsMessage(
     [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("markers")] EditorMarker[] Markers);
 
 /// <summary>Chooses the surface's theme.</summary>
@@ -223,6 +232,7 @@ public sealed record SetProjectsMessage(
 public sealed record SyncDocumentMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("text")] string Text);
 
 /// <summary>Asks the surface to run one of the editor's own commands.</summary>
@@ -407,7 +417,7 @@ public sealed record SetLanguageFactsMessage(
 /// rather than at build time.
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-[JsonSerializable(typeof(LoadDocumentMessage))]
+[JsonSerializable(typeof(OpenDocumentMessage))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(SetThemeMessage))]

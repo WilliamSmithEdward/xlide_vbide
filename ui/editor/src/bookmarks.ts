@@ -4,133 +4,161 @@
  * moved here whole: toggle a mark on a line, hop between marks, clear them all.
  *
  * The marks are Monaco decorations, which ride the text as it is edited, so bookmarks shift
- * with their lines for free. The surface shows one model at a time and replaces it on every
- * module switch, so each model's marks are captured as it goes — onWillDispose, the last
- * moment its decoration positions exist — and restored when its module returns, keyed by the
- * model's URI, which names the module.
+ * with their lines for free. Models stay alive for as long as their modules are open
+ * (decision 12), so a live model's marks simply persist on it; a model being disposed — its
+ * pane closed — has its lines captured at the last moment they exist, and restored if the
+ * module returns, keyed by the model's URI.
  *
- * Like the native editor's, they last as long as the session; nothing persists them.
+ * One store serves every editor group: the marks belong to the DOCUMENT, and jumping walks
+ * the marks of whichever document the acting editor shows. Like the native editor's, they
+ * last as long as the session; nothing persists them.
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
 
-export function installBookmarks(editor: monaco.editor.IStandaloneCodeEditor): void {
-  /** Lines by model URI, for models not currently shown. */
-  const held = new Map<string, number[]>();
+export class Bookmarks {
+  /** Lines by model URI, for models that have been disposed. */
+  private readonly held = new Map<string, number[]>();
 
-  /** Live decoration ids on the current model. */
-  let ids: string[] = [];
+  /** Live decoration ids per model URI. */
+  private readonly ids = new Map<string, string[]>();
 
-  let watching: monaco.IDisposable | null = null;
+  /** Models already being watched for disposal, so an editor swap does not double-register. */
+  private readonly watched = new WeakSet<monaco.editor.ITextModel>();
 
-  const lines = (): number[] => {
-    const model = editor.getModel();
-    if (!model) {
-      return [];
-    }
-
-    const found = ids
+  /** Current bookmark lines of a model, read from its live decorations. */
+  private lines(model: monaco.editor.ITextModel): number[] {
+    const found = (this.ids.get(model.uri.toString()) ?? [])
       .map((id) => model.getDecorationRange(id)?.startLineNumber)
       .filter((line): line is number => line !== undefined);
     return [...new Set(found)].sort((a, b) => a - b);
-  };
+  }
 
-  const decorate = (marks: number[]): void => {
-    const model = editor.getModel();
-    if (!model) {
-      ids = [];
-      return;
-    }
-
-    ids = model.deltaDecorations(ids, marks.map((line) => ({
+  private decorate(model: monaco.editor.ITextModel, marks: number[]): void {
+    const key = model.uri.toString();
+    this.ids.set(key, model.deltaDecorations(this.ids.get(key) ?? [], marks.map((line) => ({
       range: new monaco.Range(line, 1, line, 1),
       options: {
         glyphMarginClassName: "xlide-bookmark codicon codicon-bookmark",
         glyphMarginHoverMessage: { value: "Bookmark" },
         stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
       },
-    })));
-  };
+    }))));
+  }
 
-  const adopt = (): void => {
-    watching?.dispose();
-    watching = null;
-    ids = [];
-
-    const model = editor.getModel();
-    if (!model) {
+  /** Adopts a model: restores held marks if its module was closed before, watches disposal. */
+  adopt(model: monaco.editor.ITextModel): void {
+    if (this.watched.has(model)) {
       return;
     }
 
-    decorate(held.get(model.uri.toString()) ?? []);
-    watching = model.onWillDispose(() => {
-      held.set(model.uri.toString(), lines());
+    this.watched.add(model);
+    const key = model.uri.toString();
+
+    const restored = this.held.get(key);
+    if (restored && restored.length > 0) {
+      this.held.delete(key);
+      this.decorate(model, restored);
+    }
+
+    model.onWillDispose(() => {
+      const marks = this.lines(model);
+      if (marks.length > 0) {
+        this.held.set(key, marks);
+      }
+      this.ids.delete(key);
     });
-  };
+  }
 
-  editor.onDidChangeModel(adopt);
-  adopt();
-
-  const jump = (line: number): void => {
-    editor.setPosition({ lineNumber: line, column: 1 });
-    editor.revealLineInCenterIfOutsideViewport(line);
-    editor.focus();
-  };
-
-  editor.addAction({
-    id: "xlide.bookmark.toggle",
-    label: "Toggle Bookmark",
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK],
-    contextMenuGroupId: "1_xlide",
-    contextMenuOrder: 2,
-    run: () => {
-      const at = editor.getPosition()?.lineNumber;
-      if (at === undefined) {
-        return;
+  /** Wires the bookmark actions into one editor. Called once per editor group. */
+  attach(editor: monaco.editor.IStandaloneCodeEditor): void {
+    const model = editor.getModel();
+    if (model) {
+      this.adopt(model);
+    }
+    editor.onDidChangeModel(() => {
+      const next = editor.getModel();
+      if (next) {
+        this.adopt(next);
       }
+    });
 
-      const marks = lines();
-      decorate(marks.includes(at) ? marks.filter((line) => line !== at) : [...marks, at]);
-    },
-  });
+    const jump = (line: number): void => {
+      editor.setPosition({ lineNumber: line, column: 1 });
+      editor.revealLineInCenterIfOutsideViewport(line);
+      editor.focus();
+    };
 
-  editor.addAction({
-    id: "xlide.bookmark.next",
-    label: "Next Bookmark",
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyN],
-    run: () => {
-      const marks = lines();
-      const at = editor.getPosition()?.lineNumber ?? 0;
-      const next = marks.find((line) => line > at) ?? marks[0];
-      if (next !== undefined) {
-        jump(next);
-      }
-    },
-  });
+    editor.addAction({
+      id: "xlide.bookmark.toggle",
+      label: "Toggle Bookmark",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK],
+      contextMenuGroupId: "1_xlide",
+      contextMenuOrder: 2,
+      run: () => {
+        const target = editor.getModel();
+        const at = editor.getPosition()?.lineNumber;
+        if (!target || at === undefined) {
+          return;
+        }
 
-  editor.addAction({
-    id: "xlide.bookmark.previous",
-    label: "Previous Bookmark",
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyP],
-    run: () => {
-      const marks = lines();
-      const at = editor.getPosition()?.lineNumber ?? 0;
-      const previous = [...marks].reverse().find((line) => line < at) ?? marks[marks.length - 1];
-      if (previous !== undefined) {
-        jump(previous);
-      }
-    },
-  });
+        const marks = this.lines(target);
+        this.decorate(target, marks.includes(at) ? marks.filter((line) => line !== at) : [...marks, at]);
+      },
+    });
 
-  editor.addAction({
-    id: "xlide.bookmark.clearAll",
-    label: "Clear All Bookmarks",
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
-    run: () => {
-      // Every module's, the way the native command cleared them: the held map and the
-      // marks on the model in hand.
-      held.clear();
-      decorate([]);
-    },
-  });
+    editor.addAction({
+      id: "xlide.bookmark.next",
+      label: "Next Bookmark",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyN],
+      run: () => {
+        const target = editor.getModel();
+        if (!target) {
+          return;
+        }
+
+        const marks = this.lines(target);
+        const at = editor.getPosition()?.lineNumber ?? 0;
+        const next = marks.find((line) => line > at) ?? marks[0];
+        if (next !== undefined) {
+          jump(next);
+        }
+      },
+    });
+
+    editor.addAction({
+      id: "xlide.bookmark.previous",
+      label: "Previous Bookmark",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyP],
+      run: () => {
+        const target = editor.getModel();
+        if (!target) {
+          return;
+        }
+
+        const marks = this.lines(target);
+        const at = editor.getPosition()?.lineNumber ?? 0;
+        const previous = [...marks].reverse().find((line) => line < at) ?? marks[marks.length - 1];
+        if (previous !== undefined) {
+          jump(previous);
+        }
+      },
+    });
+
+    editor.addAction({
+      id: "xlide.bookmark.clearAll",
+      label: "Clear All Bookmarks",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyK],
+      run: () => {
+        // Every module's, the way the native command cleared them: the held map, and the
+        // marks on every model that still lives.
+        this.held.clear();
+        for (const model of monaco.editor.getModels()) {
+          if (this.ids.has(model.uri.toString())) {
+            this.decorate(model, []);
+          }
+        }
+      },
+    });
+  }
 }

@@ -39,8 +39,13 @@ export interface SearchWidgetHandlers {
 }
 
 export class SearchWidget {
-  private readonly editor: monaco.editor.IStandaloneCodeEditor;
+  /** The active group's editor — the widget searches wherever the developer is. */
+  private readonly editorOf: () => monaco.editor.IStandaloneCodeEditor;
   private readonly handlers: SearchWidgetHandlers;
+
+  private get editor(): monaco.editor.IStandaloneCodeEditor {
+    return this.editorOf();
+  }
 
   private readonly root: HTMLElement;
   private readonly expandButton: HTMLButtonElement;
@@ -61,11 +66,24 @@ export class SearchWidget {
   /** Whether the module-scope match table is showing; it rides every re-find while true. */
   private moduleResultsOpen = false;
 
-  /** Whether the widget is showing; mirrored into a context key so Escape can be claimed
-   * inside the editor only while it matters. */
-  private readonly openKey: monaco.editor.IContextKey<boolean>;
+  /** Whether the widget is showing; mirrored into a context key PER EDITOR so Escape can be
+   * claimed inside whichever editor has it, only while it matters. */
+  private readonly openKeys: monaco.editor.IContextKey<boolean>[] = [];
+  private isOpen = false;
 
-  private readonly decorations: monaco.editor.IEditorDecorationsCollection;
+  /** Find-match paint per editor: matches decorate the editor being searched. */
+  private readonly decorationsBy = new Map<monaco.editor.IStandaloneCodeEditor, monaco.editor.IEditorDecorationsCollection>();
+
+  private get decorations(): monaco.editor.IEditorDecorationsCollection {
+    const editor = this.editor;
+    let collection = this.decorationsBy.get(editor);
+    if (!collection) {
+      collection = editor.createDecorationsCollection([]);
+      this.decorationsBy.set(editor, collection);
+    }
+    return collection;
+  }
+
   private matches: monaco.editor.FindMatch[] = [];
   private current = -1;
   private refindTimer: number | undefined;
@@ -73,11 +91,9 @@ export class SearchWidget {
   /** The scoped search whose answer is awaited; older answers are ignored. */
   private pendingSearchId = 0;
 
-  constructor(host: HTMLElement, editor: monaco.editor.IStandaloneCodeEditor, handlers: SearchWidgetHandlers) {
-    this.editor = editor;
+  constructor(editorOf: () => monaco.editor.IStandaloneCodeEditor, handlers: SearchWidgetHandlers) {
+    this.editorOf = editorOf;
     this.handlers = handlers;
-    this.decorations = editor.createDecorationsCollection();
-    this.openKey = editor.createContextKey<boolean>("xlideSearchOpen", false);
 
     this.root = document.createElement("div");
     this.root.id = "search-widget";
@@ -90,7 +106,7 @@ export class SearchWidget {
     this.wordButton = this.makeToggle("ab", "Whole word");
     this.scopeSelect = document.createElement("select");
     this.scopeSelect.setAttribute("aria-label", "Search scope");
-    for (const [value, label] of [["module", "Module"], ["project", "Workbook"], ["all", "All workbooks"]]) {
+    for (const [value, label] of [["module", "Module"], ["project", "Workbook"], ["all", "All workbooks"]] as const) {
       const option = document.createElement("option");
       option.value = value;
       option.textContent = label;
@@ -143,10 +159,36 @@ export class SearchWidget {
     this.results.hidden = true;
 
     this.root.append(head, this.results);
-    host.appendChild(this.root);
+    closeButton.addEventListener("click", () => this.close());
 
     this.wire();
-    this.registerActions(closeButton);
+  }
+
+  /**
+   * Puts the widget over a group's editor area. Called for the active group at boot and
+   * whenever the active group changes, so the widget floats where the developer works.
+   */
+  attachTo(container: HTMLElement): void {
+    if (this.root.parentElement !== container) {
+      container.appendChild(this.root);
+    }
+  }
+
+  /**
+   * The active editor changed while the widget may be open: match paint belongs to the new
+   * editor's model now, and the stale paint on the old one goes.
+   */
+  onActiveEditorChanged(): void {
+    if (this.isOpen && this.scope() === "module") {
+      this.clearAllDecorations();
+      this.findInModule(false);
+    }
+  }
+
+  private clearAllDecorations(): void {
+    for (const collection of this.decorationsBy.values()) {
+      collection.clear();
+    }
   }
 
   /** Routes the answer to a scoped search; the bridge calls this on searchResult. */
@@ -290,7 +332,7 @@ export class SearchWidget {
       }
     });
 
-    this.expandButton.addEventListener("click", () => this.setReplaceShown(this.replaceRow.hidden));
+    this.expandButton.addEventListener("click", () => this.setReplaceShown(this.replaceRow.hidden !== false));
 
     this.root.addEventListener("keydown", (event) => {
       if (event.key === "Escape") {
@@ -325,54 +367,48 @@ export class SearchWidget {
       }
     });
 
-    // Module-scope matches ride the text: an edit re-finds after a beat, and a module
-    // switch re-finds against the new model.
-    this.editor.onDidChangeModelContent(() => {
-      if (this.root.hidden || this.scope() !== "module" || this.findInput.value.length === 0) {
-        return;
-      }
-
-      window.clearTimeout(this.refindTimer);
-      this.refindTimer = window.setTimeout(() => this.findInModule(true), 150);
-    });
-    this.editor.onDidChangeModel(() => {
-      if (!this.root.hidden && this.scope() === "module") {
-        this.findInModule(false);
-      }
-    });
   }
 
-  private registerActions(closeButton: HTMLButtonElement): void {
-    closeButton.addEventListener("click", () => this.close());
-
+  /**
+   * Wires one editor into the widget: the search actions and keys, the Escape claim, and the
+   * re-find listeners. Called once per editor as the workspace creates groups, so Ctrl+F
+   * works from any group and acts on the group it was pressed in.
+   */
+  registerOn(editor: monaco.editor.IStandaloneCodeEditor): void {
     const KeyMod = monaco.KeyMod;
     const KeyCode = monaco.KeyCode;
 
-    this.editor.addAction({
+    // The open flag is per editor, because a standalone editor's commands go into a keybinding
+    // service shared by every editor on the page and the when-clause is the only scoping there
+    // is. Each editor's Escape rule matches only while ITS context says the widget is open.
+    const openKey = editor.createContextKey<boolean>("xlideSearchOpen", this.isOpen);
+    this.openKeys.push(openKey);
+
+    editor.addAction({
       id: "xlide.search.open",
       label: "Find",
       keybindings: [KeyMod.CtrlCmd | KeyCode.KeyF],
       run: () => this.open({ scope: "module" }),
     });
-    this.editor.addAction({
+    editor.addAction({
       id: "xlide.search.replace",
       label: "Replace",
       keybindings: [KeyMod.CtrlCmd | KeyCode.KeyH],
       run: () => this.open({ scope: "module", withReplace: true }),
     });
-    this.editor.addAction({
+    editor.addAction({
       id: "xlide.search.workbook",
       label: "Search Workbook",
       keybindings: [KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KeyF],
       run: () => this.open({ scope: "project" }),
     });
-    this.editor.addAction({
+    editor.addAction({
       id: "xlide.search.next",
       label: "Find Next",
       keybindings: [KeyCode.F3],
       run: () => { if (this.ensureOpenForCycle()) { this.next(); } },
     });
-    this.editor.addAction({
+    editor.addAction({
       id: "xlide.search.previous",
       label: "Find Previous",
       keybindings: [KeyMod.Shift | KeyCode.F3],
@@ -381,7 +417,23 @@ export class SearchWidget {
 
     // Escape closes from inside the editor too, but only while the widget shows: the
     // context key keeps the claim from shadowing every other Escape in the editor.
-    this.editor.addCommand(KeyCode.Escape, () => this.close(), "xlideSearchOpen");
+    editor.addCommand(KeyCode.Escape, () => this.close(), "xlideSearchOpen");
+
+    // Module-scope matches ride the text: an edit re-finds after a beat, and a model switch
+    // re-finds against the new model — but only for the editor the widget is bound to.
+    editor.onDidChangeModelContent(() => {
+      if (editor !== this.editor || this.root.hidden || this.scope() !== "module" || this.findInput.value.length === 0) {
+        return;
+      }
+
+      window.clearTimeout(this.refindTimer);
+      this.refindTimer = window.setTimeout(() => this.findInModule(true), 150);
+    });
+    editor.onDidChangeModel(() => {
+      if (editor === this.editor && !this.root.hidden && this.scope() === "module") {
+        this.findInModule(false);
+      }
+    });
   }
 
   /** F3 with the widget closed reopens the last search rather than doing nothing. */
@@ -412,7 +464,10 @@ export class SearchWidget {
     }
 
     this.root.hidden = false;
-    this.openKey.set(true);
+    this.isOpen = true;
+    for (const key of this.openKeys) {
+      key.set(true);
+    }
     this.scopeChanged();
     const focused = options?.withReplace ? this.replaceInput : this.findInput;
     focused.focus();
@@ -430,8 +485,11 @@ export class SearchWidget {
 
   close(): void {
     this.root.hidden = true;
-    this.openKey.set(false);
-    this.decorations.clear();
+    this.isOpen = false;
+    for (const key of this.openKeys) {
+      key.set(false);
+    }
+    this.clearAllDecorations();
     this.matches = [];
     this.current = -1;
     this.moduleResultsOpen = false;
@@ -554,7 +612,11 @@ export class SearchWidget {
 
     const model = this.editor.getModel();
     for (let i = 0; i < shown; i++) {
-      const range = this.matches[i].range;
+      const match = this.matches[i];
+      if (!match) {
+        continue;
+      }
+      const range = match.range;
 
       const row = document.createElement("button");
       row.type = "button";
@@ -590,7 +652,7 @@ export class SearchWidget {
   /** The first match at or after the position, wrapping to the first match. */
   private nearestMatch(position: monaco.Position): number {
     for (let i = 0; i < this.matches.length; i++) {
-      if (!this.matches[i].range.getStartPosition().isBefore(position)) {
+      if (this.matches[i]?.range.getStartPosition().isBefore(position) === false) {
         return i;
       }
     }
@@ -636,7 +698,10 @@ export class SearchWidget {
     }
 
     this.current = (this.current + direction + this.matches.length) % this.matches.length;
-    const range = this.matches[this.current].range;
+    const range = this.matches[this.current]?.range;
+    if (!range) {
+      return;
+    }
     this.editor.setSelection(range);
     this.editor.revealRangeInCenterIfOutsideViewport(range);
     this.decorate();
@@ -648,7 +713,10 @@ export class SearchWidget {
       return;
     }
 
-    const range = this.matches[this.current].range;
+    const range = this.matches[this.current]?.range;
+    if (!range) {
+      return;
+    }
     const start = range.getStartPosition();
     this.editor.executeEdits("xlide-search", [{ range, text: this.replaceInput.value }]);
     this.findInModule(false);

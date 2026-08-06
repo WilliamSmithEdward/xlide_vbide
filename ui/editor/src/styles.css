@@ -58,88 +58,416 @@ body {
   /* menu bar, toolbar, main, status. */
   grid-template-rows: auto auto 1fr auto;
   min-height: 0;
-
-  /* Written by the splitters. */
-  --panel-height: 180px;
-  --sidebar-width: 260px;
 }
 
+/* The four dock sections around the editor: left and right flank the workspace, top and
+   bottom stack inside it. Each carries its own size, written by its splitter, and exists
+   only while it holds panes. */
+
 #main {
-  display: grid;
-  grid-template-columns: var(--sidebar-width) auto 1fr;
+  display: flex;
   min-height: 0;
   min-width: 0;
 }
 
 #workspace {
-  display: grid;
-  /* tabs, editor, splitter, panel. The editor takes what is left. */
-  grid-template-rows: auto 1fr auto auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
 }
 
-#sidebar {
+/* A section holds the size its splitter wrote and never grows past it: the editor takes
+   whatever is left. The maximum keeps a mis-set size from swallowing the workspace. */
+
+#dock-left,
+#dock-right {
+  flex: 0 0 auto;
+  width: var(--dock-size, 260px);
+  max-width: 70%;
+}
+
+#dock-top,
+#dock-bottom {
+  flex: 0 0 auto;
+  height: var(--dock-size, 200px);
+  max-height: 70%;
+}
+
+#dock-left,
+#dock-right,
+#dock-top,
+#dock-bottom {
   display: flex;
-  flex-direction: column;
   min-height: 0;
   min-width: 0;
   background: var(--vscode-sideBar-background, rgba(128, 128, 128, 0.05));
 }
 
-#sidebar-tree {
-  overflow: auto;
+#dock-left > *,
+#dock-right > *,
+#dock-top > *,
+#dock-bottom > * {
+  flex: 1 1 auto;
   min-height: 0;
-  flex: 1;
-  padding-bottom: 8px;
+  min-width: 0;
 }
 
-/* The properties of the shown component, pinned under the tree the way an inspector sits under
-   an explorer. Its height is written by the splitter above it. */
-
-#properties {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 auto;
-  min-height: 0;
-  height: var(--properties-height, 300px);
-}
-
-#properties.collapsed {
-  height: auto;
-}
-
-#properties[hidden] {
+#dock-left[hidden],
+#dock-right[hidden],
+#dock-top[hidden],
+#dock-bottom[hidden],
+#dock-left-splitter[hidden],
+#dock-right-splitter[hidden],
+#dock-top-splitter[hidden],
+#dock-bottom-splitter[hidden],
+#pane-bodies[hidden] {
   display: none;
 }
 
-#properties-splitter {
+#dock-left-splitter,
+#dock-right-splitter {
+  flex: 0 0 auto;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+#dock-top-splitter,
+#dock-bottom-splitter {
   flex: 0 0 auto;
   height: 5px;
-  cursor: row-resize;
+  cursor: ns-resize;
+}
+
+#dock-left-splitter,
+#dock-right-splitter,
+#dock-top-splitter,
+#dock-bottom-splitter {
   background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
-#properties-splitter[hidden] {
-  display: none;
-}
-
-#properties-splitter:hover,
-#properties-splitter:focus-visible {
+#dock-left-splitter:hover,
+#dock-right-splitter:hover,
+#dock-top-splitter:hover,
+#dock-bottom-splitter:hover,
+#dock-left-splitter:focus-visible,
+#dock-right-splitter:focus-visible,
+#dock-top-splitter:focus-visible,
+#dock-bottom-splitter:focus-visible {
   background: var(--vscode-focusBorder, #0078d4);
   outline: none;
 }
 
-/* A visible grip on every splitter, so the resize affordance does not have to be guessed at. */
+/* Inside a section: a split tree of pane groups, each a title strip over one shown pane. */
 
-#panel-splitter,
-#sidebar-splitter,
-#properties-splitter {
+.dock-split {
+  display: flex;
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dock-split.split-row {
+  flex-direction: row;
+}
+
+.dock-split.split-column {
+  flex-direction: column;
+}
+
+.dock-cell {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.dock-cell > * {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+.dock-group {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  /* The close box keeps a margin off the right edge, so it reads as sitting in the header
+     rather than pressed against the frame (developer, 2026-08-06). */
+  padding: 2px 8px 2px 6px;
+  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 2px;
+  flex: 1 1 auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* The close box of the shown pane, at the group's top right. */
+.dock-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.dock-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+.dock-close:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.dock-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* A dragged pane's title fades; the zone preview does the talking. */
+.panel-tab.dragging {
+  opacity: 0.45;
+}
+
+/* A pane title, in whichever section it has been dragged to. */
+.panel-tab {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  opacity: 0.6;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.panel-tab:hover {
+  opacity: 0.9;
+}
+
+.panel-tab.active {
+  opacity: 1;
+  box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, #0078d4);
+}
+
+/* The editor area: the group split tree fills it; the empty view replaces it when the last
+   tab closes. Exactly one of the two is displayed at a time, and the displayed one takes
+   every pixel the docks have not claimed — without the grow, a flex column sized it to its
+   content, which for a Monaco container is nothing, and the bottom dock swallowed the
+   workspace (2026-08-06). */
+
+#editor-area,
+#empty-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+#editor-area {
+  display: flex;
+}
+
+#editor-area.empty {
+  display: none;
+}
+
+#editor-area > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-group {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* More than one group marks the active one on its strip, so the target of every
+   editor-wide command is visible at a glance. */
+.editor-group.active-group > .group-tabs {
+  box-shadow: inset 0 -1px 0 var(--vscode-focusBorder, #0078d4);
+}
+
+.group-split {
+  display: flex;
+  /* Explicit, because a bundled stylesheet reaches this class name with align-items:
+     baseline, which collapses every cell to its tab strip's height. */
+  align-items: stretch;
+  min-height: 0;
+  min-width: 0;
+}
+
+.group-split.split-row {
+  flex-direction: row;
+}
+
+.group-split.split-column {
+  flex-direction: column;
+}
+
+.group-cell {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.group-cell > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.group-splitter {
+  flex: 0 0 auto;
+  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.group-splitter.split-row {
+  width: 4px;
+  cursor: ew-resize;
+}
+
+.group-splitter.split-column {
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.group-splitter:hover,
+.group-splitter:focus-visible {
+  background: var(--vscode-focusBorder, #0078d4);
+  outline: none;
+}
+
+/* The drop target preview while a tab is dragged over a group: the half (a split) or the
+   whole (a move) it would land in.
+
+   A LIGHT wash and a definite edge, not a slab of colour: at editor size the heavy fill
+   read as the editor having been replaced by a blue rectangle, which is alarming for a
+   gesture that has not happened yet (developer, 2026-08-06). The outline carries the
+   meaning; the tint only says which side of it is being talked about. */
+.drop-overlay {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 8%, transparent);
+}
+
+/* Landing in something that already stands: a solid edge around the thing itself. */
+.drop-overlay-join {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+/* Carving space that does not exist yet: a dashed edge, because the shape is a proposal
+   rather than a place (developer, 2026-08-06). */
+.drop-overlay-new {
+  outline: 2px dashed var(--vscode-focusBorder, #0078d4);
+  outline-offset: -3px;
+  background: color-mix(in srgb, var(--vscode-focusBorder, #0078d4) 5%, transparent);
+}
+
+/* The drag is a MODE, so the page says so: everything dims behind the preview, and a compass
+   of five zones sits over whatever region the pointer is on. The compass is a hint about
+   what the pointer means, never a hit target — the position decides the drop, and a second
+   smaller thing to aim at inside the thing already being aimed at helps nobody. */
+
+.drag-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.drop-compass {
+  position: fixed;
+  z-index: 61;
+  pointer-events: none;
+  display: grid;
+  /* Generous zones: this is the thing being aimed at during a drag, and a small target
+     turns an aimed gesture into a fiddly one (developer, 2026-08-06). */
+  grid-template-columns: repeat(3, 54px);
+  grid-template-rows: repeat(3, 54px);
+  gap: 4px;
+  /* Centred on the region it describes. */
+  transform: translate(-50%, -50%);
+}
+
+.drop-compass[hidden] {
+  display: none;
+}
+
+.drop-petal {
+  border: 1px solid var(--vscode-focusBorder, #0078d4);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-editorWidget-background, #252526) 88%, transparent);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.drop-petal[hidden] {
+  display: none;
+}
+
+/* Each petal sits where the region it means is: the compass reads as the region in
+   miniature, so what a drop would do is legible without a legend. */
+.drop-petal-top { grid-area: 1 / 2; }
+.drop-petal-left { grid-area: 2 / 1; }
+.drop-petal-center { grid-area: 2 / 2; }
+.drop-petal-right { grid-area: 2 / 3; }
+.drop-petal-bottom { grid-area: 3 / 2; }
+
+.drop-petal.lit {
+  background: var(--vscode-focusBorder, #0078d4);
+  border-color: #ffffff;
+}
+
+
+
+/* A visible grip, CENTRED, on every divider that resizes something: the affordance is an
+   indicator to be seen, not discovered (developer, 2026-08-06). */
+
+#dock-left-splitter,
+#dock-right-splitter,
+#dock-top-splitter,
+#dock-bottom-splitter,
+.group-splitter {
   position: relative;
 }
 
-#panel-splitter::after,
-#properties-splitter::after {
+#dock-top-splitter::after,
+#dock-bottom-splitter::after,
+.group-splitter.split-column::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -153,7 +481,9 @@ body {
   pointer-events: none;
 }
 
-#sidebar-splitter::after {
+#dock-left-splitter::after,
+#dock-right-splitter::after,
+.group-splitter.split-row::after {
   content: "";
   position: absolute;
   left: 50%;
@@ -167,42 +497,18 @@ body {
   pointer-events: none;
 }
 
-#panel-splitter:hover::after,
-#sidebar-splitter:hover::after,
-#properties-splitter:hover::after,
-#panel-splitter:focus-visible::after,
-#sidebar-splitter:focus-visible::after,
-#properties-splitter:focus-visible::after {
+#dock-left-splitter:hover::after,
+#dock-right-splitter:hover::after,
+#dock-top-splitter:hover::after,
+#dock-bottom-splitter:hover::after,
+.group-splitter:hover::after,
+#dock-left-splitter:focus-visible::after,
+#dock-right-splitter:focus-visible::after,
+#dock-top-splitter:focus-visible::after,
+#dock-bottom-splitter:focus-visible::after,
+.group-splitter:focus-visible::after {
   background: #ffffff;
   opacity: 0.9;
-}
-
-#properties-head {
-  flex: 0 0 auto;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  padding: 5px 10px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  opacity: 0.7;
-  cursor: pointer;
-}
-
-#properties-head::before {
-  content: "\25be ";
-}
-
-#properties.collapsed #properties-head::before {
-  content: "\25b8 ";
-}
-
-#properties-head:focus-visible {
-  outline: 2px solid var(--vscode-focusBorder, #0078d4);
-  outline-offset: -2px;
 }
 
 #properties-object {
@@ -216,10 +522,6 @@ body {
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.2));
   white-space: nowrap;
   overflow: hidden;
-}
-
-#properties.collapsed #properties-object {
-  display: none;
 }
 
 .prop-object-name {
@@ -303,17 +605,7 @@ span.prop-value.readonly {
   white-space: nowrap;
 }
 
-#sidebar-splitter {
-  width: 5px;
-  cursor: col-resize;
-  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-}
 
-#sidebar-splitter:hover,
-#sidebar-splitter:focus-visible {
-  background: var(--vscode-focusBorder, #0078d4);
-  outline: none;
-}
 
 .tree-item {
   display: flex;
@@ -414,11 +706,8 @@ span.prop-value.readonly {
   opacity: 0.8;
 }
 
-#shell.panel-collapsed {
-  --panel-height: auto;
-}
 
-#container {
+.group-body {
   min-height: 0;
 
   /* A grid item refuses to shrink below its content, and the editor sets an explicit pixel
@@ -443,22 +732,18 @@ body.live-resize .minimap {
 }
 
 /* The empty workspace: what the editor area becomes when every tab is closed. It occupies the
-   editor's grid row so the layout does not move, and the shell class decides which of the two is
-   real. */
+   editor area's grid row so the layout does not move; the workspace decides which of the two
+   is real. */
 
 #empty-view {
-  display: none;
+  display: flex;
   min-height: 0;
   align-items: center;
   justify-content: center;
 }
 
-#shell.empty #container {
+#empty-view[hidden] {
   display: none;
-}
-
-#shell.empty #empty-view {
-  display: flex;
 }
 
 #empty-view-message {
@@ -480,22 +765,8 @@ body.live-resize .minimap {
   opacity: 0.8;
 }
 
-#panel-splitter {
-  height: 5px;
-  cursor: row-resize;
-  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-}
 
-#panel-splitter:hover,
-#panel-splitter:focus-visible {
-  background: var(--vscode-focusBorder, #0078d4);
-  outline: none;
-}
 
-#shell.panel-collapsed #panel-splitter {
-  /* Nothing to resize while the panel is a single row of text. */
-  display: none;
-}
 
 /* The menu bar and its dropdowns. The bar is a shell row; the dropdowns are fixed-position
    children of the body so they can hang over the editor without being clipped by any row. */
@@ -677,10 +948,11 @@ body.live-resize .minimap {
   opacity: 1;
 }
 
-#tabs {
+.group-tabs {
   display: flex;
   overflow-x: auto;
   scrollbar-width: thin;
+  min-height: 28px;
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
@@ -714,7 +986,7 @@ body.live-resize .minimap {
 }
 
 .tab:focus-visible,
-#panel-toggle:focus-visible,
+.panel-tab:focus-visible,
 .row:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: -2px;
@@ -790,6 +1062,45 @@ body.live-resize .minimap {
   justify-content: center;
   padding-top: 12vh;
   z-index: 90;
+}
+
+/* The Panes menu: the surface's own dropdown, with a tick column so the checked state
+   reads at a glance and the labels still line up when nothing is ticked. */
+
+#panes-menu .panes-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+#panes-menu .panes-menu-item.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#panes-menu .panes-menu-tick {
+  flex: 0 0 auto;
+  width: 16px;
+  font-size: 13px;
+}
+
+/* A heading inside the settings card, naming the group of rows under it. */
+.settings-section {
+  margin-top: 6px;
+  padding: 8px 16px 4px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
 #settings-card {
@@ -945,49 +1256,9 @@ body.live-resize .minimap {
   outline-offset: 1px;
 }
 
-#panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  height: var(--panel-height);
-}
 
-#panel.collapsed #panel-body {
-  display: none;
-}
 
-#panel-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
 
-#panel-tabs {
-  display: flex;
-  gap: 2px;
-}
-
-.panel-tab {
-  padding: 2px 10px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  opacity: 0.6;
-  cursor: pointer;
-}
-
-.panel-tab:hover {
-  opacity: 0.9;
-}
-
-.panel-tab.active {
-  opacity: 1;
-  box-shadow: inset 0 -2px 0 var(--vscode-focusBorder, #0078d4);
-}
 
 .panel-tab:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
@@ -1332,15 +1603,37 @@ body.objbrowser-page #objbrowser-card {
    code face, where the member lives, and the library's description when it has one. */
 #objbrowser-splitter {
   flex: none;
+  position: relative;
   height: 5px;
   cursor: ns-resize;
   border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+/* The same centred grip every resizable divider wears (developer, 2026-08-06). */
+#objbrowser-splitter::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 36px;
+  height: 3px;
+  margin: -1.5px 0 0 -18px;
+  border-radius: 2px;
+  background: var(--vscode-editor-foreground, #d4d4d4);
+  opacity: 0.35;
+  pointer-events: none;
 }
 
 #objbrowser-splitter:hover,
 #objbrowser-splitter:focus-visible {
   background: var(--vscode-focusBorder, #007fd4);
   outline: none;
+}
+
+#objbrowser-splitter:hover::after,
+#objbrowser-splitter:focus-visible::after {
+  background: #ffffff;
+  opacity: 0.9;
 }
 
 #objbrowser-detail {
@@ -1387,31 +1680,9 @@ body.objbrowser-page #objbrowser-card {
   justify-content: center;
 }
 
-#panel-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 10px;
-  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
-}
 
-#panel-toggle {
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 2px 4px;
-}
 
-#panel-toggle::before {
-  content: "\25be ";
-}
 
-#panel.collapsed #panel-toggle::before {
-  content: "\25b8 ";
-}
 
 /* The Error List's toolbar row: one toggle per severity, count always showing, pressed means
    shown. Sits under the tab row and belongs to the Problems panel alone. */
@@ -1469,9 +1740,33 @@ body.objbrowser-page #objbrowser-card {
   color: var(--vscode-problemsInfoIcon-foreground, #3794ff);
 }
 
-#panel-list {
+/* Every pane body fills the group it is docked in and scrolls inside itself, so a long list
+   never grows the section it sits in. */
+
+#panel-list,
+#sidebar-tree,
+#properties-list {
+  flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
+}
+
+#immediate,
+#locals,
+#watch {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#immediate[hidden],
+#locals[hidden],
+#watch[hidden],
+#panel-list[hidden],
+#sidebar-tree[hidden],
+#properties-list[hidden],
+#properties-object[hidden],
+#problems-filters[hidden] {
+  display: none;
 }
 
 .row {
@@ -1562,7 +1857,7 @@ body.objbrowser-page #objbrowser-card {
  * the container's origin — floating at the top of the page (developer, 2026-08-04).
  * Positioning the container makes it the ancestor the numbers were computed for.
  */
-#container {
+.group-body {
   position: relative;
 }
 

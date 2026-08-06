@@ -30,7 +30,35 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>The page itself, for the debug api's eval route. Debug builds only.</summary>
     internal WebView2Surface? Browser => _browser;
 #endif
-    private string? _module;
+
+    /// <summary>
+    /// One open module as this surface mirrors it: the workbook it belongs to (display name,
+    /// the identity the page's tabs use), the text as last agreed, and whether the developer
+    /// has typed something that has not been written back yet.
+    /// </summary>
+    private sealed class OpenDoc
+    {
+        public required string Module { get; init; }
+        public string? Project { get; init; }
+        public required string Text { get; set; }
+        public bool Unwritten { get; set; }
+    }
+
+    /// <summary>
+    /// Every module the surface holds live, keyed by (workbook, module). One model per key on
+    /// the page, one mirror per key here — two workbooks' Module1 are two documents (decision
+    /// 12), where a name-keyed table would have merged them.
+    /// </summary>
+    private readonly Dictionary<string, OpenDoc> _docs = new(StringComparer.Ordinal);
+
+    /// <summary>The active document's key — the module the native active pane shows.</summary>
+    private string? _activeKey;
+
+    /// <summary>The identity two documents are the same by, spelled like the page's tab key.</summary>
+    private static string DocKey(string module, string? project) =>
+        $"{(project ?? string.Empty).ToLowerInvariant()}\0{module.ToLowerInvariant()}";
+
+    private OpenDoc? ActiveDoc => _activeKey is { } key && _docs.TryGetValue(key, out var doc) ? doc : null;
 
     /// <summary>
     /// Messages waiting for the page to be ready, newest per kind, in the order the kinds were
@@ -72,8 +100,6 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>True when the text changed since the last live pass, the line-leave trigger's gate.</summary>
     private bool _changedSinceLiveAnalysis;
 
-    private string? _text;
-    private bool _unwritten;
     private bool _loaded;
 
     private EditorSurface(nint host) => _host = host;
@@ -81,11 +107,15 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>The window this surface is a child of, which is the editor's document area.</summary>
     public nint Host => _host;
 
-    /// <summary>The component currently shown, or null when nothing is.</summary>
-    public string? Module => _module;
+    /// <summary>The active module — the one the native active pane shows — or null when nothing is.</summary>
+    public string? Module => ActiveDoc?.Module;
 
-    /// <summary>Raised when the surface reports the developer changed the text.</summary>
-    public Action<string, string>? TextChanged { get; set; }
+    /// <summary>The active module's workbook, by the display name the page's tabs use.</summary>
+    public string? Project => ActiveDoc?.Project;
+
+    /// <summary>Raised when the surface reports the developer changed a module's text:
+    /// (module, workbook display name or null, the whole text).</summary>
+    public Action<string, string?, string>? TextChanged { get; set; }
 
     /// <summary>Raised when the developer picks a module, with the workbook when the picker
     /// knows it (the tree does; the tab strip does not yet).</summary>
@@ -398,10 +428,11 @@ internal sealed class EditorSurface : IDisposable
     public Action<int>? CaretLineSettled { get; set; }
 
     /// <summary>
-    /// Raised when an edit added or removed lines: everything anchored below afterLine moves by
-    /// delta. This is how line-anchored bookkeeping — breakpoints — follows the text.
+    /// Raised when an edit added or removed lines in a module: everything anchored in it below
+    /// afterLine moves by delta. This is how line-anchored bookkeeping — breakpoints — follows
+    /// the text.
     /// </summary>
-    public Action<int, int>? LinesShifted { get; set; }
+    public Action<string, int, int>? LinesShifted { get; set; }
 
     /// <summary>The page asked to search: id, query, matchCase, wholeWord, scope.</summary>
     public Action<int, string, bool, bool, string>? SearchRequested { get; set; }
@@ -460,49 +491,135 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public void Focus() => _browser?.Focus();
 
-    /// <summary>Shows a module's text.</summary>
-    public void Show(string moduleName, string text)
+    /// <summary>
+    /// Makes a module the active document, opening it live on the page if it is not already.
+    ///
+    /// A document already open keeps what it has: unwritten edits outrank the read that produced
+    /// this call (the page's model is ahead of the module, not behind it), and a clean document
+    /// whose module changed underneath adopts the new text as a sync — an in-place edit that
+    /// keeps the model's undo stack and caret — never as a reload.
+    /// </summary>
+    public void Show(string moduleName, string? project, string text)
     {
-        // Squiggles belong to the module they were computed for. Carrying a held set across a
-        // switch would decorate the new module at the old one's positions.
-        if (_module != moduleName)
+        var key = DocKey(moduleName, project);
+        _activeKey = key;
+
+        if (!_docs.TryGetValue(key, out var doc))
         {
-            Drop("setDiagnostics");
+            _docs[key] = new OpenDoc { Module = moduleName, Project = project, Text = text };
+            PostOpenDocument(moduleName, project, text);
+            return;
         }
 
-        _module = moduleName;
-        _text = text;
+        if (doc.Unwritten)
+        {
+            return;
+        }
 
-        // The text just arrived from the module, so there is nothing of the developer's to write.
-        _unwritten = false;
-        _overlay?.StopWriteTimer();
+        if (!string.Equals(doc.Text, text, StringComparison.Ordinal))
+        {
+            doc.Text = text;
+            PostSyncDocument(moduleName, project, text);
+        }
+    }
 
-        Send("loadDocument", JsonSerializer.Serialize(
-            new LoadDocumentMessage("loadDocument", moduleName, text),
-            EditorMessageContext.Default.LoadDocumentMessage));
+    private void PostOpenDocument(string moduleName, string? project, string text)
+    {
+        if (!_loaded)
+        {
+            // Not queued: the ready handler re-opens every live document, which also covers a
+            // page that reloaded mid-session and lost its models.
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new OpenDocumentMessage("openDocument", moduleName, project, text),
+            EditorMessageContext.Default.OpenDocumentMessage));
+    }
+
+    private void PostSyncDocument(string moduleName, string? project, string text)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SyncDocumentMessage("syncDocument", moduleName, project, text),
+            EditorMessageContext.Default.SyncDocumentMessage));
     }
 
     /// <summary>
     /// Shows nothing: every pane is closed, and the workspace says so instead of showing the last
-    /// module as if it were still open.
+    /// module as if it were still open. Unwritten edits are flushed first, not dropped.
     /// </summary>
     public void Clear()
     {
-        _module = null;
-        _text = null;
-        _unwritten = false;
-        _overlay?.StopWriteTimer();
-        Drop("setDiagnostics");
+        FlushEdits();
+        _docs.Clear();
+        _activeKey = null;
 
-        // The same kind as loading, deliberately: whichever of the two was said last is the truth
-        // a page that has not booted yet should wake up to.
-        Send("loadDocument", JsonSerializer.Serialize(
-            new ClearDocumentMessage("clearDocument"),
-            EditorMessageContext.Default.ClearDocumentMessage));
+        // Squiggles held for a page that never arrived describe models that no longer exist.
+        foreach (var kind in _pendingOrder.Where(k => k.StartsWith("setDiagnostics:", StringComparison.Ordinal)).ToArray())
+        {
+            Drop(kind);
+        }
+
+        // Posted, never held: the empty document table already IS the cleared state, and the
+        // ready handler re-opens from the table alone. A held clear replayed after ready's
+        // re-opens would wrongly clear documents shown again since (the order a boot flushes
+        // in is not the order a session said things in).
+        if (_loaded)
+        {
+            Post(JsonSerializer.Serialize(
+                new ClearDocumentMessage("clearDocuments"),
+                EditorMessageContext.Default.ClearDocumentMessage));
+        }
     }
 
     /// <summary>
-    /// Adopts the editor's version of the module without disturbing what the developer is doing.
+    /// Drops every document that is no longer in the editor's open list, flushing any unwritten
+    /// edits first — a pane closed natively mid-debounce still gets its write. The page prunes
+    /// its own models from the same open list, so no message is needed.
+    /// </summary>
+    public void PruneDocuments(IReadOnlyCollection<(string Module, string? Project)> open)
+    {
+        ArgumentNullException.ThrowIfNull(open);
+
+        var keep = new HashSet<string>(open.Select(pair => DocKey(pair.Module, pair.Project)), StringComparer.Ordinal);
+
+        // Removed from the table BEFORE any flush callback runs: a flush reaches WriteModule,
+        // which republishes, which prunes again — and the re-entrant pass must see a table
+        // without the closing documents, not a half-walked one.
+        List<OpenDoc>? closing = null;
+        foreach (var (key, doc) in _docs.ToArray())
+        {
+            if (keep.Contains(key))
+            {
+                continue;
+            }
+
+            _docs.Remove(key);
+            if (_activeKey == key)
+            {
+                _activeKey = null;
+            }
+
+            if (doc.Unwritten)
+            {
+                doc.Unwritten = false;
+                (closing ??= []).Add(doc);
+            }
+        }
+
+        foreach (var doc in closing ?? [])
+        {
+            TextChanged?.Invoke(doc.Module, doc.Project, doc.Text);
+        }
+    }
+
+    /// <summary>
+    /// Adopts the editor's version of a module without disturbing what the developer is doing.
     ///
     /// The editor is the text of record and it rewrites what it is given: it respells keywords and
     /// normalises spacing as it takes a module in. So the moment after an edit is written, the two
@@ -510,23 +627,17 @@ internal sealed class EditorSurface : IDisposable
     /// Adopting its version closes that immediately, at the one moment the difference is known to
     /// be the editor's doing and not an edit in flight.
     /// </summary>
-    public void Sync(string moduleName, string text)
+    public void Sync(string moduleName, string? project, string text)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        if (_module != moduleName)
+        if (!_docs.TryGetValue(DocKey(moduleName, project), out var doc))
         {
             return;
         }
 
-        _text = text;
-
-        if (_loaded)
-        {
-            Post(JsonSerializer.Serialize(
-                new SyncDocumentMessage("syncDocument", moduleName, text),
-                EditorMessageContext.Default.SyncDocumentMessage));
-        }
+        doc.Text = text;
+        PostSyncDocument(moduleName, project, text);
     }
 
     /// <summary>
@@ -641,19 +752,33 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.ImmediateResultMessage));
     }
 
-    /// <summary>True when the developer has typed something that has not reached the module.</summary>
-    public bool HasUnwrittenEdits => _unwritten;
+    /// <summary>True when any open document holds typing that has not reached its module.</summary>
+    public bool HasUnwrittenEdits => _docs.Values.Any(doc => doc.Unwritten);
 
-    /// <summary>The surface's copy of the module text, or null when it is showing nothing.</summary>
-    public string? Text => _text;
+    /// <summary>The active document's text, or null when nothing is shown.</summary>
+    public string? Text => ActiveDoc?.Text;
 
-    /// <summary>Replaces the squiggles shown on the module currently displayed.</summary>
-    public void ShowDiagnostics(EditorMarker[] markers)
+    /// <summary>A document's text as the surface holds it, or null when it is not open.</summary>
+    public string? TextOf(string moduleName, string? project) =>
+        _docs.TryGetValue(DocKey(moduleName, project), out var doc) ? doc.Text : null;
+
+    /// <summary>True when this one document holds typing that has not reached its module.</summary>
+    public bool HasUnwritten(string moduleName, string? project) =>
+        _docs.TryGetValue(DocKey(moduleName, project), out var doc) && doc.Unwritten;
+
+    /// <summary>Every open document, as (module, workbook display name) pairs.</summary>
+    public IReadOnlyList<(string Module, string? Project)> OpenDocuments =>
+        [.. _docs.Values.Select(doc => (doc.Module, doc.Project))];
+
+    /// <summary>Replaces the squiggles shown on one open document's model.</summary>
+    public void ShowDiagnostics(string moduleName, string? project, EditorMarker[] markers)
     {
         ArgumentNullException.ThrowIfNull(markers);
 
-        Send("setDiagnostics", JsonSerializer.Serialize(
-            new SetDiagnosticsMessage("setDiagnostics", markers),
+        // Keyed per document rather than one held slot: with several models live, the newest
+        // set for one module must not evict the newest set for another.
+        Send($"setDiagnostics:{(project ?? string.Empty).ToLowerInvariant()}/{moduleName.ToLowerInvariant()}", JsonSerializer.Serialize(
+            new SetDiagnosticsMessage("setDiagnostics", moduleName, project, markers),
             EditorMessageContext.Default.SetDiagnosticsMessage));
     }
 
@@ -815,7 +940,7 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public string? LineAt(int line)
     {
-        if (_text is null || line < 1)
+        if (ActiveDoc?.Text is not { } text || line < 1)
         {
             return null;
         }
@@ -823,11 +948,11 @@ internal sealed class EditorSurface : IDisposable
         var start = 0;
         for (var current = 1; ; current++)
         {
-            var end = _text.IndexOf('\n', start);
+            var end = text.IndexOf('\n', start);
             if (current == line)
             {
-                var text = end < 0 ? _text[start..] : _text[start..end];
-                return text.TrimEnd('\r');
+                var lineText = end < 0 ? text[start..] : text[start..end];
+                return lineText.TrimEnd('\r');
             }
 
             if (end < 0)
@@ -889,24 +1014,42 @@ internal sealed class EditorSurface : IDisposable
     {
         _overlay?.StopWriteTimer();
 
-        if (!_unwritten || _module is null || _text is null)
+        // Flags drop before the callbacks run: a flush reaches WriteModule and republishes,
+        // and the re-entrant pass must find nothing left to flush.
+        List<OpenDoc>? unwritten = null;
+        foreach (var doc in _docs.Values)
         {
-            return;
+            if (doc.Unwritten)
+            {
+                doc.Unwritten = false;
+                (unwritten ??= []).Add(doc);
+            }
         }
 
-        _unwritten = false;
-        TextChanged?.Invoke(_module, _text);
+        foreach (var doc in unwritten ?? [])
+        {
+            TextChanged?.Invoke(doc.Module, doc.Project, doc.Text);
+        }
     }
 
     /// <summary>
-    /// Forgets the developer's unwritten edits instead of writing them. For the moment they have
-    /// chosen to discard: the module is about to be put back to its saved text, and the debounced
-    /// write of the abandoned text must not land on top of it.
+    /// Forgets one document's unwritten edits instead of writing them. For the moment the
+    /// developer has chosen to discard: the module is about to be put back to its saved text,
+    /// and the debounced write of the abandoned text must not land on top of it. Only this
+    /// document forgets — a sibling tab's pending edits are not the developer's answer here.
     /// </summary>
-    public void DiscardEdits()
+    public void DiscardEdits(string moduleName, string? project)
     {
-        _unwritten = false;
-        _overlay?.StopWriteTimer();
+        if (_docs.TryGetValue(DocKey(moduleName, project), out var doc))
+        {
+            doc.Unwritten = false;
+        }
+
+        // The write timer stays armed if some other document still owes a write.
+        if (!_docs.Values.Any(other => other.Unwritten))
+        {
+            _overlay?.StopWriteTimer();
+        }
     }
 
     /// <summary>Sends a message, or holds it until the page is ready for it.</summary>
@@ -965,6 +1108,10 @@ internal sealed class EditorSurface : IDisposable
             {
                 case "ready":
                     _loaded = true;
+
+                    // A fresh page has the default chrome, whatever was last said to the
+                    // page before it; the cache would otherwise skip re-saying it.
+                    _chromeSent = null;
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
 #if DEBUG
                     PageBuildStamp = document.RootElement.TryGetProperty("timings", out var readyTimings)
@@ -972,6 +1119,15 @@ internal sealed class EditorSurface : IDisposable
                         ? readyBuild.GetString()
                         : null;
 #endif
+                    // Every live document is (re)opened before anything held is flushed: a page
+                    // that reloaded mid-session lost its models, and the messages behind it —
+                    // squiggles, tabs — land on models, so the models come first. An open the
+                    // page already has is adopted idempotently.
+                    foreach (var doc in _docs.Values.ToArray())
+                    {
+                        PostOpenDocument(doc.Module, doc.Project, doc.Text);
+                    }
+
                     Flush();
 
                     // Only now is the browser worth looking at: the page is styled and has its
@@ -1007,7 +1163,23 @@ internal sealed class EditorSurface : IDisposable
                     break;
 
                 case "contentChanged":
-                    if (_module is not null)
+                {
+                    // The message names the document it edits (decision 12); the active one
+                    // stands in only for a page too old to say, which no shipped pairing is.
+                    var editedDoc = document.RootElement.TryGetProperty("moduleName", out var editedName)
+                        && editedName.GetString() is { Length: > 0 } editedModule
+                        ? (_docs.TryGetValue(
+                            DocKey(
+                                editedModule,
+                                document.RootElement.TryGetProperty("project", out var editedProject)
+                                    ? editedProject.GetString()
+                                    : null),
+                            out var addressed)
+                            ? addressed
+                            : null)
+                        : ActiveDoc;
+
+                    if (editedDoc is not null)
                     {
                         // A small module arrives whole; a large one arrives as its changes and
                         // is reconstructed here, because building and shipping the full text of
@@ -1018,12 +1190,11 @@ internal sealed class EditorSurface : IDisposable
 
                         EngineTextEdit[]? parsedEdits = null;
                         if (updated is null
-                            && _text is { } current
                             && document.RootElement.TryGetProperty("changes", out var changeSet)
                             && changeSet.ValueKind == JsonValueKind.Array)
                         {
-                            parsedEdits = ParseChanges(current, changeSet);
-                            updated = parsedEdits is null ? null : ApplyEdits(current, parsedEdits);
+                            parsedEdits = ParseChanges(editedDoc.Text, changeSet);
+                            updated = parsedEdits is null ? null : ApplyEdits(editedDoc.Text, parsedEdits);
                         }
 
                         if (updated is not null)
@@ -1040,8 +1211,8 @@ internal sealed class EditorSurface : IDisposable
                             // the project on every keystroke. The edit is written once the
                             // developer stops typing, and immediately before anything that has
                             // to see it.
-                            _text = updated;
-                            _unwritten = true;
+                            editedDoc.Text = updated;
+                            editedDoc.Unwritten = true;
                             _overlay?.StartWriteTimer(WriteDelayMilliseconds);
 
                             // Breakpoints are line-anchored bookkeeping, and edits move lines.
@@ -1077,7 +1248,7 @@ internal sealed class EditorSurface : IDisposable
                                     var delta = newlines - (endLine - startLine);
                                     if (delta != 0)
                                     {
-                                        LinesShifted?.Invoke(startLine, delta);
+                                        LinesShifted?.Invoke(editedDoc.Module, startLine, delta);
                                     }
                                 }
                             }
@@ -1094,7 +1265,7 @@ internal sealed class EditorSurface : IDisposable
                             // so the change stream continues to it — small edits for a large
                             // module, the whole text for a small one — ordered ahead of any
                             // request about the text it makes.
-                            LiveTextPushed?.Invoke(_module!, parsedEdits is null ? updated : null, parsedEdits);
+                            LiveTextPushed?.Invoke(editedDoc.Module, parsedEdits is null ? updated : null, parsedEdits);
 
                             // Read from the raw change set rather than the parsed edits, because
                             // small modules skip the parse and this must fire for them too.
@@ -1107,6 +1278,7 @@ internal sealed class EditorSurface : IDisposable
                     }
 
                     break;
+                }
 
                 case "activateModule":
                     if (document.RootElement.TryGetProperty("moduleName", out var requested)
@@ -1610,8 +1782,8 @@ internal sealed class EditorSurface : IDisposable
         _overlay?.Dispose();
         _overlay = null;
 
-        _module = null;
-        _text = null;
+        _docs.Clear();
+        _activeKey = null;
         _loaded = false;
         _pending.Clear();
         _pendingOrder.Clear();

@@ -36,6 +36,9 @@ const PLAIN_ENTER = /^\r?\n[ \t]*$/;
 /** Lines that could be half of a For/Next pair, checked before scanning the document at all. */
 const LOOP_LINE = /^[ \t]*(?:For|Next)\b/i;
 
+/** Distinguishes each editor's key rules from every other editor's. See the scope key below. */
+let nextEditorScope = 1;
+
 // The extension reads these from settings, and so does this surface now: the host loads the
 // developer's file, the page applies what arrives, and every Enter reads the choice as it
 // stands. See settings.ts for the store and settingsdialog.ts for where choices are made.
@@ -72,15 +75,26 @@ class TypingAutomation {
     // Tab and Backspace, rebound under the extension's own when-clauses. Both fall through to
     // the editor's stock command whenever the smart answer is "nothing", so the keys never go
     // dead — they only gain the VBE-flavoured cases.
+    //
+    // The scope key is what makes them safe with more than one editor group. A standalone
+    // editor's addCommand registers into a keybinding service SHARED by every editor on the
+    // page, and the when-clause is the only scoping there is: with two groups, two identical
+    // Backspace rules matched, the later one won everywhere, and its handler deleted in ITS
+    // editor — so Backspace looked dead in the group being typed in (2026-08-06). A context
+    // key created on THIS editor is true only in this editor's context, so each rule matches
+    // exactly the editor it belongs to.
+    const scope = `xlideTypingScope${nextEditorScope++}`;
+    editor.createContextKey(scope, true);
+
     editor.addCommand(
       monaco.KeyCode.Tab,
       () => this.smartTab(),
-      "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode"
+      `${scope} && editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode`
       + " && !editorTabMovesFocus && !inlineSuggestionVisible");
     editor.addCommand(
       monaco.KeyCode.Backspace,
       () => this.smartBackspace(),
-      "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode");
+      `${scope} && editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inSnippetMode`);
 
     const model = editor.getModel();
     const position = editor.getPosition();

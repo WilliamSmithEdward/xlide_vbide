@@ -56,6 +56,99 @@ const OPTIONS = [
 ];
 
 /**
+ * The panes the Panes menu shows and hides. Supplied by the shell, because pane visibility is
+ * page-local arrangement rather than a setting the host persists — it lives with the dock
+ * layout, and this is the route back for a pane that was closed with its X.
+ */
+export interface PaneVisibilityControl {
+  list(): { name: string; title: string; open: boolean; permanent: boolean }[];
+  setOpen(name: string, open: boolean): void;
+}
+
+/**
+ * The Panes menu: one checkable row per pane, dropped under its toolbar button. Its own
+ * menu rather than a settings section (developer, 2026-08-06) — showing and hiding a pane
+ * is a thing done while working, not a preference visited once.
+ */
+export function openPanesMenu(panes: PaneVisibilityControl, anchor: HTMLElement): void {
+  const existing = document.getElementById("panes-menu");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const menu = document.createElement("div");
+  menu.id = "panes-menu";
+  // The surface's own dropdown chrome, so this menu is the menus the developer already knows.
+  menu.className = "menu-dropdown";
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", "Panes");
+
+  const dismiss = (): void => {
+    menu.remove();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("keydown", onKey, true);
+  };
+
+  const onPointerDown = (event: PointerEvent): void => {
+    if (!menu.contains(event.target as Node) && !anchor.contains(event.target as Node)) {
+      dismiss();
+    }
+  };
+
+  const onKey = (event: KeyboardEvent): void => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+    }
+  };
+
+  const draw = (): void => {
+    menu.replaceChildren();
+
+    for (const pane of panes.list()) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "menu-item panes-menu-item" + (pane.permanent ? " disabled" : "");
+      item.setAttribute("role", "menuitemcheckbox");
+      item.setAttribute("aria-checked", String(pane.open));
+      item.disabled = pane.permanent;
+      item.dataset.pane = pane.name;
+
+      const tick = document.createElement("span");
+      tick.className = "panes-menu-tick codicon" + (pane.open ? " codicon-check" : "");
+      tick.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.className = "menu-caption";
+      label.textContent = pane.permanent ? `${pane.title} (always shown)` : pane.title;
+
+      item.append(tick, label);
+      item.addEventListener("click", () => {
+        panes.setOpen(pane.name, !pane.open);
+        draw();
+      });
+
+      menu.appendChild(item);
+    }
+  };
+
+  draw();
+  document.body.appendChild(menu);
+
+  // Under its button, pulled back on-screen when the button sits near the right edge.
+  const box = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  menu.style.left = `${Math.max(4, Math.min(box.left, window.innerWidth - width - 4))}px`;
+  menu.style.top = `${box.bottom + 2}px`;
+
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("keydown", onKey, true);
+  menu.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
+}
+
+/**
  * Opens the dialog. One at a time: opening while open focuses the one that exists. Every
  * change posts through `update`; the card re-reads its state whenever the host echoes.
  */
