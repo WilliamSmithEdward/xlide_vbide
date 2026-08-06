@@ -499,8 +499,13 @@ internal static class Program
     }
 
     /// <summary>
-    /// Waits while the editor holds the add-in open, offering to try again instead of making
-    /// someone start over. Returns false when they gave up, or when there is nobody to ask.
+    /// Waits while Excel is open, offering to try again or to close it, instead of making someone
+    /// start over. Returns false when they gave up, or when there is nobody to ask.
+    ///
+    /// It says Excel is open rather than that Excel holds the add-in open, because whether the
+    /// add-in is loaded in that process is not known here and often it is not: a first install has
+    /// nothing registered to load. What is true in every case is that Excel is running and these
+    /// files cannot safely be replaced while it might pick them up.
     /// </summary>
     private static bool WaitForHostToClose(bool silent)
     {
@@ -512,15 +517,15 @@ internal static class Program
         if (silent || Console.IsInputRedirected)
         {
             Console.Error.WriteLine();
-            Console.Error.WriteLine($"Excel is running (process {processId}) and holds the add-in open. Close it and run this again.");
+            Console.Error.WriteLine($"Excel is open (process {processId}). Close it and run this again.");
             return false;
         }
 
         while (IsHostRunning(out processId))
         {
             Console.WriteLine();
-            Console.WriteLine($"Excel is running (process {processId}) and holds the add-in open.");
-            Console.Write("Close Excel, then press Enter to try again, or Esc to cancel. ");
+            Console.WriteLine($"Excel is open (process {processId}).");
+            Console.Write("Close Excel, then press Enter. Press F to close it now, or Esc to cancel. ");
 
             ConsoleKeyInfo key;
             try
@@ -540,9 +545,85 @@ internal static class Program
                 Console.WriteLine("Cancelled. Nothing was changed.");
                 return false;
             }
+
+            if (key.Key == ConsoleKey.F)
+            {
+                CloseHost();
+            }
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Closes Excel on request. It asks first, through the same close every window button sends,
+    /// so Excel can raise its own save prompt and the person can answer it. Only if that is left
+    /// unanswered does it end the process, which is what they asked for and is still worth being
+    /// slow about: unsaved work is theirs, not ours.
+    /// </summary>
+    private static void CloseHost()
+    {
+        var processes = Process.GetProcessesByName("EXCEL");
+        if (processes.Length == 0)
+        {
+            return;
+        }
+
+        Console.WriteLine("Asking Excel to close. Answer any save prompt it raises.");
+
+        foreach (var process in processes)
+        {
+            try
+            {
+                process.CloseMainWindow();
+            }
+            catch (InvalidOperationException)
+            {
+                // Already gone between the enumeration and here.
+            }
+        }
+
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && IsHostRunning(out _))
+        {
+            Thread.Sleep(250);
+        }
+
+        if (!IsHostRunning(out _))
+        {
+            Console.WriteLine("Excel closed.");
+            DisposeAll(processes);
+            return;
+        }
+
+        Console.WriteLine("Excel did not close, so it is being ended. Unsaved changes in it are lost.");
+
+        foreach (var process in Process.GetProcessesByName("EXCEL"))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+                process.WaitForExit(10_000);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                Console.Error.WriteLine($"Could not end process {process.Id}: {ex.Message}");
+            }
+            finally
+            {
+                process.Dispose();
+            }
+        }
+
+        DisposeAll(processes);
+    }
+
+    private static void DisposeAll(Process[] processes)
+    {
+        foreach (var process in processes)
+        {
+            process.Dispose();
+        }
     }
 
     /// <summary>
