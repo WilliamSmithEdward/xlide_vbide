@@ -382,6 +382,15 @@ internal static unsafe partial class Win32
     /// <summary>CLSCTX_INPROC_SERVER.</summary>
     public const uint ClassContextInProcessServer = 1;
 
+    [LibraryImport("ole32.dll")]
+    public static partial int CoInitializeEx(nint reserved, uint apartment);
+
+    [LibraryImport("ole32.dll")]
+    public static partial void CoUninitialize();
+
+    /// <summary>COINIT_MULTITHREADED.</summary>
+    public const uint ApartmentMultithreaded = 0;
+
     /// <summary>
     /// Asks a window for an object behind it. With the native object model identifier this is how
     /// a host application's own automation object is reached without the running object table.

@@ -663,3 +663,42 @@ Consequence: when a component refuses to rearrange its own windows, taking the w
 not enough - its OWNER keeps the paint, the layout, and the lifecycle, and it reconciles
 against you on its own clock. Adoption works for windows whose content is self-contained;
 a window whose owner draws its insides can only be replaced, never stolen.
+
+## 33. An out parameter eight bytes short works until the build changes, then it kills a panel
+
+The Locals panel died on 2026-08-05: every session, every break, "skipped N unreadable
+element(s)", zero rows, while the identical accessibility reads from an outside process
+returned every row all day. The discarded first fix treated the symptoms - per-element
+isolation, backoff instead of a one-fault latch - and the rows still never came.
+
+The crash was one number. UiVariant, the buffer GetCurrentPropertyValue fills, was declared
+Size = 16 with a comment calling that "sixteen bytes on x64". Sixteen is the x86 size; a
+VARIANT on x64 is TWENTY-FOUR bytes - eight of type tag and padding, then a sixteen-byte
+union whose widest member is a record's two pointers. The callee initialises the whole
+variant, so every property read wrote eight bytes past the buffer into whatever the caller
+kept beside it. Release stack layouts happened to keep dead space there, and the reads
+worked for a day of probes and live use. The morning Smart App Control forced the dev loop
+onto Debug publishes, the layout changed, a live slot moved into the overhang, and every
+read died in a NullReferenceException whose stack pointed at everything and nothing -
+memory corruption wearing an innocent exception's clothes.
+
+What found it: not the exception, which named no cause, but the SPLIT. The same reads
+out-of-proc (PowerShell UIA client) worked; in-proc they died; raw MSAA in-proc walked the
+same tree happily but showed the rows are not in MSAA at all - the grid is served by a
+native UIA provider, so the UIA channel is the only channel, and the only difference left
+between the working client and the dying one was who marshalled the variant. .NET's client
+allocates the real 24; ours allocated 16.
+
+Two consequences. First: when a native fault is build-dependent - works in Release, dies in
+Debug, moves between elements across sessions - suspect a buffer the callee writes, and
+audit every struct size in the interop layer against the 64-bit ABI, not a comment.
+Second: the reads now live on their own thread anyway (GhostReaderThread), because a UIA
+client on the provider's own thread inside the provider's process was never a supported
+shape - it re-enters the provider mid-call and worked on borrowed luck. The variant fix
+made the reads correct; the thread makes them shaped like every client that is supposed to
+exist. En route, two smaller truths: the Locals context box is a bare PANE to the
+accessibility tree, not an edit, and reads as empty in-proc even when an outside client
+sees the full procedure path - the strip stays hidden rather than lying with a blank; and
+two UIA clients hitting the editor's provider concurrently (the in-proc reader plus an
+out-of-proc probe dump) can kill the BREAK itself - the project resets, panes are
+destroyed - so probes must never dump the ghost while the product's reader is alive.

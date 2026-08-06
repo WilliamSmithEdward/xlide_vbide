@@ -339,7 +339,7 @@ export class Shell {
 
     this.installPanelTabs();
     this.installImmediate();
-    this.setLocals(null, []);
+    this.setLocals(false, null, []);
 
     this.panelToggle.addEventListener("click", () => this.togglePanel());
     this.installSplitter();
@@ -786,10 +786,11 @@ export class Shell {
   }
 
   /**
-   * Replaces the Locals panel content. Null context is the not-stopped state; a context with no
-   * rows is a break in a scope with nothing in it.
+   * Replaces the Locals panel content. Stopped false is the idle state. Stopped true with no
+   * rows is a break with nothing readable in scope — the panel must not claim "not stopped"
+   * while the editor sits at a breakpoint, whatever the reader managed to see.
    */
-  setLocals(context: string | null, rows: { expression: string; value: string; kind: string }[]): void {
+  setLocals(stopped: boolean, context: string | null, rows: { expression: string; value: string; kind: string }[]): void {
     this.localsContext.textContent = context ?? "";
     this.localsContext.hidden = context === null;
     this.localsTable.replaceChildren();
@@ -797,9 +798,9 @@ export class Shell {
     if (rows.length === 0) {
       const empty = document.createElement("div");
       empty.className = "locals-empty";
-      empty.textContent = context === null
-        ? "Not stopped. Variables appear here in break mode."
-        : "No variables in scope.";
+      empty.textContent = stopped
+        ? "No variables to show."
+        : "Not stopped. Variables appear here in break mode.";
       this.localsTable.appendChild(empty);
       return;
     }

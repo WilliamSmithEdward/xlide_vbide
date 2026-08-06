@@ -18,6 +18,13 @@ namespace Xlide.Vbe.Shim.Editor;
 /// renders into its own surface regardless of position or occlusion, so the ghost is fed
 /// faithfully through every break and step while being impossible to see. Probed 2026-08-04:
 /// counter tracked 1 through 4 across steps at alpha 0, off screen (Probe-GhostLocals.ps1).
+///
+/// Everything here — creation, connection, every read — runs on the ghost reading thread, never
+/// the host's: the rows are served by an accessibility provider inside this process, and a
+/// client on the provider's own thread is the unsupported configuration. The day the panel
+/// actually died (2026-08-05) the crash was an undersized variant out-parameter — the story is
+/// on ComVariantBlock — but the thread separation stands on its own; GhostReaderThread has the
+/// full rationale.
 /// </summary>
 internal sealed class LocalsReader : IDisposable
 {
@@ -33,7 +40,13 @@ internal sealed class LocalsReader : IDisposable
     private ComHandle<IUIAutomationElement>? _element;
     private nint _condition;
 
-    private bool _failed;
+    /// <summary>
+    /// Consecutive read failures, and when the next attempt may run. A fault does not end the
+    /// reader for the session — the first failure of a streak is logged in full, the rest wait
+    /// out a pause quietly, and a later success announces the recovery.
+    /// </summary>
+    private int _consecutiveFailures;
+    private long _retryAt;
 
     private LocalsReader(nint window) => _window = window;
 
@@ -105,10 +118,15 @@ internal sealed class LocalsReader : IDisposable
     /// </summary>
     public LocalsSnapshot? Read()
     {
-        if (_failed || _element is null || _condition == 0)
+        if (_element is null || _condition == 0 || Environment.TickCount64 < _retryAt)
         {
             return null;
         }
+
+        // Named so a fault can say which call it died in: a native fault inside the
+        // accessibility library carries no managed frames, and its bare NullReferenceException
+        // points at everything and nothing (2026-08-05).
+        var stage = "findAll";
 
         try
         {
@@ -118,6 +136,7 @@ internal sealed class LocalsReader : IDisposable
                 return null;
             }
 
+            stage = "length";
             using var array = ComHandle<IUIAutomationElementArray>.Own(arrayPointer);
             if (array is null || array.Target.GetLength(out var count) < 0)
             {
@@ -126,63 +145,115 @@ internal sealed class LocalsReader : IDisposable
 
             string? context = null;
             List<LocalRow>? rows = null;
+            var poisoned = 0;
 
             for (var i = 0; i < count; i++)
             {
-                if (array.Target.GetElement(i, out var childPointer) < 0 || childPointer == 0)
+                // Each element fends for itself: one descendant whose property fetch faults
+                // natively must cost that element alone, not the whole reading.
+                try
                 {
-                    continue;
-                }
+                    stage = $"element {i} of {count}";
+                    if (array.Target.GetElement(i, out var childPointer) < 0 || childPointer == 0)
+                    {
+                        continue;
+                    }
 
-                using var child = ComHandle<IUIAutomationElement>.Own(childPointer);
-                if (child is null)
-                {
-                    continue;
-                }
+                    using var child = ComHandle<IUIAutomationElement>.Own(childPointer);
+                    if (child is null)
+                    {
+                        continue;
+                    }
 
-                if (child.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0)
-                {
-                    continue;
-                }
+                    stage = $"control type {i}";
+                    if (child.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0)
+                    {
+                        continue;
+                    }
 
-                var controlType = kind.AsInt32();
-                if (controlType != UiAutomationIds.ListItemControl && controlType != UiAutomationIds.EditControl)
-                {
-                    continue;
-                }
+                    var controlType = kind.AsInt32();
+                    if (controlType != UiAutomationIds.ListItemControl
+                        && controlType != UiAutomationIds.EditControl
+                        && controlType != UiAutomationIds.PaneControl)
+                    {
+                        continue;
+                    }
 
-                if (child.Target.GetCurrentPropertyValue(UiAutomationIds.NameProperty, out var name) < 0)
-                {
-                    continue;
-                }
+                    stage = $"name {i}";
+                    if (child.Target.GetCurrentPropertyValue(UiAutomationIds.NameProperty, out var name) < 0)
+                    {
+                        continue;
+                    }
 
-                var text = name.TakeString();
-                if (text is null)
-                {
-                    continue;
-                }
+                    var text = name.TakeString();
+                    if (text is null)
+                    {
+                        continue;
+                    }
 
-                if (controlType == UiAutomationIds.EditControl)
-                {
-                    context = text;
+                    if (controlType == UiAutomationIds.ListItemControl)
+                    {
+                        if (ParseRow(text) is { } row)
+                        {
+                            (rows ??= []).Add(row);
+                        }
+                    }
+                    else if (controlType == UiAutomationIds.EditControl && text.Length > 0)
+                    {
+                        context = text;
+                    }
+                    else if (context is null && IsContextText(text))
+                    {
+                        // The context box reaches the accessibility tree as a bare pane, not an
+                        // edit (measured 2026-08-05: pane named "VBAProject.BreakProbe.BreakHere"
+                        // beside panes named "" and "..."), so a pane may carry the context but
+                        // never outranks a real edit. An empty edit does not count as a context:
+                        // the panel hides its strip on null, and an empty non-null string would
+                        // show a blank strip instead.
+                        context = text;
+                    }
                 }
-                else if (ParseRow(text) is { } row)
+                catch
                 {
-                    (rows ??= []).Add(row);
+                    poisoned++;
                 }
+            }
+
+            if (poisoned > 0)
+            {
+                Log.Verbose($"locals: skipped {poisoned} unreadable element(s)");
+            }
+
+            if (_consecutiveFailures > 0)
+            {
+                Log.Info($"locals: recovered after {_consecutiveFailures} failed read(s)");
+                _consecutiveFailures = 0;
             }
 
             return new LocalsSnapshot(context, rows is null ? [] : rows);
         }
         catch (Exception ex)
         {
-            // Stopped rather than repeated: this runs on the debug poll, and a recurring fault
-            // would write the same line several times a second.
-            _failed = true;
-            Log.Error("locals: the window could not be read, no longer trying", ex);
+            // Backed off rather than stopped: this runs on every requested read, and a
+            // recurring fault would write the same line several times a second — so the first
+            // failure of a streak is logged in full and the rest wait out a pause quietly.
+            _consecutiveFailures++;
+            _retryAt = Environment.TickCount64 + 5000;
+            if (_consecutiveFailures == 1)
+            {
+                Log.Error($"locals: the read died at {stage}, backing off", ex);
+            }
+
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether a pane's text reads as the broken procedure's path. The real one is dotted
+    /// ("VBAProject.Module1.Test"); its neighbours are empty or the call-stack button's "...".
+    /// </summary>
+    internal static bool IsContextText(string text) =>
+        text.Contains('.', StringComparison.Ordinal) && text.Any(char.IsLetter);
 
     /// <summary>
     /// One row's columns, split back apart.

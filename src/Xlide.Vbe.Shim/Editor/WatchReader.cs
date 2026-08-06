@@ -28,7 +28,9 @@ internal sealed class WatchReader : IDisposable
     private ComHandle<IUIAutomationElement>? _element;
     private nint _condition;
 
-    private bool _failed;
+    /// <summary>Failure streak and backoff, the same manner as the Locals reader's.</summary>
+    private int _consecutiveFailures;
+    private long _retryAt;
 
     private WatchReader(nint window) => _window = window;
 
@@ -92,7 +94,7 @@ internal sealed class WatchReader : IDisposable
     /// <summary>The window's current rows, or null when it cannot be read.</summary>
     public IReadOnlyList<WatchRow>? Read()
     {
-        if (_failed || _element is null || _condition == 0)
+        if (_element is null || _condition == 0 || Environment.TickCount64 < _retryAt)
         {
             return null;
         }
@@ -112,46 +114,72 @@ internal sealed class WatchReader : IDisposable
             }
 
             List<WatchRow>? rows = null;
+            var poisoned = 0;
 
             for (var i = 0; i < count; i++)
             {
-                if (array.Target.GetElement(i, out var childPointer) < 0 || childPointer == 0)
+                // Each element fends for itself, the same manner as the Locals reader: one
+                // descendant whose property fetch faults natively costs that element alone.
+                try
                 {
-                    continue;
-                }
+                    if (array.Target.GetElement(i, out var childPointer) < 0 || childPointer == 0)
+                    {
+                        continue;
+                    }
 
-                using var child = ComHandle<IUIAutomationElement>.Own(childPointer);
-                if (child is null)
-                {
-                    continue;
-                }
+                    using var child = ComHandle<IUIAutomationElement>.Own(childPointer);
+                    if (child is null)
+                    {
+                        continue;
+                    }
 
-                if (child.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0
-                    || kind.AsInt32() != UiAutomationIds.ListItemControl)
-                {
-                    continue;
-                }
+                    if (child.Target.GetCurrentPropertyValue(UiAutomationIds.ControlTypeProperty, out var kind) < 0
+                        || kind.AsInt32() != UiAutomationIds.ListItemControl)
+                    {
+                        continue;
+                    }
 
-                if (child.Target.GetCurrentPropertyValue(UiAutomationIds.NameProperty, out var name) < 0)
-                {
-                    continue;
-                }
+                    if (child.Target.GetCurrentPropertyValue(UiAutomationIds.NameProperty, out var name) < 0)
+                    {
+                        continue;
+                    }
 
-                var text = name.TakeString();
-                if (text is not null && ParseRow(text) is { } row)
-                {
-                    (rows ??= []).Add(row);
+                    var text = name.TakeString();
+                    if (text is not null && ParseRow(text) is { } row)
+                    {
+                        (rows ??= []).Add(row);
+                    }
                 }
+                catch
+                {
+                    poisoned++;
+                }
+            }
+
+            if (poisoned > 0)
+            {
+                Log.Verbose($"watch: skipped {poisoned} unreadable element(s)");
+            }
+
+            if (_consecutiveFailures > 0)
+            {
+                Log.Info($"watch: recovered after {_consecutiveFailures} failed read(s)");
+                _consecutiveFailures = 0;
             }
 
             return rows is null ? [] : rows;
         }
         catch (Exception ex)
         {
-            // Stopped rather than repeated: this runs on the debug poll, and a recurring fault
-            // would write the same line several times a second.
-            _failed = true;
-            Log.Error("watch: the window could not be read, no longer trying", ex);
+            // Backed off rather than stopped, the same manner as the Locals reader: the first
+            // failure of a streak is logged in full, the rest wait out a pause quietly.
+            _consecutiveFailures++;
+            _retryAt = Environment.TickCount64 + 5000;
+            if (_consecutiveFailures == 1)
+            {
+                Log.Error("watch: the window could not be read, backing off", ex);
+            }
+
             return null;
         }
     }

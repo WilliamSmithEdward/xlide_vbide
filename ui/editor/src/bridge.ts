@@ -70,7 +70,7 @@ export type HostMessage =
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
-  | { type: "setLocals"; context: string | null; rows: { expression: string; value: string; kind: string }[] }
+  | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "setDebugState"; mode: string }
   | { type: "obLibrariesResult"; id: number; libraries: ObLibrary[] }
@@ -764,7 +764,7 @@ export class EditorBridge {
         this.shell?.showSearchResults(message.id, message.matches, message.truncated, message.replaced ?? 0);
         return;
       case "setLocals":
-        this.shell?.setLocals(message.context ?? null, message.rows ?? []);
+        this.shell?.setLocals(message.stopped ?? false, message.context ?? null, message.rows ?? []);
         return;
       case "setWatches":
         this.shell?.setWatches(message.stopped, message.rows ?? []);
@@ -1335,6 +1335,7 @@ export function demoTransport(): HostTransport {
         });
         send({
           type: "setLocals",
+          stopped: true,
           context: "VBAProject.Module1.Demo",
           rows: [
             { expression: "counter", value: "42", kind: "Long" },

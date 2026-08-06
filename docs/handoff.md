@@ -10,6 +10,37 @@ that would be expensive to reverse.
 
 ## START NEW SESSION HERE — 2026-08-04 evening
 
+**2026-08-05 EVENING — LOCALS TRACKING IN BREAK IS FIXED (lesson 33 has the full story).**
+The developer's report: in a live break the Locals panel said "Not stopped. Variables
+appear here in break mode." while the code pane showed the stopped line. Root cause found
+by splitting in-proc vs out-of-proc reads: `UiVariant`/`ComVariantBlock` were declared
+Size = 16, but an x64 VARIANT is 24 bytes — every GetCurrentPropertyValue wrote 8 bytes
+past the buffer. Release layouts survived it; the SAC-forced switch to Debug publishes
+(2026-08-05 morning) moved a live slot into the overhang and every read died in a frameless
+NullReferenceException ("skipped 4 unreadable element(s)", 24 sessions straight). Fixed:
+both structs are Size = 24. THREE MORE THINGS SHIPPED WITH IT: (1) the readers moved off
+the host thread onto `Editor/GhostReaderThread.cs` — an MTA thread owning both LocalsReader
+and WatchReader; the host only RequestRead()s and reads published snapshots, never blocks
+(bounded 500ms join on dispose, readings cleared at break exit so a new break starts
+empty); in-proc UIA clients on the provider's own thread were never a supported shape.
+(2) Honest panel states: `setLocals` gained a `stopped` flag (shim record + EditorSurface +
+bridge + shell + demo); in a break with nothing readable the panel says "No variables to
+show.", never "Not stopped". The readers also kept the discarded-patch armor, rebuilt: per-
+element fault isolation, stage-named first-failure logging, 5s backoff, recovery lines.
+(3) The context strip: the context box is a PANE to UIA (not an Edit — that was the old
+"context reads null" nit) and reads EMPTY in-proc even though out-of-proc sees
+"VBAProject.Module.Proc"; the reader accepts a dotted pane name and normalises empty to
+null so the strip hides rather than showing blank. VERIFIED: quiet-break probe (no external
+COM) — break enters, honest empty first tick, `locals: 3 row(s)` next tick, break holds;
+`Test-GhostLocalsPanel.ps1` PASS with three distinct row pushes tracking two steps
+(counter 1→2, label alpha→beta) and a clean clear at exit; 72/72 Core tests; page rebuilt
+and mirrored. TRAP FOR PROBES: dumping the ghost's UIA from OUTSIDE while the in-proc
+reader is alive can RESET THE PROJECT mid-break (measured twice) — never do both at once.
+Watch rows' accessible-name shape against a REAL watch remains unverified (needs the
+native Add Watch dialog — developer's first watch is the test). NOTE: the debug api and
+CDP flags my session memory mentioned are NOT in this tree — they were part of the
+discarded 2026-08-05 working copy; treat them as never shipped.**
+
 **2026-08-05 THE OBJECT BROWSER ENDGAME — A FLOATING XLIDE PALETTE (developer-chosen,
 confirmed live; supersedes every OB delta below).** After the hole shipped, the developer
 asked for theming and true outside-the-canvas floating — both impossible for the native
@@ -271,9 +302,11 @@ shedding as ports land).
   panel sits at "Searching...").
 
 **Known nits and edges, all small, none blocking:**
-- Locals panel: the context strip (procedure name) reads null through the COM reader; the
-  ghost has the data (the Edit element) — reader-side parse nit. External-command steps
-  outrun the poll cadence; real steps go through our command path which arms the fast watch.
+- Locals panel: the context strip stays hidden — the context box is a PANE to UIA (never an
+  Edit; measured 2026-08-05) and its name reads EMPTY in-proc even though an outside client
+  sees "VBAProject.Module.Proc"; the reader takes a dotted pane name when one ever arrives
+  and normalises empty to null. External-command steps outrun the poll cadence; real steps
+  go through our command path which arms the fast watch.
 - Residual canvas flicker during resize drags is the browser compositor catching up — the
   dark ground keeps it subtle; accepted for now.
 - `_writtenModules` is keyed by bare module name — two same-named modules in different

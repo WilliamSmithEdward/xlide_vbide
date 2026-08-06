@@ -705,11 +705,12 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
-    /// Replaces what the Locals panel shows. Null context with no rows is the not-stopped state.
+    /// Replaces what the Locals panel shows. Stopped false is the idle state; stopped true with
+    /// no rows is a break whose variables cannot be read, shown honestly as an empty break.
     /// Not held for a loading page for the same reason as the current line: stale variables are
     /// worse than none.
     /// </summary>
-    public void ShowLocals(string? context, SurfaceLocalRow[] rows)
+    public void ShowLocals(bool stopped, string? context, SurfaceLocalRow[] rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
 
@@ -719,7 +720,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         Post(JsonSerializer.Serialize(
-            new SetLocalsMessage("setLocals", context, rows),
+            new SetLocalsMessage("setLocals", stopped, context, rows),
             EditorMessageContext.Default.SetLocalsMessage));
     }
 

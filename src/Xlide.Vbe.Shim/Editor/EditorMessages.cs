@@ -162,11 +162,13 @@ public sealed record SurfaceLocalRow(
     [property: JsonPropertyName("kind")] string Kind);
 
 /// <summary>
-/// What the debugger has in scope. Context names the broken procedure; null context and no rows
-/// means not stopped, which is the panel's empty state.
+/// What the debugger has in scope. Context names the broken procedure. Stopped false is the
+/// idle state; stopped true with no rows is a break whose variables cannot be read yet, or a
+/// scope with nothing in it — the panel must not claim "not stopped" during a break.
 /// </summary>
 public sealed record SetLocalsMessage(
     [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("stopped")] bool Stopped,
     [property: JsonPropertyName("context")] string? Context,
     [property: JsonPropertyName("rows")] SurfaceLocalRow[] Rows);
 

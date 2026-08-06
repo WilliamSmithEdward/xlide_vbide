@@ -273,6 +273,12 @@ internal sealed class AddInSession : IDisposable
         HideNativeToolbars();
         PrepareLocalsGhost();
         PrepareWatchGhost();
+
+        // Both ghosts are read from one dedicated thread; the host thread only asks and looks.
+        // Reading from here re-enters the editor's own accessibility provider and dies in
+        // native faults — GhostReaderThread carries the story.
+        _ghostReaders = GhostReaderThread.Start(_localsPalette, _watchPalette);
+
         DarkenTitleBar(host);
 
         return true;
@@ -2112,16 +2118,18 @@ internal sealed class AddInSession : IDisposable
             if (_lastLocalsKey is not null)
             {
                 _lastLocalsKey = null;
-                _editorSurface.ShowLocals(null, []);
+                _editorSurface.ShowLocals(stopped: false, null, []);
             }
 
             return;
         }
 
-        if (_localsReader?.Read() is not { } snapshot)
-        {
-            return;
-        }
+        // Asks for a fresh read and shows the latest one that has landed; the reading thread
+        // answers within a tick or two. Until it does — or while reads are failing — an empty
+        // snapshot stands in, so the panel honestly shows a stopped emptiness rather than
+        // whatever it said before the break.
+        _ghostReaders?.RequestRead();
+        var snapshot = _ghostReaders?.Locals ?? new LocalsReader.LocalsSnapshot(null, []);
 
         var rows = new SurfaceLocalRow[snapshot.Rows.Count];
         for (var i = 0; i < rows.Length; i++)
@@ -2137,7 +2145,7 @@ internal sealed class AddInSession : IDisposable
         }
 
         _lastLocalsKey = key;
-        _editorSurface.ShowLocals(snapshot.Context, rows);
+        _editorSurface.ShowLocals(stopped: true, snapshot.Context, rows);
         Log.Info($"locals: {rows.Length} row(s) at {snapshot.Context ?? "(no context)"}");
     }
 
@@ -2186,10 +2194,10 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        if (_watchReader?.Read() is not { } reading)
-        {
-            return;
-        }
+        // The same stand-in discipline as the Locals mirror above: an empty reading until the
+        // reading thread's first answer lands.
+        _ghostReaders?.RequestRead();
+        var reading = _ghostReaders?.Watches ?? [];
 
         var rows = new SurfaceWatchRow[reading.Count];
         for (var i = 0; i < rows.Length; i++)
@@ -2230,6 +2238,12 @@ internal sealed class AddInSession : IDisposable
                 {
                     _inBreak = false;
                     _editorSurface?.ShowCurrentLine(null);
+
+                    // Forgotten at exit so the NEXT break starts empty: the readings outlive
+                    // the break otherwise, and the previous break's variables are exactly
+                    // stale enough to mislead.
+                    _ghostReaders?.ClearReadings();
+
                     PublishLocals(stopped: false);
                     PublishWatches(stopped: false);
                     Log.Info($"debug: mode {mode}, not stopped");
@@ -3676,7 +3690,11 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
-    private LocalsReader? _localsReader;
+    /// <summary>
+    /// The ghost palettes' reading thread, started once both palettes are prepared. It owns the
+    /// Locals and Watches readers; the host thread asks it to read and looks at what landed.
+    /// </summary>
+    private GhostReaderThread? _ghostReaders;
 
     /// <summary>The floated Locals palette, its original extended styles kept for restoration.</summary>
     private nint _localsPalette;
@@ -3760,10 +3778,9 @@ internal sealed class AddInSession : IDisposable
                 Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
                     Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
 
-                _localsReader = LocalsReader.Create(palette);
-                Log.Info(_localsReader is null
-                    ? "locals: the ghost palette could not be read; the native window stays"
-                    : $"locals: ghost palette {palette:X} feeding the panel");
+                // The reader is not created here: it lives on the ghost reading thread, which
+                // starts once both palettes are prepared and reports its own connect result.
+                Log.Verbose($"locals: palette {palette:X} floated and ghosted");
                 return;
             }
         }
@@ -3809,8 +3826,6 @@ internal sealed class AddInSession : IDisposable
 
         _localsPalette = 0;
     }
-
-    private WatchReader? _watchReader;
 
     /// <summary>The floated Watches palette, its original extended styles kept for restoration.</summary>
     private nint _watchPalette;
@@ -3879,10 +3894,9 @@ internal sealed class AddInSession : IDisposable
                 Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
                     Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
 
-                _watchReader = WatchReader.Create(palette);
-                Log.Info(_watchReader is null
-                    ? "watch: the ghost palette could not be read; the native window stays"
-                    : $"watch: ghost palette {palette:X} feeding the panel");
+                // The reader is not created here: it lives on the ghost reading thread, the
+                // same manner as the Locals ghost above.
+                Log.Verbose($"watch: palette {palette:X} floated and ghosted");
                 return;
             }
         }
@@ -5087,15 +5101,13 @@ internal sealed class AddInSession : IDisposable
         _immediateReader?.Dispose();
         _immediateReader = null;
 
+        // The reading thread stops before the palettes change back: a reader must not touch a
+        // window mid-restoration. Its join is bounded — see GhostReaderThread.Dispose.
+        _ghostReaders?.Dispose();
+        _ghostReaders = null;
+
         RestoreLocalsPalette();
-
-        _localsReader?.Dispose();
-        _localsReader = null;
-
         RestoreWatchPalette();
-
-        _watchReader?.Dispose();
-        _watchReader = null;
 
         _typeLibraries?.Dispose();
         _typeLibraries = null;
