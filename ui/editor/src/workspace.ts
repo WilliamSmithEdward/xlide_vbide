@@ -197,6 +197,24 @@ class EditorGroup {
    * holds text for the one that was looked at. A group whose every survivor is untouched cannot
    * show anything by itself, and returns false rather than leaving a blank pane unexplained.
    */
+  /**
+   * The surviving tab this group showed most recently, whether or not the page holds its text.
+   *
+   * promote() answers the narrower question, "what can I show right now", and returns nothing
+   * when the page has no text for any survivor. This one answers "what SHOULD be shown", which is
+   * what a caller needs when it is willing to go and fetch it.
+   */
+  mostRecentlyShown(): DocumentId | undefined {
+    for (const key of this.shownHere) {
+      const found = this.tabs.find((tab) => this.key(tab.id) === key);
+      if (found) {
+        return found.id;
+      }
+    }
+
+    return undefined;
+  }
+
   promote(): boolean {
     const survivors = this.tabs.map((tab) => tab.id);
     const remembered = this.shownHere
@@ -437,9 +455,22 @@ export class Workspace {
 
     // A group whose active tab closed goes back to what it was showing before it: only the
     // HOST-active document gets a reveal below, and a background group must not sit blank either.
+    //
+    // promote() can only choose among documents the page HAS TEXT for, and the page gets a
+    // module's text when it is activated, not when its tab appears. So a group whose every
+    // survivor is untouched had nothing to promote to and sat blank with a full tab strip above
+    // it (the developer, 2026-08-07: closing a tab went to a blank view). When that happens the
+    // host is asked for the best candidate and the group shows it when the text arrives, which is
+    // the same fallback moving a tab out of a group already used.
     for (const group of this.groups) {
-      if (!group.active && group.tabs.length > 0) {
-        group.promote();
+      if (group.active || group.tabs.length === 0 || group.promote()) {
+        continue;
+      }
+
+      const next = group.mostRecentlyShown() ?? group.tabs[0]?.id;
+      if (next && !group.pending) {
+        group.pending = next;
+        this.handlers.activate(next);
       }
     }
 
