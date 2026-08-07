@@ -261,9 +261,23 @@ export function renameFor(
         }
     }
 
-    // The declaration is renamed along with everything else: a rename that left it behind would
-    // produce a project referring to a name nothing declares.
-    const sites = referencesFor(symbols, moduleName, source, offset, true);
+    // Anchored at the DECLARATION, wherever the developer started from.
+    //
+    // Starting from a call site and starting from the declaration must rename the same set, and
+    // they did not: asked at `CleanModule.RunTotal`, the member resolver answered with every
+    // module declaring a RunTotal, and the rename went through all of them — including a
+    // BrokenModule.RunTotal that has nothing to do with it (the developer, 2026-08-06). Resolving
+    // to the one declaration first and collecting from there makes every entry point agree, and
+    // makes the entry point that was already correct the only one there is.
+    const anchor = anchorFor(symbols, moduleName, source, offset);
+    if (anchor.ambiguous) {
+        return { modules: [], oldName: word.text, refused: anchor.ambiguous };
+    }
+
+    const sites = anchor.at
+        ? referencesFor(symbols, anchor.at.module, anchor.at.source, anchor.at.offset, true)
+        : referencesFor(symbols, moduleName, source, offset, true);
+
     if (sites.length === 0) {
         return {
             modules: [],
@@ -310,6 +324,51 @@ export function renameFor(
     }
 
     return { modules: out, oldName: word.text, ambiguous: leftAlone(symbols, word.text, sites) };
+}
+
+/**
+ * The declaration a rename should be anchored at, whichever site the developer asked from.
+ *
+ * One declaration is the answer. None means the symbol is a local, a parameter or something else
+ * with no project-level declaration, and the caret's own position is the right anchor. More than
+ * one means the name genuinely resolves to several procedures and nothing can prove which was
+ * meant — which is the collision the developer asked to be warned about rather than guessed at.
+ */
+function anchorFor(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    source: string,
+    offset: number,
+): { at?: { module: string; source: string; offset: number }; ambiguous?: string } {
+    const declarations = definitionsFor(symbols, moduleName, source, offset);
+
+    if (declarations.length > 1) {
+        const where = [...new Set(declarations.map((one) => one.module))].sort();
+        return {
+            ambiguous: where.length > 1
+                ? `'${where.join("' and '")}' each declare this name, so nothing can tell which was meant. `
+                    + 'Rename it from the declaration you mean.'
+                : 'This name is declared more than once, so nothing can tell which one was meant.',
+        };
+    }
+
+    const only = declarations[0];
+    if (!only) {
+        return {};
+    }
+
+    const home = symbols.byModule.get(only.module.toLowerCase());
+    if (!home) {
+        return {};
+    }
+
+    const starts = lineStarts(home.source);
+    const line = starts[only.line - 1];
+    if (line === undefined) {
+        return {};
+    }
+
+    return { at: { module: home.moduleName, source: home.source, offset: line + only.column - 1 } };
 }
 
 /**

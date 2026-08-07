@@ -892,6 +892,81 @@ try {
 
     check('a keyword is not a symbol', () => assert.equal(nowhere.locations.length, 0));
 
+    // Rename: the same set from every entry point.
+    //
+    // Asked at a qualified call, the member resolver answers with EVERY module declaring that
+    // name, and a rename built straight on that went through all of them — renaming a procedure
+    // in another module that merely shared a name (found live, 2026-08-06). Anchoring at the one
+    // declaration is what fixed it, so the test that matters is that starting from a call site
+    // and starting from the declaration reach exactly the same modules.
+    const SHARED_A = [
+        'Option Explicit',
+        '',
+        'Public Sub RunTotal()',
+        '    Debug.Print "a"',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    const SHARED_B = [
+        'Option Explicit',
+        '',
+        'Public Sub RunTotal()',
+        '    Debug.Print "b"',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    const NAMES_A = [
+        'Option Explicit',
+        '',
+        'Public Sub Test()',
+        '    SharedA.RunTotal',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Shared',
+        generation: 1,
+        modules: [
+            { moduleName: 'SharedA', source: SHARED_A, type: 'standard' },
+            { moduleName: 'SharedB', source: SHARED_B, type: 'standard' },
+            { moduleName: 'Names', source: NAMES_A, type: 'standard' },
+        ],
+    });
+
+    const fromCall = await call('textDocument/rename', {
+        projectId: 'Shared',
+        moduleName: 'Names',
+        source: NAMES_A,
+        moduleType: 'standard',
+        offset: NAMES_A.indexOf('SharedA.RunTotal') + 'SharedA.Run'.length,
+        newName: 'RunTotalTest',
+    });
+
+    const fromDeclaration = await call('textDocument/rename', {
+        projectId: 'Shared',
+        moduleName: 'SharedA',
+        source: SHARED_A,
+        moduleType: 'standard',
+        offset: SHARED_A.indexOf('Sub RunTotal') + 6,
+        newName: 'RunTotalTest',
+    });
+
+    const touched = (answer) => answer.modules.map((entry) => entry.module).sort().join(', ');
+    console.log(`  -> from the call site: ${touched(fromCall)}`);
+    console.log(`  -> from the declaration: ${touched(fromDeclaration)}`);
+
+    check('a rename from a call site reaches the same modules as one from the declaration', () =>
+        assert.equal(touched(fromCall), touched(fromDeclaration)));
+
+    check('a module that merely shares the name is not renamed', () => {
+        assert.ok(!fromCall.modules.some((entry) => entry.module === 'SharedB'),
+            'SharedB declares its own RunTotal and must be left alone');
+        assert.equal(touched(fromCall), 'Names, SharedA');
+    });
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

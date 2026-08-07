@@ -123,17 +123,23 @@ which does not care what is showing.
 | a bare call elsewhere, colliding definitions | no, by the resolver |
 | the other module's own declaration and its own calls | never |
 
-**One thing is NOT proven.** The collision row holds at the engine layer, where seeding is explicit
-and certain. The live attempt at it was inconclusive: the colliding declaration was added through
-the object model rather than through the editor, and there is no way from outside to confirm the
-engine had re-seeded with it before the rename ran — so the bare call being renamed may be correct
-behaviour against a project the engine still saw as having one definition, or may be the
-divergence it looks like. Settle it by making the colliding declaration THROUGH the editor, where
-the write-back and reseed are observable, before trusting the row.
+The collision row was NOT inconclusive after all — it was broken, and the developer found it by
+renaming from a call site (2026-08-06). Asked at `CleanModule.RunTotal`, the member resolver
+answers with EVERY module declaring a `RunTotal`, so the rename went through all of them and
+renamed a `BrokenModule.RunTotal` that had nothing to do with it.
 
-The ambiguity report is also over-broad: it currently lists the other procedure's own declaration
-and its own calls, which are a different symbol and not something a developer needs to decide
-about. Only the genuinely ambiguous bare call belongs in a warning.
+Every probe until then had started at the DECLARATION, which resolves to one definition and was
+always correct. The entry point was the variable nobody varied.
+
+The fix is to anchor every rename at the declaration, whichever site it was asked from: resolve
+the symbol first, then collect from there. So the entry point that was already right became the
+only one there is, and a name resolving to more than one declaration now refuses and names the
+modules — which is the collision warning, arriving where it is actually needed. The smoke test
+now asserts that a rename from a call site and one from the declaration reach the same modules.
+
+The remaining `ambiguous` list is over-broad: it reports the other procedure's own declaration and
+its own calls, which are a different symbol and not something a developer needs to decide about.
+Nothing shows it yet, so nothing is wrong on screen — but it is not fit to show as it stands.
 
 ## What rename still needs
 
