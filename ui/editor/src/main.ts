@@ -614,14 +614,27 @@ function boot(): void {
       }
 
       const found = await bridge.requestNavigation(model.getOffsetAt(position), false);
-      const locations = toEditorLocations(bridge, found);
-      const elsewhere = found[0];
-
-      if (locations.length === 0 && elsewhere) {
-        bridge.navigateTo(elsewhere);
+      const target = found[0];
+      if (!target) {
+        return null;
       }
 
-      return locations;
+      // Anything outside THIS model is navigated by the host, not returned to the editor.
+      //
+      // The standalone editor's navigation can only move within the model it is showing: its
+      // editor service returns nothing for any other document, so a definition in another module
+      // came back a perfectly good location and went nowhere (the developer, 2026-08-06). It went
+      // unnoticed because the definition first tested was in the same module as the call.
+      //
+      // The host opens the module, brings its group forward and places the caret, which is the
+      // same path the tree and the references list already use.
+      const home = bridge.modelForLocation(target);
+      if (home !== model) {
+        bridge.navigateTo(target);
+        return null;
+      }
+
+      return toEditorLocations(bridge, found);
     },
   });
 
