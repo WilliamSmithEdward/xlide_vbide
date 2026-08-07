@@ -405,6 +405,27 @@ function clientFor(entry) {
     },
     immediate: (text) => call(`immediate${query({ text })}`, { method: "POST" }),
 
+    /**
+     * Every breakpoint the session is holding, and the mode it is in.
+     *
+     * There was a way to SET one from the day this door landed and no way to ask what is set,
+     * which makes a debugger assertion a matter of remembering what the test did.
+     */
+    breakpoints: () => call("breakpoints"),
+
+    /**
+     * Types into the editor the way a person does.
+     *
+     * Through the editor's own keyboard pipeline, so the behaviour that only happens WHILE typing
+     * is what gets tested: smart Enter, comment continuation, auto-indent. Setting the text
+     * instead goes around every handler that makes typing feel like anything, so a probe that
+     * sets text is testing nothing this product does. A `\n` is sent as a real Enter.
+     *
+     *   await api.type("' a comment\n");     // the next line should continue the apostrophe
+     */
+    type: (text, { waitMs = 8000 } = {}) =>
+      call(`type${query({ waitMs })}`, { method: "POST", body: text, timeout: waitMs + 8000 }),
+
     /** state: "on" | "off" | undefined to toggle. Prefer on/off in scripts. */
     breakpoint: (module, line, { project, state } = {}) =>
       call(`breakpoint${query({ module, line, project, state })}`, { method: "POST" }),

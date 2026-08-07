@@ -148,6 +148,8 @@ complete on the day it is written and quietly is not, six routes later.
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
+| `breakpoints` | `breakpoints()` | what is set, per module, and the mode |
+| `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
 | `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
 | `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes |

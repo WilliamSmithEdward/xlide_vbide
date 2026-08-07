@@ -705,6 +705,21 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("mode")] int Mode,
     [property: JsonPropertyName("components")] DebugComponentRow[] Components);
 
+/// <summary>The breakpoints one module carries, in line order.</summary>
+public sealed record DebugBreakpointRow(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("lines")] int[] Lines);
+
+/// <summary>
+/// Every breakpoint the session is holding, and the mode it is in.
+///
+/// There was a way to SET one from the moment this door landed and no way to ask what is set,
+/// which makes every debugger assertion a matter of remembering what the test did.
+/// </summary>
+public sealed record DebugBreakpointsReply(
+    [property: JsonPropertyName("breakpoints")] DebugBreakpointRow[] Breakpoints,
+    [property: JsonPropertyName("mode")] string? Mode);
+
 /// <summary>The developer's settings as they stand, after any change this request asked for.</summary>
 public sealed record DebugSettingsReply(
     [property: JsonPropertyName("blockLayout")] string BlockLayout,
@@ -945,6 +960,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugComponentReply))]
 [JsonSerializable(typeof(DebugProjectReply))]
 [JsonSerializable(typeof(DebugSettingsReply))]
+[JsonSerializable(typeof(DebugBreakpointsReply))]
 [JsonSerializable(typeof(DebugMarkReply))]
 [JsonSerializable(typeof(DebugOutlineReply))]
 [JsonSerializable(typeof(DebugCompileReply))]

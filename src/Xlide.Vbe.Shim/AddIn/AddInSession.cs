@@ -1374,6 +1374,66 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugCompileReply));
             }
 
+            case "type" when request.Body.Length > 0 || request.Query.ContainsKey("text"):
+            {
+                // Types into the editor the way a person does, so the behaviour that only happens
+                // WHILE typing can be tested: smart Enter, comment continuation, auto-indent.
+                //
+                // Through the editor's own keyboard pipeline — `trigger("keyboard", "type")` —
+                // not by setting the text. Setting text goes around every handler that makes
+                // typing feel like anything, which means a probe that sets text is testing
+                // nothing this product does. \n is sent as a real Enter for the same reason: it
+                // is the keystroke the block layout hangs off.
+                var typing = request.Body.Length > 0 ? request.Body : request.Query["text"];
+
+                // Typed with GAPS, because typing has gaps.
+                //
+                // Smart Enter runs from a content-change listener and defers its own work to a
+                // microtask, the way the editor's auto-indent lands first. A script that types a
+                // newline and then the next line synchronously never lets that run, so the
+                // continuation is computed against a line that already has the next line on it —
+                // and the first version of this route reported that comment continuation was
+                // broken when it was not (2026-08-07). One turn of the loop between segments is
+                // the difference between typing and setting text.
+                var script = $$"""
+                    (async function () {
+                      var editor = window.xlideBridge.workspace.activeEditor();
+                      editor.focus();
+                      var settle = function () {
+                        return new Promise(function (done) { setTimeout(done, 24); });
+                      };
+
+                      var text = {{JsonString(typing)}};
+                      var parts = text.split("\n");
+
+                      for (var i = 0; i < parts.length; i++) {
+                        if (i > 0) {
+                          editor.trigger("keyboard", "type", { text: "\n" });
+                          await settle();
+                        }
+                        if (parts[i].length > 0) {
+                          editor.trigger("keyboard", "type", { text: parts[i] });
+                          await settle();
+                        }
+                      }
+
+                      var at = editor.getPosition();
+                      return JSON.stringify({
+                        line: at ? at.lineNumber : null,
+                        column: at ? at.column : null,
+                        text: editor.getModel() ? editor.getModel().getValue() : null
+                      });
+                    })()
+                    """;
+
+                var typed = RunPageScript(script, null, WaitMilliseconds(request, 8000));
+                return typed.Error is { } typeError
+                    ? DebugError(typeError)
+                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugEvalReply(typed.Answered, typed.ErrorCode, typed.Result, Unwrap(typed.Result)),
+                        DebugJsonContext.Default.DebugEvalReply));
+            }
+
             case "mark" when request.Query.TryGetValue("text", out var marker) && marker.Length > 0:
             {
                 // A labelled line in the log, and the offset it landed at.
@@ -2315,6 +2375,22 @@ internal sealed class AddInSession : IDisposable
                             new DebugErrorReply($"unknown action {paneAction}; use open or close"),
                             DebugJsonContext.Default.DebugErrorReply);
                 }
+            }
+
+            case "breakpoints":
+            {
+                // Reading what is set. There has been a way to SET a breakpoint since the door
+                // landed and no way to ask what is set, which makes every debugger assertion a
+                // matter of remembering what the test did rather than looking (2026-08-07).
+                var rows = _breakpoints
+                    .Where(entry => entry.Value.Count > 0)
+                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(entry => new DebugBreakpointRow(entry.Key, [.. entry.Value]))
+                    .ToArray();
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugBreakpointsReply(rows, _lastPublishedMode),
+                    DebugJsonContext.Default.DebugBreakpointsReply);
             }
 
             case "settings":
