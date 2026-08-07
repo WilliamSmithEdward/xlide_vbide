@@ -20,6 +20,14 @@ editor.
   workbooks can each hold a `Module1` and a `Recalculate`, and they are unrelated. A definition in
   a module with no tab open is still reached — the module opens on the way.
 
+### Changed
+
+- Go to Definition and Last Position are xlide's rather than the host's. Shift+F2 and
+  Ctrl+Shift+F2 still do what a VBA developer's hands expect; what answers is the analyzer, which
+  crosses modules, resolves members reached through a receiver, and reads the text as typed rather
+  than as last written back. Only what the host alone can do is still sent to it: running a
+  procedure, and the breakpoints the debugger owns.
+
 ### Known limits
 
 - The references window lists only modules that already have a tab open. The answer behind it

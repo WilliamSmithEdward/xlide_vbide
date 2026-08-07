@@ -702,31 +702,56 @@ function boot(): void {
 }
 
 /**
- * The host's own commands, present in each editor's context menu and the command palette so
- * they are discoverable where a developer already looks for commands. The navigation pair
- * rode the View menu until it went (2026-08-05); their keys are claimed host-side while the
- * surface has focus, and bound here as well for every moment it does not. Registered on
- * every group's editor, so the palette works wherever it opens.
+ * The commands in each editor's context menu and command palette.
+ *
+ * Only what the VBA host alone can do is sent to it: running a procedure, and the breakpoints
+ * the debugger owns. Everything about the code itself is xlide's, because xlide knows more
+ * about it — the editor's Go to Definition crosses modules, understands members reached through
+ * a receiver, and reads the text as typed rather than as last written back, none of which the
+ * host's own does (the developer, 2026-08-06: everything should be xlide).
+ *
+ * The VBA keys are kept on the xlide commands. Shift+F2 is what a VBA developer's hands already
+ * do; what changes is what answers.
  */
 function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge: EditorBridge): void {
-  const hostActions: Array<[string, string, string, number[]?]> = [
+  const hostActions: Array<[string, string, string]> = [
     ["xlide.run", "Run Sub/UserForm (F5)", "run"],
     ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
     ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
-    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "goToDefinition",
-      [monaco.KeyMod.Shift | monaco.KeyCode.F2]],
-    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "lastPosition",
-      [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2]],
   ];
 
-  for (const [id, label, command, keys] of hostActions) {
+  for (const [id, label, command] of hostActions) {
     editor.addAction({
       id,
       label,
       contextMenuGroupId: "1_xlide",
       contextMenuOrder: 1,
-      ...(keys ? { keybindings: keys } : {}),
       run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
+    });
+  }
+
+  // The VBA keys, answered by the editor. Both editor commands are registered by their features
+  // rather than as editor actions, so they are triggered by id — which falls through to the
+  // command registry, where those live.
+  const editorActions: Array<[string, string, string, number]> = [
+    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "editor.action.revealDefinition",
+      monaco.KeyMod.Shift | monaco.KeyCode.F2],
+    ["xlide.findReferences", "Find All References (Shift+F12)", "editor.action.goToReferences",
+      monaco.KeyMod.Shift | monaco.KeyCode.F12],
+    // The VBE's Last Position steps back through where the caret has been. So does this, and it
+    // steps back through every move rather than only the ones that were jumps.
+    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "cursorUndo",
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2],
+  ];
+
+  for (const [id, label, command, key] of editorActions) {
+    editor.addAction({
+      id,
+      label,
+      contextMenuGroupId: "1_xlide",
+      contextMenuOrder: 2,
+      keybindings: [key],
+      run: (target) => { target.trigger("xlide", command, null); },
     });
   }
 }

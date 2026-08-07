@@ -46,8 +46,6 @@ internal static class VbeCommands
         public const int AddWatch = 1820;
         public const int EditWatch = 940;
         public const int CallStack = 620;
-        public const int Definition = 939;
-        public const int LastPosition = 1822;
         public const int CommentBlock = 192;
         public const int Save = 3;
         public const int ObjectBrowser = 473;
@@ -265,8 +263,8 @@ internal static class VbeCommands
         "addWatch" => Command.AddWatch,
         "editWatch" => Command.EditWatch,
         "callStack" => Command.CallStack,
-        "goToDefinition" => Command.Definition,
-        "lastPosition" => Command.LastPosition,
+        // No goToDefinition or lastPosition: navigating code is the surface's now, and the two
+        // host commands they used to reach are gone with them (2026-08-06).
         "clearAllBreakpoints" => Command.ClearAllBreakpoints,
         "references" => Command.References,
         "projectProperties" => Command.ProjectProperties,
@@ -303,12 +301,13 @@ internal static class VbeCommands
     {
         return virtualKey switch
         {
-            // The View menu's navigation pair, kept on their native keys after the menu went
-            // (2026-08-05): both execute through the caret-synced command path, and the
-            // pane-follow machinery brings the surface to wherever the editor lands. Plain
-            // F2 is the Object Browser, as it always was.
-            VirtualKey.F2 when shift && control => Command.LastPosition,
-            VirtualKey.F2 when shift => Command.Definition,
+            // Shift+F2 and Ctrl+Shift+F2 are NOT claimed. They were the host's navigation pair
+            // until the surface grew its own (2026-08-06), and the surface's knows more: it
+            // crosses modules, resolves members reached through a receiver, and reads the text as
+            // typed rather than as last written back. Claiming a key here takes it before the
+            // page can see it, so the keys are left alone and the surface binds them. Plain F2 is
+            // the Object Browser, as it always was.
+            VirtualKey.F2 when shift => 0,
             VirtualKey.F2 => Command.ObjectBrowser,
             VirtualKey.F5 when control => Command.Break,
             VirtualKey.F5 when shift => Command.Reset,
