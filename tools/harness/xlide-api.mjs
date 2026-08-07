@@ -262,6 +262,43 @@ function clientFor(entry) {
     },
 
     /**
+     * Waits for a condition IN the page, instead of sleeping a guess.
+     *
+     * One request, polled inside the page, answering `met` and how long it took — so a probe
+     * says what it is waiting for rather than how long it hopes that takes. Every fixed sleep in
+     * a probe is a race that has not lost yet: 2500ms was right until a round trip to the host
+     * was added to the path it was waiting on, and then it reported the feature broken
+     * (2026-08-07).
+     *
+     *   await api.until("window.xlideBridge.documents.all().length > 1")
+     */
+    until: (predicate, { waitMs = 10000, surface } = {}) =>
+      call(`await${query({ surface, waitMs })}`,
+        { method: "POST", body: predicate, timeout: waitMs + 10000 }),
+
+    /**
+     * Reloads the page and waits for it to come back, answering with the bundle it is now
+     * running. A page change needs no republish and no restart — the bundle is served from a
+     * folder on disk — so this plus a copy is the whole page loop. See tools\Update-Page.ps1.
+     */
+    reload: ({ waitMs = 20000 } = {}) =>
+      call(`reload${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
+
+    /** The whole visible arrangement: docks, groups, tabs, sizes, open documents. */
+    layout: () => call("layout"),
+
+    /** Puts the arrangement back to the default and waits for the page. */
+    resetLayout: ({ waitMs = 10000 } = {}) =>
+      call(`layout${query({ reset: 1, waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
+
+    /** What the page said to itself: a ring of console lines, installed at page ready. */
+    console: (last) => call(`console${query({ last })}`),
+
+    /** Elements matching a selector: box, classes, hidden, computed styles, and the rules behind them. */
+    inspect: (selector, { styles, rules, max } = {}) =>
+      call(`inspect${query({ selector, styles, rules: rules ? 1 : undefined, max })}`),
+
+    /**
      * Waits for the editor to be answering again, which is the honest precondition for any
      * assertion after something that might raise a modal. Reports what is in the way.
      */

@@ -56,7 +56,9 @@ caller suspended inside the editor (that crashed Excel). The api enforces the sw
 out - and a dialog the developer opened is provably left alone.**
 
 **2026-08-06 — THE DEBUG API IS BACK, AND IT IS THE BRIDGE'S FIRST LIMB (developer asked
-for it re-landed; [debug-api.md](debug-api.md) is the reference).** A token-gated HTTP door
+for it re-landed; [debug-api.md](debug-api.md) is the reference, and
+[driving-excel.md](driving-excel.md) is how to get a host into a state that can be driven at
+all — read that one first if you have never done it).** A token-gated HTTP door
 on 127.0.0.1, Debug builds only, re-landed from `post-v010-experiments` onto the fixed
 tree. THE ROLLBACK'S CAUSE IS GONE: that branch died in the crash storm now root-caused as
 the 16-byte VARIANT (lesson 33), not the api. Routes: state, windows, stats, log, messages,
