@@ -1327,6 +1327,7 @@ internal sealed class AddInSession : IDisposable
             {
                 var placement = PerfCounters.PlacementSnapshot();
                 var marshal = PerfCounters.MarshalSnapshot();
+                var refresh = PerfCounters.RefreshSnapshot();
                 var messages = WebView.WebView2Surface.MessageTap.Totals;
                 using var self = System.Diagnostics.Process.GetCurrentProcess();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -1338,6 +1339,12 @@ internal sealed class AddInSession : IDisposable
                         GcCounts: [GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2)],
                         PlacementFullPasses: placement.FullPasses,
                         PlacementFastPasses: placement.FastPasses,
+                        PlacementFastTotalMs: placement.FastTotalMs,
+                        PlacementFastMaxMs: placement.FastMaxMs,
+                        WindowEvents: refresh.Events,
+                        RefreshPasses: refresh.Passes,
+                        RefreshTotalMs: refresh.TotalMs,
+                        RefreshMaxMs: refresh.MaxMs,
                         PlacementLastMs: placement.LastMs,
                         PlacementMaxMs: placement.MaxMs,
                         MarshalCount: marshal.Count,
@@ -7028,6 +7035,10 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+#if DEBUG
+        var startedAt = Environment.TickCount64;
+#endif
+
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
 
         // The full pass — window policing, band silencing, chrome — is object-model work,
@@ -7037,7 +7048,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ArmPlacementSettle(PlacementSettleMilliseconds);
 
 #if DEBUG
-        PerfCounters.PlacementFast();
+        PerfCounters.PlacementFast(Environment.TickCount64 - startedAt);
 #endif
     }
 

@@ -14,6 +14,12 @@ internal static class PerfCounters
 
     private static long _placementFullPasses;
     private static long _placementFastPasses;
+    private static long _windowEvents;
+    private static long _refreshPasses;
+    private static long _refreshTotalMs;
+    private static long _refreshMaxMs;
+    private static long _placementFastTotalMs;
+    private static long _placementFastMaxMs;
     private static long _placementLastMs;
     private static long _placementMaxMs;
     private static long _marshalCount;
@@ -30,7 +36,17 @@ internal static class PerfCounters
         Sample(PlacementSamples, ref _placementCursor, milliseconds);
     }
 
-    public static void PlacementFast() => Interlocked.Increment(ref _placementFastPasses);
+    /// <summary>
+    /// The fast placement pass, timed as well as counted. Counting alone said the storm had been
+    /// tamed and said nothing about what one pass costs — and a pass that runs inside the modal
+    /// resize loop delays the loop, which is what a cursor lagging its own window looks like.
+    /// </summary>
+    public static void PlacementFast(long milliseconds)
+    {
+        Interlocked.Increment(ref _placementFastPasses);
+        Interlocked.Add(ref _placementFastTotalMs, milliseconds);
+        RaiseToAtLeast(ref _placementFastMaxMs, milliseconds);
+    }
 
     public static void Marshal(long milliseconds)
     {
@@ -39,6 +55,26 @@ internal static class PerfCounters
         RaiseToAtLeast(ref _marshalMaxMs, milliseconds);
         Sample(MarshalSamples, ref _marshalCursor, milliseconds);
     }
+
+    /// <summary>One window event heard from the hook, whether or not it led anywhere.</summary>
+    public static void WindowEvent() => Interlocked.Increment(ref _windowEvents);
+
+    /// <summary>
+    /// One pane-tracker refresh. The hook hears the WHOLE process, so a host resize streams
+    /// events for controls that have nothing to do with the editor, and this runs for each.
+    /// Counting the events beside the refreshes is what separates "too much work per event"
+    /// from "too many events".
+    /// </summary>
+    public static void Refresh(long milliseconds)
+    {
+        Interlocked.Increment(ref _refreshPasses);
+        Interlocked.Add(ref _refreshTotalMs, milliseconds);
+        RaiseToAtLeast(ref _refreshMaxMs, milliseconds);
+    }
+
+    public static (long Events, long Passes, long TotalMs, long MaxMs) RefreshSnapshot() =>
+        (Interlocked.Read(ref _windowEvents), Interlocked.Read(ref _refreshPasses),
+            Interlocked.Read(ref _refreshTotalMs), Interlocked.Read(ref _refreshMaxMs));
 
     public static void LogLine() => Interlocked.Increment(ref _logLines);
 
@@ -114,9 +150,10 @@ internal static class PerfCounters
         return [.. taken];
     }
 
-    public static (long FullPasses, long FastPasses, long LastMs, long MaxMs) PlacementSnapshot() =>
+    public static (long FullPasses, long FastPasses, long LastMs, long MaxMs, long FastTotalMs, long FastMaxMs) PlacementSnapshot() =>
         (Interlocked.Read(ref _placementFullPasses), Interlocked.Read(ref _placementFastPasses),
-            Interlocked.Read(ref _placementLastMs), Interlocked.Read(ref _placementMaxMs));
+            Interlocked.Read(ref _placementLastMs), Interlocked.Read(ref _placementMaxMs),
+            Interlocked.Read(ref _placementFastTotalMs), Interlocked.Read(ref _placementFastMaxMs));
 
     public static (long Count, long LastMs, long MaxMs) MarshalSnapshot() =>
         (Interlocked.Read(ref _marshalCount), Interlocked.Read(ref _marshalLastMs), Interlocked.Read(ref _marshalMaxMs));

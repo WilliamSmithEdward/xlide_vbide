@@ -184,6 +184,10 @@ internal sealed class CodePaneTracker : IDisposable
             _openComponents = null;
         }
 
+#if DEBUG
+        Diagnostics.PerfCounters.WindowEvent();
+#endif
+
         Refresh();
 
         // After the refresh, so a pane-driven placement (via Changed) has already happened and
@@ -227,6 +231,10 @@ internal sealed class CodePaneTracker : IDisposable
 
         _refreshing = true;
 
+#if DEBUG
+        var refreshStartedAt = Environment.TickCount64;
+#endif
+
         try
         {
             var passes = 0;
@@ -237,6 +245,10 @@ internal sealed class CodePaneTracker : IDisposable
                 RefreshOnce();
             }
             while (_refreshQueued && ++passes < 4);
+
+#if DEBUG
+            Diagnostics.PerfCounters.Refresh(Environment.TickCount64 - refreshStartedAt);
+#endif
 
             if (_refreshQueued)
             {
