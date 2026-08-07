@@ -10,6 +10,27 @@ invisible, and the analyzer is almost never the missing one.
 
 | Capability | Analyzer | Engine op | Shim route | Page provider | State |
 | --- | --- | --- | --- | --- | --- |
+Three of the five have been wired since. The table below is as of 2026-08-06; what changed is
+recorded under it.
+
+| Capability | Analyzer | Engine op | Shim route | Page provider | State |
+| --- | --- | --- | --- | --- | --- |
+| Quick fixes | yes | `codeAction` | yes | `registerCodeActionProvider` | shipped |
+| Semantic highlighting | yes | `semanticTokens` | yes | `registerDocumentSemanticTokensProvider` | shipped |
+| Go to definition | yes | `definition` | yes | `registerDefinitionProvider` | shipped |
+| Find references | yes | `references` | yes | `registerReferenceProvider` | shipped, one limit |
+| Rename symbol | yes | no | no | no | analyzer only |
+
+Find references answers across the whole workbook, but the editor's references window can only
+render modules that have a tab open: a module with no tab has no model to render. Go to definition
+has no such limit — a definition in an unopened module goes through the host, which opens it on the
+way. What would close the gap is a way for the page to ask the host to open a module without also
+moving the caret into it.
+
+## The table as first measured
+
+| Capability | Analyzer | Engine op | Shim route | Page provider | State |
+| --- | --- | --- | --- | --- | --- |
 | Diagnostics | yes | `analyze` | yes | markers | shipped |
 | Completion | yes | `completion` | yes | `registerCompletionItemProvider` | shipped |
 | Hover | yes | `hover` | yes | `registerHoverProvider` | shipped |
@@ -71,3 +92,34 @@ prove the pattern before anything harder. Then definition and references, which 
 plumbing rename needs. Then rename. Then measure whether the 15,000-line generated Excel object
 model in `analyzer/host` actually reaches completions here the way it does in the extension, which
 is the largest remaining IntelliSense question and is data plumbing rather than logic.
+
+## What the first four taught
+
+Three registrations turned out to cover less than their names: `codeAction`, `semanticTokens` and
+`gotoSymbol` each pull in one contribution and leave the rest in modules they never import. In
+every case the provider registered cleanly and was then asked nothing, which looks exactly like a
+provider that answers nothing. The way to tell them apart is to watch a running editor and see
+whether the request goes out at all. Expect this of the next feature rather than rediscovering it.
+
+Two more editor facts, found the same way. A code-action provider must declare
+`providedCodeActionKinds`, because the editor gates Ctrl+. and Shift+Alt+. on a context key built
+from that list. And semantic highlighting defaults to whatever the theme says, which for a
+standalone theme is always no — the flag is hardcoded off on every one of them, so the editor has
+to be asked outright.
+
+## What rename still needs
+
+The engine part is small: `referencesFor` already returns every span, and a rename is those spans
+with a validated new name. What decides whether the feature is correct is the part that is not
+plumbing.
+
+A rename that stops at a module boundary compiles until the module nobody renamed runs, so a
+rename that cannot reach every module must refuse rather than do most of it. Modules with a tab
+open are straightforward — the edits go through the same path typing already uses, so the unsaved
+dot, Don't Save, and the baselines behind both keep working because nothing new is happening to
+them. Modules with no tab are the whole question: writing them behind the developer's back means
+inventing baselines for text they never saw, and refusing until they open every affected module
+makes the feature rarely usable. Deciding that, and proving it against a live host, is the work.
+
+Undo is the other one. The editor's undo stack is per model and the edit is not, so a multi-module
+rename undoes a tab at a time unless something is built to hold it together.

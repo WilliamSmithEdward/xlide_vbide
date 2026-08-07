@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+The analyzer has been answering more than anything asked it. Three of those answers now reach the
+editor.
+
+### Added
+
+- Quick fixes. A finding that can be fixed offers to fix it, from the lightbulb or Ctrl+period:
+  the missing `Set`, the parentheses a `Call` wants, `Option Explicit` at the top of a module, a
+  stub for a procedure that does not exist yet, a placeholder for an argument that was left out.
+  Every finding also offers to silence itself on the line above.
+- Semantic colouring. A name that denotes a type is coloured as the kind of type it is — class,
+  enum, or user-defined — and a host global is tinted apart from an ordinary identifier, unless
+  something in the module has declared that name itself, in which case it is the developer's and
+  is coloured as one.
+- Go to Definition and Find All References, on Ctrl+click, F12, Shift+F12, and the editor's
+  right-click menu. Both answer across every module of the workbook and stop at its edge: two open
+  workbooks can each hold a `Module1` and a `Recalculate`, and they are unrelated. A definition in
+  a module with no tab open is still reached — the module opens on the way.
+
+### Known limits
+
+- The references window lists only modules that already have a tab open. The answer behind it
+  covers the whole workbook; the window can only draw a module it has the text for.
+- Renaming a symbol across modules is not wired yet. It is the one item here that changes code
+  rather than describing it, and what it does to a module with no tab open has to be decided
+  before it can be trusted.
+
 ## v0.3.0 (2026-08-06)
 
 The editor window becomes xlide's: its title bar, its corner, and a command strip that survives a

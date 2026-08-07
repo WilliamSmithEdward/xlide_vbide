@@ -1144,23 +1144,29 @@ symbol index. So parity here is mostly PROTOCOL AND WIRING rather than analysis:
 operation, a shim route, and a Monaco provider, three layers that are already well-trodden for the
 seven that exist.
 
-Do the audit before the work. For every analyzer capability in the spec repo, record whether the
-engine exposes it, the shim routes it, and the page uses it. That turns a feeling into a table, and
-it will probably show more is present-but-unwired than anyone expects.
+The audit was done first and is in [parity-audit.md](parity-audit.md). It showed exactly that:
+five capabilities computing answers nobody could reach.
+
+Items 1 to 3 below are DONE (2026-08-06) and verified — the engine against real analyzer output
+through the smoke test, the page against a running editor. Read parity-audit.md before starting
+item 4: it records the three editor registrations that turned out to cover less than their names,
+which is the trap that cost the most time on each of the first three.
 
 Then, in order of what a VBA developer actually feels:
 
-1. **Quick fixes.** Diagnostics already show; acting on them is the missing half, and it is the
-   difference between a surface that reports and one that repairs. `codeActions` is in the bundle;
-   `registerCodeActionProvider` is the page side.
-2. **Semantic highlighting.** `analyzer/semantic` is compiled in and unused. One provider, and it
-   is what makes the surface look like the product rather than a syntax-highlighted approximation.
-3. **Go to definition, find references, and both on the symbol's RIGHT-CLICK menu** (user,
-   2026-08-06: this matters as much as the rest). `symbols/projectIndex` already backs the outline,
-   so this exposes what the index knows rather than building an index. The editor's context menu
-   already exists and is curated per object class (item 2 below), so the entries belong there
-   beside the run and breakpoint commands, not only on F12. References answer across every module
-   in the WORKBOOK, and stop there.
+1. ~~**Quick fixes.**~~ DONE. `textDocument/codeAction`, resolved from the analysis the engine
+   already holds — most fixes need parts of a finding that never cross to the surface, so the
+   finding is not sent down and asked for back. Text the diagnostics have not caught up with is
+   analysed rather than answered stale.
+2. ~~**Semantic highlighting.**~~ DONE. `textDocument/semanticTokens`. Addressed by module name
+   rather than taken from the host-active module, the way the outline is, so both halves of a
+   split are coloured.
+3. ~~**Go to definition and find references.**~~ DONE, with one limit. Both answer across the
+   whole workbook and stop there. Definition reaches modules with no tab open, through the host,
+   which opens them on the way. The references WINDOW can only render modules that are open,
+   because one without a tab has no model to render — closing that needs a way for the page to ask
+   the host to open a module without also moving the caret into it. The right-click entries come
+   from the editor's own commands, which carry their menu placement with them.
 4. **Rename symbol, across modules and scoped to the workbook** (user, 2026-08-06: cross-module,
    not in-file; and bounded by the workbook). A VBA project is many modules against one namespace,
    so a rename that stops at the module boundary is worse than none: it compiles until the module
@@ -1173,10 +1179,21 @@ Then, in order of what a VBA developer actually feels:
    than inventing one. The index that answers find-references is the same one that finds the edit
    sites, so this follows directly from item 3 rather than being separate work.
 
-   It is the one item with real dependencies rather than just wiring: edits land in modules that
-   may be open, dirty, or closed, so it goes through the host's writer and has to agree with the
-   baselines the unsaved dot and Don't Save both read. Undo across several modules at once is the
-   part to think hardest about. Sequence it after item 3 for the index, not because it is optional.
+   It is the one item with real dependencies rather than just wiring, and item 3 has now built
+   everything that IS wiring: `referencesFor` already returns every span, so a rename is those
+   spans with a validated new name. What is left is the part that decides whether the feature is
+   correct, and it is a decision rather than a keystroke.
+
+   Modules with a tab open are straightforward: the edits go through the same path typing already
+   uses, so the unsaved dot, Don't Save, and the baselines behind both keep working because
+   nothing new is happening to them. Modules with NO tab are the whole question. Writing them
+   behind the developer's back means inventing baselines for text they have never seen; refusing
+   until they open every affected module makes the feature rarely usable. A rename that stops at a
+   module boundary compiles until the module nobody renamed runs, so whatever is chosen, a rename
+   that cannot reach every module must refuse rather than do most of it.
+
+   Undo is the other one: the editor's undo stack is per model and the edit is not, so a
+   multi-module rename undoes a tab at a time unless something holds it together.
 5. **IntelliSense depth.** Completion is wired, but measure whether `analyzer/host` -- the 15,000
    lines of generated Excel object model -- actually reaches completions here the way it does in
    the extension. If it does not, that is the largest single IntelliSense gap and it is data
