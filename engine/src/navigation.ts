@@ -327,6 +327,139 @@ export function renameFor(
 }
 
 /**
+ * Every module a MODULE rename rewrites, with its new text.
+ *
+ * A module's name is not in its own text — it belongs to the component — so this rewrites what
+ * OTHER modules say about it. The component itself is renamed by the add-in, which owns the
+ * object model; this only works out what the code has to say afterwards.
+ *
+ * What counts as a mention is deliberately narrow. Matching the bare word everywhere would
+ * rewrite it inside string literals, where "CleanModule" may be data rather than a reference.
+ * Only two forms are references:
+ *
+ *   - a qualifier, `OldName.Something`, which is how any module's members are reached
+ *   - a type, `As OldName` or `New OldName`, which only a class or a document can be
+ *
+ * Both are checked against the characters either side rather than parsed, because the whole
+ * project has to be scanned and the two shapes are unambiguous.
+ */
+export function renameModuleFor(
+    symbols: ProjectSymbols,
+    oldName: string,
+    newName: string,
+): { modules: { module: string; source: string; replaced: number }[]; refused?: string } {
+    if (!IDENTIFIER.test(newName)) {
+        return {
+            modules: [],
+            refused: `'${newName}' is not a VBA name. A name starts with a letter and holds letters, digits and underscores.`,
+        };
+    }
+
+    if (RESERVED.has(newName.toLowerCase())) {
+        return { modules: [], refused: `'${newName}' is a VBA keyword.` };
+    }
+
+    if (newName === oldName) {
+        return { modules: [], refused: 'That is already its name.' };
+    }
+
+    if (!symbols.byModule.has(oldName.toLowerCase())) {
+        return { modules: [], refused: `'${oldName}' is not a module of this workbook.` };
+    }
+
+    // A workbook cannot hold two components of one name, and the host would refuse the rename
+    // halfway through — after the code had been rewritten to call something that cannot exist.
+    if (newName.toLowerCase() !== oldName.toLowerCase()
+        && symbols.byModule.has(newName.toLowerCase())) {
+        return { modules: [], refused: `This workbook already has a module called '${newName}'.` };
+    }
+
+    const out: { module: string; source: string; replaced: number }[] = [];
+
+    for (const module of symbols.modules) {
+        const sites = mentionsOfModule(module.source, oldName);
+        if (sites.length === 0) {
+            continue;
+        }
+
+        const rewritten = replaceSpans(module.source, sites, newName);
+        if (rewritten === null) {
+            return {
+                modules: [],
+                refused: `'${module.moduleName}' changed while renaming, so nothing was renamed.`,
+            };
+        }
+
+        out.push({ module: module.moduleName, source: rewritten, replaced: sites.length });
+    }
+
+    return { modules: out };
+}
+
+/** Where a module's name is used as a qualifier or as a type, as offsets into one module's text. */
+function mentionsOfModule(source: string, name: string): { start: number; length: number }[] {
+    const wanted = name.toLowerCase();
+    const haystack = source.toLowerCase();
+    const out: { start: number; length: number }[] = [];
+
+    for (let at = haystack.indexOf(wanted); at >= 0; at = haystack.indexOf(wanted, at + 1)) {
+        if (isIdentifierChar(source[at - 1]) || isIdentifierChar(source[at + wanted.length])) {
+            continue;
+        }
+
+        if (qualifies(source, at + wanted.length) || namesAType(source, at)) {
+            out.push({ start: at, length: name.length });
+        }
+    }
+
+    return out;
+}
+
+/** Whether what follows is a dot, so the name was reaching for something inside the module. */
+function qualifies(source: string, after: number): boolean {
+    let at = after;
+    while (source[at] === ' ' || source[at] === '\t') {
+        at++;
+    }
+    return source[at] === '.';
+}
+
+/** Whether the name is preceded by As or New, which is a type position and nothing else. */
+function namesAType(source: string, start: number): boolean {
+    let at = start;
+    while (at > 0 && (source[at - 1] === ' ' || source[at - 1] === '\t')) {
+        at--;
+    }
+
+    let from = at;
+    while (from > 0 && isIdentifierChar(source[from - 1])) {
+        from--;
+    }
+
+    const word = source.slice(from, at).toLowerCase();
+    return (word === 'as' || word === 'new') && from < at;
+}
+
+/** One module's text with the named spans replaced, applied back to front. */
+function replaceSpans(
+    source: string,
+    spans: readonly { start: number; length: number }[],
+    text: string,
+): string | null {
+    let out = source;
+
+    for (let i = spans.length - 1; i >= 0; i--) {
+        const span = spans[i];
+        if (span.start < 0 || span.start + span.length > out.length) {
+            return null;
+        }
+        out = out.slice(0, span.start) + text + out.slice(span.start + span.length);
+    }
+
+    return out;
+}
+
+/**
  * The declaration a rename should be anchored at, whichever site the developer asked from.
  *
  * One declaration is the answer. None means the symbol is a local, a parameter or something else

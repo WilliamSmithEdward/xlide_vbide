@@ -384,6 +384,20 @@ export interface RenameResult {
 }
 
 /**
+ * workspace/renameModule: the new text of every module that mentions a module being renamed.
+ *
+ * The module's own name is not in its text — it belongs to the component, which the add-in
+ * renames through the object model. This works out only what the OTHER modules must say
+ * afterwards, so the add-in can compute everything before it changes anything.
+ */
+export interface RenameModuleParams {
+    projectId: string;
+    /** The module being renamed, by its current name. */
+    moduleName: string;
+    newName: string;
+}
+
+/**
  * textDocument/semanticTokens: the analysed colouring of a whole module — which identifiers name
  * types, which kind of type each names, and which are host globals nothing has shadowed. Same
  * liveness rule as completion.

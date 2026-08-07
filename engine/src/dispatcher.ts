@@ -16,7 +16,7 @@ import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
-import { assembleSymbols, definitionsFor, referencesFor, renameFor, type ProjectSymbols } from './navigation';
+import { assembleSymbols, definitionsFor, referencesFor, renameFor, renameModuleFor, type ProjectSymbols } from './navigation';
 import { semanticTokensFor } from './semantic';
 import { signatureHelpFor } from './signature';
 import {
@@ -41,6 +41,7 @@ import {
     type OutlineParams,
     type OutlineResult,
     type ProjectOpenParams,
+    type RenameModuleParams,
     type RenameParams,
     type RenameResult,
     type SearchParams,
@@ -187,6 +188,9 @@ export class Dispatcher {
 
             case 'textDocument/rename':
                 return this.rename(this.require<RenameParams>(params));
+
+            case 'workspace/renameModule':
+                return this.renameModule(this.require<RenameModuleParams>(params));
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
@@ -357,6 +361,33 @@ export class Dispatcher {
 
         const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
         return renameFor(symbols, params.moduleName, source, params.offset, params.newName);
+    }
+
+    private renameModule(params: RenameModuleParams): RenameResult {
+        this.requireInitialized();
+
+        // Anchored on the module's own current text, which is what symbolsFor wants; the answer
+        // is about every OTHER module, so which one is passed here only decides whose live text
+        // wins over its seeded copy.
+        // Checked against what the project was SEEDED with, not against the assembly: the
+        // assembly synthesises a module it has never heard of so that a module opened before the
+        // first seed still answers, and that would let a rename of a module nobody has silently
+        // succeed at renaming nothing.
+        const seeded = this.seededModules.get(params.projectId) ?? [];
+        const wanted = params.moduleName.toLowerCase();
+        if (!seeded.some((module) => module.moduleName.toLowerCase() === wanted)) {
+            return {
+                modules: [],
+                oldName: params.moduleName,
+                refused: `'${params.moduleName}' is not a module of this workbook.`,
+            };
+        }
+
+        const source = this.sourceFor({ projectId: params.projectId, moduleName: params.moduleName })
+            ?? '';
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        const answer = renameModuleFor(symbols, params.moduleName, params.newName);
+        return { modules: answer.modules, oldName: params.moduleName, refused: answer.refused };
     }
 
     private definition(params: NavigationParams): NavigationResult {

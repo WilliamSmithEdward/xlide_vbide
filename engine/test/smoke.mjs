@@ -967,6 +967,93 @@ try {
         assert.equal(touched(fromCall), 'Names, SharedA');
     });
 
+    // Renaming a MODULE. Its name is not in its own text, so this is about what every other
+    // module says: a qualifier reaching into it, and — for a class — a type naming it.
+    const MOD_TARGET = ['Option Explicit', '', 'Public Sub Recalc()', 'End Sub', ''].join('\r\n');
+    const MOD_CALLER = [
+        'Option Explicit',
+        '',
+        'Sub Drive()',
+        '    Target.Recalc',
+        '    Dim k As Kind',
+        '    Set k = New Kind',
+        '    Debug.Print "Target is data"',
+        '    TargetExtra.Thing',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Modules',
+        generation: 1,
+        modules: [
+            { moduleName: 'Target', source: MOD_TARGET, type: 'standard' },
+            { moduleName: 'Kind', source: 'Option Explicit\r\n', type: 'class' },
+            { moduleName: 'TargetExtra', source: 'Option Explicit\r\n', type: 'standard' },
+            { moduleName: 'Caller', source: MOD_CALLER, type: 'standard' },
+        ],
+    });
+
+    const renamedModule = await call('workspace/renameModule', {
+        projectId: 'Modules',
+        moduleName: 'Target',
+        newName: 'Utils',
+    });
+
+    const callerAfter = renamedModule.modules.find((entry) => entry.module === 'Caller')?.source ?? '';
+    console.log(`  -> renaming a module rewrote ${renamedModule.modules.length} other module(s)`);
+
+    check('a qualified call into the module follows it', () =>
+        assert.ok(callerAfter.includes('Utils.Recalc'), callerAfter));
+
+    check('the name inside a string literal is left alone', () =>
+        assert.ok(callerAfter.includes('"Target is data"'),
+            'a module name in a string is data, not a reference'));
+
+    check('another module that merely starts with the name is left alone', () =>
+        assert.ok(callerAfter.includes('TargetExtra.Thing'), callerAfter));
+
+    const renamedClass = await call('workspace/renameModule', {
+        projectId: 'Modules',
+        moduleName: 'Kind',
+        newName: 'Sort',
+    });
+
+    check('a class module is followed by As and New as well', () => {
+        const after = renamedClass.modules.find((entry) => entry.module === 'Caller')?.source ?? '';
+        assert.ok(after.includes('As Sort'), after);
+        assert.ok(after.includes('New Sort'), after);
+    });
+
+    for (const [what, name, expected] of [
+        ['a name already taken', 'Kind', 'already has a module'],
+        ['a name that is not an identifier', '9Bad', 'is not a VBA name'],
+        ['a keyword', 'Next', 'is a VBA keyword'],
+        ['the name it already has', 'Target', 'already its name'],
+    ]) {
+        const refused = await call('workspace/renameModule', {
+            projectId: 'Modules',
+            moduleName: 'Target',
+            newName: name,
+        });
+
+        check(`renaming to ${what} is refused`, () => {
+            assert.equal(refused.modules.length, 0);
+            assert.ok(refused.refused?.includes(expected), refused.refused);
+        });
+    }
+
+    const noSuchModule = await call('workspace/renameModule', {
+        projectId: 'Modules',
+        moduleName: 'NeverSeeded',
+        newName: 'Fine',
+    });
+
+    // The symbol assembly invents a module it has not been seeded with, so that one opened before
+    // the first seed still answers. A rename must not ride that and quietly rename nothing.
+    check('renaming a module the workbook does not have is refused', () =>
+        assert.ok(noSuchModule.refused?.includes('not a module'), noSuchModule.refused));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;
