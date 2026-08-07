@@ -270,6 +270,9 @@ export class Shell {
       { left: dockOf("left"), right: dockOf("right"), top: dockOf("top"), bottom: dockOf("bottom") },
       { left: splitterOf("left"), right: splitterOf("right"), top: splitterOf("top"), bottom: splitterOf("bottom") },
       root.querySelector("#editor-area") as HTMLElement,
+      // Stands in the editor area's place while no module is open, when the area itself is
+      // display:none and measures nothing.
+      root.querySelector("#empty-view") as HTMLElement | null,
       root.querySelector("#pane-bodies") as HTMLElement,
       seats,
       {

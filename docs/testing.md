@@ -73,6 +73,20 @@ VBA behind and the next run starts from somewhere new.
 appears while modules are open, so the check passed or failed on whether the fixture happened to
 have a module open. Watch for the specific thing.
 
+**When a faithful reproduction disagrees with you, believe it.** Chasing a reported drag fault on
+2026-08-06, a synthetic `pointerdown`/`pointermove` sequence produced the dim, the compass and its
+five petals, and no drop preview however precisely it aimed. That was written off twice: first as
+the synthetic events not being a real drag, then as the session running a stale bundle after an
+intermediate "it works now". Both were wrong. The reproduction was accurate the whole time, and the
+fault was real: with no module open the editor area is `display:none` and measures nothing, so the
+guard that skips a zero-sized region skipped the entire editor-edge branch.
+
+Two habits would have found it in one pass instead of three. Measure the thing being aimed at
+rather than assuming it is where it looks — `getBoundingClientRect()` on the region under test says
+`0x0` immediately. And take an intermittent report as a clue about state rather than noise: "works,
+then doesn't" was the difference between a module being open and not, which is exactly what the
+reporter eventually said.
+
 **Counts beat megabytes for leaks.** `Test-Churn.ps1` asserts that editors, models, dock groups and
 DOM nodes return to their starting numbers after two dozen cycles. An exact number that must return
 to its starting value is a far better detector than a heap figure nobody can interpret.

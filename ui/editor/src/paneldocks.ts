@@ -117,6 +117,7 @@ export class PanelDocks {
 
   /** Where dragged panes read the editor area's edge bands from. */
   private readonly editorArea: HTMLElement;
+  private readonly emptyView: HTMLElement | null;
 
   /** Where a closed pane's elements wait, out of the tree. */
   private readonly parking: HTMLElement;
@@ -132,10 +133,30 @@ export class PanelDocks {
   /** True from a pane drag until the click it would become has been swallowed. */
   private dragArmed = false;
 
+  /**
+   * The region a pane docks against when it is dragged over the editor.
+   *
+   * With no module open, #editor-area is display:none and measures nothing, and the empty view
+   * stands in the same place. Measuring only the editor area meant that dragging a pane to the
+   * editor's edge did nothing at all until a module had been opened -- no compass, no preview,
+   * no drop -- which reads as the drag being broken rather than as the editor being empty
+   * (developer, 2026-08-06: "it only happens when an editor tab has not yet been loaded").
+   */
+  private editorRegion(): DOMRect {
+    const area = this.editorArea.getBoundingClientRect();
+    if (area.width > 0 && area.height > 0) {
+      return area;
+    }
+
+    const empty = this.emptyView?.getBoundingClientRect();
+    return empty && empty.width > 0 && empty.height > 0 ? empty : area;
+  }
+
   constructor(
     docks: Record<DockSide, HTMLElement>,
     splitters: Record<DockSide, HTMLElement>,
     editorArea: HTMLElement,
+    emptyView: HTMLElement | null,
     parking: HTMLElement,
     seats: PanelSeat[],
     handlers: PanelDockHandlers,
@@ -143,6 +164,7 @@ export class PanelDocks {
     this.dockElements = docks;
     this.dockSplitters = splitters;
     this.editorArea = editorArea;
+    this.emptyView = emptyView;
     this.parking = parking;
     this.handlers = handlers;
 
@@ -583,7 +605,7 @@ export class PanelDocks {
       // Over the editor itself: the compass's edges begin a section on that side. Measured
       // against the EDITOR AREA, not the workspace, which includes the sections themselves.
       // No centre here — a tool pane never joins the editor's own tabs.
-      const area = this.editorArea.getBoundingClientRect();
+      const area = this.editorRegion();
       if (area.width > 0 && area.height > 0 && inside(area)) {
         const zone = compass.over(area, during.clientX, during.clientY, EDGE_ZONES);
         target = zone && zone !== "center" ? { kind: "side", side: zone } : null;
