@@ -1133,6 +1133,45 @@ try {
         assert.ok(userAfter.includes('IShapeCounter = 1'),
             'IShapeCounter is its own name in a module that implements nothing'));
 
+    // A comment ending in a full stop looked like a qualified reference, so one word of a
+    // sentence was rewritten and the two beside it were not (found by the fixture, 2026-08-06).
+    const PROSE = [
+        'Option Explicit',
+        '',
+        'Sub Note()',
+        "    ' A comment about Widget, IShape, and Helpers.",
+        '    Debug.Print "Widget. IShape. Helpers."',
+        '    Dim w As Widget',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Prose',
+        generation: 1,
+        modules: [
+            { moduleName: 'Widget', source: 'Option Explicit\r\n', type: 'class' },
+            { moduleName: 'Notes', source: PROSE, type: 'standard' },
+        ],
+    });
+
+    const proseRename = await call('workspace/renameModule', {
+        projectId: 'Prose',
+        moduleName: 'Widget',
+        newName: 'Gadget',
+    });
+
+    const notesAfter = proseRename.modules.find((entry) => entry.module === 'Notes')?.source ?? '';
+
+    check('a name in a comment is prose, even ending in a full stop', () =>
+        assert.ok(notesAfter.includes('about Widget, IShape, and Helpers.'), notesAfter));
+
+    check('a name in a string is data, even ending in a full stop', () =>
+        assert.ok(notesAfter.includes('"Widget. IShape. Helpers."'), notesAfter));
+
+    check('the declaration beside them still follows', () =>
+        assert.ok(notesAfter.includes('Dim w As Gadget'), notesAfter));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

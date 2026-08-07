@@ -419,8 +419,13 @@ function mentionsOfModule(source: string, name: string): { start: number; length
     // variable in some other module that merely starts with the same word is left alone.
     const implementsIt = implementsInterface(source, wanted);
 
+    // Only code counts. A module's name in a string is data, and in a comment it is prose — and
+    // prose ends in a full stop, which made `IShape.` read as a qualified reference and rewrote
+    // one word of a sentence while leaving the two beside it (found by the fixture, 2026-08-06).
+    const inCode = codePositions(source);
+
     for (let at = haystack.indexOf(wanted); at >= 0; at = haystack.indexOf(wanted, at + 1)) {
-        if (isIdentifierChar(source[at - 1])) {
+        if (!inCode[at] || isIdentifierChar(source[at - 1])) {
             continue;
         }
 
@@ -447,6 +452,64 @@ function mentionsOfModule(source: string, name: string): { start: number; length
 
 /** The three line endings a VBA module turns up with, in one place. */
 const LINE_BREAK = /\r\n|\n|\r/;
+
+const LINE_FEED = "\n";
+const CARRIAGE_RETURN = "\r";
+
+/**
+ * Which offsets of a module are code, rather than inside a string or a comment.
+ *
+ * A line's comment starts at the first apostrophe that is not inside a string, and a string ends
+ * at its closing quote — doubled quotes being an escaped one rather than the end. That is the
+ * whole of what has to be known here: enough to tell a reference from a mention.
+ */
+function codePositions(source: string): boolean[] {
+    const code = new Array<boolean>(source.length).fill(true);
+    let inString = false;
+    let inComment = false;
+
+    for (let at = 0; at < source.length; at++) {
+        const character = source[at];
+
+        if (character === LINE_FEED || character === CARRIAGE_RETURN) {
+            inString = false;
+            inComment = false;
+            continue;
+        }
+
+        if (inComment) {
+            code[at] = false;
+            continue;
+        }
+
+        if (inString) {
+            code[at] = false;
+            if (character === '"') {
+                // A doubled quote is an escaped one and the string continues.
+                if (source[at + 1] === '"') {
+                    code[at + 1] = false;
+                    at++;
+                } else {
+                    inString = false;
+                }
+            }
+            continue;
+        }
+
+        if (character === '"') {
+            inString = true;
+            code[at] = false;
+            continue;
+        }
+
+        if (character === "'") {
+            inComment = true;
+            code[at] = false;
+        }
+    }
+
+    return code;
+}
 
 /** Whether this module carries an `Implements` statement for the named interface. */
 function implementsInterface(source: string, wanted: string): boolean {
