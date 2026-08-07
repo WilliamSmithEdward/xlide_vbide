@@ -92,6 +92,21 @@ public sealed record EngineCodeAction(
 public sealed record EngineCodeActions(
     [property: JsonPropertyName("actions")] EngineCodeAction[] Actions);
 
+/// <summary>One module a rename rewrites: its name, what it says afterwards, and how many went.</summary>
+public sealed record EngineRenamedModule(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("replaced")] int Replaced);
+
+/// <summary>
+/// The result of a rename: every module it rewrites, whole. Refused says why nothing changed —
+/// a rename that cannot reach every use must do none of them.
+/// </summary>
+public sealed record EngineRename(
+    [property: JsonPropertyName("modules")] EngineRenamedModule[] Modules,
+    [property: JsonPropertyName("oldName")] string? OldName,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -180,6 +195,8 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineCodeActions))]
 [JsonSerializable(typeof(EngineSemanticToken))]
 [JsonSerializable(typeof(EngineSemanticTokens))]
+[JsonSerializable(typeof(EngineRenamedModule))]
+[JsonSerializable(typeof(EngineRename))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

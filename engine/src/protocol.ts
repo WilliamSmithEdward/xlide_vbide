@@ -340,6 +340,50 @@ export interface NavigationResult {
 }
 
 /**
+ * textDocument/rename: the new text of every module a rename changes, across the workbook and
+ * never past it.
+ *
+ * Whole module texts rather than edits, because the add-in writes modules and a module with no
+ * tab open has no editor to apply an edit list to. The engine holds every module's current text
+ * anyway, so producing the result of the edit is free and leaves nothing for two sides to
+ * disagree about.
+ */
+export interface RenameParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset of the symbol being renamed. */
+    offset: number;
+    newName: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** One module a rename rewrites: its name, and what it says afterwards. */
+export interface RenamedModulePayload {
+    module: string;
+    source: string;
+    /** How many occurrences were replaced in it, for the summary the surface shows. */
+    replaced: number;
+}
+
+export interface RenameResult {
+    modules: RenamedModulePayload[];
+    /** The name as it stood, so the surface can say what it renamed. */
+    oldName?: string;
+    /** Present when nothing was renamed, saying why in words a developer can act on. */
+    refused?: string;
+    /**
+     * Uses of the old name the rename deliberately did not touch, because another module declares
+     * the same name and nothing can prove which one a bare call meant. Reported rather than
+     * silently skipped: the developer is the only one who knows, and they cannot decide about a
+     * call nobody told them about.
+     */
+    ambiguous?: LocationPayload[];
+}
+
+/**
  * textDocument/semanticTokens: the analysed colouring of a whole module — which identifiers name
  * types, which kind of type each names, and which are host globals nothing has shadowed. Same
  * liveness rule as completion.

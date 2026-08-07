@@ -2044,6 +2044,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
         _editorSurface.NavigationRequested = OnNavigationRequested;
+        _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
@@ -5112,6 +5113,108 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures, failed));
+        });
+    }
+
+    /// <summary>
+    /// Renames a symbol everywhere it is used in the workbook, whether its module has a tab open
+    /// or not (the developer, 2026-08-06).
+    ///
+    /// The write goes through the same writer every other module write uses, which reaches a
+    /// module through the object model and so does not care whether anything is showing it. Open
+    /// tabs are then given the new text, because the page's model is what the developer is
+    /// looking at and it would otherwise still say the old name.
+    ///
+    /// All or nothing. The engine refuses rather than returning a partial answer, and a write
+    /// that fails part-way is reported as what it is: a rename that stopped, naming the modules
+    /// that did change. A rename that quietly reaches most of a project compiles until the module
+    /// nobody renamed runs.
+    /// </summary>
+    private void OnRenameRequested(int requestId, int offset, string newName)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowRenamed(requestId, null, newName, [], 0, "There is nothing here to rename.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            string? oldName = null;
+            string? refused = null;
+            string[] changed = [];
+            var replaced = 0;
+            Xlide.Vbe.Core.Engine.EngineRenamedModule[] modules = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis.RenameAsync(module, offset, newName, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was renamed.";
+                }
+                else
+                {
+                    oldName = outcome.Answer.OldName;
+                    refused = outcome.Answer.Refused;
+                    modules = outcome.Answer.Modules;
+                    replaced = modules.Sum(entry => entry.Replaced);
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The rename could not be worked out, so nothing was renamed.";
+                Log.Info($"rename: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is not null || modules.Length == 0)
+            {
+                surface.RunOnHostThread(() =>
+                    surface.ShowRenamed(requestId, oldName, newName, [], 0, refused ?? "Nothing to rename."));
+                return;
+            }
+
+            // The writes are the host's own object model, so they belong on the host thread —
+            // the same thread every other module write happens on.
+            surface.RunOnHostThread(() =>
+            {
+                var written = new List<string>(modules.Length);
+                string? stopped = null;
+
+                foreach (var entry in modules)
+                {
+                    try
+                    {
+                        WriteModule(entry.Module, entry.Source, _shownProject, hostRewrite: true);
+                        written.Add(entry.Module);
+
+                        // The page holds a model per OPEN module. Syncing one that is not open is
+                        // harmless — the page has nothing by that name to sync — and syncing one
+                        // that is open is the whole point.
+                        surface.Sync(entry.Module, display, entry.Source);
+                    }
+                    catch (Exception ex)
+                    {
+                        stopped = $"'{entry.Module}' could not be written, so the rename stopped there.";
+                        Log.Error($"rename: writing {entry.Module} failed", ex);
+                        break;
+                    }
+                }
+
+                Log.Info($"rename: {oldName} -> {newName}, {replaced} use(s) in {written.Count} module(s)");
+                surface.ShowRenamed(requestId, oldName, newName, [.. written], replaced, stopped);
+
+                // The findings describe the old names until something asks again.
+                _analysis?.Reanalyse();
+            });
         });
     }
 

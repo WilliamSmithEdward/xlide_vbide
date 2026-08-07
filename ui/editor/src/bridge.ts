@@ -77,6 +77,7 @@ export type HostMessage =
   | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
+  | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -184,6 +185,13 @@ export interface HostLocation {
   length: number;
 }
 
+/** What a rename did, or the reason it did nothing. */
+export interface HostRenameAnswer {
+  modules: string[];
+  replaced: number;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -269,6 +277,7 @@ export type ClientMessage =
   | { type: "semanticTokens"; id: number; module: string; project?: string }
   | { type: "definition"; id: number; offset: number }
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
+  | { type: "rename"; id: number; offset: number; newName: string }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -421,6 +430,12 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Rename requests awaiting their answers, by request identifier. */
+  private readonly pendingRenames = new Map<number, {
+    resolve: (answer: HostRenameAnswer) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   /** Outline requests awaiting their answers, by request identifier. */
   private readonly pendingOutlines = new Map<number, {
     resolve: (procedures: HostProcedure[] | null) => void;
@@ -434,6 +449,7 @@ export class EditorBridge {
   private nextCodeActionId = 1;
   private nextSemanticTokensId = 1;
   private nextNavigationId = 1;
+  private nextRenameId = 1;
   private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -794,6 +810,27 @@ export class EditorBridge {
     });
   }
 
+  /**
+   * Asks the host to rename a symbol everywhere it is used in the workbook.
+   *
+   * The HOST does the renaming, not the page: modules with no tab open have no model to edit,
+   * and they are exactly the ones a rename must not miss. So nothing comes back but a summary,
+   * and the open tabs are refreshed by the ordinary document sync.
+   */
+  requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
+    const id = this.nextRenameId++;
+
+    return new Promise<HostRenameAnswer>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingRenames.delete(id);
+        resolve({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." });
+      }, 30000);
+
+      this.pendingRenames.set(id, { resolve, timer });
+      this.transport.post({ type: "rename", id, offset, newName });
+    });
+  }
+
   /** The model a host location names, or null when that module has no tab open. */
   modelForLocation(location: HostLocation): monaco.editor.ITextModel | null {
     return this.documents.get(location.module, location.workbook ?? null);
@@ -1018,6 +1055,19 @@ export class EditorBridge {
           this.pendingCodeActions.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.actions);
+        }
+        return;
+      }
+      case "renameResult": {
+        const waiter = this.pendingRenames.get(message.id);
+        if (waiter) {
+          this.pendingRenames.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve({
+            modules: message.modules,
+            replaced: message.replaced,
+            refused: message.refused ?? null,
+          });
         }
         return;
       }

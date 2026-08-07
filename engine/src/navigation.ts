@@ -202,6 +202,199 @@ export function referencesFor(
 }
 
 /**
+ * A VBA identifier: a letter, then letters, digits and underscores, up to 255 characters. Checked
+ * here rather than on the surface because a rename that produces something VBA cannot parse turns
+ * one compiling project into a broken one across several modules at once, and the surface has no
+ * business knowing the language's rules.
+ */
+const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,254}$/;
+
+/**
+ * The reserved words a rename must not produce. Not the full keyword list — a name that merely
+ * collides with a statement keyword is caught by the analyzer's own diagnostics on the next pass,
+ * and refusing every one of them here would reject names VBA accepts.
+ */
+const RESERVED = new Set([
+    'as', 'byref', 'byval', 'call', 'case', 'const', 'dim', 'do', 'each', 'else', 'elseif', 'end',
+    'error', 'exit', 'false', 'for', 'function', 'get', 'goto', 'if', 'in', 'is', 'let', 'loop',
+    'me', 'new', 'next', 'nothing', 'null', 'on', 'option', 'private', 'property', 'public',
+    'redim', 'resume', 'return', 'select', 'set', 'sub', 'then', 'to', 'true', 'until', 'wend',
+    'while', 'with',
+]);
+
+/**
+ * Every module a rename rewrites, with its new text.
+ *
+ * Whole texts rather than edit lists: the add-in writes modules, and a module with no tab open
+ * has no editor to apply edits to. The engine already holds every module's current text, so
+ * producing the result costs nothing and leaves no arithmetic for two sides to get differently.
+ */
+export function renameFor(
+    symbols: ProjectSymbols,
+    moduleName: string,
+    source: string,
+    offset: number,
+    newName: string,
+): { modules: { module: string; source: string; replaced: number }[]; oldName?: string; refused?: string; ambiguous?: LocationPayload[] } {
+    const word = identifierAt(source, offset);
+    if (!word) {
+        return { modules: [], refused: 'There is no symbol here to rename.' };
+    }
+
+    if (!IDENTIFIER.test(newName)) {
+        return {
+            modules: [],
+            oldName: word.text,
+            refused: `'${newName}' is not a VBA name. A name starts with a letter and holds letters, digits and underscores.`,
+        };
+    }
+
+    if (RESERVED.has(newName.toLowerCase())) {
+        return { modules: [], oldName: word.text, refused: `'${newName}' is a VBA keyword.` };
+    }
+
+    if (newName.toLowerCase() === word.text.toLowerCase()) {
+        // Same name in different case is a recasing, which is a real edit and is allowed. The
+        // same name in the same case is not.
+        if (newName === word.text) {
+            return { modules: [], oldName: word.text, refused: 'That is already its name.' };
+        }
+    }
+
+    // The declaration is renamed along with everything else: a rename that left it behind would
+    // produce a project referring to a name nothing declares.
+    const sites = referencesFor(symbols, moduleName, source, offset, true);
+    if (sites.length === 0) {
+        return {
+            modules: [],
+            oldName: word.text,
+            refused: `'${word.text}' could not be resolved, so nothing was renamed.`,
+        };
+    }
+
+    const byModule = new Map<string, LocationPayload[]>();
+    for (const site of sites) {
+        const key = site.module.toLowerCase();
+        const held = byModule.get(key);
+        if (held) {
+            held.push(site);
+        } else {
+            byModule.set(key, [site]);
+        }
+    }
+
+    const out: { module: string; source: string; replaced: number }[] = [];
+
+    for (const [key, locations] of byModule) {
+        const module = symbols.byModule.get(key);
+        if (!module) {
+            // A site in a module the assembly does not hold cannot be rewritten, and a rename
+            // that silently skips a module is the failure this whole feature exists to avoid.
+            return {
+                modules: [],
+                oldName: word.text,
+                refused: `'${locations[0].module}' could not be read, so nothing was renamed.`,
+            };
+        }
+
+        const rewritten = replaceAll(module.source, locations, newName);
+        if (rewritten === null) {
+            return {
+                modules: [],
+                oldName: word.text,
+                refused: `'${module.moduleName}' changed while renaming, so nothing was renamed.`,
+            };
+        }
+
+        out.push({ module: module.moduleName, source: rewritten, replaced: locations.length });
+    }
+
+    return { modules: out, oldName: word.text, ambiguous: leftAlone(symbols, word.text, sites) };
+}
+
+/**
+ * Every occurrence of the old name the rename did NOT touch.
+ *
+ * A bare call is only ambiguous when more than one module declares the name: with a single
+ * definition in the workbook there is nothing else it could mean, and the resolver renames it.
+ * When there IS a collision the resolver leaves it alone, which is right — nothing can prove
+ * which one was meant — but leaving it alone SILENTLY is not: the developer is the only one who
+ * knows, and they cannot decide about a call they were never told about.
+ *
+ * So what is left behind is counted and handed back. Warning about it is the surface's job.
+ */
+function leftAlone(
+    symbols: ProjectSymbols,
+    oldName: string,
+    renamed: readonly LocationPayload[],
+): LocationPayload[] {
+    const touched = new Set(renamed.map((where) => `${where.module.toLowerCase()}:${where.line}:${where.column}`));
+    const out: LocationPayload[] = [];
+
+    for (const location of occurrencesOfTypeName(symbols, oldName)) {
+        if (!touched.has(`${location.module.toLowerCase()}:${location.line}:${location.column}`)) {
+            out.push(location);
+        }
+    }
+
+    return out;
+}
+
+/**
+ * One module's text with every named span replaced. Applied back to front so that an earlier
+ * replacement cannot move the span of a later one, and refused outright if any span does not
+ * still hold the name — a rename computed against text that has since moved must not be applied
+ * to it by arithmetic that no longer describes it.
+ */
+function replaceAll(
+    source: string,
+    locations: readonly LocationPayload[],
+    newName: string,
+): string | null {
+    const starts = lineStarts(source);
+
+    const offsets = locations
+        .map((where) => {
+            const line = starts[where.line - 1];
+            return line === undefined ? null : { start: line + where.column - 1, length: where.length };
+        })
+        .filter((span): span is { start: number; length: number } => span !== null);
+
+    if (offsets.length !== locations.length) {
+        return null;
+    }
+
+    offsets.sort((left, right) => right.start - left.start);
+
+    let text = source;
+    for (const span of offsets) {
+        if (span.start < 0 || span.start + span.length > text.length) {
+            return null;
+        }
+        text = text.slice(0, span.start) + newName + text.slice(span.start + span.length);
+    }
+
+    return text;
+}
+
+/** Where each line begins, counting the three line endings VBA modules turn up with. */
+function lineStarts(source: string): number[] {
+    const starts = [0];
+    for (let at = 0; at < source.length; at++) {
+        const character = source[at];
+        if (character === '\n') {
+            starts.push(at + 1);
+        } else if (character === '\r') {
+            starts.push(source[at + 1] === '\n' ? at + 2 : at + 1);
+            if (source[at + 1] === '\n') {
+                at++;
+            }
+        }
+    }
+    return starts;
+}
+
+/**
  * Every mention of a type's name across the workbook. A type is named in declarations rather
  * than called, so the scope resolver has nothing to bind; matching the identifier is what the
  * extension does here too.

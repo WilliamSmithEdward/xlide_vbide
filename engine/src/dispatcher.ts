@@ -16,7 +16,7 @@ import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
-import { assembleSymbols, definitionsFor, referencesFor, type ProjectSymbols } from './navigation';
+import { assembleSymbols, definitionsFor, referencesFor, renameFor, type ProjectSymbols } from './navigation';
 import { semanticTokensFor } from './semantic';
 import { signatureHelpFor } from './signature';
 import {
@@ -41,6 +41,8 @@ import {
     type OutlineParams,
     type OutlineResult,
     type ProjectOpenParams,
+    type RenameParams,
+    type RenameResult,
     type SearchParams,
     type SearchResult,
     type SemanticTokensParams,
@@ -182,6 +184,9 @@ export class Dispatcher {
 
             case 'textDocument/references':
                 return this.references(this.require<NavigationParams>(params));
+
+            case 'textDocument/rename':
+                return this.rename(this.require<RenameParams>(params));
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
@@ -340,6 +345,18 @@ export class Dispatcher {
         }
 
         return { edits: loopSyncFor({ ...params, source }) };
+    }
+
+    private rename(params: RenameParams): RenameResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { modules: [], refused: 'This module is not one the engine holds.' };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return renameFor(symbols, params.moduleName, source, params.offset, params.newName);
     }
 
     private definition(params: NavigationParams): NavigationResult {

@@ -346,6 +346,34 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what a rename would make of every module in the workbook it touches. Null
+    /// when there is no engine or no address for the module, which is a different fact from a
+    /// rename the engine refused and said why.
+    /// </summary>
+    public async Task<(EngineRename Answer, string ProjectId)?> RenameAsync(
+        string moduleName,
+        int offset,
+        string newName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .RenameAsync(home.ProjectId, moduleName, home.ModuleType, offset, newName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine for the call tip at an offset into a module's live text, or null when
     /// there is no engine, no address for the module, or the caret is not inside a call.
     /// </summary>

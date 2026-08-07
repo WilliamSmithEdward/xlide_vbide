@@ -30,6 +30,8 @@ import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/multicursor/register.js";
 import "monaco-editor/features/parameterHints/register.js";
 import "monaco-editor/features/quickCommand/register.js";
+// The rename input box and its F2 binding.
+import "monaco-editor/features/rename/register.js";
 // What asks a semantic-tokens provider for tokens and paints the answer. The feature's register
 // module imports only the VIEWPORT contribution, which serves registerDocumentRangeSemanticTokens
 // providers; the whole-document feature is a separate module it never touches, so registering the
@@ -54,7 +56,7 @@ import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
-import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation } from "./bridge.js";
+import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { DocumentStore } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
@@ -126,6 +128,24 @@ function toEditorLocations(
   }
 
   return out;
+}
+
+/**
+ * What to tell the developer a rename did. The count of modules matters more than the count of
+ * uses: a rename that reached four modules is a rename that reached modules they cannot see, and
+ * that is the fact worth putting on screen.
+ */
+function renameSummary(answer: HostRenameAnswer, newName: string): string {
+  const uses = `${answer.replaced} use${answer.replaced === 1 ? "" : "s"}`;
+  const modules = answer.modules.length === 1
+    ? answer.modules[0]
+    : `${answer.modules.length} modules: ${answer.modules.join(", ")}`;
+  return `Renamed to ${newName} — ${uses} in ${modules}.`;
+}
+
+/** A range of nothing, which is what a refused rename has to carry alongside its reason. */
+function emptyRangeAt(position: monaco.Position): monaco.Range {
+  return new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
 }
 
 function modifierBits(modifiers: readonly string[] | null | undefined): number {
@@ -577,6 +597,43 @@ function boot(): void {
         bridge,
         await bridge.requestNavigation(
           model.getOffsetAt(position), true, context.includeDeclaration));
+    },
+  });
+
+  // Rename, across every module of the workbook that uses the symbol, whether its tab is open or
+  // not (the developer, 2026-08-06).
+  //
+  // The HOST does the renaming, so this returns no edits. A module with no tab has no model to
+  // edit, and those are exactly the ones a rename must not miss — so the work goes where the
+  // modules are, and the open tabs are refreshed by the ordinary document sync that follows.
+  monaco.languages.registerRenameProvider(VBA_LANGUAGE_ID, {
+    resolveRenameLocation: (model, position): monaco.languages.RenameLocation & monaco.languages.Rejection => {
+      if (model !== bridge.hostActiveModel()) {
+        return { range: emptyRangeAt(position), text: "", rejectReason: "Rename works in the module the editor is showing." };
+      }
+
+      const word = model.getWordAtPosition(position);
+      if (!word) {
+        return { range: emptyRangeAt(position), text: "", rejectReason: "There is no symbol here to rename." };
+      }
+
+      return {
+        range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        text: word.word,
+      };
+    },
+    provideRenameEdits: async (model, position, newName) => {
+      if (model !== bridge.hostActiveModel()) {
+        return { edits: [], rejectReason: "Rename works in the module the editor is showing." };
+      }
+
+      const answer = await bridge.requestRename(model.getOffsetAt(position), newName);
+      if (answer.refused) {
+        return { edits: [], rejectReason: answer.refused };
+      }
+
+      bridge.shell?.notify(renameSummary(answer, newName));
+      return { edits: [] };
     },
   });
 

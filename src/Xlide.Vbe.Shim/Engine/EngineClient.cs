@@ -362,6 +362,31 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineLocations);
     }
 
+    /// <summary>
+    /// Asks what a rename would make of every module it touches. Whole module texts come back,
+    /// because a module with no tab open has no editor to apply an edit list to.
+    /// </summary>
+    public async Task<EngineRename?> RenameAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int offset,
+        string newName,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["offset"] = offset,
+            ["newName"] = newName,
+        };
+
+        var result = await CallAsync("textDocument/rename", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineRename);
+    }
+
     /// <summary>Asks for a module's colouring: the type references and host globals it holds.</summary>
     public async Task<EngineSemanticTokens?> SemanticTokensAsync(
         string projectId,

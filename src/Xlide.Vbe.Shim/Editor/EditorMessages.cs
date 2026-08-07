@@ -413,6 +413,20 @@ public sealed record CodeActionResultMessage(
     [property: JsonPropertyName("actions")] SurfaceCodeAction[] Actions);
 
 /// <summary>
+/// The answer to one rename: which modules changed and how many uses went in each, or the reason
+/// nothing changed. The new text is not sent back — the host has already written it, and the open
+/// tabs are refreshed by the ordinary document sync.
+/// </summary>
+public sealed record RenameResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("oldName")] string? OldName,
+    [property: JsonPropertyName("newName")] string? NewName,
+    [property: JsonPropertyName("modules")] string[] Modules,
+    [property: JsonPropertyName("replaced")] int Replaced,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// One place in the workbook: the module, its workbook's display name, and a 1-based line and
 /// column into the module's live text.
 /// </summary>
@@ -537,6 +551,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]
 [JsonSerializable(typeof(SemanticTokensResultMessage))]
+[JsonSerializable(typeof(RenameResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

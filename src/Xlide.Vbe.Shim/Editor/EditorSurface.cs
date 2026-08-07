@@ -207,6 +207,9 @@ internal sealed class EditorSurface : IDisposable
     /// workbook or null).</summary>
     public Action<int, string, string?>? SemanticTokensRequested { get; set; }
 
+    /// <summary>Raised when the page asks to rename a symbol: (requestId, offset, newName).</summary>
+    public Action<int, int, string>? RenameRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -313,6 +316,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new CodeActionResultMessage("codeActionResult", requestId, actions),
             EditorMessageContext.Default.CodeActionResultMessage));
+    }
+
+    /// <summary>Answers one rename request: what changed, or why nothing did.</summary>
+    public void ShowRenamed(int requestId, string? oldName, string? newName, string[] modules, int replaced, string? refused)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
+            EditorMessageContext.Default.RenameResultMessage));
     }
 
     /// <summary>Answers one navigation request. Never held: the caret moves and the answer lapses.</summary>
@@ -1578,6 +1596,20 @@ internal sealed class EditorSurface : IDisposable
                         && fixEnd >= fixStart)
                     {
                         CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd);
+                    }
+
+                    break;
+
+                case "rename":
+                    if (document.RootElement.TryGetProperty("id", out var renameId)
+                        && renameId.TryGetInt32(out var renameRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var renameOffsetElement)
+                        && renameOffsetElement.TryGetInt32(out var renameOffset)
+                        && renameOffset >= 0
+                        && document.RootElement.TryGetProperty("newName", out var newNameElement)
+                        && newNameElement.GetString() is { Length: > 0 } renameNewName)
+                    {
+                        RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
                     }
 
                     break;
