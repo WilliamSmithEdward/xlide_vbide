@@ -1062,7 +1062,10 @@ body.live-resize .minimap {
 }
 
 #help-card {
-  width: 420px;
+  /* Wide enough for an install path on one line. The paths this shows are real ones out of a
+     repository, and a card sized for the prose made the only fact anyone opens this for the one
+     thing that wrapped. */
+  width: 560px;
   max-width: calc(100vw - 40px);
   padding-bottom: 4px;
   background: var(--vscode-editorWidget-background, #252526);
@@ -1132,15 +1135,36 @@ body.live-resize .minimap {
   padding: 0 14px 12px;
 }
 
+/* The label column never wraps. It is two short words at most, and letting a long value squeeze
+   it turned "Loaded from" into two lines beside a path that had plenty of room. */
 .help-facts dt,
 .help-keys dt {
   opacity: 0.6;
+  white-space: nowrap;
 }
 
 .help-facts dd,
 .help-keys dd {
   margin: 0;
+  min-width: 0;
   font-variant-numeric: tabular-nums;
+}
+
+/* A path that must break should break anywhere rather than at whatever hyphen happens to be in a
+   folder name, which reads as a typo. */
+.help-facts dd {
+  overflow-wrap: anywhere;
+}
+
+.help-path {
+  display: block;
+}
+
+.help-kind {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  opacity: 0.55;
 }
 
 .help-section {

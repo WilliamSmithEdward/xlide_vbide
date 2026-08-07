@@ -23,17 +23,35 @@ export function setInstallPath(path: string | null): void {
   installPath = path;
   const shown = document.getElementById("help-install-path");
   if (shown) {
-    shown.textContent = describeInstall();
+    describeInstall(shown);
   }
 }
 
-function describeInstall(): string {
-  if (!installPath) return "not reported";
+/**
+ * Fills an element with the path and, under it, what kind of build lives there. The kind is on its
+ * own line rather than in brackets after the path: a development publish is long enough that the
+ * bracket wrapped alone onto the next line and read as something that had come apart.
+ */
+function describeInstall(into: HTMLElement): void {
+  into.replaceChildren();
 
-  // Naming which kind of build it is answers the question the path is being read for. The
-  // installer puts the product under Programs\xlide; anything else is a development publish.
-  const installed = /\\Programs\\xlide$/i.test(installPath);
-  return `${installPath}${installed ? "" : "  (development build)"}`;
+  if (!installPath) {
+    into.textContent = "not reported";
+    return;
+  }
+
+  const where = document.createElement("span");
+  where.className = "help-path";
+  where.textContent = installPath;
+  into.appendChild(where);
+
+  // The installer puts the product under Programs\xlide; anything else was published by hand.
+  if (!/\\Programs\\xlide$/i.test(installPath)) {
+    const kind = document.createElement("span");
+    kind.className = "help-kind";
+    kind.textContent = "development build";
+    into.appendChild(kind);
+  }
 }
 
 interface Shortcut {
@@ -105,19 +123,24 @@ export function openHelpDialog(closed?: () => void): void {
   const facts = document.createElement("dl");
   facts.className = "help-facts";
 
-  for (const [label, value, id] of [
-    ["Version", __XLIDE_VERSION__, ""],
-    ["Build", `${__XLIDE_BUILD_NUMBER__}`, ""],
-    ["Built", __XLIDE_BUILD__.replace("T", " "), ""],
-    ["Loaded from", describeInstall(), "help-install-path"],
+  for (const [label, value] of [
+    ["Version", __XLIDE_VERSION__],
+    ["Build", `${__XLIDE_BUILD_NUMBER__}`],
+    ["Built", __XLIDE_BUILD__.replace("T", " ")],
   ] as const) {
     const term = document.createElement("dt");
     term.textContent = label;
     const detail = document.createElement("dd");
     detail.textContent = value;
-    if (id) detail.id = id;
     facts.append(term, detail);
   }
+
+  const whereTerm = document.createElement("dt");
+  whereTerm.textContent = "Loaded from";
+  const whereDetail = document.createElement("dd");
+  whereDetail.id = "help-install-path";
+  describeInstall(whereDetail);
+  facts.append(whereTerm, whereDetail);
 
   const keysTitle = document.createElement("div");
   keysTitle.className = "help-section";
