@@ -545,6 +545,28 @@ internal sealed class EditorSurface : IDisposable
 #if DEBUG
         var startedAt = Environment.TickCount64;
 #endif
+        // Growing gives the browser its new size BEFORE the window reaches it.
+        //
+        // The overlay grows in one call and the browser catches up in its own time, so for a
+        // frame the strip between the old edge and the new one is the overlay's own ground —
+        // a flat band at the right edge on every tick of a drag (the developer, 2026-08-06).
+        // The window's paint handler already covers that strip deliberately, because what lies
+        // under it is the old native editor and THAT bleeding through is worse. Painting it
+        // sooner is not the answer; not exposing it is.
+        //
+        // A child may be larger than its parent — it is simply clipped — so sizing it first
+        // means the parent grows into a child that already covers the new area. Only when
+        // growing: shrinking the child first would expose the same band on the inside edge,
+        // which is the same defect facing the other way.
+        if (visible && _overlay is { } growing)
+        {
+            var current = growing.ClientBounds();
+            if (bounds.Width > current.Width || bounds.Height > current.Height)
+            {
+                _browser?.SetBounds(new PixelRect(0, 0, bounds.Width, bounds.Height));
+            }
+        }
+
         _overlay?.Place(bounds, visible);
 #if DEBUG
         var placedAt = Environment.TickCount64;
