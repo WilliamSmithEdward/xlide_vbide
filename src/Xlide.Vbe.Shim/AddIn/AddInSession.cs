@@ -5439,7 +5439,8 @@ internal sealed class AddInSession : IDisposable
                     .ConfigureAwait(false);
 
                 locations = [.. answered.Select(location => new SurfaceLocation(
-                    location.Module, workbook, location.Line, location.Column, location.Length))];
+                    location.Module, workbook, location.Line, location.Column, location.Length,
+                    location.Preview))];
 
                 Log.Info($"{(references ? "references" : "definition")}: {module}@{offset} -> {locations.Length}");
             }

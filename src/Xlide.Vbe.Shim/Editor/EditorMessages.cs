@@ -435,7 +435,9 @@ public sealed record SurfaceLocation(
     [property: JsonPropertyName("workbook")] string? Workbook,
     [property: JsonPropertyName("line")] int Line,
     [property: JsonPropertyName("column")] int Column,
-    [property: JsonPropertyName("length")] int Length);
+    [property: JsonPropertyName("length")] int Length,
+    /// <summary>The line it sits on, which is what makes an unopened module renderable.</summary>
+    [property: JsonPropertyName("preview")] string? Preview = null);
 
 /// <summary>
 /// The answer to one navigation request: where a symbol is declared, or everywhere it is used.

@@ -117,7 +117,9 @@ public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
     [property: JsonPropertyName("line")] int Line,
     [property: JsonPropertyName("column")] int Column,
-    [property: JsonPropertyName("length")] int Length);
+    [property: JsonPropertyName("length")] int Length,
+    /// <summary>The line it sits on, so a module with no tab open can still be listed.</summary>
+    [property: JsonPropertyName("preview")] string? Preview = null);
 
 /// <summary>Where a symbol is declared, or everywhere it is used. Never crosses a workbook.</summary>
 public sealed record EngineLocations(

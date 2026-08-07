@@ -1,4 +1,4 @@
-# Parity audit: what is wired, what is not
+﻿# Parity audit: what is wired, what is not
 
 Measured 2026-08-06 against the shipping build, as step 1 of the parity goal in
 [handoff.md](handoff.md) section 9. Four layers have to line up for a capability to reach a
@@ -17,13 +17,13 @@ editor's own report of what it did.
 | Quick fixes | yes | `codeAction` | yes | `registerCodeActionProvider` | shipped |
 | Semantic highlighting | yes | `semanticTokens` | yes | `registerDocumentSemanticTokensProvider` | shipped |
 | Go to definition | yes | `definition` | yes | `registerDefinitionProvider` | shipped |
-| Find references | yes | `references` | yes | `registerReferenceProvider` | shipped, one limit |
+| Find references | yes | `references` | yes | xlide's own results modal | shipped |
 | Rename symbol | yes | `rename` | yes | `registerRenameProvider` | shipped |
 | Rename module | yes | `renameModule` | yes | explorer, and the rename box | shipped |
 
 Find references answers across the whole workbook, but the editor's references window can only
 render modules that have a tab open: a module with no tab has no model to render. Go to definition
-has no such limit — a definition in an unopened module goes through the host, which opens it on the
+has no such limit â€” a definition in an unopened module goes through the host, which opens it on the
 way. What would close the gap is a way for the page to ask the host to open a module without also
 moving the caret into it.
 
@@ -74,7 +74,7 @@ Monaco has a first-class provider for every one of these:
 **Rename**, and it turned out to be the sentence below that mattered rather than the one predicted.
 Agreeing with the baselines was free: the edits go through the same writer typing already uses, so
 the unsaved dot and Don't Save kept working because nothing new was happening to them. Undo is the
-part that did not get solved — the editor's stack is per module and the edit is not, so a rename
+part that did not get solved â€” the editor's stack is per module and the edit is not, so a rename
 cannot be undone. What actually cost the time was narrower and unforeseen: which occurrences of a
 name are references at all.
 
@@ -105,14 +105,14 @@ whether the request goes out at all. Expect this of the next feature rather than
 Two more editor facts, found the same way. A code-action provider must declare
 `providedCodeActionKinds`, because the editor gates Ctrl+. and Shift+Alt+. on a context key built
 from that list. And semantic highlighting defaults to whatever the theme says, which for a
-standalone theme is always no — the flag is hardcoded off on every one of them, so the editor has
+standalone theme is always no â€” the flag is hardcoded off on every one of them, so the editor has
 to be asked outright.
 
 ## Rename, as measured live
 
 Proven in a real host (2026-08-06), reading the result out of the VBA project rather than
 believing the editor's report: a rename from a module with a tab open rewrote a module with NO tab
-open — both its bare call and its qualified one — because the write goes through the object model,
+open â€” both its bare call and its qualified one â€” because the write goes through the object model,
 which does not care what is showing.
 
 | Site | Renamed |
@@ -124,7 +124,7 @@ which does not care what is showing.
 | a bare call elsewhere, colliding definitions | no, by the resolver |
 | the other module's own declaration and its own calls | never |
 
-The collision row was NOT inconclusive after all — it was broken, and the developer found it by
+The collision row was NOT inconclusive after all â€” it was broken, and the developer found it by
 renaming from a call site (2026-08-06). Asked at `CleanModule.RunTotal`, the member resolver
 answers with EVERY module declaring a `RunTotal`, so the rename went through all of them and
 renamed a `BrokenModule.RunTotal` that had nothing to do with it.
@@ -135,12 +135,12 @@ always correct. The entry point was the variable nobody varied.
 The fix is to anchor every rename at the declaration, whichever site it was asked from: resolve
 the symbol first, then collect from there. So the entry point that was already right became the
 only one there is, and a name resolving to more than one declaration now refuses and names the
-modules — which is the collision warning, arriving where it is actually needed. The smoke test
+modules â€” which is the collision warning, arriving where it is actually needed. The smoke test
 now asserts that a rename from a call site and one from the declaration reach the same modules.
 
 The remaining `ambiguous` list is over-broad: it reports the other procedure's own declaration and
 its own calls, which are a different symbol and not something a developer needs to decide about.
-Nothing shows it yet, so nothing is wrong on screen — but it is not fit to show as it stands.
+Nothing shows it yet, so nothing is wrong on screen â€” but it is not fit to show as it stands.
 
 ## What rename still needs
 
@@ -150,7 +150,7 @@ plumbing.
 
 A rename that stops at a module boundary compiles until the module nobody renamed runs, so a
 rename that cannot reach every module must refuse rather than do most of it. Modules with a tab
-open are straightforward — the edits go through the same path typing already uses, so the unsaved
+open are straightforward â€” the edits go through the same path typing already uses, so the unsaved
 dot, Don't Save, and the baselines behind both keep working because nothing new is happening to
 them. Modules with no tab are the whole question: writing them behind the developer's back means
 inventing baselines for text they never saw, and refusing until they open every affected module

@@ -198,6 +198,7 @@ export function referencesFor(
         line: span.line + 1,
         column: span.column + 1,
         length: span.length,
+        preview: lineAt(byModule.get(span.moduleName.toLowerCase())?.source, span.line),
     }));
 }
 
@@ -686,6 +687,14 @@ function replaceAll(
     return text;
 }
 
+/** One line of a module, trimmed, for a results list. Empty when the module is not held. */
+function lineAt(source: string | undefined, line: number): string {
+    if (source === undefined) {
+        return '';
+    }
+    return (source.split(LINE_BREAK)[line] ?? '').trim();
+}
+
 /** Where each line begins, counting the three line endings VBA modules turn up with. */
 function lineStarts(source: string): number[] {
     const starts = [0];
@@ -716,7 +725,13 @@ function occurrencesOfTypeName(symbols: ProjectSymbols, name: string): LocationP
         const lines = module.source.split(/\r\n|\n|\r/);
         for (let index = 0; index < lines.length; index++) {
             for (const at of identifierPositions(lines[index], wanted)) {
-                out.push({ module: module.moduleName, line: index + 1, column: at + 1, length: name.length });
+                out.push({
+                    module: module.moduleName,
+                    line: index + 1,
+                    column: at + 1,
+                    length: name.length,
+                    preview: lines[index].trim(),
+                });
             }
         }
     }

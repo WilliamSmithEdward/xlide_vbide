@@ -882,6 +882,17 @@ try {
     check('excluding the declaration drops exactly it', () =>
         assert.equal(withoutDeclaration.locations.length, uses.locations.length - 1));
 
+    // Every reference carries the line it sits on. The surface's own list renders TEXT rather
+    // than editor models, and only a module with a tab open has a model — so sending the line is
+    // what lets a use in a module nobody has opened be listed at all.
+    check('every reference carries the line it sits on', () => {
+        for (const where of uses.locations) {
+            assert.ok(typeof where.preview === 'string' && where.preview.length > 0,
+                `${where.module}:${where.line} came back with no line to show`);
+            assert.equal(where.preview, where.preview.trim(), 'the line is trimmed for a list');
+        }
+    });
+
     const nowhere = await call('textDocument/definition', {
         projectId: 'Smoke',
         moduleName: 'GoodModule',

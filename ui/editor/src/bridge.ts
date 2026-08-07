@@ -183,6 +183,8 @@ export interface HostLocation {
   line: number;
   column: number;
   length: number;
+  /** The line it sits on, so a module with no tab open can still be listed. */
+  preview?: string | null;
 }
 
 /** What a rename did, or the reason it did nothing. */
@@ -1915,7 +1917,15 @@ export function demoTransport(): HostTransport {
             text.split("\n").forEach((line, index) => {
               const column = line.indexOf(word);
               if (column >= 0) {
-                locations.push({ module, line: index + 1, column: column + 1, length: word.length });
+                locations.push({
+                  module,
+                  line: index + 1,
+                  column: column + 1,
+                  length: word.length,
+                  // The host sends the line with every location; the demo must too, or the
+                  // references list looks empty here and correct everywhere else.
+                  preview: line.trim(),
+                });
               }
             });
           }

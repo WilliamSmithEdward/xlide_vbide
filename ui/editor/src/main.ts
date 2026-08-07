@@ -63,6 +63,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 import "./styles.css";
 import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
+import { openReferencesDialog } from "./referencesdialog.js";
 import { DocumentStore } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
@@ -814,7 +815,9 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   const editorKeys: Array<[string, string, string, number, boolean]> = [
     ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "editor.action.revealDefinition",
       monaco.KeyMod.Shift | monaco.KeyCode.F2, false],
-    ["xlide.findReferences", "Find All References (Shift+F12)", "editor.action.goToReferences",
+    // Not editor.action.goToReferences: that opens the editor's own window, which can only draw
+    // modules with a tab open. Handled below instead.
+    ["xlide.findReferences", "Find All References (Shift+F12)", "",
       monaco.KeyMod.Shift | monaco.KeyCode.F12, false],
     // The VBE's Last Position steps back through where the caret has been. So does this, and it
     // steps back through every move rather than only the ones that were jumps.
@@ -831,6 +834,35 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
       run: (target) => { target.trigger("xlide", command, null); },
     });
   }
+
+  // Find All References, in xlide's own list.
+  //
+  // The editor's window renders each result by resolving it to a MODEL, and this surface only has
+  // models for modules with a tab open — so the use in a module nobody has opened, which is the
+  // one worth being shown, is the one it cannot draw. This list renders the line the host sends
+  // instead, so an unopened module is listed like any other and clicking it opens it.
+  editor.addAction({
+    id: "xlide.findAllReferences",
+    label: "Find All References",
+    contextMenuGroupId: "navigation",
+    contextMenuOrder: 1.35,
+    keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
+    run: async (target) => {
+      const model = target.getModel();
+      const position = target.getPosition();
+      if (!model || !position || model !== bridge.hostActiveModel()) {
+        return;
+      }
+
+      const word = model.getWordAtPosition(position);
+      const found = await bridge.requestNavigation(model.getOffsetAt(position), true, true);
+
+      openReferencesDialog(word?.word ?? "this symbol", found, {
+        navigate: (module, line, column, workbook) =>
+          bridge.navigate(module, line, column, false, workbook ?? undefined),
+      });
+    },
+  });
 }
 
 /**

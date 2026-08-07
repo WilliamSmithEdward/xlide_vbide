@@ -2421,3 +2421,120 @@ body.objbrowser-page #objbrowser-card {
   white-space: nowrap;
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
 }
+
+/* Where a symbol is used. The scrim and card match the About dialog's, because two modals that
+   are nearly the same shape read as a mistake rather than a family. */
+#references-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 10vh;
+  z-index: 90;
+}
+
+#references-card {
+  width: 720px;
+  max-width: calc(100vw - 40px);
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+
+#references-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 8px 14px;
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+#references-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+#references-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+#references-close:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* The list scrolls; the header and the card's edges do not. */
+#references-body {
+  overflow-y: auto;
+  padding: 6px 0 8px;
+}
+
+.references-module {
+  padding: 6px 14px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.75;
+}
+
+.references-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 3px 14px 3px 26px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.references-row:hover,
+.references-row:focus-visible {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.18));
+  outline: none;
+}
+
+.references-line {
+  flex: 0 0 auto;
+  min-width: 34px;
+  text-align: right;
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The line as it is written, in the editor's own face: a result that does not look like code is
+   harder to recognise than the code it came from. */
+.references-preview {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.references-empty {
+  margin: 0;
+  padding: 10px 14px 12px;
+  opacity: 0.8;
+}

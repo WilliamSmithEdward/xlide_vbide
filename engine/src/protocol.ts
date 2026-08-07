@@ -333,6 +333,14 @@ export interface LocationPayload {
     line: number;
     column: number;
     length: number;
+    /**
+     * The line the reference sits on, trimmed for a results list.
+     *
+     * Carried because the surface's own references list renders TEXT rather than editor models,
+     * and only modules with a tab open have a model. Sending the line is what lets a reference in
+     * a module nobody has opened be shown at all — which is the reference most worth showing.
+     */
+    preview?: string;
 }
 
 export interface NavigationResult {
