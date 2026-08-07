@@ -233,12 +233,22 @@ class EditorGroup {
     return wasActive;
   }
 
-  /** Rebuilds the strip when anything it draws has changed. The render key covers it all. */
+  /**
+   * Rebuilds the strip when anything it draws has changed. The render key covers it all.
+   *
+   * Including whether each name COLLIDES, which is not a fact about this group. A twin tab
+   * opening in another group changes what this group's label should say while changing nothing
+   * about its own tabs, so a key built from its own tabs alone held it back: the newly opened
+   * tab showed its workbook and the one already there stayed bare, which reads as arbitrary
+   * (the developer, 2026-08-07). Both names are ambiguous, so both are qualified.
+   */
   renderTabs(): void {
+    const counts = this.workspace.openNameCounts;
     const renderKey = this.tabs
       .map((tab) => this.key(tab.id)
         + "" + this.workspace.problemCountFor(tab.id)
-        + (tab.dirty ? "d" : ""))
+        + (tab.dirty ? "d" : "")
+        + ((counts.get(tab.id.module.toLowerCase()) ?? 0) > 1 ? "+" : ""))
       .join("")
       + "" + (this.active ? this.key(this.active) : "");
 
@@ -263,9 +273,19 @@ class EditorGroup {
       tab.className = "tab" + (isActive ? " active" : "") + (dirty ? " dirty" : "");
       tab.dataset.module = id.module;
       tab.dataset.project = id.project ?? "";
-      // Bracketed, not dashed. The workbook is a qualifier on the name rather than a second
-      // thing of equal weight, and brackets say that where a dash does not.
+      // The workbook is added to the LABEL only when two open tabs share a module name, which is
+      // exactly when the bare name is ambiguous. Putting it on every tab costs strip width, and
+      // the strip runs out: it grew scroll arrows for that reason.
+      //
+      // Bracketed rather than dashed, because the workbook qualifies the name rather than
+      // standing beside it as a second thing of equal weight.
       tab.textContent = collides && id.project ? `${id.module} (${id.project})` : id.module;
+
+      // The tooltip always carries it, collision or not. Otherwise a bare tab offers no way at
+      // all to find out which workbook it belongs to, and the answer to "which one is this?"
+      // should not depend on some other tab happening to share its name (the developer,
+      // 2026-08-07).
+      tab.title = id.project ? `${id.module} (${id.project})` : id.module;
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(isActive));
       tab.draggable = false;

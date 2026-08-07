@@ -542,16 +542,35 @@ function boot(): void {
         return null;
       }
 
+      // What the debugger says this is worth, when execution is stopped in this module.
+      //
+      // First in the hover and answered even when the analyzer has nothing: while stopped, the
+      // value is the thing being looked for, and a local has no declaration the analyzer would
+      // describe anyway. This is the reading the Locals panel is already showing, asked about
+      // one name instead of all of them.
+      const word = model.getWordAtPosition(position);
+      const live = word ? bridge.localValue(model, word.word) : null;
+
       const hover = await bridge.requestHover(model.getOffsetAt(position));
+
       if (!hover) {
-        return null;
+        return live && word
+          ? {
+            range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+            contents: [{ value: "```vba\n" + word.word + " = " + live.value + "\n```" }],
+          }
+          : null;
       }
 
       const start = model.getPositionAt(hover.start);
       const end = model.getPositionAt(hover.end);
-      const contents: monaco.IMarkdownString[] = [
-        { value: "```vba\n" + hover.signature + "\n```" },
-      ];
+      const contents: monaco.IMarkdownString[] = [];
+
+      if (live && word) {
+        contents.push({ value: "```vba\n" + word.word + " = " + live.value + "\n```" });
+      }
+
+      contents.push({ value: "```vba\n" + hover.signature + "\n```" });
 
       if (hover.details.length > 0) {
         contents.push({ value: hover.details.join("  \n") });

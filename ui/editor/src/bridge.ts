@@ -887,6 +887,36 @@ export class EditorBridge {
     });
   }
 
+  /**
+   * The variables in scope where execution is stopped, or empty when it is not stopped.
+   *
+   * The Locals panel's own reading, kept so a hover can answer with a value. Empty the moment
+   * execution resumes, because a value from a frame that has gone is worse than no value: it
+   * looks current and is not.
+   */
+  private stoppedLocals: { expression: string; value: string; kind: string }[] = [];
+
+  /**
+   * What the debugger says this name is worth right now, or null when nothing is stopped, the
+   * name is not in scope, or the caret is not in the module execution stopped in.
+   *
+   * That last guard matters. The Locals panel holds ONE frame, and a name in some other module
+   * can easily match one of its variables; showing that value on a hover in a procedure that is
+   * not running would be a confident lie. The stopped module is the one the surface is showing,
+   * because the host brings it forward when it breaks.
+   */
+  localValue(model: monaco.editor.ITextModel, name: string): { value: string; kind: string } | null {
+    if (this.stoppedLocals.length === 0 || model !== this.hostActiveModel()) {
+      return null;
+    }
+
+    const wanted = name.toLowerCase();
+    const found = this.stoppedLocals.find((row) => row.expression.toLowerCase() === wanted);
+
+    // A row with no value is a parent node in the panel's tree, not a reading.
+    return found && found.value.length > 0 ? { value: found.value, kind: found.kind } : null;
+  }
+
   /** The model a host location names, or null when that module has no tab open. */
   modelForLocation(location: HostLocation): monaco.editor.ITextModel | null {
     return this.documents.get(location.module, location.workbook ?? null);
@@ -1217,12 +1247,23 @@ export class EditorBridge {
         this.searchWidget?.showSearchResults(message.id, message.matches, message.truncated, message.replaced ?? 0);
         return;
       case "setLocals":
+        // Kept as well as shown. The panel draws them; the hover uses them for data tips, which
+        // is the same reading answering a different question.
+        this.stoppedLocals = (message.stopped ?? false) ? (message.rows ?? []) : [];
         this.shell?.setLocals(message.stopped ?? false, message.context ?? null, message.rows ?? []);
         return;
       case "setWatches":
         this.shell?.setWatches(message.stopped, message.rows ?? []);
         return;
       case "setDebugState":
+        // Leaving break mode drops the values immediately, without waiting for a locals push to
+        // say so. Reset produced no such push, so a hover went on reporting `label = "twin"`
+        // from a frame that no longer existed: a reading that looks current and is not is worse
+        // than none at all (2026-08-07).
+        if (message.mode !== "break") {
+          this.stoppedLocals = [];
+        }
+
         this.shell?.setDebugMode(message.mode);
         return;
       case "obLibrariesResult":
