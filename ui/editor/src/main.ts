@@ -23,6 +23,11 @@ import "monaco-editor/features/gotoLine/register.js";
 // than its name does; the pattern is worth expecting rather than rediscovering.
 import "monaco-editor/features/gotoSymbol/register.js";
 import "monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands.js";
+// And the window those commands open. goToCommands asks ReferencesController for the peek, and
+// the STANDALONE editor registers that controller in a module of its own that nothing else
+// imports — so Find All References ran, resolved, and showed nothing. Fourth feature here whose
+// pieces arrive separately.
+import "monaco-editor/editor/standalone/browser/referenceSearch/standaloneReferenceSearch.js";
 import "monaco-editor/features/hover/register.js";
 import "monaco-editor/features/indentation/register.js";
 import "monaco-editor/features/lineSelection/register.js";
@@ -797,23 +802,31 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // The VBA keys, answered by the editor. Both editor commands are registered by their features
   // rather than as editor actions, so they are triggered by id — which falls through to the
   // command registry, where those live.
-  const editorActions: Array<[string, string, string, number]> = [
+  // The VBA keys, answered by the editor's own commands.
+  //
+  // NOT on the context menu. The editor already puts Go to Definition and Go to References at the
+  // top of it, and a second pair further down running the same thing reads as two different
+  // features and invites the question of which one is the real one (the developer, 2026-08-06).
+  // These exist for the keys alone: Shift+F2 is what a VBA developer's hands already do, and it
+  // would otherwise do nothing at all.
+  //
+  // Last Position keeps its entry, because the editor's menu has no equivalent to duplicate.
+  const editorKeys: Array<[string, string, string, number, boolean]> = [
     ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "editor.action.revealDefinition",
-      monaco.KeyMod.Shift | monaco.KeyCode.F2],
+      monaco.KeyMod.Shift | monaco.KeyCode.F2, false],
     ["xlide.findReferences", "Find All References (Shift+F12)", "editor.action.goToReferences",
-      monaco.KeyMod.Shift | monaco.KeyCode.F12],
+      monaco.KeyMod.Shift | monaco.KeyCode.F12, false],
     // The VBE's Last Position steps back through where the caret has been. So does this, and it
     // steps back through every move rather than only the ones that were jumps.
     ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "cursorUndo",
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2],
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2, true],
   ];
 
-  for (const [id, label, command, key] of editorActions) {
+  for (const [id, label, command, key, onMenu] of editorKeys) {
     editor.addAction({
       id,
       label,
-      contextMenuGroupId: "1_xlide",
-      contextMenuOrder: 2,
+      ...(onMenu ? { contextMenuGroupId: "1_xlide", contextMenuOrder: 2 } : {}),
       keybindings: [key],
       run: (target) => { target.trigger("xlide", command, null); },
     });
