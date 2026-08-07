@@ -75,6 +75,9 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `compile` | POST | `waitMs` | compiles the project and answers its errors as DATA, clearing the modal it raises. `compiled` is false when anything appeared |
 | `documents` | GET | | the documents the surface holds TEXT for, with line counts, unwritten flags, and which is active. Not the same list as the tabs |
 | `component` | POST | `action=add\|remove\|rename`, `kind=1\|2\|3`, `name`, `newName`, `project` | adds, renames or removes a component FROM INSIDE, so a fixture can be built without "Trust access to the VBA project object model". `name` is read back from the component; a refused name adds nothing |
+| `project` | GET | `project` | what the VBA project CONTAINS: every component with its kind, line count, and whether a pane is open on it, plus the project's execution mode. The object model's own answer, read from inside |
+| `outline` | GET | `module`, `project` | a module's procedures, from the analyzer: name, kind, line. For asserting on shape without parsing the text again in the caller |
+| `mark` | POST | `text` | writes a labelled line into the shim log and answers the byte offset it landed at, so `log?since=` can return exactly the slice a step produced |
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |

@@ -228,6 +228,38 @@ function clientFor(entry) {
     component: (action, { kind, name, newName, project } = {}) =>
       call(`component${query({ action, kind, name, newName, project })}`, { method: "POST" }),
 
+    /**
+     * What the VBA project actually CONTAINS: every component, its kind, its line count, and
+     * whether the editor has a pane open on it.
+     *
+     * Not the same question as `documents()` (what the surface holds text for) or the tab strip
+     * (what has a pane). This is the object model's own answer, read from inside — the question a
+     * fixture asks twice, once to build and once to check.
+     */
+    project: (project) => call(`project${query({ project })}`),
+
+    /**
+     * A module's procedures, from the analyzer.
+     *
+     * For asserting on SHAPE without reading the text back and parsing it a second time, in a
+     * second language, with a second set of bugs.
+     */
+    outline: (module, project) => call(`outline${query({ module, project })}`),
+
+    /**
+     * Writes a labelled line into the shim log and answers the offset it landed at.
+     *
+     * Reading a log for what one step did means finding where that step began, and "scroll up
+     * until it looks about right" is how a session ends up reasoning about the wrong three
+     * seconds. Mark, act, then `log({ since: mark.at })` — a slice that starts with words you
+     * chose is a slice you can be sure is yours.
+     *
+     *   const mark = await api.mark("renaming Recalculate");
+     *   …
+     *   const what = await api.log({ since: mark.at });
+     */
+    mark: (text) => call(`mark${query({ text })}`, { method: "POST" }),
+
     /** The start-of-session sanity check: right build, everything attached, nothing standing. */
     doctor: () => call("doctor"),
 

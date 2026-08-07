@@ -684,6 +684,43 @@ public sealed record DebugComponentReply(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("action")] string Action);
 
+/// <summary>One component of a VBA project, as the object model has it.</summary>
+public sealed record DebugComponentRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("type")] int Type,
+    [property: JsonPropertyName("lines")] int Lines,
+    [property: JsonPropertyName("hasPane")] bool HasPane);
+
+/// <summary>
+/// What a workbook's VBA project actually contains, read from the object model.
+///
+/// The one question a harness could not ask without "Trust access to the VBA project object
+/// model": not what the surface is SHOWING, but what is THERE. Building a fixture and then
+/// checking it is the same question twice, and both were reaching outside for it.
+/// </summary>
+public sealed record DebugProjectReply(
+    [property: JsonPropertyName("project")] string Project,
+    [property: JsonPropertyName("projectId")] string? ProjectId,
+    [property: JsonPropertyName("mode")] int Mode,
+    [property: JsonPropertyName("components")] DebugComponentRow[] Components);
+
+/// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
+public sealed record DebugMarkReply(
+    [property: JsonPropertyName("marked")] string Marked,
+    [property: JsonPropertyName("at")] long At);
+
+/// <summary>One procedure in a module, as the analyzer sees it.</summary>
+public sealed record DebugProcedureRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("line")] int Line);
+
+/// <summary>A module's shape without reading its text and parsing it again in the caller.</summary>
+public sealed record DebugOutlineReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("procedures")] DebugProcedureRow[] Procedures);
+
 /// <summary>One document the HOST is holding text for, and whether the page was given it.</summary>
 public sealed record DebugDocumentRow(
     [property: JsonPropertyName("module")] string Module,
@@ -896,6 +933,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugGuardReply))]
 [JsonSerializable(typeof(DebugComponentReply))]
+[JsonSerializable(typeof(DebugProjectReply))]
+[JsonSerializable(typeof(DebugMarkReply))]
+[JsonSerializable(typeof(DebugOutlineReply))]
 [JsonSerializable(typeof(DebugCompileReply))]
 [JsonSerializable(typeof(DebugDocumentsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]

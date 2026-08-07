@@ -11,8 +11,15 @@
     Every module below is labelled in its own comments with what to try and what must NOT move.
     The checklist is in the workbook, not only here, so it is still there next time.
 
-    Trust access to the VBA project object model must be on (Excel > Options > Trust Center >
-    Trust Center Settings > Macro Settings), or the components cannot be written.
+    Built through the debug api, so "Trust access to the VBA project object model" does NOT have
+    to be on. That setting gates VBComponents.Add through Workbook.VBProject; the add-in is
+    already past it, because the host hands it the VBE. A Debug build must be registered and
+    loading, which is what makes the door exist.
+
+    The result deliberately does NOT compile: Helpers and Rival each declare a public
+    Recalculate, and Consumer calls it bare. That collision is the point of the fixture, so never
+    compile it as part of a wider experiment — every Run against it will fail for a reason that
+    has nothing to do with what you asked.
 
 .EXAMPLE
     tools\New-RenameFixture.ps1
@@ -182,69 +189,93 @@ Public Sub Refresh()
 End Sub
 '@
 
-$excel = New-Object -ComObject Excel.Application
-$excel.Visible = $true
-$excel.DisplayAlerts = $false
+# ---------------------------------------------------------------- building it
 
+# Built through the DOOR, not through Workbook.VBProject.
+#
+# The old shape needed "Trust access to the VBA project object model" turned on, because
+# VBComponents.Add is exactly what that setting gates. The add-in is already past that gate — the
+# host hands it the VBE at OnConnection — so the components go in through the debug api and the
+# setting can stay OFF, which is where it belongs (2026-08-07).
+#
+# Three phases, because each needs a different thing:
+#   1. An empty macro workbook. Only Excel can make one, and an automation-created Excel is fine
+#      for it — no add-in is needed to save a blank file.
+#   2. The same workbook opened as an ORDINARY process with the editor up, which is what loads
+#      the add-in and therefore what opens the door.
+#   3. The components, through the door.
+
+$harness = Join-Path $PSScriptRoot 'harness'
+$client = Join-Path $harness 'xlide-api.mjs'
+
+Write-Host '1. Making an empty macro workbook.'
+$maker = New-Object -ComObject Excel.Application
+$maker.Visible = $false
+$maker.DisplayAlerts = $false
 try {
-    $book = $excel.Workbooks.Add()
-    $project = $book.VBProject
-
-    foreach ($name in $modules.Keys) {
-        $entry = $modules[$name]
-        $component = $project.VBComponents.Add($entry.Kind)
-        # Named after it is added: Add returns a Class1/Module1 and the name is a property.
-        try {
-            $component.Name = $name
-        } catch {
-            # A name the object library already owns is refused with a bare HRESULT, so it is
-            # named here rather than left as a number. Circle is one: Excel has it already.
-            throw "The editor would not accept '$name' as a module name ($($_.Exception.Message))."
-        }
-        $component.CodeModule.AddFromString($entry.Code)
-    }
-
-    # The first worksheet's own module, for the document-module case.
-    $project.VBComponents.Item($book.Worksheets.Item(1).CodeName).CodeModule.AddFromString($sheetCode)
-
+    $blank = $maker.Workbooks.Add()
     # 52 is xlOpenXMLWorkbookMacroEnabled: a workbook that cannot hold macros is no fixture.
-    $book.SaveAs($Path, 52)
+    $blank.SaveAs($Path, 52)
+    $blank.Close($false)
+}
+finally {
+    try { $maker.Quit() } catch { }
+    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($maker) | Out-Null
+}
 
-    $excel.VBE.MainWindow.Visible = $true
+Write-Host '2. Opening it with the editor, which is what loads the add-in.'
+& (Join-Path $harness 'Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
 
-    # Consumer stays CLOSED and Watcher stays OPEN, which is the arrangement the interesting
-    # test needs; opening them all would hide the case that matters.
-    foreach ($name in $modules.Keys) {
-        $project.VBComponents.Item($name).CodeModule.CodePane.Window.Close()
-    }
-    $project.VBComponents.Item('Watcher').CodeModule.CodePane.Show()
+# The module texts go to node as JSON, so that quoting, CRLFs and VBA's own doubled quotes cross
+# once rather than being escaped through two shells.
+$plan = @{
+    modules = @(
+        foreach ($name in $modules.Keys) {
+            @{ name = $name; kind = $modules[$name].Kind; code = $modules[$name].Code }
+        }
+    )
+    sheetCode = $sheetCode
+    openAtEnd = 'Watcher'
+}
 
-    Write-Host ""
-    Write-Host "Fixture written to $Path"
-    Write-Host ""
-    Write-Host "  Helpers        standard module, renamed from the explorer or from code"
-    Write-Host "  HelpersExtra   shares a prefix and must not move"
-    Write-Host "  Rival          declares its own Recalculate and must not move"
-    Write-Host "  IShape         interface: Implements, the IShape_Draw prefix, and As IShape"
-    Write-Host "  RoundShape     implements IShape"
-    Write-Host "  Widget         ordinary class: As Widget, New Widget"
-    Write-Host "  Consumer       names everything - LEFT CLOSED on purpose"
-    Write-Host "  Watcher        names some of it - LEFT OPEN on purpose"
-    Write-Host "  Sheet1         document module, the untested case"
-    Write-Host ""
-    Write-Host "After any rename, check Consumer - the module with no tab is the one that"
-    Write-Host "silently gets missed, and it is where every string and comment must be intact."
-    Write-Host ""
+# Written WITHOUT a byte-order mark. In PowerShell 5.1 `-Encoding utf8` means "UTF-8 with a BOM",
+# and JSON.parse refuses one — naming a character that does not appear to be in the file.
+$planPath = Join-Path ([System.IO.Path]::GetTempPath()) "xlide-fixture-$PID.json"
+[System.IO.File]::WriteAllText(
+    $planPath,
+    ($plan | ConvertTo-Json -Depth 5),
+    (New-Object System.Text.UTF8Encoding $false))
 
-    if ($Quiet) {
-        $book.Close($true)
-        $excel.Quit()
-    }
-} catch {
-    Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red
-    if ($_.Exception.Message -match '0x800A03EC|programmatic') {
-        Write-Host "Trust access to the VBA project object model is probably off." -ForegroundColor Yellow
-    }
-    try { $excel.Quit() } catch { }
-    throw
+Write-Host '3. Writing the components through the debug api.'
+try {
+    & node (Join-Path $harness 'build-fixture.mjs') $planPath | Write-Host
+    if ($LASTEXITCODE -ne 0) { throw 'the fixture could not be built through the api' }
+}
+finally {
+    Remove-Item $planPath -ErrorAction SilentlyContinue
+}
+
+Write-Host ''
+Write-Host "Fixture written to $Path"
+Write-Host ''
+Write-Host '  Helpers        standard module, renamed from the explorer or from code'
+Write-Host '  HelpersExtra   shares a prefix and must not move'
+Write-Host '  Rival          declares its own Recalculate and must not move'
+Write-Host '  IShape         interface: Implements, the IShape_Draw prefix, and As IShape'
+Write-Host '  RoundShape     implements IShape'
+Write-Host '  Widget         ordinary class: As Widget, New Widget'
+Write-Host '  Consumer       names everything - LEFT CLOSED on purpose'
+Write-Host '  Watcher        names some of it - LEFT OPEN on purpose'
+Write-Host '  Sheet1         document module, the untested case'
+Write-Host ''
+Write-Host 'After any rename, check Consumer - the module with no tab is the one that'
+Write-Host 'silently gets missed, and it is where every string and comment must be intact.'
+Write-Host ''
+Write-Host 'NOTE: this fixture deliberately does NOT compile. Helpers and Rival each declare a'
+Write-Host 'public Recalculate and Consumer calls it bare, which is the collision it exists for.'
+Write-Host 'Never compile it as part of a wider experiment.'
+Write-Host ''
+
+if ($Quiet) {
+    Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
 }

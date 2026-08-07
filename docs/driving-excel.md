@@ -139,6 +139,9 @@ complete on the day it is written and quietly is not, six routes later.
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
+| `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
+| `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
+| `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes |
 | `console` | `console(last)` | what the page said to itself |
 | `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |
 | `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |
@@ -362,8 +365,11 @@ add-in. When the question is "did the add-in actually do what it said", an answe
 through the add-in is weaker evidence than one that does not — and that distinction found two real
 defects on 2026-08-06.
 
-`tools\New-RenameFixture.ps1` still takes this route, because it predates the `component` route.
-It works, and it needs the setting; the door does the same job without it.
+`tools\New-RenameFixture.ps1` no longer takes this route: it builds its nine modules through the
+door and needs no trust setting at all. Its three phases are worth copying for any fixture —
+Excel makes an empty `.xlsm` (automation is fine for that, no add-in needed), `Start-Excel.ps1`
+opens it properly so the add-in loads, and `tools\harness\build-fixture.mjs` writes the components
+through the api.
 
 > **The refusal is a NULL, not an exception**, at least through PowerShell's COM binder. `$excel.VBE`
 > simply evaluates to nothing, so `try { … } catch { }` reports success and prints an empty string.
@@ -414,6 +420,18 @@ find nothing.
 `Recalculate` and `Consumer` calls it bare — that ambiguity is what the fixture is FOR. Never
 compile it as part of a wider experiment, and never take a `Run` failure against it as evidence
 of anything.
+
+**A write can fail and the reply will not say so.** `writeModule` answers the same way whether the
+module took the text or not; the refusal is in the LOG. Building a fixture on unchecked writes
+produced one with an empty `Rival`, so the duplicate `Recalculate` was not there, so it no longer
+exercised the collision it exists for — and it looked fine. Read the line count back from
+`project()` after writing anything you are going to make claims about. (The cause of that
+particular failure is fixed: an empty module's baseline splits into one empty line, so the write
+asked to delete a line from a module that had none, and the editor refused the whole thing.)
+
+**PowerShell 5.1's `-Encoding utf8` writes a BOM.** `JSON.parse` refuses one, and names a
+character that does not appear to be in the file. Use
+`[System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding $false))`.
 
 **A stale engine executable answers "Unknown method".** The add-in runs
 `engine\dist\xlide-engine.exe`; `npm run build` writes only the bundle. Three features were

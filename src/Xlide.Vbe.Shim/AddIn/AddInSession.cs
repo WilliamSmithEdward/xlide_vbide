@@ -1374,6 +1374,29 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugCompileReply));
             }
 
+            case "mark" when request.Query.TryGetValue("text", out var marker) && marker.Length > 0:
+            {
+                // A labelled line in the log, and the offset it landed at.
+                //
+                // Reading a log for what one step did means finding where that step began, and
+                // "scroll up until it looks like the right place" is how a session ends up
+                // reasoning about the wrong three seconds. A probe that marks its steps can ask
+                // for exactly the slice between two marks — `log({ since })` with the offset this
+                // hands back.
+                // The offset is taken BEFORE the marker is written, so reading from it returns
+                // the marker itself — a slice that starts with the words the caller chose is a
+                // slice they can be sure is theirs.
+                var at = Log.Path is { } logPath && File.Exists(logPath)
+                    ? new FileInfo(logPath).Length
+                    : 0;
+
+                Log.Info($"---- {marker} ----");
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugMarkReply(marker, at),
+                    DebugJsonContext.Default.DebugMarkReply));
+            }
+
             case "guard":
             {
                 // No host thread here either: turning the guard on is exactly what a caller does
@@ -2044,6 +2067,48 @@ internal sealed class AddInSession : IDisposable
                     new DebugWindowsReply([.. rows]), DebugJsonContext.Default.DebugWindowsReply);
             }
 
+            case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:
+            {
+                // A module's shape, from the analyzer, so a caller can assert on structure rather
+                // than read the text back and parse it a second time — in a second language, with
+                // a second set of bugs.
+                if (_analysis is not { } outlineAnalysis)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply("the analysis engine is not up"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+
+                request.Query.TryGetValue("project", out var outlineProject);
+
+                try
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    var answered = outlineAnalysis
+                        .OutlineAsync(outlineModule, ProjectIdFromDisplay(outlineProject), source: null, deadline.Token)
+                        .GetAwaiter().GetResult();
+
+                    if (answered is null)
+                    {
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply($"'{outlineModule}' could not be outlined"),
+                            DebugJsonContext.Default.DebugErrorReply);
+                    }
+
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugOutlineReply(
+                            outlineModule,
+                            [.. answered.Select(p => new DebugProcedureRow(p.Name, p.Kind, p.Line))]),
+                        DebugJsonContext.Default.DebugOutlineReply);
+                }
+                catch (Exception ex)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"outline failed: {ex.Message.Trim()}"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+            }
+
             case "component" when request.Query.TryGetValue("action", out var componentAction):
             {
                 // Adding, renaming and removing components, from INSIDE.
@@ -2214,6 +2279,73 @@ internal sealed class AddInSession : IDisposable
                         new DebugErrorReply($"{componentAction} failed: {ex.Message.Trim()}"),
                         DebugJsonContext.Default.DebugErrorReply);
                 }
+            }
+
+            case "project":
+            {
+                // What is actually THERE, as opposed to what the surface is showing.
+                //
+                // This is the question a fixture asks twice — once to build and once to check —
+                // and it was the last one that could only be answered by reaching in through
+                // `Workbook.VBProject`, which needs the trust setting. Answered from inside, where
+                // the add-in already is.
+                request.Query.TryGetValue("project", out var wantedProject);
+
+                using var project = FindProjectByDisplayName(wantedProject)
+                    ?? _editor.GetObject("ActiveVBProject");
+
+                if (project is null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply("no VBA project is active"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+
+                var rows = new List<DebugComponentRow>();
+                using (var components = project.GetObject("VBComponents"))
+                {
+                    var count = components?.GetInt32("Count") ?? 0;
+                    for (var i = 1; i <= count; i++)
+                    {
+                        try
+                        {
+                            using var component = components!.GetItem(i);
+                            if (component?.GetString("Name") is not { Length: > 0 } name
+                                || IsScratchComponent(name))
+                            {
+                                continue;
+                            }
+
+                            var type = component.GetInt32("Type");
+                            using var code = component.GetObject("CodeModule");
+
+                            // A pane exists once the module has been LOOKED at. Reading CodePane
+                            // would create one, which would make asking the question change the
+                            // answer, so this asks the open list instead.
+                            var open = ReadOpenModules()?.Any(pane =>
+                                string.Equals(pane.Name, name, StringComparison.OrdinalIgnoreCase)) ?? false;
+
+                            rows.Add(new DebugComponentRow(
+                                name,
+                                ComponentKind(type),
+                                type,
+                                code?.GetInt32("CountOfLines") ?? 0,
+                                open));
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Verbose($"project: component {i} could not be read ({ex.GetType().Name})");
+                        }
+                    }
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugProjectReply(
+                        project.GetString("Name") ?? string.Empty,
+                        DisplayFromProjectId(_shownProject),
+                        project.GetInt32("Mode"),
+                        [.. rows]),
+                    DebugJsonContext.Default.DebugProjectReply);
             }
 
             case "documents":
@@ -3229,6 +3361,20 @@ internal sealed class AddInSession : IDisposable
         if (oldWindow > LargestDiffLines || newWindow > LargestDiffLines)
         {
             return false;
+        }
+
+        // Never ask to delete lines that are not there.
+        //
+        // An EMPTY module has CountOfLines 0, but the empty baseline splits into one empty line —
+        // so the window says "delete 1 from line 1" and the editor refuses the whole write with
+        // "Invalid procedure call or argument". Nothing is written, and the only place it is said
+        // is the log: the write route's reply looks like every other success. It took the code out
+        // of the first module of every fixture built through the door, leaving a workbook that
+        // looked right and no longer exercised what it existed for (2026-08-07).
+        var present = module.GetInt32("CountOfLines");
+        if (prefix + oldWindow > present)
+        {
+            oldWindow = Math.Max(0, present - prefix);
         }
 
         if (oldWindow > 0)
