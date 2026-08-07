@@ -315,7 +315,7 @@ body {
 
 /* More than one group marks the active one on its strip, so the target of every
    editor-wide command is visible at a glance. */
-.editor-group.active-group > .group-tabs {
+.editor-group.active-group > .group-tabbar {
   box-shadow: inset 0 -1px 0 var(--vscode-focusBorder, #0078d4);
 }
 
@@ -1248,13 +1248,91 @@ body.live-resize .minimap {
   opacity: 1;
 }
 
-.group-tabs {
+/* The strip and its two edges. The edges live here rather than in the strip so they hold still
+   while it moves under them. */
+.group-tabbar {
+  position: relative;
   display: flex;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  min-height: 28px;
+  min-width: 0;
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.group-tabs {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  /* The bar scrolls by its edges, not by a scrollbar. A native one appearing under the tabs was
+     unstyled, took a row of height the tabs needed, and said nothing the edges do not
+     (the developer, 2026-08-06). */
+  scrollbar-width: none;
+  min-height: 28px;
+}
+
+.group-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Styled as the command strip's edges are, and for the same reason: they reveal what is already
+   there rather than running anything, so they must not look like a tab. */
+.tab-edge {
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  padding: 0;
+  border: 0;
+  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+  color: inherit;
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.tab-edge:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.tab-edge:active {
+  background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.3));
+}
+
+.tab-edge .codicon {
+  font-size: 14px;
+}
+
+/* The tabs fade under each edge, so it reads as more strip continuing rather than a border. */
+.tab-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  pointer-events: none;
+}
+
+.tab-edge-start::after {
+  left: 100%;
+  background: linear-gradient(
+    to right,
+    var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08)),
+    transparent);
+}
+
+.tab-edge-end::after {
+  right: 100%;
+  background: linear-gradient(
+    to left,
+    var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08)),
+    transparent);
+}
+
+.tab-edge[hidden] {
+  display: none;
 }
 
 .tab {

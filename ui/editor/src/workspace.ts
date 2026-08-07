@@ -23,6 +23,7 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
@@ -73,6 +74,8 @@ let nextGroupNumber = 1;
 class EditorGroup {
   readonly root: HTMLElement;
   readonly strip: HTMLElement;
+  private readonly tabbar: HTMLElement;
+  private readonly scroller: EdgeScroll;
   readonly body: HTMLElement;
   readonly editor: monaco.editor.IStandaloneCodeEditor;
 
@@ -95,10 +98,18 @@ class EditorGroup {
     this.strip.setAttribute("role", "tablist");
     this.strip.setAttribute("aria-label", "Open modules");
 
+    // The strip is wrapped so its edges have somewhere to sit that does not scroll with it.
+    // The strip itself keeps its class and its element identity, because the tab drag handlers
+    // and every selector that names it are attached to exactly this node.
+    this.tabbar = document.createElement("div");
+    this.tabbar.className = "group-tabbar";
+    this.tabbar.append(this.strip);
+
     this.body = document.createElement("div");
     this.body.className = "group-body";
 
-    this.root.append(this.strip, this.body);
+    this.root.append(this.tabbar, this.body);
+    this.scroller = installEdgeScroll(this.strip, "tab-edge");
     this.editor = workspace.handlers.createEditor(this.body);
 
     // Focus anywhere inside the group makes it the active group; the editor's own focus is
@@ -235,6 +246,7 @@ class EditorGroup {
   }
 
   dispose(): void {
+    this.scroller.dispose();
     this.editor.setModel(null);
     this.editor.dispose();
     this.root.remove();

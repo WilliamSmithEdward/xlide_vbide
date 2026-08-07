@@ -9,6 +9,8 @@
  * The distinction is in the data rather than in the caller, so adding a command is one entry.
  */
 
+import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
+
 export type CommandTarget = "host" | "editor";
 
 export interface ToolbarCommand {
@@ -103,12 +105,10 @@ export function buildToolbar(
   // the alternatives all cost something worse: clipping takes them away with nothing to say they
   // existed, a menu hides them behind a second decision, and wrapping spends a row of a pane whose
   // height is the point. Chevrons appear only when there is something past the edge.
-  const back = scrollButton("chevron-left", "Scroll the commands left", "start");
   const strip = document.createElement("div");
   strip.className = "toolbar-strip";
-  const forward = scrollButton("chevron-right", "Scroll the commands right", "end");
 
-  root.append(back, strip, forward);
+  root.append(strip);
 
   const missing: string[] = [];
 
@@ -149,83 +149,16 @@ export function buildToolbar(
     strip.appendChild(button);
   }
 
-  const update = (): void => {
-    const furthest = strip.scrollWidth - strip.clientWidth;
-    // A pixel of slack: fractional widths mean scrollLeft rarely lands exactly on the end.
-    back.hidden = strip.scrollLeft <= 1;
-    forward.hidden = strip.scrollLeft >= furthest - 1;
-  };
-
-  // How far one press travels. Four buttons is enough to feel like progress and short enough that
-  // nothing sails past unseen.
-  const STEP = 4 * 28;
-
-  const slide = (direction: -1 | 1): void => {
-    strip.scrollBy({ left: direction * STEP, behavior: "smooth" });
-  };
-
-  for (const [button, direction] of [[back, -1], [forward, 1]] as const) {
-    button.addEventListener("click", () => slide(direction));
-
-    // Held down, it keeps going. Crossing a strip a press at a time is the kind of small tax that
-    // makes a person stop using the far end of it.
-    button.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      const timer = window.setInterval(() => slide(direction), 140);
-      const stop = (): void => {
-        window.clearInterval(timer);
-        window.removeEventListener("pointerup", stop);
-        window.removeEventListener("pointercancel", stop);
-      };
-      window.addEventListener("pointerup", stop);
-      window.addEventListener("pointercancel", stop);
-    });
-  }
-
-  // A vertical wheel over a horizontal strip should move it, because that is the wheel most mice
-  // have and the strip is the only thing under the pointer.
-  strip.addEventListener(
-    "wheel",
-    (event) => {
-      if (event.deltaX !== 0 || event.deltaY === 0) return;
-      if (strip.scrollWidth <= strip.clientWidth) return;
-      event.preventDefault();
-      strip.scrollLeft += event.deltaY;
-    },
-    { passive: false },
-  );
-
-  strip.addEventListener("scroll", update, { passive: true });
-
-  update();
-
-  // The pane is resized by dragging a splitter, not only by resizing the window, so the element
-  // itself is what has to be watched.
-  observers.get(root)?.disconnect();
-  const observer = new ResizeObserver(() => update());
-  observer.observe(strip);
-  observers.set(root, observer);
+  // The edges, and everything that makes the strip scroll. Shared with the tab strip so the two
+  // cannot end up with different wheel or press-and-hold behaviour.
+  scrollers.get(root)?.dispose();
+  scrollers.set(root, installEdgeScroll(strip));
 
   if (missing.length > 0) {
     console.warn(`[xlide] toolbar commands not available in this build: ${missing.join(", ")}`);
   }
 }
 
-/** One observer per toolbar, replaced whenever it is rebuilt, so rebuilds do not accumulate them. */
-const observers = new WeakMap<HTMLElement, ResizeObserver>();
+/** One scroller per toolbar, replaced whenever it is rebuilt, so rebuilds do not accumulate them. */
+const scrollers = new WeakMap<HTMLElement, EdgeScroll>();
 
-function scrollButton(icon: string, label: string, edge: "start" | "end"): HTMLButtonElement {
-  const button = document.createElement("button");
-  button.type = "button";
-  // Deliberately not a toolbar-button: it does not run anything, and looking like the things that
-  // do is how a person ends up pressing it expecting a command.
-  button.className = `toolbar-edge toolbar-edge-${edge}`;
-  button.title = label;
-  button.setAttribute("aria-label", label);
-  // Nothing here is reachable only this way: every command is also on a menu or a key, and a
-  // keyboard user tabs straight through the strip rather than paging it.
-  button.tabIndex = -1;
-  button.hidden = true;
-  button.innerHTML = `<span class="codicon codicon-${icon}" aria-hidden="true"></span>`;
-  return button;
-}
