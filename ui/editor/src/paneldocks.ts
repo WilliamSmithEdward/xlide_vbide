@@ -389,10 +389,19 @@ export class PanelDocks {
         sizes: this.sizes,
         closed: [...this.closed],
       }));
-    } catch {
-      // Storage can be full or off; the arrangement simply will not survive the reload.
+    } catch (error) {
+      // Storage can be full or off. The arrangement simply will not survive the reload, which is
+      // survivable -- but silently, and "my layout keeps resetting" is then a mystery with nothing
+      // behind it. Said once: this runs on every drag, and a broken store would otherwise fill the
+      // console with the same line.
+      if (!this.warnedAboutStorage) {
+        this.warnedAboutStorage = true;
+        console.warn("[xlide] the pane arrangement could not be saved; it will not survive a reload", error);
+      }
     }
   }
+
+  private warnedAboutStorage = false;
 
   /* ------------------------------------------------------------------ rendering */
 

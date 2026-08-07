@@ -323,7 +323,16 @@ permanently mid-drag.
 
 Membership is the host's, geography is the developer's. WHICH modules are open and WHICH
 panes exist are answered by the object model and by the shell; where each one sits, and how
-big, is the developer's arrangement, persisted page-locally beside the splitter positions.
+big, is the developer's arrangement.
+
+What survives a session is narrower than that sentence used to claim, and the difference is worth
+stating rather than discovering. The TOOL PANES persist page-locally: which sections stand, the
+tree inside each, which panes are tabbed together and which is showing, every section's size, and
+which panes have been closed. The EDITOR's own splits do not. Reopen, and the modules the host says
+are open come back as tabs in one group, however they were arranged before.
+
+That is a gap rather than a decision. It was recorded here as though both halves persisted, which
+is the kind of error that only shows up when someone relies on it (2026-08-06).
 
 The explorer may not be closed: with every tab shut it is the only route back to a module.
 Every other pane has an X on its group and a checkable row in the Panes menu, which is also
