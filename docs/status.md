@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-06, at v0.2.1.
+Updated 2026-08-06, at v0.3.0.
 
 A short, current snapshot. The living documents are [handoff.md](handoff.md) for what happened
 and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,
@@ -45,6 +45,11 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   28 MB, per user, no administrator rights, nothing required to be present beforehand. It
   refuses to build without a language engine or a built page rather than producing something
   that installs and does half of what it should. `tools\release.ps1` attaches it to a tag.
+
+- **The window is xlide's.** Its title reads `XLIDE - Book1.xlsm` and it carries the product
+  icon, retaken whenever the editor rewrites its own caption and put back when the add-in
+  unloads. The surface names its version in the corner and in an About dialog that also says
+  which build is running and where it was loaded from.
 
 ## What is not done
 

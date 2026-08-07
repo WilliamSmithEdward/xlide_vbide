@@ -1,5 +1,68 @@
 # Changelog
 
+## v0.3.0 (2026-08-06)
+
+The editor window becomes xlide's: its title bar, its corner, and a command strip that survives a
+narrow pane. Uninstalling becomes something that finishes, or says why it did not.
+
+### Added
+
+- The window is titled `XLIDE - Book1.xlsm` and carries the product's icon. Only the product name
+  is replaced; the workbook and module the editor names are still named. The editor rewrites its
+  own caption as the active project changes, so it is retaken on every rename, and both the title
+  and the icon are put back when the add-in unloads.
+- A wordmark and version sit at the top right of the menu bar, quiet enough to disappear while
+  working.
+- An About dialog, from the question mark beside the gear: the version, the build number, when the
+  surface was built, where the add-in is loaded from, and the keys worth knowing. Every question
+  that begins "it used to work" is really a question about which build is loaded.
+- `docs/testing.md`: which of the four kinds of check to reach for, and the traps this codebase has
+  already charged for.
+
+### Changed
+
+- The command strip scrolls instead of clipping. When the pane is too narrow for every command, an
+  edge appears at each end that has more past it: full height, square, tinted, with the commands
+  fading beneath. Held down it keeps scrolling, and a vertical wheel moves it sideways.
+- Split Right and Split Down leave the tab right-click. Splitting is a placement, and the two
+  direct ways of placing a tab, dragging it to the edge you mean and Ctrl+\\, both show you the
+  result before you commit to it.
+- The cursor is a closed hand for the whole page while a drag is live, including over the editor,
+  which was still showing a text caret under a dimmed page.
+- The unsaved dot belongs to the tab that earned it. It was a workbook fact worn by every tab the
+  workbook owned, which marked four untouched tabs for one edit.
+
+### Fixed
+
+- An uninstall started from the installed-apps list failed on its own executable, having already
+  removed the entry from that list: files on disk, the editor still loading them, and no way left
+  to remove it through Windows. The process handing over now exits at once instead of waiting for a
+  keypress while the copy tries to delete it, deletion catches the access denial Windows actually
+  raises, and the entry is removed last and only when the files are really gone.
+- Deleting the installation by hand stranded that entry pointing at an executable that was no
+  longer there. The uninstaller now lives outside the folder it removes, so Uninstall still works.
+- Excel being open no longer ends an install or an uninstall. Both offer to wait while you close
+  it, or to force close it.
+- An install replaces the previous one rather than writing over the top of it, so nothing an older
+  version shipped survives into a folder that is otherwise this one.
+- xlide appeared in the installed-apps list with a generic icon.
+- A tab opened on a workbook that has never been saved showed the unsaved dot immediately, and
+  could never lose it: baselines were only recorded while the workbook was clean, and that moment
+  never comes for a workbook with no saved text.
+- Closing a tab and declining to save left the Problems panel reporting errors in code that no
+  longer existed.
+- Dragging a pane to the editor's edge did nothing until a module had been opened. With none open
+  the editor area is not drawn and measures nothing, so the drop zones were skipped entirely.
+- Assemblies and the surface now read one version, from one file.
+
+### Known limits
+
+- The tool panes' arrangement survives a session; the editor's own splits do not. Reopening brings
+  the open modules back as tabs in one group.
+- Still not code-signed, so Windows warns before running the installer.
+- The engine is 90 MB of Node runtime wrapping 2.2 MB of analyzer. Compression hides most of that
+  in the download, not on disk. The C# port that removes it is in progress.
+
 ## v0.2.1 (2026-08-06)
 
 A packaging release. The installer is 28 MB, down from 102 MB, and it now arrives attached to
