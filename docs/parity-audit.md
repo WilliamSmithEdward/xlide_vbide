@@ -107,6 +107,34 @@ from that list. And semantic highlighting defaults to whatever the theme says, w
 standalone theme is always no — the flag is hardcoded off on every one of them, so the editor has
 to be asked outright.
 
+## Rename, as measured live
+
+Proven in a real host (2026-08-06), reading the result out of the VBA project rather than
+believing the editor's report: a rename from a module with a tab open rewrote a module with NO tab
+open — both its bare call and its qualified one — because the write goes through the object model,
+which does not care what is showing.
+
+| Site | Renamed |
+| --- | --- |
+| the declaration | yes |
+| a bare call inside the declaring module | yes |
+| a qualified `Module.Sub` call, anywhere | yes |
+| a bare call elsewhere, one definition in the workbook | yes |
+| a bare call elsewhere, colliding definitions | no, by the resolver |
+| the other module's own declaration and its own calls | never |
+
+**One thing is NOT proven.** The collision row holds at the engine layer, where seeding is explicit
+and certain. The live attempt at it was inconclusive: the colliding declaration was added through
+the object model rather than through the editor, and there is no way from outside to confirm the
+engine had re-seeded with it before the rename ran — so the bare call being renamed may be correct
+behaviour against a project the engine still saw as having one definition, or may be the
+divergence it looks like. Settle it by making the colliding declaration THROUGH the editor, where
+the write-back and reseed are observable, before trusting the row.
+
+The ambiguity report is also over-broad: it currently lists the other procedure's own declaration
+and its own calls, which are a different symbol and not something a developer needs to decide
+about. Only the genuinely ambiguous bare call belongs in a warning.
+
 ## What rename still needs
 
 The engine part is small: `referencesFor` already returns every span, and a rename is those spans
