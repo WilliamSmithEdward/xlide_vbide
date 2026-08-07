@@ -410,6 +410,15 @@ body {
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* A closed hand for the whole page while a drag is live. Every element is named because Monaco
+   sets cursors of its own on the lines it draws, and an I-beam under a dimmed page with a compass
+   trailing the pointer is the surface saying two different things at once. Forced for the same
+   reason: these are other people's rules, and the mode outranks them until it ends. */
+html.drag-live,
+html.drag-live * {
+  cursor: grabbing !important;
+}
+
 .drop-compass {
   position: fixed;
   z-index: 61;

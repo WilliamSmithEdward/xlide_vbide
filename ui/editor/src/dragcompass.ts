@@ -67,6 +67,11 @@ export class DragCompass {
     document.body.appendChild(this.dim);
     document.body.appendChild(this.compass);
 
+    // The cursor says the mode too. Without this it stays whatever it was over -- an I-beam over
+    // the editor, an arrow over a pane -- which reads as ordinary pointing while the page is dim
+    // and a compass is following the pointer around.
+    document.documentElement.classList.add("drag-live");
+
     this.abandon = abandon;
     window.addEventListener("blur", this.onAbandon);
     document.addEventListener("visibilitychange", this.onVisibility);
@@ -161,6 +166,7 @@ export class DragCompass {
     document.removeEventListener("visibilitychange", this.onVisibility);
     document.removeEventListener("keydown", this.onKey, true);
 
+    document.documentElement.classList.remove("drag-live");
     this.dim.remove();
     this.compass.remove();
     this.preview(null);

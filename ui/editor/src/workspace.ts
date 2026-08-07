@@ -901,17 +901,10 @@ export class Workspace {
           label: "Close All",
           run: () => this.groups.flatMap((g) => [...g.tabs]).forEach((tab) => this.handlers.close(tab.id)),
         },
-        {},
-        {
-          label: "Split Right",
-          enabled: group.tabs.length > 1 || this.groups.length > 1,
-          run: () => this.moveTab(id, group, { split: { of: group, direction: "right" } }),
-        },
-        {
-          label: "Split Down",
-          enabled: group.tabs.length > 1 || this.groups.length > 1,
-          run: () => this.moveTab(id, group, { split: { of: group, direction: "bottom" } }),
-        },
+        // Splitting is not offered here. It is a placement, and every other way of placing a tab
+        // is direct: drag it where it should go, or press Ctrl+\. A menu entry that splits
+        // somewhere the developer cannot see before choosing is a worse version of the gesture
+        // that already exists (developer, 2026-08-06).
       ]);
     });
 
