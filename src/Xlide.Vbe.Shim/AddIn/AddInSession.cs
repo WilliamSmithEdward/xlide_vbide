@@ -5293,7 +5293,9 @@ internal sealed class AddInSession : IDisposable
             // known clean, and while the host says dirty the dot shows only if some module's
             // known text actually differs from its snapshot. A module with no snapshot to
             // compare keeps the flag's word.
-            var dirtyByProject = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            // WorkbookSaved crosses into the object model, so it is asked once per workbook even
+            // though the answer is used once per module.
+            var savedByProject = new Dictionary<string, bool?>(StringComparer.OrdinalIgnoreCase);
 
             // Any live document's text counts, not just the active one: a background tab's
             // typing is exactly as unsaved as the shown one's.
@@ -5301,7 +5303,12 @@ internal sealed class AddInSession : IDisposable
                 surface.TextOf(module, display)
                     ?? (_writtenModules.TryGetValue(WrittenKey(module, display), out var written) ? written : null);
 
-            bool DirtyOf(string? project)
+            // One module, one answer. The dot used to be a workbook fact worn by every tab the
+            // workbook owned, on the grounds that saving persists all of a workbook's modules
+            // together. That is true of SAVING and false of the question a tab strip is asked,
+            // which is which of these have I changed (developer, 2026-08-06). A workbook-wide dot
+            // marks four untouched tabs for one edit and tells nobody which one to look at.
+            bool DirtyOf(string module, string? project)
             {
                 var display = DisplayFromProjectId(project);
                 if (display is not { Length: > 0 })
@@ -5309,62 +5316,53 @@ internal sealed class AddInSession : IDisposable
                     return false;
                 }
 
-                if (dirtyByProject.TryGetValue(display, out var known))
+                if (!savedByProject.TryGetValue(display, out var saved))
                 {
-                    return known;
+                    saved = WorkbookSaved(display);
+                    savedByProject[display] = saved;
                 }
 
-                var saved = WorkbookSaved(display);
-                var siblings = modules.Where(m => string.Equals(
-                    DisplayFromProjectId(m.Project), display, StringComparison.OrdinalIgnoreCase));
-
-                bool dirty;
+                // Unreadable must not invent a dot, and a saved workbook has nothing unsaved in it.
+                // A clean moment is also when a baseline is the saved truth, so it is taken here.
                 if (saved != false)
                 {
-                    // Clean (or unreadable, which must not invent a dot). A clean moment is
-                    // also the moment the snapshots are the saved truth.
-                    dirty = false;
-                    if (saved == true)
+                    if (saved == true && CurrentTextOf(module, display) is { } clean)
                     {
-                        foreach (var sibling in siblings)
-                        {
-                            if (CurrentTextOf(sibling.Name, display) is { } text)
-                            {
-                                _savedBaselines[BaselineKey(display, sibling.Name)] = text;
-                            }
-                        }
+                        _savedBaselines[BaselineKey(display, module)] = clean;
                     }
+
+                    return false;
                 }
-                else
+
+                var text = CurrentTextOf(module, display);
+                if (text is null)
                 {
-                    // The host says dirty; the code decides the dot. Any module whose text
-                    // cannot be compared keeps the host's verdict.
-                    dirty = false;
-                    foreach (var sibling in siblings)
-                    {
-                        var text = CurrentTextOf(sibling.Name, display);
-                        if (text is null
-                            || !_savedBaselines.TryGetValue(BaselineKey(display, sibling.Name), out var baseline))
-                        {
-                            dirty = true;
-                            break;
-                        }
-
-                        if (!string.Equals(text, baseline, StringComparison.Ordinal))
-                        {
-                            dirty = true;
-                            break;
-                        }
-                    }
+                    // Something in this workbook is unsaved, but nothing here says it was this
+                    // module, and a dot on a tab whose text was never read is a guess.
+                    return false;
                 }
 
-                dirtyByProject[display] = dirty;
-                return dirty;
+                if (!_savedBaselines.TryGetValue(BaselineKey(display, module), out var baseline))
+                {
+                    // First sight of this module, with the workbook already dirty. Taking that as
+                    // proof THIS module made it dirty put a dot on a tab nobody had typed in, the
+                    // moment it was opened -- and on a workbook that has never been saved,
+                    // permanently, because the clean moment that writes baselines never comes
+                    // (developer, 2026-08-06: a fresh tab showing the unsaved dot immediately).
+                    //
+                    // The text as first read becomes the baseline instead, which is also what
+                    // Don't Save restores, so the dot and the revert agree about what unchanged
+                    // means.
+                    _savedBaselines[BaselineKey(display, module)] = text;
+                    return false;
+                }
+
+                return !string.Equals(text, baseline, StringComparison.Ordinal);
             }
 
             string[] names = [.. modules.Select(m => m.Name)];
             string?[] projects = [.. modules.Select(m => m.Project)];
-            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Project))];
+            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Name, m.Project))];
             var active = surface.Module;
             var activeProject = DisplayFromProjectId(_shownProject);
 
