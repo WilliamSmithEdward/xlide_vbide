@@ -1133,6 +1133,38 @@ Immediate window facts, measured while making capture behave:
 
 ## 9. Open and known, in priority order
 
+**THE CURRENT GOAL (user, 2026-08-06): parity with xlide_vscode on editor ergonomics, the analyzer,
+and IntelliSense.** Mission item 3, promoted to the thing being worked on.
+
+The useful finding, which changes what this costs: most of the analyzer is already compiled into
+the shipping engine and reachable by nothing. The engine exposes seven operations (analyze,
+completion, hover, signature, outline, onType, search) while its bundle carries
+`analyzer/codeActions` (632 lines), `analyzer/semantic` (582), the call graph, and the fuller
+symbol index. So parity here is mostly PROTOCOL AND WIRING rather than analysis: an engine
+operation, a shim route, and a Monaco provider, three layers that are already well-trodden for the
+seven that exist.
+
+Do the audit before the work. For every analyzer capability in the spec repo, record whether the
+engine exposes it, the shim routes it, and the page uses it. That turns a feeling into a table, and
+it will probably show more is present-but-unwired than anyone expects.
+
+Then, in order of what a VBA developer actually feels:
+
+1. **Quick fixes.** Diagnostics already show; acting on them is the missing half, and it is the
+   difference between a surface that reports and one that repairs. `codeActions` is in the bundle;
+   `registerCodeActionProvider` is the page side.
+2. **Semantic highlighting.** `analyzer/semantic` is compiled in and unused. One provider, and it
+   is what makes the surface look like the product rather than a syntax-highlighted approximation.
+3. **Go to definition, find references.** `symbols/projectIndex` already backs the outline, so this
+   exposes what the index knows rather than building an index.
+4. **IntelliSense depth.** Completion is wired, but measure whether `analyzer/host` -- the 15,000
+   lines of generated Excel object model -- actually reaches completions here the way it does in
+   the extension. If it does not, that is the largest single IntelliSense gap and it is data
+   plumbing, not logic.
+5. **Rename symbol**, last of these: it needs the write path and the close-confirm interaction.
+
+Done means a VBA developer moving between the two products does not notice which one they are in.
+
 **DEFERRED BY AGREEMENT (2026-08-06): editor split persistence.** The tool panes survive a session
 and the editor's own splits do not, so reopening brings the host's open modules back as tabs in one
 group however they were arranged. Decision 13 has been corrected to say so.
