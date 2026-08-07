@@ -1908,8 +1908,14 @@ export function demoTransport(): HostTransport {
       // exercisable in a plain browser: every mention of the word under the caret, in both
       // modules, which is what makes it a cross-module answer rather than a local one.
       if (message.type === "definition" || message.type === "references") {
-        const at = DEMO_MODULE.slice(0, message.offset).search(/[A-Za-z0-9_]*$/);
-        const word = /^[A-Za-z0-9_]+/.exec(DEMO_MODULE.slice(at))?.[0] ?? "";
+        // The offset is into whichever module is host-active, so the word has to be read out of
+        // THAT module's text. Reading it out of Module1's regardless answered about a word that
+        // was not under the caret whenever Module2 was showing — and, because Module1 is searched
+        // first, made an answer in another module impossible to produce here. That is the one case
+        // the surface has now got wrong twice.
+        const asked = activeModule === "Module2" ? DEMO_MODULE_2 : DEMO_MODULE;
+        const at = asked.slice(0, message.offset).search(/[A-Za-z0-9_]*$/);
+        const word = /^[A-Za-z0-9_]+/.exec(asked.slice(at))?.[0] ?? "";
         const locations: HostLocation[] = [];
 
         if (word.length > 1) {

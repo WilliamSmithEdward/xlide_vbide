@@ -64,7 +64,7 @@ import "./styles.css";
 import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { openReferencesDialog } from "./referencesdialog.js";
-import { DocumentStore } from "./documents.js";
+import { DocumentStore, docUriOf } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
@@ -107,33 +107,43 @@ const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable"];
 const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
 
 /**
- * The host's answers as the editor wants them, dropping any whose module has no model. A location
- * the editor cannot resolve to a model renders as an empty row in the peek window, which reads as
- * a result that is there and says nothing — worse than one result fewer.
+ * Where each URI the editor was handed came from, so the opener below can name a module to the
+ * host the way the host spelled it. A URI has to lowercase the workbook to be a stable identity;
+ * the host wants its own spelling back. Bounded by the workbook: one entry per module ever
+ * offered as a target.
+ */
+const offeredTargets = new Map<string, HostLocation>();
+
+/**
+ * The host's answers as the editor wants them.
+ *
+ * A module with no tab open has no model, and its URI is built rather than the location dropped.
+ * Dropping it is how the definition provider came to navigate from inside itself: with nothing
+ * left to return there was no way to reach the module but to go there — and a provider that moves
+ * the caret cancels the very request that asked for it, because the editor watches the position
+ * while a provider runs. That is why Peek Definition jumped instead of peeking. The provider
+ * answers the question; the opener is what acts on the answer.
  */
 function toEditorLocations(
   bridge: EditorBridge,
   locations: readonly HostLocation[],
 ): monaco.languages.Location[] {
-  const out: monaco.languages.Location[] = [];
+  return locations.map((location) => {
+    // An open module's own model URI, not a rebuilt one: both come from the same parts, but the
+    // model already exists and its spelling is the one the editor knows it by.
+    const uri = bridge.modelForLocation(location)?.uri
+      ?? docUriOf(location.module, location.workbook ?? null);
+    offeredTargets.set(uri.toString(), location);
 
-  for (const location of locations) {
-    const model = bridge.modelForLocation(location);
-    if (!model) {
-      continue;
-    }
-
-    out.push({
-      uri: model.uri,
+    return {
+      uri,
       range: new monaco.Range(
         location.line,
         location.column,
         location.line,
         location.column + location.length),
-    });
-  }
-
-  return out;
+    };
+  });
 }
 
 /**
@@ -150,15 +160,8 @@ function renameSummary(answer: HostRenameAnswer, newName: string): string {
 }
 
 /**
- * The command id the editor falls back to when Go to Definition is invoked on the definition.
- * A global command rather than an editor action, because that option names a command by id and
- * an editor action's id is rewritten when it is registered.
- */
-const SHOW_REFERENCES_COMMAND = "xlide.showReferences";
-
-/**
- * Every use of the symbol at the caret, in xlide's own list. One function, so the key, the
- * right-click entry and the editor's own fallback cannot show three different things.
+ * Every use of the symbol at the caret, in xlide's own list. One function, so the key and the
+ * right-click entry cannot show two different things.
  */
 async function showReferences(
   bridge: EditorBridge,
@@ -603,58 +606,72 @@ function boot(): void {
 
   // Go to definition, across the modules of one workbook and never past it.
   //
-  // A module the developer already has open answers as a location, so Ctrl+click, F12 and the
-  // peek window all work in place. A module that is not open has no model for the editor to
-  // point at, so the host is asked to go there instead — which is the same path the search
-  // results and the outline tree already take, and it opens the module on the way.
+  // Nothing but an answer comes out of here. Every command that asks — F12, Ctrl+click, Shift+F2,
+  // and Peek Definition — comes through this one provider, and it cannot tell which is asking, so
+  // acting on the answer here means acting the same way for all of them. Peek asked and was
+  // taken to the definition instead (the developer, 2026-08-07). Going anywhere is the opener's
+  // job, below.
   monaco.languages.registerDefinitionProvider(VBA_LANGUAGE_ID, {
     provideDefinition: async (model, position) => {
       if (model !== bridge.hostActiveModel()) {
         return null;
       }
 
-      const found = await bridge.requestNavigation(model.getOffsetAt(position), false);
-      const target = found[0];
-      if (!target) {
-        return null;
-      }
-
-      // Anything outside THIS model is navigated by the host, not returned to the editor.
-      //
-      // The standalone editor's navigation can only move within the model it is showing: its
-      // editor service returns nothing for any other document, so a definition in another module
-      // came back a perfectly good location and went nowhere (the developer, 2026-08-06). It went
-      // unnoticed because the definition first tested was in the same module as the call.
-      //
-      // The host opens the module, brings its group forward and places the caret, which is the
-      // same path the tree and the references list already use.
-      const home = bridge.modelForLocation(target);
-      if (home !== model) {
-        bridge.navigateTo(target);
-        return null;
-      }
-
-      return toEditorLocations(bridge, found);
-    },
-  });
-
-  // Find all references, over the same answers.
-  //
-  // Only modules that are open can be shown: the peek window renders text, and a module with no
-  // tab has no model to render. The answer itself covers the whole workbook — what is missing is
-  // a way for the page to ask the host to open a module without also moving the caret into it.
-  monaco.languages.registerReferenceProvider(VBA_LANGUAGE_ID, {
-    provideReferences: async (model, position, context) => {
-      if (model !== bridge.hostActiveModel()) {
-        return null;
-      }
-
       return toEditorLocations(
-        bridge,
-        await bridge.requestNavigation(
-          model.getOffsetAt(position), true, context.includeDeclaration));
+        bridge, await bridge.requestNavigation(model.getOffsetAt(position), false));
     },
   });
+
+  // And where a location in another module is opened.
+  //
+  // The standalone editor's own open handler answers only for the model already attached to the
+  // editor that asked; for every other document it returns null and the jump silently does not
+  // happen. This is the seam the editor offers for exactly that, and the host fills it: the host
+  // owns the modules, including the ones with no tab, so it opens the module, brings its group
+  // forward and places the caret — the same path the tree and the references list already take.
+  //
+  // The answer MUST be true. Anything else is read as "not handled" and falls through to the
+  // built-in handler, which then fails, so a navigation that worked reads as one that did nothing.
+  monaco.editor.registerEditorOpener({
+    openCodeEditor: (source, resource, selectionOrPosition) => {
+      // The asking editor's own model stays the editor's business: moving within one module is a
+      // move, and routing it through the host would make it a round trip that ends where it began.
+      if (source.getModel()?.uri.toString() === resource.toString()) {
+        return false;
+      }
+
+      const target = offeredTargets.get(resource.toString());
+      if (!target) {
+        return false;
+      }
+
+      const at = selectionOrPosition === undefined
+        ? { lineNumber: target.line, column: target.column }
+        : "lineNumber" in selectionOrPosition
+          ? { lineNumber: selectionOrPosition.lineNumber, column: selectionOrPosition.column }
+          : {
+            lineNumber: selectionOrPosition.startLineNumber,
+            column: selectionOrPosition.startColumn,
+          };
+
+      bridge.navigate(target.module, at.lineNumber, at.column, false, target.workbook ?? undefined);
+      return true;
+    },
+  });
+
+  // No reference provider is registered, deliberately.
+  //
+  // Registering one buys the editor's own Go to References and Peek References, and both draw
+  // their results by resolving each one to a MODEL — which this surface only has for modules with
+  // a tab open. So the use in a module nobody has opened, the one worth being shown, is the one
+  // they cannot draw: the editor's window showed 3 of the 4 uses xlide's list showed (the
+  // developer, 2026-08-06). Find All References below answers the same question over the same
+  // engine answers, and renders the line the host sends, so an unopened module lists like any
+  // other.
+  //
+  // Leaving the provider unregistered is also what takes those two commands off the right-click
+  // menu and off Shift+F12: both are gated on there being a reference provider at all, so the
+  // menu has no entry to duplicate and the key is free for xlide's (the developer, 2026-08-07).
 
   // Rename, across every module of the workbook that uses the symbol, whether its tab is open or
   // not (the developer, 2026-08-06).
@@ -778,14 +795,6 @@ function boot(): void {
     },
   });
 
-  // Registered once, not per editor: it is a global command, and the editor's goto-location
-  // option names it by id. It acts on whichever editor is focused, which is the one whose
-  // Go to Definition just fell through to it.
-  monaco.editor.addCommand({
-    id: SHOW_REFERENCES_COMMAND,
-    run: () => void showReferences(bridge, workspace.activeEditor()),
-  });
-
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 
   if (!transport) {
@@ -851,25 +860,19 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     });
   }
 
-  // The VBA keys, answered by the editor. Both editor commands are registered by their features
-  // rather than as editor actions, so they are triggered by id — which falls through to the
-  // command registry, where those live.
-  // The VBA keys, answered by the editor's own commands.
+  // The VBA keys, answered by the editor's own commands. Those commands are registered by their
+  // features rather than as editor actions, so they are triggered by id — which falls through to
+  // the command registry, where they live.
   //
-  // NOT on the context menu. The editor already puts Go to Definition and Go to References at the
-  // top of it, and a second pair further down running the same thing reads as two different
-  // features and invites the question of which one is the real one (the developer, 2026-08-06).
-  // These exist for the keys alone: Shift+F2 is what a VBA developer's hands already do, and it
-  // would otherwise do nothing at all.
+  // Go to Definition is NOT on the context menu here. The editor already puts it at the top, and a
+  // second entry further down running the same thing reads as two different features and invites
+  // the question of which one is the real one (the developer, 2026-08-06). This exists for the key
+  // alone: Shift+F2 is what a VBA developer's hands already do, and it would otherwise do nothing.
   //
   // Last Position keeps its entry, because the editor's menu has no equivalent to duplicate.
   const editorKeys: Array<[string, string, string, number, boolean]> = [
     ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "editor.action.revealDefinition",
       monaco.KeyMod.Shift | monaco.KeyCode.F2, false],
-    // Not editor.action.goToReferences: that opens the editor's own window, which can only draw
-    // modules with a tab open. Handled below instead.
-    ["xlide.findReferences", "Find All References (Shift+F12)", "",
-      monaco.KeyMod.Shift | monaco.KeyCode.F12, false],
     // The VBE's Last Position steps back through where the caret has been. So does this, and it
     // steps back through every move rather than only the ones that were jumps.
     ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "cursorUndo",
@@ -887,12 +890,17 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   }
 
   // Go to Definition, invoked ON the definition, has nowhere to go — so the editor runs its
-  // "alternative definition command", which by default peeks references. That is the one window
-  // this surface cannot use: it draws only modules with a tab open, and it showed 3 of the 4
-  // references the list shows because the fourth was in a closed module (the developer,
-  // 2026-08-06). Pointed at the same list everything else uses.
+  // "alternative definition command", which by default goes to references. That command opens the
+  // window this surface cannot use, and it is now gated off anyway, so it would only report having
+  // found nothing.
+  //
+  // Set to nothing rather than to xlide's own list, which was tried and could not work: the editor
+  // looks the id up among its SYMBOL NAVIGATION commands and runs it as one of those, so an id
+  // that names anything else is not found and the fallback silently never fires (the developer,
+  // 2026-08-06: it does nothing). Nothing is what it now honestly does; Find All References is a
+  // key and a menu entry away.
   editor.updateOptions({
-    gotoLocation: { alternativeDefinitionCommand: SHOW_REFERENCES_COMMAND },
+    gotoLocation: { alternativeDefinitionCommand: "" },
   });
 
   // Find All References, in xlide's own list.
