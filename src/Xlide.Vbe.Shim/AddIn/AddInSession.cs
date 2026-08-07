@@ -5159,6 +5159,7 @@ internal sealed class AddInSession : IDisposable
         {
             string? oldName = null;
             string? refused = null;
+            string? renamedComponent = null;
             string[] changed = [];
             var replaced = 0;
             Xlide.Vbe.Core.Engine.EngineRenamedModule[] modules = [];
@@ -5179,6 +5180,13 @@ internal sealed class AddInSession : IDisposable
                     refused = outcome.Answer.Refused;
                     modules = outcome.Answer.Modules;
                     replaced = modules.Sum(entry => entry.Replaced);
+
+                    // The word was a MODULE's name, not a symbol in one. The engine says so
+                    // rather than the page guessing, because only the engine knows every module
+                    // of the workbook — and the page only knows the ones with a tab open. The
+                    // component half is the add-in's either way, so it goes to the same route
+                    // the explorer's Rename uses.
+                    renamedComponent = outcome.Answer.Module;
                 }
             }
             catch (Exception ex)
@@ -5187,10 +5195,26 @@ internal sealed class AddInSession : IDisposable
                 Log.Info($"rename: {module}@{offset} failed ({ex.GetType().Name})");
             }
 
-            if (refused is not null || modules.Length == 0)
+            if (refused is not null)
             {
                 surface.RunOnHostThread(() =>
-                    surface.ShowRenamed(requestId, oldName, newName, [], 0, refused ?? "Nothing to rename."));
+                    surface.ShowRenamed(requestId, oldName, newName, [], 0, refused));
+                return;
+            }
+
+            if (renamedComponent is { } component)
+            {
+                // A module rename with nothing else naming it still has a component to rename,
+                // so it does NOT get the empty-modules early return below.
+                surface.RunOnHostThread(() =>
+                    ApplyModuleRename(requestId, component, _shownProject, newName, modules));
+                return;
+            }
+
+            if (modules.Length == 0)
+            {
+                surface.RunOnHostThread(() =>
+                    surface.ShowRenamed(requestId, oldName, newName, [], 0, "Nothing to rename."));
                 return;
             }
 
@@ -5295,70 +5319,91 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() =>
-            {
-                // The component first, because it is the only step the HOST can still refuse and
-                // the only one whose failure leaves nothing changed.
-                string actual;
-                try
-                {
-                    using var found = FindComponent(moduleName, projectId ?? _shownProject, out _);
-                    if (found is null)
-                    {
-                        surface.ShowRenamed(requestId, moduleName, newName, [], 0,
-                            $"'{moduleName}' could not be found, so nothing was renamed.");
-                        return;
-                    }
-
-                    found.SetString("Name", newName);
-
-                    // Read back rather than assumed: the host normalises a name it dislikes, and
-                    // rewriting the callers to a name it did not accept would break every one.
-                    actual = found.GetString("Name") ?? newName;
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"renameModule: the host refused to rename {moduleName}", ex);
-                    surface.ShowRenamed(requestId, moduleName, newName, [], 0,
-                        $"The editor would not rename '{moduleName}', so nothing was renamed.");
-                    return;
-                }
-
-                AdoptRename(moduleName, actual);
-
-                var written = new List<string>(modules.Length);
-                var replaced = 0;
-                string? stopped = null;
-
-                foreach (var entry in modules)
-                {
-                    // A module that mentions the renamed one may BE the renamed one; it answers to
-                    // its new name now.
-                    var target = string.Equals(entry.Module, moduleName, StringComparison.OrdinalIgnoreCase)
-                        ? actual
-                        : entry.Module;
-
-                    try
-                    {
-                        WriteModule(target, entry.Source, projectId ?? _shownProject, hostRewrite: true);
-                        written.Add(target);
-                        replaced += entry.Replaced;
-                        surface.Sync(target, display, entry.Source);
-                    }
-                    catch (Exception ex)
-                    {
-                        stopped = $"'{target}' could not be written, so the rename stopped there.";
-                        Log.Error($"renameModule: writing {target} failed", ex);
-                        break;
-                    }
-                }
-
-                Log.Info($"renameModule: {moduleName} -> {actual}, {replaced} mention(s) in {written.Count} module(s)");
-                surface.ShowRenamed(requestId, moduleName, actual, [.. written], replaced, stopped);
-
-                PublishProjects();
-                _analysis?.Reanalyse();
-            });
+                ApplyModuleRename(requestId, moduleName, projectId ?? _shownProject, newName, modules));
         });
+    }
+
+    /// <summary>
+    /// Renames the component, then writes what every module must say afterwards. The host thread
+    /// owns both, and both entry points — the explorer's Rename and renaming a module's name in
+    /// code — land here so there is one order rather than two.
+    ///
+    /// The component goes first because it is the only step the HOST can still refuse, and the
+    /// only one whose failure leaves nothing changed. Its answer is read back rather than
+    /// assumed: the editor normalises a name it dislikes, and rewriting every caller to a name it
+    /// did not accept would break all of them at once.
+    /// </summary>
+    private void ApplyModuleRename(
+        int requestId,
+        string moduleName,
+        string? projectId,
+        string newName,
+        Xlide.Vbe.Core.Engine.EngineRenamedModule[] modules)
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        var display = DisplayFromProjectId(projectId);
+
+        string actual;
+        try
+        {
+            using var found = FindComponent(moduleName, projectId, out _);
+            if (found is null)
+            {
+                surface.ShowRenamed(requestId, moduleName, newName, [], 0,
+                    $"'{moduleName}' could not be found, so nothing was renamed.");
+                return;
+            }
+
+            found.SetString("Name", newName);
+            actual = found.GetString("Name") ?? newName;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"renameModule: the host refused to rename {moduleName}", ex);
+            surface.ShowRenamed(requestId, moduleName, newName, [], 0,
+                $"The editor would not rename '{moduleName}', so nothing was renamed.");
+            return;
+        }
+
+        AdoptRename(moduleName, actual);
+
+        var written = new List<string>(modules.Length);
+        var replaced = 0;
+        string? stopped = null;
+
+        foreach (var entry in modules)
+        {
+            // A module that mentions the renamed one may BE the renamed one; it answers to its
+            // new name now.
+            var target = string.Equals(entry.Module, moduleName, StringComparison.OrdinalIgnoreCase)
+                ? actual
+                : entry.Module;
+
+            try
+            {
+                WriteModule(target, entry.Source, projectId, hostRewrite: true);
+                written.Add(target);
+                replaced += entry.Replaced;
+                surface.Sync(target, display, entry.Source);
+            }
+            catch (Exception ex)
+            {
+                stopped = $"'{target}' could not be written, so the rename stopped there.";
+                Log.Error($"renameModule: writing {target} failed", ex);
+                break;
+            }
+        }
+
+        Log.Info($"renameModule: {moduleName} -> {actual}, {replaced} mention(s) in {written.Count} module(s)");
+        surface.ShowRenamed(requestId, moduleName, actual, [.. written], replaced, stopped);
+
+        PublishProjects();
+        _analysis?.Reanalyse();
     }
 
     /// <summary>

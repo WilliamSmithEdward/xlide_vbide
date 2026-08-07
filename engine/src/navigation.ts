@@ -235,7 +235,7 @@ export function renameFor(
     source: string,
     offset: number,
     newName: string,
-): { modules: { module: string; source: string; replaced: number }[]; oldName?: string; refused?: string; ambiguous?: LocationPayload[] } {
+): { modules: { module: string; source: string; replaced: number }[]; oldName?: string; refused?: string; ambiguous?: LocationPayload[]; module?: string } {
     const word = identifierAt(source, offset);
     if (!word) {
         return { modules: [], refused: 'There is no symbol here to rename.' };
@@ -269,6 +269,16 @@ export function renameFor(
     // BrokenModule.RunTotal that has nothing to do with it (the developer, 2026-08-06). Resolving
     // to the one declaration first and collecting from there makes every entry point agree, and
     // makes the entry point that was already correct the only one there is.
+    // A module's name is not a symbol. No declaration in any module's text holds it — it belongs
+    // to the component — so the resolver finds nothing for `Helpers` in `Helpers.Recalc`, and
+    // refusing there is exactly why renaming a module from code did nothing. If the word names a
+    // module of this workbook, this IS a module rename, and it is the same operation the
+    // explorer asks for; the add-in does the component half either way.
+    if (symbols.byModule.has(word.text.toLowerCase())) {
+        const renamed = renameModuleFor(symbols, word.text, newName);
+        return { ...renamed, oldName: word.text, module: renamed.refused ? undefined : word.text };
+    }
+
     const anchor = anchorFor(symbols, moduleName, source, offset);
     if (anchor.ambiguous) {
         return { modules: [], oldName: word.text, refused: anchor.ambiguous };
@@ -396,14 +406,34 @@ export function renameModuleFor(
     return { modules: out };
 }
 
-/** Where a module's name is used as a qualifier or as a type, as offsets into one module's text. */
+/** Where a module's name is used as a qualifier, as a type, or as an implemented interface. */
 function mentionsOfModule(source: string, name: string): { start: number; length: number }[] {
     const wanted = name.toLowerCase();
     const haystack = source.toLowerCase();
     const out: { start: number; length: number }[] = [];
 
+    // A class that implements an interface names each implemented member `Interface_Member`.
+    // That prefix is part of the contract, not a coincidence: rename the interface and leave the
+    // prefix behind and the class no longer implements anything, which the compiler notices and
+    // the developer did not ask for. Only inside a module that actually implements it, so a
+    // variable in some other module that merely starts with the same word is left alone.
+    const implementsIt = implementsInterface(source, wanted);
+
     for (let at = haystack.indexOf(wanted); at >= 0; at = haystack.indexOf(wanted, at + 1)) {
-        if (isIdentifierChar(source[at - 1]) || isIdentifierChar(source[at + wanted.length])) {
+        if (isIdentifierChar(source[at - 1])) {
+            continue;
+        }
+
+        const after = source[at + wanted.length];
+
+        if (after === '_') {
+            if (implementsIt) {
+                out.push({ start: at, length: name.length });
+            }
+            continue;
+        }
+
+        if (isIdentifierChar(after)) {
             continue;
         }
 
@@ -415,6 +445,23 @@ function mentionsOfModule(source: string, name: string): { start: number; length
     return out;
 }
 
+/** The three line endings a VBA module turns up with, in one place. */
+const LINE_BREAK = /\r\n|\n|\r/;
+
+/** Whether this module carries an `Implements` statement for the named interface. */
+function implementsInterface(source: string, wanted: string): boolean {
+    for (const line of source.split(LINE_BREAK)) {
+        const trimmed = line.trim().toLowerCase();
+        if (!trimmed.startsWith('implements ')) {
+            continue;
+        }
+        if (trimmed.slice('implements '.length).trim() === wanted) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Whether what follows is a dot, so the name was reaching for something inside the module. */
 function qualifies(source: string, after: number): boolean {
     let at = after;
@@ -424,7 +471,14 @@ function qualifies(source: string, after: number): boolean {
     return source[at] === '.';
 }
 
-/** Whether the name is preceded by As or New, which is a type position and nothing else. */
+/**
+ * Whether the name sits in a type position: the three keywords that can precede one.
+ *
+ * `As` and `New` are the obvious pair. `Implements` is the one worth naming separately — a class
+ * that implements an interface names it in a statement with no dot and no As, so a rename that
+ * knew only the pair would rename the interface everywhere except in the classes that implement
+ * it, which is the one place the compiler will not let you get away with it.
+ */
 function namesAType(source: string, start: number): boolean {
     let at = start;
     while (at > 0 && (source[at - 1] === ' ' || source[at - 1] === '\t')) {
@@ -437,7 +491,7 @@ function namesAType(source: string, start: number): boolean {
     }
 
     const word = source.slice(from, at).toLowerCase();
-    return (word === 'as' || word === 'new') && from < at;
+    return from < at && (word === 'as' || word === 'new' || word === 'implements');
 }
 
 /** One module's text with the named spans replaced, applied back to front. */

@@ -387,7 +387,12 @@ export class Dispatcher {
             ?? '';
         const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
         const answer = renameModuleFor(symbols, params.moduleName, params.newName);
-        return { modules: answer.modules, oldName: params.moduleName, refused: answer.refused };
+        return {
+            modules: answer.modules,
+            oldName: params.moduleName,
+            refused: answer.refused,
+            module: answer.refused ? undefined : params.moduleName,
+        };
     }
 
     private definition(params: NavigationParams): NavigationResult {

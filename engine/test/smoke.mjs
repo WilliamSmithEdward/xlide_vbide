@@ -1054,6 +1054,85 @@ try {
     check('renaming a module the workbook does not have is refused', () =>
         assert.ok(noSuchModule.refused?.includes('not a module'), noSuchModule.refused));
 
+    // Both entry points reach the same operation. The explorer asks by name; renaming the
+    // qualifier in code asks by offset, and a module's name is not a symbol, so that path used to
+    // refuse. Pinned as a property because the equivalent gap in symbol rename was only found
+    // once a developer used the entry point no probe had tried (2026-08-06).
+    const fromCode = await call('textDocument/rename', {
+        projectId: 'Modules',
+        moduleName: 'Caller',
+        source: MOD_CALLER,
+        moduleType: 'standard',
+        offset: MOD_CALLER.indexOf('Target.Recalc') + 3,
+        newName: 'Utils',
+    });
+
+    check('renaming a module from a qualifier in code is a module rename', () => {
+        assert.equal(fromCode.module, 'Target', 'the engine must say which component to rename');
+        assert.equal(fromCode.modules.length, renamedModule.modules.length);
+        assert.deepEqual(
+            fromCode.modules.map((entry) => entry.module).sort(),
+            renamedModule.modules.map((entry) => entry.module).sort(),
+            'the explorer and the code entry must reach the same modules');
+    });
+
+    // Renaming an INTERFACE, and the classes that implement it. VBA names an implemented member
+    // `Interface_Member`, so that prefix is part of the contract: rename the interface and leave
+    // the prefix and the class stops implementing anything, which the compiler notices.
+    const SHAPE = ['Option Explicit', '', 'Public Sub Draw()', 'End Sub', ''].join('\r\n');
+    const CIRCLE = [
+        'Option Explicit',
+        '',
+        'Implements IShape',
+        '',
+        'Private Sub IShape_Draw()',
+        'End Sub',
+        '',
+    ].join('\r\n');
+    const SHAPE_USER = [
+        'Option Explicit',
+        '',
+        'Sub Go()',
+        '    Dim s As IShape',
+        '    Set s = New Circle',
+        '    IShapeCounter = 1',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Shapes',
+        generation: 1,
+        modules: [
+            { moduleName: 'IShape', source: SHAPE, type: 'class' },
+            { moduleName: 'Circle', source: CIRCLE, type: 'class' },
+            { moduleName: 'ShapeUser', source: SHAPE_USER, type: 'standard' },
+        ],
+    });
+
+    const renamedInterface = await call('workspace/renameModule', {
+        projectId: 'Shapes',
+        moduleName: 'IShape',
+        newName: 'IDrawable',
+    });
+
+    const circleAfter = renamedInterface.modules.find((entry) => entry.module === 'Circle')?.source ?? '';
+    const userAfter = renamedInterface.modules.find((entry) => entry.module === 'ShapeUser')?.source ?? '';
+
+    check('the Implements statement follows the interface', () =>
+        assert.ok(circleAfter.includes('Implements IDrawable'), circleAfter));
+
+    check('an implemented member keeps its interface prefix', () =>
+        assert.ok(circleAfter.includes('Private Sub IDrawable_Draw()'),
+            'the Interface_Member prefix is the contract, not a coincidence'));
+
+    check('a declared variable of the interface type follows it', () =>
+        assert.ok(userAfter.includes('As IDrawable'), userAfter));
+
+    check('an unrelated name that merely starts with the interface is left alone', () =>
+        assert.ok(userAfter.includes('IShapeCounter = 1'),
+            'IShapeCounter is its own name in a module that implements nothing'));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

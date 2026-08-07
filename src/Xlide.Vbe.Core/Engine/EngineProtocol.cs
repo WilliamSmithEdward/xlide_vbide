@@ -105,7 +105,12 @@ public sealed record EngineRenamedModule(
 public sealed record EngineRename(
     [property: JsonPropertyName("modules")] EngineRenamedModule[] Modules,
     [property: JsonPropertyName("oldName")] string? OldName,
-    [property: JsonPropertyName("refused")] string? Refused);
+    [property: JsonPropertyName("refused")] string? Refused,
+    /// <summary>
+    /// Set when what is being renamed is a MODULE rather than a symbol in one. Its name lives on
+    /// the component, not in any module's text, so the add-in owns that half.
+    /// </summary>
+    [property: JsonPropertyName("module")] string? Module = null);
 
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(

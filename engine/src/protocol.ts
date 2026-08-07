@@ -375,6 +375,12 @@ export interface RenameResult {
     /** Present when nothing was renamed, saying why in words a developer can act on. */
     refused?: string;
     /**
+     * Present when what was renamed is a MODULE rather than a symbol inside one. Its name lives
+     * on the component rather than in any module's text, so the add-in has that half to do; the
+     * texts here are what the rest of the workbook must say once it has.
+     */
+    module?: string;
+    /**
      * Uses of the old name the rename deliberately did not touch, because another module declares
      * the same name and nothing can prove which one a bare call meant. Reported rather than
      * silently skipped: the developer is the only one who knows, and they cannot decide about a
