@@ -2943,9 +2943,20 @@ internal sealed class AddInSession : IDisposable
             pane.Invoke("Show");
             pane.Invoke("SetSelection", line, column, line, column);
 
-            if (_editorSurface?.Module == component)
+            // The surface shows one (module, WORKBOOK) pair, and a module name is not unique
+            // across workbooks: two open workbooks can each hold a Helpers. Comparing the name
+            // alone made a navigation to the other workbook's Helpers a no-op on the surface —
+            // the native pane moved and the surface stayed where it was, showing a different
+            // workbook's module of the same name (2026-08-07). A navigation that names no
+            // project keeps the old meaning: whichever one is shown.
+            var alreadyShowing =
+                string.Equals(_editorSurface?.Module, component, StringComparison.OrdinalIgnoreCase)
+                && (projectId is null
+                    || string.Equals(_shownProject, projectId, StringComparison.OrdinalIgnoreCase));
+
+            if (alreadyShowing)
             {
-                _editorSurface.Reveal(line);
+                _editorSurface!.Reveal(line);
             }
             else if (_editorSurface is not null)
             {
