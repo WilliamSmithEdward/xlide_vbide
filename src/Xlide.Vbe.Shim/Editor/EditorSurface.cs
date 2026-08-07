@@ -542,7 +542,13 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible)
     {
+#if DEBUG
+        var startedAt = Environment.TickCount64;
+#endif
         _overlay?.Place(bounds, visible);
+#if DEBUG
+        var placedAt = Environment.TickCount64;
+#endif
 
         // The browser's size normally rides the WM_SIZE the placement above produces; it is
         // asserted here as well, so a size message that never arrived — a raced resize storm —
@@ -553,6 +559,11 @@ internal sealed class EditorSurface : IDisposable
         {
             _browser?.SetBounds(overlay.ClientBounds());
         }
+
+#if DEBUG
+        var doneAt = Environment.TickCount64;
+        Diagnostics.PerfCounters.Follow(placedAt - startedAt, doneAt - placedAt, _browser is not null);
+#endif
     }
 
     /// <summary>

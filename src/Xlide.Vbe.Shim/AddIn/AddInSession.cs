@@ -1328,6 +1328,7 @@ internal sealed class AddInSession : IDisposable
                 var placement = PerfCounters.PlacementSnapshot();
                 var marshal = PerfCounters.MarshalSnapshot();
                 var refresh = PerfCounters.RefreshSnapshot();
+                var follow = PerfCounters.FollowSnapshot();
                 var messages = WebView.WebView2Surface.MessageTap.Totals;
                 using var self = System.Diagnostics.Process.GetCurrentProcess();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -1345,6 +1346,9 @@ internal sealed class AddInSession : IDisposable
                         RefreshPasses: refresh.Passes,
                         RefreshTotalMs: refresh.TotalMs,
                         RefreshMaxMs: refresh.MaxMs,
+                        OverlayMs: follow.OverlayMs,
+                        BrowserMs: follow.BrowserMs,
+                        BrowserCalls: follow.BrowserCalls,
                         PlacementLastMs: placement.LastMs,
                         PlacementMaxMs: placement.MaxMs,
                         MarshalCount: marshal.Count,

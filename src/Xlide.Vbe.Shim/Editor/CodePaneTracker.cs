@@ -188,7 +188,21 @@ internal sealed class CodePaneTracker : IDisposable
         Diagnostics.PerfCounters.WindowEvent();
 #endif
 
-        Refresh();
+        // A window MOVING somewhere else in the process is not news here.
+        //
+        // The hook hears everything the host owns, and resizing a frame moves every toolbar,
+        // scrollbar and child control inside it. One drag of the editor's frame measured 1,298
+        // window events for 60 size steps, and a full refresh ran for every one of them: 188ms
+        // of that gesture, the largest single cost in it and three times what moving the surface
+        // itself took (2026-08-06). What a refresh computes is pane rectangles and which panes
+        // are open, and a window OUTSIDE the editor moving can change neither.
+        //
+        // Appearing and disappearing still refreshes for everything, whatever the class: those
+        // are rare, and one of them is how a pane closing gets noticed at all.
+        if (!windowEvent.IsLocationChange || IsEditorClass(className))
+        {
+            Refresh();
+        }
 
         // After the refresh, so a pane-driven placement (via Changed) has already happened and
         // the frame-driven one sees final rectangles.

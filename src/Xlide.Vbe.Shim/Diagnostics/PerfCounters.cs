@@ -15,6 +15,9 @@ internal static class PerfCounters
     private static long _placementFullPasses;
     private static long _placementFastPasses;
     private static long _windowEvents;
+    private static long _overlayMs;
+    private static long _browserMs;
+    private static long _browserCalls;
     private static long _refreshPasses;
     private static long _refreshTotalMs;
     private static long _refreshMaxMs;
@@ -75,6 +78,24 @@ internal static class PerfCounters
     public static (long Events, long Passes, long TotalMs, long MaxMs) RefreshSnapshot() =>
         (Interlocked.Read(ref _windowEvents), Interlocked.Read(ref _refreshPasses),
             Interlocked.Read(ref _refreshTotalMs), Interlocked.Read(ref _refreshMaxMs));
+
+    /// <summary>
+    /// The two halves of a follow, timed apart. Moving our own overlay window is Win32 and
+    /// should be free; handing the browser its new bounds resizes a composition surface, and
+    /// which of the two dominates decides whether the fix is fewer updates or later ones.
+    /// </summary>
+    public static void Follow(long overlayMs, long browserMs, bool calledBrowser)
+    {
+        Interlocked.Add(ref _overlayMs, overlayMs);
+        Interlocked.Add(ref _browserMs, browserMs);
+        if (calledBrowser)
+        {
+            Interlocked.Increment(ref _browserCalls);
+        }
+    }
+
+    public static (long OverlayMs, long BrowserMs, long BrowserCalls) FollowSnapshot() =>
+        (Interlocked.Read(ref _overlayMs), Interlocked.Read(ref _browserMs), Interlocked.Read(ref _browserCalls));
 
     public static void LogLine() => Interlocked.Increment(ref _logLines);
 
