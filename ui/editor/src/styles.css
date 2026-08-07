@@ -1334,6 +1334,19 @@ body.live-resize .minimap {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.28));
 }
 
+/* An emoji standing in for a codicon: the same 16px box, so a row that uses one lines its label up
+   with the rows that do not. Emoji sit large for their point size, hence the smaller font. */
+.sponsor-emoji {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 13px;
+  line-height: 1;
+}
+
 .sponsor-words {
   display: flex;
   flex-direction: column;

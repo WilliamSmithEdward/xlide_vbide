@@ -14,6 +14,7 @@ interface SponsorLink {
   label: string;
   detail: string;
   url: string;
+  /** A codicon name, or an emoji when the icon set has nothing for it. */
   icon: string;
 }
 
@@ -31,12 +32,20 @@ const LINKS: SponsorLink[] = [
     url: "https://www.paypal.com/donate/?business=ML855BRLNR838&no_recurring=0&item_name=VBA+has+always+treated+me+well.+It+was+how+I+first+grew+professional+as+a+programmer%2C+I%27m+happy+to+show+it+some+love+%E2%9D%A4%EF%B8%8F&currency_code=USD",
   },
   {
+    // An emoji, because the icon set has no note and no dollar: this row was drawing a codicon
+    // that does not exist, which is not a broken glyph but nothing at all — the label simply sat
+    // further left than the two above it (the developer, 2026-08-07).
     label: "Cash App",
     detail: "$williamesmithjcil",
-    icon: "symbol-currency",
+    icon: "💵",
     url: "https://cash.app/$williamesmithjcil",
   },
 ];
+
+/** True for an icon that is a character to print rather than a name to look up. */
+function isEmoji(icon: string): boolean {
+  return !/^[a-z0-9-]+$/.test(icon);
+}
 
 /** What the dialog needs of the world: somewhere outside the page to open an address. */
 export interface SponsorHandlers {
@@ -97,9 +106,16 @@ export function openSponsorDialog(handlers: SponsorHandlers, closed?: () => void
     open.className = "sponsor-open";
     open.title = link.url;
 
+    // Same box either way, so the three labels start on one line whichever kind of mark is above
+    // them. An emoji is set in the box rather than beside it for exactly that reason.
     const icon = document.createElement("span");
-    icon.className = `codicon codicon-${link.icon}`;
     icon.setAttribute("aria-hidden", "true");
+    if (isEmoji(link.icon)) {
+      icon.className = "sponsor-emoji";
+      icon.textContent = link.icon;
+    } else {
+      icon.className = `codicon codicon-${link.icon}`;
+    }
 
     const words = document.createElement("span");
     words.className = "sponsor-words";
