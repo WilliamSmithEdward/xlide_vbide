@@ -3212,21 +3212,15 @@ internal sealed class AddInSession : IDisposable
             return true;
         }
 
-        // Closing keys are claimed unconditionally: unclaimed, the browser treats Ctrl+W as an
-        // instruction to close ITS window, which takes the whole surface with it.
-        if (control && !shift && virtualKey is VirtualKey.W or VirtualKey.F4)
-        {
-            if (_editorSurface?.Module is { } shown)
-            {
-                Log.Info($"key: 0x{virtualKey:X2} ctrl -> close {shown}");
-
-                // Through the same gate as the tab's X: a module with unsaved changes gets
-                // the question, not the guillotine.
-                OnModuleCloseRequested(shown, DisplayFromProjectId(_shownProject), null);
-            }
-
-            return true;
-        }
+        // The closing keys are handled above, as SURFACE commands, because the page is what has
+        // tabs. They are still claimed here whatever happens to them, because unclaimed the
+        // browser treats Ctrl+W as an instruction to close ITS window, which takes the whole
+        // surface with it.
+        //
+        // They used to be answered here instead, by closing whatever module the host believed was
+        // shown. With two workbooks open that belief drifts: the host held a null module and a
+        // project belonging to the OTHER workbook while the page had TwinCaller active, so the key
+        // was claimed and nothing closed at all (the developer, 2026-08-07).
 
         var command = VbeCommands.ForKey(virtualKey, shift, control);
         Log.Info($"key: 0x{virtualKey:X2}{(shift ? " shift" : string.Empty)}{(control ? " ctrl" : string.Empty)}"

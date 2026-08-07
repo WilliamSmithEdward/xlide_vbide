@@ -1356,6 +1356,14 @@ export class EditorBridge {
 
     // Tab cycling arrives from the host because the browser swallows Ctrl+PageDown for its own
     // tab switching before the page could ever see the key. Cycling is within the active group.
+    if (id === "xlide.tab.close") {
+      // The workspace knows which tab is active and which workbook it belongs to, so nothing has
+      // to be guessed from a name. It goes through the same gate the tab's own X uses, so a
+      // module with unsaved changes still gets the question.
+      this.workspace?.closeActive();
+      return;
+    }
+
     if (id === "xlide.tab.next" || id === "xlide.tab.previous") {
       const target = this.workspace?.cycleTab(id === "xlide.tab.next" ? 1 : -1);
       this.trace(`cycle -> ${target ?? "(nothing)"}`);

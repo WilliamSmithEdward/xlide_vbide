@@ -282,6 +282,12 @@ internal static class VbeCommands
     public static string? SurfaceCommandForKey(uint virtualKey, bool shift, bool control) => virtualKey switch
     {
         VirtualKey.F1 when !shift && !control => "editor.action.quickCommand",
+        // Closing a tab is the PAGE's decision, because the page is what has tabs. The host used
+        // to decide here, closing whatever module it believed was shown, and with two workbooks
+        // open its belief drifted: it held a null module and a project from the other workbook,
+        // so the key was claimed and nothing closed (the developer, 2026-08-07).
+        VirtualKey.W when control && !shift => "xlide.tab.close",
+        VirtualKey.F4 when control && !shift => "xlide.tab.close",
         VirtualKey.PageDown when control && !shift => "xlide.tab.next",
         VirtualKey.PageUp when control && !shift => "xlide.tab.previous",
         _ => null,
