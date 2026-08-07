@@ -374,6 +374,33 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what renaming a module would make of every module that mentions it. Null
+    /// when there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineRename Answer, string ProjectId)?> RenameModuleAsync(
+        string moduleName,
+        string? projectId,
+        string newName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveNamedHome(moduleName, projectId) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .RenameModuleAsync(home.ProjectId, moduleName, newName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine for the call tip at an offset into a module's live text, or null when
     /// there is no engine, no address for the module, or the caret is not inside a call.
     /// </summary>

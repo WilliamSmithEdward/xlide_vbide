@@ -210,6 +210,10 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks to rename a symbol: (requestId, offset, newName).</summary>
     public Action<int, int, string>? RenameRequested { get; set; }
 
+    /// <summary>Raised when the page asks to rename a MODULE and everything that names it:
+    /// (requestId, moduleName, workbook or null, newName).</summary>
+    public Action<int, string, string?, string>? ModuleRenameRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -1643,6 +1647,22 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "renameModule":
+                    if (document.RootElement.TryGetProperty("id", out var modRenameId)
+                        && modRenameId.TryGetInt32(out var modRenameRequestId)
+                        && document.RootElement.TryGetProperty("module", out var modRenameElement)
+                        && modRenameElement.GetString() is { Length: > 0 } modRenameModule
+                        && document.RootElement.TryGetProperty("newName", out var modNewNameElement)
+                        && modNewNameElement.GetString() is { Length: > 0 } modNewName)
+                    {
+                        var modProject = document.RootElement.TryGetProperty("project", out var modOwner)
+                            ? modOwner.GetString()
+                            : null;
+                        ModuleRenameRequested?.Invoke(modRenameRequestId, modRenameModule, modProject, modNewName);
                     }
 
                     break;

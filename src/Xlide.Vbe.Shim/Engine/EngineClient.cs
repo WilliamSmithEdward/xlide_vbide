@@ -387,6 +387,27 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineRename);
     }
 
+    /// <summary>
+    /// Asks what renaming a MODULE would make of every module that mentions it. Whole texts, and
+    /// nothing written: the caller can still refuse on a name the host will not accept.
+    /// </summary>
+    public async Task<EngineRename?> RenameModuleAsync(
+        string projectId,
+        string moduleName,
+        string newName,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["newName"] = newName,
+        };
+
+        var result = await CallAsync("workspace/renameModule", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineRename);
+    }
+
     /// <summary>Asks for a module's colouring: the type references and host globals it holds.</summary>
     public async Task<EngineSemanticTokens?> SemanticTokensAsync(
         string projectId,

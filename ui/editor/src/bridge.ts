@@ -278,6 +278,7 @@ export type ClientMessage =
   | { type: "definition"; id: number; offset: number }
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
   | { type: "rename"; id: number; offset: number; newName: string }
+  | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -817,6 +818,20 @@ export class EditorBridge {
    * and they are exactly the ones a rename must not miss. So nothing comes back but a summary,
    * and the open tabs are refreshed by the ordinary document sync.
    */
+  requestModuleRename(module: string, project: string | null, newName: string): Promise<HostRenameAnswer> {
+    const id = this.nextRenameId++;
+
+    return new Promise<HostRenameAnswer>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingRenames.delete(id);
+        resolve({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." });
+      }, 30000);
+
+      this.pendingRenames.set(id, { resolve, timer });
+      this.transport.post({ type: "renameModule", id, module, newName, ...(project ? { project } : {}) });
+    });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const id = this.nextRenameId++;
 

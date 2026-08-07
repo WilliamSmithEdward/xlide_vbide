@@ -57,6 +57,8 @@ export interface ShellHandlers {
   panelChanged(name: string, open: boolean): void;
   /** The developer selected a component in the explorer without opening it. */
   selectComponent(name: string): void;
+  /** The developer renamed a module, and everything that names it follows. */
+  renameModule(name: string, workbook: string | null, newName: string): void;
   /** The developer opened a menu; the host is asked for its items. [] is the bar itself. */
   menuRequest(path: number[]): void;
   /** The developer chose a menu item, named by its position chain. */
@@ -871,7 +873,7 @@ export class Shell {
     const items: ContextMenuItem[] = [
       { label: openLabel, run: () => this.handlers.activateModule(name) },
       {},
-      { label: "Rename", run: () => this.beginRename(name) },
+      { label: "Rename…", run: () => this.beginRename(name, null) },
     ];
 
     if (this.handlers.moduleIsOpen(name)) {
@@ -900,11 +902,26 @@ export class Shell {
     this.handlers.command({ id, target: "host", icon: "", label: id });
   }
 
-  /** Selects a component and puts focus in its name, once its properties arrive. */
-  private beginRename(name: string): void {
-    this.pendingRename = name;
-    this.handlers.selectComponent(name);
-    this.docks.reveal("properties");
+  /**
+   * Renames a module, and with it everything in the workbook that names it.
+   *
+   * This used to open the Properties panel and leave the developer to retype "(Name)" — which
+   * renames the component and leaves every `OldName.Something` in every other module pointing at
+   * a module that no longer exists. The rename goes through the host now; the panel is still
+   * where a name can be edited by hand for anyone who wants only that.
+   */
+  private beginRename(name: string, workbook: string | null): void {
+    const wanted = window.prompt(`Rename ${name} to:`, name);
+    if (wanted === null) {
+      return;
+    }
+
+    const trimmed = wanted.trim();
+    if (trimmed.length === 0 || trimmed === name) {
+      return;
+    }
+
+    this.handlers.renameModule(name, workbook, trimmed);
   }
 
   private renderPanel(): void {

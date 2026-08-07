@@ -396,6 +396,13 @@ function boot(): void {
     menuClosed: () => workspace.activeEditor().focus(),
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
     selectComponent: (name) => bridge.selectComponent(name),
+    renameModule: (name, workbook, newName) => {
+      void bridge.requestModuleRename(name, workbook, newName).then((answer) => {
+        bridge.shell?.notify(answer.refused
+          ?? `Renamed ${name} to ${newName}— ${answer.replaced} mention${answer.replaced === 1 ? "" : "s"}`
+            + ` in ${answer.modules.length} module${answer.modules.length === 1 ? "" : "s"}.`);
+      });
+    },
     closeModule: (name, workbook, action) => bridge.closeModule(name, workbook, action),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
