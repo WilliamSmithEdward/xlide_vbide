@@ -69,6 +69,32 @@ interface Tab {
   dirty: boolean;
 }
 
+/** One tab as the debug api reports it: what it holds, and what the strip draws for it. */
+export interface TabSnapshot {
+  module: string;
+  project: string | null;
+  /** The label as rendered, workbook and all when the name collides. */
+  label: string;
+  active: boolean;
+  dirty: boolean;
+  problems: number;
+}
+
+export interface GroupSnapshot {
+  number: number;
+  active: boolean;
+  pending: DocumentId | null;
+  /** Document keys, most recently shown first: what a close falls back through. */
+  recent: string[];
+  tabs: TabSnapshot[];
+}
+
+export interface WorkspaceSnapshot {
+  groups: GroupSnapshot[];
+  active: DocumentId | null;
+  empty: boolean;
+}
+
 let nextGroupNumber = 1;
 
 class EditorGroup {
@@ -213,6 +239,11 @@ class EditorGroup {
     }
 
     return undefined;
+  }
+
+  /** The MRU stack itself, for the debug api: what a close will fall back through, in order. */
+  shownOrder(): string[] {
+    return [...this.shownHere];
   }
 
   promote(): boolean {
@@ -417,6 +448,37 @@ export class Workspace {
   }
 
   /**
+   * What the strip would say, as data. For the debug api's `ui` route.
+   *
+   * Reported from the tabs themselves rather than read back out of the DOM, because a probe
+   * that scrapes the strip is measuring the render and calling it the state, and a stale
+   * render is precisely the defect worth catching. The label is computed the same way
+   * renderTabs computes it, so a disagreement between this and the screen IS the bug.
+   */
+  snapshot(): WorkspaceSnapshot {
+    return {
+      groups: this.groups.map((group) => ({
+        number: Number(group.root.dataset.group ?? "0"),
+        active: group === this.activeGroup,
+        pending: group.pending ? { ...group.pending } : null,
+        recent: group.shownOrder(),
+        tabs: group.tabs.map(({ id, dirty }) => ({
+          module: id.module,
+          project: id.project,
+          label: (this.openNameCounts.get(id.module.toLowerCase()) ?? 0) > 1 && id.project
+            ? `${id.module} (${id.project})`
+            : id.module,
+          active: group.active !== null && group.key(group.active) === group.key(id),
+          dirty,
+          problems: this.problemCountFor(id),
+        })),
+      })),
+      active: this.activeDocument(),
+      empty: this.groups.every((group) => group.tabs.length === 0),
+    };
+  }
+
+  /**
    * Adopts the host's open list. Membership is the host's; geography is the developer's:
    * tabs still open keep their group and position, new ones join the active group, closed
    * ones leave wherever they sit, and a group emptied by the diff dissolves.
@@ -554,6 +616,14 @@ export class Workspace {
   private setEmpty(empty: boolean): void {
     this.emptyView.hidden = !empty;
     this.area.classList.toggle("empty", empty);
+  }
+
+  /**
+   * Whether the empty view is up. A different question from having no tabs: the two disagreeing
+   * is a defect, and one that only shows as a blank editor with a tab strip above it.
+   */
+  emptyViewShown(): boolean {
+    return !this.emptyView.hidden;
   }
 
   /** The group under focus changed. */

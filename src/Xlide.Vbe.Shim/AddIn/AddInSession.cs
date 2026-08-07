@@ -895,11 +895,63 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugPerfReply));
             }
 
+            case "ui":
+            {
+                // The surface as the PAGE describes it: tabs with the labels the strip drew,
+                // the tree's expansion, which panes and dialogs are up, what has not arrived
+                // yet, where the caret is.
+                //
+                // The page answers because the page knows. Every earlier version of this
+                // question was a querySelectorAll written fresh in whichever probe was asking,
+                // and a scraped row cannot tell "collapsed" from "rendered wrong" — the render
+                // being stale is the defect worth catching, and scraping it measures the wrong
+                // half. See ui/editor/src/devsurface.ts.
+                var ui = RunPageScript("window.xlideUi.state()", null, WaitMilliseconds(request, 5000));
+                return ui.Error is { } uiError
+                    ? DebugError(uiError)
+                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugEvalReply(ui.Answered, ui.ErrorCode, ui.Result, Unwrap(ui.Result)),
+                        DebugJsonContext.Default.DebugEvalReply));
+            }
+
+            case "act" when request.Query.TryGetValue("do", out var actionName) && actionName.Length > 0:
+            {
+                // The surface DRIVEN, through the methods a click reaches rather than through
+                // synthesised events. The tab close box is why: it arms at pointerdown and
+                // fires at pointerup, so `element.click()` on it does nothing, silently, and a
+                // probe written that way reports a working feature broken (2026-08-07).
+                //
+                // Arguments ride as query values and arrive as strings; the page coerces them.
+                var arguments = new System.Text.Json.Nodes.JsonObject();
+                foreach (var (key, value) in request.Query)
+                {
+                    if (key is not ("do" or "token" or "waitMs"))
+                    {
+                        arguments[key] = value;
+                    }
+                }
+
+                var quotedName = System.Text.Json.Nodes.JsonValue.Create(actionName)!.ToJsonString();
+                var act = RunPageScript(
+                    $"window.xlideUi.act({quotedName}, {arguments.ToJsonString()})",
+                    null,
+                    WaitMilliseconds(request, 8000));
+
+                return act.Error is { } actError
+                    ? DebugError(actError)
+                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugEvalReply(act.Answered, act.ErrorCode, act.Result, Unwrap(act.Result)),
+                        DebugJsonContext.Default.DebugEvalReply));
+            }
+
             case "eval" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
             {
                 // The page's own DOM, asked directly: the questions that are one line ("how
                 // many tabs does the strip show?", "is the empty view up?") answered without
                 // a DevTools client. Pixels cannot answer those, and this needs no protocol.
+                //
+                // `ui` above answers most of them now, and better. Reach for this when the
+                // question is genuinely new; if it gets asked twice, it belongs in devsurface.
                 var script = request.Body.Length > 0 ? request.Body : request.Query["script"];
                 request.Query.TryGetValue("surface", out var which);
 
@@ -1222,6 +1274,101 @@ internal sealed class AddInSession : IDisposable
                         ordered[^1],
                         [.. samples],
                         detail),
+                    DebugJsonContext.Default.DebugBenchReply));
+            }
+
+            case "trip" when request.Query.TryGetValue("what", out var tripWhat) && tripWhat.Length > 0:
+            {
+                // What a person WAITS for, which is never one layer.
+                //
+                // `bench` times the page's own work and `perf` reports the host's, and both
+                // have looked healthy while the surface felt slow, because the cost was in
+                // neither: it was the crossing between them, which nothing measured. These
+                // are wall clock from asking to observable, taken here rather than on either
+                // side, so the door's own cost is inside the number.
+                //
+                // `pagecall` is the floor. Every other figure here contains it, and without
+                // it a 40ms feature and a 40ms door are the same reading.
+                //
+                // WHAT CANNOT BE MEASURED HERE, and it is a constraint on every route, not
+                // just this one: a route body runs ON THE HOST THREAD, and a web message
+                // posted to the page is delivered by that same thread's pump. So a body that
+                // posts and then waits to see the effect waits forever - the post cannot be
+                // delivered until the body returns. A caret trip written that way sat through
+                // four seconds per sample and reported that the caret never moved, while the
+                // identical sequence from OUTSIDE landed in 50ms on the first poll
+                // (2026-08-07). Thread.Sleep does not help: it yields the CPU and pumps
+                // nothing.
+                //
+                // RunPageScript survives this because ExecuteScript's answer comes back by a
+                // path the blocked thread still completes; PostWebMessageAsString does not.
+                // Anything of that second kind is measured ACROSS requests, in the client.
+                var tripRuns = request.Query.TryGetValue("n", out var tripRunsText)
+                    && int.TryParse(tripRunsText, out var tripCount)
+                    ? Math.Clamp(tripCount, 1, 50)
+                    : 10;
+
+                var tripSamples = new List<double>();
+                var tripDetail = string.Empty;
+                var tripSurface = _editorSurface;
+
+                if (tripSurface is null)
+                {
+                    return DebugError("no surface is up");
+                }
+
+                switch (tripWhat)
+                {
+                    case "pagecall":
+                    {
+                        for (var run = 0; run < tripRuns; run++)
+                        {
+                            var began = System.Diagnostics.Stopwatch.StartNew();
+                            var pinged = RunPageScript("1", null, 5000);
+                            began.Stop();
+                            if (pinged.Error is { } pageError)
+                            {
+                                return DebugError(pageError);
+                            }
+                            tripSamples.Add(Math.Round(began.Elapsed.TotalMilliseconds, 3));
+                        }
+
+                        tripDetail = "a script into the page and its answer back";
+                        break;
+                    }
+
+                    case "hostcall":
+                    {
+                        for (var run = 0; run < tripRuns; run++)
+                        {
+                            var began = System.Diagnostics.Stopwatch.StartNew();
+                            tripSurface.RunOnHostThread(() => { });
+                            began.Stop();
+                            tripSamples.Add(Math.Round(began.Elapsed.TotalMilliseconds, 3));
+                        }
+
+                        tripDetail = "nothing, marshalled onto the host thread and waited for";
+                        break;
+                    }
+
+                    default:
+                        return DebugError(
+                            $"unknown trip {tripWhat}; try pagecall or hostcall. Anything that has to "
+                            + "observe a POSTED message cannot be measured from in here at all - see the "
+                            + "note on this route - and belongs in the client, the way tripCaret() does");
+                }
+
+                var tripOrdered = tripSamples.OrderBy(one => one).ToArray();
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugBenchReply(
+                        tripWhat,
+                        tripOrdered.Length,
+                        tripOrdered[0],
+                        tripOrdered[tripOrdered.Length / 2],
+                        tripOrdered[Math.Min(tripOrdered.Length - 1, (int)(tripOrdered.Length * 0.95))],
+                        tripOrdered[^1],
+                        [.. tripSamples],
+                        tripDetail),
                     DebugJsonContext.Default.DebugBenchReply));
             }
 

@@ -1409,6 +1409,21 @@ export class EditorBridge {
     };
   }
 
+  /**
+   * What the page is still waiting on, for the debug api's `ui` route.
+   *
+   * A document request that never comes home fails as a four-second silence, and the surface
+   * shows nothing while it does. Without this, "the tab is blank" and "the text has not arrived
+   * yet" look identical from outside, which is two rounds of reading the wrong code.
+   */
+  waitingOn(): { documents: string[]; hostActive: DocumentId | null; stoppedRows: number } {
+    return {
+      documents: [...this.pendingDocuments.keys()],
+      hostActive: this.hostActive ? { ...this.hostActive } : null,
+      stoppedRows: this.stoppedLocals.length,
+    };
+  }
+
   /** The host-active document's model, which is what engine answers are computed against. */
   hostActiveModel(): monaco.editor.ITextModel | null {
     return this.hostActive

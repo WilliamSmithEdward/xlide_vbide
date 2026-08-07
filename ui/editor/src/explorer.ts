@@ -48,6 +48,27 @@ export interface ExplorerProcedure {
   line: number;
 }
 
+/** The tree as the debug api reports it. */
+export interface ExplorerSnapshot {
+  selected: string | null;
+  active: string | null;
+  attentionWorkbook: string | null;
+  unfolded: { module: string; workbook: string | null } | null;
+  /** Whether the "Explorer follows the editor" setting is on, since it gates every automatic move. */
+  follows: boolean;
+  workbooks: {
+    name: string;
+    expanded: boolean;
+    modules: {
+      name: string;
+      kind: string;
+      problems: number;
+      unfolded: boolean;
+      procedures: ExplorerProcedure[];
+    }[];
+  }[];
+}
+
 interface KindMeta {
   /** The kind spelled the way the companion editor spells it beside a module's name. */
   type: string;
@@ -386,6 +407,54 @@ export class Explorer {
     this.attentionWorkbook = null;
 
     this.render();
+  }
+
+  /**
+   * The tree as data, for the debug api's `ui` route.
+   *
+   * Reported from the fields the render reads rather than from the rendered rows, so a probe
+   * asks what the tree BELIEVES. Scraping `.tree-item` was how this was measured before, and it
+   * cannot see the difference between "collapsed" and "rendered wrong".
+   */
+  treeState(): ExplorerSnapshot {
+    return {
+      selected: this.selected,
+      active: this.active,
+      attentionWorkbook: this.attentionWorkbook,
+      unfolded: this.expandedModule === null ? null : {
+        module: this.expandedModule,
+        workbook: this.expandedModuleWorkbook,
+      },
+      follows: currentSettings().treeFollowsEditor,
+      workbooks: this.projects.map((project) => ({
+        name: project.name,
+        expanded: this.expandedWorkbooks.get(project.name) ?? false,
+        modules: project.components.map((component) => ({
+          name: component.name,
+          kind: kindMeta(component.kind).type,
+          problems: this.problemCounts.get(component.name) ?? 0,
+          unfolded: this.expandedModule === component.name
+            && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === project.name),
+          procedures: (this.outlines.get(component.name) ?? []).map((one) => ({ ...one })),
+        })),
+      })),
+    };
+  }
+
+  /** Opens or shuts a workbook the way its row does, for a script that would otherwise click. */
+  setWorkbookExpanded(workbook: string, open: boolean): boolean {
+    if (!this.projects.some((project) => project.name === workbook)) {
+      return false;
+    }
+
+    this.expandedWorkbooks.set(workbook, open);
+    this.render();
+    return true;
+  }
+
+  /** Unfolds a module's procedures the way its chevron does. */
+  unfold(module: string, workbook?: string): void {
+    this.toggleModule(module, workbook);
   }
 
   /** True while a click is being served, so setExpandedModule knows this was asked for. */

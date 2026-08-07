@@ -137,6 +137,7 @@ complete on the day it is written and quietly is not, six routes later.
 
 | Route | Client | |
 | --- | --- | --- |
+| `act` | `act(name, args)` | drives the surface through the methods a click reaches |
 | `assert` | `assert(that, {value, timeoutMs})` | states a claim and waits for it |
 | `await` | `until(predicate, {waitMs})` | waits for a condition IN the page |
 | `bench` | `bench(what, {n})` | times a scenario: min, median, p95, max, raw samples |
@@ -176,6 +177,8 @@ complete on the day it is written and quietly is not, six routes later.
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
 | `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
 | `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters |
+| `trip` | `trip(what, {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
+| `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
 
@@ -190,6 +193,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Is this session sane | `doctor()` |
 | What is shown, and where the windows are | `state()`, `windows()` |
 | What the surface holds TEXT for | `documents()` |
+| **What the surface LOOKS like: tabs, tree, panes, dialogs, caret** | **`ui()`** |
 | The whole arrangement: docks, groups, tabs, sizes | `layout()` |
 | A module's text, through the session's own reader | `readModule(name, project)` |
 | The analyzer's findings | `problems(module)` |
@@ -210,9 +214,71 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Evaluate in the Immediate window | `immediate(text)` |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
+| **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
 | Run script in the page | `ask(script)` — see the trap below |
 | Reload the page and wait for it | `reload()` |
 | Put the arrangement back | `resetLayout()` |
+
+### The surface, asked and driven
+
+Two routes, and they replace almost every DOM script a probe used to carry.
+
+```js
+const ui = await api.ui();
+ui.workspace.groups[0].tabs;      // module, project, LABEL as drawn, active, dirty, problems
+ui.workspace.groups[0].recent;    // the MRU stack a close falls back through
+ui.explorer.workbooks;            // expanded, and each module's unfolded state and procedures
+ui.explorer.unfolded;             // the accordion's one open module, and its workbook
+ui.dialogs;                       // settings, help, sponsors, references, object browser
+ui.waiting.documents;             // text asked for and not yet arrived
+ui.focus;                         // model, line, column, and whether the editor has the keyboard
+ui.emptyViewShown;                // a DIFFERENT question from having no tabs
+
+await api.act("closeActive");
+await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
+await api.act("unfoldModule", { module: "Helpers" });
+await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
+await api.act("closeDialogs");
+```
+
+`act` answers `{did, detail}`. **`did: false` is an answer, not a failure** — closing a tab when
+nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop
+distinguishing it from a broken door.
+
+> **Why these exist.** Both replace a habit that cost more than any product defect here. Reading
+> the surface with `querySelectorAll` measures the RENDER and calls it the state, and a stale
+> render is the bug worth catching; `ui()` reports from the fields the render reads. Driving the
+> surface with synthesised events guesses which ones the handlers listen for, and guesses wrong
+> silently: the tab close box arms at `pointerdown` and fires at `pointerup`, so `.click()` on it
+> does nothing whatsoever and the probe reports a working feature broken (2026-08-07).
+>
+> If a question needs a DOM script twice, it belongs in `ui/editor/src/devsurface.ts`.
+
+### Measuring what a person actually waits for
+
+```js
+await api.trip("pagecall");   // the floor: a script into the page and back
+await api.trip("hostcall");   // nothing, marshalled onto the host thread and waited for
+await api.tripCaret();        // host caret set, to the PAGE agreeing where it is
+```
+
+`bench()` times the page's own work and `perf()` reports the host's. Both have read healthy while
+the surface felt slow, because the cost was in the crossing that neither measures. `trip` is wall
+clock from asking to observable, so the door's own cost is inside the number, which is why
+`pagecall` has to be read alongside the rest. Without it, a 40ms feature and a 40ms door are the
+same reading.
+
+> **Why `tripCaret` is a client method and not a route.** A route body runs ON THE HOST THREAD,
+> and a message posted to the page is delivered by that same thread's pump. So a route that posts
+> and then waits to see the effect waits forever: the post cannot be delivered until the body
+> returns. Written as a route, the caret trip sat four seconds a sample and reported that the
+> caret never moved, while the identical sequence from outside landed on the first poll
+> (2026-08-07). `Thread.Sleep` does not help; it yields the CPU and pumps nothing.
+>
+> `RunPageScript` survives this because `ExecuteScript`'s answer returns by a path the blocked
+> thread still completes. `PostWebMessageAsString` does not. **Anything that observes a POSTED
+> effect has to be measured across requests, on the client side of the door.** That applies to
+> any future route, not just this one.
 
 ### Waiting, rather than sleeping
 

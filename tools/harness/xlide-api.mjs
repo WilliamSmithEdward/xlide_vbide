@@ -362,6 +362,97 @@ function clientFor(entry) {
     /** The whole visible arrangement: docks, groups, tabs, sizes, open documents. */
     layout: () => call("layout"),
 
+    /**
+     * The surface as the PAGE describes it, decoded: `.value` is the snapshot.
+     *
+     * Tabs with the labels the strip drew and the MRU order a close falls through, the tree's
+     * expansion and unfolded module, which panes and dialogs are up, what has not arrived yet,
+     * and where the caret is. Reach for this before writing a DOM script: a scraped row cannot
+     * tell "collapsed" from "rendered wrong", and the render being stale is the defect worth
+     * catching.
+     */
+    async ui() {
+      const answer = await call("ui", { timeout: 10000 });
+      return answer.value ?? answer;
+    },
+
+    /**
+     * Drives the surface through the methods a click reaches.
+     *
+     * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
+     * `settings`, `sponsors`, `closeDialogs`, `key`, `focusEditor`. Answers {did, detail};
+     * `did: false` means the page declined, which is an answer and not a failure.
+     *
+     * Synthesising events instead is how a working feature gets reported broken: the tab close
+     * box arms at pointerdown and fires at pointerup, so `.click()` on it does nothing at all.
+     */
+    async act(name, args = {}) {
+      const answer = await call(`act${query({ do: name, ...args })}`, { method: "POST", timeout: 15000 });
+      return answer.value ?? answer;
+    },
+
+    /**
+     * Times what a person WAITS for, across the boundary: `pagecall`, `hostcall`.
+     *
+     * `bench` times the page's own work and `perf` reports the host's; both have looked healthy
+     * while the surface felt slow, because the cost was in the crossing that neither measured.
+     * Always read `pagecall` alongside the rest: it is the floor every other figure contains.
+     */
+    trip: (what, { n } = {}) => call(`trip${query({ what, n })}`, { timeout: 120000 }),
+
+    /**
+     * Go To Line, timed end to end: the host moves the caret, the page agrees where it is.
+     *
+     * Measured HERE and not in the shim, and that is not a stylistic choice. A route body runs
+     * on the host thread, and the caret is delivered to the page by a message that same thread
+     * pumps — so a route that posts and then waits to see the effect waits forever. Written that
+     * way it reported the caret never moving, through four seconds a sample; the identical
+     * sequence across requests lands on the first poll (2026-08-07). Anything that observes a
+     * POSTED effect belongs on this side of the door.
+     *
+     * Answers the same shape `trip` does, so the two read together.
+     */
+    async tripCaret({ n = 5, lines = [1, 2, 3, 4, 5] } = {}) {
+      const before = await this.ui();
+      if (!before.focus.host) {
+        throw new Error("no group is showing the host-active module, so the caret has nowhere observable to land");
+      }
+
+      const samples = [];
+      for (let run = 0; run < n; run++) {
+        // Never the line it is already on: that sample would measure nothing and pass.
+        const line = lines[run % lines.length] === (await this.ui()).focus.host?.line
+          ? lines[(run + 1) % lines.length]
+          : lines[run % lines.length];
+
+        const began = Date.now();
+        await this.caret(line);
+
+        let landed = false;
+        while (Date.now() - began < 4000 && !landed) {
+          landed = (await this.ui()).focus.host?.line === line;
+        }
+
+        if (!landed) {
+          throw new Error(`the caret never reached line ${line}`);
+        }
+
+        samples.push(Date.now() - began);
+      }
+
+      const ordered = [...samples].sort((a, b) => a - b);
+      return {
+        what: "caret",
+        runs: ordered.length,
+        minMs: ordered[0],
+        medianMs: ordered[ordered.length >> 1],
+        p95Ms: ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * 0.95))],
+        maxMs: ordered[ordered.length - 1],
+        samplesMs: samples,
+        detail: "host caret set, to the page agreeing where it is; measured across requests",
+      };
+    },
+
     /** Puts the arrangement back to the default and waits for the page. */
     resetLayout: ({ waitMs = 10000 } = {}) =>
       call(`layout${query({ reset: 1, waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
@@ -500,6 +591,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
       case "eval": return api.eval(rest.join(" "));
+      case "ui": return api.ui();
+      // node xlide-api.mjs act closeActive / act expandWorkbook workbook TwinFixture.xlsm
+      case "act": return api.act(rest[0], Object.fromEntries(
+        rest.slice(1).reduce((pairs, value, at, all) =>
+          at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])));
+      case "trip": return api.trip(rest[0] ?? "pagecall", { n: rest[1] });
       case "immediate": return api.immediate(rest.join(" "));
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
       default: throw new Error(`unknown route ${route}`);

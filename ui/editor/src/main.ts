@@ -69,6 +69,7 @@ import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/context
 import "./styles.css";
 import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
+import { installDevSurface } from "./devsurface.js";
 import { openReferencesDialog } from "./referencesdialog.js";
 import { DocumentStore, docUriOf } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
@@ -501,6 +502,19 @@ function boot(): void {
   // Reachable from a devtools console, which is how the page half of a host defect gets isolated
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
+
+  // And the surface itself, as data and as actions: the debug api's `ui` and `act` routes. See
+  // devsurface.ts for why this is a module rather than a script written fresh per question.
+  installDevSurface({
+    workspace,
+    explorer: shell.explorerTree(),
+    bridge,
+    panes: shell.paneVisibility(),
+    openSettings: () => bridge.openSettings?.(),
+    openSponsors: () => openSponsorDialog(
+      { openExternal: (url) => bridge.openExternal(url) },
+      () => workspace.activeEditor().focus()),
+  });
 
   // Tools > Options routes here from the host: the native Options dialog is superseded, and
   // the product's settings are where the choices that matter live.
