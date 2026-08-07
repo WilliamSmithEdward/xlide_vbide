@@ -6107,6 +6107,31 @@ internal sealed class AddInSession : IDisposable
     /// active-line hold is keeping back, so the panel and the badges never announce a verdict
     /// about a line still being typed.
     /// </summary>
+    /// <summary>
+    /// Forgets one module's findings and redraws. For a module whose text has been replaced behind
+    /// the analyzer's back: stale findings outlive their code otherwise, because a live answer is
+    /// only accepted while its module is the one on screen.
+    /// </summary>
+    private void DropFindingsFor(string component, string? projectDisplay)
+    {
+        var remaining = _findings
+            .Where(finding => !(
+                string.Equals(finding.Module, component, StringComparison.OrdinalIgnoreCase)
+                && (projectDisplay is null
+                    || string.Equals(DisplayFromProjectId(finding.Project), projectDisplay, StringComparison.OrdinalIgnoreCase))))
+            .ToList();
+
+        if (remaining.Count == _findings.Count)
+        {
+            return;
+        }
+
+        Log.Info($"findings: dropped {_findings.Count - remaining.Count} for {component}, its text was replaced");
+        _findings = remaining;
+        PublishMarkersToSurface();
+        PublishFindingsToSurface();
+    }
+
     private void PublishFindingsToSurface()
     {
         _editorSurface?.ShowFindings([.. _findings
@@ -6174,6 +6199,16 @@ internal sealed class AddInSession : IDisposable
                     // the document anyway; this covers the close that cannot find a pane, so
                     // whatever stays on screen is the module's truth.
                     ResyncFromModule();
+
+                    // The findings still describe the text that was just thrown away, and nothing
+                    // else will replace them: a live answer is dropped unless its module is still
+                    // the one on screen, and this one is about to close. So the panel kept
+                    // reporting errors from code that no longer existed (developer, 2026-08-06).
+                    //
+                    // Dropped rather than recomputed here. Whatever the reverted text really
+                    // contains comes back from the next analysis pass, which is the same path that
+                    // would have reported it had the module never been opened.
+                    DropFindingsFor(component, display);
 
                     Log.Info($"close: {component} reverted to {display}'s saved text");
                 }
