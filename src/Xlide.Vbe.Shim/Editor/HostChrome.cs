@@ -22,7 +22,10 @@ namespace Xlide.Vbe.Shim.Editor;
 internal sealed class HostChrome : IDisposable
 {
     private const string HostName = "Microsoft Visual Basic for Applications";
-    private const string OurName = "xlide";
+    // Capitalised here and nowhere else. In a title bar it is a wordmark sitting beside the
+    // workbook's name, which is how the surface's own corner spells it; in prose it is a product
+    // called xlide.
+    private const string OurName = "XLIDE";
 
     private readonly nint _window;
     private readonly string? _originalCaption;
