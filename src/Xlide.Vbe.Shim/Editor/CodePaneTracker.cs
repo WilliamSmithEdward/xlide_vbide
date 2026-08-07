@@ -199,7 +199,7 @@ internal sealed class CodePaneTracker : IDisposable
         //
         // Appearing and disappearing still refreshes for everything, whatever the class: those
         // are rare, and one of them is how a pane closing gets noticed at all.
-        if (!windowEvent.IsLocationChange || IsEditorClass(className))
+        if (!windowEvent.IsLocationChange || MovesPanes(className))
         {
             Refresh();
         }
@@ -221,6 +221,26 @@ internal sealed class CodePaneTracker : IDisposable
     private static bool IsEditorClass(string? className) => className
         is FrameClass or "MDIClient" or PaneClass or "XlideEditorOverlay"
         or "MsoCommandBarDock" or "MsoCommandBar";
+
+    /// <summary>
+    /// Whether a window MOVING can have moved a code pane. Narrower than the editor's own
+    /// windows, which is what deserves a log line rather than what deserves a refresh.
+    ///
+    /// A pane lives inside the MDI client, inside the frame. Those three moving can move a pane;
+    /// nothing else in the editor can. Measured over one resize drag, 60 size steps produced 531
+    /// of these events and only 236 came from the three (2026-08-06):
+    ///
+    /// - The toolbars, 236 of them, are half the traffic and move no pane. What they DO change is
+    ///   how much room is left for the MDI client — and the MDI client says so itself, with its
+    ///   own event, which is still heard.
+    /// - Our own overlay, 59 of them, moved because we moved it a moment earlier. A refresh
+    ///   caused by our own placement is a loop that tells us nothing.
+    ///
+    /// Appearing and disappearing is unaffected and still refreshes for every class, because a
+    /// pane closing is exactly the thing that must never be missed.
+    /// </summary>
+    private static bool MovesPanes(string? className) => className
+        is FrameClass or "MDIClient" or PaneClass;
 
     /// <summary>Set when events arrive while a refresh is running, so none of them are lost.</summary>
     private bool _refreshQueued;
