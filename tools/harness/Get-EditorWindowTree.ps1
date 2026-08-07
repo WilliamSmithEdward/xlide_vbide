@@ -134,7 +134,7 @@ try {
     $component.Name = 'ProbeModule'
     $component.CodeModule.AddFromString("Option Explicit`r`n`r`nSub Probe()`r`n    Dim n As Long`r`n    n = 1`r`nEnd Sub`r`n")
 
-    $excel.VBE.MainWindow.Visible = $true
+    & (Join-Path $PSScriptRoot 'Open-VbeEditor.ps1') -Excel $excel
     $component.CodeModule.CodePane.Show()
 
     Start-Sleep -Milliseconds 1200

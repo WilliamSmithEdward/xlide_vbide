@@ -229,6 +229,31 @@ function clientFor(entry) {
       call(`component${query({ action, kind, name, newName, project })}`, { method: "POST" }),
 
     /**
+     * Opens or closes a module's code pane — a TAB, as the strip draws it.
+     *
+     * `caret` opens one on the way to a line; this is how one goes away. A close goes through the
+     * same gate the tab's own X uses, so a module with unwritten edits raises the question;
+     * `answer` ("save" or "discard") settles it in advance.
+     *
+     *   await api.pane("close", { module: "Consumer", answer: "discard" });
+     */
+    pane: (action, { module, project, answer } = {}) =>
+      call(`pane${query({ action, module, project, answer })}`, { method: "POST" }),
+
+    /**
+     * The developer's settings — read them, or change ONE without restating the rest.
+     *
+     * The page's own update takes the whole object, so changing one thing from a harness meant
+     * spelling out all seven and getting a default wrong on the way. Named arguments here; the
+     * answer is always the settings as they now stand.
+     *
+     *   await api.settings();                          // read
+     *   await api.settings({ treeFollowsEditor: false });
+     */
+    settings: (changes) =>
+      call(`settings${query(changes ?? {})}`, changes ? { method: "POST" } : {}),
+
+    /**
      * What the VBA project actually CONTAINS: every component, its kind, its line count, and
      * whether the editor has a pane open on it.
      *

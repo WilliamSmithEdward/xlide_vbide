@@ -53,11 +53,18 @@ Not `New-Object -ComObject Excel.Application`. A host created through automation
 
 ### The editor must be opened
 
-Excel loads VBE add-ins when the **VBE** starts, not when Excel does. Nothing is under test until:
+Excel loads VBE add-ins when the **VBE** starts, not when Excel does. Nothing is under test until
+the editor is up — and it is opened through Excel's own ribbon command, not the object model:
 
 ```powershell
-$excel.VBE.MainWindow.Visible = $true
+$excel.CommandBars.ExecuteMso('VisualBasic')      # not $excel.VBE.MainWindow.Visible
 ```
+
+`$excel.VBE` is one of the two properties "Trust access to the VBA project object model" gates,
+and with that off it is **null**, so the obvious line fails — or worse, is swallowed by a
+try/catch and the script carries on believing the editor is open. `ExecuteMso` is not gated.
+`tools\harness\Open-VbeEditor.ps1` is that one line with the reason attached, and every harness
+script goes through it.
 
 `Start-Excel.ps1` does this, along with the two things around it that are easy to get wrong:
 
@@ -139,6 +146,8 @@ complete on the day it is written and quietly is not, six routes later.
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
+| `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
+| `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
 | `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
 | `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes |

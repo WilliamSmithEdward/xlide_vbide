@@ -2279,6 +2279,89 @@ internal sealed class AddInSession : IDisposable
                 }
             }
 
+            case "pane" when request.Query.TryGetValue("action", out var paneAction)
+                && request.Query.TryGetValue("module", out var paneModule) && paneModule.Length > 0:
+            {
+                // Opening and CLOSING a module's pane.
+                //
+                // `caret` opens one on the way to a line, and until now nothing closed one — so
+                // every test of what the tab strip does when a tab goes had to reach into the
+                // page's private workspace through eval, which is a test of the probe as much as
+                // of the thing. Four defects in the strip this week were found that way and each
+                // one needed the reach rewritten (2026-08-07).
+                request.Query.TryGetValue("project", out var paneProject);
+                var paneOwner = ProjectIdFromDisplay(paneProject) ?? _shownProject;
+
+                switch (paneAction)
+                {
+                    case "open":
+                        ShowModule(paneModule);
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+
+                    case "close":
+                    {
+                        // Through the same gate the tab's own X uses, so a module with unwritten
+                        // edits gets the question rather than the guillotine — and `action` is how
+                        // a caller answers it in advance.
+                        request.Query.TryGetValue("answer", out var closeAnswer);
+                        OnModuleCloseRequested(paneModule, DisplayFromProjectId(paneOwner), closeAnswer);
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                    }
+
+                    default:
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply($"unknown action {paneAction}; use open or close"),
+                            DebugJsonContext.Default.DebugErrorReply);
+                }
+            }
+
+            case "settings":
+            {
+                // Read them, or change one without restating the rest.
+                //
+                // The page's own update takes the WHOLE settings object, so changing one thing
+                // from a harness meant spelling out all seven and getting a default wrong in the
+                // process. Here a caller names what it wants changed and everything else stands.
+                var settings = _settings;
+
+                if (request.Query.Count > 0)
+                {
+                    bool Flag(string name, bool current) =>
+                        request.Query.TryGetValue(name, out var asked)
+                            ? asked is "1" or "true" or "yes" or "on"
+                            : current;
+
+                    settings = new ProductSettings
+                    {
+                        BlockLayout = request.Query.TryGetValue("blockLayout", out var layout)
+                            ? layout
+                            : settings.BlockLayout,
+                        ContinueCommentOnNewline = Flag("continueCommentOnNewline", settings.ContinueCommentOnNewline),
+                        MirrorCommentSpacing = Flag("mirrorCommentSpacing", settings.MirrorCommentSpacing),
+                        TreeFollowsEditor = Flag("treeFollowsEditor", settings.TreeFollowsEditor),
+                        FormatIndentSize = request.Query.TryGetValue("formatIndentSize", out var indent)
+                            && int.TryParse(indent, out var asked) ? asked : settings.FormatIndentSize,
+                        FormatUseTabs = Flag("formatUseTabs", settings.FormatUseTabs),
+                        FormatCanonicalKeywords = Flag("formatCanonicalKeywords", settings.FormatCanonicalKeywords),
+                    }.Normalized();
+
+                    OnSettingsChanged(settings);
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugSettingsReply(
+                        settings.BlockLayout,
+                        settings.ContinueCommentOnNewline,
+                        settings.MirrorCommentSpacing,
+                        settings.TreeFollowsEditor,
+                        settings.FormatIndentSize,
+                        settings.FormatUseTabs,
+                        settings.FormatCanonicalKeywords),
+                    DebugJsonContext.Default.DebugSettingsReply);
+            }
+
             case "project":
             {
                 // What is actually THERE, as opposed to what the surface is showing.

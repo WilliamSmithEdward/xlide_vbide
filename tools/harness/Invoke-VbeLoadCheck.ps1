@@ -228,7 +228,7 @@ try {
 
     # The host loads editor add-ins when the editor starts, not when the host does, so this is the
     # step that actually triggers what is being tested.
-    $excel.VBE.MainWindow.Visible = $true
+    & (Join-Path $PSScriptRoot 'Open-VbeEditor.ps1') -Excel $excel
     Complete-Phase 'open editor'
 
     # Wait for the add-in to say it finished starting. The log is matched on the host's process

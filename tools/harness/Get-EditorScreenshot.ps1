@@ -270,7 +270,7 @@ try {
         $broken.CodeModule.CodePane.Show()
     }
 
-    $excel.VBE.MainWindow.Visible = $true
+    & (Join-Path $PSScriptRoot 'Open-VbeEditor.ps1') -Excel $excel
 
     # Wait for everything the capture is meant to show, not just the first thing that finishes.
     #

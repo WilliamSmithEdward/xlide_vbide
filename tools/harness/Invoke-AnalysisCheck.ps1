@@ -106,7 +106,7 @@ try {
 
     Write-Host 'Added BrokenModule and CleanModule.'
 
-    $excel.VBE.MainWindow.Visible = $true
+    & (Join-Path $PSScriptRoot 'Open-VbeEditor.ps1') -Excel $excel
 
     $logPattern = "shim-*-$($process.Id).log"
     $analysisDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
