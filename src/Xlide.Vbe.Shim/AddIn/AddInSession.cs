@@ -2042,6 +2042,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.SmartEnterRequested = OnSmartEnterRequested;
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
+        _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
@@ -5003,6 +5004,55 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowLoopSync(requestId, edits));
+        });
+    }
+
+    /// <summary>
+    /// Answers a quick-fix request from the surface: what can be fixed over a span, and the edits
+    /// that would fix it. Answered the same way a hover is, and empty on failure for the same
+    /// reason — a lightbulb that does not appear is what the developer already sees when there is
+    /// nothing to fix.
+    /// </summary>
+    private void OnCodeActionsRequested(int requestId, int start, int end)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowCodeActions(requestId, []);
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceCodeAction[] actions = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                var answered = await analysis.CodeActionsAsync(module, start, end, deadline.Token)
+                    .ConfigureAwait(false);
+
+                actions = [.. answered.Select(action => new SurfaceCodeAction(
+                    action.Title,
+                    action.IsPreferred ?? false,
+                    action.Code,
+                    action.Span.Start,
+                    action.Span.End,
+                    [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))]))];
+
+                if (actions.Length > 0)
+                {
+                    Log.Info($"codeAction: {module}@{start}..{end} -> {actions.Length} fix(es)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"codeAction: {module}@{start}..{end} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowCodeActions(requestId, actions));
         });
     }
 

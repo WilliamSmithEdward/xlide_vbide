@@ -5,6 +5,9 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 // keeps the bundle from growing to the full editor.main.js size.
 import "monaco-editor/features/bracketMatching/register.js";
 import "monaco-editor/features/clipboard/register.js";
+// The lightbulb and its menu. A code-action provider without this registered answers into a void,
+// the same way a completion provider does without suggest.
+import "monaco-editor/features/codeAction/register.js";
 import "monaco-editor/features/codicon/register.js";
 import "monaco-editor/features/comment/register.js";
 import "monaco-editor/features/contextmenu/register.js";
@@ -38,7 +41,7 @@ import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
-import { EditorBridge, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
+import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { DocumentStore } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
@@ -403,6 +406,68 @@ function boot(): void {
         contents,
       };
     },
+  });
+
+  // Quick fixes. Every fix answers a finding, so the squiggles already on screen say whether
+  // there can be any: no marker touching the range means no round trip, which matters because
+  // the lightbulb asks again every time the caret settles.
+  monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, {
+    provideCodeActions: async (model, range) => {
+      const none = { actions: [], dispose: () => { } };
+      if (model !== bridge.hostActiveModel()) {
+        return none;
+      }
+
+      const markers = monaco.editor
+        .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
+        .filter((marker) => monaco.Range.areIntersectingOrTouching(marker, range));
+      if (markers.length === 0) {
+        return none;
+      }
+
+      const offered = await bridge.requestCodeActions(
+        model.getOffsetAt(range.getStartPosition()),
+        model.getOffsetAt(range.getEndPosition()));
+
+      const actions: monaco.languages.CodeAction[] = offered.map((action) => {
+        const start = model.getPositionAt(action.start);
+        const end = model.getPositionAt(action.end);
+        // The finding this fix answers, so the menu groups it under the right squiggle and the
+        // marker's own "fix this" affordance finds it.
+        const answered = markers.filter((marker) =>
+          marker.code === action.code
+          && marker.startLineNumber === start.lineNumber
+          && marker.startColumn === start.column
+          && marker.endLineNumber === end.lineNumber
+          && marker.endColumn === end.column);
+
+        return {
+          title: action.title,
+          kind: "quickfix",
+          isPreferred: action.isPreferred,
+          ...(answered.length > 0 ? { diagnostics: answered } : {}),
+          edit: {
+            edits: action.edits.map((edit) => ({
+              resource: model.uri,
+              versionId: model.getVersionId(),
+              textEdit: {
+                range: monaco.Range.fromPositions(
+                  model.getPositionAt(edit.start),
+                  model.getPositionAt(edit.end)),
+                text: edit.text,
+              },
+            })),
+          },
+        };
+      });
+
+      return { actions, dispose: () => { } };
+    },
+  }, {
+    // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
+    // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
+    // the keyboard.
+    providedCodeActionKinds: ["quickfix"],
   });
 
   // Call tips, triggered the way the extension triggers them: the opening paren, the comma, and

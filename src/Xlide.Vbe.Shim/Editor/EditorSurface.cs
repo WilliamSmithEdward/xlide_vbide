@@ -190,6 +190,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks for the paired loop rename: (requestId, offset).</summary>
     public Action<int, int>? LoopSyncRequested { get; set; }
 
+    /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
+    public Action<int, int, int>? CodeActionsRequested { get; set; }
+
     /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName,
     /// workbook or null).</summary>
     public Action<int, string, string?>? OutlineRequested { get; set; }
@@ -285,6 +288,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new LoopSyncResultMessage("loopSyncResult", requestId, edits),
             EditorMessageContext.Default.LoopSyncResultMessage));
+    }
+
+    /// <summary>Answers one quick-fix request. Never held: the caret moves and the offer lapses.</summary>
+    public void ShowCodeActions(int requestId, SurfaceCodeAction[] actions)
+    {
+        ArgumentNullException.ThrowIfNull(actions);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new CodeActionResultMessage("codeActionResult", requestId, actions),
+            EditorMessageContext.Default.CodeActionResultMessage));
     }
 
     /// <summary>
@@ -1505,6 +1523,21 @@ internal sealed class EditorSurface : IDisposable
                             && headerElement.ValueKind == JsonValueKind.True;
 
                         CanonicalCaseRequested?.Invoke(caseRequestId, caseStart, caseEnd, single, completeHeader);
+                    }
+
+                    break;
+
+                case "codeAction":
+                    if (document.RootElement.TryGetProperty("id", out var fixId)
+                        && fixId.TryGetInt32(out var fixRequestId)
+                        && document.RootElement.TryGetProperty("start", out var fixStartElement)
+                        && fixStartElement.TryGetInt32(out var fixStart)
+                        && document.RootElement.TryGetProperty("end", out var fixEndElement)
+                        && fixEndElement.TryGetInt32(out var fixEnd)
+                        && fixStart >= 0
+                        && fixEnd >= fixStart)
+                    {
+                        CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd);
                     }
 
                     break;

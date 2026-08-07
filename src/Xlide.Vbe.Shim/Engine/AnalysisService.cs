@@ -286,6 +286,32 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine for the quick fixes over a span of a module's live text. Empty when there
+    /// is no engine, no address for the module, or nothing on that span can be fixed.
+    /// </summary>
+    public async Task<EngineCodeAction[]> CodeActionsAsync(
+        string moduleName,
+        int start,
+        int end,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return [];
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return [];
+        }
+
+        var result = await engine.CodeActionsAsync(home.ProjectId, moduleName, home.ModuleType, null, start, end, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Actions ?? [];
+    }
+
+    /// <summary>
     /// Asks the engine for the call tip at an offset into a module's live text, or null when
     /// there is no engine, no address for the module, or the caret is not inside a call.
     /// </summary>

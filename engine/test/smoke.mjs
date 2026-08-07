@@ -615,6 +615,114 @@ try {
         assert.ok(after.includes('Next i'), `got: ${JSON.stringify(after)}`);
     });
 
+    // Quick fixes: resolved from the analyzer's own findings, which carry fix data the surface
+    // never sees. Three mistakes, each with a different fix, in one module.
+    const FIXABLE = [
+        'Sub Broken()',
+        '    Dim r As Range',
+        '    r = ActiveSheet.Range("A1")',
+        '    Call Helper 1, 2',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('textDocument/diagnostics', {
+        documentKey: 'Smoke/Fixable',
+        projectId: 'Smoke',
+        generation: 1,
+        source: FIXABLE,
+        moduleName: 'BadModule',
+        moduleType: 'standard',
+    });
+
+    const wholeModule = await call('textDocument/codeAction', {
+        projectId: 'Smoke',
+        moduleName: 'BadModule',
+        source: FIXABLE,
+        moduleType: 'standard',
+        start: 0,
+        end: FIXABLE.length,
+    });
+
+    console.log(`  -> ${wholeModule.actions.length} quick fix(es) over the module:`);
+    for (const action of wholeModule.actions) {
+        console.log(`     "${action.title}" [${action.code}]`);
+    }
+
+    check('a missing Set is offered one', () => {
+        const fix = wholeModule.actions.find((action) => action.code === 'set-required');
+        assert.ok(fix, 'expected a set-required fix');
+        assert.ok(applyEdits(FIXABLE, fix.edits).includes('Set r = ActiveSheet'),
+            'expected the fix to insert Set');
+    });
+
+    check('a Call without parentheses is offered them', () => {
+        const fix = wholeModule.actions.find((action) =>
+            action.code === 'call-requires-parens' && !action.title.startsWith('Suppress'));
+        assert.ok(fix, 'expected a call-requires-parens fix');
+        assert.ok(applyEdits(FIXABLE, fix.edits).includes('Call Helper(1, 2)'),
+            `got: ${JSON.stringify(applyEdits(FIXABLE, fix.edits))}`);
+    });
+
+    check('a missing Option Explicit is offered one, and it is preferred', () => {
+        const fix = wholeModule.actions.find((action) => action.title === 'Add Option Explicit');
+        assert.ok(fix, 'expected an option-explicit-missing fix');
+        assert.equal(fix.isPreferred, true);
+    });
+
+    check('every finding also offers to suppress itself', () => {
+        assert.ok(wholeModule.actions.some((action) =>
+            action.title === "Suppress 'set-required' on next line"));
+    });
+
+    // A caret rather than a selection: only the finding it sits in answers.
+    const caret = FIXABLE.indexOf('r = ActiveSheet') + 1;
+    const atCaret = await call('textDocument/codeAction', {
+        projectId: 'Smoke',
+        moduleName: 'BadModule',
+        source: FIXABLE,
+        moduleType: 'standard',
+        start: caret,
+        end: caret,
+    });
+
+    check('a caret answers only the finding it sits in', () => {
+        assert.ok(atCaret.actions.length > 0, 'expected fixes at the caret');
+        assert.ok(atCaret.actions.every((action) => action.code === 'set-required'),
+            `got codes: ${atCaret.actions.map((action) => action.code).join(', ')}`);
+    });
+
+    // Text the diagnostics have never run against still gets fixes: a fix is an edit by offset,
+    // so answering from findings made against older text would place it by arithmetic that has
+    // stopped holding.
+    const EDITED = FIXABLE.replace('Dim r As Range', 'Dim r As Range   ');
+    const untouched = await call('textDocument/codeAction', {
+        projectId: 'Smoke',
+        moduleName: 'BadModule',
+        source: EDITED,
+        moduleType: 'standard',
+        start: 0,
+        end: EDITED.length,
+    });
+
+    check('never-analysed text is analysed rather than answered stale', () => {
+        const fix = untouched.actions.find((action) => action.code === 'set-required');
+        assert.ok(fix, 'expected a set-required fix against the edited text');
+        assert.ok(applyEdits(EDITED, fix.edits).includes('Set r = ActiveSheet'),
+            `got: ${JSON.stringify(applyEdits(EDITED, fix.edits))}`);
+    });
+
+    const clean = await call('textDocument/codeAction', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: GOOD_MODULE,
+        moduleType: 'standard',
+        start: 0,
+        end: GOOD_MODULE.length,
+    });
+
+    check('code with nothing wrong offers no fixes', () => assert.equal(clean.actions.length, 0));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

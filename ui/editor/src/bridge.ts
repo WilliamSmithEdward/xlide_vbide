@@ -74,6 +74,7 @@ export type HostMessage =
   | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
+  | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -142,6 +143,20 @@ export interface HostTextEdit {
   start: number;
   end: number;
   text: string;
+}
+
+/**
+ * One quick fix from the host's engine: what to call it, the finding it answers, and the edits
+ * that apply it. The code and span belong to the finding, so the fix can be attached to the
+ * squiggle it belongs to rather than floating free of it.
+ */
+export interface HostCodeAction {
+  title: string;
+  isPreferred: boolean;
+  code?: string | null;
+  start: number;
+  end: number;
+  edits: HostTextEdit[];
 }
 
 /** One parameter slot, its label exactly as it appears in the signature line. */
@@ -225,6 +240,7 @@ export type ClientMessage =
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
+  | { type: "codeAction"; id: number; start: number; end: number }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -259,7 +275,8 @@ declare global {
   }
 }
 
-const MARKER_OWNER = "xlide";
+/** The owner the surface sets its squiggles under; anything else on a model is not ours. */
+export const MARKER_OWNER = "xlide";
 
 const SEVERITY: Record<HostSeverity, monaco.MarkerSeverity> = {
   error: monaco.MarkerSeverity.Error,
@@ -358,6 +375,12 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Quick-fix requests awaiting their answers, by request identifier. */
+  private readonly pendingCodeActions = new Map<number, {
+    resolve: (actions: HostCodeAction[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   /** Outline requests awaiting their answers, by request identifier. */
   private readonly pendingOutlines = new Map<number, {
     resolve: (procedures: HostProcedure[] | null) => void;
@@ -368,6 +391,7 @@ export class EditorBridge {
   private nextHoverId = 1;
   private nextSignatureId = 1;
   private nextCanonicalCaseId = 1;
+  private nextCodeActionId = 1;
   private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -636,6 +660,24 @@ export class EditorBridge {
   }
 
   /**
+   * Asks the host what can be fixed over a span. Resolves empty rather than rejecting: a fix that
+   * fails is a lightbulb that does not appear, which is what an unfixable line looks like anyway.
+   */
+  requestCodeActions(start: number, end: number): Promise<HostCodeAction[]> {
+    const id = this.nextCodeActionId++;
+
+    return new Promise<HostCodeAction[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingCodeActions.delete(id);
+        resolve([]);
+      }, 2000);
+
+      this.pendingCodeActions.set(id, { resolve, timer });
+      this.transport.post({ type: "codeAction", id, start, end });
+    });
+  }
+
+  /**
    * Asks the host for the case corrections over a span. Resolves empty rather than rejecting: a
    * recase that fails is a line left as typed, and the next pass over it will ask again.
    */
@@ -853,6 +895,15 @@ export class EditorBridge {
           this.pendingCanonicalCases.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.edits);
+        }
+        return;
+      }
+      case "codeActionResult": {
+        const waiter = this.pendingCodeActions.get(message.id);
+        if (waiter) {
+          this.pendingCodeActions.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.actions);
         }
         return;
       }
@@ -1629,6 +1680,28 @@ export function demoTransport(): HostTransport {
             start: message.offset,
             end: message.offset,
           },
+        });
+      }
+      // One fix over the demo's one squiggle, so the lightbulb and its menu are exercisable in a
+      // plain browser. The span is the marker's, which is how the real host answers: the fix
+      // belongs to the finding, not to wherever the caret happened to be.
+      if (message.type === "codeAction") {
+        const shadowed = DEMO_MODULE.indexOf("rowIndex");
+        const answers = message.start <= shadowed + "rowIndex".length && shadowed <= message.end;
+
+        send({
+          type: "codeActionResult",
+          id: message.id,
+          actions: answers
+            ? [{
+              title: "Rename to 'outerRowIndex'",
+              isPreferred: true,
+              code: "XL0101",
+              start: shadowed,
+              end: shadowed + "rowIndex".length,
+              edits: [{ start: shadowed, end: shadowed + "rowIndex".length, text: "outerRowIndex" }],
+            }]
+            : [],
         });
       }
       if (message.type === "signatureHelp") {

@@ -9,7 +9,7 @@
     "check-types": "tsc --noEmit",
     "build": "node build.mjs",
     "package": "node build.mjs --package",
-    "test": "node --test test/"
+    "test": "node test/smoke.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

@@ -78,6 +78,20 @@ public sealed record EngineSmartEnter(
 public sealed record EngineTextEdits(
     [property: JsonPropertyName("edits")] EngineTextEdit[] Edits);
 
+/// <summary>
+/// One quick fix: what to call it, the finding it answers, and the edits that apply it.
+/// </summary>
+public sealed record EngineCodeAction(
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("isPreferred")] bool? IsPreferred,
+    [property: JsonPropertyName("code")] string? Code,
+    [property: JsonPropertyName("span")] EngineSpan Span,
+    [property: JsonPropertyName("edits")] EngineTextEdit[] Edits);
+
+/// <summary>The quick fixes offered over a span.</summary>
+public sealed record EngineCodeActions(
+    [property: JsonPropertyName("actions")] EngineCodeAction[] Actions);
+
 /// <summary>One procedure: the kind as a tree spells it ("Sub", "Property Get") and its 1-based line.</summary>
 public sealed record EngineOutlineProcedure(
     [property: JsonPropertyName("name")] string Name,
@@ -137,6 +151,8 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineTextEdit[]))]
 [JsonSerializable(typeof(EngineSmartEnter))]
 [JsonSerializable(typeof(EngineTextEdits))]
+[JsonSerializable(typeof(EngineCodeAction))]
+[JsonSerializable(typeof(EngineCodeActions))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
 [JsonSerializable(typeof(EngineProjectOpened))]

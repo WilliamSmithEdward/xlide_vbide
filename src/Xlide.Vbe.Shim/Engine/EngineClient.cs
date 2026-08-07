@@ -304,6 +304,38 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineSmartEnter);
     }
 
+    /// <summary>
+    /// Asks for the quick fixes offered over a span of a module's live source. No findings travel
+    /// with the request: the engine resolves fixes from the analysis it holds, which carries fix
+    /// data the surface never saw.
+    /// </summary>
+    public async Task<EngineCodeActions?> CodeActionsAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? source,
+        int start,
+        int end,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["start"] = start,
+            ["end"] = end,
+        };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
+
+        var result = await CallAsync("textDocument/codeAction", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineCodeActions);
+    }
+
     /// <summary>Asks for the case corrections over a span of a module's live source.</summary>
     public async Task<EngineTextEdits?> CanonicalCaseAsync(
         string projectId,

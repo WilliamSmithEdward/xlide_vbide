@@ -269,6 +269,43 @@ export interface LoopSyncResult {
 }
 
 /**
+ * textDocument/codeAction: the quick fixes offered over a span.
+ *
+ * A span rather than an offset, because the surface asks about a selection as readily as a caret,
+ * and an empty selection is a span whose ends meet. No diagnostics travel with the request: the
+ * engine resolves fixes from the analysis it holds, which carries the fix data the surface never
+ * saw. Same liveness rule as completion — the source of the module being typed in travels with
+ * the request, since a fix must edit the text on screen and not the text last written back.
+ */
+export interface CodeActionParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offsets into that source. An empty selection has start === end. */
+    start: number;
+    end: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/** One quick fix: what to call it, the finding it answers, and the edits that apply it. */
+export interface CodeActionPayload {
+    title: string;
+    /** Whether the editor should offer this one first. */
+    isPreferred?: boolean;
+    /** The diagnostic code it answers, so the surface can attach it to the right squiggle. */
+    code?: string;
+    /** The finding's own span, for the same reason. */
+    span: { start: number; end: number };
+    edits: TextEditPayload[];
+}
+
+export interface CodeActionResult {
+    actions: CodeActionPayload[];
+}
+
+/**
  * textDocument/outline: a module's procedures, in declaration order. The source is optional:
  * present for the module being edited (the liveness rule), absent to use the seeded copy, which
  * is how the tree asks about modules that are not open.

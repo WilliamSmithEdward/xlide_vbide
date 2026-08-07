@@ -394,6 +394,24 @@ public sealed record LoopSyncResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
 
+/// <summary>
+/// One quick fix: what to call it, the finding it answers, and the edits that apply it. The code
+/// and span are the finding's, so the surface can attach the fix to the squiggle it belongs to.
+/// </summary>
+public sealed record SurfaceCodeAction(
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("isPreferred")] bool IsPreferred,
+    [property: JsonPropertyName("code")] string? Code,
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End,
+    [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
+
+/// <summary>The answer to one quick-fix request; empty means nothing on that span can be fixed.</summary>
+public sealed record CodeActionResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("actions")] SurfaceCodeAction[] Actions);
+
 /// <summary>One procedure in a module's outline, the kind spelled the way the tree shows it.</summary>
 public sealed record SurfaceOutlineProcedure(
     [property: JsonPropertyName("name")] string Name,
@@ -474,6 +492,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SmartEnterResultMessage))]
 [JsonSerializable(typeof(CanonicalCaseResultMessage))]
 [JsonSerializable(typeof(LoopSyncResultMessage))]
+[JsonSerializable(typeof(SurfaceCodeAction))]
+[JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]

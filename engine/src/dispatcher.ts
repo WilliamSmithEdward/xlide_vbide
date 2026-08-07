@@ -8,7 +8,9 @@
 
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
+import type { VbaModuleAnalysisDiagnostic } from '../../../xlide_vscode/src/vbaModuleAnalysis';
 import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
+import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
@@ -19,6 +21,8 @@ import {
     ErrorCode,
     type CanonicalCaseParams,
     type CanonicalCaseResult,
+    type CodeActionParams,
+    type CodeActionResult,
     type CompletionParams,
     type CompletionResult,
     type DiagnosticsParams,
@@ -44,6 +48,9 @@ import {
 function liveKey(projectId: string, moduleName: string): string {
     return `${projectId}\0${moduleName.toLowerCase()}`;
 }
+
+/** The analyse request, narrowed: the only worker request this engine keeps hold of. */
+type AnalyzeRequest = Extract<AnalysisWorkerRequest, { kind: 'analyze' }>;
 
 /** Thrown to answer a request with a JSON-RPC error rather than a result. */
 export class RpcError extends Error {
@@ -84,6 +91,21 @@ export class Dispatcher {
      * string, so parsing 26,000 lines again to repeat the same procedures is pure waste.
      */
     private readonly outlineMemo = new Map<string, { source: string; result: OutlineResult }>();
+
+    /**
+     * The last analysis of each module, kept whole: the findings as the analyzer made them, and
+     * the text they describe. Quick fixes are resolved from these rather than from anything the
+     * surface sends back, because a finding carries fix data — the missing argument's name, the
+     * unclosed block's expected closer — that never crosses to the surface at all.
+     *
+     * The request is kept too, so a fix asked for against text the diagnostics have not caught up
+     * with can be answered by analysing that text under the same options the squiggles used.
+     */
+    private readonly lastAnalysis = new Map<string, {
+        source: string;
+        diagnostics: readonly VbaModuleAnalysisDiagnostic[];
+        request: AnalyzeRequest;
+    }>();
 
     private nextRequestId = 1;
     private initialized = false;
@@ -131,6 +153,9 @@ export class Dispatcher {
 
             case 'textDocument/loopSync':
                 return this.loopSync(this.require<LoopSyncParams>(params));
+
+            case 'textDocument/codeAction':
+                return this.codeAction(this.require<CodeActionParams>(params));
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
@@ -205,6 +230,14 @@ export class Dispatcher {
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
         this.seededModules.delete(params.projectId);
+
+        const prefix = `${params.projectId}\0`;
+        for (const key of this.lastAnalysis.keys()) {
+            if (key.startsWith(prefix)) {
+                this.lastAnalysis.delete(key);
+            }
+        }
+
         return null;
     }
 
@@ -274,6 +307,71 @@ export class Dispatcher {
         }
 
         return { edits: loopSyncFor({ ...params, source }) };
+    }
+
+    private codeAction(params: CodeActionParams): CodeActionResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { actions: [] };
+        }
+
+        const analysed = this.analysisFor(params, source);
+        if (!analysed) {
+            return { actions: [] };
+        }
+
+        return {
+            actions: codeActionsFor(source, analysed, { start: params.start, end: params.end }),
+        };
+    }
+
+    /**
+     * The findings for a module's current text: the ones diagnostics last reported when they
+     * describe this exact text, a fresh pass when they do not.
+     *
+     * The fresh pass is what keeps a fix honest between a keystroke and the diagnostics that
+     * follow it. Fixes are spans into the text they will edit, so answering from findings made
+     * against older text would place the edit by arithmetic that no longer holds. Null when the
+     * module has never been analysed, or when the engine's sources are stale enough that
+     * analysing would report on text the developer is not looking at.
+     */
+    private analysisFor(
+        params: CodeActionParams,
+        source: string,
+    ): readonly VbaModuleAnalysisDiagnostic[] | null {
+        const key = liveKey(params.projectId, params.moduleName);
+        const memo = this.lastAnalysis.get(key);
+        if (memo?.source === source) {
+            return memo.diagnostics;
+        }
+
+        const request: AnalyzeRequest = {
+            kind: 'analyze',
+            requestId: this.nextRequestId++,
+            docKey: memo?.request.docKey ?? key,
+            workbookKey: params.projectId,
+            generation: this.generations.get(params.projectId),
+            source,
+            moduleName: params.moduleName,
+            moduleType: params.moduleType ?? memo?.request.moduleType,
+            moduleKind: moduleKindFromType(params.moduleType ?? memo?.request.moduleType),
+            documentType: params.documentType ?? memo?.request.documentType,
+            // Inherited rather than sent: a fix must be offered under the same rules that drew
+            // the squiggle, and the last analysis of this module is what drew it.
+            severityOverrides: memo?.request.severityOverrides,
+        };
+
+        const response = this.analysis.handle(request);
+        if (response?.kind !== 'result') {
+            // No seed, or the analyzer threw. A quick fix that fails is a lightbulb that does not
+            // open, which is what the developer already sees when there is nothing to fix.
+            return null;
+        }
+
+        this.lastAnalysis.set(key, { source, diagnostics: response.diagnostics, request });
+        return response.diagnostics;
     }
 
     private outline(params: OutlineParams): OutlineResult {
@@ -355,7 +453,7 @@ export class Dispatcher {
             return { diagnostics: [] };
         }
 
-        const request: AnalysisWorkerRequest = {
+        const request: AnalyzeRequest = {
             kind: 'analyze',
             requestId: this.nextRequestId++,
             docKey: params.documentKey,
@@ -390,6 +488,15 @@ export class Dispatcher {
 
         if (response.kind === 'error') {
             throw new RpcError(ErrorCode.InternalError, response.message);
+        }
+
+        // Kept whole for quick fixes, which need the parts of a finding that do not travel below.
+        if (params.projectId !== undefined) {
+            this.lastAnalysis.set(liveKey(params.projectId, params.moduleName), {
+                source,
+                diagnostics: response.diagnostics,
+                request,
+            });
         }
 
         return {
