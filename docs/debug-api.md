@@ -71,6 +71,9 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `console` | GET | `last` | what the page said to itself: a ring of console lines, installed at page ready |
 | `reload` | POST | `waitMs` | reloads the page and waits for it to come back, answering with the bundle stamp it is now running and whether that is behind the one on disk |
 | `dismiss` | POST | `button`, `caption` | clicks a dialog button by name. Explicit, so it will press OK if asked |
+| `guard` | POST | `on=true\|false`, `forget` | turns the dialog guard on or off and answers what it has cleared. While ON, a NOTICE this door did not raise is cleared too — see below. Off by default |
+| `compile` | POST | `waitMs` | compiles the project and answers its errors as DATA, clearing the modal it raises. `compiled` is false when anything appeared |
+| `documents` | GET | | the documents the surface holds TEXT for, with line counts, unwritten flags, and which is active. Not the same list as the tabs |
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |
@@ -225,18 +228,44 @@ project has had both ended that way: an Add Watch dialog whose filler mis-parsed
 arguments, and a Macros dialog raised by a Run with the caret on line one. Both times the
 editor simply stopped, and nothing could say why.
 
-Three things now stand between a modal and a wedged session.
+Four things now stand between a modal and a wedged session.
 
 **It can be seen.** `dialogs` enumerates windows, which needs no host thread, so it answers
-while every other route would time out. It returns each dialog's caption and buttons, plus
-`heartbeatAgeMs` - how long since the host thread last completed a poll tick. A large
-heartbeat age with a dialog standing is a stuck editor, stated as two numbers.
+while every other route would time out. It returns each dialog's caption, **the text it
+says**, and its buttons. The text matters: every VBA compile error wears the caption
+"Microsoft Visual Basic for Applications", so a harness reading captions alone learns that
+something is wrong and never what.
 
-**It is cleared automatically, if the door raised it.** Every request that touches the
-session first sweeps dialogs this door is answerable for, pressing one SAFE button: Cancel,
-then Close, then No. Never OK, Yes, Save, Delete, or Run - a dialog nobody read must not be
-agreed with, and every safe button means "as you were". A request that means to open a
-dialog passes `keep=1` and what it opens is exempt.
+`doctor` names a standing dialog as a finding, because a session with one is not healthy
+however well every other route answers.
+
+**Do not use `heartbeatAgeMs` to detect one.** A VBA modal PUMPS messages, so the host thread
+keeps completing poll ticks the whole time it is blocked: measured 2026-08-07, a compile error
+stood for fourteen seconds with the heartbeat never above 140ms. What is standing is the only
+evidence that something is standing.
+
+**It is cleared automatically, if the door raised it.** Every request sweeps dialogs this door
+is answerable for — including the routes that need no host thread, which is where the sweep
+belongs, because `dialogs`, `dismiss` and `guard` are exactly what a caller reaches for while
+something is stuck. It presses one SAFE button, and what counts as safe depends on what is
+being asked:
+
+- A **notice** — every button an acknowledgement (OK, Help, Close, Continue) — is answered with
+  OK. It is reporting, not asking, so pressing it decides nothing. This case used to be
+  missed: the policy was Cancel/Close/No only, so a compile error offering OK and Help matched
+  nothing and stood with the host thread behind it.
+- A **question** is only ever declined: Cancel, then No, then Close. Never OK, Yes, Save,
+  Delete, or Run — a dialog nobody read must not be agreed with.
+
+A request that means to open a dialog passes `keep=1` and what it opens is exempt.
+
+**A harness can ask for more: `guard`.** While the guard is on, a NOTICE the door did NOT raise
+is cleared too, and recorded in `cleared` so nothing is swallowed silently. This is off by
+default and is never turned on by itself, because the attribution rule below is right for a
+person at a keyboard and wrong for an unattended run: a compile error raised by an experiment
+stood for six minutes with everything behind it (2026-08-07), and no route could say so.
+
+A question is still never answered, guard or no guard.
 
 **A dialog you opened is never touched.** Attribution is the whole safety property, and it
 took three attempts. A snapshot taken as a request ends catches nothing, because the dialog

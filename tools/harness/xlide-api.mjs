@@ -174,6 +174,42 @@ function clientFor(entry) {
     /** Native dialogs standing right now. Answers even while the host thread is blocked. */
     dialogs: () => call("dialogs"),
 
+    /**
+     * The dialog guard: while on, a NOTICE this door did not raise is cleared as soon as any
+     * request notices it, instead of owning the host thread until somebody looks at the screen.
+     *
+     * Off by default and never turned on by itself, because a dialog a DEVELOPER opened is
+     * theirs. A harness run should turn it on: a compile error raised by an experiment stood for
+     * six minutes with everything behind it, and nothing in the session could say so, because a
+     * VBA modal pumps messages and every other route answers normally while it stands
+     * (2026-08-07).
+     *
+     * `cleared` is the half that matters. A guard that silently swallows an error turns a hang
+     * into a mystery, which is the worse trade.
+     */
+    guard: (on, { forget } = {}) =>
+      call(`guard${query({ on: on === undefined ? undefined : String(!!on), forget: forget ? 1 : undefined })}`,
+        { method: "POST" }),
+
+    /**
+     * Does the project compile, and if not, what does it say?
+     *
+     * The menu command alone cannot answer: a compile error is a modal, so running it and waiting
+     * hangs the thread that raised it. This starts the compile, reads whatever dialog it raises
+     * from the outside, and clears it.
+     */
+    compile: ({ waitMs = 6000 } = {}) =>
+      call(`compile${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
+
+    /**
+     * The documents the surface HOLDS text for — which is not the list of tabs.
+     *
+     * Text arrives when a module is activated; a tab exists because its pane does. A workspace
+     * opened onto eight modules holds one, and two defects came from nothing ever showing the
+     * difference (2026-08-07).
+     */
+    documents: () => call("documents"),
+
     /** The start-of-session sanity check: right build, everything attached, nothing standing. */
     doctor: () => call("doctor"),
 
@@ -207,9 +243,23 @@ function clientFor(entry) {
     /** Answers a dialog by button caption. Names the button exactly; "Cancel" is usual. */
     dismiss: (button, caption) => call(`dismiss${query({ button, caption })}`, { method: "POST" }),
 
-    /** Runs script in the live page and returns its result as JSON text. */
+    /**
+     * Runs script in the live page.
+     *
+     * Prefer `.value` over `.result`. The browser returns a result as JSON, so a script returning
+     * a string comes back quoted, and one that builds its answer with JSON.stringify comes back
+     * quoted TWICE — and a single parse leaves a string that reads as an object right up until
+     * every property of it is undefined, which is a probe reporting false for something that
+     * worked (2026-08-07, twice). `value` is already unwrapped.
+     */
     eval: (script, surface) =>
       call(`eval${query({ surface })}`, { method: "POST", body: script, timeout: 15000 }),
+
+    /** A page script's answer, already unwrapped. What `eval` is almost always wanted for. */
+    async ask(script, surface) {
+      const answer = await this.eval(script, surface);
+      return answer?.value ?? null;
+    },
 
     /**
      * Waits for the editor to be answering again, which is the honest precondition for any

@@ -927,6 +927,21 @@ internal sealed class EditorSurface : IDisposable
     public bool HasUnwritten(string moduleName, string? project) =>
         _docs.TryGetValue(DocKey(moduleName, project), out var doc) && doc.Unwritten;
 
+    /// <summary>
+    /// Every document this surface holds text for, with enough to tell them apart.
+    ///
+    /// Which modules have TEXT and which merely have tabs are different lists — text arrives when
+    /// a module is activated, a tab exists because its pane does — and two defects came from
+    /// nothing ever showing the difference (2026-08-07).
+    /// </summary>
+    public IReadOnlyList<(string Module, string? Project, int Lines, bool Unwritten, bool Active)> DocumentTable =>
+        [.. _docs.Select(entry => (
+            entry.Value.Module,
+            entry.Value.Project,
+            entry.Value.Text.Length == 0 ? 0 : entry.Value.Text.Split('\n').Length,
+            entry.Value.Unwritten,
+            entry.Key == _activeKey))];
+
     /// <summary>Every open document, as (module, workbook display name) pairs.</summary>
     public IReadOnlyList<(string Module, string? Project)> OpenDocuments =>
         [.. _docs.Values.Select(doc => (doc.Module, doc.Project))];

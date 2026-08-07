@@ -560,6 +560,19 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private DebugServer.DebugReply AnswerDebugRequest(DebugServer.DebugRequest request)
     {
+        // Sweep FIRST, before the routes that answer without the host thread.
+        //
+        // The sweep used to sit below them, which read as "every request heals first" and was
+        // not: dialogs, dismiss and guard all return before reaching it, and those are exactly
+        // the routes a caller uses while something is standing. Armed and watching, the guard
+        // therefore never ran once — fourteen seconds of polling with a modal on screen and an
+        // empty cleared list (2026-08-07).
+        //
+        // The heartbeat is no help here and this is why it cannot be the trigger: a VBA modal
+        // PUMPS messages, so the host thread kept answering in under 140ms the whole time it was
+        // blocked. What is standing is the only evidence that something is standing.
+        ClearDialogsWeRaised();
+
         switch (request.Route)
         {
             case "log":
@@ -863,7 +876,7 @@ internal sealed class AddInSession : IDisposable
                         State: sessionState ?? "(the host thread did not answer)",
                         HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
                         Dialogs: DialogWatch.Dialogs()
-                            .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Buttons, row.Enabled))
+                            .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Text, row.Buttons, row.Enabled))
                             .ToArray(),
                         PlacementMs: placementSamples,
                         MarshalMs: marshalSamples,
@@ -894,7 +907,7 @@ internal sealed class AddInSession : IDisposable
                 return run.Error is { } evalError
                     ? DebugError(evalError)
                     : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                        new DebugEvalReply(run.Answered, run.ErrorCode, run.Result),
+                        new DebugEvalReply(run.Answered, run.ErrorCode, run.Result, Unwrap(run.Result)),
                         DebugJsonContext.Default.DebugEvalReply));
             }
 
@@ -1305,11 +1318,85 @@ internal sealed class AddInSession : IDisposable
                 // No host thread anywhere in this route, deliberately: it answers while the
                 // editor is blocked, which is the only time it matters.
                 var rows = DialogWatch.Dialogs()
-                    .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Buttons, row.Enabled))
+                    .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Text, row.Buttons, row.Enabled))
                     .ToArray();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugDialogsReply(rows, PerfCounters.HeartbeatAgeMs),
                     DebugJsonContext.Default.DebugDialogsReply));
+            }
+
+            case "compile":
+            {
+                // Does this project compile, and if not, what does it say?
+                //
+                // Not just the menu command. A compile error is a MODAL, so running it and
+                // waiting on the host thread hangs the thread that raised it — which is how a
+                // probe left one standing for six minutes, and why the answer nobody could read
+                // was on screen the whole time (2026-08-07). The command is started and not
+                // waited for; the answering happens here, on the door's own thread, which is the
+                // only one still moving while a modal owns the editor.
+                if (_editorSurface is not { } compileSurface)
+                {
+                    return DebugError("the surface is not up yet");
+                }
+
+                var standing = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
+                var command = VbeCommands.ForName("compile");
+                compileSurface.RunOnHostThread(() => ExecuteEditorCommand(command));
+
+                var said = new List<string>();
+                var settle = Environment.TickCount64 + WaitMilliseconds(request, 6000);
+
+                while (Environment.TickCount64 < settle)
+                {
+                    Thread.Sleep(150);
+
+                    foreach (var raised in DialogWatch.Dialogs())
+                    {
+                        if (standing.Contains(raised.Window))
+                        {
+                            continue;
+                        }
+
+                        said.Add(raised.Text.Length > 0 ? raised.Text : raised.Caption);
+                        standing.Add(raised.Window);
+
+                        // Read, then cleared. A compile error left on screen is the hang this
+                        // route exists to stop happening.
+                        var compileAnswer = DialogWatch.SafeAnswerFor(raised) ?? "OK";
+                        DialogWatch.Dismiss(raised.Caption, compileAnswer);
+                        Log.Info($"compile: \"{raised.Text}\" answered with {compileAnswer}");
+                    }
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCompileReply(said.Count == 0, [.. said], DisplayFromProjectId(_shownProject) ?? string.Empty),
+                    DebugJsonContext.Default.DebugCompileReply));
+            }
+
+            case "guard":
+            {
+                // No host thread here either: turning the guard on is exactly what a caller does
+                // when the host thread has already stopped answering.
+                if (request.Query.TryGetValue("on", out var wanted))
+                {
+                    _guardEverything = wanted is "1" or "true" or "yes" or "on";
+                    Log.Info($"debug api: the dialog guard is {(_guardEverything ? "on" : "off")}");
+                }
+
+                string[] cleared;
+                lock (_dialogGate)
+                {
+                    cleared = [.. _guardCleared];
+                    if (request.Query.ContainsKey("forget"))
+                    {
+                        _guardCleared.Clear();
+                    }
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugGuardReply(_guardEverything, cleared, DialogWatch.Dialogs().Length),
+                    DebugJsonContext.Default.DebugGuardReply));
             }
 
             case "dismiss" when request.Query.TryGetValue("button", out var button) && button.Length > 0:
@@ -1370,13 +1457,12 @@ internal sealed class AddInSession : IDisposable
             return DebugError("the surface is not up yet");
         }
 
-        // Heal before working. A modal this door raised earlier may still be standing, and
-        // waiting for a timeout to notice is the wrong instrument for two reasons: a VBA
-        // modal PUMPS messages, so marshaled work still runs and no timeout ever comes
-        // (measured 2026-08-06 - state answered normally while the Macros dialog owned the
-        // editor), and the developer is looking at a stuck editor the whole time. So every
-        // request first clears what this door left behind, and only what it left behind.
-        ClearDialogsWeRaised();
+        // The sweep already ran, at the top of this method, so every route heals — including the
+        // ones that answer without the host thread and used to return before reaching it. A modal
+        // this door raised earlier may still be standing, and waiting for a timeout to notice is
+        // the wrong instrument: a VBA modal PUMPS messages, so marshaled work still runs and no
+        // timeout ever comes (measured 2026-08-06 — state answered normally while the Macros
+        // dialog owned the editor), while the developer is looking at a stuck editor throughout.
 
         // What was already standing before this request. Anything that appears while it is
         // in flight was raised BY it, and only those may be answered automatically: a dialog
@@ -1467,7 +1553,7 @@ internal sealed class AddInSession : IDisposable
         string[] ours;
         lock (_dialogGate)
         {
-            if (_dialogsWeRaised.Count == 0)
+            if (_dialogsWeRaised.Count == 0 && !_guardEverything)
             {
                 return;
             }
@@ -1477,20 +1563,35 @@ internal sealed class AddInSession : IDisposable
 
         foreach (var dialog in DialogWatch.Dialogs())
         {
-            if (!ours.Contains(dialog.Window) || _dialogsToKeep.Contains(dialog.Window))
+            if (_dialogsToKeep.Contains(dialog.Window))
             {
                 continue;
             }
 
-            string[] safeButtons = ["Cancel", "Close", "No"];
-            var pressed = safeButtons.FirstOrDefault(button =>
-                dialog.Buttons.Any(have => have.Equals(button, StringComparison.OrdinalIgnoreCase))
-                && DialogWatch.Dismiss(dialog.Caption, button));
+            var mine = ours.Contains(dialog.Window);
+
+            // A dialog this door did not raise is cleared only while a caller has asked for the
+            // guard, and only when it is a NOTICE. Declining a question nobody asked this door to
+            // raise would be answering for the developer; clearing a notice only takes an already
+            // finished announcement off the screen — and off the host thread it is holding.
+            if (!mine && !(_guardEverything && DialogWatch.IsNotice(dialog)))
+            {
+                continue;
+            }
+
+            var answer = DialogWatch.SafeAnswerFor(dialog);
+            var pressed = answer is not null && DialogWatch.Dismiss(dialog.Caption, answer) ? answer : null;
 
             Log.Info(pressed is null
                 ? $"debug api: \"{dialog.Caption}\" has the editor and offers no safe button; leaving it"
-                : $"debug api: cleared \"{dialog.Caption}\" with {pressed}, "
+                : $"debug api: cleared {(mine ? "our" : "a standing")} dialog \"{dialog.Caption}\""
+                    + $"{(dialog.Text.Length > 0 ? $" ({dialog.Text})" : string.Empty)} with {pressed}, "
                     + $"host thread quiet for {PerfCounters.HeartbeatAgeMs}ms");
+
+            if (pressed is not null && !mine)
+            {
+                _guardCleared.Add($"{dialog.Caption}: {dialog.Text}".Trim().TrimEnd(':'));
+            }
 
             lock (_dialogGate)
             {
@@ -1513,6 +1614,20 @@ internal sealed class AddInSession : IDisposable
     /// the request existed to open.
     /// </summary>
     private readonly HashSet<string> _dialogsToKeep = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether to clear a NOTICE this door did not raise. Off unless a caller asks.
+    ///
+    /// The rule that a dialog the developer opened is theirs is right for a person at the
+    /// keyboard and wrong for a harness: a compile error raised by an experiment stood for six
+    /// minutes with the host thread behind it, and nothing in the session could say so because
+    /// every other route answers normally while a modal pumps messages (2026-08-07). A harness
+    /// turns this on for its run; nothing turns it on by itself.
+    /// </summary>
+    private volatile bool _guardEverything;
+
+    /// <summary>What the guard has taken off the screen, so a run can report what it swallowed.</summary>
+    private readonly List<string> _guardCleared = [];
 
 
     /// <summary>
@@ -1690,6 +1805,47 @@ internal sealed class AddInSession : IDisposable
         return (lines, file.Length);
     }
 
+    /// <summary>
+    /// A page script's answer, unwrapped as far as it is wrapped.
+    ///
+    /// The browser returns a result as JSON, so a script returning a string returns a QUOTED
+    /// string; a script that builds its answer with JSON.stringify — which every useful one does,
+    /// because that is how a structure crosses — returns it quoted twice. Unwrapping stops at the
+    /// first thing that is not itself a JSON document, so a plain string stays a plain string.
+    /// </summary>
+    private static System.Text.Json.Nodes.JsonNode? Unwrap(string result)
+    {
+        System.Text.Json.Nodes.JsonNode? node;
+        try
+        {
+            node = System.Text.Json.Nodes.JsonNode.Parse(result);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+
+        for (var depth = 0; depth < 4; depth++)
+        {
+            if (node is not System.Text.Json.Nodes.JsonValue value
+                || !value.TryGetValue<string>(out var inner))
+            {
+                break;
+            }
+
+            try
+            {
+                node = System.Text.Json.Nodes.JsonNode.Parse(inner);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                break;
+            }
+        }
+
+        return node;
+    }
+
     private static DebugServer.DebugReply AnswerBlockedRequest(
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
@@ -1714,10 +1870,8 @@ internal sealed class AddInSession : IDisposable
                 DebugJsonContext.Default.DebugBlockedReply));
         }
 
-        string[] safeButtons = ["Cancel", "Close", "No"];
-        var pressed = safeButtons.FirstOrDefault(button =>
-            blocking.Buttons.Any(have => have.Equals(button, StringComparison.OrdinalIgnoreCase))
-            && DialogWatch.Dismiss(blocking.Caption, button));
+        var safe = DialogWatch.SafeAnswerFor(blocking);
+        var pressed = safe is not null && DialogWatch.Dismiss(blocking.Caption, safe) ? safe : null;
 
         Log.Info(pressed is null
             ? $"debug api: \"{blocking.Caption}\" is blocking the host thread and has no safe button"
@@ -1816,6 +1970,17 @@ internal sealed class AddInSession : IDisposable
                     findings.Add("the page never reported a build stamp; it may not have finished booting");
                 }
 
+                // A standing dialog owns the host thread, and every OTHER route answers normally
+                // while it does — so a session can look healthy for minutes while nothing it is
+                // asked to do can run. It was found by a person looking at the screen, which is
+                // the one instrument a harness does not have (2026-08-07).
+                foreach (var standing in DialogWatch.Dialogs())
+                {
+                    var says = standing.Text.Length > 0 ? $": {standing.Text}" : string.Empty;
+                    findings.Add($"a dialog is standing and owns the host thread{says} "
+                        + $"(buttons: {string.Join(", ", standing.Buttons)})");
+                }
+
                 if (_analysis is null)
                 {
                     findings.Add("the analysis engine is not up, so diagnostics will stay empty");
@@ -1877,6 +2042,20 @@ internal sealed class AddInSession : IDisposable
 
                 return System.Text.Json.JsonSerializer.Serialize(
                     new DebugWindowsReply([.. rows]), DebugJsonContext.Default.DebugWindowsReply);
+            }
+
+            case "documents":
+            {
+                // What the surface actually HOLDS, as opposed to what the strip draws. A module
+                // with a tab and no text is the state most of a workspace is in, and it is what
+                // an empty peek window and a blank pane both turned out to be.
+                var rows = _editorSurface?.DocumentTable
+                    .Select(row => new DebugDocumentRow(row.Module, row.Project, row.Lines, row.Unwritten, row.Active))
+                    .ToArray() ?? [];
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugDocumentsReply(rows, _editorSurface?.Module),
+                    DebugJsonContext.Default.DebugDocumentsReply);
             }
 
             case "command" when request.Query.TryGetValue("name", out var name) && name.Length > 0:

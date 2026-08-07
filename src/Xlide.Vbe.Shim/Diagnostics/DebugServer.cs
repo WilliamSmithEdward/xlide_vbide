@@ -634,16 +634,59 @@ public sealed record DebugBlockedReply(
     [property: JsonPropertyName("dismissed")] string? Dismissed,
     [property: JsonPropertyName("retried")] bool Retried);
 
-/// <summary>One native dialog standing in the process.</summary>
+/// <summary>
+/// One native dialog standing in the process.
+///
+/// Text, not just Caption: every VBA compile error wears the caption "Microsoft Visual Basic for
+/// Applications", so the caption alone cannot tell one from another and a harness reading only
+/// captions learns that something is wrong but never what.
+/// </summary>
 public sealed record DebugDialogRow(
     [property: JsonPropertyName("window")] string Window,
     [property: JsonPropertyName("caption")] string Caption,
+    [property: JsonPropertyName("text")] string Text,
     [property: JsonPropertyName("buttons")] string[] Buttons,
     [property: JsonPropertyName("enabled")] bool Enabled);
 
 public sealed record DebugDialogsReply(
     [property: JsonPropertyName("dialogs")] DebugDialogRow[] Dialogs,
     [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
+
+/// <summary>
+/// The dialog guard: whether it is on, and what it has taken off the screen.
+///
+/// Cleared is the important half. A guard that silently swallows a compile error turns a hang
+/// into a mystery, which is a worse trade than the hang.
+/// </summary>
+public sealed record DebugGuardReply(
+    [property: JsonPropertyName("on")] bool On,
+    [property: JsonPropertyName("cleared")] string[] Cleared,
+    [property: JsonPropertyName("standing")] int Standing);
+
+/// <summary>
+/// What a compile said, as data rather than as a modal nobody can read from a script. Errors
+/// is empty when the project compiles, which is the only summary worth trusting.
+/// </summary>
+public sealed record DebugCompileReply(
+    [property: JsonPropertyName("compiled")] bool Compiled,
+    [property: JsonPropertyName("errors")] string[] Errors,
+    [property: JsonPropertyName("project")] string Project);
+
+/// <summary>One document the HOST is holding text for, and whether the page was given it.</summary>
+public sealed record DebugDocumentRow(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("lines")] int Lines,
+    [property: JsonPropertyName("unwritten")] bool Unwritten,
+    [property: JsonPropertyName("active")] bool Active);
+
+/// <summary>
+/// The documents the surface holds. Which modules have TEXT and which merely have tabs are
+/// different lists, and two defects came from nothing ever showing the difference.
+/// </summary>
+public sealed record DebugDocumentsReply(
+    [property: JsonPropertyName("documents")] DebugDocumentRow[] Documents,
+    [property: JsonPropertyName("shownModule")] string? ShownModule);
 
 /// <summary>
 /// The start-of-session questions, answered together: is this session running the code that
@@ -695,11 +738,21 @@ public sealed record DebugPerfReply(
     [property: JsonPropertyName("marshalMs")] long[] MarshalMs,
     [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
 
-/// <summary>What a script run in the page answered with; result is JSON as the browser encodes it.</summary>
+/// <summary>
+/// What a script run in the page answered with.
+///
+/// Two fields for one answer, because the encoding bit twice. `result` is the browser's own JSON
+/// of the value, so a script returning a STRING comes back quoted — and a script returning a
+/// JSON string comes back quoted twice. One parse then leaves a string that reads as an object
+/// right up until every property of it is undefined, which is a probe reporting false for
+/// something that worked (2026-08-07). `value` is that unwrapped as far as it goes, so a caller
+/// that wants the answer can read the answer.
+/// </summary>
 public sealed record DebugEvalReply(
     [property: JsonPropertyName("answered")] bool Answered,
     [property: JsonPropertyName("errorCode")] int ErrorCode,
-    [property: JsonPropertyName("result")] string Result);
+    [property: JsonPropertyName("result")] string Result,
+    [property: JsonPropertyName("value")] System.Text.Json.Nodes.JsonNode? Value);
 
 /// <summary>
 /// A condition waited for in the page: whether it came true, and how long it took. Elapsed
@@ -829,6 +882,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugBlockedReply))]
 [JsonSerializable(typeof(DebugDialogRow))]
 [JsonSerializable(typeof(DebugDialogsReply))]
+[JsonSerializable(typeof(DebugGuardReply))]
+[JsonSerializable(typeof(DebugCompileReply))]
+[JsonSerializable(typeof(DebugDocumentsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]
 [JsonSerializable(typeof(DebugAwaitReply))]
 [JsonSerializable(typeof(DebugReloadReply))]

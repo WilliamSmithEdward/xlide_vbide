@@ -29,8 +29,25 @@ internal static unsafe class DialogWatch
     /// block the api's own thread inside the nested loop it starts.</summary>
     private const uint BmClick = 0x00F5;
 
-    /// <summary>One dialog: what it is, and which buttons would answer it.</summary>
-    public sealed record DialogRow(string Window, string Caption, string[] Buttons, bool Enabled);
+    /// <summary>One dialog: what it is, what it says, and which buttons would answer it.</summary>
+    public sealed record DialogRow(
+        string Window,
+        string Caption,
+        string Text,
+        string[] Buttons,
+        bool Enabled);
+
+    /// <summary>
+    /// Buttons that only acknowledge. A dialog offering nothing else is a NOTICE, not a question:
+    /// it has already happened, and pressing OK changes nothing but the fact that it is on screen.
+    /// </summary>
+    private static readonly string[] Acknowledgements = ["OK", "Help", "Close", "Continue"];
+
+    /// <summary>
+    /// Buttons that decline. Preferred on a real question, because declining is the answer that
+    /// cannot destroy anything.
+    /// </summary>
+    private static readonly string[] Declines = ["Cancel", "No", "Close"];
 
     /// <summary>Every visible dialog this process owns.</summary>
     public static DialogRow[] Dialogs()
@@ -39,24 +56,72 @@ internal static unsafe class DialogWatch
         foreach (var dialog in TopLevelDialogs())
         {
             var buttons = new List<string>();
+            var said = new List<string>();
+
             foreach (var child in ChildrenOf(dialog))
             {
-                if (ReadClass(child).Equals("Button", StringComparison.OrdinalIgnoreCase)
+                var kind = ReadClass(child);
+
+                if (kind.Equals("Button", StringComparison.OrdinalIgnoreCase)
                     && Plain(ReadText(child)) is { Length: > 0 } caption
                     && buttons.Count < 16)
                 {
                     buttons.Add(caption);
+                    continue;
+                }
+
+                // What the dialog SAYS, not just what it is called. Every VBA compile error wears
+                // the same caption — "Microsoft Visual Basic for Applications" — so the caption
+                // alone cannot tell "Ambiguous name detected: Recalculate" from anything else,
+                // and a harness that only reads captions learns nothing about what went wrong
+                // (2026-08-07).
+                if (kind.Equals("Static", StringComparison.OrdinalIgnoreCase)
+                    && ReadText(child) is { Length: > 0 } line
+                    && said.Count < 8)
+                {
+                    said.Add(line.Trim());
                 }
             }
 
             rows.Add(new DialogRow(
                 $"0x{dialog:X}",
                 ReadText(dialog),
+                string.Join(" ", said).Trim(),
                 [.. buttons],
                 Win32.IsWindowEnabled(dialog)));
         }
 
         return [.. rows];
+    }
+
+    /// <summary>
+    /// Whether this dialog only reports. Every button an acknowledgement means nothing is being
+    /// asked: the thing has already happened, and the dialog is the record of it.
+    /// </summary>
+    public static bool IsNotice(DialogRow dialog) =>
+        dialog.Buttons.Length > 0
+        && dialog.Buttons.All(button => Acknowledgements.Contains(button, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The button that answers a dialog without deciding anything, or null when every button it
+    /// offers commits to something.
+    ///
+    /// A NOTICE — every button an acknowledgement — is always safe: it is reporting, not asking.
+    /// That is the case the old policy missed. It would press only Cancel, Close or No, so a
+    /// compile error offering OK and Help matched nothing and stood for six minutes with the host
+    /// thread behind it (2026-08-07). A real question is still only ever declined.
+    /// </summary>
+    public static string? SafeAnswerFor(DialogRow dialog)
+    {
+        if (IsNotice(dialog))
+        {
+            return dialog.Buttons.FirstOrDefault(button =>
+                button.Equals("OK", StringComparison.OrdinalIgnoreCase))
+                ?? dialog.Buttons[0];
+        }
+
+        return Declines.FirstOrDefault(button =>
+            dialog.Buttons.Contains(button, StringComparer.OrdinalIgnoreCase));
     }
 
     /// <summary>
