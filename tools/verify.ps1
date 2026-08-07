@@ -155,6 +155,17 @@ Step 'page probes (headless)' {
     'close-confirm, object browser'
 }
 
+# A route table is complete on the day it is written and quietly is not, six routes later. This
+# reads the routes out of the shim itself, so the documents and the client cannot fall behind the
+# door without the gate saying so (2026-08-07: the reference had all of them, the driving guide
+# had twenty, and one route had no client method at all).
+Step 'debug api is documented' {
+    $answer = node (Join-Path $repoRoot 'tools\harness\audit-routes.mjs') 2>&1
+    $answer | Where-Object { $_ -notmatch '^ok ' } | ForEach-Object { Write-Host "  $_" }
+    if ($LASTEXITCODE -ne 0) { throw 'a debug api route is undocumented or unreachable' }
+    ($answer | Select-Object -Last 1) -replace '^ok\s+', ''
+}
+
 # Named, not left to whichever directory the gate was started from. Both of these used to be
 # bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory — so
 # the gate passed from the repo root and failed with MSB1003 from anywhere else (2026-08-07). A

@@ -6,9 +6,21 @@ is there, where the api stops, and what still has to go through COM or the harne
 Written 2026-08-07 and **kept current**: anything added to the door, the client, or the harness
 belongs here the same day. A door nobody can find the handle for is a door nobody opens.
 
-Related: [debug-api.md](debug-api.md) is the route reference and the reasoning behind each one;
-this is the operational guide. [working-with-modals.md](working-with-modals.md) is the rules for
-opening a modal at all. [testing.md](testing.md) is the gate.
+> ## 📖 The API reference is [**debug-api.md**](debug-api.md)
+>
+> **That document is the authority on the api itself**: every route with its arguments and what it
+> answers, the reasoning behind each one, and the failures each was built after. Read it when you
+> need to know what a route DOES.
+>
+> **This document is the operational guide**: how to get a host into a state that can be driven at
+> all, which loop to use for which change, where the api stops, and what still needs COM or CDP.
+> Read it when you need to know how to GET somewhere.
+>
+> The two are kept in step by the gate — `tools\harness\audit-routes.mjs` reads the routes out of
+> the shim and fails when one is missing from either document or has no client method.
+
+Also: [working-with-modals.md](working-with-modals.md) is the rules for opening a modal at all,
+and [testing.md](testing.md) is the gate.
 
 ---
 
@@ -108,7 +120,52 @@ reporting the build stamp each is now running. `-NoBuild` copies what the gate j
 
 ## 3. What the api can do
 
-Full route reference: [debug-api.md](debug-api.md). Grouped here by what you would drive it FOR.
+### Every route, and how to call it
+
+The reasoning behind each route is in [debug-api.md](debug-api.md); this is the mapping from route
+to client method. **`tools\harness\audit-routes.mjs` proves this table complete** — it reads the
+route cases out of the shim and fails when one is missing here, missing from the reference, or has
+no client method. It runs in the gate, because a route table is exactly the kind of thing that is
+complete on the day it is written and quietly is not, six routes later.
+
+| Route | Client | |
+| --- | --- | --- |
+| `assert` | `assert(that, {value, timeoutMs})` | states a claim and waits for it |
+| `await` | `until(predicate, {waitMs})` | waits for a condition IN the page |
+| `bench` | `bench(what, {n})` | times a scenario: min, median, p95, max, raw samples |
+| `breakpoint` | `breakpoint(module, line, {project, state})` | set, clear or toggle |
+| `capture` | `capture(window)` | a BMP of the window, through PrintWindow |
+| `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
+| `command` | `command(name)` | any editor command by name |
+| `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
+| `console` | `console(last)` | what the page said to itself |
+| `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |
+| `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |
+| `doctor` | `doctor()` | the start-of-session checklist |
+| `documents` | `documents()` | what the surface holds TEXT for |
+| `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
+| `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
+| `history` | `history()` | every request served, as a replayable script |
+| `immediate` | `immediate(text)` | schedules an Immediate evaluation |
+| `inspect` | `inspect(selector, {styles, rules, max})` | boxes, classes, computed styles, winning rules |
+| `journal` | `journal(lines)` | one capture of a whole moment |
+| `layout` | `layout()` / `resetLayout()` | the arrangement; and putting it back |
+| `locals` | `locals()` | the Locals panel |
+| `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
+| `messages` | `messages(last)` | page traffic, both directions |
+| `module` | `readModule(name, project)` / `writeModule(name, text, project)` | through the session's own reader and writer |
+| `perf` | `perf()` | raw placement and marshal durations |
+| `placement` | `placement()` | forces a placement pass |
+| `problems` | `problems(module)` | the analyzer's findings |
+| `reload` | `reload({waitMs})` | reloads the page and waits for it |
+| `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
+| `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters |
+| `watches` | `watches()` | the Watch panel |
+| `windows` | `windows()` | every editor window |
+
+Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
+
+### Grouped by what you would drive it for
 
 ### Looking
 
@@ -189,6 +246,54 @@ These are not oversights; they are the boundary. Everything here needs COM or CD
 | Send real mouse or keyboard input to the page | Synthesised DOM events do not reach the editor's own mouse handling — use CDP |
 | Reach a second Excel process | One door per add-in session; `discover()` lists them, each with its own port |
 | Run in a Release build | The whole door is `#if DEBUG` |
+
+---
+
+## 4a. "Trust access to the VBA project object model"
+
+**The add-in does not need it. The harness does.**
+
+That setting — Trust Center → Macro Settings → *Trust access to the VBA project object model*,
+`HKCU\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM` — is a barrier on the way IN from
+outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reached from
+**automation**: another process, or VBA code, asking Excel for its VBA project. Off, those raise
+1004, *"Programmatic access to Visual Basic Project is not trusted."*
+
+| | Needs it | Why |
+| --- | --- | --- |
+| The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
+| The debug api | **no** | The door runs inside the add-in's own process and calls the same objects |
+| `Start-Excel.ps1` | **yes** | `$excel.VBE.MainWindow.Visible` is automation reaching in |
+| `New-RenameFixture.ps1` | **yes** | `$book.VBProject.VBComponents.Add` |
+| Any COM verification | **yes** | Reading a module back independently is the same reach |
+
+This is worth caring about: needing a security setting changed before a product works at all is a
+real adoption barrier, and xlide does not have one.
+
+**Verified 2026-08-07, with the box unticked and `AccessVBOM = 0`:**
+
+| | |
+| --- | --- |
+| `Workbook.VBProject` from automation | **null** — refused |
+| `Application.VBE` from automation | **null** — refused |
+| xlide loading, surface up | **yes** (seen on screen) |
+| `doctor` | healthy, no findings |
+| `state` | named the shown module and its workbook |
+| `readModule("Helpers")` | 442 characters of real code |
+| `problems`, `compile` | answered; `compile` drove the VBE and read back its error |
+
+The add-in was reading and driving the VBA project throughout, from inside, while nothing outside
+could reach it at all.
+
+> **The refusal is a NULL, not an exception** — at least through PowerShell's COM binder.
+> `$excel.VBE` simply evaluates to nothing, so a probe written as `try { … } catch { }` reports
+> success and prints an empty string. Test it as `$null -eq $excel.VBE`, or the experiment says
+> the gate is open when it is shut.
+
+To reproduce: untick the box, close Excel completely, open a macro workbook and press Alt+F11
+(the harness cannot open the editor for you — `$excel.VBE` is exactly what is refused; Excel's own
+ribbon button, `CommandBars.ExecuteMso('VisualBasic')`, is not). Tick it back afterwards to get the
+harness working again.
 
 ---
 

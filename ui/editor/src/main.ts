@@ -300,6 +300,14 @@ function boot(): void {
       showSlider: "always",
     },
     scrollBeyondLastLine: false,
+    // Room above the first line and below the last. Line one sat hard against the tab strip, so
+    // the top of a module read as clipped rather than as the start of something (the developer,
+    // 2026-08-07). Below matters too: the last line otherwise sits on the status bar, which
+    // scrollBeyondLastLine: false is what leaves it doing.
+    padding: {
+      top: 8,
+      bottom: 8,
+    },
     find: {
       addExtraSpaceOnTop: false,
     },

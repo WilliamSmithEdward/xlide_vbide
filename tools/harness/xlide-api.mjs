@@ -299,6 +299,15 @@ function clientFor(entry) {
       call(`inspect${query({ selector, styles, rules: rules ? 1 : undefined, max })}`),
 
     /**
+     * Times a scenario in the page: min, median, p95, max, and the raw samples.
+     *
+     * `what` is one of tabswitch, layout, type. The raw samples are the point — a median that
+     * moved is a fact, and a median that moved because one sample in twenty doubled is a
+     * different fact.
+     */
+    bench: (what, { n } = {}) => call(`bench${query({ what, n })}`, { timeout: 60000 }),
+
+    /**
      * Waits for the editor to be answering again, which is the honest precondition for any
      * assertion after something that might raise a modal. Reports what is in the way.
      */
