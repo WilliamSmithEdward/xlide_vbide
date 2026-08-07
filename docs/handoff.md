@@ -1133,6 +1133,19 @@ Immediate window facts, measured while making capture behave:
 
 ## 9. Open and known, in priority order
 
+**DEFERRED BY AGREEMENT (2026-08-06): editor split persistence.** The tool panes survive a session
+and the editor's own splits do not, so reopening brings the host's open modules back as tabs in one
+group however they were arranged. Decision 13 has been corrected to say so.
+
+Closing it is a focused piece, not a tail-end addition. `workspace.ts` holds its `LayoutNode` tree
+with live DOM elements and Monaco instances in it, so it cannot be serialised directly: it needs a
+parallel plain shape, saved at the five places the tree or its tabs mutate, and a restore that runs
+at the first `setOpen` and reconciles against the host's open list — place what the saved shape
+knows, drop tabs for modules no longer open, land newly-opened ones somewhere sensible. That
+reconcile is where the bugs will be, because membership is the host's and geography is the page's,
+and they disagree on every reload. The docks' `load`/`persist`/`pruneUnknown` in `paneldocks.ts` is
+the shape to copy, and `docktree.ts` is the pure, unit-tested version of the same arithmetic.
+
 **THE MISSION (user, 2026-08-01), which frames everything below:**
 1. Replicate all base functionality of the VBE editor.
 2. Replace all native windows with custom GUI implementations.
