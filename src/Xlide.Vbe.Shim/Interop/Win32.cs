@@ -418,4 +418,23 @@ internal static unsafe partial class Win32
 
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", SetLastError = true)]
     public static partial uint GetModuleFileName(nint module, char* fileName, uint size);
+
+    /// <summary>
+    /// Hands a thing to whatever the machine has registered to open it. Used for one purpose here:
+    /// opening a sponsorship address in the developer's own browser, because the surface itself is
+    /// a page that is not allowed to navigate anywhere.
+    /// </summary>
+    [LibraryImport("shell32.dll", EntryPoint = "ShellExecuteW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial nint ShellExecute(
+        nint owner,
+        string? operation,
+        string file,
+        string? parameters,
+        string? directory,
+        int show);
+
+    /// <summary>ShellExecute return values at or below this mean it failed.</summary>
+    public const int ShellExecuteFailure = 32;
+
+    public const int ShowNormal = 1;
 }

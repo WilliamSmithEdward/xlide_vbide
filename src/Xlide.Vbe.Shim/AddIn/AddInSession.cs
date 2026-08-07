@@ -2040,6 +2040,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.Polled = PollDebugState;
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
+        _editorSurface.ExternalOpenRequested = OpenExternal;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
@@ -4531,6 +4532,48 @@ internal sealed class AddInSession : IDisposable
     /// Their edits go to the module first. Evaluating compiles the project, so a line that refers
     /// to something just typed has to be able to see it.
     /// </summary>
+    /// <summary>
+    /// The addresses the page is allowed to have opened. Three, exactly, spelled here.
+    ///
+    /// This is a list rather than a check on the scheme or the host because the page asks for the
+    /// opening and the page is the part of this product most exposed to whatever it renders. An
+    /// allowed HOST would let anything under it through; an allowed ADDRESS lets through only what
+    /// is written on this line, so the worst a page that has been talked into asking can do is ask
+    /// for one of the developer's own sponsorship pages.
+    /// </summary>
+    private static readonly string[] OpenableAddresses =
+    [
+        "https://github.com/sponsors/WilliamSmithEdward",
+        "https://www.paypal.com/donate/?business=ML855BRLNR838&no_recurring=0&item_name=VBA+has+always+treated+me+well.+It+was+how+I+first+grew+professional+as+a+programmer%2C+I%27m+happy+to+show+it+some+love+%E2%9D%A4%EF%B8%8F&currency_code=USD",
+        "https://cash.app/$williamesmithjcil",
+    ];
+
+    /// <summary>
+    /// Opens an address in whatever browser the machine uses, if it is one of the three above.
+    ///
+    /// The surface is a page that is not allowed to navigate anywhere, so a link on it would look
+    /// like a link and do nothing. The host has no such restriction, and this is the one thing it
+    /// opens.
+    /// </summary>
+    private void OpenExternal(string url)
+    {
+        if (!Array.Exists(OpenableAddresses, allowed => string.Equals(allowed, url, StringComparison.Ordinal)))
+        {
+            Log.Info($"external: refused an address that is not one of ours ({url.Length} characters)");
+            return;
+        }
+
+        var result = Win32.ShellExecute(0, "open", url, null, null, Win32.ShowNormal);
+        if ((long)result <= Win32.ShellExecuteFailure)
+        {
+            Log.Error($"external: the shell would not open the address (result {(long)result})");
+            _editorSurface?.Notify("That address could not be opened. It is in the About dialog to copy.");
+            return;
+        }
+
+        Log.Info("external: opened a sponsorship address");
+    }
+
     private void EvaluateImmediate(string line)
     {
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");

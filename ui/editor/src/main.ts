@@ -76,6 +76,7 @@ import { registerFormatting } from "./format.js";
 import { currentSettings } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
+import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
@@ -417,6 +418,16 @@ function boot(): void {
         return;
       }
 
+      // Beside About, because it answers the question About raises. The addresses are opened by
+      // the HOST: this page is not allowed to navigate anywhere, and the host will only open the
+      // three it holds.
+      if (command.id === "openSponsor") {
+        openSponsorDialog(
+          { openExternal: (url) => bridge.openExternal(url) },
+          () => workspace.activeEditor().focus());
+        return;
+      }
+
       if (command.id === "openPanes") {
         const button = document.querySelector<HTMLElement>('#toolbar [data-command="openPanes"]');
         if (button && shell) {
@@ -433,6 +444,7 @@ function boot(): void {
     commandAvailable: (command) =>
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
+      || command.id === "openSponsor"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),

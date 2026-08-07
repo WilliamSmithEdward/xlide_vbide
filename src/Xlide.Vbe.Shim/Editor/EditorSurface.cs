@@ -139,6 +139,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer enters a line in the Immediate panel.</summary>
     public Action<string>? EvaluateRequested { get; set; }
 
+    /// <summary>Raised with an address the page wants opened outside itself.</summary>
+    public Action<string>? ExternalOpenRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -1456,6 +1459,15 @@ internal sealed class EditorSurface : IDisposable
                         && expression.GetString() is { Length: > 0 } entered)
                     {
                         EvaluateRequested?.Invoke(entered);
+                    }
+
+                    break;
+
+                case "openExternal":
+                    if (document.RootElement.TryGetProperty("url", out var address)
+                        && address.GetString() is { Length: > 0 } addressAsked)
+                    {
+                        ExternalOpenRequested?.Invoke(addressAsked);
                     }
 
                     break;

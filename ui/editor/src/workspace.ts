@@ -82,6 +82,16 @@ class EditorGroup {
   tabs: Tab[] = [];
   active: DocumentId | null = null;
 
+  /**
+   * The documents this group has shown, most recent first — what it falls back to when it loses
+   * its active tab. Position in the strip is where a tab was dropped and says nothing about what
+   * anyone was reading.
+   */
+  private shownHere: string[] = [];
+
+  /** A document this group means to show as soon as the page has its text. */
+  pending: DocumentId | null = null;
+
   /** Each document's scroll and caret in THIS group, restored when its tab returns. */
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
 
@@ -161,7 +171,39 @@ class EditorGroup {
 
   private setActive(id: DocumentId): void {
     this.active = id;
+    this.pending = null;
+
+    const key = this.key(id);
+    this.shownHere = [key, ...this.shownHere.filter((held) => held !== key)];
+
     this.renderTabs();
+  }
+
+  /**
+   * Shows something after the active tab left, and says whether it managed to.
+   *
+   * The most recently shown survivor, not the departed tab's neighbour in the strip: what a group
+   * should fall back to is what was last being read in it (the developer, 2026-08-07).
+   *
+   * A tab that has never been shown HERE may have no model at all — the host publishes a module's
+   * text when it is activated, not when its pane opens, so a workspace opened onto eight modules
+   * holds text for the one that was looked at. A group whose every survivor is untouched cannot
+   * show anything by itself, and returns false rather than leaving a blank pane unexplained.
+   */
+  promote(): boolean {
+    const survivors = this.tabs.map((tab) => tab.id);
+    const remembered = this.shownHere
+      .map((key) => survivors.find((id) => this.key(id) === key))
+      .filter((id): id is DocumentId => id !== undefined);
+
+    for (const id of [...remembered, ...survivors]) {
+      if (this.workspace.documents.get(id.module, id.project)) {
+        this.show(id);
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /** Drops a document from this group; true when it was the active one. */
@@ -171,6 +213,7 @@ class EditorGroup {
 
     this.tabs = this.tabs.filter((tab) => this.key(tab.id) !== key);
     this.viewStates.delete(key);
+    this.shownHere = this.shownHere.filter((held) => held !== key);
 
     if (wasActive) {
       this.active = null;
@@ -363,14 +406,11 @@ export class Workspace {
     // Groups emptied by the diff dissolve; the last one stays as the empty workspace.
     this.dissolveEmptyGroups();
 
-    // A group whose active tab closed promotes its first survivor: only the HOST-active
-    // document gets a reveal below, and a background group must not sit blank either.
+    // A group whose active tab closed goes back to what it was showing before it: only the
+    // HOST-active document gets a reveal below, and a background group must not sit blank either.
     for (const group of this.groups) {
       if (!group.active && group.tabs.length > 0) {
-        const first = group.tabs[0];
-        if (first) {
-          group.show(first.id);
-        }
+        group.promote();
       }
     }
 
@@ -420,6 +460,23 @@ export class Workspace {
     }
 
     this.announceActive();
+  }
+
+  /**
+   * A document's text arrived. Any group that asked for it shows it.
+   *
+   * A group that loses its active tab can only fall back to a document the page already holds,
+   * and the page holds a module's text once it has been activated — not merely because its pane
+   * is open. So a group with nothing to fall back to asks the host and waits here, rather than
+   * calling show() on a document that does not exist yet and silently staying blank.
+   */
+  documentOpened(module: string, project: string | null): void {
+    const key = docKeyOf(module, project);
+    for (const group of this.groups) {
+      if (group.pending && docKeyOf(group.pending.module, group.pending.project) === key) {
+        group.show(group.pending);
+      }
+    }
   }
 
   /** Empties everything: the host said every pane is closed. */
@@ -787,12 +844,16 @@ export class Workspace {
       docKeyOf(candidate.id.module, candidate.id.project) === key);
     const wasActive = from.remove(id);
 
-    // The source group does not sit blank: the neighbour of the departed tab steps up, the
-    // way every tabbed editor promotes on close.
-    if (wasActive && from.tabs.length > 0 && from !== target) {
-      const promoted = from.tabs[Math.min(Math.max(leavingIndex, 0), from.tabs.length - 1)];
-      if (promoted) {
-        from.show(promoted.id);
+    // The source group does not sit blank: it goes back to what it was last showing, the way
+    // every tabbed editor promotes on close.
+    if (wasActive && from.tabs.length > 0 && from !== target && !from.promote()) {
+      // Nothing it still holds has text on this page, so there is nothing to promote TO. The
+      // host is asked for the departed tab's neighbour and the group shows it when it arrives;
+      // the moved tab is activated after this, at the end, so that is what ends up active.
+      const neighbour = from.tabs[Math.min(Math.max(leavingIndex, 0), from.tabs.length - 1)];
+      if (neighbour) {
+        from.pending = neighbour.id;
+        this.handlers.activate(neighbour.id);
       }
     }
 

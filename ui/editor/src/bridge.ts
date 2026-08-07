@@ -264,6 +264,7 @@ export type ClientMessage =
   | { type: "navigate"; module: string; line: number; column: number; project?: string }
   | { type: "command"; name: string }
   | { type: "evaluate"; text: string }
+  | { type: "openExternal"; url: string }
   | { type: "panel"; name: string; open: boolean }
   | { type: "menu"; path: number[] }
   | { type: "menuExecute"; path: number[] }
@@ -549,6 +550,18 @@ export class EditorBridge {
   /** Asks the host to evaluate a line entered in the Immediate panel. */
   evaluate(text: string): void {
     this.transport.post({ type: "evaluate", text });
+  }
+
+  /**
+   * Asks the host to open an address outside the surface.
+   *
+   * This page may not navigate anywhere, by policy — the whole point of it is that it is a fixed
+   * document over a host, not a browser. The host has no such restriction and opens the address
+   * in whatever the machine uses, but only if it is one of the few it holds: what is sent from
+   * here is a request, not an instruction.
+   */
+  openExternal(url: string): void {
+    this.transport.post({ type: "openExternal", url });
   }
 
   /**
@@ -1302,6 +1315,9 @@ export class EditorBridge {
   private openDocument(moduleName: string, project: string | null, text: string): void {
     this.documents.open(moduleName, project, text, (model, adopted) => this.adoptText(model, adopted));
     this.shell?.setWorkspaceEmpty(false);
+
+    // A group left with nothing to show asked for this; now it can.
+    this.workspace?.documentOpened(moduleName, project);
   }
 
   /**

@@ -83,6 +83,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
   { id: "openHelp", target: "editor", icon: "question", label: "About xlide" },
+  { id: "openSponsor", target: "editor", icon: "heart", label: "Support xlide" },
 ];
 
 /**

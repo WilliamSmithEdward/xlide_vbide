@@ -1237,6 +1237,151 @@ body.live-resize .minimap {
   background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.3));
 }
 
+/* Support xlide. Shares the About card's frame — same width, same head, same copy button — because
+   it is the same kind of thing: one card, a few facts, and a way to take an address away with you. */
+#sponsor-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  z-index: 90;
+}
+
+#sponsor-card {
+  width: 460px;
+  max-width: calc(100vw - 40px);
+  padding-bottom: 4px;
+  background: var(--vscode-editorWidget-background, #252526);
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+#sponsor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+
+#sponsor-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#sponsor-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+#sponsor-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.sponsor-blurb {
+  margin: 0;
+  padding: 0 14px 12px;
+  opacity: 0.8;
+  line-height: 1.5;
+}
+
+#sponsor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+
+.sponsor-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+/* The whole row is the target, not the label: a destination this small is easier to hit as a band
+   than as a word, and the external-link mark on the right says where pressing it goes. */
+.sponsor-open {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sponsor-open:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.28));
+}
+
+.sponsor-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.sponsor-label {
+  font-weight: 600;
+}
+
+.sponsor-detail {
+  font-size: 11px;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sponsor-away {
+  flex: 0 0 auto;
+  opacity: 0.5;
+  font-size: 12px;
+}
+
+.sponsor-copy {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 4px;
+  background: var(--vscode-button-secondaryBackground, rgba(128, 128, 128, 0.2));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sponsor-copy:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.3));
+}
+
+.sponsor-thanks {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 #status {
   display: flex;
   gap: 16px;
