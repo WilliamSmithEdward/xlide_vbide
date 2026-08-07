@@ -265,6 +265,7 @@ export type ClientMessage =
   | { type: "command"; name: string }
   | { type: "evaluate"; text: string }
   | { type: "openExternal"; url: string }
+  | { type: "requestDocument"; module: string; project?: string }
   | { type: "panel"; name: string; open: boolean }
   | { type: "menu"; path: number[] }
   | { type: "menuExecute"; path: number[] }
@@ -866,6 +867,60 @@ export class EditorBridge {
     return this.documents.get(location.module, location.workbook ?? null);
   }
 
+  /** Documents asked for and not yet arrived, so a second ask joins the first. */
+  private readonly pendingDocuments = new Map<string, Promise<monaco.editor.ITextModel | null>>();
+
+  /**
+   * Makes sure the page has a module's text, asking the host if it does not.
+   *
+   * The page holds a module's text once it has been ACTIVATED — not because its pane is open — so
+   * a workspace opened onto eight modules holds one. Anything that DRAWS a module without going
+   * to it needs this: the editor's peek window resolves each result to a model, and with no model
+   * it draws an empty window (2026-08-07).
+   *
+   * Resolves with whatever the page has when it settles, including null: a module that cannot be
+   * read is one result that will not preview, not a reason to answer nothing.
+   */
+  ensureDocument(module: string, project: string | null): Promise<monaco.editor.ITextModel | null> {
+    const held = this.documents.get(module, project);
+    if (held) {
+      return Promise.resolve(held);
+    }
+
+    const key = docKeyOf(module, project);
+    const already = this.pendingDocuments.get(key);
+    if (already) {
+      return already;
+    }
+
+    const waiting = new Promise<monaco.editor.ITextModel | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.documentWaiters.delete(key);
+        this.pendingDocuments.delete(key);
+        resolve(this.documents.get(module, project));
+      }, 4000);
+
+      this.documentWaiters.set(key, () => {
+        clearTimeout(timer);
+        this.documentWaiters.delete(key);
+        this.pendingDocuments.delete(key);
+        resolve(this.documents.get(module, project));
+      });
+
+      this.transport.post({
+        type: "requestDocument",
+        module,
+        ...(project ? { project } : {}),
+      });
+    });
+
+    this.pendingDocuments.set(key, waiting);
+    return waiting;
+  }
+
+  /** Callbacks waiting on a document's text, by document key. */
+  private readonly documentWaiters = new Map<string, () => void>();
+
   /** Goes where a host location names, opening its module if it is not already open. */
   navigateTo(location: HostLocation): void {
     this.navigate(
@@ -1318,6 +1373,9 @@ export class EditorBridge {
 
     // A group left with nothing to show asked for this; now it can.
     this.workspace?.documentOpened(moduleName, project);
+
+    // And anything that asked for the text itself rather than for a tab.
+    this.documentWaiters.get(docKeyOf(moduleName, project))?.();
   }
 
   /**

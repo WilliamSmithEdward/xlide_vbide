@@ -1087,6 +1087,219 @@ try {
             'the explorer and the code entry must reach the same modules');
     });
 
+    // Six ways a rename was wrong, each found by asking it something it had not been asked before
+    // (2026-08-07). Pinned as properties rather than as the examples they were found with.
+    const LOG_MODULE = ['Option Explicit', '', 'Public Sub Write(ByVal text As String)', 'End Sub', ''].join('\r\n');
+    const HAS_LOCAL_LOG = [
+        'Option Explicit',
+        '',
+        'Public Sub Work()',
+        '    Dim Log As String',
+        '    Log = "started"',
+        'End Sub',
+        '',
+    ].join('\r\n');
+    const CALLS_LOG = ['Option Explicit', '', 'Public Sub Other()', '    Log.Write "hello"', 'End Sub', ''].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Shadowed',
+        generation: 1,
+        modules: [
+            { moduleName: 'Log', source: LOG_MODULE, type: 'standard' },
+            { moduleName: 'Worker', source: HAS_LOCAL_LOG, type: 'standard' },
+            { moduleName: 'Caller', source: CALLS_LOG, type: 'standard' },
+        ],
+    });
+
+    // A workbook with modules called Log, Config or Data has LOCALS called Log, Config and Data.
+    // Asking whether the word names a module, and asking it first, renamed the module and left
+    // the variable the developer had selected untouched.
+    const localNamedLikeModule = await call('textDocument/rename', {
+        projectId: 'Shadowed',
+        moduleName: 'Worker',
+        source: HAS_LOCAL_LOG,
+        moduleType: 'standard',
+        offset: HAS_LOCAL_LOG.indexOf('    Log = "started"') + 4,
+        newName: 'Journal',
+    });
+
+    check('a local that shares a module name is renamed as a variable, not as the module', () => {
+        assert.equal(localNamedLikeModule.module, undefined, 'no component should be renamed');
+        assert.deepEqual(
+            localNamedLikeModule.modules.map((entry) => entry.module),
+            ['Worker'],
+            'only the module holding the local should change');
+    });
+
+    // And the qualifier still is a module rename, so the fix did not cost the feature.
+    const qualifierIsStillTheModule = await call('textDocument/rename', {
+        projectId: 'Shadowed',
+        moduleName: 'Caller',
+        source: CALLS_LOG,
+        moduleType: 'standard',
+        offset: CALLS_LOG.indexOf('    Log.Write') + 5,
+        newName: 'Journal',
+    });
+
+    check('a module named as a qualifier is still renamed as the module', () =>
+        assert.equal(qualifierIsStillTheModule.module, 'Log'));
+
+    // A name the scope already holds. Nothing checked, and renaming Alpha to Beta beside an
+    // existing Beta produced two of them in one module: a project that no longer compiles,
+    // reported as a rename that worked.
+    const TWO_PROCEDURES = [
+        'Option Explicit',
+        '',
+        'Public Sub Alpha()',
+        'End Sub',
+        '',
+        'Public Sub Beta()',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Taken',
+        generation: 1,
+        modules: [{ moduleName: 'Both', source: TWO_PROCEDURES, type: 'standard' }],
+    });
+
+    const ontoTakenName = await call('textDocument/rename', {
+        projectId: 'Taken',
+        moduleName: 'Both',
+        source: TWO_PROCEDURES,
+        moduleType: 'standard',
+        offset: TWO_PROCEDURES.indexOf('Public Sub Alpha') + 'Public Sub Al'.length,
+        newName: 'Beta',
+    });
+
+    check('renaming onto a name the scope already holds is refused', () => {
+        assert.ok(ontoTakenName.refused, 'expected a refusal');
+        assert.equal(ontoTakenName.modules.length, 0, 'nothing should be rewritten');
+    });
+
+    // REM is a comment too. Only the apostrophe was known, so a module's name inside a REM line
+    // was rewritten as though it were a reference — the same mistake as the full stop below.
+    const HELPERS = ['Option Explicit', '', 'Public Sub Recalculate()', 'End Sub', ''].join('\r\n');
+    const REM_AND_CONTINUATION = [
+        'Option Explicit',
+        '',
+        'Public Sub Uses()',
+        '    Helpers _',
+        '        .Recalculate',
+        'End Sub',
+        '',
+        'REM Helpers.Recalculate is described here',
+        'Dim REMainder As Long',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Prose',
+        generation: 1,
+        modules: [
+            { moduleName: 'Helpers', source: HELPERS, type: 'standard' },
+            { moduleName: 'Prose', source: REM_AND_CONTINUATION, type: 'standard' },
+        ],
+    });
+
+    const remRename = await call('workspace/renameModule', {
+        projectId: 'Prose',
+        moduleName: 'Helpers',
+        newName: 'Aides',
+    });
+
+    const proseAfter = remRename.modules.find((entry) => entry.module === 'Prose')?.source ?? '';
+
+    check('a module name in a REM comment is prose', () =>
+        assert.ok(proseAfter.includes('REM Helpers.Recalculate'), 'the REM line must not change'));
+
+    check('REMainder is a name, not a comment', () =>
+        assert.ok(proseAfter.includes('Dim REMainder As Long'), 'the declaration after it must survive'));
+
+    // A line continuation is whitespace to VBA, so `Helpers _` and `.Recalculate` on the next line
+    // are one qualified call. Skipping it left a caller pointing at a module that no longer exists.
+    check('a qualified call split over a line continuation is renamed', () =>
+        assert.ok(proseAfter.includes('Aides _'), `expected the continuation call to follow: ${proseAfter}`));
+
+    // A procedure of the same name SHADOWS a module for a qualified call into it — measured
+    // against a live host in a workbook of its own, because the rename fixture deliberately does
+    // not compile and every Run against it fails for a reason of its own.
+    const SHADOWING_CALLER = [
+        'Option Explicit',
+        '',
+        'Public Sub Aides()',
+        'End Sub',
+        '',
+        'Public Sub CallsIt()',
+        '    Helpers.Recalculate',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Shadowing',
+        generation: 1,
+        modules: [
+            { moduleName: 'Helpers', source: HELPERS, type: 'standard' },
+            { moduleName: 'Other', source: SHADOWING_CALLER, type: 'standard' },
+        ],
+    });
+
+    const wouldBeShadowed = await call('workspace/renameModule', {
+        projectId: 'Shadowing',
+        moduleName: 'Helpers',
+        newName: 'Aides',
+    });
+
+    check('a module rename that a procedure would shadow is refused', () =>
+        assert.ok(wouldBeShadowed.refused, 'expected a refusal'));
+
+    const notShadowed = await call('workspace/renameModule', {
+        projectId: 'Shadowing',
+        moduleName: 'Helpers',
+        newName: 'Assistants',
+    });
+
+    check('a module rename nothing shadows still goes through', () => {
+        assert.ok(!notShadowed.refused, `unexpected refusal: ${notShadowed.refused}`);
+        assert.deepEqual(notShadowed.modules.map((entry) => entry.module), ['Other']);
+    });
+
+    // What a rename LEFT ALONE is meant to be the calls nobody can decide between. It was every
+    // occurrence of the word, including inside strings and comments — a list of nothing to decide.
+    const PROSE_AND_STRINGS = [
+        'Option Explicit',
+        '',
+        'Public Sub Ping()',
+        '    Debug.Print "the word Ping in a string"',
+        'End Sub',
+        '',
+        "' Ping in a comment",
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Ambiguity',
+        generation: 1,
+        modules: [{ moduleName: 'Solo', source: PROSE_AND_STRINGS, type: 'standard' }],
+    });
+
+    const soleDefinition = await call('textDocument/rename', {
+        projectId: 'Ambiguity',
+        moduleName: 'Solo',
+        source: PROSE_AND_STRINGS,
+        moduleType: 'standard',
+        offset: PROSE_AND_STRINGS.indexOf('Public Sub Ping') + 'Public Sub Pi'.length,
+        newName: 'Pong',
+    });
+
+    check('nothing is reported as ambiguous when nothing is', () =>
+        assert.deepEqual(
+            soleDefinition.ambiguous ?? [],
+            [],
+            'a name in a string or a comment is not a call to decide about'));
+
     // Renaming an INTERFACE, and the classes that implement it. VBA names an implemented member
     // `Interface_Member`, so that prefix is part of the contract: rename the interface and leave
     // the prefix and the class stops implementing anything, which the compiler notices.

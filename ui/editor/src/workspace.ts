@@ -142,6 +142,13 @@ class EditorGroup {
 
   /** Shows a document this group holds: model on the editor, view states swapped. */
   show(id: DocumentId): void {
+    // A group shows what it HOLDS. Asked for anything else it would draw a module with no tab in
+    // its own strip and report it as active — which a group waiting on a document whose tab closed
+    // meanwhile did (2026-08-07).
+    if (!this.holds(id)) {
+      return;
+    }
+
     const model = this.workspace.documents.get(id.module, id.project);
     if (!model) {
       return;

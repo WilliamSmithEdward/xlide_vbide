@@ -2041,6 +2041,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
         _editorSurface.ExternalOpenRequested = OpenExternal;
+        _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
@@ -4572,6 +4573,50 @@ internal sealed class AddInSession : IDisposable
         }
 
         Log.Info("external: opened a sponsorship address");
+    }
+
+    /// <summary>
+    /// Gives the page a module's text without activating it.
+    ///
+    /// The page holds a module's text once it has been ACTIVATED, so a workspace opened onto eight
+    /// modules holds one — and anything that draws a module it is not showing (peeking a
+    /// definition, previewing a reference) had nothing to draw. Answered without touching which
+    /// pane is active, because being taken to what you asked to look at is the whole complaint.
+    /// </summary>
+    private void PublishDocument(string moduleName, string? projectDisplay)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        // The page names a workbook the way it is shown; the object model wants the project's own
+        // identity. Every other route that takes a project from the page converts here, and this
+        // one did not — so the component was never found and the answer never came (2026-08-07).
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out var owner);
+                using var code = component?.GetObject("CodeModule");
+                if (code is null)
+                {
+                    Log.Info($"document: {moduleName} could not be found to publish");
+                    return;
+                }
+
+                var count = code.GetInt32("CountOfLines");
+                var text = count > 0 ? code.GetStringIndexed("Lines", 1, count) ?? string.Empty : string.Empty;
+                Log.Info($"document: publishing {moduleName}, {count} line(s), without activating it");
+                surface.Publish(moduleName, DisplayFromProjectId(owner ?? projectId), text);
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose($"document: {moduleName} could not be published ({ex.GetType().Name})");
+            }
+        });
     }
 
     private void EvaluateImmediate(string line)

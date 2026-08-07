@@ -635,8 +635,18 @@ function boot(): void {
         return null;
       }
 
-      return toEditorLocations(
-        bridge, await bridge.requestNavigation(model.getOffsetAt(position), false));
+      const found = await bridge.requestNavigation(model.getOffsetAt(position), false);
+
+      // The text is fetched before the answer is given, for any module the page does not already
+      // hold. Peek draws each result by resolving it to a MODEL, and the page holds a module's
+      // text once it has been ACTIVATED — not because its pane is open — so peeking into a module
+      // nobody had opened drew an empty window (2026-08-07). Asked for without activating
+      // anything, which is what makes a peek a peek.
+      await Promise.all(found
+        .filter((location) => !bridge.modelForLocation(location))
+        .map((location) => bridge.ensureDocument(location.module, location.workbook ?? null)));
+
+      return toEditorLocations(bridge, found);
     },
   });
 

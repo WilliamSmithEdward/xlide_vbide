@@ -270,19 +270,46 @@ export function renameFor(
     // BrokenModule.RunTotal that has nothing to do with it (the developer, 2026-08-06). Resolving
     // to the one declaration first and collecting from there makes every entry point agree, and
     // makes the entry point that was already correct the only one there is.
+    const anchor = anchorFor(symbols, moduleName, source, offset);
+
     // A module's name is not a symbol. No declaration in any module's text holds it — it belongs
     // to the component — so the resolver finds nothing for `Helpers` in `Helpers.Recalc`, and
     // refusing there is exactly why renaming a module from code did nothing. If the word names a
     // module of this workbook, this IS a module rename, and it is the same operation the
     // explorer asks for; the add-in does the component half either way.
-    if (symbols.byModule.has(word.text.toLowerCase())) {
+    //
+    // BOTH halves are required, and asking the name alone was a bug: nothing there resolved, AND
+    // the word stands where only a module can — before a dot, or after As, New or Implements.
+    // A workbook with modules called Log, Config or Data has locals called Log, Config and Data,
+    // and renaming one of those renamed the MODULE and left the local untouched (2026-08-07).
+    if (!anchor.at
+        && !anchor.ambiguous
+        && symbols.byModule.has(word.text.toLowerCase())
+        && (qualifies(source, word.end) || namesAType(source, word.start))) {
         const renamed = renameModuleFor(symbols, word.text, newName);
         return { ...renamed, oldName: word.text, module: renamed.refused ? undefined : word.text };
     }
 
-    const anchor = anchorFor(symbols, moduleName, source, offset);
     if (anchor.ambiguous) {
         return { modules: [], oldName: word.text, refused: anchor.ambiguous };
+    }
+
+    // The new name must not already mean something where the old one does. Nothing else checks:
+    // a rename onto a name the module already declares produced two `Public Sub Beta()` in one
+    // module — a project that no longer compiles, reported as a rename that worked (2026-08-07).
+    const taken = anchor.at
+        ? symbols.project.resolveDefinition(anchor.at.module, newName, anchor.at.offset)
+        : symbols.project.resolveDefinition(moduleName, newName, offset);
+
+    if (taken.length > 0) {
+        const where = taken[0].moduleName;
+        return {
+            modules: [],
+            oldName: word.text,
+            refused: where && where.toLowerCase() !== (anchor.at?.module ?? moduleName).toLowerCase()
+                ? `'${newName}' is already declared in '${where}' and would be reached from here.`
+                : `'${newName}' is already declared here.`,
+        };
     }
 
     const sites = anchor.at
@@ -393,6 +420,20 @@ export function renameModuleFor(
             continue;
         }
 
+        // A procedure of that name SHADOWS the module for a qualified call into it. Measured
+        // against a live host (2026-08-07): with a module `Aides` and a caller saying
+        // `Aides.Ping`, adding a `Public Sub Aides()` to the caller turns the call into a runtime
+        // failure, and removing it again fixes it. A bare `Aides` is unaffected — VBA takes the
+        // procedure — which is why this refuses only where a QUALIFIED mention would land.
+        if (sites.some((site) => site.qualified)
+            && symbols.project.visibleProcedureNames(module.moduleName).has(newName.toLowerCase())) {
+            return {
+                modules: [],
+                refused: `'${module.moduleName}' can see a procedure called '${newName}', `
+                    + `which would shadow the module and break every '${newName}.' call in it.`,
+            };
+        }
+
         const rewritten = replaceSpans(module.source, sites, newName);
         if (rewritten === null) {
             return {
@@ -407,11 +448,19 @@ export function renameModuleFor(
     return { modules: out };
 }
 
-/** Where a module's name is used as a qualifier, as a type, or as an implemented interface. */
-function mentionsOfModule(source: string, name: string): { start: number; length: number }[] {
+/**
+ * Where a module's name is used as a qualifier, as a type, or as an implemented interface.
+ *
+ * Each site says which it is, because only a QUALIFIER can be shadowed by a procedure of the same
+ * name — a type position cannot, and the difference decides whether a rename is safe.
+ */
+function mentionsOfModule(
+    source: string,
+    name: string,
+): { start: number; length: number; qualified: boolean }[] {
     const wanted = name.toLowerCase();
     const haystack = source.toLowerCase();
-    const out: { start: number; length: number }[] = [];
+    const out: { start: number; length: number; qualified: boolean }[] = [];
 
     // A class that implements an interface names each implemented member `Interface_Member`.
     // That prefix is part of the contract, not a coincidence: rename the interface and leave the
@@ -434,7 +483,7 @@ function mentionsOfModule(source: string, name: string): { start: number; length
 
         if (after === '_') {
             if (implementsIt) {
-                out.push({ start: at, length: name.length });
+                out.push({ start: at, length: name.length, qualified: false });
             }
             continue;
         }
@@ -443,8 +492,10 @@ function mentionsOfModule(source: string, name: string): { start: number; length
             continue;
         }
 
-        if (qualifies(source, at + wanted.length) || namesAType(source, at)) {
-            out.push({ start: at, length: name.length });
+        if (qualifies(source, at + wanted.length)) {
+            out.push({ start: at, length: name.length, qualified: true });
+        } else if (namesAType(source, at)) {
+            out.push({ start: at, length: name.length, qualified: false });
         }
     }
 
@@ -460,14 +511,20 @@ const CARRIAGE_RETURN = "\r";
 /**
  * Which offsets of a module are code, rather than inside a string or a comment.
  *
- * A line's comment starts at the first apostrophe that is not inside a string, and a string ends
- * at its closing quote — doubled quotes being an escaped one rather than the end. That is the
- * whole of what has to be known here: enough to tell a reference from a mention.
+ * A line's comment starts at the first apostrophe that is not inside a string, or at a `REM` that
+ * begins a statement; a string ends at its closing quote, doubled quotes being an escaped one
+ * rather than the end. That is the whole of what has to be known here: enough to tell a reference
+ * from a mention.
  */
 function codePositions(source: string): boolean[] {
     const code = new Array<boolean>(source.length).fill(true);
     let inString = false;
     let inComment = false;
+
+    // Where a statement begins: the start of the source, a new line, or a colon. REM is a comment
+    // only there — `Dim REMainder` is a name, and treating it as one is the difference between
+    // reading a module and mangling it.
+    let statementStart = true;
 
     for (let at = 0; at < source.length; at++) {
         const character = source[at];
@@ -475,12 +532,23 @@ function codePositions(source: string): boolean[] {
         if (character === LINE_FEED || character === CARRIAGE_RETURN) {
             inString = false;
             inComment = false;
+            statementStart = true;
             continue;
         }
 
         if (inComment) {
             code[at] = false;
             continue;
+        }
+
+        if (!inString && statementStart && startsRem(source, at)) {
+            inComment = true;
+            code[at] = false;
+            continue;
+        }
+
+        if (character !== ' ' && character !== '\t') {
+            statementStart = character === ':';
         }
 
         if (inString) {
@@ -512,6 +580,20 @@ function codePositions(source: string): boolean[] {
     return code;
 }
 
+/**
+ * Whether a `REM` comment starts here: the three letters, in any case, followed by something that
+ * is not part of a name. `REM` alone on a line is an empty comment and counts; `REMark` is a name
+ * and does not.
+ */
+function startsRem(source: string, at: number): boolean {
+    if (source.slice(at, at + 3).toLowerCase() !== 'rem') {
+        return false;
+    }
+
+    const after = source[at + 3];
+    return after === undefined || !isIdentifierChar(after);
+}
+
 /** Whether this module carries an `Implements` statement for the named interface. */
 function implementsInterface(source: string, wanted: string): boolean {
     for (const line of source.split(LINE_BREAK)) {
@@ -526,12 +608,41 @@ function implementsInterface(source: string, wanted: string): boolean {
     return false;
 }
 
-/** Whether what follows is a dot, so the name was reaching for something inside the module. */
+/**
+ * Whether what follows is a dot, so the name was reaching for something inside the module.
+ *
+ * A line continuation counts as whitespace, because to VBA it is: `Helpers _` on one line and
+ * `.Recalculate` on the next is one qualified call, and a rename that skipped over it left a
+ * caller pointing at a module that no longer exists (2026-08-07).
+ */
 function qualifies(source: string, after: number): boolean {
     let at = after;
-    while (source[at] === ' ' || source[at] === '\t') {
-        at++;
+
+    for (;;) {
+        while (source[at] === ' ' || source[at] === '\t') {
+            at++;
+        }
+
+        if (source[at] !== '_') {
+            break;
+        }
+
+        // An underscore is a continuation only at the end of its line; anywhere else it is part
+        // of a name, and a name is not whitespace.
+        let ahead = at + 1;
+        while (source[ahead] === ' ' || source[ahead] === '\t') {
+            ahead++;
+        }
+
+        if (source[ahead] === CARRIAGE_RETURN) {
+            at = source[ahead + 1] === LINE_FEED ? ahead + 2 : ahead + 1;
+        } else if (source[ahead] === LINE_FEED) {
+            at = ahead + 1;
+        } else {
+            break;
+        }
     }
+
     return source[at] === '.';
 }
 
@@ -639,11 +750,54 @@ function leftAlone(
     renamed: readonly LocationPayload[],
 ): LocationPayload[] {
     const touched = new Set(renamed.map((where) => `${where.module.toLowerCase()}:${where.line}:${where.column}`));
+    const wanted = oldName.toLowerCase();
     const out: LocationPayload[] = [];
 
-    for (const location of occurrencesOfTypeName(symbols, oldName)) {
-        if (!touched.has(`${location.module.toLowerCase()}:${location.line}:${location.column}`)) {
-            out.push(location);
+    for (const module of symbols.modules) {
+        // A module that declares the name itself binds a bare use to its own, and that is not a
+        // decision anyone has to make: it is a different symbol that happens to share a spelling.
+        if (symbols.project.resolveDefinition(module.moduleName, oldName, 0)
+            .some((symbol) => symbol.moduleName?.toLowerCase() === module.moduleName.toLowerCase())) {
+            continue;
+        }
+
+        const inCode = codePositions(module.source);
+        const starts = lineStarts(module.source);
+        const lines = module.source.split(LINE_BREAK);
+
+        for (let index = 0; index < lines.length; index++) {
+            const start = starts[index];
+            if (start === undefined) {
+                continue;
+            }
+
+            for (const at of identifierPositions(lines[index], wanted)) {
+                const offset = start + at;
+
+                // Only code. The name in a string is data and in a comment it is prose, and
+                // listing either as something to decide about is asking about nothing.
+                if (!inCode[offset]) {
+                    continue;
+                }
+
+                // A qualified use says which one it means, so it is not ambiguous — and it was
+                // either renamed already or belongs to a different module.
+                if (qualifierBefore(module.source, offset) !== undefined) {
+                    continue;
+                }
+
+                if (touched.has(`${module.moduleName.toLowerCase()}:${index + 1}:${at + 1}`)) {
+                    continue;
+                }
+
+                out.push({
+                    module: module.moduleName,
+                    line: index + 1,
+                    column: at + 1,
+                    length: oldName.length,
+                    preview: lines[index].trim(),
+                });
+            }
         }
     }
 

@@ -142,6 +142,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised with an address the page wants opened outside itself.</summary>
     public Action<string>? ExternalOpenRequested { get; set; }
 
+    /// <summary>Raised when the page wants a module's text without being taken to it.</summary>
+    public Action<string, string?>? DocumentRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -645,6 +648,29 @@ internal sealed class EditorSurface : IDisposable
             doc.Text = text;
             PostSyncDocument(moduleName, project, text);
         }
+    }
+
+    /// <summary>
+    /// Gives the page a module's text WITHOUT making it the active document.
+    ///
+    /// Show() is the only other way a document reaches the page, and it moves the active one,
+    /// because it is what activating a pane calls. The page needs a third thing: text for a module
+    /// it is going to draw but not go to — a definition it is peeking at, a reference it is
+    /// listing. Peeking one and being taken there instead is exactly the bug this answers.
+    ///
+    /// A document the page already has is left alone. It may be ahead of the module (unwritten
+    /// edits) and this is not a sync; it is a copy for something that had none.
+    /// </summary>
+    public void Publish(string moduleName, string? project, string text)
+    {
+        var key = DocKey(moduleName, project);
+        if (_docs.ContainsKey(key))
+        {
+            return;
+        }
+
+        _docs[key] = new OpenDoc { Module = moduleName, Project = project, Text = text };
+        PostOpenDocument(moduleName, project, text);
     }
 
     private void PostOpenDocument(string moduleName, string? project, string text)
@@ -1468,6 +1494,19 @@ internal sealed class EditorSurface : IDisposable
                         && address.GetString() is { Length: > 0 } addressAsked)
                     {
                         ExternalOpenRequested?.Invoke(addressAsked);
+                    }
+
+                    break;
+
+                case "requestDocument":
+                    if (document.RootElement.TryGetProperty("module", out var documentName)
+                        && documentName.GetString() is { Length: > 0 } documentAsked)
+                    {
+                        DocumentRequested?.Invoke(
+                            documentAsked,
+                            document.RootElement.TryGetProperty("project", out var documentOwner)
+                                ? documentOwner.GetString()
+                                : null);
                     }
 
                     break;
