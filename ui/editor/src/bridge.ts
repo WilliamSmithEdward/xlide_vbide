@@ -284,6 +284,7 @@ export type ClientMessage =
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
   | { type: "rename"; id: number; offset: number; newName: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
+  | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -837,6 +838,27 @@ export class EditorBridge {
    * and they are exactly the ones a rename must not miss. So nothing comes back but a summary,
    * and the open tabs are refreshed by the ordinary document sync.
    */
+  /**
+   * Asks the host to put the last rename back.
+   *
+   * The host holds it, not the page: a rename edits several modules and the editor's undo stack
+   * is per model, so Ctrl+Z in the module you are looking at would reverse that module's share
+   * and leave every other one renamed — a half-renamed project, which is worse than no undo.
+   */
+  requestRenameUndo(): Promise<HostRenameAnswer> {
+    const id = this.nextRenameId++;
+
+    return new Promise<HostRenameAnswer>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingRenames.delete(id);
+        resolve({ modules: [], replaced: 0, refused: "The undo timed out, so nothing changed." });
+      }, 30000);
+
+      this.pendingRenames.set(id, { resolve, timer });
+      this.transport.post({ type: "undoRename", id });
+    });
+  }
+
   requestModuleRename(module: string, project: string | null, newName: string): Promise<HostRenameAnswer> {
     const id = this.nextRenameId++;
 

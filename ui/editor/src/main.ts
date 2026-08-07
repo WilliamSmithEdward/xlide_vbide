@@ -989,6 +989,26 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     gotoLocation: { alternativeDefinitionCommand: "" },
   });
 
+  // Undo Rename, which the editor's own undo cannot be.
+  //
+  // A rename edits every module that uses the symbol, and the undo stack is PER MODEL: Ctrl+Z in
+  // the module on screen reverses that module's share and leaves the rest renamed, which is a
+  // half-renamed project — worse than no undo at all. So the reversal is the host's, over the
+  // same modules the rename touched, and it is a command of its own rather than a key that
+  // already means something narrower.
+  editor.addAction({
+    id: "xlide.undoRename",
+    label: "Undo Rename",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.5,
+    run: async () => {
+      const answer = await bridge.requestRenameUndo();
+      bridge.shell?.notify(answer.refused
+        ?? `Rename put back — ${answer.modules.length} module`
+          + `${answer.modules.length === 1 ? "" : "s"}.`);
+    },
+  });
+
   // Find All References, in xlide's own list.
   //
   // The editor's window renders each result by resolving it to a MODEL, and this surface only has

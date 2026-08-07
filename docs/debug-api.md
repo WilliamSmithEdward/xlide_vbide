@@ -79,6 +79,7 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `outline` | GET | `module`, `project` | a module's procedures, from the analyzer: name, kind, line. For asserting on shape without parsing the text again in the caller |
 | `pane` | POST | `action=open\|close`, `module`, `project`, `answer=save\|discard` | opens or closes a module's TAB. A close goes through the same gate the tab's own X uses, so unwritten edits raise the question unless `answer` settles it |
 | `settings` | GET/POST | any setting name | the developer's settings, and a POST changes only what it names — the page's own update takes the whole object |
+| `undoRename` | POST | | puts the last rename back: every module it touched and the component's old name. The editor's own undo cannot, because a rename spans modules and the undo stack is per model |
 | `breakpoints` | GET | | every breakpoint the session holds, per module, and the debug mode. The read that has been missing since the write landed |
 | `type` | POST | body = text, `waitMs` | types into the editor through its own KEYBOARD pipeline, so smart Enter, comment continuation and auto-indent all run. A `
 ` is an Enter, and each segment is given a turn of the loop — typing has gaps, and a script without them tests nothing |

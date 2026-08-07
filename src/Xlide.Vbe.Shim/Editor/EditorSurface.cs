@@ -139,6 +139,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the developer enters a line in the Immediate panel.</summary>
     public Action<string>? EvaluateRequested { get; set; }
 
+    /// <summary>Raised when the developer asks for the last rename to be put back.</summary>
+    public Action<int>? RenameUndoRequested { get; set; }
+
     /// <summary>Raised with an address the page wants opened outside itself.</summary>
     public Action<string>? ExternalOpenRequested { get; set; }
 
@@ -1703,6 +1706,15 @@ internal sealed class EditorSurface : IDisposable
                         && fixEnd >= fixStart)
                     {
                         CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd);
+                    }
+
+                    break;
+
+                case "undoRename":
+                    if (document.RootElement.TryGetProperty("id", out var undoId)
+                        && undoId.TryGetInt32(out var undoRequestId))
+                    {
+                        RenameUndoRequested?.Invoke(undoRequestId);
                     }
 
                     break;

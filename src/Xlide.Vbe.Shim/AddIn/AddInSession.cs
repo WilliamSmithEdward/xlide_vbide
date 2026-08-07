@@ -2377,6 +2377,16 @@ internal sealed class AddInSession : IDisposable
                 }
             }
 
+            case "undoRename":
+            {
+                // The same path the editor's own Undo Rename takes. Here so a probe can prove a
+                // rename is reversible without driving the page, which is the half a rename test
+                // could never assert before.
+                UndoRename(0);
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+            }
+
             case "breakpoints":
             {
                 // Reading what is set. There has been a way to SET a breakpoint since the door
@@ -2681,6 +2691,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
         _editorSurface.EvaluateRequested = EvaluateImmediate;
         _editorSurface.ExternalOpenRequested = OpenExternal;
+        _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
@@ -5983,6 +5994,16 @@ internal sealed class AddInSession : IDisposable
             // the same thread every other module write happens on.
             surface.RunOnHostThread(() =>
             {
+                // What each module holds now, so this can be put back. Read before the first
+                // write, and read from the MODULES rather than reused from the engine's input,
+                // because the editor rewrites what it is handed.
+                _undoableRename = new RenameUndo(
+                    oldName ?? string.Empty,
+                    newName,
+                    null,
+                    _shownProject,
+                    CaptureBefore(modules.Select(entry => entry.Module), _shownProject));
+
                 var written = new List<string>(modules.Length);
                 string? stopped = null;
 
@@ -6094,6 +6115,127 @@ internal sealed class AddInSession : IDisposable
     /// assumed: the editor normalises a name it dislikes, and rewriting every caller to a name it
     /// did not accept would break all of them at once.
     /// </summary>
+    /// <summary>
+    /// What one rename changed, kept so it can be put back.
+    ///
+    /// A rename is the one operation here that edits several modules at once, and the editor's
+    /// undo stack is PER MODEL: Ctrl+Z in the module you are looking at reverses that module's
+    /// share and leaves every other one renamed, which is a half-renamed project and worse than
+    /// no undo at all. So the reversal is the add-in's, over the same modules the rename touched.
+    ///
+    /// One slot. A second rename replaces it — undo goes back one step, the way the operation is
+    /// one step — and the texts are the ones read out of the modules immediately before writing,
+    /// not the ones the engine was given, because the editor rewrites what it is handed.
+    /// </summary>
+    private sealed record RenameUndo(
+        string OldName,
+        string NewName,
+        string? Component,
+        string? ProjectId,
+        (string Module, string Text)[] Before);
+
+    private RenameUndo? _undoableRename;
+
+    /// <summary>Reads what each module holds now, so a rename can be put back exactly.</summary>
+    private (string Module, string Text)[] CaptureBefore(IEnumerable<string> modules, string? projectId)
+    {
+        var captured = new List<(string, string)>();
+
+        foreach (var module in modules)
+        {
+            try
+            {
+                using var component = FindComponent(module, projectId, out _);
+                using var code = component?.GetObject("CodeModule");
+                if (code is null)
+                {
+                    continue;
+                }
+
+                var count = code.GetInt32("CountOfLines");
+                captured.Add((module, count > 0 ? code.GetStringIndexed("Lines", 1, count) ?? string.Empty : string.Empty));
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose($"rename: {module} could not be captured for undo ({ex.GetType().Name})");
+            }
+        }
+
+        return [.. captured];
+    }
+
+    /// <summary>
+    /// Puts the last rename back: every module's text as it was, and the component's old name.
+    ///
+    /// The component goes LAST, mirroring the order the rename does it in. A rename renames the
+    /// component first because that is the only step the host can still refuse; an undo rewrites
+    /// the callers first, so the project is never pointing at a name that does not exist.
+    /// </summary>
+    private void UndoRename(int requestId)
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        if (_undoableRename is not { } undo)
+        {
+            surface.ShowRenamed(requestId, null, null, [], 0, "There is no rename to undo.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(undo.ProjectId);
+        var restored = new List<string>(undo.Before.Length);
+        string? stopped = null;
+
+        foreach (var (module, text) in undo.Before)
+        {
+            // The module answers to its NEW name now, if it was the one renamed.
+            var target = undo.Component is { } renamed
+                && string.Equals(module, renamed, StringComparison.OrdinalIgnoreCase)
+                ? undo.NewName
+                : module;
+
+            try
+            {
+                WriteModule(target, text, undo.ProjectId, hostRewrite: true);
+                restored.Add(module);
+                surface.Sync(target, display, text);
+            }
+            catch (Exception ex)
+            {
+                stopped = $"'{target}' could not be written, so the undo stopped there.";
+                Log.Error($"undo rename: writing {target} failed", ex);
+                break;
+            }
+        }
+
+        if (stopped is null && undo.Component is { } component)
+        {
+            try
+            {
+                using var found = FindComponent(undo.NewName, undo.ProjectId, out _);
+                found?.SetString("Name", component);
+                AdoptRename(undo.NewName, component);
+            }
+            catch (Exception ex)
+            {
+                stopped = $"The editor would not rename '{undo.NewName}' back to '{component}'.";
+                Log.Error($"undo rename: the component would not go back", ex);
+            }
+        }
+
+        Log.Info($"undo rename: {undo.NewName} -> {undo.OldName}, {restored.Count} module(s)");
+
+        // Spent either way. An undo that half-worked must not be offered again, because the
+        // texts it holds no longer describe what is there.
+        _undoableRename = null;
+
+        ComponentsChanged();
+        surface.ShowRenamed(requestId, undo.NewName, undo.OldName, [.. restored], restored.Count, stopped);
+    }
+
     private void ApplyModuleRename(
         int requestId,
         string moduleName,
@@ -6108,6 +6250,10 @@ internal sealed class AddInSession : IDisposable
         }
 
         var display = DisplayFromProjectId(projectId);
+
+        // Captured BEFORE the component is renamed, while every module still answers to the name
+        // it has now — including the one about to change.
+        var before = CaptureBefore(modules.Select(entry => entry.Module), projectId);
 
         string actual;
         try
@@ -6132,6 +6278,8 @@ internal sealed class AddInSession : IDisposable
         }
 
         AdoptRename(moduleName, actual);
+
+        _undoableRename = new RenameUndo(moduleName, actual, moduleName, projectId, before);
 
         var written = new List<string>(modules.Length);
         var replaced = 0;

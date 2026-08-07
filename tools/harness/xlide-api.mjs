@@ -414,6 +414,14 @@ function clientFor(entry) {
     breakpoints: () => call("breakpoints"),
 
     /**
+     * Puts the last rename back — every module it touched, and the component's old name.
+     *
+     * The editor's own undo cannot: a rename edits several modules and the undo stack is per
+     * model, so Ctrl+Z reverses one module's share and leaves the rest renamed.
+     */
+    undoRename: () => call("undoRename", { method: "POST" }),
+
+    /**
      * Types into the editor the way a person does.
      *
      * Through the editor's own keyboard pipeline, so the behaviour that only happens WHILE typing
