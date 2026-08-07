@@ -303,7 +303,34 @@ function clientFor(entry) {
       call(`assert${query({ that, value, timeoutMs })}`, { timeout: timeoutMs + 10000 }),
 
     /** Recent raw durations for percentile work, rather than a max one outlier owns. */
-    perf: () => call("perf"),
+    /**
+     * Everything about how fast this session is.
+     *
+     * `placementMs`/`marshalMs` are the host's raw samples. `engine` is the one that matters and
+     * is new: per analyzer method, split into WAIT (queued behind another call) and CALL (the
+     * round trip). One request is served at a time, so a diagnostics pass over a big module
+     * delays every keystroke's completion behind it, and a combined figure blames completions.
+     *
+     * `reset: true` forgets the engine figures first, so an experiment measures what it provokes
+     * rather than everything since the editor opened.
+     */
+    perf: ({ reset } = {}) => call(`perf${query({ reset: reset ? 1 : undefined })}`),
+
+    /** perf(), ranked and printable: the analyzer methods this session actually spent time in. */
+    async engineCosts({ reset } = {}) {
+      const answer = await this.perf({ reset });
+      return (answer.engine ?? []).map((row) => ({
+        method: row.method,
+        calls: row.calls,
+        totalMs: row.waitTotalMs + row.callTotalMs,
+        waitMs: row.waitTotalMs,
+        callMs: row.callTotalMs,
+        medianMs: row.medianMs,
+        p95Ms: row.p95Ms,
+        worstMs: row.waitMaxMs + row.callMaxMs,
+        refused: row.refused,
+      }));
+    },
 
     /**
      * Waits for a log line to appear, instead of sleeping and hoping. Returns the matching
@@ -392,7 +419,9 @@ function clientFor(entry) {
     },
 
     /**
-     * Times what a person WAITS for, across the boundary: `pagecall`, `hostcall`.
+     * Times what a person WAITS for, across the boundary. `pagecall` is the only scenario:
+     * anything whose effect is DELIVERED by the host thread cannot be observed from inside a
+     * route body, which is on it. For the cost of reaching the host thread read perf().marshalMs.
      *
      * `bench` times the page's own work and `perf` reports the host's; both have looked healthy
      * while the surface felt slow, because the cost was in the crossing that neither measured.
@@ -587,7 +616,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "journal": return api.journal(rest[0]);
       case "history": return api.history();
       case "assert": return api.assert(rest[0], { value: rest[1] });
-      case "perf": return api.perf();
+      case "perf": return api.perf({ reset: rest[0] === "reset" });
+      case "engine": return api.engineCosts({ reset: rest[0] === "reset" });
       case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
       case "eval": return api.eval(rest.join(" "));

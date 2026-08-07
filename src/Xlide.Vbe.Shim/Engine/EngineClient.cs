@@ -642,7 +642,20 @@ internal sealed class EngineClient : IAsyncDisposable
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(30));
 
+        // Timed on both sides of the semaphore, deliberately. One request is served at a time,
+        // so a method's latency is the wait to get on the pipe PLUS the round trip, and only
+        // the second is the analyzer's doing: a diagnostics pass over a large module delays
+        // every keystroke's completion request behind it, and one combined figure reports that
+        // as slow completions. See EngineCounters.
+#if DEBUG
+        var queued = System.Diagnostics.Stopwatch.StartNew();
+#endif
         await _oneCall.WaitAsync(deadline.Token).ConfigureAwait(false);
+#if DEBUG
+        queued.Stop();
+        var served = System.Diagnostics.Stopwatch.StartNew();
+        var refused = false;
+#endif
 
         try
         {
@@ -662,6 +675,9 @@ internal sealed class EngineClient : IAsyncDisposable
             {
                 var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
                 Log.Warn($"engine: {method} refused: {message}");
+#if DEBUG
+                refused = true;
+#endif
                 return null;
             }
 
@@ -670,6 +686,13 @@ internal sealed class EngineClient : IAsyncDisposable
         finally
         {
             _oneCall.Release();
+#if DEBUG
+            // In the finally, so a cancelled or thrown call is counted too. A perf hunt that
+            // silently drops the calls that went wrong is reading the healthy half only.
+            served.Stop();
+            Diagnostics.EngineCounters.Record(
+                method, queued.ElapsedMilliseconds, served.ElapsedMilliseconds, refused);
+#endif
         }
     }
 

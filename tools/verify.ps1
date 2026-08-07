@@ -147,6 +147,23 @@ Step 'page tests' {
     'tree algebra, bundle structure'
 }
 
+Step 'engine language matrix' {
+    # Non-ASCII through the real engine over the real pipe, for every script the companion
+    # product supports. This repo's risk is not the companion's: it never decodes the .xlsm's
+    # bytes, so the exposure is OFFSET ARITHMETIC. Every language feature names a position as a
+    # number of units into the source, and a byte count or a code-point count anywhere in the
+    # chain drifts by the width of the non-ASCII text to its left -- invisible in an English
+    # module, and it corrupts an edit rather than failing.
+    #
+    # A gate step because it cannot be noticed any other way: the fixtures are English.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        node test/language.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the engine language matrix failed' }
+    } finally { Pop-Location }
+    '18 scripts through open, diagnose, outline, definition and rename'
+}
+
 Step 'page probes (headless)' {
     foreach ($probe in 'close-confirm-page-probe.mjs', 'objbrowser-page-probe.mjs') {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1

@@ -1,6 +1,7 @@
 // Engine entry point. Serves one named pipe until the add-in disconnects or asks it to stop.
 
 import net from 'node:net';
+import { StringDecoder } from 'node:string_decoder';
 import { Dispatcher, RpcError } from './dispatcher';
 import { ErrorCode, type JsonRpcRequest, type JsonRpcResponse } from './protocol';
 
@@ -26,10 +27,21 @@ function serve(socket: net.Socket, onShutdown: () => void): void {
 
     socket.setNoDelay(true);
 
+    // A StringDecoder rather than chunk.toString('utf8'), because a socket splits its chunks on
+    // byte boundaries and a multi-byte character straddling two of them decodes to U+FFFD in
+    // each half: the character is destroyed, silently, and only for large payloads. Module
+    // source is exactly the large payload here.
+    //
+    // Latent under the current client: the shim serialises with System.Text.Json, whose default
+    // encoder escapes every non-ASCII character to a \uXXXX sequence, so the bytes arriving are
+    // ASCII and nothing can straddle. Verified by round-tripping a 35KB module of accented text
+    // through the pipe intact (2026-08-07). Fixed anyway: the correctness of this loop should
+    // not rest on an escaping default in another language on the far side of the pipe.
+    const decoder = new StringDecoder('utf8');
     let buffer = '';
 
     socket.on('data', (chunk) => {
-        buffer += chunk.toString('utf8');
+        buffer += decoder.write(chunk);
 
         // One message per line. A partial line is kept until its newline arrives.
         let newline = buffer.indexOf('\n');

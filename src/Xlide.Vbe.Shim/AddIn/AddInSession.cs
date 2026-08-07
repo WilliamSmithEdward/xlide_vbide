@@ -785,7 +785,7 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugHistoryReply(requests, script.ToString()),
+                    new DebugHistoryReply(requests, script.ToString(), DebugServer.RouteCosts()),
                     DebugJsonContext.Default.DebugHistoryReply));
             }
 
@@ -890,8 +890,24 @@ internal sealed class AddInSession : IDisposable
                 // Raw recent durations, so a probe can compute a median and a p95 rather
                 // than reason from a running maximum that one outlier owns forever.
                 var (placementSamples, marshalSamples) = PerfCounters.Samples();
+
+                // reset=1 forgets the analyzer figures, so an experiment measures what it
+                // provokes rather than everything since the editor opened. Session start is
+                // the wrong window for "is THIS change slow".
+                if (request.Query.TryGetValue("reset", out var perfReset) && perfReset != "0")
+                {
+                    EngineCounters.Reset();
+                }
+
+                var (engineMethods, engineSlowest, engineWindow) = EngineCounters.Snapshot();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugPerfReply(placementSamples, marshalSamples, PerfCounters.HeartbeatAgeMs),
+                    new DebugPerfReply(
+                        placementSamples,
+                        marshalSamples,
+                        PerfCounters.HeartbeatAgeMs,
+                        engineMethods,
+                        engineSlowest,
+                        engineWindow),
                     DebugJsonContext.Default.DebugPerfReply));
             }
 
@@ -1303,6 +1319,13 @@ internal sealed class AddInSession : IDisposable
                 // RunPageScript survives this because ExecuteScript's answer comes back by a
                 // path the blocked thread still completes; PostWebMessageAsString does not.
                 // Anything of that second kind is measured ACROSS requests, in the client.
+                //
+                // A `hostcall` scenario lived here briefly and was worse than nothing. It called
+                // RunOnHostThread and timed the return, and RunOnHostThread ENQUEUES and sets a
+                // timer rather than waiting - so it reported 0.001ms and read as "reaching the
+                // host thread is free". The queued action could not have run anyway, for the
+                // reason above. The honest figure for that crossing is perf().marshalMs, which
+                // every api request already samples from the far side of it.
                 var tripRuns = request.Query.TryGetValue("n", out var tripRunsText)
                     && int.TryParse(tripRunsText, out var tripCount)
                     ? Math.Clamp(tripCount, 1, 50)
@@ -1337,25 +1360,13 @@ internal sealed class AddInSession : IDisposable
                         break;
                     }
 
-                    case "hostcall":
-                    {
-                        for (var run = 0; run < tripRuns; run++)
-                        {
-                            var began = System.Diagnostics.Stopwatch.StartNew();
-                            tripSurface.RunOnHostThread(() => { });
-                            began.Stop();
-                            tripSamples.Add(Math.Round(began.Elapsed.TotalMilliseconds, 3));
-                        }
-
-                        tripDetail = "nothing, marshalled onto the host thread and waited for";
-                        break;
-                    }
-
                     default:
                         return DebugError(
-                            $"unknown trip {tripWhat}; try pagecall or hostcall. Anything that has to "
-                            + "observe a POSTED message cannot be measured from in here at all - see the "
-                            + "note on this route - and belongs in the client, the way tripCaret() does");
+                            $"unknown trip {tripWhat}; pagecall is the only one. Anything that has to "
+                            + "observe an effect delivered BY the host thread cannot be measured from in "
+                            + "here at all - see the note on this route - and belongs in the client, the "
+                            + "way tripCaret() does. For the cost of reaching the host thread, read "
+                            + "perf().marshalMs, which every api request already samples from the far side");
                 }
 
                 var tripOrdered = tripSamples.OrderBy(one => one).ToArray();

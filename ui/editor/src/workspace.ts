@@ -246,6 +246,24 @@ class EditorGroup {
     return [...this.shownHere];
   }
 
+  /**
+   * Forgets every tab and everything remembered ABOUT those tabs.
+   *
+   * The per-tab state has to go with the tabs. Emptying `tabs` alone left the MRU stack and the
+   * saved view states holding documents that were no longer open: the stack then decided which
+   * tab a close falls back to, using entries from before the workspace was emptied, which is the
+   * blank-view defect of 2026-08-07 arriving through a second door. The view states are a leak
+   * besides — one monaco view state per document ever shown, for the life of the page.
+   */
+  forget(): void {
+    this.tabs = [];
+    this.active = null;
+    this.pending = null;
+    this.shownHere = [];
+    this.viewStates.clear();
+    this.editor.setModel(null);
+  }
+
   promote(): boolean {
     const survivors = this.tabs.map((tab) => tab.id);
     const remembered = this.shownHere
@@ -270,6 +288,15 @@ class EditorGroup {
     this.tabs = this.tabs.filter((tab) => this.key(tab.id) !== key);
     this.viewStates.delete(key);
     this.shownHere = this.shownHere.filter((held) => held !== key);
+
+    // A group awaiting text for the tab that just left would wait forever: show() refuses a
+    // document the group no longer holds, so nothing would ever clear `pending`, and the
+    // fallback below skips any group that has one. Latent rather than seen — the host re-opens
+    // every live document at ready, so the page rarely lacks a survivor's text — but a stuck
+    // `pending` disables the fallback permanently, which is too sharp an edge to leave.
+    if (this.pending && this.key(this.pending) === key) {
+      this.pending = null;
+    }
 
     if (wasActive) {
       this.active = null;
@@ -604,9 +631,7 @@ export class Workspace {
   /** Empties everything: the host said every pane is closed. */
   clear(): void {
     for (const group of [...this.groups]) {
-      group.tabs = [];
-      group.active = null;
-      group.editor.setModel(null);
+      group.forget();
       group.renderTabs();
     }
     this.dissolveEmptyGroups();

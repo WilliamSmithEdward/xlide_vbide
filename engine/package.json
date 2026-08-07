@@ -9,7 +9,8 @@
     "check-types": "tsc --noEmit",
     "build": "node build.mjs",
     "package": "node build.mjs --package",
-    "test": "node test/smoke.mjs"
+    "test": "node test/smoke.mjs && node test/language.mjs",
+    "test:language": "node test/language.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

@@ -11,6 +11,72 @@ env:
   DOTNET_NOLOGO: 1
 
 jobs:
+  # The ENGINE, which had no CI at all until 2026-08-07 -- including the smoke test that pins
+  # every rename and navigation fix from the adversarial pass.
+  #
+  # It is its own job because it needs the companion repo checked out beside this one: the
+  # analyzer is not vendored here, it is imported straight out of ../xlide_vscode/src, which is
+  # what keeps the two products analysing VBA identically. A job that cannot see it cannot build
+  # the engine, which is why the engine was never built here.
+  #
+  # Ubuntu as well as Windows, deliberately. The engine is plain Node and the language matrix is
+  # about text, so a difference in the runner's ICU build is exactly the kind of thing that shows
+  # up on one platform and not the other. The companion's language job runs both for the same
+  # reason.
+  engine:
+    name: Engine (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xlide_vbide
+
+      # The analyzer. Pinned to nothing: the two move together on purpose, and a green run here
+      # against yesterday's analyzer would be the opposite of what this job is for.
+      - uses: actions/checkout@v4
+        with:
+          repository: WilliamSmithEdward/xlide_vscode
+          path: xlide_vscode
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the companion's dependencies
+        working-directory: xlide_vscode
+        run: npm ci
+
+      - name: Install the engine's dependencies
+        working-directory: xlide_vbide/engine
+        run: npm ci
+
+      - name: Typecheck the engine
+        working-directory: xlide_vbide/engine
+        run: npm run check-types
+
+      - name: Build the engine
+        working-directory: xlide_vbide/engine
+        run: npm run build
+
+      # Analysis over a real pipe: the rename and navigation cases from the bug hunts.
+      - name: Engine smoke
+        working-directory: xlide_vbide/engine
+        run: node test/smoke.mjs
+
+      # Non-ASCII through every path that carries it. This repo's exposure is not the companion's:
+      # it never decodes the workbook's bytes, so what breaks here is OFFSET ARITHMETIC -- a
+      # position counted in bytes or code points rather than UTF-16 code units drifts by the width
+      # of the text to its left, which no English fixture can show and which corrupts an edit
+      # rather than failing one.
+      - name: Language matrix
+        working-directory: xlide_vbide/engine
+        run: node test/language.mjs
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.

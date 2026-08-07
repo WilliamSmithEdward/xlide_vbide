@@ -171,13 +171,13 @@ complete on the day it is written and quietly is not, six routes later.
 | `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
 | `messages` | `messages(last)` | page traffic, both directions |
 | `module` | `readModule(name, project)` / `writeModule(name, text, project)` | through the session's own reader and writer |
-| `perf` | `perf()` | raw placement and marshal durations |
+| `perf` | `perf({reset})` / `engineCosts()` | placement and marshal durations, and the ANALYZER's cost per method |
 | `placement` | `placement()` | forces a placement pass |
 | `problems` | `problems(module)` | the analyzer's findings |
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
 | `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
 | `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters |
-| `trip` | `trip(what, {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
+| `trip` | `trip("pagecall", {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
@@ -235,6 +235,7 @@ ui.focus;                         // model, line, column, and whether the editor
 ui.emptyViewShown;                // a DIFFERENT question from having no tabs
 
 await api.act("closeActive");
+await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-changes box
 await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
@@ -244,6 +245,12 @@ await api.act("closeDialogs");
 `act` answers `{did, detail}`. **`did: false` is an answer, not a failure** — closing a tab when
 nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop
 distinguishing it from a broken door.
+
+> **Closing a module with unsaved changes does not close it.** The host asks the page to confirm,
+> and a Save / Don't Save / Cancel box stands until something answers. `closeActive` reports
+> `did: false` and names what is standing; `answerCloseConfirm` gets past it. This is worth
+> knowing before writing any close loop: five closes in a row once reported success five times
+> while the tab never moved (2026-08-07).
 
 > **Why these exist.** Both replace a habit that cost more than any product defect here. Reading
 > the surface with `querySelectorAll` measures the RENDER and calls it the state, and a stale
@@ -258,9 +265,35 @@ distinguishing it from a broken door.
 
 ```js
 await api.trip("pagecall");   // the floor: a script into the page and back
-await api.trip("hostcall");   // nothing, marshalled onto the host thread and waited for
 await api.tripCaret();        // host caret set, to the PAGE agreeing where it is
 ```
+
+### Where the time actually goes
+
+```js
+await api.perf({ reset: true });        // forget, then provoke the slowness
+// ... type, hover, open modules, whatever feels slow ...
+console.table(await api.engineCosts()); // ranked by total time spent
+(await api.ui()).longTasks;             // main-thread stalls over 50ms, worst first
+(await api.history()).routeCosts;       // the door's own cost, per route
+```
+
+**`engineCosts()` is the one to reach for first.** Every language feature goes down one pipe —
+completions, hover, signature help, diagnostics, navigation, rename, semantic tokens, outline —
+and that pipe serves **one request at a time**. So each method's latency is two things added
+together, and only one is the analyzer's doing:
+
+- **`waitMs`** — queued behind another call. A diagnostics pass over a large module delays every
+  keystroke's completion request behind it.
+- **`callMs`** — the round trip once on the pipe. This one is the analyzer's.
+
+A combined figure reports the first as slow completions and sends the hunt at the wrong file.
+Nothing measured any of this before 2026-08-07: the features a developer feels most had no
+instrument at all.
+
+`longTasks` is the other half. A frame is 16ms; anything over 50ms is a stretch where the surface
+answered no key and painted nothing, and **no host counter can see it** — the host thread was fine
+throughout.
 
 `bench()` times the page's own work and `perf()` reports the host's. Both have read healthy while
 the surface felt slow, because the cost was in the crossing that neither measures. `trip` is wall
@@ -312,6 +345,39 @@ await api.guard(false, { forget: true });
 > **`heartbeatAgeMs` cannot detect a modal.** A VBA modal PUMPS messages, so the host thread keeps
 > completing poll ticks the whole time it is blocked: measured at under 140ms through fourteen
 > seconds of being stuck. What is standing is the only evidence that something is standing.
+
+---
+
+## 3a. Language, and what the host will not store
+
+Two tests, because there are two different exposures and only one of them is ours.
+
+```bash
+node engine	est\language.mjs          # headless, a gate step, 18 scripts
+tools\harness\Test-Language.ps1        # live, needs a running host
+```
+
+**The engine matrix is about OFFSETS.** The companion product decodes the workbook's VBA streams
+itself, so its language risk is code pages; this product never touches those bytes, and its risk
+is arithmetic. Every language feature names a position as a number of units into the source, and
+a byte count or a code-point count anywhere in the chain drifts by the width of the non-ASCII
+text to its left. That is invisible in an English module, gets worse further down the file, and
+corrupts an edit rather than failing one. The matrix drives 18 scripts plus astral emoji through
+open, diagnose, outline, definition (checking line **and column**) and rename (comparing the
+whole produced text). All pass.
+
+**The live probe is about what survives the round trip**, and the headline is not ours:
+
+> **VBA stores module text in the system ANSI code page, not in Unicode.** A character outside
+> that page does not survive being written at all — it comes back as a question mark, from Excel,
+> before xlide sees it. On a Western European system, measured 2026-08-07: accented Latin
+> survives, and Cyrillic, Greek, Hebrew, Arabic, Thai, CJK and emoji do not.
+>
+> This is why the companion product patches `PROJECTCODEPAGE` in its own tests — the code page is
+> a property of the VBA project. Nothing in xlide_vbide can widen it.
+
+The probe reports which scripts survive on the machine it runs on rather than asserting a list,
+and fails only when text reaches COM and is then lost by **our** code.
 
 ---
 

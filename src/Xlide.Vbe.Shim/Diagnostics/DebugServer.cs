@@ -198,6 +198,7 @@ internal sealed class DebugServer : IDisposable
             RecordRequest(method, route, query);
 
             DebugReply body;
+            var servedFrom = Environment.TickCount64;
             try
             {
                 body = _answer(new DebugRequest(route, query, requestBody));
@@ -207,6 +208,10 @@ internal sealed class DebugServer : IDisposable
                 WriteReply(stream, "500 Internal Server Error", DebugReply.Json($"{{\"error\":\"{ex.GetType().Name}\"}}"));
                 return;
             }
+
+            // Timed around the answer, not around the write: a slow client reading its bytes
+            // is not a slow route, and conflating the two sends a perf hunt at the network.
+            RecordDuration(route, Environment.TickCount64 - servedFrom);
 
             WriteReply(stream, "200 OK", body);
         }
@@ -258,6 +263,38 @@ internal sealed class DebugServer : IDisposable
         }
     }
 
+    /*
+     * How long each route takes, in aggregate.
+     *
+     * The door is the instrument every other measurement is taken through, so a route that has
+     * quietly become slow makes everything measured with it look slow, and there was no way to
+     * notice. Ranked by TOTAL rather than worst case: the route to look at is the one a session
+     * actually spends its seconds in.
+     */
+    private static readonly Dictionary<string, (long Count, long TotalMs, long MaxMs)> Durations =
+        new(StringComparer.Ordinal);
+
+    private static void RecordDuration(string route, long elapsedMs)
+    {
+        lock (HistoryGate)
+        {
+            var (count, total, max) = Durations.TryGetValue(route, out var seen) ? seen : (0, 0, 0);
+            Durations[route] = (count + 1, total + elapsedMs, Math.Max(max, elapsedMs));
+        }
+    }
+
+    /// <summary>Each route's count, total and worst, slowest total first.</summary>
+    public static DebugRouteCost[] RouteCosts()
+    {
+        lock (HistoryGate)
+        {
+            return [.. Durations
+                .Select(entry => new DebugRouteCost(
+                    entry.Key, entry.Value.Count, entry.Value.TotalMs, entry.Value.MaxMs))
+                .OrderByDescending(row => row.TotalMs)];
+        }
+    }
+
     private static (string Method, string Target, string Body)? ReadRequest(NetworkStream stream)
     {
         // Headers first; a body follows only when Content-Length says so, and it is capped
@@ -297,13 +334,37 @@ internal sealed class DebugServer : IDisposable
         }
 
         var contentLength = 0;
+        var tooLarge = false;
         foreach (var header in head.Split("\r\n").Skip(1))
         {
             if (header.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)
                 && int.TryParse(header["Content-Length:".Length..].Trim(), out var declared))
             {
-                contentLength = Math.Clamp(declared, 0, buffer.Length - (headerEnd + 4));
+                // REFUSED rather than clamped. A body larger than the buffer used to be silently
+                // shortened to whatever fitted, and the caller most likely to send one is
+                // `module` POST — so an oversized module would be written to the workbook
+                // TRUNCATED, losing the developer's code behind a reply that said it worked. "A
+                // write that fails must fail in its reply, not only in the log" applies to the
+                // door as much as it did to the writer (lessons-2026-08-07).
+                //
+                // Non-ASCII brings the ceiling closer than it looks: this is a BYTE count, and a
+                // Cyrillic or CJK module costs two to three bytes a character.
+                var room = buffer.Length - (headerEnd + 4);
+                if (declared > room)
+                {
+                    tooLarge = true;
+                }
+
+                contentLength = Math.Clamp(declared, 0, room);
             }
+        }
+
+        if (tooLarge)
+        {
+            // Refused by closing rather than by answering: the request was never fully read, and
+            // a 200 for a body that was thrown away is the failure this exists to prevent.
+            Log.Info($"debug api: a body over {buffer.Length} bytes was refused rather than truncated");
+            return null;
         }
 
         var bodyStart = headerEnd + 4;
@@ -802,15 +863,30 @@ public sealed record DebugAssertReply(
     [property: JsonPropertyName("saw")] string Saw);
 
 /// <summary>The requests this door has served, as a script that can be replayed.</summary>
+/// <summary>One route's share of the door's own time.</summary>
+public sealed record DebugRouteCost(
+    [property: JsonPropertyName("route")] string Route,
+    [property: JsonPropertyName("count")] long Count,
+    [property: JsonPropertyName("totalMs")] long TotalMs,
+    [property: JsonPropertyName("maxMs")] long MaxMs);
+
 public sealed record DebugHistoryReply(
     [property: JsonPropertyName("requests")] string[] Requests,
-    [property: JsonPropertyName("script")] string Script);
+    [property: JsonPropertyName("script")] string Script,
+    /// <summary>Each route's count, total and worst time, slowest total first.</summary>
+    [property: JsonPropertyName("routeCosts")] DebugRouteCost[] RouteCosts);
 
 /// <summary>Recent raw durations, for percentiles a running maximum cannot give.</summary>
 public sealed record DebugPerfReply(
     [property: JsonPropertyName("placementMs")] long[] PlacementMs,
     [property: JsonPropertyName("marshalMs")] long[] MarshalMs,
-    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
+    /// <summary>Per analyzer method, most time spent first. The largest cost in the product.</summary>
+    [property: JsonPropertyName("engine")] EngineMethodCost[] Engine,
+    /// <summary>Individual analyzer calls over the slow threshold, newest first: the tail.</summary>
+    [property: JsonPropertyName("engineSlowest")] EngineSlowCall[] EngineSlowest,
+    /// <summary>How long the engine figures cover, since they can be reset per experiment.</summary>
+    [property: JsonPropertyName("engineWindowMs")] long EngineWindowMs);
 
 /// <summary>
 /// What a script run in the page answered with.
@@ -973,8 +1049,14 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugBenchReply))]
 [JsonSerializable(typeof(DebugDoctorReply))]
 [JsonSerializable(typeof(DebugPerfReply))]
+[JsonSerializable(typeof(EngineMethodCost))]
+[JsonSerializable(typeof(EngineMethodCost[]))]
+[JsonSerializable(typeof(EngineSlowCall))]
+[JsonSerializable(typeof(EngineSlowCall[]))]
 [JsonSerializable(typeof(DebugJournalReply))]
 [JsonSerializable(typeof(DebugAssertReply))]
 [JsonSerializable(typeof(DebugHistoryReply))]
+[JsonSerializable(typeof(DebugRouteCost))]
+[JsonSerializable(typeof(DebugRouteCost[]))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
 #endif

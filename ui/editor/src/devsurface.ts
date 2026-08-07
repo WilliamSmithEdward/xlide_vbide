@@ -60,6 +60,10 @@ export interface UiSnapshot {
   settings: Record<string, unknown>;
   /** Whether the empty view is up, which is a different thing from having no tabs. */
   emptyViewShown: boolean;
+  /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
+  longTasks: LongTask[];
+  /** How many models and documents are alive, since a leak shows here first. */
+  census: { models: number; documents: number };
 }
 
 export interface DevSurfaceParts {
@@ -72,17 +76,116 @@ export interface DevSurfaceParts {
 }
 
 /**
- * Every page-side dialog by the id of its root element, which is how each one already tests for
- * its own presence. Names, not selectors, so a probe asserts on "settings" rather than on markup.
+ * Whatever is standing in front of the page, asked of the DOM rather than of a list.
+ *
+ * The first version of this was a hand-kept map of dialog element ids, and it was wrong on the
+ * day it shipped: it did not name `close-confirm-backdrop`, which is the ONE dialog most likely
+ * to be up when something looks stuck. A Save / Don't Save / Cancel box sat on screen through an
+ * entire invariant sweep while this reported no dialogs at all, and every close in that sweep
+ * failed for a reason nothing could see (2026-08-07).
+ *
+ * Every dialog this page builds already marks itself `aria-modal="true"`, because that is what
+ * makes it a dialog to a screen reader. So a new dialog is reported the moment it exists, with no
+ * list to remember to update. The name is its accessible label, its title text, or its id, in that
+ * order of usefulness.
  */
-const DIALOG_IDS: Record<string, string> = {
-  "settings-backdrop": "settings",
-  "help-backdrop": "help",
-  "sponsor-backdrop": "sponsors",
-  "references-backdrop": "references",
-  "objbrowser-card": "object browser",
-  "panes-menu": "panes",
-};
+function dialogsUp(): DialogSnapshot[] {
+  return [...document.querySelectorAll('[aria-modal="true"]')].map((element) => {
+    // The card carries the modal marking; the backdrop is what holds it and what a close removes.
+    const root = element.closest("[id]") ?? element;
+    const label = element.getAttribute("aria-label")
+      ?? element.querySelector("[id$='-title']")?.textContent
+      ?? root.id;
+
+    return { id: root.id || element.id, title: (label ?? "").trim() };
+  });
+}
+
+/**
+ * Long tasks, which is what jank IS.
+ *
+ * A frame is 16ms. Anything holding the main thread longer than 50ms is a stretch during which
+ * the surface answered no key, painted nothing, and scrolled nowhere, and no counter on the host
+ * side can see it: the host thread was fine the whole time.
+ *
+ * Two entry types, because they answer different halves. `longtask` says a stall happened and how
+ * long it was. `long-animation-frame` names the SCRIPT, with its source and the function that
+ * invoked it, which is the difference between "something is slow" and a file to open.
+ *
+ * A CAVEAT worth more than the instrument: **a stall provoked through the `eval` route is not a
+ * page task and neither type sees it.** Testing this by holding the main thread from a debug-api
+ * script reported nothing at all, which reads exactly like a broken observer, and would have read
+ * exactly like "no jank" had it been believed (2026-08-07). Provoke from inside the page — a
+ * setTimeout, a real interaction — or provoke nothing and read what the session collected.
+ */
+interface LongTask {
+  startedAt: number;
+  durationMs: number;
+  /** For a long-animation-frame: the script and the call that ran it. Empty for a bare longtask. */
+  attribution: string;
+}
+
+const longTasks: LongTask[] = [];
+
+function watchLongTasks(): void {
+  // Not every engine ships either type, and a PerformanceObserver constructed with an
+  // unsupported one THROWS rather than observing nothing. Nothing here may take the page down.
+  const supported = (PerformanceObserver.supportedEntryTypes ?? [])
+    .filter((type) => type === "longtask" || type === "long-animation-frame");
+
+  if (supported.length === 0) {
+    return;
+  }
+
+  // ONE OBSERVER PER TYPE, deliberately. `buffered: true` replays what was recorded before the
+  // observer existed, and it is only accepted with the single-`type` form: an `entryTypes` list
+  // takes both types and silently gives up the history, which is exactly where the long ones are.
+  // Page start-up is the worst stretch this product has, and it happens before any of this runs.
+  const install = (type: string) => {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        // A long-animation-frame and a longtask report the SAME stall, so the frame's richer
+        // entry replaces the bare one rather than doubling it.
+        const frame = entry as PerformanceEntry & {
+          scripts?: { name?: string; invoker?: string; sourceURL?: string; duration?: number }[];
+        };
+
+        const worst = (frame.scripts ?? [])
+          .slice()
+          .sort((a, b) => (b.duration ?? 0) - (a.duration ?? 0))[0];
+
+        const attribution = worst
+          ? `${worst.invoker ?? worst.name ?? "?"} ${worst.sourceURL ?? ""}`.trim()
+          : "";
+
+        const startedAt = Math.round(entry.startTime);
+        const already = longTasks.findIndex((one) => Math.abs(one.startedAt - startedAt) <= 2);
+        const row = { startedAt, durationMs: Math.round(entry.duration), attribution };
+
+        if (already >= 0) {
+          // Keep whichever knows more. The bare longtask usually lands first.
+          if (attribution !== "" || (longTasks[already]?.durationMs ?? 0) < row.durationMs) {
+            longTasks[already] = row;
+          }
+        } else {
+          longTasks.push(row);
+        }
+      }
+
+      // Worst first, capped, so one bad minute cannot push out the record holder.
+      longTasks.sort((a, b) => b.durationMs - a.durationMs);
+      longTasks.length = Math.min(longTasks.length, 24);
+    }).observe({ type, buffered: true });
+  };
+
+  for (const type of supported) {
+    try {
+      install(type);
+    } catch {
+      // One type failing must not cost the other. An empty list is honest: nothing observed.
+    }
+  }
+}
 
 /**
  * A boolean argument, from a caller that may have sent one or may have sent a query value.
@@ -102,12 +205,6 @@ function flag(value: unknown, whenMissing: boolean): boolean {
   return Boolean(value);
 }
 
-function dialogsUp(): DialogSnapshot[] {
-  return Object.entries(DIALOG_IDS)
-    .filter(([id]) => document.getElementById(id) !== null)
-    .map(([id, title]) => ({ id, title }));
-}
-
 /**
  * The result of an action: what it did, in words a failing test can print.
  *
@@ -120,8 +217,16 @@ export interface ActResult {
   detail: string;
 }
 
+/** An action's answer. A promise for anything whose outcome crosses to the host and back. */
+type ActAnswer = ActResult | Promise<ActResult>;
+
 export function installDevSurface(parts: DevSurfaceParts): void {
   const { workspace, explorer, bridge } = parts;
+
+  // Installed at wiring time, not at first ask: `buffered: true` recovers what the observer
+  // would have seen slightly earlier, but nothing recovers a stall that happened before the
+  // page had an observer at all, and start-up is where the long ones live.
+  watchLongTasks();
 
   const editorFocus = (): UiSnapshot["focus"] => {
     const editor = workspace.activeEditor();
@@ -152,6 +257,8 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focus: editorFocus(),
     settings: { ...currentSettings() } as unknown as Record<string, unknown>,
     emptyViewShown: workspace.emptyViewShown(),
+    longTasks: [...longTasks],
+    census: bridge.modelCensus(),
   });
 
   /**
@@ -191,14 +298,85 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     };
   };
 
-  const actions: Record<string, (args: Record<string, unknown>) => ActResult> = {
+  const actions: Record<string, (args: Record<string, unknown>) => ActAnswer> = {
+    /*
+     * Closing is a REQUEST, and saying otherwise is how this route lied for an afternoon.
+     *
+     * The host answers a close on a module with unsaved changes by asking the page to confirm,
+     * and the tab stays until somebody answers. The first version reported `did: true, closed
+     * Watcher` five times running while the tab never moved and a Save / Don't Save / Cancel box
+     * stood on screen the whole time. A feature that reports its own success is reporting its
+     * intent (lessons-2026-08-07, finding 14) and this was a fresh instance of it, in the very
+     * route built to stop probes fooling themselves.
+     */
     closeActive: () => {
       const before = workspace.activeDocument();
       if (!before) {
         return { did: false, detail: "nothing is active" };
       }
+
       workspace.closeActive();
-      return { did: true, detail: `closed ${before.module}` };
+
+      // WAITED FOR, because a synchronous answer here can only report the request. The close
+      // crosses to the host and comes back either as the tab leaving or as a confirm box
+      // standing, and neither has happened by the time this line runs. The `act` route awaits a
+      // promise, so the honest answer is reachable; the first version returned immediately and
+      // said `closed Watcher` five times over a tab that never moved.
+      const held = () => workspace.snapshot().groups
+        .some((group) => group.tabs.some((tab) =>
+          tab.module === before.module && tab.project === before.project));
+
+      return (async () => {
+        const deadline = Date.now() + 2000;
+        let gone = 0;
+
+        while (Date.now() < deadline) {
+          await new Promise((wake) => setTimeout(wake, 50));
+
+          // The DIALOG is checked first, and the tab's absence has to hold for two polls.
+          // The two race: a close removes the tab locally before the host's confirm request
+          // arrives, so a loop that took the tab's absence as the answer reported `closed`
+          // with a Save / Don't Save / Cancel box standing on screen (2026-08-07).
+          const standing = dialogsUp();
+          if (standing.length > 0) {
+            return {
+              did: false,
+              detail: `close of ${before.module} is waiting on: ${standing.map((one) => one.title).join(", ")}`,
+            };
+          }
+
+          gone = held() ? 0 : gone + 1;
+          if (gone >= 2) {
+            return { did: true, detail: `closed ${before.module}` };
+          }
+        }
+
+        return { did: false, detail: `close of ${before.module} was asked for and nothing came back` };
+      })();
+    },
+
+    /**
+     * Answers the unsaved-changes box the way a person would.
+     *
+     * Without this the only way past it was a synthesised click on a button found by its text,
+     * which is the guessing this module exists to end. `answer` is save, discard, or cancel.
+     */
+    answerCloseConfirm: (args) => {
+      const answer = String(args.answer ?? "discard").toLowerCase();
+      const wanted = { save: "Save", discard: "Don't Save", cancel: "Cancel" }[answer];
+      if (!wanted) {
+        return { did: false, detail: `answer must be save, discard or cancel; got ${answer}` };
+      }
+
+      const button = [...document.querySelectorAll("#close-confirm-buttons button")]
+        .find((one) => (one.textContent ?? "").trim() === wanted) as HTMLButtonElement | undefined;
+
+      if (!button) {
+        return { did: false, detail: "no unsaved-changes box is up" };
+      }
+
+      button.click();
+      return { did: true, detail: `answered ${wanted}` };
     },
 
     activate: (args) => {
@@ -279,18 +457,28 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
   };
 
-  const act = (name: string, args?: Record<string, unknown>): ActResult => {
+  const act = (name: string, args?: Record<string, unknown>): ActAnswer => {
     const action = actions[name];
     if (!action) {
       return { did: false, detail: `unknown action ${name}; try ${Object.keys(actions).sort().join(", ")}` };
     }
 
+    const named = (error: unknown): ActResult => ({
+      did: false,
+      detail: `${name} threw: ${error instanceof Error ? error.message : String(error)}`,
+    });
+
     try {
-      return action(args ?? {});
+      const answer = action(args ?? {});
+
+      // A rejected promise walks straight past a try/catch, and an action is allowed to be
+      // async now. Without this the door would carry a bare rejection with no stack and no
+      // action name, which is the half worth having.
+      return answer instanceof Promise ? answer.catch(named) : answer;
     } catch (error) {
       // Reported rather than thrown: the door carries a script error as a bare message with no
       // stack, and "which action failed" is the half that goes missing.
-      return { did: false, detail: `${name} threw: ${error instanceof Error ? error.message : String(error)}` };
+      return named(error);
     }
   };
 
