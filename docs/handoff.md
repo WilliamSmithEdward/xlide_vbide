@@ -1155,13 +1155,32 @@ Then, in order of what a VBA developer actually feels:
    `registerCodeActionProvider` is the page side.
 2. **Semantic highlighting.** `analyzer/semantic` is compiled in and unused. One provider, and it
    is what makes the surface look like the product rather than a syntax-highlighted approximation.
-3. **Go to definition, find references.** `symbols/projectIndex` already backs the outline, so this
-   exposes what the index knows rather than building an index.
-4. **IntelliSense depth.** Completion is wired, but measure whether `analyzer/host` -- the 15,000
+3. **Go to definition, find references, and both on the symbol's RIGHT-CLICK menu** (user,
+   2026-08-06: this matters as much as the rest). `symbols/projectIndex` already backs the outline,
+   so this exposes what the index knows rather than building an index. The editor's context menu
+   already exists and is curated per object class (item 2 below), so the entries belong there
+   beside the run and breakpoint commands, not only on F12. References answer across every module
+   in the WORKBOOK, and stop there.
+4. **Rename symbol, across modules and scoped to the workbook** (user, 2026-08-06: cross-module,
+   not in-file; and bounded by the workbook). A VBA project is many modules against one namespace,
+   so a rename that stops at the module boundary is worse than none: it compiles until the module
+   nobody renamed runs. The boundary is the PROJECT, not the session -- two open workbooks can each
+   hold a `Module1` and each hold a `Recalculate`, and they are unrelated, so a rename that reached
+   across workbooks would silently edit someone else's code.
+
+   The identity model already says this: everything is addressed as (workbook, module), and
+   `DisplayFromProjectId` is how the host keeps them apart. Renaming reuses that boundary rather
+   than inventing one. The index that answers find-references is the same one that finds the edit
+   sites, so this follows directly from item 3 rather than being separate work.
+
+   It is the one item with real dependencies rather than just wiring: edits land in modules that
+   may be open, dirty, or closed, so it goes through the host's writer and has to agree with the
+   baselines the unsaved dot and Don't Save both read. Undo across several modules at once is the
+   part to think hardest about. Sequence it after item 3 for the index, not because it is optional.
+5. **IntelliSense depth.** Completion is wired, but measure whether `analyzer/host` -- the 15,000
    lines of generated Excel object model -- actually reaches completions here the way it does in
    the extension. If it does not, that is the largest single IntelliSense gap and it is data
    plumbing, not logic.
-5. **Rename symbol**, last of these: it needs the write path and the close-confirm interaction.
 
 Done means a VBA developer moving between the two products does not notice which one they are in.
 
