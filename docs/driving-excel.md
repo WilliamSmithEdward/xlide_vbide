@@ -138,6 +138,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
+| `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
 | `console` | `console(last)` | what the page said to itself |
 | `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |
 | `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |
@@ -235,23 +236,22 @@ await api.guard(false, { forget: true });
 
 ## 4. Where the api stops
 
-These are not oversights; they are the boundary. Everything here needs COM or CDP.
+These are not oversights; they are the boundary.
 
-| The api cannot | Because |
-| --- | --- |
-| Start or stop Excel | It lives inside the process it would have to start |
-| Open, close or save a workbook | The door drives the EDITOR, not the host application |
-| Add, remove or rename a VBComponent | Only `renameModule` through the page's own flow; a fixture's components are COM |
-| Answer a QUESTION dialog automatically | Deliberate. It declines or acknowledges; it never agrees |
-| Send real mouse or keyboard input to the page | Synthesised DOM events do not reach the editor's own mouse handling — use CDP |
-| Reach a second Excel process | One door per add-in session; `discover()` lists them, each with its own port |
-| Run in a Release build | The whole door is `#if DEBUG` |
+| The api cannot | Because | Instead |
+| --- | --- | --- |
+| Start or stop Excel | It lives inside the process it would have to start | `Start-Excel.ps1`; no trust setting needed |
+| Open, close or save a workbook | The door drives the EDITOR, not the host application | Excel's own object model; not gated |
+| Answer a QUESTION dialog automatically | Deliberate. It declines or acknowledges; it never agrees | `dismiss(button)` by name, when you know |
+| Send real mouse or keyboard input to the page | Synthesised DOM events do not reach the editor's own mouse handling | CDP, section 6 |
+| Reach a second Excel process | One door per add-in session | `discover()` lists them, each with its own port |
+| Run in a Release build | The whole door is `#if DEBUG` | — |
 
 ---
 
 ## 4a. "Trust access to the VBA project object model"
 
-**The add-in does not need it. The harness does.**
+**Neither the add-in nor the normal harness needs it. Drive with it OFF.**
 
 That setting — Trust Center → Macro Settings → *Trust access to the VBA project object model*,
 `HKCU\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM` — is a barrier on the way IN from
@@ -263,12 +263,16 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | --- | --- | --- |
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
 | The debug api | **no** | The door runs inside the add-in's own process and calls the same objects |
-| `Start-Excel.ps1` | **yes** | `$excel.VBE.MainWindow.Visible` is automation reaching in |
-| `New-RenameFixture.ps1` | **yes** | `$book.VBProject.VBComponents.Add` |
-| Any COM verification | **yes** | Reading a module back independently is the same reach |
+| `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` — Excel running its own ribbon button — not through `$excel.VBE` |
+| Building a fixture | **no** | `api.component()` adds, renames and removes from inside |
+| Reading a module back | **no** | `api.readModule()` reads the real object model, from inside |
+| Running a procedure | **no** | `Application.Run` is not gated (measured) |
+| `New-RenameFixture.ps1` | **yes** | Predates the `component` route and still uses `$book.VBProject` |
+| Verifying WITHOUT the add-in | **yes** | See the warning in section 5 |
 
-This is worth caring about: needing a security setting changed before a product works at all is a
-real adoption barrier, and xlide does not have one.
+This is worth caring about twice over: needing a security setting changed before a product works
+is a real adoption barrier, and xlide does not have one — and a harness that leaves the setting off
+is a harness that cannot be blamed for what a macro does while it runs.
 
 **Verified 2026-08-07, with the box unticked and `AccessVBOM = 0`:**
 
@@ -297,36 +301,73 @@ harness working again.
 
 ---
 
-## 5. What still needs COM
+## 5. COM, and how little of it is left
 
-Through `Start-Excel.ps1`'s attach, or the same three calls in your own script.
+**Everything a harness normally needs works with the trust setting OFF.** Only the ungated part of
+Excel's object model is used, and the rest goes through the door.
 
-**Building a fixture.** Adding components, naming them, filling them:
+| Job | How | Trust setting |
+| --- | --- | --- |
+| Start Excel | `Start-Process EXCEL.EXE <workbook>` | not needed |
+| Attach to Excel | `AccessibleObjectFromWindow(EXCEL7, OBJID_NATIVEOM)` | not needed |
+| Open the editor | `$excel.CommandBars.ExecuteMso('VisualBasic')` | not needed |
+| Open, close, save a workbook | `$excel.Workbooks…` | not needed |
+| Run a procedure | `$excel.Run('Module.Proc')`, or `api.immediate()` | not needed |
+| **Build a fixture** | `api.component("add"/"rename"/"remove")` + `api.writeModule()` | **not needed** |
+| **Read a module back** | `api.readModule(name)` — the real object model, read from inside | **not needed** |
+| Compile and read the errors | `api.compile()` | not needed |
 
-```powershell
-$component = $project.VBComponents.Add(1)      # 1 standard, 2 class, 3 form
-$component.Name = 'Helpers'
-$component.CodeModule.AddFromString($code)
+Building a fixture through the door:
+
+```js
+await api.component("add", { kind: 1, name: "Helpers" });   // 1 standard, 2 class, 3 form
+await api.writeModule("Helpers", source);
+…
+await api.component("rename", { name: "Helpers", newName: "Aides" });
+await api.component("remove", { name: "Aides" });
 ```
 
-`tools\New-RenameFixture.ps1` is the worked example. Note `Circle` is not available as a module
-name — the Excel object library owns it, and VBA refuses with a bare HRESULT.
+`name` comes back as the component actually ended up named, not as it was asked for. A name the
+editor refuses outright — `Circle` belongs to the Excel object library — is reported as a refusal
+**and nothing is added**, so a failed name never leaves a stray `Module1` behind.
 
-**Verifying independently.** The most valuable thing COM does here: read the VBA project back
-*without going through the add-in*, so a feature is proved by the object model rather than by the
-editor's own report of what it did. That distinction found two real defects on 2026-08-06.
+> A `Run` against a project that does not compile fails for a reason that has nothing to do with
+> what you asked. Check `compile()` first, or your experiment is measuring the wrong thing — which
+> is exactly how a shadowing question got answered wrongly on 2026-08-07 before being redone in a
+> workbook of its own.
+
+### ⚠️ The part that still needs the trust setting
+
+> ## ⚠️ Requires "Trust access to the VBA project object model"
+>
+> **Everything below needs that box ticked in Trust Center → Macro Settings. Nothing above does.**
+>
+> **Consider carefully before turning it on.** It is off by default for a reason: with it on, ANY
+> macro or automation running as you can rewrite the VBA of any open workbook. That is the
+> mechanism of the self-replicating macro virus, and it is why the setting exists at all. Turn it
+> on for a session that needs it, and turn it back off.
+
+**Reaching the project from outside the add-in.** `Workbook.VBProject` and `Application.VBE`, from
+a script rather than from inside:
 
 ```powershell
+$project = $book.VBProject                  # null without the setting
 $code = $project.VBComponents.Item('Helpers').CodeModule
 $text = $code.Lines(1, $code.CountOfLines)
 ```
 
-**Running a procedure.** `$excel.Run('Module.Procedure')`.
+There is exactly one reason left to want this, and it is a good one: **verifying without trusting
+the thing under test.** `api.readModule` reads the real object model, but it reads it through the
+add-in. When the question is "did the add-in actually do what it said", an answer that comes back
+through the add-in is weaker evidence than one that does not — and that distinction found two real
+defects on 2026-08-06.
 
-> A `Run` against a project that does not compile fails for a reason that has nothing to do with
-> what you asked. Check `compile()` first, or your experiment is measuring the wrong thing —
-> which is exactly how a shadowing question got answered wrongly on 2026-08-07 before being redone
-> in a workbook of its own.
+`tools\New-RenameFixture.ps1` still takes this route, because it predates the `component` route.
+It works, and it needs the setting; the door does the same job without it.
+
+> **The refusal is a NULL, not an exception**, at least through PowerShell's COM binder. `$excel.VBE`
+> simply evaluates to nothing, so `try { … } catch { }` reports success and prints an empty string.
+> Test it as `$null -eq $excel.VBE`, or your experiment will say the gate is open when it is shut.
 
 ---
 

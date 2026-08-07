@@ -210,6 +210,24 @@ function clientFor(entry) {
      */
     documents: () => call("documents"),
 
+    /**
+     * Adds, renames or removes a component — the pieces a fixture is made of.
+     *
+     * Done from INSIDE, which is the point: reaching in through `Workbook.VBProject` needs "Trust
+     * access to the VBA project object model" turned on, and the add-in is already past that gate
+     * because the host hands it the VBE. So a fixture can be built with the setting OFF.
+     *
+     *   await api.component("add", { kind: 1, name: "Helpers" });
+     *   await api.writeModule("Helpers", source);
+     *   await api.component("remove", { name: "Helpers" });
+     *
+     * `name` comes back as the component actually ended up named, not as it was asked for: the
+     * editor normalises what it dislikes, and refuses some outright — `Circle` belongs to the
+     * Excel object library.
+     */
+    component: (action, { kind, name, newName, project } = {}) =>
+      call(`component${query({ action, kind, name, newName, project })}`, { method: "POST" }),
+
     /** The start-of-session sanity check: right build, everything attached, nothing standing. */
     doctor: () => call("doctor"),
 

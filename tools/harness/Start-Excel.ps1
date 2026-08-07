@@ -137,14 +137,41 @@ if ($null -eq $window) { throw "Could not reach Excel $($process.Id) through its
 
 $excel = $window.Application
 $excel.DisplayAlerts = $false
-$excel.VBE.MainWindow.Visible = $true
 
-$project = $excel.VBE.ActiveVBProject
-Write-Host "Editor open. $($project.Name):"
-foreach ($component in $project.VBComponents) {
-    Write-Host ("  {0,-16} type {1}" -f $component.Name, $component.Type)
+# The editor is opened through Excel's OWN ribbon command, not through $excel.VBE.
+#
+# That matters more than it looks: `Application.VBE` and `Workbook.VBProject` are exactly what
+# "Trust access to the VBA project object model" refuses, and with it off they come back NULL —
+# not an exception, a null, so a try/catch reports success and prints nothing. ExecuteMso is
+# Excel executing its own Developer > Visual Basic button, and is not gated. So this script, and
+# everything the debug api does after it, works with that setting OFF (verified 2026-08-07).
+$excel.CommandBars.ExecuteMso('VisualBasic')
+Write-Host 'Editor opened (through the ribbon command, which needs no VBA project trust).'
+
+# What is in the project is asked of the DOOR, for the same reason.
+$listed = $false
+$deadline = (Get-Date).AddSeconds(30)
+while (-not $listed -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 500
+    try {
+        $answer = & node (Join-Path $PSScriptRoot 'xlide-api.mjs') doctor 2>$null | Out-String
+        if ($answer -match '"healthy"') {
+            $listed = $true
+            if ($answer -match '"healthy":\s*true') {
+                Write-Host 'The add-in is up and its door is healthy.' -ForegroundColor Green
+            }
+            else {
+                Write-Host 'The add-in is up but the doctor has findings:' -ForegroundColor Yellow
+                Write-Host $answer
+            }
+        }
+    }
+    catch { }
+}
+
+if (-not $listed) {
+    Write-Host 'The door did not answer. Debug build? Registered? Try: node tools\harness\xlide-api.mjs doctor' -ForegroundColor Yellow
 }
 
 Write-Host ''
 Write-Host "pid=$($process.Id)"
-Write-Host 'Ask the door whether it is healthy:  node tools\harness\xlide-api.mjs doctor'

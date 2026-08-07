@@ -2044,6 +2044,178 @@ internal sealed class AddInSession : IDisposable
                     new DebugWindowsReply([.. rows]), DebugJsonContext.Default.DebugWindowsReply);
             }
 
+            case "component" when request.Query.TryGetValue("action", out var componentAction):
+            {
+                // Adding, renaming and removing components, from INSIDE.
+                //
+                // This is what a fixture is made of, and until now it was the one thing a harness
+                // had to reach in through `Workbook.VBProject` for — which needs "Trust access to
+                // the VBA project object model" turned on. The add-in is already past that gate:
+                // the host hands it the VBE at OnConnection. So the fixture can be built through
+                // the door, and the setting can stay off (2026-08-07).
+                request.Query.TryGetValue("name", out var componentName);
+                request.Query.TryGetValue("project", out var componentProject);
+                var componentOwner = ProjectIdFromDisplay(componentProject) ?? _shownProject;
+
+                try
+                {
+                    switch (componentAction)
+                    {
+                        case "add":
+                        {
+                            // 1 standard, 2 class, 3 form — the VBE's own numbering.
+                            var kind = request.Query.TryGetValue("kind", out var kindText)
+                                && int.TryParse(kindText, out var parsedKind) ? parsedKind : 1;
+
+                            if (kind is not (1 or 2 or 3))
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply($"kind {kind} is not 1, 2 or 3"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            using var project = FindProjectByDisplayName(componentProject)
+                                ?? _editor.GetObject("ActiveVBProject");
+                            using var components = project?.GetObject("VBComponents");
+                            using var added = components?.CallObject("Add", kind);
+                            if (added is null)
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply("the project would not add a component"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            // Named here rather than left as Module1, because a fixture is its
+                            // names. The editor refuses some outright — Circle is owned by the
+                            // Excel object library — and says so with a bare HRESULT, so the
+                            // refusal is reported with the name that caused it.
+                            if (componentName is { Length: > 0 })
+                            {
+                                try
+                                {
+                                    added.SetString("Name", componentName);
+                                }
+                                catch (Exception ex)
+                                {
+                                    // Taken back out. A refused name otherwise leaves a Module1
+                                    // nobody asked for, in a project a fixture is about to make
+                                    // claims about — and the next run finds it and is confused by
+                                    // it. Add either produces the component that was asked for or
+                                    // produces nothing.
+                                    try { components?.InvokeWithObject("Remove", added); }
+                                    catch (Exception undo) { Log.Warn($"component: could not undo the add ({undo.GetType().Name})"); }
+
+                                    return System.Text.Json.JsonSerializer.Serialize(
+                                        new DebugErrorReply(
+                                            $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})"),
+                                        DebugJsonContext.Default.DebugErrorReply);
+                                }
+                            }
+
+                            var finalName = added.GetString("Name") ?? string.Empty;
+                            Log.Info($"component: added {finalName} (kind {kind})");
+
+                            // The strip is published from the editor's pane list, and nothing
+                            // republishes it on its own. Without this a component that was renamed
+                            // or removed kept its old tab, so a fixture built through the door
+                            // left the surface describing a project that no longer existed.
+                            PublishModules();
+                            _analysis?.Reanalyse();
+
+                            return System.Text.Json.JsonSerializer.Serialize(
+                                new DebugComponentReply(true, finalName, "add"),
+                                DebugJsonContext.Default.DebugComponentReply);
+                        }
+
+                        case "remove":
+                        {
+                            if (componentName is not { Length: > 0 })
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply("remove needs a name"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            using var doomed = FindComponent(componentName, componentOwner, out var removedFrom);
+                            if (doomed is null)
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply($"'{componentName}' is not a component of this project"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            using var owningProject = FindProjectByDisplayName(
+                                DisplayFromProjectId(removedFrom ?? componentOwner))
+                                ?? _editor.GetObject("ActiveVBProject");
+                            using var holding = owningProject?.GetObject("VBComponents");
+                            if (holding is null)
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply("the project would not open its component list"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            // Remove takes the COMPONENT, not an index, so it goes through the
+                            // object-argument path rather than the integer one.
+                            holding.InvokeWithObject("Remove", doomed);
+
+                            Log.Info($"component: removed {componentName}");
+                            PublishModules();
+                            _analysis?.Reanalyse();
+
+                            return System.Text.Json.JsonSerializer.Serialize(
+                                new DebugComponentReply(true, componentName, "remove"),
+                                DebugJsonContext.Default.DebugComponentReply);
+                        }
+
+                        case "rename":
+                        {
+                            // The COMPONENT only. Renaming a module AND everything that names it
+                            // is `renameModule` through the page, which is a different operation
+                            // with an engine behind it; this is the fixture-building primitive.
+                            if (componentName is not { Length: > 0 }
+                                || !request.Query.TryGetValue("newName", out var newName)
+                                || newName.Length == 0)
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply("rename needs name and newName"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            using var target = FindComponent(componentName, componentOwner, out _);
+                            if (target is null)
+                            {
+                                return System.Text.Json.JsonSerializer.Serialize(
+                                    new DebugErrorReply($"'{componentName}' is not a component of this project"),
+                                    DebugJsonContext.Default.DebugErrorReply);
+                            }
+
+                            target.SetString("Name", newName);
+                            var readBack = target.GetString("Name") ?? newName;
+                            Log.Info($"component: renamed {componentName} to {readBack}");
+                            PublishModules();
+                            _analysis?.Reanalyse();
+
+                            return System.Text.Json.JsonSerializer.Serialize(
+                                new DebugComponentReply(true, readBack, "rename"),
+                                DebugJsonContext.Default.DebugComponentReply);
+                        }
+
+                        default:
+                            return System.Text.Json.JsonSerializer.Serialize(
+                                new DebugErrorReply($"unknown action {componentAction}; use add, remove or rename"),
+                                DebugJsonContext.Default.DebugErrorReply);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"component: {componentAction} failed", ex);
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"{componentAction} failed: {ex.Message.Trim()}"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+            }
+
             case "documents":
             {
                 // What the surface actually HOLDS, as opposed to what the strip draws. A module

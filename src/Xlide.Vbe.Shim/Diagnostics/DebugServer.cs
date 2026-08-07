@@ -672,6 +672,18 @@ public sealed record DebugCompileReply(
     [property: JsonPropertyName("errors")] string[] Errors,
     [property: JsonPropertyName("project")] string Project);
 
+/// <summary>
+/// What became of a component the door was asked to add, rename or remove.
+///
+/// Name is read BACK from the component rather than echoed: the editor normalises names it
+/// dislikes, and a fixture built on the name that was asked for rather than the one that exists
+/// is a fixture that addresses something else.
+/// </summary>
+public sealed record DebugComponentReply(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("action")] string Action);
+
 /// <summary>One document the HOST is holding text for, and whether the page was given it.</summary>
 public sealed record DebugDocumentRow(
     [property: JsonPropertyName("module")] string Module,
@@ -883,6 +895,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogRow))]
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugGuardReply))]
+[JsonSerializable(typeof(DebugComponentReply))]
 [JsonSerializable(typeof(DebugCompileReply))]
 [JsonSerializable(typeof(DebugDocumentsReply))]
 [JsonSerializable(typeof(DebugEvalReply))]
