@@ -91,6 +91,31 @@ Step 'vendored spec' {
     if ($out -match 'not present') { 'manifest only' } else { 'matches the spec repo' }
 }
 
+Step 'engine executable is current' {
+    # The add-in launches engine\dist\xlide-engine.exe, NOT engine\dist\engine.cjs. `npm run build`
+    # writes only the bundle; only `npm run package` rebuilds the executable. So an engine change
+    # can be built, tested against the bundle, committed, and published, while the thing that
+    # actually runs is hours old and refuses every new method as unknown.
+    #
+    # That happened on 2026-08-06, and the only reason it surfaced was a live session's log. This
+    # step is the cheap version of that log: if any engine source is newer than the executable, the
+    # executable is stale, and no amount of green elsewhere means anything.
+    $engineRoot = Join-Path $repoRoot 'engine'
+    $exe = Join-Path $engineRoot 'dist\xlide-engine.exe'
+    if (-not (Test-Path $exe)) { throw 'engine\dist\xlide-engine.exe has never been packaged; run npm run package in engine\' }
+
+    $builtAt = (Get-Item $exe).LastWriteTimeUtc
+    $newer = @(Get-ChildItem (Join-Path $engineRoot 'src') -Recurse -File |
+        Where-Object { $_.LastWriteTimeUtc -gt $builtAt })
+
+    if ($newer.Count -gt 0) {
+        $names = ($newer | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
+        throw "engine sources are newer than the packaged executable ($names). Run: npm run package --prefix engine"
+    }
+
+    'packaged after every engine source'
+}
+
 Step 'page typecheck' {
     Push-Location $pageRoot
     try {
