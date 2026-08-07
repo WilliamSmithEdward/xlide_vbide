@@ -396,11 +396,11 @@ export class Shell {
     this.shell.classList.toggle("empty", empty);
     this.statusModule.textContent = empty ? "" : this.statusModule.textContent;
 
-    // Nothing open means nothing is being worked on, so the tree stops claiming otherwise: the
-    // unfolded module's procedures fold away. The workbooks stay as they were — that is a choice
-    // someone made, and closing every tab is not a reason to undo it.
+    // Nothing open means nothing is being worked on, so the tree stops claiming otherwise and
+    // folds all the way back: procedures and workbooks both. Opening anything unfolds its
+    // workbook again on the way in.
     if (empty) {
-      this.explorer.collapseModules();
+      this.explorer.collapseAll();
     }
 
     this.handlers.layoutChanged();

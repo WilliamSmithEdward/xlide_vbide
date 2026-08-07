@@ -11,6 +11,8 @@
  * line. Expansion is an accordion: one module open at a time, following the module being edited,
  * and activating a module in another workbook moves the whole tree's attention there. A workbook
  * the developer collapsed by hand stays collapsed until the attention genuinely moves again.
+ * Closing the last tab folds the whole thing back, workbooks included: with nothing open there is
+ * nothing for the tree to be following, and it should read as at rest rather than half unpacked.
  *
  * All of that following is one setting — "Explorer follows the editor", on by default. Off, the
  * tree does nothing on its own: it unfolds what is clicked and stays as it was left, which is the
@@ -350,21 +352,39 @@ export class Explorer {
   }
 
   /**
-   * Folds every module's procedures away, leaving the workbooks as they are.
+   * Folds the tree all the way back: every module's procedures, and every workbook.
    *
-   * Called when the last tab closes. The tree's unfolded module is the accordion's memory of what
-   * was being worked on, and once nothing is open there is no such thing — leaving a module's
-   * procedures hanging open under an empty editor points at work that is no longer there (the
-   * developer, 2026-08-07). Which WORKBOOKS are open is a different kind of state, chosen by hand,
-   * and closing every tab is not a reason to undo it.
+   * Called when the last tab closes. The unfolded module is the accordion's memory of what was
+   * being worked on, and once nothing is open there is no such thing, so procedures hanging open
+   * under an empty editor point at work that is no longer there.
+   *
+   * The workbooks go too. That is a reversal of the first version, which kept them on the grounds
+   * that an expanded workbook is a hand-made choice: with nothing open at all, the tree should be
+   * back where it starts rather than half unpacked (the developer, 2026-08-07). Opening anything
+   * expands its workbook again on the way in.
+   *
+   * Nothing here happens when the tree has been told not to follow the editor.
    */
-  collapseModules(): void {
-    if (this.expandedModule === null || !currentSettings().treeFollowsEditor) {
+  collapseAll(): void {
+    if (!currentSettings().treeFollowsEditor) {
+      return;
+    }
+
+    const wasUnfolded = this.expandedModule !== null
+      || [...this.expandedWorkbooks.values()].some((open) => open);
+
+    if (!wasUnfolded) {
       return;
     }
 
     this.expandedModule = null;
     this.expandedModuleWorkbook = null;
+    this.expandedWorkbooks.clear();
+
+    // Forgotten too, or the next activation would count as "the attention has not moved" and
+    // leave the workbook it lands in closed.
+    this.attentionWorkbook = null;
+
     this.render();
   }
 
