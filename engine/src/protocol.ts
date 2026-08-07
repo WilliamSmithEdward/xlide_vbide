@@ -306,6 +306,40 @@ export interface CodeActionResult {
 }
 
 /**
+ * textDocument/definition and textDocument/references: where the identifier at an offset is
+ * declared, and everywhere else it is used.
+ *
+ * Both are answered within one workbook and never across two. Two open workbooks can each hold a
+ * Module1 and a Recalculate, and they are unrelated. Same liveness rule as completion for the
+ * module being typed in; the other modules answer from the live text the engine holds for them,
+ * because the answer is a line the surface will scroll to and the surface shows live text.
+ */
+export interface NavigationParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset into that source. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+    /** references only: whether the declaration itself is one of the answers. */
+    includeDeclaration?: boolean;
+}
+
+/** One place in the workbook: which module, and a 1-based line and column into its live text. */
+export interface LocationPayload {
+    module: string;
+    line: number;
+    column: number;
+    length: number;
+}
+
+export interface NavigationResult {
+    locations: LocationPayload[];
+}
+
+/**
  * textDocument/semanticTokens: the analysed colouring of a whole module — which identifiers name
  * types, which kind of type each names, and which are host globals nothing has shadowed. Same
  * liveness rule as completion.

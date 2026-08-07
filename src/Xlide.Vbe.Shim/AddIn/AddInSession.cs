@@ -2043,6 +2043,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
+        _editorSurface.NavigationRequested = OnNavigationRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
@@ -5111,6 +5112,52 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures, failed));
+        });
+    }
+
+    /// <summary>
+    /// Answers a navigation request from the surface: where the symbol at the caret is declared,
+    /// or everywhere in the workbook it is used.
+    ///
+    /// Every answer names a module of the SHOWN workbook, which is the invariant that makes one
+    /// display name right for all of them: the engine resolves within one project and never
+    /// across two, because two open workbooks can each hold a Module1 and a Recalculate.
+    /// </summary>
+    private void OnNavigationRequested(int requestId, int offset, bool references, bool includeDeclaration)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowLocations(requestId, []);
+            return;
+        }
+
+        var workbook = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceLocation[] locations = [];
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var answered = await analysis
+                    .NavigateAsync(module, offset, references, includeDeclaration, deadline.Token)
+                    .ConfigureAwait(false);
+
+                locations = [.. answered.Select(location => new SurfaceLocation(
+                    location.Module, workbook, location.Line, location.Column, location.Length))];
+
+                Log.Info($"{(references ? "references" : "definition")}: {module}@{offset} -> {locations.Length}");
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"{(references ? "references" : "definition")}: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowLocations(requestId, locations));
         });
     }
 

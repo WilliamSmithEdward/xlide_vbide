@@ -336,6 +336,32 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineCodeActions);
     }
 
+    /// <summary>
+    /// Asks where the identifier at an offset is declared, or everywhere it is used. One method
+    /// for both because the request and the answer are the same shape; the engine names which.
+    /// </summary>
+    public async Task<EngineLocations?> NavigateAsync(
+        string method,
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int offset,
+        bool includeDeclaration,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+            ["offset"] = offset,
+            ["includeDeclaration"] = includeDeclaration,
+        };
+
+        var result = await CallAsync(method, payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineLocations);
+    }
+
     /// <summary>Asks for a module's colouring: the type references and host globals it holds.</summary>
     public async Task<EngineSemanticTokens?> SemanticTokensAsync(
         string projectId,

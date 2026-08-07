@@ -92,6 +92,17 @@ public sealed record EngineCodeAction(
 public sealed record EngineCodeActions(
     [property: JsonPropertyName("actions")] EngineCodeAction[] Actions);
 
+/// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
+public sealed record EngineLocation(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("column")] int Column,
+    [property: JsonPropertyName("length")] int Length);
+
+/// <summary>Where a symbol is declared, or everywhere it is used. Never crosses a workbook.</summary>
+public sealed record EngineLocations(
+    [property: JsonPropertyName("locations")] EngineLocation[] Locations);
+
 /// <summary>
 /// One coloured span. The type is the analyzer's vocabulary — class, enum, struct, type,
 /// variable — and the only modifier used is defaultLibrary, which marks a host global.
@@ -169,6 +180,8 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineCodeActions))]
 [JsonSerializable(typeof(EngineSemanticToken))]
 [JsonSerializable(typeof(EngineSemanticTokens))]
+[JsonSerializable(typeof(EngineLocation))]
+[JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
 [JsonSerializable(typeof(EngineProjectOpened))]

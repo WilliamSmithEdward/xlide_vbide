@@ -193,6 +193,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
     public Action<int, int, int>? CodeActionsRequested { get; set; }
 
+    /// <summary>
+    /// Raised when the page asks where a symbol is declared or used:
+    /// (requestId, offset, wantsReferences, includeDeclaration).
+    /// </summary>
+    public Action<int, int, bool, bool>? NavigationRequested { get; set; }
+
     /// <summary>Raised when the page asks for a module's procedures: (requestId, moduleName,
     /// workbook or null).</summary>
     public Action<int, string, string?>? OutlineRequested { get; set; }
@@ -307,6 +313,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new CodeActionResultMessage("codeActionResult", requestId, actions),
             EditorMessageContext.Default.CodeActionResultMessage));
+    }
+
+    /// <summary>Answers one navigation request. Never held: the caret moves and the answer lapses.</summary>
+    public void ShowLocations(int requestId, SurfaceLocation[] locations)
+    {
+        ArgumentNullException.ThrowIfNull(locations);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new NavigationResultMessage("navigationResult", requestId, locations),
+            EditorMessageContext.Default.NavigationResultMessage));
     }
 
     /// <summary>Answers one colouring request. Failed keeps what the page already shows.</summary>
@@ -1557,6 +1578,29 @@ internal sealed class EditorSurface : IDisposable
                         && fixEnd >= fixStart)
                     {
                         CodeActionsRequested?.Invoke(fixRequestId, fixStart, fixEnd);
+                    }
+
+                    break;
+
+                case "definition":
+                case "references":
+                    if (document.RootElement.TryGetProperty("id", out var navId)
+                        && navId.TryGetInt32(out var navRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var navOffsetElement)
+                        && navOffsetElement.TryGetInt32(out var navOffset)
+                        && navOffset >= 0)
+                    {
+                        // The declaration counts as a use unless the page says otherwise, which
+                        // is what the editor's own "find all references" means by the word.
+                        var includeDeclaration =
+                            !document.RootElement.TryGetProperty("includeDeclaration", out var declElement)
+                            || declElement.ValueKind != JsonValueKind.False;
+
+                        NavigationRequested?.Invoke(
+                            navRequestId,
+                            navOffset,
+                            type.GetString() == "references",
+                            includeDeclaration);
                     }
 
                     break;

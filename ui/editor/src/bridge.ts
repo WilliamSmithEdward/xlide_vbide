@@ -76,6 +76,7 @@ export type HostMessage =
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
+  | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -171,6 +172,18 @@ export interface HostSemanticToken {
   modifiers?: string[] | null;
 }
 
+/**
+ * One place in the workbook: which module, its workbook when the host names one, and a 1-based
+ * line and column into that module's live text.
+ */
+export interface HostLocation {
+  module: string;
+  workbook?: string | null;
+  line: number;
+  column: number;
+  length: number;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -254,6 +267,8 @@ export type ClientMessage =
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "codeAction"; id: number; start: number; end: number }
   | { type: "semanticTokens"; id: number; module: string; project?: string }
+  | { type: "definition"; id: number; offset: number }
+  | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -400,6 +415,12 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Navigation requests awaiting their answers, by request identifier. */
+  private readonly pendingNavigations = new Map<number, {
+    resolve: (locations: HostLocation[]) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   /** Outline requests awaiting their answers, by request identifier. */
   private readonly pendingOutlines = new Map<number, {
     resolve: (procedures: HostProcedure[] | null) => void;
@@ -412,6 +433,7 @@ export class EditorBridge {
   private nextCanonicalCaseId = 1;
   private nextCodeActionId = 1;
   private nextSemanticTokensId = 1;
+  private nextNavigationId = 1;
   private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -748,6 +770,46 @@ export class EditorBridge {
   }
 
   /**
+   * Asks the host where the symbol at an offset is declared, or everywhere in the workbook it is
+   * used. Resolves empty rather than rejecting: navigation that fails is a click that does not
+   * move the cursor.
+   */
+  requestNavigation(
+    offset: number,
+    references: boolean,
+    includeDeclaration = true,
+  ): Promise<HostLocation[]> {
+    const id = this.nextNavigationId++;
+
+    return new Promise<HostLocation[]>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingNavigations.delete(id);
+        resolve([]);
+      }, 8000);
+
+      this.pendingNavigations.set(id, { resolve, timer });
+      this.transport.post(references
+        ? { type: "references", id, offset, includeDeclaration }
+        : { type: "definition", id, offset });
+    });
+  }
+
+  /** The model a host location names, or null when that module has no tab open. */
+  modelForLocation(location: HostLocation): monaco.editor.ITextModel | null {
+    return this.documents.get(location.module, location.workbook ?? null);
+  }
+
+  /** Goes where a host location names, opening its module if it is not already open. */
+  navigateTo(location: HostLocation): void {
+    this.navigate(
+      location.module,
+      location.line,
+      location.column,
+      false,
+      location.workbook ?? undefined);
+  }
+
+  /**
    * Asks the host to colour a model. Addressed by the model's own document, not by whichever is
    * host-active: the editor colours every model it is showing, and a split shows two.
    *
@@ -956,6 +1018,15 @@ export class EditorBridge {
           this.pendingCodeActions.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.actions);
+        }
+        return;
+      }
+      case "navigationResult": {
+        const waiter = this.pendingNavigations.get(message.id);
+        if (waiter) {
+          this.pendingNavigations.delete(message.id);
+          clearTimeout(waiter.timer);
+          waiter.resolve(message.locations);
         }
         return;
       }
@@ -1764,6 +1835,32 @@ export function demoTransport(): HostTransport {
               edits: [{ start: shadowed, end: shadowed + "rowIndex".length, text: "outerRowIndex" }],
             }]
             : [],
+        });
+      }
+      // The demo's own answers for both, so the peek windows and the context-menu entries are
+      // exercisable in a plain browser: every mention of the word under the caret, in both
+      // modules, which is what makes it a cross-module answer rather than a local one.
+      if (message.type === "definition" || message.type === "references") {
+        const at = DEMO_MODULE.slice(0, message.offset).search(/[A-Za-z0-9_]*$/);
+        const word = /^[A-Za-z0-9_]+/.exec(DEMO_MODULE.slice(at))?.[0] ?? "";
+        const locations: HostLocation[] = [];
+
+        if (word.length > 1) {
+          for (const [module, text] of [["Module1", DEMO_MODULE], ["Module2", DEMO_MODULE_2]] as const) {
+            text.split("\n").forEach((line, index) => {
+              const column = line.indexOf(word);
+              if (column >= 0) {
+                locations.push({ module, line: index + 1, column: column + 1, length: word.length });
+              }
+            });
+          }
+        }
+
+        send({
+          type: "navigationResult",
+          id: message.id,
+          // A definition is one place; references are all of them.
+          locations: message.type === "definition" ? locations.slice(0, 1) : locations,
         });
       }
       // The demo's own colouring, so the legend, the delta encoding and the theme rules are

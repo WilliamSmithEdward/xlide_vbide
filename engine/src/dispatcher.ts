@@ -16,6 +16,7 @@ import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
+import { assembleSymbols, definitionsFor, referencesFor, type ProjectSymbols } from './navigation';
 import { semanticTokensFor } from './semantic';
 import { signatureHelpFor } from './signature';
 import {
@@ -35,6 +36,8 @@ import {
     type LoopSyncParams,
     type LoopSyncResult,
     type ModulePayload,
+    type NavigationParams,
+    type NavigationResult,
     type OutlineParams,
     type OutlineResult,
     type ProjectOpenParams,
@@ -103,6 +106,9 @@ export class Dispatcher {
      */
     private readonly semanticMemo = new Map<string, { source: string; result: SemanticTokensResult }>();
 
+    /** One workbook's symbol index, kept against the exact module texts it was built from. */
+    private readonly symbolsMemo = new Map<string, { sources: string[]; symbols: ProjectSymbols }>();
+
     /**
      * The last analysis of each module, kept whole: the findings as the analyzer made them, and
      * the text they describe. Quick fixes are resolved from these rather than from anything the
@@ -170,6 +176,12 @@ export class Dispatcher {
 
             case 'textDocument/semanticTokens':
                 return this.semanticTokens(this.require<SemanticTokensParams>(params));
+
+            case 'textDocument/definition':
+                return this.definition(this.require<NavigationParams>(params));
+
+            case 'textDocument/references':
+                return this.references(this.require<NavigationParams>(params));
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
@@ -258,6 +270,7 @@ export class Dispatcher {
             }
         }
 
+        this.symbolsMemo.delete(params.projectId);
         return null;
     }
 
@@ -327,6 +340,77 @@ export class Dispatcher {
         }
 
         return { edits: loopSyncFor({ ...params, source }) };
+    }
+
+    private definition(params: NavigationParams): NavigationResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { locations: [] };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return { locations: definitionsFor(symbols, params.moduleName, source, params.offset) };
+    }
+
+    private references(params: NavigationParams): NavigationResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { locations: [] };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return {
+            locations: referencesFor(
+                symbols,
+                params.moduleName,
+                source,
+                params.offset,
+                params.includeDeclaration ?? true),
+        };
+    }
+
+    /**
+     * A workbook's symbols over its current text: live where the surface is typing, seeded
+     * elsewhere, with the request's own module text winning over both.
+     *
+     * Cached on the exact strings it was built from, compared by identity. Indexing a whole
+     * workbook is far too expensive to repeat per navigation, and the surface asks on every
+     * Ctrl+click and every open of the references list; between edits the strings are the same
+     * instances, so the comparison is a walk over a handful of pointers.
+     */
+    private symbolsFor(projectId: string, moduleName: string, source: string): ProjectSymbols {
+        const seeded = this.seededModules.get(projectId) ?? [];
+        const wanted = moduleName.toLowerCase();
+
+        const modules = seeded.map((module) => ({
+            moduleName: module.moduleName,
+            type: module.type,
+            documentType: module.documentType,
+            source: module.moduleName.toLowerCase() === wanted
+                ? source
+                : this.liveSources.get(liveKey(projectId, module.moduleName)) ?? module.source,
+        }));
+
+        // A module the surface is asking about that the project was never seeded with: analysed
+        // alone rather than not at all, which is what a module opened before the first seed is.
+        if (!modules.some((module) => module.moduleName.toLowerCase() === wanted)) {
+            modules.push({ moduleName, type: 'standard', documentType: undefined, source });
+        }
+
+        const memo = this.symbolsMemo.get(projectId);
+        if (memo
+            && memo.sources.length === modules.length
+            && memo.sources.every((held, index) => held === modules[index].source)) {
+            return memo.symbols;
+        }
+
+        const symbols = assembleSymbols(modules);
+        this.symbolsMemo.set(projectId, { sources: modules.map((module) => module.source), symbols });
+        return symbols;
     }
 
     private semanticTokens(params: SemanticTokensParams): SemanticTokensResult {

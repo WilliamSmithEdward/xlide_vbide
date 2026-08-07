@@ -788,6 +788,110 @@ try {
             'a shadowed name must not be marked as the host library');
     });
 
+    // Navigation: where a name is declared, and everywhere in THIS workbook it is used. The
+    // workbook is the boundary — a second one holding the same names must not appear.
+    const NAV_CALLER = [
+        'Option Explicit',
+        '',
+        'Sub Drive()',
+        '    Dim w As FineClass',
+        '    Set w = New FineClass',
+        '    w.Describe',
+        '    Probe',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    await call('project/open', {
+        projectId: 'Elsewhere',
+        generation: 1,
+        modules: [{ moduleName: 'BadModule', source: BAD_MODULE, type: 'standard' }],
+    });
+
+    const memberDefinition = await call('textDocument/definition', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: NAV_CALLER,
+        moduleType: 'standard',
+        offset: NAV_CALLER.indexOf('w.Describe') + 4,
+    });
+
+    check('a class member reached through a receiver resolves to its own module', () => {
+        assert.equal(memberDefinition.locations.length, 1);
+        assert.equal(memberDefinition.locations[0].module, 'FineClass');
+    });
+
+    const typeDefinition = await call('textDocument/definition', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: NAV_CALLER,
+        moduleType: 'standard',
+        offset: NAV_CALLER.indexOf('As FineClass') + 4,
+    });
+
+    check('a type name resolves to the module that is the type', () => {
+        assert.equal(typeDefinition.locations.length, 1);
+        assert.equal(typeDefinition.locations[0].module, 'FineClass');
+    });
+
+    // GoodModule's caller exists only in unsaved text, which is the case that matters: an answer
+    // computed from the seeded copy would miss the call and, once rename is built on it, would
+    // leave that call behind.
+    socket.write(`${JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'textDocument/didChange',
+        params: { projectId: 'Smoke', moduleName: 'GoodModule', source: NAV_CALLER },
+    })}\n`);
+
+    const uses = await call('textDocument/references', {
+        projectId: 'Smoke',
+        moduleName: 'BadModule',
+        source: BAD_MODULE,
+        moduleType: 'standard',
+        offset: BAD_MODULE.indexOf('Sub Probe') + 5,
+        includeDeclaration: true,
+    });
+
+    console.log(`  -> ${uses.locations.length} use(s) of Probe: ` +
+        uses.locations.map((where) => `${where.module}:${where.line}:${where.column}`).join(', '));
+
+    check('a procedure is found where it is declared and where it is called', () => {
+        const modules = new Set(uses.locations.map((where) => where.module));
+        assert.ok(modules.has('BadModule'), 'the declaration');
+        assert.ok(modules.has('GoodModule'), 'the call from the other module, in unsaved text');
+    });
+
+    check('the other open workbook is not searched, though it holds the same module name', () => {
+        // Elsewhere/BadModule declares Probe too. An answer naming it would be a rename waiting
+        // to edit a workbook nobody asked about.
+        assert.equal(
+            uses.locations.filter((where) => where.module === 'BadModule').length,
+            1,
+            'exactly one BadModule, this project\'s');
+    });
+
+    const withoutDeclaration = await call('textDocument/references', {
+        projectId: 'Smoke',
+        moduleName: 'BadModule',
+        source: BAD_MODULE,
+        moduleType: 'standard',
+        offset: BAD_MODULE.indexOf('Sub Probe') + 5,
+        includeDeclaration: false,
+    });
+
+    check('excluding the declaration drops exactly it', () =>
+        assert.equal(withoutDeclaration.locations.length, uses.locations.length - 1));
+
+    const nowhere = await call('textDocument/definition', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: NAV_CALLER,
+        moduleType: 'standard',
+        offset: NAV_CALLER.indexOf('Option') + 2,
+    });
+
+    check('a keyword is not a symbol', () => assert.equal(nowhere.locations.length, 0));
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

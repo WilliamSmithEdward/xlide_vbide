@@ -413,6 +413,26 @@ public sealed record CodeActionResultMessage(
     [property: JsonPropertyName("actions")] SurfaceCodeAction[] Actions);
 
 /// <summary>
+/// One place in the workbook: the module, its workbook's display name, and a 1-based line and
+/// column into the module's live text.
+/// </summary>
+public sealed record SurfaceLocation(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("workbook")] string? Workbook,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("column")] int Column,
+    [property: JsonPropertyName("length")] int Length);
+
+/// <summary>
+/// The answer to one navigation request: where a symbol is declared, or everywhere it is used.
+/// Always within the one workbook, because two workbooks can each hold a Module1.
+/// </summary>
+public sealed record NavigationResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("locations")] SurfaceLocation[] Locations);
+
+/// <summary>
 /// One coloured span, offsets into the live source. The type is the analyzer's vocabulary and
 /// the only modifier used is defaultLibrary, which marks a host global.
 /// </summary>
@@ -517,6 +537,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]
 [JsonSerializable(typeof(SemanticTokensResultMessage))]
+[JsonSerializable(typeof(SurfaceLocation))]
+[JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]

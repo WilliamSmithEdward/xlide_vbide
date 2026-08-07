@@ -17,6 +17,12 @@ import "monaco-editor/features/folding/register.js";
 import "monaco-editor/features/format/register.js";
 import "monaco-editor/features/gotoError/register.js";
 import "monaco-editor/features/gotoLine/register.js";
+// Ctrl+click on a symbol. The commands the same feature is named for — F12, Shift+F12, the peek
+// windows, and their right-click entries — live in a module its register never imports, so they
+// come in by their own path. That is the third feature here whose register module covers less
+// than its name does; the pattern is worth expecting rather than rediscovering.
+import "monaco-editor/features/gotoSymbol/register.js";
+import "monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands.js";
 import "monaco-editor/features/hover/register.js";
 import "monaco-editor/features/indentation/register.js";
 import "monaco-editor/features/lineSelection/register.js";
@@ -48,7 +54,7 @@ import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/wordPartOperations/register.js";
 
 import "./styles.css";
-import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem } from "./bridge.js";
+import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
 import { DocumentStore } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
@@ -91,6 +97,36 @@ const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable"];
 
 /** `defaultLibrary` marks a host-injected global — Application, ThisWorkbook, ActiveSheet. */
 const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
+
+/**
+ * The host's answers as the editor wants them, dropping any whose module has no model. A location
+ * the editor cannot resolve to a model renders as an empty row in the peek window, which reads as
+ * a result that is there and says nothing — worse than one result fewer.
+ */
+function toEditorLocations(
+  bridge: EditorBridge,
+  locations: readonly HostLocation[],
+): monaco.languages.Location[] {
+  const out: monaco.languages.Location[] = [];
+
+  for (const location of locations) {
+    const model = bridge.modelForLocation(location);
+    if (!model) {
+      continue;
+    }
+
+    out.push({
+      uri: model.uri,
+      range: new monaco.Range(
+        location.line,
+        location.column,
+        location.line,
+        location.column + location.length),
+    });
+  }
+
+  return out;
+}
 
 function modifierBits(modifiers: readonly string[] | null | undefined): number {
   let bits = 0;
@@ -500,6 +536,48 @@ function boot(): void {
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
     // the keyboard.
     providedCodeActionKinds: ["quickfix"],
+  });
+
+  // Go to definition, across the modules of one workbook and never past it.
+  //
+  // A module the developer already has open answers as a location, so Ctrl+click, F12 and the
+  // peek window all work in place. A module that is not open has no model for the editor to
+  // point at, so the host is asked to go there instead — which is the same path the search
+  // results and the outline tree already take, and it opens the module on the way.
+  monaco.languages.registerDefinitionProvider(VBA_LANGUAGE_ID, {
+    provideDefinition: async (model, position) => {
+      if (model !== bridge.hostActiveModel()) {
+        return null;
+      }
+
+      const found = await bridge.requestNavigation(model.getOffsetAt(position), false);
+      const locations = toEditorLocations(bridge, found);
+      const elsewhere = found[0];
+
+      if (locations.length === 0 && elsewhere) {
+        bridge.navigateTo(elsewhere);
+      }
+
+      return locations;
+    },
+  });
+
+  // Find all references, over the same answers.
+  //
+  // Only modules that are open can be shown: the peek window renders text, and a module with no
+  // tab has no model to render. The answer itself covers the whole workbook — what is missing is
+  // a way for the page to ask the host to open a module without also moving the caret into it.
+  monaco.languages.registerReferenceProvider(VBA_LANGUAGE_ID, {
+    provideReferences: async (model, position, context) => {
+      if (model !== bridge.hostActiveModel()) {
+        return null;
+      }
+
+      return toEditorLocations(
+        bridge,
+        await bridge.requestNavigation(
+          model.getOffsetAt(position), true, context.includeDeclaration));
+    },
   });
 
   // Semantic colouring, over the grammar rather than instead of it. The grammar already paints

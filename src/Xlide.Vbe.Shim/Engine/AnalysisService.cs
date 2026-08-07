@@ -312,6 +312,40 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine where the identifier at an offset is declared, or everywhere in the
+    /// workbook it is used. Empty when there is no engine, no address for the module, or nothing
+    /// at that offset resolves.
+    /// </summary>
+    public async Task<EngineLocation[]> NavigateAsync(
+        string moduleName,
+        int offset,
+        bool references,
+        bool includeDeclaration,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return [];
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return [];
+        }
+
+        var result = await engine.NavigateAsync(
+            references ? "textDocument/references" : "textDocument/definition",
+            home.ProjectId,
+            moduleName,
+            home.ModuleType,
+            offset,
+            includeDeclaration,
+            cancellation).ConfigureAwait(false);
+
+        return result?.Locations ?? [];
+    }
+
+    /// <summary>
     /// Asks the engine for the call tip at an offset into a module's live text, or null when
     /// there is no engine, no address for the module, or the caret is not inside a call.
     /// </summary>
