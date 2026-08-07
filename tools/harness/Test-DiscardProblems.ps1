@@ -8,8 +8,14 @@
 #
 # Written as a live probe rather than a unit test because that is where the bug lived: every
 # piece worked, and the defect was in what happens between them when a module goes away
-# mid-flight. A seam test in Test-CloseConfirm.ps1 guards that the call is still there; this
-# guards that it still does anything.
+# mid-flight. A seam test in Test-CloseConfirm.ps1 guards that the call is still there.
+#
+# HONEST LIMIT, and do not mistake this probe for more than it is. Run against a build with the
+# fix disabled, it still passed all five checks: something else clears the findings within the
+# time it waits. So it pins the flow -- type, get problems, close, decline, tab goes, panel ends
+# empty -- but it is NOT proof that the regression cannot come back, because it never went red
+# for it. Making it discriminate means finding what the slower path is and asserting the clear
+# happens before that path could have run. See docs/testing.md.
 #
 # Run tools\dev.ps1 -KeepOpen -Configuration Debug first. Debug builds only.
 $ErrorActionPreference = 'Continue'
@@ -56,34 +62,67 @@ function WaitFor([string] $what, [scriptblock] $condition, [int] $seconds = 20) 
 
 function ProblemsFor([string] $module) {
     $r = Invoke-RestMethod "$api/problems?module=$module" -TimeoutSec 10
-    @($r.findings | Where-Object { $_.module -eq $module })
+
+    # The leading comma is load-bearing. A function returns its output through the pipeline, which
+    # enumerates it, so a one-element array arrives at the caller as the bare element -- and .Count
+    # on a PSCustomObject is $null, not 1, so "exactly one finding" read as "no findings" and every
+    # wait timed out while the api was answering correctly the whole time.
+    return , @($r.findings | Where-Object { $_.module -eq $module })
 }
 
-# The module the session is showing. The fixture opens its own, so the probe works with what is
-# there rather than insisting on a name.
-$state = Invoke-RestMethod "$api/state" -TimeoutSec 10
-$module = $state.module
-if (-not $module) { Write-Output 'RESULT: FAIL - no module is open to work with'; return }
-Write-Output "module: $module"
+# A module to work in, chosen rather than assumed. The session's shown module is empty whenever
+# the surface has tabs but no active one, which is how a fresh -KeepOpen session starts, so the
+# tab strip is the list that actually says what is open.
+#
+# It must also start with no problems of its own: the probe asserts that the findings it caused
+# are gone, and a module whose saved text is already broken can never satisfy that.
+# Returned as one delimited string rather than JSON: the eval route answers with the JSON
+# encoding of the page's result, Page already decodes that once, and decoding an array a second
+# time yields one element that is the array.
+$open = @((Page "[...document.querySelectorAll('.tab')].map(t => t.textContent.trim()).join('\n')") -split "`n" | Where-Object { $_ })
+if ($open.Count -eq 0) { Write-Output 'RESULT: FAIL - no tabs are open to work with'; return }
+
+$module = $open | Where-Object { (ProblemsFor $_).Count -eq 0 } | Select-Object -First 1
+if (-not $module) {
+    Write-Output "RESULT: FAIL - every open module already has problems ($($open -join ', ')); nothing to prove a clear against"
+    return
+}
+
+Write-Output "module: $module (of $($open -join ', '))"
+
+# Shown, so the live analysis this probe is about actually runs for it.
+Page "(() => { const t = [...document.querySelectorAll('.tab')].find(e => e.textContent.trim() === '$module'); t?.click(); return !!t; })()" | Out-Null
 
 $original = (Invoke-RestMethod "$api/module?name=$module" -TimeoutSec 10).text
 if ($null -eq $original) { Write-Output 'RESULT: FAIL - the module text could not be read'; return }
 
 try {
-    # Something the analyzer will certainly object to, appended so the rest of the module still
-    # parses and the findings that appear are the ones this probe made.
-    $broken = $original + "`r`nSub XlideDiscardProbe()`r`n    If`r`nEnd Sub`r`n"
-    Invoke-RestMethod "$api/module?name=$module" -Method Post -Body $broken -TimeoutSec 15 | Out-Null
-
-    Check 'the broken text produces problems' {
+    # Typed into the editor rather than written through the api. A host write carries a new
+    # baseline with it, so the module would not be unsaved and the close would never ask -- and
+    # the whole bug lives on the far side of that question. Typing is also what the person who
+    # reported it did.
+    #
+    # A type mismatch rather than a syntax error: the analyzer reports this one as a finding,
+    # where an unfinished statement is a parse failure it declines to diagnose, and a probe that
+    # waits for a finding nobody promised fails for a reason that has nothing to do with the bug.
+    $typed = 'Sub XlideDiscardProbe()\n    Dim n As Long\n    n = "oops"\nEnd Sub\n'
+    Check 'the typed text produces problems' {
+        Page "(() => { const ed = globalThis.xlideBridge?.workspace?.activeEditor?.(); if (!ed) return 'no editor'; const m = ed.getModel(); const e = m.getFullModelRange().getEndPosition(); ed.executeEdits('xlide-probe', [{ range: { startLineNumber: e.lineNumber, startColumn: e.column, endLineNumber: e.lineNumber, endColumn: e.column }, text: '\n$typed' }]); return 'typed'; })()" | Out-Null
         WaitFor 'findings to appear' { (ProblemsFor $module).Count -gt 0 }
     }
 
-    # Close the tab and answer Don't Save, through the page's own path rather than by calling the
-    # host directly: the bug was in the sequence a real close runs, and a shortcut past the page
-    # would not have reproduced it.
+    Check 'the tab shows as unsaved' {
+        WaitFor 'the dirty dot' {
+            (Page "[...document.querySelectorAll('.tab')].some(t => t.textContent.trim() === '$module' && t.classList.contains('dirty'))") -eq $true
+        }
+    }
+
+    # Closed through the page's own X, not by calling the host: the bug was in the sequence a real
+    # close runs. The X is armed at pointerdown and fired at pointerup and never listens for a
+    # click, because a press can survive the element being rebuilt underneath it, so a synthetic
+    # click does nothing at all.
     Check 'the close question is asked' {
-        Page "(() => { const t = [...document.querySelectorAll('.tab')].find(e => e.textContent.includes('$module')); t?.querySelector('.tab-close, .tab-dirty')?.click(); return !!t; })()" | Out-Null
+        Page "(() => { const t = [...document.querySelectorAll('.tab')].find(e => e.textContent.trim() === '$module'); const x = t?.querySelector('.tab-close'); if (!x) return 'no close box'; const o = { bubbles: true, cancelable: true, composed: true, button: 0, pointerId: 1, isPrimary: true }; x.dispatchEvent(new PointerEvent('pointerdown', o)); x.dispatchEvent(new PointerEvent('pointerup', o)); return 'pressed'; })()" | Out-Null
         WaitFor 'the close-confirm modal' {
             (Page "!!document.getElementById('close-confirm-backdrop')") -eq $true
         }
@@ -92,7 +131,7 @@ try {
     Check "Don't Save closes the tab" {
         Page "(() => { const b = [...document.querySelectorAll('#close-confirm-backdrop button')].find(x => /don.t save/i.test(x.textContent)); b?.click(); return !!b; })()" | Out-Null
         WaitFor 'the tab to go' {
-            (Page "![...document.querySelectorAll('.tab')].some(e => e.textContent.includes('$module'))") -eq $true
+            (Page "![...document.querySelectorAll('.tab')].some(e => e.textContent.trim() === '$module')") -eq $true
         }
     }
 
