@@ -149,6 +149,36 @@ function renameSummary(answer: HostRenameAnswer, newName: string): string {
   return `Renamed to ${newName} — ${uses} in ${modules}.`;
 }
 
+/**
+ * The command id the editor falls back to when Go to Definition is invoked on the definition.
+ * A global command rather than an editor action, because that option names a command by id and
+ * an editor action's id is rewritten when it is registered.
+ */
+const SHOW_REFERENCES_COMMAND = "xlide.showReferences";
+
+/**
+ * Every use of the symbol at the caret, in xlide's own list. One function, so the key, the
+ * right-click entry and the editor's own fallback cannot show three different things.
+ */
+async function showReferences(
+  bridge: EditorBridge,
+  editor: monaco.editor.ICodeEditor,
+): Promise<void> {
+  const model = editor.getModel();
+  const position = editor.getPosition();
+  if (!model || !position || model !== bridge.hostActiveModel()) {
+    return;
+  }
+
+  const word = model.getWordAtPosition(position);
+  const found = await bridge.requestNavigation(model.getOffsetAt(position), true, true);
+
+  openReferencesDialog(word?.word ?? "this symbol", found, {
+    navigate: (module, line, column, workbook) =>
+      bridge.navigate(module, line, column, false, workbook ?? undefined),
+  });
+}
+
 /** A range of nothing, which is what a refused rename has to carry alongside its reason. */
 function emptyRangeAt(position: monaco.Position): monaco.Range {
   return new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column);
@@ -735,6 +765,14 @@ function boot(): void {
     },
   });
 
+  // Registered once, not per editor: it is a global command, and the editor's goto-location
+  // option names it by id. It acts on whichever editor is focused, which is the one whose
+  // Go to Definition just fell through to it.
+  monaco.editor.addCommand({
+    id: SHOW_REFERENCES_COMMAND,
+    run: () => void showReferences(bridge, workspace.activeEditor()),
+  });
+
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 
   if (!transport) {
@@ -835,6 +873,15 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     });
   }
 
+  // Go to Definition, invoked ON the definition, has nowhere to go — so the editor runs its
+  // "alternative definition command", which by default peeks references. That is the one window
+  // this surface cannot use: it draws only modules with a tab open, and it showed 3 of the 4
+  // references the list shows because the fourth was in a closed module (the developer,
+  // 2026-08-06). Pointed at the same list everything else uses.
+  editor.updateOptions({
+    gotoLocation: { alternativeDefinitionCommand: SHOW_REFERENCES_COMMAND },
+  });
+
   // Find All References, in xlide's own list.
   //
   // The editor's window renders each result by resolving it to a MODEL, and this surface only has
@@ -847,21 +894,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     contextMenuGroupId: "navigation",
     contextMenuOrder: 1.35,
     keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
-    run: async (target) => {
-      const model = target.getModel();
-      const position = target.getPosition();
-      if (!model || !position || model !== bridge.hostActiveModel()) {
-        return;
-      }
-
-      const word = model.getWordAtPosition(position);
-      const found = await bridge.requestNavigation(model.getOffsetAt(position), true, true);
-
-      openReferencesDialog(word?.word ?? "this symbol", found, {
-        navigate: (module, line, column, workbook) =>
-          bridge.navigate(module, line, column, false, workbook ?? undefined),
-      });
-    },
+    run: (target) => void showReferences(bridge, target),
   });
 }
 
