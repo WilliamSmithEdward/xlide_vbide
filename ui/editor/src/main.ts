@@ -60,6 +60,12 @@ import "monaco-editor/features/wordHighlighter/register.js";
 import "monaco-editor/features/wordOperations/register.js";
 import "monaco-editor/features/wordPartOperations/register.js";
 
+// Not a contribution but the registry the right-click menu is built from, and the expression the
+// menu asks before drawing an entry. Reached directly because one entry the editor registers
+// unconditionally has to be moved rather than merely not registered — see foldPeekIntoTheMenu.
+import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/actions.js";
+import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/contextkey.js";
+
 import "./styles.css";
 import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
@@ -795,6 +801,19 @@ function boot(): void {
     },
   });
 
+  // Once, not per editor: the menu registry is the editor's, and every editor draws from it.
+  foldPeekIntoTheMenu();
+
+  // Shift+F2 is what a VBA developer's hands already do, so it names the editor's OWN Go to
+  // Definition rather than an xlide action that forwards to it. A forwarding action would appear
+  // in the command palette as a second Go to Definition — two entries, two keys, one thing — which
+  // is the shape this menu has been getting rid of all morning. A rule adds the key and nothing
+  // else, and the palette keeps one entry.
+  monaco.editor.addKeybindingRule({
+    keybinding: monaco.KeyMod.Shift | monaco.KeyCode.F2,
+    command: "editor.action.revealDefinition",
+  });
+
   watchPreferredTheme((theme) => bridge.applyOsTheme(theme));
 
   if (!transport) {
@@ -832,6 +851,47 @@ function boot(): void {
 }
 
 /**
+ * Peek Definition, on the menu itself rather than behind a slide-out (the developer, 2026-08-07).
+ *
+ * The editor registers a "Peek" submenu unconditionally and hangs six commands off it. This
+ * surface answers exactly one of them: peek declaration, type definition, implementations,
+ * references and call hierarchy are each gated on a provider xlide does not register. So the
+ * slide-out holds one item, and reaching it costs a second click and a hover on a menu with room
+ * for it.
+ *
+ * The entry is MOVED, not copied — the same command object, so the label and the Alt+F12 the menu
+ * draws beside it are the editor's own and cannot drift from what the key actually does.
+ *
+ * The submenu itself is left alone. An entry whose children all resolve away is not drawn at all
+ * (`menuService`: `if (submenuActions.length > 0)`), so Peek disappears because it is empty rather
+ * than because it was hidden — and if xlide ever answers implementations or type definitions, it
+ * comes back holding exactly those. Hiding the submenu outright would have left them unreachable.
+ *
+ * This reaches into a registry entry the editor owns, so it names what it is looking for and does
+ * nothing when it is not there: a shape that moves under a version bump brings the slide-out back,
+ * and nothing worse.
+ */
+function foldPeekIntoTheMenu(): void {
+  for (const entry of MenuRegistry.getMenuItems(MenuId.EditorContextPeek)) {
+    if (entry.command?.id !== "editor.action.peekDefinition") {
+      continue;
+    }
+
+    MenuRegistry.appendMenuItem(MenuId.EditorContext, {
+      command: entry.command,
+      // Its own precondition, carried over: inside a peek window there is nothing to peek from,
+      // and the entry should be as absent there as it was in the slide-out.
+      when: entry.when,
+      group: "navigation",
+      // Between Go to Definition at 1.1 and Find All References at 1.35.
+      order: 1.2,
+    });
+
+    entry.when = ContextKeyExpr.false();
+  }
+}
+
+/**
  * The commands in each editor's context menu and command palette.
  *
  * Only what the VBA host alone can do is sent to it: running a procedure, and the breakpoints
@@ -842,52 +902,48 @@ function boot(): void {
  *
  * The VBA keys are kept on the xlide commands. Shift+F2 is what a VBA developer's hands already
  * do; what changes is what answers.
+ *
+ * No command carries its key in its NAME. The menu draws keys in the column at the right, from
+ * the keybinding service, so a name that also names the key says it twice and reads as the key
+ * being part of what the command is called (the developer, 2026-08-07: the hint on the right and
+ * not in the name is best practice). Every command here therefore declares its key.
  */
 function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge: EditorBridge): void {
-  const hostActions: Array<[string, string, string]> = [
-    ["xlide.run", "Run Sub/UserForm (F5)", "run"],
-    ["xlide.toggleBreakpoint", "Toggle Breakpoint (F9)", "toggleBreakpoint"],
-    ["xlide.runToCursor", "Run To Cursor (Ctrl+F8)", "runToCursor"],
+  // These three keys never reach the page. The browser's accelerator hook claims F5, F8 and F9
+  // before the document is offered them, because the surface covers the pane the editor used to
+  // receive them through (`AddInSession.OnSurfaceKey`). Declaring them here is therefore a
+  // statement of what the key means, which is what the menu draws — and a fallback that does the
+  // same thing if the hook ever stops claiming them.
+  const hostActions: Array<[string, string, string, number]> = [
+    ["xlide.run", "Run Sub/UserForm", "run", monaco.KeyCode.F5],
+    ["xlide.toggleBreakpoint", "Toggle Breakpoint", "toggleBreakpoint", monaco.KeyCode.F9],
+    ["xlide.runToCursor", "Run To Cursor", "runToCursor",
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8],
   ];
 
-  for (const [id, label, command] of hostActions) {
+  for (const [id, label, command, key] of hostActions) {
     editor.addAction({
       id,
       label,
       contextMenuGroupId: "1_xlide",
       contextMenuOrder: 1,
+      keybindings: [key],
       run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
     });
   }
 
-  // The VBA keys, answered by the editor's own commands. Those commands are registered by their
-  // features rather than as editor actions, so they are triggered by id — which falls through to
-  // the command registry, where they live.
-  //
-  // Go to Definition is NOT on the context menu here. The editor already puts it at the top, and a
-  // second entry further down running the same thing reads as two different features and invites
-  // the question of which one is the real one (the developer, 2026-08-06). This exists for the key
-  // alone: Shift+F2 is what a VBA developer's hands already do, and it would otherwise do nothing.
-  //
-  // Last Position keeps its entry, because the editor's menu has no equivalent to duplicate.
-  const editorKeys: Array<[string, string, string, number, boolean]> = [
-    ["xlide.goToDefinition", "Go to Definition (Shift+F2)", "editor.action.revealDefinition",
-      monaco.KeyMod.Shift | monaco.KeyCode.F2, false],
-    // The VBE's Last Position steps back through where the caret has been. So does this, and it
-    // steps back through every move rather than only the ones that were jumps.
-    ["xlide.lastPosition", "Last Position (Ctrl+Shift+F2)", "cursorUndo",
-      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2, true],
-  ];
-
-  for (const [id, label, command, key, onMenu] of editorKeys) {
-    editor.addAction({
-      id,
-      label,
-      ...(onMenu ? { contextMenuGroupId: "1_xlide", contextMenuOrder: 2 } : {}),
-      keybindings: [key],
-      run: (target) => { target.trigger("xlide", command, null); },
-    });
-  }
+  // The VBE's Last Position steps back through where the caret has been. So does this, and it
+  // steps back through every move rather than only the ones that were jumps. It keeps a menu
+  // entry because the editor's own menu has no equivalent to duplicate — and its own name,
+  // because "Cursor Undo" is not what a VBA developer is looking for.
+  editor.addAction({
+    id: "xlide.lastPosition",
+    label: "Last Position",
+    contextMenuGroupId: "1_xlide",
+    contextMenuOrder: 2,
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.F2],
+    run: (target) => { target.trigger("xlide", "cursorUndo", null); },
+  });
 
   // Go to Definition, invoked ON the definition, has nowhere to go — so the editor runs its
   // "alternative definition command", which by default goes to references. That command opens the

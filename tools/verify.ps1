@@ -155,14 +155,20 @@ Step 'page probes (headless)' {
     'close-confirm, object browser'
 }
 
+# Named, not left to whichever directory the gate was started from. Both of these used to be
+# bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory — so
+# the gate passed from the repo root and failed with MSB1003 from anywhere else (2026-08-07). A
+# check whose answer depends on where you are standing is not a check.
+$solution = Join-Path $repoRoot 'xlide_vbide.slnx'
+
 Step 'solution build (Release)' {
-    dotnet build -c Release --nologo -v q 2>&1 | Out-Host
+    dotnet build $solution -c Release --nologo -v q 2>&1 | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'the solution does not build in Release' }
     'clean'
 }
 
 Step 'unit tests' {
-    $out = dotnet test -c Release --no-build --nologo -v q 2>&1
+    $out = dotnet test $solution -c Release --no-build --nologo -v q 2>&1
     $out | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }
     $passed = ($out | Select-String 'Passed:\s+(\d+)' -AllMatches).Matches |
