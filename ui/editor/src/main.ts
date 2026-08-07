@@ -163,7 +163,7 @@ function renameSummary(answer: HostRenameAnswer, newName: string): string {
   const modules = answer.modules.length === 1
     ? answer.modules[0]
     : `${answer.modules.length} modules: ${answer.modules.join(", ")}`;
-  return `Renamed to ${newName} — ${uses} in ${modules}.`;
+  return `Renamed to ${newName}: ${uses} in ${modules}.`;
 }
 
 /**
@@ -464,7 +464,7 @@ function boot(): void {
     renameModule: (name, workbook, newName) => {
       void bridge.requestModuleRename(name, workbook, newName).then((answer) => {
         bridge.shell?.notify(answer.refused
-          ?? `Renamed ${name} to ${newName}— ${answer.replaced} mention${answer.replaced === 1 ? "" : "s"}`
+          ?? `Renamed ${name} to ${newName}: ${answer.replaced} mention${answer.replaced === 1 ? "" : "s"}`
             + ` in ${answer.modules.length} module${answer.modules.length === 1 ? "" : "s"}.`);
       });
     },
@@ -1004,7 +1004,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     run: async () => {
       const answer = await bridge.requestRenameUndo();
       bridge.shell?.notify(answer.refused
-        ?? `Rename put back — ${answer.modules.length} module`
+        ?? `Rename put back: ${answer.modules.length} module`
           + `${answer.modules.length === 1 ? "" : "s"}.`);
     },
   });

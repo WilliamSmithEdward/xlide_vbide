@@ -263,7 +263,9 @@ class EditorGroup {
       tab.className = "tab" + (isActive ? " active" : "") + (dirty ? " dirty" : "");
       tab.dataset.module = id.module;
       tab.dataset.project = id.project ?? "";
-      tab.textContent = collides && id.project ? `${id.module} — ${id.project}` : id.module;
+      // Bracketed, not dashed. The workbook is a qualifier on the name rather than a second
+      // thing of equal weight, and brackets say that where a dash does not.
+      tab.textContent = collides && id.project ? `${id.module} (${id.project})` : id.module;
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(isActive));
       tab.draggable = false;

@@ -999,7 +999,7 @@ export class Shell {
       const where = document.createElement("div");
       where.className = "where";
       where.textContent = `${finding.module}`
-        + (collides && finding.project ? ` — ${finding.project}` : "")
+        + (collides && finding.project ? ` (${finding.project})` : "")
         + ` (${finding.line}, ${finding.column})`
         + (finding.code ? `   ${finding.code}` : "");
 
