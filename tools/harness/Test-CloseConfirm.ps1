@@ -57,6 +57,12 @@ Test-Seam 'session gates, saves, and reverts' (Join-Path $repo 'src\Xlide.Vbe.Sh
     'OnModuleCloseRequested', 'case "save"', 'case "discard"', 'SaveWorkbookOf', 'ModuleDiffersFromSaved')
 Test-Seam 'a revert corrects the engine live copy (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
     'hostRewrite: true', 'NotifyLiveText')
+# The host's own copy of the findings goes stale the same way, for a different reason: a live
+# answer is only accepted while its module is the one on screen, and a discarded module is
+# closing. Nothing replaced the findings computed from the text that had just been thrown away,
+# so the panel reported errors in code that no longer existed (developer, 2026-08-06).
+Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+    'private void DropFindingsFor', 'DropFindingsFor\(component, display\)')
 Test-Seam 'Ctrl\+W goes through the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
     'OnModuleCloseRequested\(shown')
 Test-Seam 'built bundle carries the modal' (Join-Path $repo 'ui\editor\dist\editor.js') @(

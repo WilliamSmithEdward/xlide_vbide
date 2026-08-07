@@ -207,7 +207,7 @@ if ($Live) {
             if (-not $ready) { throw 'the session never became healthy enough to probe' }
         }
 
-        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-Churn.ps1') {
+        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1') {
             $answer = powershell -NoProfile -ExecutionPolicy Bypass `
                 -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
             $answer | Out-Host
