@@ -121,8 +121,44 @@ internal sealed class CodePaneTracker : IDisposable
     /// </summary>
     public Action? FrameChanged { get; set; }
 
+    /// <summary>
+    /// A window was renamed, with its handle. The editor renames its own main window as the active
+    /// project and module change, which is the only notice anything holding that title bar gets.
+    /// </summary>
+    public Action<nint>? CaptionChanged { get; set; }
+
+    /// <summary>
+    /// The editor's main window in this process, or zero before it exists. Found by class and
+    /// filtered by process, because the class is not unique to us: a second host running the same
+    /// editor has one too, and dressing someone else's window would be a bug nobody could explain.
+    /// </summary>
+    public static nint MainWindow()
+    {
+        var ours = Win32.GetCurrentProcessId();
+
+        nint frame = 0;
+        while ((frame = Win32.FindWindowEx(0, frame, FrameClass, null)) != 0)
+        {
+            Win32.GetWindowThreadProcessId(frame, out var owner);
+            if (owner == ours)
+            {
+                return frame;
+            }
+        }
+
+        return 0;
+    }
+
     private void OnWindowEvent(WindowEvent windowEvent)
     {
+        // Ahead of the layout gate, which does not admit renames: the editor rewrites its own
+        // caption whenever the active project or module changes, and that is exactly when anything
+        // that has taken the title bar over has to take it over again.
+        if (windowEvent.IsNameChange && !windowEvent.IsCaret)
+        {
+            CaptionChanged?.Invoke(windowEvent.Window);
+        }
+
         if (!windowEvent.AffectsLayout || windowEvent.IsCaret)
         {
             return;

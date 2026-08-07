@@ -74,6 +74,13 @@
           LinkBase="ui\editor\dist"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+
+    <!-- Loaded at run time to dress the editor's title bar. A file rather than an embedded Win32
+         resource because this is a library, and the shell reads a window's icon from the handle it
+         is given rather than from whatever produced it. -->
+    <None Include="$(MSBuildThisFileDirectory)..\..\assets\xlide.ico"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="VerifyWebView2Loader" AfterTargets="Build">

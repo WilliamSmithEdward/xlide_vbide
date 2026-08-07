@@ -60,6 +60,29 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
     public static partial int GetWindowText(nint window, char* buffer, int capacity);
 
+    [LibraryImport("user32.dll", EntryPoint = "SetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetWindowText(nint window, string text);
+
+    /// <summary>IMAGE_ICON, and the flags for reading one out of a file at a given size.</summary>
+    public const uint ImageIcon = 1;
+    public const uint LrLoadFromFile = 0x0010;
+    public const uint LrDefaultSize = 0x0040;
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadImageW", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial nint LoadImage(nint instance, string name, uint type, int cx, int cy, uint load);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool DestroyIcon(nint icon);
+
+    /// <summary>SM_CXICON / SM_CXSMICON: the sizes the shell wants for a window's two icons.</summary>
+    public const int SmCxIcon = 11;
+    public const int SmCxSmIcon = 49;
+
+    [LibraryImport("user32.dll")]
+    public static partial int GetSystemMetrics(int index);
+
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetWindowRect(nint window, Rect* rect);

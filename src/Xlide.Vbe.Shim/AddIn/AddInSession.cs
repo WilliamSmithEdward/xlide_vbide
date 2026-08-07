@@ -41,6 +41,7 @@ internal sealed class AddInSession : IDisposable
     private ImmediateReader? _immediateReader;
     private bool _windowsHidden;
     private EditorSurface? _editorSurface;
+    private HostChrome? _hostChrome;
 
     /// <summary>
     /// The most recent findings for every module, kept so a module can be decorated the moment it
@@ -2090,6 +2091,7 @@ internal sealed class AddInSession : IDisposable
             _lastModulesKey = null;
             _lastLanguageFactsKey = null;
             _editorSurface?.ShowInstallPath(Interop.ShimModule.Directory);
+            _hostChrome ??= HostChrome.Install(CodePaneTracker.MainWindow(), Interop.ShimModule.Directory);
             PublishModules();
             PublishProjects();
             PublishFindingsToSurface();
@@ -7057,6 +7059,17 @@ internal sealed class AddInSession : IDisposable
             // window grew around it. The frame's own events re-derive placement in every state.
             _codePanes.FrameChanged = OnFrameChanged;
 
+            // The title bar is the last thing in the window still announcing the product this one
+            // replaced, and the editor rewrites it as the active module changes, so it is retaken
+            // on every rename of that window rather than set once.
+            _codePanes.CaptionChanged = window =>
+            {
+                if (_hostChrome is not null && window == CodePaneTracker.MainWindow())
+                {
+                    _hostChrome.Apply();
+                }
+            };
+
             // Any destroy might have been a hidden pane, which the tracker's own picture cannot
             // show (it only holds panes it can match — the active one, in practice). A moment of
             // polls re-reads the object model's open list and republishes; the page skips the
@@ -7139,6 +7152,11 @@ internal sealed class AddInSession : IDisposable
 
         _codePanes?.Dispose();
         _codePanes = null;
+
+        // The window is the host's, and an add-in that unloads should leave its title bar saying
+        // what it said before. After the tracker, so nothing is left to put our name back on.
+        _hostChrome?.Dispose();
+        _hostChrome = null;
 
         // Before the editor tears its own windows down. The surface owns a browser and a window
         // parented to the editor frame; leaving them for the host to destroy leaves browser

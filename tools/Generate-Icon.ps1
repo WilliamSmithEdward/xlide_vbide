@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Source) { $Source = Join-Path $repoRoot 'assets\images\extension_logo.png' }
-if (-not $Destination) { $Destination = Join-Path $repoRoot 'installer\Xlide.Setup\xlide.ico' }
+if (-not $Destination) { $Destination = Join-Path $repoRoot 'assets\xlide.ico' }
 
 if (-not (Test-Path $Source)) { throw "No logo at $Source." }
 
