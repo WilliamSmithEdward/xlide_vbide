@@ -16,6 +16,7 @@ import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
+import { semanticTokensFor } from './semantic';
 import { signatureHelpFor } from './signature';
 import {
     ErrorCode,
@@ -39,6 +40,8 @@ import {
     type ProjectOpenParams,
     type SearchParams,
     type SearchResult,
+    type SemanticTokensParams,
+    type SemanticTokensResult,
     type SignatureHelpParams,
     type SignatureHelpResult,
     type SmartEnterParams,
@@ -91,6 +94,14 @@ export class Dispatcher {
      * string, so parsing 26,000 lines again to repeat the same procedures is pure waste.
      */
     private readonly outlineMemo = new Map<string, { source: string; result: OutlineResult }>();
+
+    /**
+     * The last colouring answered per module, keyed by the exact text it described — the same
+     * bargain the outline strikes, and for a stronger reason: the surface re-asks for the whole
+     * module's tokens after every edit, and two passes over 26,000 lines per keystroke is the
+     * kind of cost that shows up as the editor feeling slow rather than as anything visible.
+     */
+    private readonly semanticMemo = new Map<string, { source: string; result: SemanticTokensResult }>();
 
     /**
      * The last analysis of each module, kept whole: the findings as the analyzer made them, and
@@ -156,6 +167,9 @@ export class Dispatcher {
 
             case 'textDocument/codeAction':
                 return this.codeAction(this.require<CodeActionParams>(params));
+
+            case 'textDocument/semanticTokens':
+                return this.semanticTokens(this.require<SemanticTokensParams>(params));
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
@@ -238,6 +252,12 @@ export class Dispatcher {
             }
         }
 
+        for (const key of this.semanticMemo.keys()) {
+            if (key.startsWith(prefix)) {
+                this.semanticMemo.delete(key);
+            }
+        }
+
         return null;
     }
 
@@ -307,6 +327,28 @@ export class Dispatcher {
         }
 
         return { edits: loopSyncFor({ ...params, source }) };
+    }
+
+    private semanticTokens(params: SemanticTokensParams): SemanticTokensResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { tokens: [] };
+        }
+
+        const key = liveKey(params.projectId, params.moduleName);
+        const memo = this.semanticMemo.get(key);
+        if (memo?.source === source) {
+            return memo.result;
+        }
+
+        const result: SemanticTokensResult = {
+            tokens: semanticTokensFor(this.seededModules.get(params.projectId) ?? [], { ...params, source }),
+        };
+
+        this.semanticMemo.set(key, { source, result });
+        return result;
     }
 
     private codeAction(params: CodeActionParams): CodeActionResult {

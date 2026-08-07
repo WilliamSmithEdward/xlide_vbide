@@ -75,6 +75,7 @@ export type HostMessage =
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
+  | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -159,6 +160,17 @@ export interface HostCodeAction {
   edits: HostTextEdit[];
 }
 
+/**
+ * One coloured span from the host's engine, UTF-16 offsets into the live source. The type is the
+ * analyzer's vocabulary; the only modifier it uses is `defaultLibrary`, for host globals.
+ */
+export interface HostSemanticToken {
+  start: number;
+  end: number;
+  type: string;
+  modifiers?: string[] | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -241,6 +253,7 @@ export type ClientMessage =
   | { type: "signatureHelp"; id: number; offset: number }
   | { type: "canonicalCase"; id: number; start: number; end: number; single?: boolean; completeHeader?: boolean }
   | { type: "codeAction"; id: number; start: number; end: number }
+  | { type: "semanticTokens"; id: number; module: string; project?: string }
   | { type: "outline"; id: number; module: string; project?: string }
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
@@ -381,6 +394,12 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Colouring requests awaiting their answers, by request identifier. */
+  private readonly pendingSemanticTokens = new Map<number, {
+    resolve: (tokens: HostSemanticToken[] | null) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
   /** Outline requests awaiting their answers, by request identifier. */
   private readonly pendingOutlines = new Map<number, {
     resolve: (procedures: HostProcedure[] | null) => void;
@@ -392,6 +411,7 @@ export class EditorBridge {
   private nextSignatureId = 1;
   private nextCanonicalCaseId = 1;
   private nextCodeActionId = 1;
+  private nextSemanticTokensId = 1;
   private nextOutlineId = 1;
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -727,6 +747,38 @@ export class EditorBridge {
     });
   }
 
+  /**
+   * Asks the host to colour a model. Addressed by the model's own document, not by whichever is
+   * host-active: the editor colours every model it is showing, and a split shows two.
+   *
+   * Resolves null rather than empty when the host cannot answer, so the caller can keep the
+   * colouring already on screen — a module that suddenly loses its analysed colours reads as the
+   * analysis having broken, which is exactly what it would be lying about.
+   */
+  requestSemanticTokens(model: monaco.editor.ITextModel): Promise<HostSemanticToken[] | null> {
+    const shown = this.documents.idOf(model);
+    if (!shown) {
+      return Promise.resolve(null);
+    }
+
+    const id = this.nextSemanticTokensId++;
+
+    return new Promise<HostSemanticToken[] | null>((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingSemanticTokens.delete(id);
+        resolve(null);
+      }, 8000);
+
+      this.pendingSemanticTokens.set(id, { resolve, timer });
+      this.transport.post({
+        type: "semanticTokens",
+        id,
+        module: shown.module,
+        ...(shown.project ? { project: shown.project } : {}),
+      });
+    });
+  }
+
   /** True while a host edit is being written into the model, so listeners can tell it from typing. */
   get isApplyingHostEdit(): boolean {
     return this.applyingHostEdit;
@@ -904,6 +956,16 @@ export class EditorBridge {
           this.pendingCodeActions.delete(message.id);
           clearTimeout(waiter.timer);
           waiter.resolve(message.actions);
+        }
+        return;
+      }
+      case "semanticTokensResult": {
+        const waiter = this.pendingSemanticTokens.get(message.id);
+        if (waiter) {
+          this.pendingSemanticTokens.delete(message.id);
+          clearTimeout(waiter.timer);
+          // A failed answer is a shrug, not a statement of colourlessness.
+          waiter.resolve(message.failed ? null : message.tokens);
         }
         return;
       }
@@ -1702,6 +1764,27 @@ export function demoTransport(): HostTransport {
               edits: [{ start: shadowed, end: shadowed + "rowIndex".length, text: "outerRowIndex" }],
             }]
             : [],
+        });
+      }
+      // The demo's own colouring, so the legend, the delta encoding and the theme rules are
+      // exercisable in a plain browser: the host globals the module names, plus its one type.
+      if (message.type === "semanticTokens") {
+        const text = message.module === "Module2" ? DEMO_MODULE_2 : DEMO_MODULE;
+        const tokens: HostSemanticToken[] = [];
+        for (const [name, type, modifiers] of [
+          ["Application", "variable", ["defaultLibrary"]],
+          ["TypeName", "variable", ["defaultLibrary"]],
+          ["Object", "class", []],
+        ] as [string, string, string[]][]) {
+          for (let at = text.indexOf(name); at >= 0; at = text.indexOf(name, at + 1)) {
+            tokens.push({ start: at, end: at + name.length, type, modifiers });
+          }
+        }
+
+        send({
+          type: "semanticTokensResult",
+          id: message.id,
+          tokens: tokens.sort((left, right) => left.start - right.start),
         });
       }
       if (message.type === "signatureHelp") {

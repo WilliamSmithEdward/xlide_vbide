@@ -197,6 +197,10 @@ internal sealed class EditorSurface : IDisposable
     /// workbook or null).</summary>
     public Action<int, string, string?>? OutlineRequested { get; set; }
 
+    /// <summary>Raised when the page asks for a module's colouring: (requestId, moduleName,
+    /// workbook or null).</summary>
+    public Action<int, string, string?>? SemanticTokensRequested { get; set; }
+
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
@@ -303,6 +307,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new CodeActionResultMessage("codeActionResult", requestId, actions),
             EditorMessageContext.Default.CodeActionResultMessage));
+    }
+
+    /// <summary>Answers one colouring request. Failed keeps what the page already shows.</summary>
+    public void ShowSemanticTokens(int requestId, SurfaceSemanticToken[] tokens, bool failed)
+    {
+        ArgumentNullException.ThrowIfNull(tokens);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SemanticTokensResultMessage("semanticTokensResult", requestId, tokens, failed),
+            EditorMessageContext.Default.SemanticTokensResultMessage));
     }
 
     /// <summary>
@@ -1564,6 +1583,20 @@ internal sealed class EditorSurface : IDisposable
                             ? outlineOwner.GetString()
                             : null;
                         OutlineRequested?.Invoke(outlineRequestId, outlineModule, outlineProject);
+                    }
+
+                    break;
+
+                case "semanticTokens":
+                    if (document.RootElement.TryGetProperty("id", out var colourId)
+                        && colourId.TryGetInt32(out var colourRequestId)
+                        && document.RootElement.TryGetProperty("module", out var colourModuleElement)
+                        && colourModuleElement.GetString() is { Length: > 0 } colourModule)
+                    {
+                        var colourProject = document.RootElement.TryGetProperty("project", out var colourOwner)
+                            ? colourOwner.GetString()
+                            : null;
+                        SemanticTokensRequested?.Invoke(colourRequestId, colourModule, colourProject);
                     }
 
                     break;

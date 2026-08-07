@@ -412,6 +412,27 @@ public sealed record CodeActionResultMessage(
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("actions")] SurfaceCodeAction[] Actions);
 
+/// <summary>
+/// One coloured span, offsets into the live source. The type is the analyzer's vocabulary and
+/// the only modifier used is defaultLibrary, which marks a host global.
+/// </summary>
+public sealed record SurfaceSemanticToken(
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("modifiers")] string[]? Modifiers);
+
+/// <summary>
+/// The answer to one colouring request, in position order. Failed says the module could not be
+/// coloured rather than that it has no colour: the surface keeps what it is already showing,
+/// because dropping to a plain grammar mid-session reads as the analysis having gone wrong.
+/// </summary>
+public sealed record SemanticTokensResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("tokens")] SurfaceSemanticToken[] Tokens,
+    [property: JsonPropertyName("failed")] bool Failed);
+
 /// <summary>One procedure in a module's outline, the kind spelled the way the tree shows it.</summary>
 public sealed record SurfaceOutlineProcedure(
     [property: JsonPropertyName("name")] string Name,
@@ -494,6 +515,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(LoopSyncResultMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
+[JsonSerializable(typeof(SurfaceSemanticToken))]
+[JsonSerializable(typeof(SemanticTokensResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]

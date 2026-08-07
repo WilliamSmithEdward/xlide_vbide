@@ -92,6 +92,20 @@ public sealed record EngineCodeAction(
 public sealed record EngineCodeActions(
     [property: JsonPropertyName("actions")] EngineCodeAction[] Actions);
 
+/// <summary>
+/// One coloured span. The type is the analyzer's vocabulary — class, enum, struct, type,
+/// variable — and the only modifier used is defaultLibrary, which marks a host global.
+/// </summary>
+public sealed record EngineSemanticToken(
+    [property: JsonPropertyName("start")] int Start,
+    [property: JsonPropertyName("end")] int End,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("modifiers")] string[]? Modifiers);
+
+/// <summary>A module's colouring, in position order.</summary>
+public sealed record EngineSemanticTokens(
+    [property: JsonPropertyName("tokens")] EngineSemanticToken[] Tokens);
+
 /// <summary>One procedure: the kind as a tree spells it ("Sub", "Property Get") and its 1-based line.</summary>
 public sealed record EngineOutlineProcedure(
     [property: JsonPropertyName("name")] string Name,
@@ -153,6 +167,8 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineTextEdits))]
 [JsonSerializable(typeof(EngineCodeAction))]
 [JsonSerializable(typeof(EngineCodeActions))]
+[JsonSerializable(typeof(EngineSemanticToken))]
+[JsonSerializable(typeof(EngineSemanticTokens))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]
 [JsonSerializable(typeof(EngineOutline))]
 [JsonSerializable(typeof(EngineProjectOpened))]

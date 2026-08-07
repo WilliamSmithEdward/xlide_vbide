@@ -432,34 +432,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        // The one request class that serves modules the surface is NOT showing: the tree asks
-        // about any row it has, and names the workbook the row belongs to. An explicit project
-        // is the whole answer; a bare name lets its own home stand even while another project
-        // is shown.
-        (string ProjectId, string ModuleType)? home = null;
-        if (projectId is not null)
-        {
-            var homes = _moduleHomes;
-            if (homes.TryGetValue(moduleName, out var candidates))
-            {
-                foreach (var candidate in candidates)
-                {
-                    if (string.Equals(candidate.ProjectId, projectId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        home = candidate;
-                        break;
-                    }
-                }
-            }
-
-            home ??= (projectId, "standard");
-        }
-        else
-        {
-            home = ResolveHome(moduleName, aboutShownModule: false);
-        }
-
-        if (home is not { } resolved)
+        if (ResolveNamedHome(moduleName, projectId) is not { } resolved)
         {
             return null;
         }
@@ -468,6 +441,60 @@ internal sealed class AnalysisService : IAsyncDisposable
             .ConfigureAwait(false);
 
         return result?.Procedures;
+    }
+
+    /// <summary>
+    /// Asks the engine to colour a module: which identifiers name types, which kind of type each
+    /// names, and which are host globals nothing has shadowed. Empty when there is no engine or
+    /// no address for the module.
+    /// </summary>
+    public async Task<EngineSemanticToken[]> SemanticTokensAsync(
+        string moduleName,
+        string? projectId,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return [];
+        }
+
+        // Addressed by name rather than taken from the shown module, the way the outline is: a
+        // split shows two modules at once and the editor asks about both, so answering only for
+        // whichever is host-active would leave one half of the split plainly coloured.
+        if (ResolveNamedHome(moduleName, projectId) is not { } resolved)
+        {
+            return [];
+        }
+
+        var result = await engine.SemanticTokensAsync(resolved.ProjectId, moduleName, resolved.ModuleType, null, cancellation)
+            .ConfigureAwait(false);
+
+        return result?.Tokens ?? [];
+    }
+
+    /// <summary>
+    /// Addresses a module the surface may not be showing. An explicit project is the whole
+    /// answer; a bare name lets the module's own home stand even while another project is shown.
+    /// </summary>
+    private (string ProjectId, string ModuleType)? ResolveNamedHome(string moduleName, string? projectId)
+    {
+        if (projectId is null)
+        {
+            return ResolveHome(moduleName, aboutShownModule: false);
+        }
+
+        if (_moduleHomes.TryGetValue(moduleName, out var candidates))
+        {
+            foreach (var candidate in candidates)
+            {
+                if (string.Equals(candidate.ProjectId, projectId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return (projectId, "standard");
     }
 
     /// <summary>

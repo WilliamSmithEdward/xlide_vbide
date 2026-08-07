@@ -336,6 +336,30 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineCodeActions);
     }
 
+    /// <summary>Asks for a module's colouring: the type references and host globals it holds.</summary>
+    public async Task<EngineSemanticTokens?> SemanticTokensAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? source,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+        };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
+
+        var result = await CallAsync("textDocument/semanticTokens", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineSemanticTokens);
+    }
+
     /// <summary>Asks for the case corrections over a span of a module's live source.</summary>
     public async Task<EngineTextEdits?> CanonicalCaseAsync(
         string projectId,

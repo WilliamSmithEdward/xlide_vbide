@@ -24,6 +24,13 @@ import "monaco-editor/features/linesOperations/register.js";
 import "monaco-editor/features/multicursor/register.js";
 import "monaco-editor/features/parameterHints/register.js";
 import "monaco-editor/features/quickCommand/register.js";
+// What asks a semantic-tokens provider for tokens and paints the answer. The feature's register
+// module imports only the VIEWPORT contribution, which serves registerDocumentRangeSemanticTokens
+// providers; the whole-document feature is a separate module it never touches, so registering the
+// feature alone leaves a document provider registered and never called. Found the same way the
+// suggest controller below was: by watching a running editor ask for nothing.
+import "monaco-editor/features/semanticTokens/register.js";
+import "monaco-editor/editor/contrib/semanticTokens/browser/documentSemanticTokens.js";
 import "monaco-editor/features/smartSelect/register.js";
 // Suggest is the completion widget itself; snippet expands the placeholders completions insert.
 // A completion provider without these registered answers into a void.
@@ -74,6 +81,27 @@ globalThis.MonacoEnvironment = {
 // So this is the cost of fetching, parsing and running the whole bundle, and it is the number that
 // decides whether the surface is worth putting over a pane at all.
 const scriptMs = performance.now();
+
+/**
+ * The semantic-token legend, which is the extension's own. An index into these lists is what
+ * crosses to the editor, so the order is a contract with the theme rather than a preference:
+ * theme.ts colours a token by matching its type and modifiers against its rule scopes.
+ */
+const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable"];
+
+/** `defaultLibrary` marks a host-injected global — Application, ThisWorkbook, ActiveSheet. */
+const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
+
+function modifierBits(modifiers: readonly string[] | null | undefined): number {
+  let bits = 0;
+  for (const modifier of modifiers ?? []) {
+    const at = SEMANTIC_TOKEN_MODIFIERS.indexOf(modifier);
+    if (at >= 0) {
+      bits |= 1 << at;
+    }
+  }
+  return bits;
+}
 
 function boot(): void {
   const editorArea = document.getElementById("editor-area");
@@ -184,6 +212,10 @@ function boot(): void {
     wordWrap: "off",
     smoothScrolling: false,
     fixedOverflowWidgets: true,
+    // Asked for outright. The default defers to the theme, and a standalone theme has no way to
+    // say yes: the flag is hardcoded off on every one of them, so a provider would be registered,
+    // asked nothing, and paint nothing.
+    "semanticHighlighting.enabled": true,
   };
 
   const transport = webView2Transport();
@@ -468,6 +500,56 @@ function boot(): void {
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
     // the keyboard.
     providedCodeActionKinds: ["quickfix"],
+  });
+
+  // Semantic colouring, over the grammar rather than instead of it. The grammar already paints
+  // the project's words from the lists project/open hands it; what it cannot do is tell a class
+  // from an enum from a user-defined type, or tell a host global from a local that shadows its
+  // name. Those need the analysis, and this is where it arrives.
+  monaco.languages.registerDocumentSemanticTokensProvider(VBA_LANGUAGE_ID, {
+    getLegend: () => ({ tokenTypes: SEMANTIC_TOKEN_TYPES, tokenModifiers: SEMANTIC_TOKEN_MODIFIERS }),
+    provideDocumentSemanticTokens: async (model) => {
+      const tokens = await bridge.requestSemanticTokens(model);
+      if (!tokens) {
+        // Null keeps what is already painted. Returning an empty set would strip the colouring
+        // from a module whose analysis merely took too long.
+        return null;
+      }
+
+      // The editor's wire format: five numbers per token, each row relative to the row before.
+      const data = new Uint32Array(tokens.length * 5);
+      let previousLine = 1;
+      let previousColumn = 1;
+      let at = 0;
+
+      for (const token of tokens) {
+        const start = model.getPositionAt(token.start);
+        const end = model.getPositionAt(token.end);
+        if (end.lineNumber !== start.lineNumber) {
+          // A token the editor cannot express: its rows are single-line by construction.
+          continue;
+        }
+
+        const typeIndex = SEMANTIC_TOKEN_TYPES.indexOf(token.type);
+        if (typeIndex < 0) {
+          continue;
+        }
+
+        data[at++] = start.lineNumber - previousLine;
+        data[at++] = start.lineNumber === previousLine
+          ? start.column - previousColumn
+          : start.column - 1;
+        data[at++] = end.column - start.column;
+        data[at++] = typeIndex;
+        data[at++] = modifierBits(token.modifiers);
+
+        previousLine = start.lineNumber;
+        previousColumn = start.column;
+      }
+
+      return { data: data.subarray(0, at) };
+    },
+    releaseDocumentSemanticTokens: () => { },
   });
 
   // Call tips, triggered the way the extension triggers them: the opening paren, the comma, and

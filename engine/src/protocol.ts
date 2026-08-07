@@ -306,6 +306,37 @@ export interface CodeActionResult {
 }
 
 /**
+ * textDocument/semanticTokens: the analysed colouring of a whole module — which identifiers name
+ * types, which kind of type each names, and which are host globals nothing has shadowed. Same
+ * liveness rule as completion.
+ */
+export interface SemanticTokensParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+/**
+ * One coloured span. The type is the analyzer's own vocabulary — class, enum, struct, type,
+ * variable — and the modifiers are the standard semantic-token ones, of which only
+ * `defaultLibrary` is used, for host globals. Offsets into the request's source.
+ */
+export interface SemanticTokenPayload {
+    start: number;
+    end: number;
+    type: string;
+    modifiers?: string[];
+}
+
+export interface SemanticTokensResult {
+    /** In position order: the surface encodes them as deltas, so the order is the contract. */
+    tokens: SemanticTokenPayload[];
+}
+
+/**
  * textDocument/outline: a module's procedures, in declaration order. The source is optional:
  * present for the module being edited (the liveness rule), absent to use the seeded copy, which
  * is how the tree asks about modules that are not open.

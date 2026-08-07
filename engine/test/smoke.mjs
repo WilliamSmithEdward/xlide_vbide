@@ -723,6 +723,71 @@ try {
 
     check('code with nothing wrong offers no fixes', () => assert.equal(clean.actions.length, 0));
 
+    // Semantic tokens: what a grammar cannot know. The class, the host global, and a local that
+    // shadows a host global's name have to come out differently.
+    const COLOURED = [
+        'Option Explicit',
+        '',
+        'Sub Paint()',
+        '    Dim maker As FineClass',
+        '    Set maker = New FineClass',
+        '    Application.Calculate',
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    const coloured = await call('textDocument/semanticTokens', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: COLOURED,
+        moduleType: 'standard',
+    });
+
+    console.log(`  -> ${coloured.tokens.length} semantic token(s):`);
+    for (const token of coloured.tokens) {
+        console.log(`     ${token.type}${token.modifiers ? ` (${token.modifiers.join(',')})` : ''}` +
+            ` ${JSON.stringify(COLOURED.slice(token.start, token.end))}`);
+    }
+
+    check("the project's own class is coloured as a class", () => {
+        const hits = coloured.tokens.filter((token) =>
+            COLOURED.slice(token.start, token.end) === 'FineClass');
+        assert.equal(hits.length, 2, 'both mentions of FineClass');
+        assert.ok(hits.every((token) => token.type === 'class'),
+            `types were ${hits.map((token) => token.type).join(', ')}`);
+    });
+
+    check('a host global is marked as one', () => {
+        const hit = coloured.tokens.find((token) =>
+            COLOURED.slice(token.start, token.end) === 'Application');
+        assert.ok(hit, 'expected Application');
+        assert.equal(hit.type, 'variable');
+        assert.deepEqual(hit.modifiers, ['defaultLibrary']);
+    });
+
+    check('tokens arrive in position order, which the surface encodes as deltas', () => {
+        for (let i = 1; i < coloured.tokens.length; i++) {
+            assert.ok(coloured.tokens[i].start >= coloured.tokens[i - 1].start,
+                `token ${i} starts before token ${i - 1}`);
+        }
+    });
+
+    // A local declared with a host global's name is the developer's, not Excel's.
+    const SHADOWED = COLOURED.replace('    Application.Calculate', '    Dim Application As Long');
+    const shadowed = await call('textDocument/semanticTokens', {
+        projectId: 'Smoke',
+        moduleName: 'GoodModule',
+        source: SHADOWED,
+        moduleType: 'standard',
+    });
+
+    check('a declaration of the same name stops it being a host global', () => {
+        assert.ok(!shadowed.tokens.some((token) =>
+            SHADOWED.slice(token.start, token.end) === 'Application'
+            && token.modifiers?.includes('defaultLibrary')),
+            'a shadowed name must not be marked as the host library');
+    });
+
     // Analysis against sources the engine was never given must be refused, not answered from
     // whatever it happens to hold.
     let refused = false;

@@ -2044,6 +2044,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
+        _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
 
@@ -5110,6 +5111,46 @@ internal sealed class AddInSession : IDisposable
             }
 
             surface.RunOnHostThread(() => surface.ShowOutline(requestId, procedures, failed));
+        });
+    }
+
+    /// <summary>
+    /// Answers a colouring request from the surface. Addressed by module name the way the outline
+    /// is, not taken from the shown module: a split shows two at once and the editor colours both.
+    /// </summary>
+    private void OnSemanticTokensRequested(int requestId, string moduleName, string? projectDisplay)
+    {
+        var surface = _editorSurface;
+
+        if (surface is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowSemanticTokens(requestId, [], failed: true);
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay);
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceSemanticToken[] tokens = [];
+            var failed = false;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                var answered = await analysis.SemanticTokensAsync(moduleName, projectId, deadline.Token)
+                    .ConfigureAwait(false);
+
+                tokens = [.. answered.Select(token =>
+                    new SurfaceSemanticToken(token.Start, token.End, token.Type, token.Modifiers))];
+            }
+            catch (Exception ex)
+            {
+                failed = true;
+                Log.Info($"semanticTokens: {moduleName} failed ({ex.GetType().Name})");
+            }
+
+            surface.RunOnHostThread(() => surface.ShowSemanticTokens(requestId, tokens, failed));
         });
     }
 

@@ -26,6 +26,15 @@ const darkRules: monaco.editor.ITokenThemeRule[] = [
   { token: "number.date", foreground: "b5cea8" },
   { token: "operator", foreground: "d4d4d4" },
   { token: "delimiter", foreground: "d4d4d4" },
+  // Semantic tokens land in the same table, matched as type-then-modifiers joined by dots. The
+  // three type kinds share the grammar's type colour, which is deliberate: the distinction the
+  // analysis adds is that these ARE types, and a module that reads differently in the two
+  // products would be the drift this file exists to prevent.
+  { token: "class", foreground: "4ec9b8" },
+  { token: "enum", foreground: "4ec9b8" },
+  { token: "struct", foreground: "4ec9b8" },
+  // A host global, tinted away from an ordinary identifier rather than shouted about.
+  { token: "variable.defaultLibrary", foreground: "4fc1ff" },
 ];
 
 const lightRules: monaco.editor.ITokenThemeRule[] = [
@@ -43,6 +52,10 @@ const lightRules: monaco.editor.ITokenThemeRule[] = [
   { token: "number.date", foreground: "098658" },
   { token: "operator", foreground: "1b1b1f" },
   { token: "delimiter", foreground: "1b1b1f" },
+  { token: "class", foreground: "267f99" },
+  { token: "enum", foreground: "267f99" },
+  { token: "struct", foreground: "267f99" },
+  { token: "variable.defaultLibrary", foreground: "0070c1" },
 ];
 
 const darkTheme: monaco.editor.IStandaloneThemeData = {
