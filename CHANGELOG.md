@@ -15,6 +15,12 @@ editor.
   enum, or user-defined — and a host global is tinted apart from an ordinary identifier, unless
   something in the module has declared that name itself, in which case it is the developer's and
   is coloured as one.
+- Rename, across every module of the workbook, whether a module has a tab open or not. A symbol
+  goes with its declaration, its qualified calls, and the bare calls that can only mean it; a
+  module takes its qualified references, its `As` and `New` types, and — for an interface — the
+  `Implements` statement and the `Interface_Member` prefix that is the contract. A name inside a
+  string or a comment is left alone. It refuses rather than half-does: a name already taken, a
+  name VBA will not accept, or a call nothing can resolve stops the whole rename.
 - Go to Definition and Find All References, on Ctrl+click, F12, Shift+F12, and the editor's
   right-click menu. Both answer across every module of the workbook and stop at its edge: two open
   workbooks can each hold a `Module1` and a `Recalculate`, and they are unrelated. A definition in
@@ -32,9 +38,10 @@ editor.
 
 - The references window lists only modules that already have a tab open. The answer behind it
   covers the whole workbook; the window can only draw a module it has the text for.
-- Renaming a symbol across modules is not wired yet. It is the one item here that changes code
-  rather than describing it, and what it does to a module with no tab open has to be decided
-  before it can be trusted.
+- Renaming cannot be undone. The edit spans several modules and the editor's undo stack is per
+  module, so Ctrl+Z does not put a rename back.
+- A rename resolves against the shown workbook. With two open, renaming from the explorer in the
+  one that is not shown has not been tried.
 
 ## v0.3.0 (2026-08-06)
 

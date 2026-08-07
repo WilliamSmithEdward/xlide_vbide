@@ -8,10 +8,9 @@ invisible, and the analyzer is almost never the missing one.
 
 ## The table
 
-| Capability | Analyzer | Engine op | Shim route | Page provider | State |
-| --- | --- | --- | --- | --- | --- |
-Three of the five have been wired since. The table below is as of 2026-08-06; what changed is
-recorded under it.
+All five have been wired since, and rename grew a sixth: renaming a module. Everything below was
+exercised against a real host, reading the result out of the VBA project rather than believing the
+editor's own report of what it did.
 
 | Capability | Analyzer | Engine op | Shim route | Page provider | State |
 | --- | --- | --- | --- | --- | --- |
@@ -19,7 +18,8 @@ recorded under it.
 | Semantic highlighting | yes | `semanticTokens` | yes | `registerDocumentSemanticTokensProvider` | shipped |
 | Go to definition | yes | `definition` | yes | `registerDefinitionProvider` | shipped |
 | Find references | yes | `references` | yes | `registerReferenceProvider` | shipped, one limit |
-| Rename symbol | yes | no | no | no | analyzer only |
+| Rename symbol | yes | `rename` | yes | `registerRenameProvider` | shipped |
+| Rename module | yes | `renameModule` | yes | explorer, and the rename box | shipped |
 
 Find references answers across the whole workbook, but the editor's references window can only
 render modules that have a tab open: a module with no tab has no model to render. Go to definition
@@ -71,11 +71,12 @@ Monaco has a first-class provider for every one of these:
 
 ## What is not just plumbing
 
-**Rename.** Everything above answers questions; rename changes code, in modules that may be open,
-dirty, or closed. It goes through the host's writer, and it has to agree with the baselines the
-unsaved dot and Don't Save both read, or a rename will either lose the dot or make Don't Save
-revert to the wrong text. Undo across several modules at once is the part to think hardest about,
-since Monaco's undo stack is per model and the edit is not.
+**Rename**, and it turned out to be the sentence below that mattered rather than the one predicted.
+Agreeing with the baselines was free: the edits go through the same writer typing already uses, so
+the unsaved dot and Don't Save kept working because nothing new was happening to them. Undo is the
+part that did not get solved — the editor's stack is per module and the edit is not, so a rename
+cannot be undone. What actually cost the time was narrower and unforeseen: which occurrences of a
+name are references at all.
 
 **The workbook boundary**, for both rename and references. Two open workbooks can each hold a
 `Module1` and a `Recalculate`, and they are unrelated. Everything here is addressed as
