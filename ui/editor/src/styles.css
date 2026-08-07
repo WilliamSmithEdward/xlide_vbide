@@ -955,7 +955,8 @@ body.live-resize .minimap {
    rounded, a groove tint instead of the strip's own ground, a divider against the commands, and a
    chevron at half the weight of a command icon. The fade beyond each one is what actually reads,
    because content dissolving under an edge is how a scrollable thing looks. */
-.toolbar-edge {
+.toolbar-edge,
+.tab-edge {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -972,30 +973,36 @@ body.live-resize .minimap {
   z-index: 1;
 }
 
-.toolbar-edge:hover {
+.toolbar-edge:hover,
+.tab-edge:hover {
   background: rgba(128, 128, 128, 0.45);
 }
 
-.toolbar-edge:active {
+.toolbar-edge:active,
+.tab-edge:active {
   background: rgba(128, 128, 128, 0.6);
 }
 
-.toolbar-edge .codicon {
+.toolbar-edge .codicon,
+.tab-edge .codicon {
   font-size: 12px;
   line-height: 1;
   opacity: 0.9;
 }
 
-.toolbar-edge-start {
+.toolbar-edge-start,
+.tab-edge-start {
   border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
 }
 
-.toolbar-edge-end {
+.toolbar-edge-end,
+.tab-edge-end {
   border-left: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
 }
 
-/* The commands fade out as they pass beneath the edge. */
-.toolbar-edge::after {
+/* Whatever is scrolling — commands or tabs — darkens as it passes beneath the edge. */
+.toolbar-edge::after,
+.tab-edge::after {
   content: "";
   position: absolute;
   top: 0;
@@ -1004,17 +1011,20 @@ body.live-resize .minimap {
   pointer-events: none;
 }
 
-.toolbar-edge-start::after {
+.toolbar-edge-start::after,
+.tab-edge-start::after {
   left: 100%;
   background: linear-gradient(to right, rgba(0, 0, 0, 0.45), transparent);
 }
 
-.toolbar-edge-end::after {
+.toolbar-edge-end::after,
+.tab-edge-end::after {
   right: 100%;
   background: linear-gradient(to left, rgba(0, 0, 0, 0.45), transparent);
 }
 
-.toolbar-edge[hidden] {
+.toolbar-edge[hidden],
+.tab-edge[hidden] {
   display: none;
 }
 
@@ -1274,66 +1284,6 @@ body.live-resize .minimap {
   display: none;
 }
 
-/* Styled as the command strip's edges are, and for the same reason: they reveal what is already
-   there rather than running anything, so they must not look like a tab. */
-.tab-edge {
-  flex: 0 0 auto;
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  padding: 0;
-  border: 0;
-  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
-  color: inherit;
-  opacity: 0.85;
-  cursor: pointer;
-}
-
-.tab-edge:hover {
-  opacity: 1;
-  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
-}
-
-.tab-edge:active {
-  background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.3));
-}
-
-.tab-edge .codicon {
-  font-size: 14px;
-}
-
-/* The tabs fade under each edge, so it reads as more strip continuing rather than a border. */
-.tab-edge::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 10px;
-  pointer-events: none;
-}
-
-.tab-edge-start::after {
-  left: 100%;
-  background: linear-gradient(
-    to right,
-    var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08)),
-    transparent);
-}
-
-.tab-edge-end::after {
-  right: 100%;
-  background: linear-gradient(
-    to left,
-    var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08)),
-    transparent);
-}
-
-.tab-edge[hidden] {
-  display: none;
-}
 
 .tab {
   display: inline-flex;
