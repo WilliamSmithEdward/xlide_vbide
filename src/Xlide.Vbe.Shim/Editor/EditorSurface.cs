@@ -969,6 +969,7 @@ internal sealed class EditorSurface : IDisposable
                 settings.BlockLayout,
                 settings.ContinueCommentOnNewline,
                 settings.MirrorCommentSpacing,
+                settings.TreeFollowsEditor,
                 settings.FormatIndentSize,
                 settings.FormatUseTabs,
                 settings.FormatCanonicalKeywords),
@@ -1586,6 +1587,8 @@ internal sealed class EditorSurface : IDisposable
                         || continueValue.ValueKind is not (JsonValueKind.False);
                     var mirrorSpacing = !document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
                         || mirrorValue.ValueKind is not (JsonValueKind.False);
+                    var treeFollows = !document.RootElement.TryGetProperty("treeFollowsEditor", out var treeValue)
+                        || treeValue.ValueKind is not JsonValueKind.False;
                     var indentSize = document.RootElement.TryGetProperty("formatIndentSize", out var indentValue)
                         && indentValue.TryGetInt32(out var asked)
                         ? asked
@@ -1600,6 +1603,7 @@ internal sealed class EditorSurface : IDisposable
                         BlockLayout = layout,
                         ContinueCommentOnNewline = continueComment,
                         MirrorCommentSpacing = mirrorSpacing,
+                        TreeFollowsEditor = treeFollows,
                         FormatIndentSize = indentSize,
                         FormatUseTabs = useTabs,
                         FormatCanonicalKeywords = canonicalKeywords,

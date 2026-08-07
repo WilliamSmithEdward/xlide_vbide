@@ -2180,12 +2180,12 @@ internal sealed class AddInSession : IDisposable
                             var finalName = added.GetString("Name") ?? string.Empty;
                             Log.Info($"component: added {finalName} (kind {kind})");
 
-                            // The strip is published from the editor's pane list, and nothing
-                            // republishes it on its own. Without this a component that was renamed
-                            // or removed kept its old tab, so a fixture built through the door
-                            // left the surface describing a project that no longer existed.
-                            PublishModules();
-                            _analysis?.Reanalyse();
+                            // The strip AND the tree. Neither republishes on its own, and they are
+                            // separate publishes: the first version of this route refreshed the
+                            // tabs only, so the explorer went on listing three components while
+                            // the strip showed eight — a surface describing two different
+                            // projects at once (the developer, 2026-08-07).
+                            ComponentsChanged();
 
                             return System.Text.Json.JsonSerializer.Serialize(
                                 new DebugComponentReply(true, finalName, "add"),
@@ -2225,8 +2225,7 @@ internal sealed class AddInSession : IDisposable
                             holding.InvokeWithObject("Remove", doomed);
 
                             Log.Info($"component: removed {componentName}");
-                            PublishModules();
-                            _analysis?.Reanalyse();
+                            ComponentsChanged();
 
                             return System.Text.Json.JsonSerializer.Serialize(
                                 new DebugComponentReply(true, componentName, "remove"),
@@ -2258,8 +2257,7 @@ internal sealed class AddInSession : IDisposable
                             target.SetString("Name", newName);
                             var readBack = target.GetString("Name") ?? newName;
                             Log.Info($"component: renamed {componentName} to {readBack}");
-                            PublishModules();
-                            _analysis?.Reanalyse();
+                            ComponentsChanged();
 
                             return System.Text.Json.JsonSerializer.Serialize(
                                 new DebugComponentReply(true, readBack, "rename"),
@@ -4545,6 +4543,25 @@ internal sealed class AddInSession : IDisposable
             PublishProperties();
         }
 
+        ComponentsChanged();
+    }
+
+    /// <summary>
+    /// The workbook's components changed: everything that has to follow, in one place.
+    ///
+    /// THE TAB STRIP AND THE EXPLORER TREE ARE SEPARATE PUBLISHES, and the analyzer is a third
+    /// thing again. Nothing refreshes on its own, so every site that adds, removes or renames a
+    /// component has to say so — and each one remembering a different subset is exactly how this
+    /// went wrong twice in one day: inserting a component from the page refreshed neither the
+    /// strip nor the tree, and the first version of the `component` route refreshed the strip
+    /// only, leaving the explorer listing three components while the strip showed eight.
+    ///
+    /// So there is one method, and the question "did you remember to refresh the tree" has one
+    /// answer (the developer, 2026-08-07: any touch to the modules in a workbook must refresh the
+    /// tree and the surface, and any relevant panes).
+    /// </summary>
+    private void ComponentsChanged()
+    {
         PublishModules();
         PublishProjects();
         _analysis?.Reanalyse();
@@ -7454,7 +7471,10 @@ internal sealed class AddInSession : IDisposable
                 ShowModule(name);
             }
 
-            _analysis?.Reanalyse();
+            // Not just the analyzer: the strip and the tree both have to hear about it too, and
+            // this used to tell only the analyzer — so a module inserted from the page appeared
+            // in neither list until something else happened to republish them.
+            ComponentsChanged();
         }
         catch (Exception ex)
         {

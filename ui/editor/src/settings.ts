@@ -14,6 +14,12 @@ export interface EditorSettings {
   continueCommentOnNewline: boolean;
   /** A continued comment also mirrors the spaces after the apostrophes. */
   mirrorCommentSpacing: boolean;
+  /**
+   * The tree follows the editor: the module being worked on unfolds its procedures, and
+   * everything folds away when the last tab closes. Off leaves the tree to the hand that opened
+   * it.
+   */
+  treeFollowsEditor: boolean;
   /** Format Module: spaces per indent level. */
   formatIndentSize: number;
   /** Format Module: indent with tabs rather than spaces. */
@@ -27,6 +33,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   blockLayout: "comfy",
   continueCommentOnNewline: true,
   mirrorCommentSpacing: true,
+  treeFollowsEditor: true,
   formatIndentSize: 4,
   formatUseTabs: true,
   formatCanonicalKeywords: true,
@@ -47,6 +54,7 @@ export function applySettings(next: EditorSettings): void {
     blockLayout: next.blockLayout === "compact" ? "compact" : "comfy",
     continueCommentOnNewline: next.continueCommentOnNewline !== false,
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
+    treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
     formatUseTabs: next.formatUseTabs === true,
     formatCanonicalKeywords: next.formatCanonicalKeywords !== false,

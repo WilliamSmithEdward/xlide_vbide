@@ -11,7 +11,14 @@
  * line. Expansion is an accordion: one module open at a time, following the module being edited,
  * and activating a module in another workbook moves the whole tree's attention there. A workbook
  * the developer collapsed by hand stays collapsed until the attention genuinely moves again.
+ *
+ * All of that following is one setting — "Explorer follows the editor", on by default. Off, the
+ * tree does nothing on its own: it unfolds what is clicked and stays as it was left, which is the
+ * right answer for anyone who arranges the tree deliberately and does not want it rearranged
+ * underneath them (the developer, 2026-08-07).
  */
+
+import { currentSettings } from "./settings.js";
 
 /** Component kinds, as the host numbers them. */
 export const enum ComponentKind {
@@ -311,6 +318,12 @@ export class Explorer {
    * a workbook collapsed by hand stays collapsed while work continues inside another.
    */
   private setExpandedModule(name: string, workbook?: string): void {
+    // Following is what the setting governs. A module CLICKED in the tree still unfolds — that
+    // goes through toggleModule — so switching this off makes the tree passive, not inert.
+    if (!currentSettings().treeFollowsEditor && !this.unfoldingByHand) {
+      return;
+    }
+
     const owner = workbook
       ? this.projects.find((project) => project.name.toLowerCase() === workbook.toLowerCase())
       : this.projects.find((project) =>
@@ -336,13 +349,40 @@ export class Explorer {
     }
   }
 
+  /**
+   * Folds every module's procedures away, leaving the workbooks as they are.
+   *
+   * Called when the last tab closes. The tree's unfolded module is the accordion's memory of what
+   * was being worked on, and once nothing is open there is no such thing — leaving a module's
+   * procedures hanging open under an empty editor points at work that is no longer there (the
+   * developer, 2026-08-07). Which WORKBOOKS are open is a different kind of state, chosen by hand,
+   * and closing every tab is not a reason to undo it.
+   */
+  collapseModules(): void {
+    if (this.expandedModule === null || !currentSettings().treeFollowsEditor) {
+      return;
+    }
+
+    this.expandedModule = null;
+    this.expandedModuleWorkbook = null;
+    this.render();
+  }
+
+  /** True while a click is being served, so setExpandedModule knows this was asked for. */
+  private unfoldingByHand = false;
+
   private toggleModule(name: string, workbook?: string): void {
     if (this.expandedModule === name
       && (!workbook || this.expandedModuleWorkbook === workbook)) {
       this.expandedModule = null;
       this.expandedModuleWorkbook = null;
     } else {
-      this.setExpandedModule(name, workbook);
+      this.unfoldingByHand = true;
+      try {
+        this.setExpandedModule(name, workbook);
+      } finally {
+        this.unfoldingByHand = false;
+      }
     }
     this.render();
   }

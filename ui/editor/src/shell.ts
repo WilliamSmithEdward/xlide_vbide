@@ -395,6 +395,14 @@ export class Shell {
   setWorkspaceEmpty(empty: boolean): void {
     this.shell.classList.toggle("empty", empty);
     this.statusModule.textContent = empty ? "" : this.statusModule.textContent;
+
+    // Nothing open means nothing is being worked on, so the tree stops claiming otherwise: the
+    // unfolded module's procedures fold away. The workbooks stay as they were — that is a choice
+    // someone made, and closing every tab is not a reason to undo it.
+    if (empty) {
+      this.explorer.collapseModules();
+    }
+
     this.handlers.layoutChanged();
   }
 

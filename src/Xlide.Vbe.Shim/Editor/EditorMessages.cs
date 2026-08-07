@@ -79,6 +79,7 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("blockLayout")] string BlockLayout,
     [property: JsonPropertyName("continueCommentOnNewline")] bool ContinueCommentOnNewline,
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
+    [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);

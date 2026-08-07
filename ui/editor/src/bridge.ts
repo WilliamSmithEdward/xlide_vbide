@@ -92,6 +92,7 @@ export type HostMessage =
     blockLayout: string;
     continueCommentOnNewline: boolean;
     mirrorCommentSpacing: boolean;
+    treeFollowsEditor: boolean;
     formatIndentSize?: number;
     formatUseTabs?: boolean;
     formatCanonicalKeywords?: boolean;
@@ -295,6 +296,7 @@ export type ClientMessage =
     blockLayout: string;
     continueCommentOnNewline: boolean;
     mirrorCommentSpacing: boolean;
+    treeFollowsEditor: boolean;
     formatIndentSize: number;
     formatUseTabs: boolean;
     formatCanonicalKeywords: boolean;
@@ -660,6 +662,7 @@ export class EditorBridge {
       blockLayout: settings.blockLayout,
       continueCommentOnNewline: settings.continueCommentOnNewline,
       mirrorCommentSpacing: settings.mirrorCommentSpacing,
+      treeFollowsEditor: settings.treeFollowsEditor,
       formatIndentSize: settings.formatIndentSize,
       formatUseTabs: settings.formatUseTabs,
       formatCanonicalKeywords: settings.formatCanonicalKeywords,
@@ -1211,6 +1214,7 @@ export class EditorBridge {
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
+          treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize ?? 4,
           formatUseTabs: message.formatUseTabs ?? true,
           formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
@@ -1822,6 +1826,7 @@ export function demoTransport(): HostTransport {
           blockLayout: "comfy",
           continueCommentOnNewline: true,
           mirrorCommentSpacing: true,
+          treeFollowsEditor: true,
           formatIndentSize: 4,
           formatUseTabs: true,
           formatCanonicalKeywords: true,
@@ -2070,6 +2075,7 @@ export function demoTransport(): HostTransport {
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
+          treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
           formatUseTabs: message.formatUseTabs,
           formatCanonicalKeywords: message.formatCanonicalKeywords,

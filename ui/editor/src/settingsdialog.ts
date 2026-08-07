@@ -34,6 +34,14 @@ const OPTIONS = [
       "A continued comment also repeats the spaces after the apostrophe, so the text lines up.",
   },
   {
+    key: "treeFollowsEditor" as const,
+    kind: "toggle" as const,
+    label: "Explorer follows the editor",
+    description:
+      "The module you are working on unfolds its procedures in the tree, and everything folds "
+      + "away when the last tab closes. Off leaves the tree exactly as you left it.",
+  },
+  {
     key: "formatIndentSize" as const,
     kind: "number" as const,
     label: "Format: indent size",

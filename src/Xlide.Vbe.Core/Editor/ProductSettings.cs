@@ -25,6 +25,14 @@ public sealed record ProductSettings
     [JsonPropertyName("editor.mirrorCommentSpacing")]
     public bool MirrorCommentSpacing { get; init; } = true;
 
+    /// <summary>
+    /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
+    /// and everything folds away when the last tab closes. Off leaves the tree entirely to the
+    /// hand that opened it.
+    /// </summary>
+    [JsonPropertyName("explorer.treeFollowsEditor")]
+    public bool TreeFollowsEditor { get; init; } = true;
+
     /// <summary>Format Module: spaces per indent level.</summary>
     [JsonPropertyName("format.indentSize")]
     public int FormatIndentSize { get; init; } = 4;
