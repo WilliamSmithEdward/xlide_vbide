@@ -981,7 +981,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "locals": return api.locals();
       case "watches": return api.watches();
       case "problems": return api.problems(rest[0]);
-      case "log": return api.log({ match: rest[0], max: 200 });
+      /*
+       * THE TAIL, because that is what a question about the last thing that happened wants.
+       *
+       * This asked for the first 200 lines from the start of the session, so every look at "what
+       * just happened" answered with the session's opening moments instead. Reading a timeline
+       * of a gesture performed seconds ago meant writing a script to page through offsets, which
+       * is the habit the standing instruction says not to build (2026-08-08).
+       *
+       *   xlide-api.mjs log                  the last 40 lines
+       *   xlide-api.mjs log destroy          the last 40 mentioning "destroy"
+       *   xlide-api.mjs log destroy 200      the last 200 of them
+       */
+      case "log": {
+        const wanted = Number(rest[1] ?? 40);
+        const all = await api.log({ match: rest[0], max: 20000 });
+        return { lines: all.lines.slice(-wanted), next: all.next, of: all.lines.length };
+      }
       case "messages": return api.messages(rest[0] ?? 20);
       case "module": return api.readModule(rest[0], rest[1]);
       case "command": return api.command(rest[0]);

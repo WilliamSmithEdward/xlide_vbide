@@ -213,6 +213,10 @@ internal sealed class CodePaneTracker : IDisposable
 
         if (windowEvent.IsDestroy)
         {
+            // NOT SHORTCUT FROM HERE, and it was tried. A destroy event names the pane's CHILD
+            // windows rather than the pane, so matching one against a tracked pane never fired
+            // once; what makes a close feel immediate is the fast resync poll the session runs
+            // afterwards (see AddInSession.UpdatePolling, 2026-08-08).
             WindowDestroyed?.Invoke();
         }
     }

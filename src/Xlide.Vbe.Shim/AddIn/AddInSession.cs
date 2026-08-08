@@ -5852,7 +5852,24 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void UpdatePolling()
     {
-        var interval = _pollsRemaining > 0 ? DebugPollMilliseconds
+        /*
+         * A CLOSE IS WATCHED CLOSELY, BRIEFLY.
+         *
+         * Closing a tab felt slow and all of the wait was a tick. The window is posted a close,
+         * the editor tears it down in about five milliseconds, and the strip then sat until the
+         * next poll re-derived the pane picture: the window died at .430 and the tab left at
+         * .581, a gap of 151ms against a 150ms poll (measured 2026-08-08).
+         *
+         * The destroy events cannot be used to shortcut it. They name the pane's CHILD windows,
+         * not the pane, so there is nothing in them to match a tracked pane against - which was
+         * the first attempt, and it never fired once.
+         *
+         * So the resync polls that a close already asks for run FAST. It is a handful of ticks
+         * over about a tenth of a second, only after a close, and then the interval goes back.
+         * Nothing else polls harder and nothing polls harder for longer.
+         */
+        var interval = _resyncPanePolls > 0 ? ClosingPollMilliseconds
+            : _pollsRemaining > 0 ? DebugPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
             : _watchingEmpty ? EmptyWorkspacePollMilliseconds
             : 0;
@@ -5868,6 +5885,14 @@ internal sealed class AddInSession : IDisposable
     /// there are no window events, and the explorer is the only way the first module gets
     /// opened, so it cannot be allowed to sit stale.
     /// </summary>
+    /// <summary>
+    /// How often the pane picture is re-derived in the moments after a close, until the resync
+    /// polls a close asks for are spent. Short because the thing being waited for is a window
+    /// teardown that takes about five milliseconds, and the developer is watching a tab they
+    /// just asked to go.
+    /// </summary>
+    private const uint ClosingPollMilliseconds = 16;
+
     private const uint EmptyWorkspacePollMilliseconds = 1000;
 
     /// <summary>
@@ -6057,6 +6082,13 @@ internal sealed class AddInSession : IDisposable
         {
             _resyncPanePolls--;
             _codePanes?.Refresh();
+
+            // The fast interval belongs to these polls and to nothing else, so it is given back
+            // the moment the last one is spent rather than on the next unrelated event.
+            if (_resyncPanePolls == 0)
+            {
+                UpdatePolling();
+            }
         }
         else if (_codePanes is { Stale: true })
         {

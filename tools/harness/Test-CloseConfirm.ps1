@@ -63,8 +63,20 @@ Test-Seam 'a revert corrects the engine live copy (stale problems)' (Join-Path $
 # so the panel reported errors in code that no longer existed (developer, 2026-08-06).
 Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
     'private void DropFindingsFor', 'DropFindingsFor\(component, display\)')
-Test-Seam 'Ctrl\+W goes through the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
-    'OnModuleCloseRequested\(shown')
+# Ctrl+W is a SURFACE command, and the seam moved with it.
+#
+# This asserted `OnModuleCloseRequested(shown` - the host closing whatever module it believed was
+# shown. That was deliberately removed in 0d48e94, because with two workbooks open the belief
+# drifts: the host held a null module and the other workbook's project while the page had a
+# different tab active, so the key was claimed and nothing closed. The key is answered in the
+# page now, which is what has tabs, and the close arrives back through the pane route into the
+# same gate.
+#
+# The check asserted the old shape for every commit since, and failed for every one of them,
+# unnoticed because this probe is not in the gate (2026-08-08).
+Test-Seam 'Ctrl+W is answered by the page, and its close lands in the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+    'The closing keys are handled above, as SURFACE commands',
+    'OnModuleCloseRequested\(paneModule')
 Test-Seam 'built bundle carries the modal' (Join-Path $repo 'ui\editor\dist\editor.js') @(
     'close-confirm-backdrop', 'confirmClose')
 

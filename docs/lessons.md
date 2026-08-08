@@ -1587,3 +1587,52 @@ all.** The republish was gated on the editor having no panes, so the tree follow
 only until the first module was opened. The pane tracker cannot cover it either - it watches code
 pane windows, and a workbook nobody has opened a module in has none. The tick watches the project
 count now, which is one property read against the collection the tree is built from.
+
+## 59. Closing a tab waited for a tick, and every millisecond of it was the tick
+
+Closing an editor tab felt slow. It was 171ms from the click to the tab leaving the strip, which
+is over the threshold where a gesture stops feeling connected to the thing it does.
+
+Almost none of it was work. The timeline:
+
+```
+.425  first destroy event
+.430  last destroy event      the editor tears the pane down in FIVE milliseconds
+.581  modules publish         the tab finally leaves
+```
+
+151ms between the window dying and the strip saying so, against a poll interval of 150. The close
+posts `WM_CLOSE` and returns, and the tab leaves when the pane picture is next re-derived. The
+refresh that the destroy events themselves provoke cannot do it: a close fires its destroys while
+the refresh started by its earlier events is still running, and that refresh still enumerates the
+dying window, so the picture comes back unchanged and nothing publishes.
+
+**The first fix was wrong and is worth recording.** A destroy event names a window, so dropping a
+tracked pane whose window had just been destroyed looked exact and free. It never fired once: the
+events name the pane's CHILD windows, not the pane. The code was removed rather than left in, and
+the comment where it stood now says so, because a shortcut that never runs is worse than none.
+
+What worked was making the resync polls a close already asks for run at 16ms instead of 150.
+A handful of ticks over about a tenth of a second, only after a close, and then the interval goes
+back. **171ms to around 40ms.**
+
+The general shape, and it is the third time this week: **when something feels slow, measure
+whether it is doing work or waiting.** A profile of the close would have shown almost nothing,
+because there was almost nothing to show. The answer was in two log timestamps and the value of
+one constant.
+
+### And two more checks found rotting
+
+Fixing this ran two probes that had not been run in a while, and both failed for reasons that were
+not the product:
+
+- `Test-CloseConfirm` asserts SEAMS in the source, and one of them pinned `OnModuleCloseRequested(shown` -
+  the host closing whatever module it believed was shown. That was deliberately removed months of
+  commits ago, because with two workbooks open the belief drifts. The check had failed for every
+  commit since and nothing noticed, because the probe is not in the gate.
+- `Test-DebugApi` failed three checks that pass from a clean session. They were state left by the
+  tab opening and closing done to measure the close.
+
+**A source-text seam check pins a design, and a design that changes on purpose leaves the check
+asserting something nobody believes any more.** Worth having, worth running, and worth updating
+in the same commit as the change it describes.
