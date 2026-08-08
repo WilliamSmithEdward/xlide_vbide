@@ -865,8 +865,22 @@ function clientFor(entry) {
      */
     readModule: (name, project, { live } = {}) =>
       call(`module${query({ name, project, live: live ? 1 : undefined })}`),
+    /**
+     * Writes a module. The client waits longer for a BIG one, because the editor takes longer to
+     * take it: 65,000 lines was accepted after 17.4 seconds, all of it the editor's own parse
+     * rather than this product's write, which is two COM calls at any size (measured 2026-08-08).
+     *
+     * The DOOR still gives up at three seconds and answers "the host thread did not answer in
+     * time" - that budget is what lets it report a standing dialog instead of hanging, and it is
+     * not raised here. The write goes on regardless, so a caller writing a large module waits for
+     * the LINE COUNT to arrive rather than for this call to return. `build-fixture.mjs` does.
+     */
     writeModule: (name, text, project) =>
-      call(`module${query({ name, project })}`, { method: "POST", body: text }),
+      call(`module${query({ name, project })}`, {
+        method: "POST",
+        body: text,
+        timeout: Math.max(10000, Math.ceil(text.length / 1000) * 250),
+      }),
 
     /** Waits for a predicate over state, which is how a harness waits for break mode. */
     async waitFor(predicate, { timeout = 20000, every = 300 } = {}) {

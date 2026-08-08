@@ -18,7 +18,7 @@ import {
 import type { EventHandlerDocumentType } from '../../../xlide_vscode/src/analyzer';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
-import { outlineFor, projectWordsFor } from './outline';
+import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
@@ -359,7 +359,7 @@ export class Dispatcher {
         // that are procedures. This is what lets `ROneCOne.Create(...)` read as a type and a
         // call while `values(index, 1)` stays a variable — the distinction the extension makes
         // with its semantic tokens.
-        const facts = projectWordsFor(params.modules);
+        const facts = projectWordsFor(params.projectId, params.modules);
         return { modules: params.modules.length, types: facts.types, procedures: facts.procedures };
     }
 
@@ -381,6 +381,7 @@ export class Dispatcher {
         }
 
         this.symbolsMemo.delete(params.projectId);
+        forgetProjectWords(params.projectId);
         return null;
     }
 

@@ -51,13 +51,54 @@ async function writeAndCheck(name, code) {
   const wanted = code.split(/\r\n|\n|\r/).filter((line, at, all) => at < all.length - 1 || line.length > 0).length;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
-    await api.writeModule(name, code);
+    try {
+      await api.writeModule(name, code);
+    } catch (error) {
+      // THE DOOR GAVE UP; THE HOST DID NOT.
+      //
+      // Every route gets the host thread three seconds, which is what lets the door say "a dialog
+      // is standing" instead of hanging forever. A big module takes longer than that to write and
+      // the write goes on regardless: 65,000 lines was accepted after 17.4 seconds, all of it the
+      // EDITOR's own parse (measured 2026-08-08). Treating that timeout as a failure would make
+      // the largest module the one fixture that could never be built.
+      if (!/did not answer in time/.test(String(error?.message))) {
+        throw error;
+      }
 
-    const project = await api.project();
-    const lines = project.components.find((component) => component.name === name)?.lines ?? 0;
+      console.log(`  ${name.padEnd(14)} is large; the door timed out, waiting for the editor to finish`);
+    }
 
-    if (lines > 0) {
-      return { lines, attempts: attempt };
+    // Polled rather than slept, and against the LINE COUNT the object model reports, so a write
+    // that is still landing is waited out and one that never lands is still caught below.
+    //
+    // The ASK has to tolerate the same timeout as the write. While the editor is taking a large
+    // module, the host thread is inside that call and answers nothing, so the poll that is
+    // waiting for the write to finish fails in exactly the way the write did. Not catching that
+    // made the largest module unbuildable for a different reason than the one just fixed.
+    for (let waited = 0; waited <= 180_000; waited += 2000) {
+      let lines = 0;
+      let asked = false;
+      try {
+        const project = await api.project();
+        lines = project.components.find((component) => component.name === name)?.lines ?? 0;
+        asked = true;
+      } catch (error) {
+        if (!/did not answer in time|aborted/i.test(String(error?.message))) {
+          throw error;
+        }
+      }
+
+      if (lines >= wanted) {
+        return { lines, attempts: attempt };
+      }
+
+      // Short and non-empty on the first ANSWERED look: the write took, and either the shape is
+      // what the caller asked for or a check further down says so.
+      if (asked && lines > 0 && waited === 0) {
+        return { lines, attempts: attempt };
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     console.log(`  ${name.padEnd(14)} write ${attempt} did not take; asking again`);

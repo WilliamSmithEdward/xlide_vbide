@@ -624,14 +624,40 @@ internal sealed unsafe class DispatchObject : IDisposable
         VarEnum.VT_DISPATCH => "(object)",
         VarEnum.VT_UNKNOWN => "(unknown)",
 
+        VarEnum.VT_I1 => value.As<sbyte>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_UI1 => value.As<byte>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_I2 => value.As<short>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_UI2 => value.As<ushort>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_I4 or VarEnum.VT_INT => value.As<int>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_UI4 or VarEnum.VT_UINT => value.As<uint>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_I8 => value.As<long>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_UI8 => value.As<ulong>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_R4 => value.As<float>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_R8 => value.As<double>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_CY or VarEnum.VT_DECIMAL => value.As<decimal>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_BOOL => value.As<bool>() ? "True" : "False",
         VarEnum.VT_DATE => value.As<DateTime>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_ERROR => $"(error 0x{value.As<int>():X8})",
 
-        _ => value.As<object>()?.ToString(),
+        /*
+         * NAMED, NEVER BUILT. This was `value.As<object>()?.ToString()` and it is the SAME leak
+         * as the one described above, left in the one branch the fix for it did not cover.
+         *
+         * VT_DISPATCH and VT_UNKNOWN were handled by name, and a variant that carries an
+         * interface WITH A FLAG ON IT does not match either: `VT_BYREF | VT_DISPATCH` is not
+         * `VT_DISPATCH`, and `VT_ARRAY | VT_VARIANT` holds whatever its elements hold. Every one
+         * of those fell to the default and asked the runtime to build a wrapper nobody owns,
+         * which the finalizer thread then released - an access violation on an apartment-threaded
+         * object, and Excel with it. Found 2026-08-08 by a crash carrying the identical stack
+         * (ComObject.Finalize, Marshal.Release, FailFast) hours after the sweep was reading a
+         * balanced 13.
+         *
+         * So there is no object-materialising path left in this method at all. Nothing that reads
+         * a property AS TEXT wants the object; callers that do want it go through FromVariant,
+         * which takes its own counted reference. A type this does not name is described by its
+         * type rather than converted, which is a worse string and not a dead host.
+         */
+        _ => $"({value.VarType})",
     };
 
     /// <summary>DISP_E_EXCEPTION: the callee raised an error and filled in the description.</summary>

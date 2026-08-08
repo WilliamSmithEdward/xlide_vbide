@@ -1221,3 +1221,85 @@ without touching a single file in this repository. Watching `engine\src` alone w
 stale executable current, which is the one answer the check exists never to give.
 
 **A staleness check that watches only the sources in this repository is not watching the build.**
+
+## 48. The outline counted newlines from the top of the file, once per procedure
+
+`outlineFor` found each procedure's line number by scanning the source from offset zero and
+counting newlines. Once per procedure. Summed over a module that is quadratic in its size, and
+the module where a tree is worth having is exactly the module where that bites.
+
+The 11,000-line fixture has some 1,600 procedures with the last near offset 256,000, so the tree
+cost around 200 million character reads: **238ms per outline**, and the surface asks for one after
+every push it notices. Typing two lines into that module spent 476ms on outlines alone.
+
+One line-start table and a binary search per procedure, which is what the diagnostics path had
+already been fixed to do and says so in its own comment. **238ms to 5ms on the same module.**
+
+The proof is the module built afterwards. `Massive` holds 64,802 lines and 7,200 procedures - 5.8
+times the procedures at 5.8 times the size, which quadratically is 33 times the work, or about
+eight seconds. It outlines in **27ms**.
+
+A cost that is quadratic in the input is invisible on every fixture small enough to be convenient,
+and every fixture in this repo was small enough to be convenient. That is why the big one exists.
+
+## 49. The same leak, in the branch the fix for it did not cover
+
+`VariantToString` was fixed on 2026-08-07 to stop asking the runtime for a wrapper over an
+interface-valued variant. The fix named the two types it had seen:
+
+```csharp
+VarEnum.VT_DISPATCH => "(object)",
+VarEnum.VT_UNKNOWN  => "(unknown)",
+...
+_ => value.As<object>()?.ToString(),   // still here
+```
+
+A variant carrying an interface WITH A FLAG ON IT matches neither. `VT_BYREF | VT_DISPATCH` is not
+`VT_DISPATCH`. `VT_ARRAY | VT_VARIANT` holds whatever its elements hold. Every one of those fell
+to the default and built a wrapper nobody owns, which the finalizer thread then released: an
+access violation on an apartment-threaded object, FailFast, and Excel with it.
+
+It killed Excel on 2026-08-08 with the identical stack to the original - `ComObject.Finalize`,
+`Marshal.Release`, `FailFast` - while the leak sweep was reading a balanced 13, exactly as it did
+the first time, and for the same reason: **the sweep counts wrappers this product TOOK, and these
+are taken behind its back.**
+
+Two things came out of it. There is no object-materialising path left in that method at all: a
+type it does not name is described by its type rather than converted, because nothing reading a
+property AS TEXT wants the object anyway. And the guard moved to where this defect is actually
+visible - a gate step that greps the shim for `.As<object>(`, proven by putting one back.
+
+**A fix that enumerates the cases it has seen is not a fix, it is a list.** The default branch is
+where the next one arrives.
+
+## 50. A skip can make a stale read permanent
+
+Not resolved, and written down because it is the open risk in the pass-skipping work.
+
+`analysis-freshness.mjs` checks that a caller is re-analysed when the callee it calls changes
+signature. It passes every time on ordinary fixtures and has failed roughly two runs in five on
+the one holding a 64,802-line module: the caller is never flagged, for two minutes, across some
+twenty passes.
+
+Three sampling errors in the CHECK were found and fixed while chasing it, and the failure outlived
+all three:
+
+- a fixed sleep of a few seconds, calibrated on a fixture where a pass takes under a second and
+  pointed at one where it takes six;
+- a wait for "any finding to appear", which caught the pass mid-flight reporting
+  `undeclared-variable` against a project that did not hold the callee yet - true of that instant
+  and not of the state being checked;
+- a "byte-identical" write of the file's own constant rather than of what the editor had STORED,
+  which is a write of different text and provokes the very pass the step asserts does not happen.
+
+Each was the same mistake wearing a different hat: **reading an interim state and calling it the
+outcome.** A check whose verdict depends on the size of the fixture is not checking the product.
+
+What remains unattributed is whether a fourth one of those is hiding, or whether the product has a
+real hole: a pass that skips a project does not update what it holds, and nothing re-triggers it.
+Before the skip, every pass re-analysed regardless, so a transient staleness corrected itself on
+the next trigger. Now it would not. That is a plausible mechanism for exactly this symptom and it
+has not been proven either way.
+
+The check is out of the gate until it is. A gate step that fails for reasons nobody can name
+teaches the reader to re-run the gate rather than to read it.

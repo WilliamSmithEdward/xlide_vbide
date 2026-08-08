@@ -295,11 +295,30 @@ internal sealed class DebugServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// The largest request body this door will read: 32 MB.
+    ///
+    /// Sized from what a module can legally be rather than from what is convenient. VBA holds up
+    /// to 65,534 lines in one module, which at the shape of ordinary code is around 13 MB, and
+    /// this is a BYTE count so a Cyrillic or CJK module of the same length costs two to three
+    /// times that. Anything beyond is refused loudly rather than truncated quietly, which is the
+    /// property this reader exists to keep.
+    /// </summary>
+    private const int LargestBody = 32 * 1024 * 1024;
+
     private static (string Method, string Target, string Body)? ReadRequest(NetworkStream stream)
     {
-        // Headers first; a body follows only when Content-Length says so, and it is capped
-        // hard - the biggest legitimate body is a module's text.
-        var buffer = new byte[1 << 20];
+        // Headers first, into a buffer sized for headers. The BODY is read into its own buffer,
+        // sized from Content-Length, because the two have nothing to do with each other and
+        // treating them as one thing set the body's ceiling to whatever was left over after the
+        // headers.
+        //
+        // That ceiling was 1 MB, and the biggest legitimate body is a module's text: VBA holds up
+        // to 65,534 lines in one module, which at the shape of ordinary code is some 13 MB. So a
+        // module a developer can legally write was more than ten times what could be sent through
+        // here, and the refusal it earned looked like `fetch failed` at the caller (2026-08-08,
+        // found while building a fixture at the line ceiling).
+        var buffer = new byte[64 * 1024];
         var held = 0;
         var headerEnd = -1;
 
@@ -349,13 +368,12 @@ internal sealed class DebugServer : IDisposable
                 //
                 // Non-ASCII brings the ceiling closer than it looks: this is a BYTE count, and a
                 // Cyrillic or CJK module costs two to three bytes a character.
-                var room = buffer.Length - (headerEnd + 4);
-                if (declared > room)
+                if (declared > LargestBody)
                 {
                     tooLarge = true;
                 }
 
-                contentLength = Math.Clamp(declared, 0, room);
+                contentLength = Math.Clamp(declared, 0, LargestBody);
             }
         }
 
@@ -363,25 +381,33 @@ internal sealed class DebugServer : IDisposable
         {
             // Refused by closing rather than by answering: the request was never fully read, and
             // a 200 for a body that was thrown away is the failure this exists to prevent.
-            Log.Info($"debug api: a body over {buffer.Length} bytes was refused rather than truncated");
+            Log.Info($"debug api: a body over {LargestBody} bytes was refused rather than truncated");
             return null;
         }
 
+        // The body gets its own buffer, sized to what was declared, with whatever of it already
+        // arrived alongside the headers copied in first.
         var bodyStart = headerEnd + 4;
-        while (held - bodyStart < contentLength)
+        var alreadyHere = Math.Min(contentLength, held - bodyStart);
+        var bodyBytes = new byte[contentLength];
+        if (alreadyHere > 0)
         {
-            var read = stream.Read(buffer, held, buffer.Length - held);
+            Array.Copy(buffer, bodyStart, bodyBytes, 0, alreadyHere);
+        }
+
+        var bodyHeld = Math.Max(0, alreadyHere);
+        while (bodyHeld < contentLength)
+        {
+            var read = stream.Read(bodyBytes, bodyHeld, contentLength - bodyHeld);
             if (read <= 0)
             {
                 break;
             }
 
-            held += read;
+            bodyHeld += read;
         }
 
-        var body = contentLength > 0
-            ? Encoding.UTF8.GetString(buffer, bodyStart, Math.Min(contentLength, held - bodyStart))
-            : string.Empty;
+        var body = bodyHeld > 0 ? Encoding.UTF8.GetString(bodyBytes, 0, bodyHeld) : string.Empty;
 
         return (parts[0], parts[1], body);
     }

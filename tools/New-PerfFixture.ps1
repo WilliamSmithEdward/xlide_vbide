@@ -84,6 +84,16 @@ $modules['Medium'] = @{ Kind = $StandardModule; Code = (New-Body -Count 125  -Pr
 $modules['Large']  = @{ Kind = $StandardModule; Code = (New-Body -Count 500  -Prefix 'L') }
 $modules['Huge']   = @{ Kind = $StandardModule; Code = (New-Body -Count 1250 -Prefix 'H') }
 
+# AT THE CEILING. VBA will not hold more than 65,534 lines in one module, and 7,200 procedures of
+# this shape come to 64,805 - close enough to the wall to find anything that scales with module
+# size, with room to type in it. Measured 2026-08-08 by writing progressively larger modules and
+# reading them back: 65,000 lines was accepted, and took the EDITOR 17.4 seconds to take (its own
+# parse, not this product's write, which is two COM calls at any size).
+#
+# It exists because the four sizes above all fit comfortably and so agreed with each other about
+# what was fast. Anything quadratic in module size is invisible at 11,000 lines and obvious here.
+$modules['Massive'] = @{ Kind = $StandardModule; Code = (New-Body -Count 7200 -Prefix 'V') }
+
 $sheetCode = @'
 Option Explicit
 
@@ -140,7 +150,9 @@ if (-not $Quiet) {
     Write-Host ''
     Write-Host "Fixture written to $Path"
     Write-Host ''
-    Write-Host '  The same generated shape at four sizes, so a difference between them is size'
-    Write-Host '  and nothing else. Measure with: node tools\harness\perf-scaling.mjs'
+    Write-Host '  The same generated shape at five sizes, so a difference between them is size'
+    Write-Host '  and nothing else. Massive sits at VBA''s per-module line ceiling, which is where'
+    Write-Host '  anything quadratic in module size stops hiding. Measure with:'
+    Write-Host '    node tools\harness\perf-scaling.mjs'
     Write-Host ''
 }
