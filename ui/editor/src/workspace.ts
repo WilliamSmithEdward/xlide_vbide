@@ -567,6 +567,27 @@ export class Workspace {
       this.reveal(active);
     }
 
+    /*
+     * THE HOST IS TOLD WHAT THE PAGE IS SHOWING, when the host itself named nothing.
+     *
+     * Closing the active module's pane leaves the host with no active module: it sends the
+     * remaining tabs with `active: null`. The page promotes one of them to show — the strip and
+     * the editor look completely normal — and the host still believes nothing is active.
+     *
+     * That is not cosmetic. Every language provider answers only for the HOST-active module and
+     * returns nothing otherwise, so hover, completions, signature help and quick fixes all go
+     * silent on a tab that looks and behaves like any other. Switching tabs cures it, because
+     * that finally tells the host something, which is exactly how it was reported (the
+     * developer, 2026-08-08: "hover is not working on the Watch sub keyword").
+     *
+     * One statement, and it converges: the host activates what it is told, republishes with that
+     * active, and this branch does not run again.
+     */
+    const shown = this.activeGroup.active ?? this.groups.find((group) => group.active)?.active;
+    if (!active && shown && open.length > 0) {
+      this.handlers.activate(shown);
+    }
+
     for (const group of this.groups) {
       group.renderTabs();
     }

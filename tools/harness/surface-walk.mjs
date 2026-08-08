@@ -168,6 +168,22 @@ async function sweep(where) {
   check(where, "no model outlives the documents", ui.census.models <= ui.census.documents + 1,
     `models=${ui.census.models} documents=${ui.census.documents}`);
 
+  /*
+   * THE PROVIDER GATE, and it is the most valuable check here.
+   *
+   * Every language provider answers only for the host-active module and returns nothing
+   * otherwise, so when the editor shows one module and the host believes another — or believes
+   * none — hover, completions, signature help and quick fixes all go silent on a tab that looks
+   * and behaves normally. Nothing else on screen is wrong, which is why it reached a developer
+   * rather than a test: closing the active module's pane left the host with `active: null`, the
+   * page promoted a tab to show, and the host was never told (2026-08-08).
+   */
+  if (!w.empty) {
+    check(where, "the editor and the host agree which module is active",
+      ui.focus.host !== null && ui.focus.model === ui.focus.host.model,
+      `editor=${ui.focus.model} host=${ui.focus.host?.model ?? "null"} — every language provider is silent`);
+  }
+
   // Panes are permanent or not; none should vanish from the list.
   check(where, "every pane is still listed", ui.panes.length >= 6, `${ui.panes.length} panes`);
 
