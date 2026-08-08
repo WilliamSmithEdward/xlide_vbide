@@ -96,8 +96,11 @@ export interface ExplorerHandlers {
   /** Double click, or Enter on the focused item: the component's code opens. The workbook says
    *  WHICH one when two workbooks share the name. */
   open(name: string, workbook?: string): void;
-  /** Right click on a component: the menu for its class, at this position. */
-  context(name: string, kind: number, x: number, y: number): void;
+  /** Right click on a component: the menu for its class, at this position. The WORKBOOK is part
+   *  of it, because every action the menu offers acts on a module, and a module is a name in a
+   *  workbook. Without it the menu's Open, Rename and Close all resolved by bare name and would
+   *  act on whichever workbook answered first (2026-08-08). */
+  context(name: string, kind: number, x: number, y: number, workbook?: string): void;
   /** Right click on a workbook's row. */
   projectContext(project: string, x: number, y: number): void;
   /** A module's procedures, for its unfolded node; null when no answer came. */
@@ -221,7 +224,8 @@ export class Explorer {
           item.dataset.component,
           Number(item.dataset.kind ?? "0"),
           event.clientX,
-          event.clientY);
+          event.clientY,
+          item.dataset.workbook);
         return;
       }
 
@@ -349,6 +353,32 @@ export class Explorer {
     }
 
     this.render();
+  }
+
+  /**
+   * Puts the selection back on the module that is actually open.
+   *
+   * A right-click marks the row the menu is about, which it must: a menu with no visible target
+   * is a menu about nothing. But the mark is part of the GESTURE, and the gesture ends when the
+   * menu does - left alone it becomes a grey row pointing at a module nobody is looking at, which
+   * is the same defect as a selection outliving its tab (2026-08-08).
+   *
+   * Restored to the active module rather than cleared to nothing, because the selection is what
+   * the properties panel describes: clearing it would leave the panel with no subject, and the
+   * module on screen is the honest answer to "what am I looking at".
+   */
+  restoreSelectionToActive(): void {
+    if (this.selected === this.active && this.selectedWorkbook === this.activeWorkbook) {
+      return;
+    }
+
+    this.selected = this.active;
+    this.selectedWorkbook = this.activeWorkbook;
+    this.render();
+
+    if (this.active) {
+      this.handlers.select(this.active);
+    }
   }
 
   /** Problem counts by component, so a defect is visible without opening the module. */

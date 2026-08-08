@@ -193,7 +193,7 @@ export class Shell {
     this.explorer = new Explorer(root.querySelector("#sidebar-tree") as HTMLElement, {
       select: (name) => handlers.selectComponent(name),
       open: (name, workbook) => handlers.activateModule(name, workbook),
-      context: (name, kind, x, y) => this.componentMenu(name, kind, x, y),
+      context: (name, kind, x, y, workbook) => this.componentMenu(name, kind, x, y, workbook),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
       outline: (module, workbook) => handlers.requestOutline(module, workbook),
       openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
@@ -882,21 +882,27 @@ export class Shell {
    * for the class are left out rather than disabled; the host's own operations arrive as the
    * classes grow them.
    */
-  private componentMenu(name: string, kind: number, x: number, y: number): void {
+  private componentMenu(name: string, kind: number, x: number, y: number, workbook?: string): void {
     // A document or a form is an object with code behind it; a module is only its code.
     const openLabel = kind === 100 || kind === 3 ? "Open Code" : "Open";
 
     const items: ContextMenuItem[] = [
-      { label: openLabel, run: () => this.handlers.activateModule(name) },
+      // WITH THE WORKBOOK, all three of them. Every call site outside this menu passed one and
+      // this one did not, so a module named the same in two workbooks was opened, renamed or
+      // closed in whichever answered first.
+      { label: openLabel, run: () => this.handlers.activateModule(name, workbook) },
       {},
-      { label: "Rename…", run: () => this.beginRename(name, null) },
+      { label: "Rename…", run: () => this.beginRename(name, workbook ?? null) },
     ];
 
     if (this.handlers.moduleIsOpen(name)) {
-      items.push({}, { label: "Close", run: () => this.handlers.closeModule(name) });
+      items.push({}, { label: "Close", run: () => this.handlers.closeModule(name, workbook) });
     }
 
-    showContextMenu(x, y, items);
+    // The tree marked the row this menu is about, and that mark is part of the gesture. It comes
+    // back when the menu goes, however it goes, or a right-click leaves a grey row pointing at a
+    // module nobody is looking at (2026-08-08).
+    showContextMenu(x, y, items, () => this.explorer.restoreSelectionToActive());
   }
 
   /**

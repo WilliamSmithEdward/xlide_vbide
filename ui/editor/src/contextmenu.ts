@@ -19,6 +19,9 @@ let openMenu: HTMLElement | null = null;
 let highlighted = -1;
 let closeListeners: (() => void) | null = null;
 
+/** What to run when the menu goes, whichever way it goes. See showContextMenu. */
+let dismissed: (() => void) | null = null;
+
 /** Closes the open context menu, if any. */
 export function closeContextMenu(): void {
   openMenu?.remove();
@@ -26,16 +29,38 @@ export function closeContextMenu(): void {
   highlighted = -1;
   closeListeners?.();
   closeListeners = null;
+
+  // Last, and cleared before it runs: the callback may open another menu, and it must not be
+  // this one's dismissal that the next one inherits.
+  const wasDismissed = dismissed;
+  dismissed = null;
+  wasDismissed?.();
 }
 
-/** Shows a context menu at a screen position, replacing any menu already open. */
-export function showContextMenu(x: number, y: number, items: ContextMenuItem[]): void {
+/**
+ * Shows a context menu at a screen position, replacing any menu already open.
+ *
+ * `onClosed` runs however the menu goes: an item chosen, Escape, a click elsewhere, or another
+ * menu replacing it. A caller that marked something to show WHICH thing the menu is about needs
+ * that mark taken back, and there is exactly one place that knows the menu is gone.
+ */
+export function showContextMenu(
+  x: number,
+  y: number,
+  items: ContextMenuItem[],
+  onClosed?: () => void,
+): void {
   closeContextMenu();
 
   const rows = items.filter((item) => item.label !== undefined);
   if (rows.length === 0) {
+    // Nothing to show, so nothing was ever marked: the caller's undo still has to run, or a
+    // right-click that produced no menu would leave its highlight behind for good.
+    onClosed?.();
     return;
   }
+
+  dismissed = onClosed ?? null;
 
   const menu = document.createElement("div");
   menu.className = "menu-dropdown";

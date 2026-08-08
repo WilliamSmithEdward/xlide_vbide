@@ -1664,3 +1664,42 @@ the file, which is the whole bug visible in one grep.
 Same afternoon, same shape as the two-workbook selection bug two entries up: that one matched rows
 by name and lit every workbook's copy, this one matched by nothing and lit a module that had gone.
 Both are the tree describing something other than what is true.
+
+## 61. A mark that belongs to a gesture has to end with the gesture
+
+Right-clicking a module marks its row, which it must: a context menu with no visible target is a
+menu about nothing. The mark was `selected`, the same state the properties panel follows, and it
+stayed after the menu went. A grey row pointing at a module that was not open, not active, and no
+longer the subject of anything.
+
+It is taken back now, and the mechanism is worth the words: `showContextMenu` grew an `onClosed`
+that runs however the menu goes - an item chosen, Escape, a click elsewhere, another menu
+replacing it - because there is exactly one place that knows the menu is gone, and every caller
+that marks something needs its mark taken back from there.
+
+Restored to the ACTIVE module rather than cleared to nothing. The selection is what the properties
+panel describes, so clearing it would leave the panel with no subject; the module on screen is the
+honest answer to "what am I looking at".
+
+### The menu did not know which workbook it was about
+
+Found on the way. `context(name, kind, x, y)` carried no workbook, though the tree had one in the
+row's own dataset, so every action the menu offers - Open, Rename, Close - resolved a bare name.
+With two workbooks holding a module of the same name, all three would have acted on whichever
+answered first. Threaded through now.
+
+That is the fourth place this week that decided for itself which workbook a name meant, after the
+identity, the tree, the tab strip and the row selection. It is exactly what
+[disambiguation.md](disambiguation.md) says to go looking for: **functions that take a bare child
+name are the places that will pick the first match and be right most of the time.**
+
+### And a test artifact, recorded because it cost most of the hunt
+
+"Open from the context menu does not open the module" was investigated for several rounds and was
+never true. The menu items are `div.menu-item` and the probe looked for `button`; then they answer
+`pointerup` and the probe sent `click`; then the menu closes between two api round trips, so
+opening it in one call and choosing in the next always found it gone. Three wrong probes in a row,
+each one producing a confident wrong reading about the product.
+
+**A gesture that spans two round trips is not one gesture.** Drive a menu in a single call, or
+what is measured is the menu closing.
