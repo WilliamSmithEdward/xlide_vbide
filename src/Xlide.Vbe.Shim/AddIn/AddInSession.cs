@@ -5647,28 +5647,17 @@ internal sealed class AddInSession : IDisposable
             // sitting at a breakpoint. Design is said too, rather than left blank: a mode you only
             // see sometimes is one you cannot rely on reading, and a window saying nothing is
             // indistinguishable from one that has stopped reporting.
-            if (_hostChrome is { } chrome)
-            {
-                var says = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "running";
-
-                // The workbook and the module come from the SURFACE, which is what the developer
-                // is actually looking at, and are the same values that go on the tab strip and the
-                // tree. Reading them here rather than hooking every route that can change one
-                // keeps the three in step by construction.
-                // The workbook as the SHELL spells it, not as the project id does. The id is a
-                // lowercased path, so composing from it put "debugfixture.xlsm" on the title bar
-                // of a file called DebugFixture.xlsm.
-                var workbook = project is null ? DisplayFromProjectId(_shownProject) : WorkbookDisplayName(project);
-                var shown = _editorSurface?.Module;
-
-                if (chrome.Mode != says || chrome.Workbook != workbook || chrome.Module != shown)
-                {
-                    chrome.Mode = says;
-                    chrome.Workbook = workbook;
-                    chrome.Module = shown;
-                    chrome.Apply();
-                }
-            }
+            // Remembered rather than applied from here. The mode is known at this moment and the
+            // workbook is cheap to read while the project object is already in hand; the MODULE
+            // changes at a different moment entirely, so the caption is composed by
+            // RefreshWindowTitle, which the tab strip's own publish also calls.
+            //
+            // The workbook as the SHELL spells it, not as the project id does. The id is a
+            // lowercased path, so composing from it put "debugfixture.xlsm" on the title bar of a
+            // file called DebugFixture.xlsm.
+            _titleMode = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "running";
+            _titleWorkbook = project is null ? DisplayFromProjectId(_shownProject) : WorkbookDisplayName(project);
+            RefreshWindowTitle();
 
             // The read answered, so the busy episode, if there was one, is over.
             _debugReadFailureLogged = false;
@@ -7458,6 +7447,44 @@ internal sealed class AddInSession : IDisposable
     /// that exists. Reading a component's pane would create one, which would put a tab up for a
     /// module nobody opened.
     /// </summary>
+    /// <summary>The mode and workbook the title last reported, so a refresh costs no COM call.</summary>
+    private string? _titleMode = "design";
+
+    private string? _titleWorkbook;
+
+    /// <summary>
+    /// Puts the current workbook, module and mode on the title bar.
+    ///
+    /// CALLED WHEREVER THE SHOWN MODULE CHANGES, not only from the tick that reads the mode. It
+    /// lived on that tick alone at first and the title lagged a tab behind: switching modules left
+    /// the previous one's name on the window until something else made the session poll, and the
+    /// poll stops when the editor is idle, which is exactly when somebody is reading the title.
+    ///
+    /// NOT A POLL of its own, and it must not become one. The mode and the workbook are cached
+    /// from the tick that already had to read them for the debugger; the module comes off the
+    /// surface; and Apply writes only when the composed caption differs from what is up. So
+    /// hanging this on the tab strip's publish, which is an event, costs a few string comparisons
+    /// and no round trip to the editor.
+    /// </summary>
+    private void RefreshWindowTitle()
+    {
+        if (_hostChrome is not { } chrome)
+        {
+            return;
+        }
+
+        var shown = _editorSurface?.Module;
+        if (chrome.Mode == _titleMode && chrome.Workbook == _titleWorkbook && chrome.Module == shown)
+        {
+            return;
+        }
+
+        chrome.Mode = _titleMode;
+        chrome.Workbook = _titleWorkbook;
+        chrome.Module = shown;
+        chrome.Apply();
+    }
+
     private void PublishModules()
     {
         var surface = _editorSurface;
@@ -7465,6 +7492,10 @@ internal sealed class AddInSession : IDisposable
         {
             return;
         }
+
+        // The tab strip changing is the moment the shown module can have changed, which is the
+        // moment the title bar is wrong until somebody says so.
+        RefreshWindowTitle();
 
         // A refusing collection changes nothing: the strip keeps its last picture and the
         // tracker's recovery republishes it.
