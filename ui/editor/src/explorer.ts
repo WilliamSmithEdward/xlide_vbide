@@ -423,7 +423,7 @@ export class Explorer {
       attentionWorkbook: this.attentionWorkbook,
       unfolded: this.expandedModule === null ? null : {
         module: this.expandedModule,
-        workbook: this.expandedModuleWorkbook,
+        workbook: this.unfoldedWorkbook(),
       },
       follows: currentSettings().treeFollowsEditor,
       workbooks: this.projects.map((project) => ({
@@ -433,8 +433,7 @@ export class Explorer {
           name: component.name,
           kind: kindMeta(component.kind).type,
           problems: this.problemCounts.get(component.name) ?? 0,
-          unfolded: this.expandedModule === component.name
-            && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === project.name),
+          unfolded: this.isUnfolded(component.name, project.name),
           procedures: (this.outlines.get(component.name) ?? []).map((one) => ({ ...one })),
         })),
       })),
@@ -455,6 +454,37 @@ export class Explorer {
   /** Unfolds a module's procedures the way its chevron does. */
   unfold(module: string, workbook?: string): void {
     this.toggleModule(module, workbook);
+  }
+
+  /**
+   * Which workbook the unfolded module belongs to, resolved rather than trusted.
+   *
+   * `expandedModuleWorkbook` is null whenever the owner could not be worked out when the module
+   * was unfolded — the projects had not arrived yet, or the caller had no workbook to give. The
+   * render and the snapshot both used to read that null as "every workbook", so with two
+   * workbooks holding a `Helpers` the accordion unfolded BOTH of them, which is not an accordion.
+   * Found by a randomised walk on 2026-08-07; the fourth defect in this codebase of the form "a
+   * name is not an identity across workbooks".
+   *
+   * A null now means "the first workbook that has one", so exactly one row can ever be unfolded.
+   */
+  private unfoldedWorkbook(): string | null {
+    if (this.expandedModule === null) {
+      return null;
+    }
+
+    if (this.expandedModuleWorkbook !== null) {
+      return this.expandedModuleWorkbook;
+    }
+
+    const name = this.expandedModule;
+    return this.projects.find((project) =>
+      project.components.some((component) => component.name.toLowerCase() === name.toLowerCase()))?.name ?? null;
+  }
+
+  /** Whether this workbook's copy of the module is the one unfolded. */
+  private isUnfolded(module: string, workbook: string): boolean {
+    return this.expandedModule === module && this.unfoldedWorkbook() === workbook;
   }
 
   /** True while a click is being served, so setExpandedModule knows this was asked for. */
@@ -584,8 +614,7 @@ export class Explorer {
 
   private item(component: ExplorerComponent, workbook: string): HTMLElement {
     const meta = kindMeta(component.kind);
-    const isUnfolded = component.name === this.expandedModule
-      && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === workbook);
+    const isUnfolded = this.isUnfolded(component.name, workbook);
 
     const button = document.createElement("button");
     button.type = "button";

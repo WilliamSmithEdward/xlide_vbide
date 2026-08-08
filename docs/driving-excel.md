@@ -261,6 +261,27 @@ distinguishing it from a broken door.
 >
 > If a question needs a DOM script twice, it belongs in `ui/editor/src/devsurface.ts`.
 
+### Walking the surface at random
+
+```bash
+tools\harness\Start-Excel.ps1 -Workbook artifactsixtures\RenameFixture.xlsm,artifactsixtures\TwinFixture.xlsm
+node tools\harness\surface-walk.mjs --steps 80 --seed 424242
+```
+
+Picks each action from a deterministic stream and re-checks every invariant after every step, so
+a failure replays from the seed it prints. **Start Excel with two workbooks** — `-Workbook` takes
+a list, and they land in one process, which is one session and one door. Half of what this checks
+does not exist with a single workbook open.
+
+Two details are load-bearing, and both were added after the walk lied about a clean run:
+
+- **The actions are weighted.** Unweighted, there are two ways to close a tab and one to open
+  one, so the workspace drains and stays empty: 54 of 70 steps with nothing open at all.
+- **It reports the states it reached.** A run that never holds two modules of the same name
+  passes every label check vacuously. That line is what found the `pane` route dropping its
+  project argument: the walk opened both workbooks' `Helpers`, reported `collision=0`, and was
+  right.
+
 ### Measuring what a person actually waits for
 
 ```js

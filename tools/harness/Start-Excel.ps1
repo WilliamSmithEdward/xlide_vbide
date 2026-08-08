@@ -27,8 +27,14 @@
 #>
 [CmdletBinding()]
 param(
-    # The workbook to open. Relative paths are taken from the repository root.
-    [string] $Workbook,
+    # The workbook or workbooks to open. Relative paths are taken from the repository root.
+    #
+    # SEVERAL is not a convenience. Two workbooks holding a module of the same name is the state
+    # three separate defects have lived in -- navigation, tab labels, breakpoints -- and there
+    # was no way to set it up from the harness at all, so every one of them was found by hand
+    # (2026-08-07). Excel takes them on one command line and puts them in ONE process, which is
+    # what makes them one session and one door.
+    [string[]] $Workbook,
 
     # Close any Excel already running first. A publish needs this anyway, because a host holds an
     # add-in library open for its lifetime.
@@ -100,16 +106,18 @@ function Find-ExcelExecutable {
     throw 'Could not locate EXCEL.EXE.'
 }
 
-if (-not $Workbook) {
-    $Workbook = Join-Path $PSScriptRoot 'fixtures\scratch.xlsm'
-    if (-not (Test-Path $Workbook)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
+if (-not $Workbook -or $Workbook.Count -eq 0) {
+    $scratch = Join-Path $PSScriptRoot 'fixtures\scratch.xlsm'
+    if (-not (Test-Path $scratch)) { & (Join-Path $PSScriptRoot 'New-ScratchWorkbook.ps1') | Out-Null }
+    $Workbook = @($scratch)
 }
 
-if (-not [System.IO.Path]::IsPathRooted($Workbook)) {
-    $Workbook = Join-Path $repoRoot $Workbook
-}
-
-if (-not (Test-Path $Workbook)) { throw "No workbook at $Workbook." }
+$Workbook = @($Workbook | ForEach-Object {
+    $one = $_
+    if (-not [System.IO.Path]::IsPathRooted($one)) { $one = Join-Path $repoRoot $one }
+    if (-not (Test-Path $one)) { throw "No workbook at $one." }
+    $one
+})
 
 if ($Fresh) {
     Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -124,8 +132,12 @@ foreach ($version in @('16.0', '15.0')) {
     if (Test-Path $key) { Remove-Item $key -Recurse -Force -ErrorAction SilentlyContinue }
 }
 
-$process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $Workbook -PassThru
-Write-Host "Started Excel as process $($process.Id) on $(Split-Path -Leaf $Workbook)."
+# Quoted individually: a fixture path with a space in it becomes two arguments otherwise, and
+# Excel then opens neither and offers to create them.
+$arguments = @($Workbook | ForEach-Object { '"{0}"' -f $_ })
+$process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
+$names = ($Workbook | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
+Write-Host "Started Excel as process $($process.Id) on $names."
 
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 $window = $null

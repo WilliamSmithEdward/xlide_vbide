@@ -2513,7 +2513,16 @@ internal sealed class AddInSession : IDisposable
                 switch (paneAction)
                 {
                     case "open":
-                        ShowModule(paneModule);
+                        // The workbook is PASSED ON. It was computed and then dropped, so
+                        // `project=` did nothing at all on open and a bare name resolved
+                        // shown-project-first — meaning the second workbook's copy of a shared
+                        // module name could not be opened from a script by any argument.
+                        //
+                        // That is why the two-workbook state was unreachable from the harness, and
+                        // why every defect in this class had to be found by hand. A stress walk
+                        // seeded with both workbooks' Helpers silently held only one of them and
+                        // passed its label checks vacuously (2026-08-07).
+                        ShowModule(paneModule, DisplayFromProjectId(paneOwner));
                         return System.Text.Json.JsonSerializer.Serialize(
                             new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
 
@@ -2664,10 +2673,28 @@ internal sealed class AddInSession : IDisposable
                     }
                 }
 
+                // The identity of the project THIS REPLY DESCRIBES, read off that project.
+                //
+                // It used to be DisplayFromProjectId(_shownProject) — the workbook the surface
+                // happened to be showing — so asking about the second workbook answered with the
+                // second workbook's components under the FIRST workbook's id. The reply
+                // contradicted itself, and a caller doing the obvious thing (read `projectId`,
+                // pass it to `pane` or `module`) was then addressing the wrong workbook while
+                // holding a reply that looked right.
+                //
+                // That is why the two-workbook state could never be set up from a script, which
+                // is why every defect in this class — navigation, tab labels, breakpoints — had
+                // to be found by hand (2026-08-07).
+                // Through DisplayFromProjectId, so the shape is unchanged: the field carries the
+                // workbook FILE NAME, which is the form every route's `project=` argument takes.
+                // The raw identity is a full path, and handing that back would fix the wrong
+                // project only to make the value unusable.
+                var identity = ProjectReader.Identity(project);
+
                 return System.Text.Json.JsonSerializer.Serialize(
                     new DebugProjectReply(
                         project.GetString("Name") ?? string.Empty,
-                        DisplayFromProjectId(_shownProject),
+                        DisplayFromProjectId(identity.Id),
                         project.GetInt32("Mode"),
                         [.. rows]),
                     DebugJsonContext.Default.DebugProjectReply);
