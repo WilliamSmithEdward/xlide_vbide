@@ -1636,3 +1636,31 @@ not the product:
 **A source-text seam check pins a design, and a design that changes on purpose leaves the check
 asserting something nobody believes any more.** Worth having, worth running, and worth updating
 in the same commit as the change it describes.
+
+## 60. A highlight outlived the thing it pointed at
+
+Closing a tab left a grey row behind in the explorer. The module was not open, not active and not
+being looked at, and its row stayed highlighted until something else happened to it.
+
+The tree carries two states. `active` is the module the editor is showing. `selected` is what the
+properties panel describes. `active` followed the tab strip; `selected` was set by a click and by
+NOTHING ELSE, so it outlived whatever it pointed at:
+
+```
+Sheet1 :: tree-item selected      no tab, still grey
+Runner :: tree-item active        the module actually open
+```
+
+The fix is not a cleanup pass. Activation carries the selection with it, because that is what the
+two states already mean in this tree: **a click selects and opens in one gesture**, so a developer
+never makes them differ. They diverge only on a right-click, which selects without opening, and
+the next activation is entitled to take the selection back. The properties panel now describes the
+module on screen rather than the last one clicked, which is what every editor does.
+
+**A state that only one gesture can set is a state that will be left behind.** Look for the write
+that has no matching clear: `selected` had a setter in the click handler and no other reference in
+the file, which is the whole bug visible in one grep.
+
+Same afternoon, same shape as the two-workbook selection bug two entries up: that one matched rows
+by name and lit every workbook's copy, this one matched by nothing and lit a module that had gone.
+Both are the tree describing something other than what is true.

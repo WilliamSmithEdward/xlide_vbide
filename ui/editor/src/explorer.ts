@@ -325,9 +325,29 @@ export class Explorer {
 
     this.active = name;
     this.activeWorkbook = workbook ?? null;
+
+    /*
+     * THE SELECTION COMES WITH IT, or a closed module keeps its highlight forever.
+     *
+     * `selected` was set by a click and never by anything else, so it outlived whatever it
+     * pointed at. Close the tab of the module you last clicked and its row keeps the grey while
+     * a different row goes blue: a highlight on something that is not open, not active, and not
+     * being looked at (reported 2026-08-08).
+     *
+     * Moving it here is not a workaround for that, it is what the two states already mean. A
+     * click in this tree SELECTS AND OPENS in one gesture, so they are the same thing every time
+     * a developer makes them happen; they diverge only on a right-click, which selects without
+     * opening, and the next activation is entitled to take the selection back.
+     *
+     * The properties panel follows the selection, so this also means it describes the module on
+     * screen rather than the last one clicked, which is what every editor does.
+     */
     if (name) {
+      this.selected = name;
+      this.selectedWorkbook = workbook ?? null;
       this.setExpandedModule(name, workbook);
     }
+
     this.render();
   }
 
