@@ -181,7 +181,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
-| `native` | `native()` / `inSync()` | the HOST's own panes and caret, under the surface |
+| `native` | `native({text})` / `inSync()` / `parityAll()` | the HOST's own panes, caret and CONTENT, under the surface |
 
 Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 

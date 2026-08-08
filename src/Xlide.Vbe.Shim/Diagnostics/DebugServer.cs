@@ -769,7 +769,14 @@ public sealed record DebugProjectReply(
 /// <summary>One pane the host's own editor holds open.</summary>
 public sealed record DebugNativePaneRow(
     [property: JsonPropertyName("module")] string Module,
-    [property: JsonPropertyName("project")] string? Project);
+    [property: JsonPropertyName("project")] string? Project,
+    /// <summary>The workbook's text for this module, reduced to a comparable form.</summary>
+    [property: JsonPropertyName("hostContent")] string? HostContent,
+    /// <summary>
+    /// The surface's copy of the same module, reduced the same way. Null when the surface holds
+    /// no text for it, which is a different answer from holding the wrong text.
+    /// </summary>
+    [property: JsonPropertyName("surfaceContent")] string? SurfaceContent);
 
 /// <summary>
 /// The HOST's editor, underneath the surface that covers it.

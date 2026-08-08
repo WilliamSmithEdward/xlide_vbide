@@ -139,6 +139,24 @@ async function sweep(where) {
     check(where, "the tab strip and the host's open panes hold the same modules",
       tabs.length === panes.length && tabs.every((m, at) => m === panes[at]),
       `page=[${tabs}] native=[${panes}]`);
+
+    /*
+     * THE CONTENT OF EVERY OPEN MODULE, not only the one on screen.
+     *
+     * Names agreeing is not parity: a surface holding an empty document for a module the host
+     * has 42 lines of passes every name check there is and shows a blank editor. And the active
+     * module is not the only one that can drift — a background tab holds a copy nobody is
+     * looking at, so it can be wrong until it is clicked, and then the developer finds out.
+     *
+     * A pane the surface holds no text for is not a disagreement: it has simply never been
+     * shown. Holding the WRONG text is the defect.
+     */
+    const stale = below.panes.filter((pane) =>
+      pane.surfaceContent !== null && pane.hostContent !== pane.surfaceContent);
+
+    check(where, "every open module's text matches the workbook's",
+      stale.length === 0,
+      stale.map((one) => `${one.module}: host=${one.hostContent} surface=${one.surfaceContent}`).join("; "));
   }
 
   check(where, "the empty view agrees with having no tabs",

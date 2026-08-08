@@ -2335,8 +2335,33 @@ internal sealed class AddInSession : IDisposable
                 var surfaceText = _editorSurface?.Text;
                 var wantText = request.Query.TryGetValue("text", out var wantsText) && wantsText != "0";
 
+                // EVERY open pane, each with the host's content and the surface's side by side.
+                //
+                // The active one is not the only one that can drift. A background tab holds a
+                // copy the developer is not looking at, so a module written from outside while
+                // its tab sits behind another goes stale with nothing to notice until it is
+                // clicked — and then it is the developer who notices.
                 var paneRows = (ReadOpenModules() ?? [])
-                    .Select(pane => new DebugNativePaneRow(pane.Name, pane.Project))
+                    .Select(pane =>
+                    {
+                        string? hostText = null;
+                        try
+                        {
+                            using var found = FindComponent(pane.Name, ProjectIdFromDisplay(pane.Project), out _);
+                            hostText = found is null ? null : ProjectReader.ReadSource(found);
+                        }
+                        catch (Exception)
+                        {
+                            // A component mid-teardown answers nothing; it is reported as unknown
+                            // rather than as a disagreement.
+                        }
+
+                        return new DebugNativePaneRow(
+                            pane.Name,
+                            pane.Project,
+                            ContentKey(hostText),
+                            ContentKey(_editorSurface?.TextOf(pane.Name, pane.Project)));
+                    })
                     .ToArray();
 
                 return System.Text.Json.JsonSerializer.Serialize(

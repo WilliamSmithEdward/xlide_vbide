@@ -167,6 +167,35 @@ function clientFor(entry) {
      */
     native: ({ text } = {}) => call(`native${query({ text: text ? 1 : undefined })}`),
 
+    /**
+     * EVERY open module's content, host against surface.
+     *
+     * `inSync()` covers the one on screen; this covers the ones behind it. A background tab
+     * holds a copy the developer is not looking at, so a module written from outside while its
+     * tab sits behind another goes stale with nothing to notice until it is clicked — and then
+     * the developer is the one who notices.
+     *
+     * A pane the surface holds no text for is reported as `held: false` rather than as a
+     * disagreement: not holding a module is a different thing from holding it wrongly.
+     */
+    async parityAll() {
+      const below = await this.native();
+      const rows = (below.panes ?? []).map((pane) => ({
+        module: pane.module,
+        project: pane.project,
+        held: pane.surfaceContent !== null,
+        agreed: pane.surfaceContent === null || pane.hostContent === pane.surfaceContent,
+        hostContent: pane.hostContent,
+        surfaceContent: pane.surfaceContent,
+      }));
+
+      return {
+        agreed: rows.every((one) => one.agreed),
+        stale: rows.filter((one) => !one.agreed),
+        panes: rows,
+      };
+    },
+
     /** True when the native pane, the surface and the page all name the same module. */
     async inSync() {
       const [below, ui] = await Promise.all([this.native(), this.ui()]);
