@@ -769,6 +769,8 @@ public sealed record DebugProjectReply(
 /// <summary>The breakpoints one module carries, in line order.</summary>
 public sealed record DebugBreakpointRow(
     [property: JsonPropertyName("module")] string Module,
+    /// <summary>The workbook it belongs to. Two open workbooks can each hold the same module.</summary>
+    [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("lines")] int[] Lines);
 
 /// <summary>

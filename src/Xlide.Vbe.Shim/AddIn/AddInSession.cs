@@ -2559,10 +2559,17 @@ internal sealed class AddInSession : IDisposable
                 // Reading what is set. There has been a way to SET a breakpoint since the door
                 // landed and no way to ask what is set, which makes every debugger assertion a
                 // matter of remembering what the test did rather than looking (2026-08-07).
-                var rows = _breakpoints
-                    .Where(entry => entry.Value.Count > 0)
-                    .OrderBy(entry => entry.Key, StringComparer.OrdinalIgnoreCase)
-                    .Select(entry => new DebugBreakpointRow(entry.Key, [.. entry.Value]))
+                // Reported from the record's own spellings, not from the key. The key is
+                // lowercased so that two workbooks holding Helpers and helpers are holding the
+                // same module, and a first version handed that key back: the route answered
+                // `helpers @ renamefixture.xlsm`, so a caller comparing against the name on
+                // screen matched nothing. A door that mangles its own answers is worse than one
+                // that refuses (2026-08-08).
+                var rows = _breakpoints.Values
+                    .Where(record => record.Lines.Count > 0)
+                    .OrderBy(record => record.Project, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(record => record.Module, StringComparer.OrdinalIgnoreCase)
+                    .Select(record => new DebugBreakpointRow(record.Module, record.Project, [.. record.Lines]))
                     .ToArray();
 
                 return System.Text.Json.JsonSerializer.Serialize(
@@ -2745,11 +2752,12 @@ internal sealed class AddInSession : IDisposable
                 request.Query.TryGetValue("state", out var wanted);
                 GoTo(module, breakLine, 1, project);
 
-                // The record is keyed by the module the surface is showing, which the GoTo
-                // above has just made this one.
+                // Read against the module the GoTo above has just made the shown one, in the
+                // workbook it belongs to. Keyed by name alone this read the TWIN's record when
+                // two workbooks shared the module name, so `state=on` saw a breakpoint that was
+                // not there and did nothing.
                 var alreadySet = _editorSurface?.Module is { } shownModule
-                    && _breakpoints.TryGetValue(shownModule, out var recordedLines)
-                    && recordedLines.Contains(breakLine);
+                    && BreakpointsFor(shownModule).Contains(breakLine);
                 var shouldSet = wanted switch
                 {
                     "on" => true,
@@ -3762,7 +3770,33 @@ internal sealed class AddInSession : IDisposable
     /// way would be real and undrawn, which is why this is a record of what we did rather than a
     /// claim about what the editor holds.
     /// </summary>
-    private readonly Dictionary<string, SortedSet<int>> _breakpoints = new(StringComparer.OrdinalIgnoreCase);
+    ///
+    /// KEYED BY WORKBOOK AND MODULE, through WrittenKey, not by module name. Two open workbooks
+    /// can each hold a `Helpers`, and keyed by name alone a breakpoint set in one was reported
+    /// against the other: the dot drew on the wrong module and a run that should have stopped did
+    /// not. Fifth defect of that shape in this codebase (2026-08-07), and the last of the ones
+    /// that were known.
+    private readonly Dictionary<string, BreakpointRecord> _breakpoints = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// One module's breakpoints, with the names AS SPELLED beside them.
+    ///
+    /// The key is lowercased, because two workbooks holding `Helpers` and `helpers` are holding
+    /// the same module as far as VBA is concerned. Reporting the key back is what a first version
+    /// did, and the `breakpoints` route then answered `helpers @ renamefixture.xlsm` — so a
+    /// caller comparing against the name the product shows found nothing, which is a door that
+    /// mangles its own answers. The spellings are kept so the route can hand back what a
+    /// developer would recognise (2026-08-08).
+    /// </summary>
+    private sealed record BreakpointRecord(string Module, string? Project, SortedSet<int> Lines);
+
+    /// <summary>The breakpoint key for a module of a workbook. Null project means the shown one.</summary>
+    private string BreakpointKey(string module, string? projectDisplay = null) =>
+        WrittenKey(module, projectDisplay ?? DisplayFromProjectId(_shownProject));
+
+    /// <summary>The lines recorded for a module of a workbook, empty when it has none.</summary>
+    private SortedSet<int> BreakpointsFor(string module, string? projectDisplay = null) =>
+        _breakpoints.TryGetValue(BreakpointKey(module, projectDisplay), out var found) ? found.Lines : [];
 
     /// <summary>Whether execution was stopped last time it was looked at.</summary>
     private bool _inBreak;
@@ -4434,10 +4468,13 @@ internal sealed class AddInSession : IDisposable
     /// <summary>Moves line-anchored breakpoints with the text they were set on.</summary>
     private void OnLinesShifted(string module, int afterLine, int delta)
     {
-        if (!_breakpoints.TryGetValue(module, out var lines) || lines.Count == 0)
+        var key = BreakpointKey(module);
+        if (!_breakpoints.TryGetValue(key, out var record) || record.Lines.Count == 0)
         {
             return;
         }
+
+        var lines = record.Lines;
 
         var moved = new SortedSet<int>();
         foreach (var line in lines)
@@ -4447,7 +4484,7 @@ internal sealed class AddInSession : IDisposable
 
         if (!moved.SetEquals(lines))
         {
-            _breakpoints[module] = moved;
+            _breakpoints[key] = record with { Lines = moved };
             PublishBreakpoints();
             Log.Verbose($"breakpoint: shifted with the text, now [{string.Join(",", moved)}]");
         }
@@ -4465,7 +4502,8 @@ internal sealed class AddInSession : IDisposable
         // Clearing is never validity-gated. A recorded dot must always answer a click,
         // whatever its line has since become: gating the clear on the line still being
         // executable left a drifted dot that five clicks could not remove (2026-08-04).
-        var clearing = _breakpoints.TryGetValue(module, out var recorded) && recorded.Contains(line);
+        var key = BreakpointKey(module);
+        var clearing = _breakpoints.TryGetValue(key, out var recorded) && recorded.Lines.Contains(line);
 
         if (!clearing && !CanBreakOn(_editorSurface?.LineAt(line)))
         {
@@ -4484,7 +4522,10 @@ internal sealed class AddInSession : IDisposable
             // module afterwards would move it.
             _editorSurface?.FlushEdits();
 
-            using var pane = FindCodePane(module);
+            // The SHOWN project's copy, not the first module of that name. Without it the
+            // command lands in whichever workbook answered first, which is how a breakpoint got
+            // set on the twin.
+            using var pane = FindCodePane(module, _shownProject);
             if (pane is null)
             {
                 return;
@@ -4497,12 +4538,13 @@ internal sealed class AddInSession : IDisposable
                 return;
             }
 
-            if (!_breakpoints.TryGetValue(module, out var lines))
+            if (!_breakpoints.TryGetValue(key, out var held))
             {
-                lines = [];
-                _breakpoints[module] = lines;
+                held = new BreakpointRecord(module, DisplayFromProjectId(_shownProject), []);
+                _breakpoints[key] = held;
             }
 
+            var lines = held.Lines;
             if (!lines.Remove(line))
             {
                 lines.Add(line);
@@ -4526,8 +4568,7 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
-        _editorSurface?.ShowBreakpoints(
-            _breakpoints.TryGetValue(module, out var lines) ? [.. lines] : []);
+        _editorSurface?.ShowBreakpoints([.. BreakpointsFor(module)]);
     }
 
     /// <summary>
@@ -4879,9 +4920,11 @@ internal sealed class AddInSession : IDisposable
             }
         }
 
-        if (_breakpoints.Remove(oldName, out var lines))
+        // The same workbook the baselines used: a rename reaches here for the selected
+        // component, and the selected component belongs to the shown workbook.
+        if (_breakpoints.Remove(WrittenKey(oldName, display), out var moving))
         {
-            _breakpoints[newName] = lines;
+            _breakpoints[WrittenKey(newName, display)] = moving with { Module = newName };
         }
 
         if (string.Equals(_propertiesTarget, oldName, StringComparison.OrdinalIgnoreCase))

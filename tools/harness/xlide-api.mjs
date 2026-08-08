@@ -531,7 +531,23 @@ function clientFor(entry) {
      * There was a way to SET one from the day this door landed and no way to ask what is set,
      * which makes a debugger assertion a matter of remembering what the test did.
      */
+    /**
+     * What is recorded, per module AND per workbook.
+     *
+     * Each row carries `project`, because two open workbooks can each hold a module of the same
+     * name and the record used to be keyed by the name alone: a breakpoint set in one was
+     * reported against the other, and a run that should have stopped did not (fixed 2026-08-08).
+     * `breakpointsIn(project)` is the filtered view a two-workbook test wants.
+     */
     breakpoints: () => call("breakpoints"),
+
+    /** The rows belonging to one workbook, matched on its file name however it is cased. */
+    async breakpointsIn(project) {
+      const answer = await this.breakpoints();
+      const wanted = String(project ?? "").toLowerCase();
+      return (answer.breakpoints ?? []).filter((row) =>
+        !wanted || String(row.project ?? "").toLowerCase() === wanted);
+    },
 
     /**
      * Puts the last rename back — every module it touched, and the component's old name.
