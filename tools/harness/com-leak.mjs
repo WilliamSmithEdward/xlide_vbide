@@ -112,6 +112,57 @@ await repeat("a doctor pass", 0, async () => {
 });
 
 /*
+ * EVERY OTHER READ ROUTE, because the seven above were chosen by hand and a leak does not care
+ * which routes somebody thought to check.
+ *
+ * The defect that started this had been present since the type was written and reached the door
+ * through whatever happened to call it. Picking likely-looking routes is how it survived: the
+ * ones a developer reaches for are the ones already believed. So the sweep is exhaustive over
+ * everything safe to call repeatedly, and anything left out is left out on purpose and named.
+ *
+ * Excluded, with reasons: `capture` returns a bitmap and is slow; `eval`, `await`, `assert`,
+ * `bench`, `trip` and `pagecall` run scripts in the page rather than touching COM; `reload`
+ * restarts the surface; `compile`, `command`, `component`, `pane`, `caret`, `type`, `act`,
+ * `breakpoint`, `settings` and `undoRename` CHANGE STATE, and a leak sweep that mutates the
+ * fixture is a leak sweep nobody will run twice. State-changing paths are covered by
+ * three-copies.mjs, which asserts parity rather than counting.
+ */
+const READ_ROUTES = [
+  ["state", () => api.state()],
+  ["documents", () => api.documents()],
+  ["ui", () => api.ui()],
+  ["layout", () => api.layout()],
+  ["problems", () => api.problems()],
+  ["outline", () => api.outline("Helpers")],
+  ["locals", () => api.locals()],
+  ["watches", () => api.watches()],
+  ["immediate", () => api.immediate()],
+  ["dialogs", () => api.dialogs()],
+  ["journal", () => api.journal()],
+  ["history", () => api.history()],
+  ["messages", () => api.messages(5)],
+  ["console", () => api.console(5)],
+  ["perf", () => api.perf()],
+  ["placement", () => api.placement()],
+  ["engine", () => api.engineSource("Helpers")],
+  ["breakpoints", () => api.breakpoints()],
+  ["windows", () => api.windows()],
+  ["inspect", () => api.inspect(".xlide-tab")],
+  // `assert` reaches the debugger's own state through its claim predicates, which is COM the
+  // read routes above never touch.
+  ["assert stopped", () => api.assert("stopped", { timeoutMs: 200 })],
+  ["assert shownModule", () => api.assert("shownModule", { timeoutMs: 200 })],
+  ["assert localsHas", () => api.assert("localsHas", { value: "n", timeoutMs: 200 })],
+];
+
+for (const [name, call] of READ_ROUTES) {
+  // eslint-disable-next-line no-await-in-loop
+  await repeat(name, 0, async () => {
+    await call().catch(() => null);
+  });
+}
+
+/*
  * WHAT THIS SUITE DELIBERATELY DOES NOT DO: force a collection and see whether Excel survives.
  *
  * That was tried, on 2026-08-07, and it is a false-negative machine. A route was added to collect
