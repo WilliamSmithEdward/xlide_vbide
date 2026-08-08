@@ -923,6 +923,37 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * Undo and redo, the two most state-affecting keys a developer presses and the two that had
+     * no way of being driven.
+     *
+     * `undoRename` existed, and only undoes a rename. Everything else a probe did to a module
+     * could be made and never taken back the way a person takes it back, so the one operation
+     * most likely to leave the workbook, the surface and the analyzer holding three different
+     * texts was the one operation no check ever performed.
+     *
+     * Triggered by name rather than looked up: undo and redo are built into the editor rather
+     * than registered as actions, so `getAction("undo")` finds nothing. This is the same path the
+     * toolbar button and Ctrl+Z take.
+     */
+    undo: (args) => {
+      const editor = workspace.activeEditor();
+      const id = args.redo === undefined ? "undo" : flag(args.redo, false) ? "redo" : "undo";
+      const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));
+
+      editor.focus();
+      for (let step = 0; step < times; step += 1) {
+        editor.trigger("xlide", id, null);
+      }
+
+      const at = editor.getPosition();
+      return {
+        did: true,
+        detail: `${id} ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
+        data: { line: at?.lineNumber ?? null, column: at?.column ?? null },
+      };
+    },
+
+    /**
      * Backspace, through the command the key is bound to.
      *
      * The shim's `type` route cannot express one: it drives `trigger("keyboard", "type")`, which

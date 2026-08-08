@@ -176,7 +176,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `problems` | `problems(module)` | the analyzer's findings |
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
 | `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
-| `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters |
+| `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters, and the COM WRAPPER counts |
 | `trip` | `trip("pagecall", {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
@@ -339,7 +339,37 @@ text does not agree with.
 ```bash
 node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at every stage
 node tools\harness\format-positions.mjs    # where a squiggle lands after Format Module
+node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
 ```
+
+### The COM wrappers, which killed Excel four times before anyone counted them
+
+```js
+(await api.stats()).comWrappersLive;   // should return to its resting level, always
+```
+
+Every automation object this product touches is wrapped, and **the wrapper takes its own
+reference** on top of the one the shim holds. A wrapper that is never disposed is given back by
+the FINALIZER THREAD instead, and the editor's objects are apartment-threaded: releasing one from
+that thread is an access violation the runtime cannot throw, so it FailFasts and ends Excel.
+
+It also surfaces late and in the wrong place. On 2026-08-07 one missing `Dispose` was reported
+four times as three different faults, blamed on `ntdll` twice, on `VBE7.DLL` once, and on this
+library once, hours apart, and nothing connected them until a stack finally named
+`ComObject.Finalize`. See [lessons.md](lessons.md) entry 36.
+
+```bash
+node tools\harness\com-leak.mjs        # each operation many times over, live count before and after
+node tools\harness\com-leak.mjs 40     # more rounds, for a slower leak
+```
+
+`ComRuntime.TakeWrapper` and `GiveBackWrapper` are the only two doors and each does its own
+counting, so a caller cannot dispose without counting or count without disposing. On a build with
+the defect restored deliberately a single `project()` call leaks **441** wrappers and every row
+fails; on a good build every row is flat. **That two-way check is the only reason the instrument
+is worth having**: the first two attempts at measuring this both passed on the broken build, and
+both were deleted. One of them was a route that forced a collection and drained the finalizers,
+which reported completely clean with 8,734 leaked wrappers pending.
 
 Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**
 — the rename fixture deliberately does not and the language fixture carries a module of deliberate

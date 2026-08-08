@@ -49,9 +49,12 @@ internal sealed unsafe class DispatchObject : IDisposable
             return null;
         }
 
-        var managed = ComRuntime.Wrappers.GetOrCreateObjectForComInstance(pointer, CreateObjectFlags.UniqueInstance);
+        var managed = ComRuntime.TakeWrapper(pointer);
         if (managed is not IDispatch dispatch)
         {
+            // The wrapper too, for the same reason Dispose gives: left to the finalizer thread,
+            // its release of an apartment-threaded object is an access violation.
+            ComRuntime.GiveBackWrapper(managed);
             Marshal.Release(pointer);
             return null;
         }
@@ -694,10 +697,36 @@ internal sealed unsafe class DispatchObject : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Gives back BOTH references: the wrapper's and ours.
+    ///
+    /// THE ONE THAT WAS MISSING KILLED EXCEL. `GetOrCreateObjectForComInstance` builds a wrapper
+    /// that takes its own reference on the pointer, and a `UniqueInstance` wrapper is not cached,
+    /// so nothing else will ever give that reference back. Releasing only ours left the wrapper
+    /// alive holding a live VBE object until the garbage collector got to it, and what runs then
+    /// is `ComObject.Finalize` on the FINALIZER THREAD.
+    ///
+    /// The editor's objects are apartment-threaded and belong to the host's thread. Releasing one
+    /// from the finalizer thread is not slow or untidy, it is invalid: it read as an access
+    /// violation inside `Marshal.Release`, which ahead-of-time compilation cannot throw and so
+    /// turns into a FailFast that takes the whole of Excel with it. Three crashes on 2026-08-07
+    /// were this, wearing three different faces: one access violation reported against this
+    /// library, one against VBE7.DLL, and two heap corruptions blamed on ntdll, because a release
+    /// on the wrong thread corrupts COM's own bookkeeping and the damage is noticed somewhere
+    /// else entirely, later, by whoever touches it next.
+    ///
+    /// ComHandle.Dispose has always done this and says why. This is the same rule, on the type
+    /// that does nearly all the control-plane work.
+    /// </summary>
     public void Dispose()
     {
         var pointer = Interlocked.Exchange(ref _pointer, 0);
+        var dispatch = _dispatch;
         _dispatch = null;
+
+        // The wrapper's reference first: releasing ours while the wrapper still holds one is safe,
+        // the reverse ordering reads as if the wrapper could outlive the object.
+        ComRuntime.GiveBackWrapper(dispatch);
 
         if (pointer != 0)
         {

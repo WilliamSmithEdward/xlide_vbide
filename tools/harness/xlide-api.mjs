@@ -239,6 +239,7 @@ function clientFor(entry) {
       };
     },
     stats: () => call("stats"),
+
     locals: () => call("locals"),
     watches: () => call("watches"),
     problems: (module) => call(`problems${query({ module })}`),

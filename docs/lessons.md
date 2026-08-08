@@ -748,3 +748,63 @@ So a ready that is not the first must clear the caches before republishing. The 
 generalises: any "has this changed" memo held ACROSS a client that can restart has to be
 invalidated when the client restarts, because the memo describes a conversation the new
 client was never part of.
+
+## 36. The wrapper takes its own reference, and the finalizer thread is the wrong thread to give it back
+
+Excel died four times on 2026-08-07, wearing three different faces. Two heap corruptions
+blamed on `ntdll` at the same fault offset. One access violation blamed on `VBE7.DLL`. One
+access violation blamed on `Xlide.Vbe.Shim.dll`. Three libraries, three exception codes,
+hours apart, each in the middle of something ordinary: a format, some typing, a probe. They
+read as three unrelated instabilities and were nearly filed as "the host is flaky today".
+
+Only the fourth carried a managed stack, and the stack was the whole answer:
+
+```
+Marshal.Release(IntPtr)
+FreeThreadedStrategy.Release(Void*)
+ComObject.Finalize()
+__Finalizer.DrainQueue()
+```
+
+`GetOrCreateObjectForComInstance` builds a wrapper that takes **its own reference** on the
+pointer, on top of the one the caller already holds. With `CreateObjectFlags.UniqueInstance`
+that wrapper is not cached, so nothing else will ever give that reference back. Releasing
+only the caller's leaves the wrapper alive holding a live editor object until the garbage
+collector reaches it, and what runs then is `ComObject.Finalize` **on the finalizer thread**.
+
+The editor's objects are apartment-threaded and belong to the host's thread. Releasing one
+from the finalizer thread is not slow or untidy, it is invalid. It reads as an access
+violation inside `Marshal.Release`, which ahead-of-time compilation cannot throw, so the
+runtime FailFasts and takes the whole of Excel with it. Worse, a release on the wrong thread
+corrupts COM's own bookkeeping, and that damage is noticed by whoever touches it next,
+which is why the same defect was reported against `ntdll` and `VBE7.DLL` as readily as
+against this library, and why nothing connected the reports.
+
+`ComHandle.Dispose` had always done it correctly, and its comment says exactly why. The
+missing line was in `DispatchObject.Dispose`, which does nearly all the control-plane work.
+One line, absent since the type was written.
+
+**The scale is worth stating.** With the defect restored deliberately, a single `project()`
+call leaked **441 wrappers**; reading the native panes leaked 156 per call; moving the caret
+29. A short probe run took the live count from 13 to 8,734. Every one of those was a live
+editor object queued for release on the wrong thread.
+
+Two lessons, and the second cost more than the first.
+
+**Pair the taking with the giving back so they cannot drift.** The fix is one line, but the
+same line can go missing again at the next call site. `ComRuntime.TakeWrapper` and
+`GiveBackWrapper` are now the only two doors, and each does its own counting: a caller
+cannot dispose without counting or count without disposing. `stats` reports taken, given
+back, and live, so a leak is a number during development rather than a crash report later.
+
+**The first instrument was a false-negative machine, and passing built confidence in a
+build that was still broken.** Two were tried. A `gc` route that collected and drained the
+finalizers on demand, on the theory that it would make the crash deterministic. Measured
+against the broken build with 8,734 wrappers pending, it reported completely clean and the
+host lived, because releasing an apartment-threaded object from the finalizer thread is only
+*sometimes* fatal. And a first version of the counter that incremented beside the disposal
+rather than by it, which read perfectly balanced on a build with the disposal deliberately
+removed. Both were deleted. **An instrument is not proven by passing on a good build; it is
+proven by failing on a bad one**, and the only way to know is to break the code on purpose
+and watch. The counter now reports 441 leaked wrappers per call on the broken build and
+zero on the fixed one, which is the only reason it is worth having.

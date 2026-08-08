@@ -77,6 +77,15 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/language.mjs
 
+      # A finding's position against the text it was actually measured in. The engine chooses
+      # between its live copy of a module and the seeded one whenever a request carries no source,
+      # and that choice is invisible to the caller -- which converted offsets against whatever
+      # text it held, and drew a squiggle six columns left of the word it was about for as long as
+      # the two differed. This drives the two copies apart on purpose and asserts the invariant.
+      - name: Positions
+        working-directory: xlide_vbide/engine
+        run: node test/positions.mjs
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.

@@ -1075,7 +1075,21 @@ public sealed record DebugStatsReply(
     [property: JsonPropertyName("messagesToPage")] long MessagesToPage,
     [property: JsonPropertyName("messagesToHost")] long MessagesToHost,
     [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
-    [property: JsonPropertyName("dialogsStanding")] int DialogsStanding);
+    [property: JsonPropertyName("dialogsStanding")] int DialogsStanding,
+    /// <summary>
+    /// Wrappers built over the editor's objects, given back, and still held.
+    ///
+    /// COUNTED BECAUSE THE ALTERNATIVE IS A CRASH REPORT. A wrapper holds its own reference on an
+    /// apartment-threaded object; one that is never disposed is given back by the FINALIZER
+    /// THREAD instead, where releasing it is an access violation the runtime cannot throw and so
+    /// ends the host process. The damage also surfaces late and elsewhere: on 2026-08-07 one leak
+    /// was reported once against this library, once against VBE7.DLL, and twice as heap
+    /// corruption inside ntdll. `live` should return to its resting level after an operation; one
+    /// that only climbs is that crash, seen early enough to fix.
+    /// </summary>
+    [property: JsonPropertyName("comWrappersTaken")] long ComWrappersTaken,
+    [property: JsonPropertyName("comWrappersGivenBack")] long ComWrappersGivenBack,
+    [property: JsonPropertyName("comWrappersLive")] long ComWrappersLive);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DebugStateReply))]

@@ -46,10 +46,10 @@ internal sealed class ComHandle<TInterface> : IDisposable
             return null;
         }
 
-        var wrapper = ComRuntime.Wrappers.GetOrCreateObjectForComInstance(pointer, CreateObjectFlags.UniqueInstance);
+        var wrapper = ComRuntime.TakeWrapper(pointer);
         if (wrapper is not TInterface target)
         {
-            (wrapper as IDisposable)?.Dispose();
+            ComRuntime.GiveBackWrapper(wrapper);
             Marshal.Release(pointer);
             return null;
         }
@@ -102,7 +102,7 @@ internal sealed class ComHandle<TInterface> : IDisposable
 
         // The wrapper's reference goes first: releasing ours while the wrapper still holds one is
         // safe, but the reverse ordering reads as if the wrapper could outlive the object.
-        (wrapper as IDisposable)?.Dispose();
+        ComRuntime.GiveBackWrapper(wrapper);
 
         if (pointer != 0)
         {

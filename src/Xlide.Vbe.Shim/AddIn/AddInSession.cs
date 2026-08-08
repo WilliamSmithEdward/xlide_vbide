@@ -1718,7 +1718,10 @@ internal sealed class AddInSession : IDisposable
                         MessagesToPage: messages.ToPage,
                         MessagesToHost: messages.ToHost,
                         HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
-                        DialogsStanding: DialogWatch.Dialogs().Length),
+                        DialogsStanding: DialogWatch.Dialogs().Length,
+                        ComWrappersTaken: Com.ComRuntime.WrappersTaken,
+                        ComWrappersGivenBack: Com.ComRuntime.WrappersGivenBack,
+                        ComWrappersLive: Com.ComRuntime.WrappersLive),
                     DebugJsonContext.Default.DebugStatsReply));
             }
         }
