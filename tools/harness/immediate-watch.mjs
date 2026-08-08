@@ -23,7 +23,32 @@ import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-ap
 
 const api = await open({});
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const project = await api.project();
+/*
+ * THE WORKBOOK THAT COMPILES, located rather than assumed.
+ *
+ * This read `project()`, which answers about the ACTIVE workbook, and evaluating in a project
+ * that does not compile raises a modal instead of answering: the rename fixture deliberately does
+ * not compile, so running this while it was in front would test the dialog guard rather than the
+ * Immediate window. The fourth suite in one afternoon to assume the workbook, which is why the
+ * client grew `projectHolding`.
+ *
+ * `Runner` is the debug fixture's own module, so finding it finds the fixture.
+ */
+const home = await api.projectHolding("Runner");
+const runnable = home !== null;
+
+if (!runnable) {
+  // Skipped, never killed: forcing the process down while the client still has connections open
+  // aborts node itself and replaces this suite's exit code with 127.
+  console.log("no open workbook holds a module named Runner.");
+  console.log("open the debug fixture and run this again:");
+  console.log("  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\DebugFixture.xlsm");
+  process.exitCode = 2;
+}
+
+const project = runnable
+  ? await api.project(home.project)
+  : { project: "(none open)", components: [] };
 
 let passed = 0;
 const failures = [];
@@ -40,6 +65,7 @@ function check(what, ok, detail) {
 
 console.log(`against ${project.project}\n`);
 
+if (runnable) {
 // ---------------------------------------------------------------------------------------------
 console.log("1. the Immediate window answers what an expression came to\n");
 
@@ -174,3 +200,4 @@ for (const failure of failures) {
 }
 
 process.exitCode = failures.length === 0 ? 0 : 1;
+}

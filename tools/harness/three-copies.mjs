@@ -27,9 +27,21 @@ import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-ap
 
 const api = await open({});
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const project = await api.project();
 const target = "HelpersExtra";
-const original = (await api.readModule(target, project.projectId)).text ?? "";
+
+// The workbook holding the target, not whichever is active. The fifth suite to need this.
+const home = await api.projectHolding(target);
+const runnable = home !== null;
+
+if (!runnable) {
+  console.log(`no open workbook holds a module named ${target}.`);
+  console.log("open the rename fixture and run this again:");
+  console.log("  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\RenameFixture.xlsm");
+  process.exitCode = 2;
+}
+
+const project = runnable ? await api.project(home.project) : { projectId: null };
+const original = runnable ? (await api.readModule(target, project.projectId)).text ?? "" : "";
 
 let passed = 0;
 const failures = [];
@@ -115,7 +127,7 @@ const shown = async () => {
   await wait(1200);
 };
 
-try {
+if (runnable) try {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
   await wait(1500);
   await api.writeModule(target, SEED.join("\r\n"), project.projectId);

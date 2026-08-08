@@ -942,3 +942,74 @@ and then returns BEFORE the line that logs window events, so the log contains no
 whether or not any were delivered. That emptiness was read as "the event never arrives", which is
 the opposite of the truth. **An absent log line is evidence about the logging, not about the
 event.** Instrument the handler, not the search.
+
+## 40. The second wrapper was taken behind the counter's back
+
+Entry 36 ends with a counter that catches a leaked COM wrapper deterministically, proven by
+breaking the code on purpose. Excel then died again, on 2026-08-07 at 22:45, with the identical
+stack: `ComObject.Finalize`, `Marshal.Release`, FailFast. The counter read balanced throughout, at
+its resting 13, before and after.
+
+Both facts were true, and together they say something precise: **a wrapper was reaching the
+finalizer that this product never took.** The counter measures wrappers taken through
+`ComRuntime.TakeWrapper`. It cannot see one the runtime builds on its own.
+
+The line was this, at the bottom of the variant-to-text conversion:
+
+```csharp
+_ => value.As<object>()?.ToString(),
+```
+
+For a variant holding `VT_DISPATCH` or `VT_UNKNOWN`, `As<object>()` asks the runtime to build a
+managed wrapper over that interface. That wrapper belongs to nobody: not taken through
+`ComRuntime`, so the live count never sees it; never disposed, so the finalizer thread releases
+it; and the editor's objects are apartment-threaded, so releasing one there is an access violation
+the runtime cannot throw. One per property read of an object-valued member.
+
+Interface-valued variants are described now rather than converted, and the numeric and date cases
+are converted explicitly so the fallback is reached by almost nothing. Callers that genuinely want
+the object go through `FromVariant`, which takes its own counted reference.
+
+**What found it was not the leak instrument.** It was the crash reporter added the hour before,
+which reads the Windows event log the moment a suite cannot connect and prints the faulting module
+and the managed stack. Without it this was one more "Excel died again" in an afternoon that had
+several, and the stack that named the cause would have scrolled past unread.
+
+Two lessons, and the second is the one worth carrying:
+
+**An instrument measures what it was pointed at.** The counter is honest and was proven both ways,
+and it is still blind to every wrapper this product does not create. Proving an instrument catches
+the bug you built it for says nothing about the bug you have not met.
+
+**So keep the instrument that observes OUTCOMES beside the one that observes MECHANISM.** The
+counter watches a mechanism this product controls; the crash reporter watches what actually
+happened to the process, whatever the cause. The second one found what the first could not see,
+and it cost twenty lines.
+
+## 41. Application.Run picks the active workbook, and the scratch module is in another one
+
+Found while running the Immediate suite against a session holding TWO workbooks, which is a
+supported state and one that three separate defects have already lived in.
+
+A line typed into the Immediate panel is compiled into a scratch module added to
+`ActiveVBProject`, and then run by name through `Application.Run`. Those are two different
+notions of "current": the VBE's active project, and the host's active workbook. With one workbook
+open they are always the same and the difference cannot be seen. With two, they can differ, and
+the evaluation fails with the host's own words:
+
+> Cannot run the macro 'XlideImmediateScratch.XlideImmediateRun'. The macro may not be available
+> in this workbook or all macros may be disabled.
+
+Which is true and unhelpful: the macro exists, in the other workbook.
+
+Fixed by qualifying the name with the workbook the scratch module actually went into:
+`'Book.xlsm'!Module.Procedure`. That resolves the ambiguity in favour of THE EDITOR'S active
+project, which is the right answer here: a line typed into this product's Immediate panel is about
+the workbook the developer is looking at in this product, not about whichever Excel window happens
+to be in front. A project that has never been saved has no name to qualify with, and there the
+unqualified form is all there is.
+
+The other candidate fix, adding the scratch module to the host's active workbook instead, would
+have resolved it the opposite way and evaluated against a workbook the developer is not editing.
+
+Measured: with both fixtures open the suite went from 10 passed and 6 failed to 16 and 0.

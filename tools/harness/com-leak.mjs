@@ -18,6 +18,13 @@
  * the live count has to come back to where it started, give or take the objects an operation is
  * entitled to keep. A count that grows with the iteration count is the crash, seen early.
  *
+ * WHAT THIS CANNOT SEE, and it cost a second crash to learn: the count is of wrappers taken
+ * through ComRuntime, so a wrapper the RUNTIME builds on its own is invisible here. One was, at
+ * the bottom of a variant-to-text conversion, where `As<object>()` on a variant holding an
+ * interface asked for a wrapper nobody owned. This suite read a perfectly balanced 13 across it,
+ * every time, while Excel died on the finalizer thread. See lessons.md entry 40; the thing that
+ * found it was the crash reporter, not this.
+ *
  *   node tools\harness\com-leak.mjs
  *   node tools\harness\com-leak.mjs 40      # more rounds, for a slower leak
  */
@@ -83,10 +90,15 @@ const held = async () => {
   // The floor is the stable part. A transient handle is open at some sample and closed at
   // another, so the minimum of several readings is close to what is actually being held, and a
   // real leak raises the floor because a leaked handle is open at every sample.
+  //
+  // THREE SAMPLES, NOT FOUR, AND CLOSER TOGETHER. The original spacing cost 600ms per reading and
+  // this is called twice a row across 35 rows: 42 seconds of the sweep's 123 were spent here, for
+  // a floor that three readings establish as well as four. What the floor needs is more than one
+  // look, not a long one.
   const samples = [];
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 3; i += 1) {
     samples.push(await api.stats());
-    if (i < 3) { await wait(150); }
+    if (i < 2) { await wait(60); }
   }
 
   const last = samples[samples.length - 1];
@@ -108,13 +120,16 @@ const live = async () => (await held()).wrappers;
 async function repeat(what, allowance, body, howMany = rounds) {
   // A round first, so anything the operation sets up once is set up before the baseline.
   await body(0);
-  await wait(600);
+  await wait(250);
 
   const before = await held();
   for (let round = 1; round <= howMany; round += 1) {
     await body(round);
   }
-  await wait(1200);
+  // Long enough for a write-back or a didChange to land, short enough that 35 rows do not cost a
+  // minute in settling alone. Every operation above is awaited, so this covers what continues
+  // AFTER the answer rather than the answer itself.
+  await wait(500);
   const after = await held();
 
   // Against howMany, not the file's default. The state-changing rows run fewer rounds, and

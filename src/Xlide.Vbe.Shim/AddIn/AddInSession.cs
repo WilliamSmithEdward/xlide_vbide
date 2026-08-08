@@ -5656,7 +5656,6 @@ internal sealed class AddInSession : IDisposable
             // lowercased path, so composing from it put "debugfixture.xlsm" on the title bar of a
             // file called DebugFixture.xlsm.
             _titleMode = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "running";
-            _titleWorkbook = project is null ? DisplayFromProjectId(_shownProject) : WorkbookDisplayName(project);
             RefreshWindowTitle();
 
             // The read answered, so the busy episode, if there was one, is over.
@@ -7447,10 +7446,20 @@ internal sealed class AddInSession : IDisposable
     /// that exists. Reading a component's pane would create one, which would put a tab up for a
     /// module nobody opened.
     /// </summary>
-    /// <summary>The mode and workbook the title last reported, so a refresh costs no COM call.</summary>
+    /// <summary>The mode the title last reported, so a refresh costs no COM call.</summary>
     private string? _titleMode = "design";
 
-    private string? _titleWorkbook;
+    /// <summary>
+    /// Workbook display names by project id, filled where the tree already walks every project.
+    ///
+    /// The title bar needs the workbook on every tab switch, and a tab switch can cross workbooks.
+    /// Reading it from the debugger's tick cached the WRONG one: the module updated on each switch
+    /// and the workbook did not, so a tab in the other workbook was labelled with the first one's
+    /// name (2026-08-07). Deriving it from the id instead spells it "debugfixture.xlsm", because
+    /// the id is a lowercased path.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _projectNames =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Puts the current workbook, module and mode on the title bar.
@@ -7474,13 +7483,22 @@ internal sealed class AddInSession : IDisposable
         }
 
         var shown = _editorSurface?.Module;
-        if (chrome.Mode == _titleMode && chrome.Workbook == _titleWorkbook && chrome.Module == shown)
+
+        // The workbook comes from the SHOWN project, read now, for the same reason the module
+        // does: a tab switch can cross workbooks, and a cached one labels the new tab with the old
+        // workbook's name. Cased from the map when it is known, since the id is a lowercased path.
+        var workbook = _shownProject is { Length: > 0 } id
+            && _projectNames.TryGetValue(id, out var cased)
+                ? cased
+                : DisplayFromProjectId(_shownProject);
+
+        if (chrome.Mode == _titleMode && chrome.Workbook == workbook && chrome.Module == shown)
         {
             return;
         }
 
         chrome.Mode = _titleMode;
-        chrome.Workbook = _titleWorkbook;
+        chrome.Workbook = workbook;
         chrome.Module = shown;
         chrome.Apply();
     }
@@ -7828,7 +7846,13 @@ internal sealed class AddInSession : IDisposable
                     }
                 }
 
-                tree.Add(new SurfaceProject(WorkbookDisplayName(project), [.. members]));
+                // The cased name against the id, so the title bar can name the workbook on a tab
+                // switch without a COM call. The id is a lowercased path and everything derived
+                // from it reads "debugfixture.xlsm"; this is the spelling the shell uses.
+                var display = WorkbookDisplayName(project);
+                _projectNames[ProjectReader.Identity(project).Id] = display;
+
+                tree.Add(new SurfaceProject(display, [.. members]));
             }
 
             surface.ShowProjects([.. tree]);

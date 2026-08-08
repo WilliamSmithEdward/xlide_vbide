@@ -197,9 +197,26 @@ internal sealed class ImmediateEvaluator
                 return new Result("The host application could not be reached.", Failed: true);
             }
 
-            // Run by name rather than through the module, because the project is what owns the
-            // compiled procedure and the host is what knows how to call into it.
-            var value = application.CallToString("Run", $"{ScratchModule}.{ScratchProcedure}");
+            /*
+             * QUALIFIED BY WORKBOOK, because "current" means two different things here.
+             *
+             * The scratch module is added to the editor's ACTIVE VB PROJECT; `Application.Run`
+             * resolves an unqualified name against the host's ACTIVE WORKBOOK. With one workbook
+             * open those are always the same and the difference cannot be seen. With two they can
+             * differ, and the evaluation fails with the host's own words: "Cannot run the macro
+             * 'XlideImmediateScratch.XlideImmediateRun'. The macro may not be available in this
+             * workbook or all macros may be disabled." Which is true, and unhelpful: it exists, in
+             * the other workbook (2026-08-07).
+             *
+             * A project with no file yet has no name to qualify with, and there the unqualified
+             * form is all there is.
+             */
+            var file = SafeFileName(project);
+            var target = file is null
+                ? $"{ScratchModule}.{ScratchProcedure}"
+                : $"'{file}'!{ScratchModule}.{ScratchProcedure}";
+
+            var value = application.CallToString("Run", target);
 
             // The scratch code marks an error it caught, and the marker cannot be typed.
             if (value.Length > 0 && value[0] == ErrorMarker)
@@ -280,6 +297,26 @@ internal sealed class ImmediateEvaluator
     /// marker on it. Handled here, the error comes back as a marked value instead, and the panel
     /// shows the language's own message the way it shows any other answer.
     /// </summary>
+    /// <summary>
+    /// The workbook file name a project belongs to, or null when it has never been saved.
+    ///
+    /// Only the name, not the path: that is what `Application.Run` wants between its quotes, and
+    /// a path there fails to resolve.
+    /// </summary>
+    private static string? SafeFileName(DispatchObject? project)
+    {
+        try
+        {
+            var full = project?.GetString("FileName");
+            return string.IsNullOrEmpty(full) ? null : Path.GetFileName(full);
+        }
+        catch (Exception)
+        {
+            // An unsaved project throws rather than answering empty. The unqualified name stands.
+            return null;
+        }
+    }
+
     private static string Compose(string body, bool wantsValue)
     {
         var work = wantsValue ? $"    {ScratchProcedure} = ({body})\r\n" : $"    {body}\r\n";

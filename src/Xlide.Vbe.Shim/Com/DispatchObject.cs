@@ -595,10 +595,42 @@ internal sealed unsafe class DispatchObject : IDisposable
         return AttachBorrowed(pointer);
     }
 
+    /// <summary>
+    /// A variant as text, WITHOUT materialising a wrapper for an interface it happens to hold.
+    ///
+    /// THE SECOND WRAPPER THAT KILLED EXCEL, and it hid from the counter built to catch the first.
+    /// The fallback here was `value.As&lt;object&gt;()?.ToString()`, which for a variant holding
+    /// VT_DISPATCH or VT_UNKNOWN asks the runtime to build a managed wrapper over that interface.
+    /// That wrapper is nobody's: it is not taken through ComRuntime, so the live count never sees
+    /// it, and it is never disposed, so the FINALIZER THREAD releases it. Releasing an
+    /// apartment-threaded object there is an access violation the runtime cannot throw, and the
+    /// stack is the same one as lessons 36: ComObject.Finalize, Marshal.Release, FailFast.
+    ///
+    /// It was invisible to the leak sweep for exactly the reason it was dangerous: the sweep
+    /// measures wrappers this product TOOK, and this one was taken behind its back. What found it
+    /// was the crash reporter reading the fault out of the event log the moment a suite could not
+    /// connect (2026-08-07).
+    ///
+    /// So an interface-valued variant is described rather than converted. Nothing that reads a
+    /// property as text wants the object anyway; the callers that do want it go through
+    /// FromVariant, which takes its own counted reference.
+    /// </summary>
     private static string? VariantToString(in ComVariant value) => value.VarType switch
     {
         VarEnum.VT_BSTR => value.As<string?>(),
         VarEnum.VT_EMPTY or VarEnum.VT_NULL => null,
+
+        // Named, not built. Asking for the object here is what leaked one per read.
+        VarEnum.VT_DISPATCH => "(object)",
+        VarEnum.VT_UNKNOWN => "(unknown)",
+
+        VarEnum.VT_I2 => value.As<short>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_I4 or VarEnum.VT_INT => value.As<int>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_R4 => value.As<float>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_R8 => value.As<double>().ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_BOOL => value.As<bool>() ? "True" : "False",
+        VarEnum.VT_DATE => value.As<DateTime>().ToString(CultureInfo.InvariantCulture),
+
         _ => value.As<object>()?.ToString(),
     };
 
