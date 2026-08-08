@@ -73,6 +73,19 @@ Check 'capture renders the frame to a bitmap' {
     (Get-Item $bmp).Length -gt 10000
 }
 
+# IT BRINGS ITS OWN MODULE.
+#
+# Every module check below was written against a module named CleanModule assumed to be in
+# whatever workbook is open. No fixture has one and the scratch workbook is empty, so six checks
+# failed structurally against every fixture in the repo, reading as a product failure in the
+# gate's live half. A probe that depends on a fixture it does not create is a probe that will one
+# day test nothing (2026-08-08).
+$existing = (Invoke-RestMethod "$api/project" -TimeoutSec 8).components | Where-Object { $_.name -eq 'CleanModule' }
+if (-not $existing) {
+    Invoke-RestMethod "$api/component?action=add&kind=module&name=CleanModule" -Method Post -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1500
+}
+
 Check 'module reads through the session reader' {
     (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text.Length -gt 0
 }
@@ -162,7 +175,12 @@ Check 'breakpoint clears with state=off' {
 }
 
 Check 'an unknown route is named, not crashed on' {
-    (Invoke-RestMethod "$api/nonesuch" -TimeoutSec 8).error -match 'unknown route'
+    # Matches on the ROUTE NAME being echoed, not a fixed phrase. The message used to say
+    # "unknown route", which was often a lie: seventeen real routes are guarded on their
+    # arguments and fall through to the same default, so a route that exists was told it does
+    # not. The wording changed with that fix and this assertion did not.
+    $answer = (Invoke-RestMethod "$api/nonesuch" -TimeoutSec 8).error
+    ($null -ne $answer) -and ($answer -match 'nonesuch')
 }
 
 Check 'dialogs answers when nothing is standing' {
