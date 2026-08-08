@@ -3344,8 +3344,27 @@ internal sealed class AddInSession : IDisposable
                     new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
 
             default:
+                /*
+                 * "UNKNOWN ROUTE" IS OFTEN A LIE, and it sends the reader to the wrong place.
+                 *
+                 * Seventeen of the cases above are guarded on their arguments -- `case "caret"
+                 * when the line parses`, and so on -- and a guard that does not hold falls through
+                 * to here. So calling a route that exists, with an argument it will not accept,
+                 * is answered by being told the route does not exist. Measured 2026-08-07:
+                 * `caret?line=-1` answered "unknown route caret", and the next minute was spent
+                 * looking for a spelling mistake in a name that was spelled correctly.
+                 *
+                 * Naming both possibilities costs nothing and points at the argument, which is
+                 * what it is nearly always going to be: a route name is copied from the docs and
+                 * an argument is computed.
+                 */
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugErrorReply($"unknown route {request.Route}"), DebugJsonContext.Default.DebugErrorReply);
+                    new DebugErrorReply(
+                        $"no route '{request.Route}' accepted this request. Either there is no such "
+                        + "route, or there is and its required arguments were missing or rejected: "
+                        + "many routes are guarded on theirs. "
+                        + $"Given: {(request.Query.Count == 0 ? "(no arguments)" : string.Join(", ", request.Query.Select(pair => $"{pair.Key}={pair.Value}")))}"),
+                    DebugJsonContext.Default.DebugErrorReply);
         }
     }
 #endif
