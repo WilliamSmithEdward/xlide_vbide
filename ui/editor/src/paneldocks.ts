@@ -571,9 +571,33 @@ export class PanelDocks {
         during.clientX >= box.left && during.clientX <= box.right
         && during.clientY >= box.top && during.clientY <= box.bottom;
 
-      // Over a dock group: its strip takes the pane at the position under the pointer —
-      // which is how a pane is reordered among its own group's tabs — and its body offers
-      // the compass, where the centre tabs it in and an edge splits the group.
+      /*
+       * THE SMALLEST BODY UNDER THE POINTER WINS, not the first one found.
+       *
+       * A section's body can extend UNDER a neighbouring section: with a pane docked right, the
+       * right body measured 364..704 by 80..1239 and the bottom body 265..520 by 1064..1239, so
+       * they overlap in the bottom-right corner and a point there is inside both. `inside` is
+       * arithmetic on boxes with no notion of stacking or clipping, so a linear scan answered
+       * with whichever came first in render order.
+       *
+       * That was not a cosmetic mix-up. When the wrong group won and it happened to be the
+       * dragged pane's OWN group, the allowed zones came out empty - centre is where it already
+       * is, and a lone tab cannot split - so no petal appeared at all and the drop silently did
+       * nothing. A pane dragged out to the right could not be dragged back: the churn probe read
+       * that as a leaked dock group, because a group it expected to dissolve never did
+       * (2026-08-08).
+       *
+       * Smallest area is the right tie-break: the sections that overlap do so because one
+       * extends beneath the other, and the one actually drawn at that point is the smaller.
+       */
+      const overlapping = this.groupHosts
+        .map((host) => ({ host, box: host.body.getBoundingClientRect() }))
+        .filter((candidate) => inside(candidate.box))
+        .sort((left, right) =>
+          (left.box.width * left.box.height) - (right.box.width * right.box.height));
+
+      const hovered = overlapping[0];
+
       for (const host of this.groupHosts) {
         if (inside(host.strip.getBoundingClientRect())) {
           const index = this.tabIndexAt(host.strip, during.clientX, name);
@@ -594,8 +618,11 @@ export class PanelDocks {
           return;
         }
 
-        const box = host.body.getBoundingClientRect();
-        if (inside(box)) {
+        // Only the group the pointer is actually over, which is the smallest body containing
+        // it rather than the first one that happens to.
+        if (hovered && hovered.host === host) {
+          const box = hovered.box;
+
           // Only what the group can honour: over the pane's OWN group, centre is where it
           // already is, and a split is impossible when it is the only tab there — a zone
           // that does nothing is a promise the drop cannot keep.

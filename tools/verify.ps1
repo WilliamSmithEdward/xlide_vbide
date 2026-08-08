@@ -1,15 +1,15 @@
-<#
+﻿<#
 .SYNOPSIS
     Everything that must hold before a commit, in one command.
 
 .DESCRIPTION
-    The gate was being assembled by hand each time — page typecheck here, page build there,
-    dotnet build, dotnet test, a Release publish, a string check for the debug door — and a
+    The gate was being assembled by hand each time â€” page typecheck here, page build there,
+    dotnet build, dotnet test, a Release publish, a string check for the debug door â€” and a
     hand-assembled gate is one someone eventually runs four fifths of. This runs the lot and
     says PASS or FAIL once, naming what failed.
 
     It does NOT need an editor: everything here is buildable and checkable on any machine.
-    The live probes are a separate act, because they need a host — `-Live` runs them too,
+    The live probes are a separate act, because they need a host â€” `-Live` runs them too,
     which requires an editor already open (tools\dev.ps1 -KeepOpen).
 
 .EXAMPLE
@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pageRoot = Join-Path $repoRoot 'ui\editor'
 
-# The SDK and the native linker are not necessarily on the machine PATH — the same reason
+# The SDK and the native linker are not necessarily on the machine PATH â€” the same reason
 # dev.ps1 does this. A verify that cannot find the compiler is not a verdict about the code.
 $localDotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet'
 if (Test-Path (Join-Path $localDotnet 'dotnet.exe')) {
@@ -232,7 +232,7 @@ Step 'debug api is documented' {
 }
 
 # Named, not left to whichever directory the gate was started from. Both of these used to be
-# bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory — so
+# bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory â€” so
 # the gate passed from the repo root and failed with MSB1003 from anywhere else (2026-08-07). A
 # check whose answer depends on where you are standing is not a check.
 $solution = Join-Path $repoRoot 'xlide_vbide.slnx'
@@ -289,13 +289,33 @@ if (-not $Quick) {
 }
 
 if ($Live) {
-    Step 'live probes' {
+    <#
+        EACH SUITE GETS THE FIXTURE IT WAS WRITTEN FOR.
+
+        The live half used to run every probe and suite against whatever workbook happened to be
+        open, and they do not want the same one: the api probe and the Immediate suite need the
+        debug fixture's Runner, and the format and three-copies suites need the rename fixture's
+        HelpersExtra. Whichever was open, the others failed - so the live gate could not pass, and
+        a gate that cannot pass is a gate that gets skipped rather than read (2026-08-08).
+
+        Opening a fixture costs an Excel restart, which is why this is grouped rather than done
+        per suite: two launches, not six.
+    #>
+    function Use-Fixture([string] $fixture) {
+        & (Join-Path $repoRoot 'tools\harness\Start-Excel.ps1') `
+            -Workbook (Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture)) -Fresh | Out-Host
+
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
+        if (-not $excel) { throw "Excel did not start on $fixture" }
+        return $excel
+    }
+
+    Step 'live probes' {
+        $excel = Use-Fixture 'DebugFixture.xlsm'
 
         # A session that has only just launched is still seeding: the engine is starting, the
         # first analysis pass has not run, and the ghost readers may not be attached. Probes
-        # that assert a healthy session then fail on the truth that it is not healthy YET —
+        # that assert a healthy session then fail on the truth that it is not healthy YET â€”
         # which is a real answer to the wrong question (2026-08-06, on a release gate).
         $discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
         if (Test-Path $discovery) {
@@ -341,9 +361,6 @@ if ($Live) {
     #
     # They report "N passed, M failed" rather than a RESULT line, so they are read that way.
     Step 'language and editor suites' {
-        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
-
         $ran = @()
         # analysis-freshness runs against whatever workbook is open: it brings its own two
         # modules, uniquely named per run, and takes them away again. It guards a SILENT failure -
@@ -355,7 +372,15 @@ if ($Live) {
         # run's answers, and a helper that dropped the field its own timing bound was built from.
         # Nine checks, four runs clean on the rename fixture and three on the one holding a module
         # at VBA's line ceiling (2026-08-08).
-        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs', 'analysis-freshness.mjs') {
+        # Grouped by the fixture each needs, so the gate opens two rather than failing five.
+        $plan = [ordered] @{
+            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs')
+            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs')
+        }
+
+        foreach ($fixture in $plan.Keys) {
+          Use-Fixture $fixture | Out-Null
+          foreach ($suite in $plan[$fixture]) {
             $answer = node (Join-Path $repoRoot "tools\harness\$suite") 2>&1
             $answer | Out-Host
 
@@ -370,6 +395,7 @@ if ($Live) {
             }
 
             $ran += "$suite $("$verdict".Trim())"
+          }
         }
 
         $ran -join '; '
@@ -384,8 +410,9 @@ if ($Live) {
     #
     # Every read route, many rounds, live count before and after. See lessons.md entry 36.
     Step 'no leaks' {
+        # Whatever the suites left open is fine: the sweep brings its own state and puts it back.
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-        if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
+        if (-not $excel) { $excel = Use-Fixture 'DebugFixture.xlsm' }
 
         $answer = node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1
         $answer | Out-Host

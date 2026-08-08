@@ -1487,3 +1487,37 @@ the run rather than read it.
 
 Nine checks, four clean runs on the rename fixture and three on the one holding a module at VBA's
 line ceiling. Back in the gate.
+
+## 56. Two boxes contained the point, and the first one answered
+
+The churn probe reported a leaked dock group: twelve dock-and-undock cycles left four groups where
+there had been three. It was not a leak. The pane went out to the right once and could never come
+back, so the group it made was never dissolved, and the probe counted the symptom.
+
+The return drop reported `no-petal`: no compass appeared at all over the bottom section. It
+appeared over the left section and over the editor, so the drag itself was fine.
+
+A section's body can extend UNDER its neighbour. With a pane docked right, the right body measured
+364..704 by 80..1239 and the bottom body 265..520 by 1064..1239 - overlapping in the bottom-right
+corner, where the point was inside BOTH. The hit test was a linear scan of boxes:
+
+```ts
+for (const host of this.groupHosts) {
+    if (inside(host.body.getBoundingClientRect())) { ... return; }
+}
+```
+
+Arithmetic on rectangles, with no notion of stacking or clipping, answering with whichever came
+first in render order. The right group won, the dragged pane was already in it and was its only
+tab, so the allowed zones came out empty - centre is where it already is, a lone tab cannot split
+- and NO PETAL WAS DRAWN. A drop that offers nothing looks exactly like a drop that failed.
+
+Smallest body under the pointer wins now. The overlap exists because one section extends beneath
+another, so the smaller is the one actually drawn there.
+
+**The interesting part is how it was found.** The check that caught it had been in the gate for
+weeks and could not run: the live half opened one fixture and ran probes needing three, so the
+whole step failed on the first one every time and the rest were never reached. Fixing the gate's
+fixtures surfaced a real defect the same afternoon.
+
+**A check that cannot run is worse than no check, because the slot looks filled.**
