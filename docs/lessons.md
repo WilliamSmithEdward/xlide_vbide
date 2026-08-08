@@ -1068,3 +1068,38 @@ two was a fair description of "the code was fixed" and neither reached the condi
 which is a project with NOTHING left to report. When a check will not fail on a build you have
 broken on purpose, the useful question is not "is the fix wrong" but "what is different between
 what I set up and what actually happened".
+
+## 43. Reveal is not a click, and the action that reported success moved nothing
+
+Found in a minute of driving the api by hand, after a manual sweep printed something odd: seven
+tabs open, and the surface holding text for exactly one of them.
+
+`act("activate", {module})` answered `did: true, "revealed Consumer"` while the page, the surface
+and the native pane all stayed on the module that was already showing. It did that for every
+module, with the project argument, without it, and with the display name instead of the id. It had
+never worked, and it had always said it had.
+
+Two separate mistakes, and the second is the one that hid the first.
+
+**The wrong method.** It called `workspace.reveal`, which shows a document THE PAGE ALREADY HOLDS
+and tells the host nothing. The page holds a document for a module once it has been activated, not
+merely because its pane is open, so against any tab whose text had never been fetched reveal found
+nothing to show and returned silently. A tab CLICK goes through `selectTab`, which shows it
+page-locally and asks the host to activate the native pane behind it. That is the state a click
+leaves, so it is the state the api action has to leave: the prime heuristic, in one line.
+
+**Reporting the request.** `return { did: true }` was unconditional. This repo has fixed exactly
+this before, in `closeActive`, whose comment says it reports the OUTCOME because closing a dirty
+module raises a box and the tab stays. The lesson did not travel to its neighbour in the same file.
+
+There is a third turn worth keeping. With the right method wired in, the action still reported
+`did: false` on the FIRST visit to each module and `did: true` on the second, because a document
+the page has never held arrives from the host asynchronously: the check was reading the model that
+was there before. The fix is the shape `closeActive` and `format` already use, which is to wait
+for the outcome before reporting it. **"Report the outcome" and "report it synchronously" are
+different claims, and the first does not imply the second.**
+
+Worth noting how it was found. Nothing was broken on screen, no crash, no failing suite: four
+suites passed against this defect for as long as it existed, because they reached the state they
+needed through `pane("open")` rather than through the tab strip. What surfaced it was printing
+several unrelated readings side by side and noticing that two of them could not both be true.

@@ -588,6 +588,20 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return { did: true, detail: `answered ${wanted}` };
     },
 
+    /**
+     * Shows a module, THROUGH THE PATH A TAB CLICK TAKES, and reports whether it landed.
+     *
+     * This used to call `workspace.reveal` and answer `did: true` regardless. Reveal shows a
+     * document the page already holds and tells the host nothing, and the page holds a document
+     * only for modules that have been activated, not for every tab in the strip. So against any
+     * of the other open tabs it moved nothing and said it had: seven tabs open, one document
+     * held, and `activate` cheerfully reporting "revealed Consumer" while the page, the surface
+     * and the native pane all stayed on Helpers (2026-08-07).
+     *
+     * A tab click goes through `selectTab`, which shows it page-locally AND asks the host to
+     * activate the native pane behind it. That is the state a developer's click leaves, so it is
+     * the state this must leave too.
+     */
     activate: (args) => {
       const module = String(args.module ?? "");
       const project = args.project === undefined || args.project === null
@@ -596,8 +610,35 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       if (!module) {
         return { did: false, detail: "no module given" };
       }
-      workspace.reveal({ module, project });
-      return { did: true, detail: `revealed ${module}` };
+
+      workspace.pickTab({ module, project });
+
+      /*
+       * AWAITED, because the outcome is not synchronous the first time.
+       *
+       * A module whose text the page has never held is shown only once the host answers with the
+       * document, so a check taken immediately reads the module that was there before. Measured:
+       * the first visit to each of three modules reported did=false while all three had in fact
+       * arrived a moment later, and the second visit reported did=true because by then the page
+       * already held it (2026-08-07).
+       *
+       * The same shape `closeActive` and `format` use: report what actually happened, having
+       * waited for it to happen.
+       */
+      const showing = () => workspace.activeEditor().getModel()?.uri.path.split("/").pop() ?? null;
+      const wanted = module.toLowerCase();
+
+      return (async () => {
+        const deadline = Date.now() + 4000;
+        while (Date.now() < deadline) {
+          if ((showing() ?? "").toLowerCase() === wanted) {
+            return { did: true, detail: `showing ${module}` };
+          }
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+
+        return { did: false, detail: `asked for ${module}; the page is showing ${showing() ?? "nothing"}` };
+      })();
     },
 
     cycleTab: (args) => {

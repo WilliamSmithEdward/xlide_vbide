@@ -739,6 +739,19 @@ export class Workspace {
    * the host is asked to activate the native pane behind it. The host's echo confirms, and a
    * refusal reconciles back on the next publish.
    */
+  /**
+   * Picks a tab exactly as clicking it does, for anything driving the surface from outside.
+   *
+   * `reveal` is NOT this. Reveal shows a document the page already holds and tells the host
+   * nothing, so against a tab whose text has never been fetched it silently does nothing at all:
+   * the strip lists every open pane, but the page holds a document only for modules that have
+   * been activated. Driving the surface through reveal therefore reported success and moved
+   * nothing, which is how it was found (2026-08-07).
+   */
+  pickTab(id: DocumentId): void {
+    this.selectTab(id);
+  }
+
   private selectTab(id: DocumentId, group?: EditorGroup): void {
     const owner = group ?? this.groups.find((candidate) => candidate.holds(id));
     if (!owner) {
