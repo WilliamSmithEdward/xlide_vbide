@@ -148,6 +148,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
+| `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched |
 | `breakpoints` | `breakpoints()` / `breakpointsIn(project)` | what is set, per module AND workbook, and the mode |

@@ -44,6 +44,36 @@ When a probe cannot distinguish the builds, one of three things is true, and it 
 which: the fix is unnecessary, the probe misses the trigger, or something else repairs the state
 before the probe looks. Waiting twenty seconds for a condition hides all three.
 
+It happened twice more on 2026-08-07, on the same defect, in one afternoon. A route was added to
+force a collection and drain the finalizers, on the theory that it would make a random crash
+deterministic: run against the broken build with 8,734 leaked wrappers pending, it reported
+completely clean. A counter was added beside it, incrementing next to the disposal rather than by
+it: run against a build with the disposal deliberately deleted, it read perfectly balanced. Both
+were believed for a while, because both passed. **An instrument is not proven by passing on a good
+build.** The third attempt reported 441 leaked wrappers per call on the broken build and zero on
+the fixed one, which is the only reason it is in the gate.
+
+## No leaks, and it is a gate step
+
+**All development guarantees no memory leaks** (the developer, 2026-08-07). This is
+release-blocking, not an aspiration, because a leaked COM wrapper in this product does not waste
+memory: it kills the host. The editor's objects are apartment-threaded, and one released by the
+finalizer thread is an access violation the runtime cannot throw, so it FailFasts Excel. One
+missing `Dispose` leaked 441 wrappers per `project()` call and killed Excel four times in a day,
+reported as three different faults against three different libraries with nothing connecting them.
+[lessons.md](lessons.md) entry 36 has the whole of it.
+
+```bash
+node tools\harness\com-leak.mjs        # every read route, many rounds, live count before and after
+```
+
+The gate runs it as the `no leaks` step. `ComRuntime.TakeWrapper` and `GiveBackWrapper` are the
+only two doors for wrapping an automation object and each does its own counting, so a caller
+cannot dispose without counting or count without disposing. New COM code goes through them.
+
+Anything that changes COM, native handles, subscriptions, timers or caches ships with its own leak
+check, and that check is shown failing on a deliberately broken build before it is trusted.
+
 ## Traps met in this codebase
 
 **PowerShell unwraps a single-element array on return from a function.** A helper ending in

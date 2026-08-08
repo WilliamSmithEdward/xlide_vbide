@@ -23,7 +23,23 @@ import { open } from "./xlide-api.mjs";
 
 const api = await open({});
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const project = await api.project();
+
+// THE WORKBOOK HOLDING `Uses`, not whichever one happens to be active.
+//
+// This asked `project()`, which answers about ONE workbook: the one named, or the active one.
+// With a second workbook open it got that one, looked for this fixture's modules inside it, and
+// failed on "timed out waiting for Uses to be the shown module" -- which reads as the surface
+// being broken rather than the suite asking the wrong workbook (2026-08-07). Two workbooks open
+// at once is a designed case here, so a suite that cannot name the one it means is a suite that
+// only runs when nothing else is loaded.
+const project = await api.projectHolding("Uses")
+  .then((row) => (row === null ? null : api.project(row.project)));
+
+if (project === null) {
+  throw new Error(
+    "no open workbook holds a module named Uses; open LanguageFixture.xlsm "
+    + "(tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\LanguageFixture.xlsm)");
+}
 
 const broken = [];
 let checks = 0;

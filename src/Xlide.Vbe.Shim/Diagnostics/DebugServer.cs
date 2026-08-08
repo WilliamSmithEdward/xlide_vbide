@@ -767,6 +767,26 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("components")] DebugComponentRow[] Components);
 
 /// <summary>
+/// One open workbook, named the way the tree and the tab strip name it.
+///
+/// The plural of `project`, which answers about one. With two workbooks open there was no way to
+/// discover the other's name from the host at all: a probe either knew it in advance or read the
+/// page's tree, which is the surface's view rather than the object model's. Two workbooks holding
+/// a module of the same name is a designed case here, and three separate defects have lived in
+/// it, so a suite that cannot name the workbook it means cannot test any of them.
+/// </summary>
+public sealed record DebugProjectRow(
+    [property: JsonPropertyName("project")] string Project,
+    [property: JsonPropertyName("projectId")] string ProjectId,
+    /// <summary>Components, with this product's own scratch module left out of the count.</summary>
+    [property: JsonPropertyName("components")] int Components,
+    /// <summary>Whether the surface is showing a module of this workbook.</summary>
+    [property: JsonPropertyName("shown")] bool Shown);
+
+public sealed record DebugProjectsReply(
+    [property: JsonPropertyName("projects")] DebugProjectRow[] Projects);
+
+/// <summary>
 /// The ENGINE's copy of a module against the surface's.
 ///
 /// Every finding is computed against the engine's copy, and it is maintained incrementally by
@@ -1111,6 +1131,8 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugGuardReply))]
 [JsonSerializable(typeof(DebugComponentReply))]
+[JsonSerializable(typeof(DebugProjectsReply))]
+[JsonSerializable(typeof(DebugProjectRow))]
 [JsonSerializable(typeof(DebugProjectReply))]
 [JsonSerializable(typeof(DebugSettingsReply))]
 [JsonSerializable(typeof(DebugEngineSourceReply))]

@@ -348,6 +348,35 @@ function clientFor(entry) {
     project: (project) => call(`project${query({ project })}`),
 
     /**
+     * EVERY open workbook: its name, its id, how many components it holds, and whether the
+     * surface is showing one of them.
+     *
+     * `project()` answers about ONE, the one named or the active one, so with two workbooks open
+     * there was no way to discover the other's name from the host at all. A probe either knew it
+     * in advance or read the page's tree, which is the surface's view rather than the object
+     * model's. The language suite failed exactly there: it asked `project()`, got whichever
+     * workbook happened to be active, and looked for its own fixture's module in the other one.
+     *
+     *   const mine = (await api.projects()).projects
+     *     .find((one) => one.project.toLowerCase().startsWith("language"));
+     */
+    projects: () => call("projects"),
+
+    /** The open workbook holding a module, by name. Null when no open workbook has one. */
+    async projectHolding(moduleName) {
+      const wanted = moduleName.toLowerCase();
+
+      for (const row of (await this.projects()).projects ?? []) {
+        const inside = await this.project(row.project).catch(() => null);
+        if ((inside?.components ?? []).some((one) => (one.name ?? "").toLowerCase() === wanted)) {
+          return row;
+        }
+      }
+
+      return null;
+    },
+
+    /**
      * A module's procedures, from the analyzer.
      *
      * For asserting on SHAPE without reading the text back and parsing it a second time, in a

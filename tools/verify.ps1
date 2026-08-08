@@ -282,6 +282,31 @@ if ($Live) {
         }
         'debug api, split workspace, churn'
     }
+
+    # NO LEAKS, AS A RELEASE-BLOCKING PROPERTY rather than a quality aspiration (the developer,
+    # 2026-08-07). A leaked COM wrapper in this product does not waste memory, it kills the host:
+    # the editor's objects are apartment-threaded, and one released by the finalizer thread is an
+    # access violation the runtime cannot throw, so it FailFasts Excel. One missing Dispose leaked
+    # 441 wrappers per project() call and killed Excel four times in a day, reported as three
+    # different faults against three different libraries with nothing connecting them.
+    #
+    # Every read route, many rounds, live count before and after. See lessons.md entry 36.
+    Step 'no leaks' {
+        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
+
+        $answer = node (Join-Path $repoRoot 'tools\harness\com-leak.mjs') 2>&1
+        $answer | Out-Host
+
+        $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
+        if (-not $verdict) { throw 'the leak sweep reported no verdict' }
+        if ("$verdict" -notmatch ', 0 failed') {
+            $leaking = @($answer | Select-String '^FAIL' | ForEach-Object { $_.Line.Trim() })
+            throw ('wrappers are being leaked: ' + ($leaking -join '; '))
+        }
+
+        "$verdict".Trim()
+    }
 }
 
 Write-Host ''

@@ -2803,6 +2803,79 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 
+            /*
+             * EVERY open workbook, which nothing could ask for.
+             *
+             * `project` answers about ONE: the one named, or the active one. With two workbooks
+             * open there was no way to discover the other's name from the host at all, so a probe
+             * either knew it in advance or asked the page's tree, which is the surface's view
+             * rather than the object model's. The language suite failed exactly there: it asked
+             * `project()`, got whichever workbook happened to be active, and looked for its own
+             * fixture's module inside the other one.
+             *
+             * That matters more here than in most products. Two workbooks holding a module of the
+             * same name is a designed case, and three separate defects have lived in it. A suite
+             * that cannot name the workbook it means cannot test any of them.
+             *
+             * The plural of a noun, beside its singular, the way `breakpoints` sits beside
+             * `breakpoint`. Cheap on purpose: names and counts, not contents. Ask `project` for
+             * what is inside one.
+             */
+            case "projects":
+            {
+                var found = new List<DebugProjectRow>();
+
+                using (var projects = _editor.GetObject("VBProjects"))
+                {
+                    var count = projects?.GetInt32("Count") ?? 0;
+                    for (var i = 1; i <= count; i++)
+                    {
+                        try
+                        {
+                            using var project = projects!.GetItem(i);
+                            if (project is null)
+                            {
+                                continue;
+                            }
+
+                            var identity = ProjectReader.Identity(project);
+                            var display = WorkbookDisplayName(project);
+
+                            // Components counted rather than listed, and the scratch module left
+                            // out of the count for the same reason it is left out everywhere else:
+                            // it is ours, and a fixture that counts it counts wrong.
+                            var components = 0;
+                            using (var list = project.GetObject("VBComponents"))
+                            {
+                                var total = list?.GetInt32("Count") ?? 0;
+                                for (var c = 1; c <= total; c++)
+                                {
+                                    using var component = list!.GetItem(c);
+                                    if (component?.GetString("Name") is { Length: > 0 } name
+                                        && !IsScratchComponent(name))
+                                    {
+                                        components++;
+                                    }
+                                }
+                            }
+
+                            found.Add(new DebugProjectRow(
+                                display ?? identity.Id,
+                                identity.Id,
+                                components,
+                                string.Equals(DisplayFromProjectId(_shownProject), display, StringComparison.OrdinalIgnoreCase)));
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Info($"projects: entry {i} could not be read ({ex.GetType().Name})");
+                        }
+                    }
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugProjectsReply([.. found]), DebugJsonContext.Default.DebugProjectsReply);
+            }
+
             case "project":
             {
                 // What is actually THERE, as opposed to what the surface is showing.

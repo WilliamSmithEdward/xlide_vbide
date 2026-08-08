@@ -29,6 +29,27 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rounds = Math.max(4, Number(process.argv[2] ?? 12) || 12);
 const project = await api.project();
 
+/*
+ * A module that is actually in the ACTIVE workbook, rather than one this file was written beside.
+ *
+ * It named `Helpers` outright, which exists in the rename fixture and not in the language one, so
+ * opening a second workbook made the sweep die on "no module named Helpers" -- the same mistake
+ * the language suite made on the same afternoon, from the same cause: assuming the workbook.
+ * A leak sweep should run against whatever is loaded, since a leak is not a property of a fixture.
+ */
+const sample = (project.components ?? [])
+  .filter((one) => (one.kind ?? one.type) !== "document")
+  .map((one) => one.name)
+  .find(Boolean)
+  ?? (project.components ?? [])[0]?.name;
+
+if (!sample) {
+  throw new Error(`the active workbook ${project.project} has no components to read`);
+}
+
+console.log(`sweeping against ${project.project}, sampling module ${sample}
+`);
+
 let passed = 0;
 const failures = [];
 
@@ -88,7 +109,7 @@ await repeat("reading the native panes", 0, async () => {
 
 // A module's text through the session's own reader.
 await repeat("reading a module", 0, async () => {
-  await api.readModule("Helpers", project.projectId);
+  await api.readModule(sample, project.projectId);
 });
 
 // The windows collection, which is a COM collection walked by index.
@@ -98,7 +119,7 @@ await repeat("walking the editor's windows", 0, async () => {
 
 // Moving the caret in the native pane, which resolves a pane and its code module each time.
 await repeat("moving the caret", 0, async (round) => {
-  await api.caret(1 + (round % 3), { module: "Helpers", project: project.projectId, column: 1 });
+  await api.caret(1 + (round % 3), { module: sample, project: project.projectId, column: 1 });
 });
 
 // Breakpoint state, which reaches into the debugger's own objects.
@@ -133,7 +154,7 @@ const READ_ROUTES = [
   ["ui", () => api.ui()],
   ["layout", () => api.layout()],
   ["problems", () => api.problems()],
-  ["outline", () => api.outline("Helpers")],
+  ["outline", () => api.outline(sample)],
   ["locals", () => api.locals()],
   ["watches", () => api.watches()],
   ["immediate", () => api.immediate()],
@@ -144,7 +165,7 @@ const READ_ROUTES = [
   ["console", () => api.console(5)],
   ["perf", () => api.perf()],
   ["placement", () => api.placement()],
-  ["engine", () => api.engineSource("Helpers")],
+  ["engine", () => api.engineSource(sample)],
   ["breakpoints", () => api.breakpoints()],
   ["windows", () => api.windows()],
   ["inspect", () => api.inspect(".xlide-tab")],
