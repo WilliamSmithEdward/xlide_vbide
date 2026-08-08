@@ -388,6 +388,34 @@ export class Dispatcher {
         this.generations.set(params.projectId, params.generation);
         this.seededModules.set(params.projectId, params.modules.map((module) => ({ ...module })));
 
+        /*
+         * A MODULE THAT IS GONE TAKES ITS ANALYSIS WITH IT.
+         *
+         * Everything memoised per module is keyed by project and NAME. `project/close` prunes all
+         * of it, but a component being removed from a project that stays open pruned nothing, so
+         * the entries outlived the module. Add a module with a name that has been used before and
+         * it inherits the dead one's findings: the memo compares source, facts and shape, and a
+         * fresh module whose text matches what the old one last held matches all three.
+         *
+         * That is not only a test artifact. Delete a module, add another with the same name, and
+         * the Problems pane shows the deleted module's errors against the new one's code.
+         *
+         * It is also what made the end-to-end freshness suite fail about two runs in five: it
+         * brings its own two modules, always with the same names, and removes them at the end. A
+         * run inherited the previous run's answers and reported findings on a module that had
+         * been created three lines earlier (2026-08-08).
+         */
+        const present = new Set(params.modules.map((module) => module.moduleName.toLowerCase()));
+        const prefix = `${params.projectId}\0`;
+        for (const key of [...this.lastAnalysis.keys()]) {
+            if (key.startsWith(prefix) && !present.has(key.slice(prefix.length))) {
+                this.lastAnalysis.delete(key);
+                this.semanticMemo.delete(key);
+                this.outlineMemo.delete(key);
+                this.liveSources.delete(key);
+            }
+        }
+
         // The project's own words, for the surface's tokenizer: names that are types and names
         // that are procedures. This is what lets `ROneCOne.Create(...)` read as a type and a
         // call while `values(index, 1)` stays a variable — the distinction the extension makes

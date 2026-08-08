@@ -28,23 +28,29 @@
  *
  *   node tools\harness\analysis-freshness.mjs
  *
- * NOT A GATE STEP YET, and the reason matters more than the check does.
+ * IT WAS FLAKY, AND EVERY CAUSE WAS IN THIS FILE OR NEXT TO IT.
  *
- * On ordinary fixtures it passes every time. On the perf fixture, which holds a module at VBA's
- * 65,534-line ceiling, step 3 has failed roughly two runs in five: the caller is never flagged,
- * for two minutes, across some twenty passes. Three separate sampling errors in THIS FILE were
- * found and fixed while chasing it - a fixed sleep shorter than a pass, a wait for "any finding"
- * that caught a transient `undeclared-variable`, and a "byte-identical" write of this file's own
- * constant rather than of what the editor had stored - and the failure outlived all three.
+ * It failed about two runs in five, and stayed flaky through three separate fixes because each
+ * one found a real defect that was not the last one. In order:
  *
- * So one of two things is true and it is not yet known which: the check is still sampling
- * something it should not, or a pass that skips a project can make a stale read PERMANENT, since
- * a skipped pass does not update what it holds and nothing re-triggers it. The second would be a
- * defect in the product, introduced by the skip, and it is the reason this is written down rather
- * than left as a flaky test somebody re-runs.
+ *   a fixed sleep shorter than a pass, calibrated on a fixture where a pass takes under a second;
+ *   a wait for "any finding", which caught the pass mid-flight reporting `undeclared-variable`
+ *     against a project that did not hold the callee yet;
+ *   a "byte-identical" write of this file's own constant rather than of what the editor stored,
+ *     which is a write of DIFFERENT text and provokes the pass the step asserts does not happen;
+ *   FIXED MODULE NAMES, reused every run, so a run inherited the previous run's answers under the
+ *     same names and reported findings on a module created three lines earlier;
+ *   `engineCalls` dropping `worstMs`, so the timing bound was built from `undefined` and read
+ *     zero, collapsing to a figure no real measurement can meet.
  *
- * Run it by hand against the fixture you care about. Do not put it back in the gate until the
- * intermittent is attributed.
+ * The last two were the ones that mattered. The names also found a genuine product defect: the
+ * engine keyed a module's analysis by name and never forgot it when the module left the project,
+ * so deleting a module and adding another with the same name showed the dead one's errors. That
+ * is fixed in the dispatcher; the names here are unique anyway, because a suite should not depend
+ * on the thing it is testing being right.
+ *
+ * Deadlines are 25 seconds, not two minutes. A check that is going to fail should say so in
+ * seconds: the old budget meant the suite was slowest exactly when it was failing.
  */
 
 import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
@@ -52,8 +58,15 @@ import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-ap
 const api = await open({});
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const CALLEE = "XlideFreshCallee";
-const CALLER = "XlideFreshCaller";
+// UNIQUE PER RUN. These used to be fixed names, and the suite removes its modules at the end,
+// so a run inherited whatever the previous run's modules had left behind under the same names.
+// It reported findings on a module created three lines earlier, about two runs in five. The
+// engine forgets a module's analysis when it leaves the project now, but the suite should not
+// depend on that being right to test something else.
+const RUN = String(process.pid).slice(-5);
+const CALLEE = `XlideCallee${RUN}`;
+const CALLER = `XlideCaller${RUN}`;
+const CALLED = `XlideAdd${RUN}`;
 
 // The caller's text, written once and never touched again. Every finding that appears or clears
 // below does so because the OTHER module moved, which is the only thing this suite is about.
@@ -62,7 +75,7 @@ const CALLER_SOURCE = [
   "",
   "Public Sub CallsAcross()",
   "    Dim r As Long",
-  "    r = XlideFreshAdd(1)",
+  `    r = ${CALLED}(1)`,
   "End Sub",
   "",
 ].join("\r\n");
@@ -70,8 +83,8 @@ const CALLER_SOURCE = [
 const oneArgument = [
   "Option Explicit",
   "",
-  "Public Function XlideFreshAdd(ByVal seed As Long) As Long",
-  "    XlideFreshAdd = seed",
+  `Public Function ${CALLED}(ByVal seed As Long) As Long`,
+  `    ${CALLED} = seed`,
   "End Function",
   "",
 ].join("\r\n");
@@ -79,8 +92,8 @@ const oneArgument = [
 const twoArguments = [
   "Option Explicit",
   "",
-  "Public Function XlideFreshAdd(ByVal seed As Long, ByVal extra As Long) As Long",
-  "    XlideFreshAdd = seed + extra",
+  `Public Function ${CALLED}(ByVal seed As Long, ByVal extra As Long) As Long`,
+  `    ${CALLED} = seed + extra`,
   "End Function",
   "",
 ].join("\r\n");
@@ -117,7 +130,7 @@ async function findingsFor(moduleName) {
  */
 
 /** Waits until the engine stops being asked things, so a measurement starts from quiet. */
-async function settle({ quietFor = 2500, budgetMs = 120_000 } = {}) {
+async function settle({ quietFor = 2000, budgetMs = 25_000 } = {}) {
   let lastSeen = -1;
   let quietSince = 0;
 
@@ -138,7 +151,7 @@ async function settle({ quietFor = 2500, budgetMs = 120_000 } = {}) {
 }
 
 /** Waits for a module's findings to satisfy a predicate, and answers what it last saw. */
-async function awaitFindings(moduleName, predicate, budgetMs = 120_000) {
+async function awaitFindings(moduleName, predicate, budgetMs = 25_000) {
   let last = [];
   for (let waited = 0; waited < budgetMs; waited += 1500) {
     last = await findingsFor(moduleName);
@@ -152,7 +165,7 @@ async function awaitFindings(moduleName, predicate, budgetMs = 120_000) {
 async function engineCalls() {
   const byMethod = {};
   for (const row of await api.engineCosts()) {
-    byMethod[row.method] = { calls: row.calls, totalMs: row.totalMs };
+    byMethod[row.method] = { calls: row.calls, totalMs: row.totalMs, worstMs: row.worstMs };
   }
   return byMethod;
 }
@@ -242,7 +255,7 @@ if (!project?.projectId) {
         "the caller is re-analysed and reports the call",
         broken.some((finding) => finding.code === "argument-count"),
         broken.length === 0
-          ? "no finding after two minutes: the stale answer was served"
+          ? "no finding within 25 seconds: the stale answer was served"
           : JSON.stringify(broken.map((finding) => finding.code)));
 
       console.log("\n4. and back; the caller is still NOT touched\n");
@@ -267,6 +280,13 @@ if (!project?.projectId) {
       const writing = api.writeModule(CALLER, `${CALLER_SOURCE}\r\n' provokes a pass\r\n`, project.projectId);
       const duringPass = await api.timeFeature("completions", { line: 8, column: 13 }, { n: 10 });
       await writing;
+
+      // SETTLED FIRST. The bound is built from the longest analyzer call in the pass this write
+      // provoked, and reading the costs the moment `timeFeature` returns reads them before the
+      // pass has made them: `longestCall` came back 0 and the bound collapsed to the idle figure
+      // plus a constant, which no real measurement can meet. The check was failing on its own
+      // arithmetic rather than on the product.
+      await settle();
       const spent = await engineCalls();
       const longestCall = Math.max(0, ...Object.values(spent).map((row) => row.worstMs ?? 0));
 

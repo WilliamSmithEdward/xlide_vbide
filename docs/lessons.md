@@ -1446,3 +1446,44 @@ The general shape, for the third time this week: a number was read as evidence f
 without checking that the mechanism had run. Lessons 50 was the same, and lessons 53's incremental
 probe was the same. **Before explaining a measurement, confirm the thing you are explaining it
 with actually happened.**
+
+## 55. The flaky suite was five defects, and the last two were the ones that mattered
+
+Lessons 50 left an unattributed intermittent: the end-to-end freshness check failed about two runs
+in five and neither the crash fix nor the fingerprint's Map blind spot explained it. It is
+attributed now, and every cause was in the suite or immediately next to it.
+
+Three had already been found and fixed, and the failure outlived all three: a fixed sleep shorter
+than a pass, a wait for "any finding" that caught a transient mid-pass, and a "byte-identical"
+write of the file's own constant rather than of what the editor had stored. The two that finished
+it:
+
+**Fixed module names, reused every run.** The suite brings its own caller and callee and removes
+them at the end. Same two names every time, so a run inherited the previous run's answers under
+those names and reported findings on a module created three lines earlier. The symptom was step 1
+failing with "the caller is clean (1 finding(s))" - a finding from the run before.
+
+**A helper that dropped the field its own assertion was built from.** `engineCalls()` returned
+`{calls, totalMs}`, and the timing bound read `row.worstMs`, which is `undefined`, which is 0. The
+bound collapsed to the idle figure plus a constant, which no real measurement can meet. It failed
+every run and looked like a product regression.
+
+### The product defect the names uncovered
+
+Worth the whole hunt. Everything memoised per module is keyed by project and NAME, and
+`project/close` prunes all of it - but a component REMOVED from a project that stays open pruned
+nothing. Delete a module, add another with the same name, and it inherits the dead one's analysis:
+the memo compares source, facts and shape, and a fresh module whose text matches what the old one
+last held matches all three. The Problems pane shows a deleted module's errors against new code.
+
+Fixed in the dispatcher: a seed drops every per-module entry for a name the project no longer has.
+
+### And the reason it was slow
+
+The deadlines were two minutes, so the suite was slowest exactly when it was failing. Twenty-five
+seconds now. **A check that is going to fail should say so in seconds** - a long deadline does not
+make a check more patient, it makes a failure look like a hang, and it trains the reader to kill
+the run rather than read it.
+
+Nine checks, four clean runs on the rename fixture and three on the one holding a module at VBA's
+line ceiling. Back in the gate.

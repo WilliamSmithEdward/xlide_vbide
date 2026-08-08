@@ -345,15 +345,17 @@ if ($Live) {
         if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
 
         $ran = @()
-        # analysis-freshness is NOT in this list, deliberately, and the reason is written down in
-        # its own header: on a project holding a module at VBA's line ceiling it has failed
-        # intermittently, roughly two runs in five, and the cause is NOT attributed. It passes
-        # every time on ordinary fixtures.
+        # analysis-freshness runs against whatever workbook is open: it brings its own two
+        # modules, uniquely named per run, and takes them away again. It guards a SILENT failure -
+        # a squiggle that should be drawn and is not, because a module's findings were reused
+        # after another module changed the signature it calls.
         #
-        # It stays out until that is understood. A gate step that fails for reasons nobody can
-        # name teaches the reader to re-run the gate rather than to read it, and a gate nobody
-        # believes is worse than one step short (2026-08-08).
-        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs') {
+        # It was out of this list while it was flaky. Every cause turned out to be in the suite or
+        # next to it, the last two being fixed module names that let one run inherit the previous
+        # run's answers, and a helper that dropped the field its own timing bound was built from.
+        # Nine checks, four runs clean on the rename fixture and three on the one holding a module
+        # at VBA's line ceiling (2026-08-08).
+        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs', 'analysis-freshness.mjs') {
             $answer = node (Join-Path $repoRoot "tools\harness\$suite") 2>&1
             $answer | Out-Host
 
