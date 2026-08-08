@@ -283,6 +283,40 @@ if ($Live) {
         'debug api, split workspace, churn'
     }
 
+    # THE NODE SUITES, which existed and passed and which nothing ran.
+    #
+    # A suite nobody runs is a suite that rots, and these three cover the defects that cost the
+    # most this week: where a squiggle lands after Format Module, whether the workbook, the surface
+    # and the analyzer are holding the same text after every operation that touches a module, and
+    # whether the Immediate window answers what a line came to. All three were written against
+    # bugs that had already shipped.
+    #
+    # They report "N passed, M failed" rather than a RESULT line, so they are read that way.
+    Step 'language and editor suites' {
+        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
+
+        $ran = @()
+        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs') {
+            $answer = node (Join-Path $repoRoot "tools\harness\$suite") 2>&1
+            $answer | Out-Host
+
+            $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
+            if (-not $verdict) { throw "$suite reported no verdict" }
+            if ("$verdict" -notmatch ', 0 failed') {
+                # The failing checks by name, for the same reason the probes above name theirs:
+                # at the end of a run the one line that matters has usually scrolled away.
+                $broken = @($answer | Select-String '^\s*FAIL' | ForEach-Object { $_.Line.Trim() })
+                $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
+                throw "$suite did not pass$named"
+            }
+
+            $ran += "$suite $("$verdict".Trim())"
+        }
+
+        $ran -join '; '
+    }
+
     # NO LEAKS, AS A RELEASE-BLOCKING PROPERTY rather than a quality aspiration (the developer,
     # 2026-08-07). A leaked COM wrapper in this product does not waste memory, it kills the host:
     # the editor's objects are apartment-threaded, and one released by the finalizer thread is an

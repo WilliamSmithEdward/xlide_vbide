@@ -323,6 +323,22 @@ const perOperation = handlesGrew / Math.max(1, totalRounds);
 console.log(`handles across ${totalRounds} operations: ${handlesGrew >= 0 ? "+" : ""}${handlesGrew}`
   + ` (${perOperation.toFixed(3)} per operation)`);
 
+/*
+ * PROVEN BOTH WAYS, on 2026-08-07, because a check that has only ever passed is not a check.
+ *
+ *   clean build:   -4, -26 and +1 across three runs
+ *   leaking build: +538 over 190 operations, 2.832 each, and it failed
+ *
+ * The sabotage was a kernel handle taken per request and never given back, which is the shape of
+ * a real leak: something the process owns and does not return.
+ *
+ * AND THE FIRST ATTEMPT AT SABOTAGE IS THE MORE USEFUL RESULT. It leaked on ONE route, and the
+ * suite passed: eight handles across 190 operations is 0.04 each, far under this threshold. So
+ * the honest limit of this check is that it catches a leak on a path the sweep exercises OFTEN,
+ * and is blind to one confined to a rarely-called route. That is a fair trade for an assertion
+ * that never fires on Excel's own churn, but it should be known rather than discovered later by
+ * somebody trusting it further than it goes.
+ */
 check(`the sweep gives back the handles it takes, over all ${totalRounds} operations`,
   perOperation < 0.5,
   `handles grew by ${handlesGrew} across ${totalRounds} operations, ${perOperation.toFixed(3)} `

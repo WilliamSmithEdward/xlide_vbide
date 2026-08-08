@@ -28,9 +28,40 @@ import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-ap
 
 const api = await open({});
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const project = await api.project();
+/*
+ * THE WORKBOOK HOLDING THE TARGET, not whichever one happens to be active.
+ *
+ * This named its module outright and read `project()`, which answers about the ACTIVE workbook.
+ * Run against a session holding a different fixture it died on "no module named HelpersExtra",
+ * which reads as a broken product rather than a suite asking the wrong workbook. The third suite
+ * to make this exact mistake in one afternoon (2026-08-07), which is why the client grew
+ * `projectHolding`.
+ */
 const target = "HelpersExtra";
-const original = (await api.readModule(target, project.projectId)).text ?? "";
+const home = await api.projectHolding(target);
+
+/*
+ * NEVER `process.exit` FROM A SUITE, and this is the one place it was tempting.
+ *
+ * Forcing the process down while the client still has connections open aborts node itself:
+ * "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING), src\win\async.c" on Windows, which
+ * replaces the suite's own exit code with 127 and prints a line that reads like a product crash.
+ * Measured 2026-08-07: one request then exit is fine, several requests then exit aborts, and
+ * setting `exitCode` and letting node drain is clean either way.
+ *
+ * So the run is SKIPPED rather than killed.
+ */
+const runnable = home !== null;
+
+if (!runnable) {
+  console.log(`no open workbook holds a module named ${target}.`);
+  console.log("open the rename fixture and run this again:");
+  console.log("  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\RenameFixture.xlsm");
+  process.exitCode = 2;
+}
+
+const project = runnable ? await api.project(home.project) : null;
+const original = runnable ? (await api.readModule(target, project.projectId)).text ?? "" : "";
 
 let passed = 0;
 const failures = [];
@@ -89,7 +120,7 @@ async function look(label) {
   return { line, column, finding, squiggles };
 }
 
-try {
+if (runnable) try {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
   await wait(1500);
   await api.writeModule(target, SEED.join("\r\n"), project.projectId);
