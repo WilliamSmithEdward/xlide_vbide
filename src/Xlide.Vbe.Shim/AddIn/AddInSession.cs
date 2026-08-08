@@ -5650,9 +5650,22 @@ internal sealed class AddInSession : IDisposable
             if (_hostChrome is { } chrome)
             {
                 var says = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "running";
-                if (chrome.Mode != says)
+
+                // The workbook and the module come from the SURFACE, which is what the developer
+                // is actually looking at, and are the same values that go on the tab strip and the
+                // tree. Reading them here rather than hooking every route that can change one
+                // keeps the three in step by construction.
+                // The workbook as the SHELL spells it, not as the project id does. The id is a
+                // lowercased path, so composing from it put "debugfixture.xlsm" on the title bar
+                // of a file called DebugFixture.xlsm.
+                var workbook = project is null ? DisplayFromProjectId(_shownProject) : WorkbookDisplayName(project);
+                var shown = _editorSurface?.Module;
+
+                if (chrome.Mode != says || chrome.Workbook != workbook || chrome.Module != shown)
                 {
                     chrome.Mode = says;
+                    chrome.Workbook = workbook;
+                    chrome.Module = shown;
                     chrome.Apply();
                 }
             }

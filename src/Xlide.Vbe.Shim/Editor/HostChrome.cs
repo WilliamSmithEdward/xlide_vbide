@@ -81,20 +81,15 @@ internal sealed class HostChrome : IDisposable
             return;
         }
 
-        var caption = ReadCaption(_window);
-        if (caption is not null)
+        var ours = Compose();
+        if (ReadCaption(_window) != ours)
         {
-            var ours = Compose(caption);
-            if (ours != caption)
-            {
-                Win32.SetWindowText(_window, ours);
-            }
-
-            // What WE want on the window, not what was read. The comparison used to be against
-            // the caption as found, which made an unchanged reading mean "nothing to do" even when
-            // the mode had moved underneath it.
-            _applied = ours;
+            Win32.SetWindowText(_window, ours);
         }
+
+        // What WE want on the window, not what was read: an unchanged reading must not mean
+        // "nothing to do" when the mode or the module has moved underneath it.
+        _applied = ours;
 
         if (_small != 0)
         {
@@ -124,102 +119,50 @@ internal sealed class HostChrome : IDisposable
     /// </summary>
     public string? Mode { get; set; } = "design";
 
+    /// <summary>The workbook on screen, as the tab strip and the tree name it.</summary>
+    public string? Workbook { get; set; }
+
+    /// <summary>The module on screen. Null when the workspace is empty.</summary>
+    public string? Module { get; set; }
+
     /// <summary>
-    /// The caption this product wants on the window: ALWAYS its own name, then whatever the editor
-    /// was naming beside it, then the mode when there is one to report.
+    /// The caption this product wants on the window, BUILT FROM WHAT THIS PRODUCT KNOWS rather
+    /// than parsed out of what the editor last wrote.
     ///
-    /// Built rather than patched. The first version swapped the host's product name for ours and
-    /// left the rest alone, which meant a caption that did not begin with the host's name was left
-    /// entirely alone -- so the name was ours only for as long as the editor kept spelling its own
-    /// the way it did at start-up. Composing means the answer does not depend on what the editor
-    /// happened to write.
+    /// WHY NOTHING IS PARSED ANY MORE. Two versions tried to keep the editor's own caption and
+    /// edit it, and both grew: the frame is an MDI frame, and Windows appends " - [Child (Code)]"
+    /// to whatever the caption CURRENTLY says whenever the maximised child changes -- to ours, not
+    /// to the editor's. Keeping the tail grew a segment per tab click; keeping only the last
+    /// segment fixed that and still showed the module twice, because the assumption about where
+    /// the editor puts the module was wrong to begin with.
+    ///
+    /// The session already knows the workbook and the module: they are the same values it puts on
+    /// the tab strip and the tree. Composing from those cannot accumulate, cannot double, and
+    /// cannot drift with whatever the editor decides its own caption should say. The one thing
+    /// given up is that the caption no longer echoes the editor's wording, which was never the
+    /// point of taking it over.
     /// </summary>
-    private string Compose(string caption)
+    private string Compose()
     {
-        // What the editor was naming beside its own name: the workbook. Kept, because
-        // "XLIDE - Book1.xlsm" tells someone which window they are looking at and "XLIDE" alone
-        // does not.
-        var rest = caption.StartsWith(HostName, StringComparison.Ordinal)
-            ? caption[HostName.Length..]
-            : caption.StartsWith(OurName, StringComparison.Ordinal)
-                ? caption[OurName.Length..]
-                : string.Empty;
+        var built = new System.Text.StringBuilder(OurName);
 
-        /*
-         * THE MAXIMISED CHILD'S TITLE COMES OFF, and this is the whole reason this method cannot
-         * just keep what it found.
-         *
-         * The editor's frame is an MDI frame, and Windows appends " - [Child (Code)]" to whatever
-         * the frame caption CURRENTLY says whenever the maximised child changes. It appends to
-         * ours, not to the editor's original, so a version that kept the tail and re-added the
-         * mode after it grew by one segment per tab click:
-         *
-         *   XLIDE - Book.xlsm [design]
-         *   XLIDE - Book.xlsm - [Runner (Code)] [design]
-         *   XLIDE - Book.xlsm - [Runner (Code)] - [Helper (Code)] [design]
-         *
-         * Dropping it is safe precisely because Windows puts it back: the segment is re-appended
-         * to the composed caption the moment it is needed, so what is rebuilt here is the stable
-         * base and nothing else.
-         */
-        // The CURRENT child is kept and the ones before it dropped, rather than dropping them all:
-        // the module being edited is worth naming, and removing it entirely would leave the title
-        // bar without it until the next time the maximised child changed.
-        var child = rest.IndexOf(" - [", StringComparison.Ordinal);
-        if (child >= 0)
+        if (Mode is { Length: > 0 } mode)
         {
-            var current = rest.LastIndexOf(" - [", StringComparison.Ordinal);
-            rest = string.Concat(rest.AsSpan(0, child), rest.AsSpan(current));
+            built.Append(" [").Append(mode).Append(']');
         }
 
-        // Any mode marker comes off too, ours or the editor's, so one is not printed beside a
-        // stale one.
-        foreach (var marker in ModeMarkers)
+        if (Workbook is { Length: > 0 } workbook)
         {
-            var at = rest.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
-            if (at >= 0)
-            {
-                rest = rest.Remove(at, marker.Length);
-            }
+            built.Append(" - ").Append(workbook);
         }
 
-        /*
-         * COLLAPSED, because removing a marker leaves the space that preceded it.
-         *
-         * Without this the caption grew by one space per apply, forever: " [design] - Book.xlsm"
-         * loses the marker and keeps both spaces, the next pass keeps three, and since our own
-         * write raises the rename that brings us back here it compounds on itself. Caught by
-         * simulating the editor's appends against this method rather than on a running host, which
-         * is the only reason it was not shipped (2026-08-07).
-         */
-        var tidy = new System.Text.StringBuilder(rest.Length);
-        var space = false;
-        foreach (var character in rest)
+        if (Module is { Length: > 0 } module)
         {
-            if (character == ' ')
-            {
-                space = true;
-                continue;
-            }
-
-            if (space && tidy.Length > 0)
-            {
-                tidy.Append(' ');
-            }
-
-            space = false;
-            tidy.Append(character);
+            built.Append(" - ").Append(module);
         }
 
-        // The mode sits BESIDE THE NAME rather than at the end, because the end is where Windows
-        // appends the child title: a mode written last ends up in the middle of the caption the
-        // moment a pane is maximised, and reads as if it belonged to the module.
-        var name = Mode is { Length: > 0 } mode ? $"{OurName} [{mode}]" : OurName;
-        return tidy.Length == 0 ? name : $"{name} {tidy}";
+        return built.ToString();
     }
-
-    /// <summary>The editor's own mode markers, which are stripped before ours is added.</summary>
-    private static readonly string[] ModeMarkers = ["[break]", "[running]", "[run]", "[design]"];
 
     private void LoadIcons(string? shimDirectory)
     {
