@@ -45,14 +45,69 @@ public static class WebViewPaths
     public const string EditorEntryFileName = "index.html";
 
     /// <summary>
-    /// Browser profile directory for the current user. Derived from the local application data
-    /// path rather than read from the environment so it can be asserted in a test.
+    /// Browser profile directory for the current user, PER PROCESS. Derived from the local
+    /// application data path rather than read from the environment so it can be asserted in a
+    /// test.
+    ///
+    /// ONE FOLDER FOR EVERY EXCEL WAS A SECOND EXCEL THAT NEVER STARTED. WebView2 takes a lock on
+    /// its user data folder, and a second process pointed at the same one does not fail loudly:
+    /// creating the environment simply never completes. The add-in loads, its door answers, the
+    /// surface reports itself ready, and the page behind it never boots, so the loader spins for
+    /// as long as the developer is willing to watch it. Reported twice before it was found
+    /// (2026-08-08), because everything that can be asked says the session is healthy.
+    ///
+    /// The process id is what separates them, and it is the right key rather than a random one:
+    /// it is stable for the session, and it lets a later session tell an abandoned folder from a
+    /// live one. See <see cref="SweepAbandonedProfiles"/>.
     /// </summary>
-    public static string UserDataFolder(string localApplicationDataPath)
+    public static string UserDataFolder(string localApplicationDataPath, int processId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationDataPath);
 
-        return Path.Combine(localApplicationDataPath, ProductIdentity.DataFolderName, UserDataFolderName);
+        return Path.Combine(
+            localApplicationDataPath,
+            ProductIdentity.DataFolderName,
+            UserDataFolderName,
+            processId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// Removes profile folders whose process is gone.
+    ///
+    /// A profile is tens of megabytes and one is made per Excel, so without this they accumulate
+    /// for the life of the machine. Swept on start-up rather than on shutdown because a host that
+    /// crashed never got to clean up, and the crash is exactly when a stale one is left behind.
+    ///
+    /// Anything that cannot be parsed, identified or deleted is left alone: a folder in use by a
+    /// live process must survive, and being wrong about that is worse than a wasted megabyte.
+    /// </summary>
+    public static void SweepAbandonedProfiles(string localApplicationDataPath, Func<int, bool> isAlive)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(localApplicationDataPath);
+        ArgumentNullException.ThrowIfNull(isAlive);
+
+        var root = Path.Combine(localApplicationDataPath, ProductIdentity.DataFolderName, UserDataFolderName);
+        if (!Directory.Exists(root))
+        {
+            return;
+        }
+
+        foreach (var folder in Directory.GetDirectories(root))
+        {
+            if (!int.TryParse(Path.GetFileName(folder), out var pid) || isAlive(pid))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (Exception)
+            {
+                // Held by something, or gone already. Either way the next session tries again.
+            }
+        }
     }
 
     /// <summary>Full path of the native loader that must be present beside the shim.</summary>

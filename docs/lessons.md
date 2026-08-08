@@ -1521,3 +1521,69 @@ whole step failed on the first one every time and the rest were never reached. F
 fixtures surfaced a real defect the same afternoon.
 
 **A check that cannot run is worse than no check, because the slot looks filled.**
+
+## 57. One browser profile for every Excel, and the second one never started
+
+A second Excel got as far as the loader and stayed there. Everything that could be asked said it
+was fine: the add-in loaded, the door answered, `state` reported `surfaceReady: true`. Only the
+doctor had a hint, and a soft one - the page had never reported a build stamp.
+
+WebView2 takes a lock on its user data folder, and there was one folder for the whole product:
+
+```
+%LOCALAPPDATA%\xlide_vbide\webview2
+```
+
+A second process pointed at the same folder does not fail loudly. Creating the environment simply
+never completes, so the page behind the loader never boots and the dots spin for as long as
+anybody is willing to watch. Per process now, keyed by process id, with abandoned profiles swept
+on start-up - at start-up rather than shutdown, because a host that crashed never got to clean up
+and that is exactly when one is left behind.
+
+**It was reported twice before it was found**, and the reason is worth keeping: every instrument
+in the product reported health, because every one of them measures something upstream of the page.
+`surfaceReady` means the surface was created, not that anything is in it.
+
+### And why it could not be tested from here
+
+`Start-Excel.ps1` launches a host and opens its editor in one motion, which covers the usual case
+and only that case. There was no way to open the editor in an Excel that was already running, so a
+second instance could be STARTED from the harness but never driven - and a VBE add-in loads when
+the VBE starts, not when Excel does, so the add-in looked absent when it had never been asked for.
+
+`Open-VbeIn.ps1 -ProcessId` closes that. **A case that cannot be set up is a case that will be
+reported by a person rather than found by a check**, which is exactly what happened here.
+
+## 58. Two workbooks called VBAProject, and five surfaces that disagreed about it
+
+An unsaved workbook has no file name, so the only name it can be called is its project's own, and
+that is "VBAProject" for every new workbook. Two of them side by side produced a defect at every
+layer, and fixing one exposed the next:
+
+- **The identity.** Both answered to the same `projectId`, so everything keyed by it collided:
+  `liveKey(projectId, moduleName)` made one workbook's Sheet1 the other's, the engine seeded one
+  over the other, the skip compared the wrong workbook's sources. An unsaved project is now
+  identified by its canonical IUnknown, which is what COM means by identity: unique among the
+  projects alive at once, and stable for exactly as long as the project is.
+- **The tree.** Two identical rows, nothing to tell them apart. Numbered now, "VBAProject 01" and
+  "VBAProject 02", and only when a name is shared - "Book1.xlsm 01" would be noise.
+- **The click.** The numbering went in and every click landed on the wrong workbook within
+  minutes, because the name the tree shows is not a name any project answers to. Resolution goes
+  through the map the tree was built from now, at the one place every route already funnelled
+  through.
+- **The tab strip.** It labelled tabs with the RAW name while the tree used the numbered one, so
+  the strip published `projects: ["VBAProject", ...]` beside `activeProject: "VBAProject 01"`.
+  Nothing matched, activation quietly did nothing, and the previous tab stayed on screen - which
+  reads exactly like the click landing on the wrong workbook.
+- **The selection.** Rows were matched by NAME alone, so clicking one ThisWorkbook lit every
+  workbook's ThisWorkbook. A module is a name IN a workbook, and the pair is what identifies it.
+
+**A display name is not an identity, and the moment you make one up you have to teach every
+surface that reads it.** The five above are one bug, found five times, because each layer had its
+own way of saying which workbook it meant.
+
+Written down separately: **a workbook opened while xlide is running never appeared in the tree at
+all.** The republish was gated on the editor having no panes, so the tree followed the project set
+only until the first module was opened. The pane tracker cannot cover it either - it watches code
+pane windows, and a workbook nobody has opened a module in has none. The tick watches the project
+count now, which is one property read against the collection the tree is built from.

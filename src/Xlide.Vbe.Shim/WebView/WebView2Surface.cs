@@ -374,7 +374,28 @@ internal sealed class WebView2Surface : IDisposable
         }
 
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var userDataFolder = WebViewPaths.UserDataFolder(localAppData);
+
+        // Profiles left by hosts that are gone, before this one takes its own. Done here rather
+        // than at shutdown because a host that crashed never got to clean up, and that is exactly
+        // when one is left behind.
+        WebViewPaths.SweepAbandonedProfiles(localAppData, static pid =>
+        {
+            try
+            {
+                using var held = System.Diagnostics.Process.GetProcessById(pid);
+                return !held.HasExited;
+            }
+            catch (Exception)
+            {
+                // No such process: the folder is abandoned.
+                return false;
+            }
+        });
+
+        // PER PROCESS. WebView2 locks this folder, and a second Excel pointed at the same one
+        // never finishes creating its environment: the add-in loads, the door answers, and the
+        // page behind the loader never boots. See WebViewPaths.UserDataFolder.
+        var userDataFolder = WebViewPaths.UserDataFolder(localAppData, Environment.ProcessId);
 
         try
         {

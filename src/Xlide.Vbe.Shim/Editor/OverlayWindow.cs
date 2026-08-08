@@ -735,36 +735,11 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
             Win32.SelectObject(dc, previousPen);
 
-            if (_loaderPhase >= LoaderStalledAfterTicks)
-            {
-                var hintFont = Win32.CreateFont(
-                    -13, 0, 0, 0,
-                    0, 0, 0, 0,
-                    Win32.FontDefaultCharset,
-                    0, 0,
-                    Win32.FontClearTypeQuality,
-                    0,
-                    "Segoe UI");
-
-                if (hintFont != 0)
-                {
-                    var previousFont = Win32.SelectObject(dc, hintFont);
-                    _ = Win32.SetTextColor(dc, LoaderHint);
-
-                    var hintRect = client;
-                    hintRect.Top = centerY + 40;
-                    hintRect.Bottom = centerY + 70;
-                    Win32.DrawText(
-                        dc,
-                        "still starting — the xlide log has the story",
-                        -1,
-                        &hintRect,
-                        Win32.DtCenter | Win32.DtSingleLine | Win32.DtNoPrefix);
-
-                    Win32.SelectObject(dc, previousFont);
-                    Win32.DeleteObject(hintFont);
-                }
-            }
+            // NO HINT TEXT. A line under the dots saying the log has the story was addressed to
+            // whoever built this, not to whoever is waiting: it tells a developer nothing they
+            // would not already do, and tells everyone else that something has gone wrong at the
+            // moment they can least act on it. The dots say "working" on their own (developer,
+            // 2026-08-08). The log still has the story, for the person who thinks to look.
         }
         finally
         {

@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Xlide.Vbe.Core.Hosting;
 using Xunit;
 
@@ -18,15 +20,15 @@ public class WebViewPathsTests
     {
         // Never the install directory. A per-user process cannot write there, and the browser
         // reports that as an environment that never finishes being created.
-        var folder = WebViewPaths.UserDataFolder(LocalAppData);
+        var folder = WebViewPaths.UserDataFolder(LocalAppData, 4242);
 
-        Assert.Equal(@"C:\Users\someone\AppData\Local\xlide_vbide\webview2", folder);
+        Assert.Equal(Path.Combine(LocalAppData, ProductIdentity.DataFolderName, "webview2", "4242"), folder);
     }
 
     [Fact]
     public void TheProfileSharesTheProductDataFolderWithTheLogs()
     {
-        var folder = WebViewPaths.UserDataFolder(LocalAppData);
+        var folder = WebViewPaths.UserDataFolder(LocalAppData, 4242);
 
         Assert.Contains(ProductIdentity.DataFolderName, folder, StringComparison.Ordinal);
     }
@@ -34,9 +36,49 @@ public class WebViewPathsTests
     [Fact]
     public void TheProfileIsNotUnderTheInstallDirectory()
     {
-        var folder = WebViewPaths.UserDataFolder(LocalAppData);
+        var folder = WebViewPaths.UserDataFolder(LocalAppData, 4242);
 
         Assert.DoesNotContain(ShimDirectory, folder, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TwoHostsNeverShareOneProfile()
+    {
+        // WebView2 LOCKS its user data folder. Two Excels pointed at the same one leave the
+        // second with an environment that never finishes being created: the add-in loads, the
+        // door answers, the surface reports itself ready, and the page behind the loader never
+        // boots. Nothing that can be asked reports a fault, which is why this was reported twice
+        // before it was found (2026-08-08).
+        var first = WebViewPaths.UserDataFolder(LocalAppData, 1000);
+        var second = WebViewPaths.UserDataFolder(LocalAppData, 2000);
+
+        Assert.NotEqual(first, second);
+    }
+
+    [Fact]
+    public void AProfileWhoseProcessIsGoneIsSweptAndOneThatIsAliveIsNot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "xlide-profile-sweep-" + Guid.NewGuid().ToString("N"));
+        var data = Path.Combine(root, ProductIdentity.DataFolderName, WebViewPaths.UserDataFolderName);
+        Directory.CreateDirectory(Path.Combine(data, "111"));
+        Directory.CreateDirectory(Path.Combine(data, "222"));
+        Directory.CreateDirectory(Path.Combine(data, "not-a-pid"));
+
+        try
+        {
+            WebViewPaths.SweepAbandonedProfiles(root, pid => pid == 222);
+
+            Assert.False(Directory.Exists(Path.Combine(data, "111")));
+            Assert.True(Directory.Exists(Path.Combine(data, "222")));
+
+            // Left alone rather than guessed at: a folder this does not understand is not its
+            // to delete.
+            Assert.True(Directory.Exists(Path.Combine(data, "not-a-pid")));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch { }
+        }
     }
 
     [Fact]

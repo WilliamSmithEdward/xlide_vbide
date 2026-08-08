@@ -69,13 +69,23 @@ internal static class ProjectReader
     /// <summary>
     /// The identity a project is addressed by, and the name the developer knows it by.
     ///
-    /// The project's own Name is "VBAProject" for nearly every workbook, so with two workbooks
-    /// open, addressing by Name made both of them the same project everywhere downstream: the
-    /// engine merged their modules, findings crossed workbooks, and a write aimed at whichever
-    /// came first. The workbook's full file path is unique among open, saved workbooks and
-    /// stable for the session, so it is the identity; the Name remains only for a workbook
-    /// never saved, which has no file name and raises when asked for one. Two unsaved
-    /// workbooks can still collide — a residual accepted and confined to that case.
+    /// The project's own Name is "VBAProject" for nearly every workbook, so addressing by Name
+    /// made two open workbooks the same project everywhere downstream: the engine merged their
+    /// modules, findings crossed workbooks, and a write aimed at whichever came first. A saved
+    /// workbook's full file path is unique among the open ones and stable for the session, so
+    /// that is the identity.
+    ///
+    /// TWO UNSAVED WORKBOOKS HAVE NEITHER. Both answer "VBAProject" to Name and both raise when
+    /// asked for a FileName, so both used to land on the same id, and everything keyed by it
+    /// collided: `liveKey(projectId, moduleName)` made one workbook's Sheet1 the other's, the
+    /// engine seeded one over the other, and the skip compared the wrong workbook's sources.
+    /// Reported from a live session with two new workbooks open (2026-08-08).
+    ///
+    /// So an unsaved project is identified by its own COM identity, which is what COM means by
+    /// identity: the canonical IUnknown for the object. It is unique among the projects alive at
+    /// any moment and stable for as long as the project is, which is exactly the lifetime the id
+    /// has to cover. It changes if the workbook is closed and reopened, and that is correct:
+    /// that is a different project.
     /// </summary>
     public static (string Id, string DisplayName) Identity(DispatchObject project)
     {
@@ -93,7 +103,40 @@ internal static class ProjectReader
             // Unsaved: the property raises rather than answering empty.
         }
 
-        return (name, name);
+        // Unsaved. The name alone is not an identity, so it is qualified by the object's own.
+        var identity = ComIdentityOf(project);
+        return identity == 0
+            ? (name, name)
+            : ($"{name.ToLowerInvariant()}#{identity:x}", name);
+    }
+
+    /// <summary>
+    /// The canonical IUnknown pointer for an object, which is COM's own definition of identity:
+    /// two references to the same object always answer the same value, and two different objects
+    /// never do. Zero when it cannot be asked, in which case the caller falls back to the name.
+    ///
+    /// Queried rather than read off the dispatch pointer we hold, because a QueryInterface for a
+    /// different interface may hand back a different pointer for the same object. Only IUnknown
+    /// is promised to be canonical.
+    /// </summary>
+    private static nint ComIdentityOf(DispatchObject project)
+    {
+        var pointer = project.Pointer;
+        if (pointer == 0)
+        {
+            return 0;
+        }
+
+        var iid = new Guid("00000000-0000-0000-C000-000000000046");
+        if (System.Runtime.InteropServices.Marshal.QueryInterface(pointer, in iid, out var unknown) < 0)
+        {
+            return 0;
+        }
+
+        // Released at once: the pointer VALUE is the identity, and holding a reference to read a
+        // number would be a reference nothing gives back.
+        System.Runtime.InteropServices.Marshal.Release(unknown);
+        return unknown;
     }
 
     /// <summary>Reads one project.</summary>

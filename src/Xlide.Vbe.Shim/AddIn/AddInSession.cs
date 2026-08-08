@@ -5950,6 +5950,28 @@ internal sealed class AddInSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// How many projects the editor holds, or -1 when it will not say. Deliberately just the
+    /// count: this runs on every tick, and anything heavier would be paid for constantly to
+    /// answer a question whose answer is almost always "the same as last time".
+    /// </summary>
+    private int ProjectCount()
+    {
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            return projects?.GetInt32("Count") ?? -1;
+        }
+        catch (Exception)
+        {
+            // The editor refuses while it is busy. The next tick asks again.
+            return -1;
+        }
+    }
+
+    /// <summary>The project count the tree was last built for. See PollDebugState.</summary>
+    private int _lastProjectCount = -1;
+
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
     {
@@ -5967,6 +5989,33 @@ internal sealed class AddInSession : IDisposable
         {
             PublishProjects();
             AdoptOpenModuleIfEmpty();
+        }
+        else
+        {
+            /*
+             * A WORKBOOK THAT APPEARS WHILE A MODULE IS OPEN USED TO NEVER APPEAR.
+             *
+             * The republish above is gated on the editor having no panes, so the tree followed
+             * the project set only until the first module was opened. After that a workbook
+             * created or opened alongside was absent from the explorer entirely: no row, no
+             * modules, no route to its code, and nothing on screen to say it existed. Adding two
+             * workbooks and finding the tree still showing one is where this was seen
+             * (2026-08-08).
+             *
+             * The pane tracker cannot cover it either. It watches code pane WINDOWS, and a
+             * workbook nobody has opened a module in has none.
+             *
+             * So the count is checked instead, which is one property read per tick against the
+             * collection the tree is built from. A change in it is the only thing that provokes
+             * the rebuild, so the ordinary case costs a single call and publishes nothing.
+             */
+            var projectCount = ProjectCount();
+            if (projectCount >= 0 && projectCount != _lastProjectCount)
+            {
+                Log.Info($"explorer: the project count went {_lastProjectCount} to {projectCount}, republishing");
+                _lastProjectCount = projectCount;
+                PublishProjects();
+            }
         }
 
         _immediateReader?.Poll();
@@ -7797,16 +7846,26 @@ internal sealed class AddInSession : IDisposable
         return $"{normalised.Length}:{normalised.GetHashCode(StringComparison.Ordinal)}";
     }
 
-    private static string? DisplayFromProjectId(string? projectId)
+    private string? DisplayFromProjectId(string? projectId)
     {
         if (string.IsNullOrEmpty(projectId))
         {
             return null;
         }
 
+        // The name the tree was built with, when there is one. An unsaved workbook's id carries
+        // its COM identity ("vbaproject#24ce5821b58") because its name is not unique, and that
+        // is an id to key by, never a thing to show a developer.
+        if (_projectNames.TryGetValue(projectId, out var shown) && shown.Length > 0)
+        {
+            return shown;
+        }
+
         return projectId.Contains('\\') || projectId.Contains('/')
             ? Path.GetFileName(projectId)
-            : projectId;
+            : projectId.Contains('#')
+                ? projectId[..projectId.IndexOf('#')]
+                : projectId;
     }
 
     /// <summary>
@@ -7849,7 +7908,17 @@ internal sealed class AddInSession : IDisposable
                         using var project = collection?.GetObject("Parent");
                         if (project is not null)
                         {
-                            owner = ProjectReader.Identity(project).DisplayName;
+                            // THE SAME NAME THE TREE USES, which is not always the project's own.
+                            //
+                            // Two unsaved workbooks are both "VBAProject", so the tree numbers
+                            // them; this labelled a tab's project with the raw name instead, and
+                            // the two halves of the same window disagreed. The strip published
+                            // `projects: ["VBAProject", ...]` beside `activeProject:
+                            // "VBAProject 01"`, so activating a module in a numbered workbook
+                            // matched no tab and quietly did nothing: clicking Sheet1 under
+                            // VBAProject 01 left whatever was already open on screen, which
+                            // reads as the click landing on the wrong workbook (2026-08-08).
+                            owner = DisplayFromProjectId(ProjectReader.Identity(project).Id);
                         }
                     }
                     catch (Exception)
@@ -7898,6 +7967,49 @@ internal sealed class AddInSession : IDisposable
             using var projects = _editor.GetObject("VBProjects");
             var projectCount = projects?.GetInt32("Count") ?? 0;
 
+            /*
+             * TWO UNSAVED WORKBOOKS ARE BOTH CALLED "VBAProject", AND THE TREE SHOWED BOTH.
+             *
+             * A workbook that has never been saved has no file name, so the only name it can be
+             * called is the project's own, and that is "VBAProject" for every new workbook. Two
+             * of them side by side in the explorer are two identical rows, and there is nothing
+             * in the tree to tell the developer which is which (reported 2026-08-08).
+             *
+             * So a name shared by more than one project is numbered: "VBAProject 01",
+             * "VBAProject 02", in the order the editor lists them. A name that is unique is left
+             * exactly as it is, because "Book1.xlsm 01" would be noise.
+             *
+             * Counted first, over the whole set, because numbering needs to know whether there is
+             * anything to disambiguate FROM. The names are then reused below rather than read
+             * again, so the tree, the title bar and every id-to-name lookup agree on one spelling.
+             */
+            var displays = new List<string>(projectCount);
+            for (var i = 1; i <= projectCount; i++)
+            {
+                using var project = projects!.GetItem(i);
+                displays.Add(project is null ? "VBAProject" : WorkbookDisplayName(project));
+            }
+
+            var shared = displays
+                .GroupBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var numbered = new List<string>(displays.Count);
+            foreach (var name in displays)
+            {
+                if (!shared.Contains(name))
+                {
+                    numbered.Add(name);
+                    continue;
+                }
+
+                seen[name] = seen.TryGetValue(name, out var count) ? count + 1 : 1;
+                numbered.Add($"{name} {seen[name]:00}");
+            }
+
             var tree = new List<SurfaceProject>(projectCount);
             for (var i = 1; i <= projectCount; i++)
             {
@@ -7923,7 +8035,11 @@ internal sealed class AddInSession : IDisposable
                 // The cased name against the id, so the title bar can name the workbook on a tab
                 // switch without a COM call. The id is a lowercased path and everything derived
                 // from it reads "debugfixture.xlsm"; this is the spelling the shell uses.
-                var display = WorkbookDisplayName(project);
+                //
+                // The NUMBERED name, from the pass above, so the tree and the title bar call a
+                // workbook the same thing. A name only the tree knew would leave the title bar
+                // saying "VBAProject" for both of two workbooks the tree had told apart.
+                var display = numbered[i - 1];
                 _projectNames[ProjectReader.Identity(project).Id] = display;
 
                 tree.Add(new SurfaceProject(display, [.. members]));
@@ -7960,12 +8076,35 @@ internal sealed class AddInSession : IDisposable
         return project.GetString("Name") ?? "VBAProject";
     }
 
-    /// <summary>The project shown under a workbook name, or null when none matches.</summary>
+    /// <summary>
+    /// The project shown under a workbook name, or null when none matches.
+    ///
+    /// THE NAME THE TREE SHOWED, WHICH IS NOT ALWAYS THE PROJECT'S OWN. Two unsaved workbooks are
+    /// both called "VBAProject", so the tree numbers them "VBAProject 01" and "VBAProject 02",
+    /// and that is what comes back on a click. Comparing against the project's own name matched
+    /// neither, so every caller fell back to the shown project: clicking Sheet1 under either new
+    /// workbook opened DebugFixture's Sheet1 instead (reported twice, 2026-08-08).
+    ///
+    /// This is the one place every route resolves a name through, so the numbering is understood
+    /// here rather than at each caller.
+    /// </summary>
     private DispatchObject? FindProjectByDisplayName(string? displayName)
     {
         if (string.IsNullOrEmpty(displayName))
         {
             return null;
+        }
+
+        // What the tree meant, when the tree is what asked. `_projectNames` is id to the name it
+        // was shown under, so reversing it turns a numbered name back into an identity.
+        string? wantedId = null;
+        foreach (var (id, shown) in _projectNames)
+        {
+            if (string.Equals(shown, displayName, StringComparison.OrdinalIgnoreCase))
+            {
+                wantedId = id;
+                break;
+            }
         }
 
         try
@@ -7981,7 +8120,11 @@ internal sealed class AddInSession : IDisposable
                     continue;
                 }
 
-                if (string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase))
+                var matches = wantedId is not null
+                    ? string.Equals(ProjectReader.Identity(project).Id, wantedId, StringComparison.OrdinalIgnoreCase)
+                    : string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase);
+
+                if (matches)
                 {
                     return project;
                 }
@@ -8977,6 +9120,28 @@ internal sealed class AddInSession : IDisposable
         if (string.IsNullOrEmpty(display))
         {
             return null;
+        }
+
+        /*
+         * THE NUMBERED NAME FIRST, because that is the name the surface was given.
+         *
+         * Two unsaved workbooks are both called "VBAProject", so the tree numbers them
+         * "VBAProject 01" and "VBAProject 02" and that is what comes back on a click. No project
+         * answers to those names, so the search below found nothing, the caller fell back to the
+         * shown project, and clicking a module in either new workbook opened a module of
+         * whichever workbook was already on screen (reported 2026-08-08, minutes after the
+         * numbering went in and caused it).
+         *
+         * `_projectNames` is the map the tree was built from, id to the name it was shown under,
+         * so reversing it answers exactly what the surface meant. Only then fall through to
+         * matching a project's own name, which is what an unnumbered display is.
+         */
+        foreach (var (id, shown) in _projectNames)
+        {
+            if (string.Equals(shown, display, StringComparison.OrdinalIgnoreCase))
+            {
+                return id;
+            }
         }
 
         using var project = FindProjectByDisplayName(display);

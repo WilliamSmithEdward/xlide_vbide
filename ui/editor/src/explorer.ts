@@ -115,6 +115,19 @@ export class Explorer {
   private projects: ExplorerProject[] = [];
   private active: string | null = null;
   private selected: string | null = null;
+
+  /*
+   * WHICH WORKBOOK the active and selected rows belong to.
+   *
+   * A row used to be matched by NAME alone, and every workbook has a ThisWorkbook and a Sheet1.
+   * With two workbooks open, clicking one lit BOTH rows: the tree said the module was open in
+   * two places at once, and the properties panel and the twisty followed whichever the render
+   * reached first (reported 2026-08-08, with two unsaved workbooks side by side).
+   *
+   * A module is a name IN a workbook, so the pair is what identifies it.
+   */
+  private activeWorkbook: string | null = null;
+  private selectedWorkbook: string | null = null;
   private problemCounts = new Map<string, number>();
 
   /** Which workbooks are open. Workbooks start closed; the first one is opened on arrival. */
@@ -162,6 +175,7 @@ export class Explorer {
       if (name) {
         const workbook = this.workbookOf(event);
         this.selected = name;
+        this.selectedWorkbook = workbook ?? null;
         this.setExpandedModule(name, workbook);
         this.render();
         this.handlers.select(name);
@@ -200,6 +214,7 @@ export class Explorer {
       if (item?.dataset.component) {
         event.preventDefault();
         this.selected = item.dataset.component;
+        this.selectedWorkbook = item.dataset.workbook ?? null;
         this.render();
         this.handlers.select(item.dataset.component);
         this.handlers.context(
@@ -302,11 +317,14 @@ export class Explorer {
     // republishes the module list on all sorts of occasions with the same active module;
     // following every push would fold what was just unfolded by hand, and even redrawing on
     // every push wipes and rebuilds a large unfolded list, which reads as flicker.
-    if (name === this.active) {
+    // BOTH halves, or switching between two workbooks' ThisWorkbook is "no change" and the
+    // tree never follows the tab.
+    if (name === this.active && (workbook ?? null) === this.activeWorkbook) {
       return;
     }
 
     this.active = name;
+    this.activeWorkbook = workbook ?? null;
     if (name) {
       this.setExpandedModule(name, workbook);
     }
@@ -618,14 +636,18 @@ export class Explorer {
 
     const button = document.createElement("button");
     button.type = "button";
+    // Name AND workbook. See activeWorkbook.
+    const isActive = component.name === this.active && workbook === this.activeWorkbook;
+    const isSelected = component.name === this.selected && workbook === this.selectedWorkbook;
+
     button.className = "tree-item"
-      + (component.name === this.active ? " active" : "")
-      + (component.name === this.selected ? " selected" : "");
+      + (isActive ? " active" : "")
+      + (isSelected ? " selected" : "");
     button.dataset.component = component.name;
     button.dataset.workbook = workbook;
     button.dataset.kind = String(component.kind);
     button.setAttribute("role", "treeitem");
-    button.setAttribute("aria-selected", String(component.name === this.selected));
+    button.setAttribute("aria-selected", String(isSelected));
     button.setAttribute("aria-expanded", String(isUnfolded));
 
     const chevron = document.createElement("span");

@@ -932,12 +932,51 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const workbook = take("--workbook");
   const [route, ...rest] = args;
 
+  // BEFORE picking one, because this is the verb for when there are several.
+  //
+  // `open` refuses to guess when more than one instance is live, which is right - and it ran
+  // first for every verb including this one, so the question "which instances are there" could
+  // only be answered while the answer was "one". Exactly when it was useless (2026-08-08).
+  if (route === "instances") {
+    const found = await discover();
+    console.log(JSON.stringify(
+      found.map((entry) => ({
+        pid: entry.pid,
+        port: entry.port,
+        shown: entry.state?.shownProject ?? null,
+        module: entry.state?.shownModule ?? null,
+      })),
+      null,
+      2));
+    process.exit(0);
+  }
+
   const api = await open({ pid, workbook });
   const answer = await (async () => {
     switch (route) {
       case undefined:
       case "state": return api.state();
       case "windows": return api.windows();
+
+      // THE ROUTES A WORKBOOK QUESTION NEEDS, which the command line did not carry.
+      //
+      // The client had them and the CLI did not, so every question about which workbook a thing
+      // belongs to had to be asked from a throwaway script - exactly the habit the standing
+      // instruction says not to build. `native` and `projects` are the two that answer "which
+      // workbook", and `pane` is how a module is opened in a named one (2026-08-08).
+      //
+      //   xlide-api.mjs native            xlide-api.mjs projects
+      //   xlide-api.mjs pane open Sheet1 "VBAProject 01"
+      //   xlide-api.mjs outline Runner    xlide-api.mjs caret 12 Runner
+      case "native": return api.native({ text: rest[0] === "text" });
+      case "projects": return api.projects();
+      case "pane": return api.pane(rest[0] ?? "open", { module: rest[1], project: rest[2], answer: rest[3] });
+      case "outline": return api.outline(rest[0], rest[1]);
+      case "caret": return api.caret(Number(rest[0] ?? 1), { module: rest[1], project: rest[2] });
+      case "breakpoints": return api.breakpoints();
+      case "documents": return api.documents();
+      case "settings": return api.settings(rest[0] ? JSON.parse(rest[0]) : undefined);
+      case "layout": return api.layout();
       case "stats": return api.stats();
       case "locals": return api.locals();
       case "watches": return api.watches();
