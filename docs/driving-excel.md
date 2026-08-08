@@ -338,6 +338,21 @@ assigned before the stop, and that Step Over advances the native caret. It leave
 Reset whatever happens: a session left stopped blocks everything after it.
 
 ```bash
+node tools\harness\step-into-features.mjs   # the HOST moving, and the page following
+```
+
+The other direction of parity, and the one a developer actually meets. Everything else drives
+through the api and asks whether the native panes keep up; this steps INTO a procedure in another
+module, so the **debugger** activates a module the page was not showing and never asked for. The
+page has to open a tab and follow, or you step into a procedure and watch a different module's
+code.
+
+The native panes are covered by the surface, so a user cannot click one — which makes the
+debugger the realistic driver of this direction, and the only one worth testing. Measured: the
+native pane crosses to `Helper`, the page follows, a tab appears, all three agree, every open
+module's content still matches, and the Locals panel shows the new frame's `value` and `prefix`.
+
+```bash
 node tools\harness
 ename-features.mjs   # rename and definition, with parity at each step
 ```
