@@ -82,18 +82,18 @@ internal sealed class HostChrome : IDisposable
         }
 
         var caption = ReadCaption(_window);
-        if (caption is not null && caption != _applied)
+        if (caption is not null)
         {
-            var ours = Rename(caption);
+            var ours = Compose(caption);
             if (ours != caption)
             {
                 Win32.SetWindowText(_window, ours);
-                _applied = ours;
             }
-            else
-            {
-                _applied = caption;
-            }
+
+            // What WE want on the window, not what was read. The comparison used to be against
+            // the caption as found, which made an unchanged reading mean "nothing to do" even when
+            // the mode had moved underneath it.
+            _applied = ours;
         }
 
         if (_small != 0)
@@ -108,13 +108,59 @@ internal sealed class HostChrome : IDisposable
     }
 
     /// <summary>
-    /// Swaps the host's product name for ours and leaves the rest of the caption alone, so the
-    /// workbook and module the editor names are still named.
+    /// The mode the editor is in, as the title bar should say it: "design", "running", "break".
+    ///
+    /// ALWAYS SAID, including design. It was left blank there at first, on the reasoning that not
+    /// debugging is not news; the developer's answer was that a mode you only see sometimes is one
+    /// you cannot rely on reading, and a window that says nothing is indistinguishable from one
+    /// that has stopped reporting. Design is therefore stated too.
+    ///
+    /// Defaulted rather than left null, so the very first caption is right: the mode is set by the
+    /// session as it changes, and the first change may be some way after the window appears.
+    ///
+    /// The editor puts its own "[break]" on the caption and takes it off again, but only sometimes
+    /// and never for design, so it is stripped and restated from what this product actually knows
+    /// rather than parsed back out of a string.
     /// </summary>
-    private static string Rename(string caption) =>
-        caption.StartsWith(HostName, StringComparison.Ordinal)
-            ? string.Concat(OurName, caption.AsSpan(HostName.Length))
-            : caption;
+    public string? Mode { get; set; } = "design";
+
+    /// <summary>
+    /// The caption this product wants on the window: ALWAYS its own name, then whatever the editor
+    /// was naming beside it, then the mode when there is one to report.
+    ///
+    /// Built rather than patched. The first version swapped the host's product name for ours and
+    /// left the rest alone, which meant a caption that did not begin with the host's name was left
+    /// entirely alone -- so the name was ours only for as long as the editor kept spelling its own
+    /// the way it did at start-up. Composing means the answer does not depend on what the editor
+    /// happened to write.
+    /// </summary>
+    private string Compose(string caption)
+    {
+        // What the editor was naming beside its own name: the workbook, usually. Kept, because
+        // "XLIDE - Book1.xlsm" tells someone which window they are looking at and "XLIDE" alone
+        // does not.
+        var rest = caption.StartsWith(HostName, StringComparison.Ordinal)
+            ? caption[HostName.Length..]
+            : caption.StartsWith(OurName, StringComparison.Ordinal)
+                ? caption[OurName.Length..]
+                : string.Empty;
+
+        // The editor's own mode marker comes off, so ours is not printed beside a stale one.
+        foreach (var marker in ModeMarkers)
+        {
+            var at = rest.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0)
+            {
+                rest = rest.Remove(at, marker.Length);
+            }
+        }
+
+        var composed = string.Concat(OurName, rest.TrimEnd());
+        return Mode is { Length: > 0 } mode ? $"{composed} [{mode}]" : composed;
+    }
+
+    /// <summary>The editor's own mode markers, which are stripped before ours is added.</summary>
+    private static readonly string[] ModeMarkers = ["[break]", "[running]", "[run]", "[design]"];
 
     private void LoadIcons(string? shimDirectory)
     {

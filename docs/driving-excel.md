@@ -164,7 +164,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
 | `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
 | `history` | `history()` | every request served, as a replayable script |
-| `immediate` | `immediate(text)` | schedules an Immediate evaluation |
+| `immediate` | `immediate(text)` / `immediate()` | evaluates a line and answers WHAT IT CAME TO; without text, reads the window |
 | `inspect` | `inspect(selector, {styles, rules, max})` | boxes, classes, computed styles, winning rules |
 | `journal` | `journal(lines)` | one capture of a whole moment |
 | `layout` | `layout()` / `resetLayout()` | the arrangement; and putting it back |
@@ -214,7 +214,9 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Put the caret somewhere, opening the module first | `caret(line, { module, column, project })` |
 | Run an editor command by name | `command("compile")`, `command("run")` … |
 | Set, clear or toggle a breakpoint | `breakpoint(module, line, { state })` |
-| Evaluate in the Immediate window | `immediate(text)` |
+| Evaluate in the Immediate window, and read the answer | `immediate(text)` |
+| Read the Immediate window as it stands | `immediate()` |
+| The Immediate window and Watch panel, end to end | `node tools\harness\immediate-watch.mjs` |
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |

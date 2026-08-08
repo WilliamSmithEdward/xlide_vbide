@@ -93,7 +93,7 @@ answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint |
-| `immediate` | POST | `text` | schedules an Immediate-window evaluation, fire and forget |
+| `immediate` | POST | `text` | evaluates a line in the Immediate window and answers WHAT IT CAME TO: the result text and whether it failed. It used to answer `{ran: true}` without waiting, so a caller learned that an evaluation had been ASKED FOR and nothing else, and what the expression evaluated to went only to the page. That is the reason this panel had a route and no suite: nothing could read what it said. The same rule the rest of this door follows, where `closeActive` reports whether the tab actually closed and `compile` answers errors as data. WITHOUT `text` it reads instead, answering the whole window as it stands. `ran: false` means the evaluation did not finish inside the ten second wait; the line still went in |
 | `placement` | POST | | forces a placement pass |
 
 ### Awaiting, rather than sleeping

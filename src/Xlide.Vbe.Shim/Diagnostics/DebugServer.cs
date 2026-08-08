@@ -767,6 +767,21 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("components")] DebugComponentRow[] Components);
 
 /// <summary>
+/// What an Immediate window line came to.
+///
+/// The route used to answer that an evaluation had been ASKED FOR: it posted the line to the host
+/// thread and returned without waiting, so what the expression evaluated to, and whether it
+/// failed, went only to the page. That is why the Immediate window had a route and no suite.
+///
+/// With no `text` the route reads instead, and `text` carries the whole window as it stands.
+/// </summary>
+public sealed record DebugImmediateReply(
+    /// <summary>False when the evaluation did not finish inside the wait. The line still went in.</summary>
+    [property: JsonPropertyName("ran")] bool Ran,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("failed")] bool Failed);
+
+/// <summary>
 /// One open workbook, named the way the tree and the tab strip name it.
 ///
 /// The plural of `project`, which answers about one. With two workbooks open there was no way to
@@ -1131,6 +1146,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDialogsReply))]
 [JsonSerializable(typeof(DebugGuardReply))]
 [JsonSerializable(typeof(DebugComponentReply))]
+[JsonSerializable(typeof(DebugImmediateReply))]
 [JsonSerializable(typeof(DebugProjectsReply))]
 [JsonSerializable(typeof(DebugProjectRow))]
 [JsonSerializable(typeof(DebugProjectReply))]

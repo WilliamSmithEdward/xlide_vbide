@@ -156,6 +156,106 @@ internal sealed class AddInSession : IDisposable
     private static bool IsScratchComponent(string? name) =>
         string.Equals(name, ImmediateEvaluator.ScratchModule, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether the editor is stopped inside the module this product evaluates lines in.
+    ///
+    /// The one state that is safe to end without asking. A developer stopped at their own
+    /// breakpoint is stopped in one of THEIR modules; only this product ever puts code in the
+    /// scratch module, so a session stopped there is one nobody is looking at and one that will
+    /// otherwise refuse every evaluation that follows.
+    /// </summary>
+    private bool StoppedInScratchModule()
+    {
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            if ((project?.GetInt32("Mode") ?? DesignMode) == DesignMode)
+            {
+                return false;
+            }
+
+            using var pane = _editor.GetObject("ActiveCodePane");
+            using var code = pane?.GetObject("CodeModule");
+            using var component = code?.GetObject("Parent");
+
+            return IsScratchComponent(component?.GetString("Name"));
+        }
+        catch (Exception ex)
+        {
+            // Unreadable answers no. A reset that cannot be justified is worse than one skipped.
+            Log.Info($"immediate: could not tell where the editor is stopped ({ex.GetType().Name})");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether the editor is stopped inside this product's scratch module, asked from ANY thread.
+    ///
+    /// Reading the editor is COM, so the question hops to the host thread and comes straight back.
+    /// It is deliberately a hop per ask rather than a cached flag: the whole point of asking
+    /// repeatedly is that the answer changes underneath, and a cached one would be the reason the
+    /// loop never ends.
+    /// </summary>
+    private bool ScratchBreakStanding()
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return false;
+        }
+
+        var answered = new ManualResetEventSlim(false);
+        var standing = false;
+
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                standing = StoppedInScratchModule();
+            }
+            finally
+            {
+                answered.Set();
+            }
+        });
+
+        // A host thread that cannot answer in two seconds is busy with something that is not this,
+        // and reporting "not stuck" lets the evaluation try and report its own failure honestly.
+        var got = answered.Wait(2000);
+        answered.Dispose();
+        return got && standing;
+    }
+
+    /// <summary>Takes the scratch module away, which a reset on its own does not.</summary>
+    private void RemoveScratchModule()
+    {
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            using var components = project?.GetObject("VBComponents");
+            if (components is null)
+            {
+                return;
+            }
+
+            // By index, the way the evaluator's own clean-up does it: `Item` by name throws when
+            // the module is absent, which is the ordinary case and not worth an exception.
+            var count = components.GetInt32("Count");
+            for (var i = count; i >= 1; i--)
+            {
+                using var candidate = components.GetItem(i);
+                if (IsScratchComponent(candidate?.GetString("Name")) && candidate is not null)
+                {
+                    components.InvokeWithObject("Remove", candidate);
+                    Log.Info("immediate: the scratch module has been taken away");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"immediate: the scratch module could not be taken away ({ex.GetType().Name})");
+        }
+    }
+
     public void Start()
     {
         Log.Info("session starting");
@@ -718,7 +818,23 @@ internal sealed class AddInSession : IDisposable
                 return new DebugServer.DebugReply("image/bmp", bytes);
             }
 
-            case "immediate" when request.Query.TryGetValue("text", out var text) && text.Length > 0:
+            /*
+             * THE OUTCOME, not the request.
+             *
+             * This posted the line to the host thread and answered `{ran: true}` without waiting,
+             * so a caller learned that the evaluation had been ASKED FOR and nothing else. What
+             * the expression came to, and whether it failed, went only to the page. That is why
+             * the Immediate window had a route and no suite: nothing could read what it said.
+             *
+             * The same rule the rest of this door already follows. `closeActive` reports whether
+             * the tab actually closed rather than that a close was requested; `compile` answers
+             * the errors as data rather than leaving them on screen. A route that reports its own
+             * invocation is a route that cannot be asserted on.
+             *
+             * Waits, therefore, and answers the evaluator's own verdict. Without `text` it READS
+             * instead: the whole window as it stands, which is the other half nobody had.
+             */
+            case "immediate":
             {
                 var surface = _editorSurface;
                 if (surface is null)
@@ -726,9 +842,135 @@ internal sealed class AddInSession : IDisposable
                     return DebugError("the surface is not up yet");
                 }
 
-                surface.RunOnHostThread(() => EvaluateImmediate(text));
+                request.Query.TryGetValue("text", out var text);
+
+                if (string.IsNullOrEmpty(text))
+                {
+                    return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugImmediateReply(false, _immediateReader?.Text() ?? string.Empty, false),
+                        DebugJsonContext.Default.DebugImmediateReply));
+                }
+
+                /*
+                 * Started on the host thread and NOT waited on there, then answered from here,
+                 * which is the shape `compile` already uses and for the same reason.
+                 *
+                 * A line that will not compile raises the editor's own "Compile error" box. That
+                 * box owns the host thread, so anything waiting on that thread waits for the box,
+                 * and the box is waiting for somebody to press OK. The door's thread is the only
+                 * one still moving, so it is the one that has to notice and clear it.
+                 *
+                 * The first version of this waited on an event and reported a timeout. It made
+                 * things worse rather than better: the request returned after ten seconds, the
+                 * dialog stopped being one this request had raised, and nothing cleared it at all
+                 * -- so a mistyped line left a modal standing in front of the editor for the rest
+                 * of the session instead of for thirteen seconds.
+                 */
+                /*
+                 * A SESSION THIS PRODUCT LEFT STOPPED IS CLEARED HERE, ON THE DOOR'S THREAD.
+                 *
+                 * THE ROOT CAUSE, which three attempts on the host thread could not reach. When a
+                 * line will not compile, the editor's "Compile error" box goes up and dismissing
+                 * it leaves VBA stopped INSIDE the scratch procedure, with `Application.Run`
+                 * suspended mid-call. A suspended frame unwinds only when the host thread returns
+                 * to its message loop -- so a recovery running ON that thread, inside a
+                 * RunOnHostThread callback, is holding the one thing that has to happen for the
+                 * recovery to work. Reset was issued, repeatedly, for eight seconds, and could not
+                 * take: not because the budget was short but because no budget can be long enough
+                 * when waiting is itself what prevents the wait from ending (2026-08-07).
+                 *
+                 * Issued from here it is an ordinary request, the host thread goes back to its
+                 * pump between calls, the frame unwinds, and the mode is design again. The polling
+                 * below is not a timing guess for the same reason `compile` polls: the door's
+                 * thread is the only one still moving, and what it waits for can actually happen
+                 * while it waits.
+                 */
+                if (ScratchBreakStanding())
+                {
+                    Log.Info("immediate: the editor is stopped in the scratch module, clearing it");
+                    surface.RunOnHostThread(() => ExecuteEditorCommand(VbeCommands.Command.Reset));
+
+                    var clearBy = Environment.TickCount64 + 5000;
+                    while (Environment.TickCount64 < clearBy && ScratchBreakStanding())
+                    {
+                        Thread.Sleep(100);
+                    }
+
+                    if (ScratchBreakStanding())
+                    {
+                        var stuck = "The last line left the editor stopped inside this product's "
+                            + "own scratch module and it could not be cleared. Press Reset in the "
+                            + "editor.";
+
+                        Log.Warn($"immediate: {stuck}");
+                        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                            new DebugImmediateReply(false, stuck, true),
+                            DebugJsonContext.Default.DebugImmediateReply));
+                    }
+
+                    surface.RunOnHostThread(RemoveScratchModule);
+                }
+
+                var raisedBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
+
+                var evaluated = new ManualResetEventSlim(false);
+                var outcome = string.Empty;
+                var failed = false;
+
+                surface.RunOnHostThread(() =>
+                {
+                    try
+                    {
+                        var result = EvaluateImmediate(text);
+                        outcome = result.Text;
+                        failed = result.Failed;
+                    }
+                    finally
+                    {
+                        evaluated.Set();
+                    }
+                });
+
+                var complained = new List<string>();
+                var deadline = Environment.TickCount64 + WaitMilliseconds(request, 15000);
+
+                while (Environment.TickCount64 < deadline && !evaluated.IsSet)
+                {
+                    evaluated.Wait(120);
+
+                    foreach (var raised in DialogWatch.Dialogs())
+                    {
+                        if (!raisedBefore.Add(raised.Window))
+                        {
+                            continue;
+                        }
+
+                        // The box's own words ARE the answer. A compile error says what is wrong
+                        // with the line, which is exactly what the developer typed it to find out,
+                        // and it is more use in the panel than on top of the editor.
+                        complained.Add(raised.Text.Length > 0 ? raised.Text : raised.Caption);
+
+                        var pressed = DialogWatch.SafeAnswerFor(raised) ?? "OK";
+                        DialogWatch.Dismiss(raised.Caption, pressed);
+                        Log.Info($"immediate: \"{raised.Text}\" answered with {pressed}");
+                    }
+                }
+
+                var ran = evaluated.Wait(2000);
+                evaluated.Dispose();
+
+                // What the editor complained about outranks what the evaluator managed to return.
+                // A cleared compile box leaves the run answering an empty string, which reads as a
+                // successful evaluation of nothing.
+                if (complained.Count > 0)
+                {
+                    outcome = string.Join(" ", complained).Replace("\r", " ").Replace("\n", " ").Trim();
+                    failed = true;
+                }
+
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply));
+                    new DebugImmediateReply(ran, outcome, failed),
+                    DebugJsonContext.Default.DebugImmediateReply));
             }
 
             case "locals":
@@ -3155,7 +3397,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.ReplaceAllRequested = OnReplaceAllRequested;
         _editorSurface.Polled = PollDebugState;
         _editorSurface.PlacementSettled = RefreshSurfacePlacement;
-        _editorSurface.EvaluateRequested = EvaluateImmediate;
+        _editorSurface.EvaluateRequested = line => EvaluateImmediate(line);
         _editorSurface.ExternalOpenRequested = OpenExternal;
         _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
@@ -5400,6 +5642,21 @@ internal sealed class AddInSession : IDisposable
 
             PublishDebugMode(mode);
 
+            // THE TITLE BAR SAYS THE MODE, because it is the one piece of state a developer needs
+            // at a glance from another window: whether the thing they alt-tabbed away from is
+            // sitting at a breakpoint. Design is said too, rather than left blank: a mode you only
+            // see sometimes is one you cannot rely on reading, and a window saying nothing is
+            // indistinguishable from one that has stopped reporting.
+            if (_hostChrome is { } chrome)
+            {
+                var says = mode == BreakMode ? "break" : mode == DesignMode ? "design" : "running";
+                if (chrome.Mode != says)
+                {
+                    chrome.Mode = says;
+                    chrome.Apply();
+                }
+            }
+
             // The read answered, so the busy episode, if there was one, is over.
             _debugReadFailureLogged = false;
 
@@ -5639,6 +5896,28 @@ internal sealed class AddInSession : IDisposable
 
         _immediateReader?.Poll();
 
+        /*
+         * THE TITLE BAR IS NOT RE-ASSERTED HERE, and that is deliberate.
+         *
+         * The caption is taken over at start-up and retaken on every rename of the frame window.
+         * On 2026-08-07 it was seen back to "Microsoft Visual Basic for Applications -
+         * DebugFixture.xlsm" mid-session, and a re-apply was briefly added to this poll to cover
+         * it. It was removed again for two reasons, both worth keeping written down.
+         *
+         * It did not work: this poll STOPS WHEN THE EDITOR IS IDLE, by design, so a caption
+         * overwritten while nothing else is happening stays overwritten. Proved by overwriting it
+         * by hand on the very window the chrome owns, and finding the editor's own name still
+         * there three seconds later. And a poll is the wrong shape for this regardless: the
+         * caption changes at a known moment and belongs on that moment's event, not on a tick
+         * that has to keep asking a question whose answer is almost always no.
+         *
+         * WHERE A NEXT ATTEMPT SHOULD START, since one afternoon was already lost to a wrong
+         * turn here: it is NOT established whether the name-change event arrives. The tracker
+         * handles renames and then returns BEFORE the line that logs window events, so the log
+         * contains no rename lines whether or not any were delivered. Reading that emptiness as
+         * "the event never comes" is the mistake to avoid; instrument the handler itself.
+         */
+
         // A stale pane picture is retried here, because the editor that refused it also stopped
         // producing trustworthy window events. Success fires the tracker's Changed, which is what
         // catches the tab strip up with everything that happened while the editor was busy.
@@ -5823,7 +6102,14 @@ internal sealed class AddInSession : IDisposable
         });
     }
 
-    private void EvaluateImmediate(string line)
+    /// <summary>
+    /// Evaluates a line in the Immediate window and RETURNS its verdict.
+    ///
+    /// It used to return nothing, showing the result on the page and telling the caller only that
+    /// it had run. So the debug route could report that an evaluation had been asked for and never
+    /// what it came to, and the Immediate window ended up with a route nothing could assert on.
+    /// </summary>
+    private ImmediateEvaluator.Result EvaluateImmediate(string line)
     {
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
 
@@ -5839,9 +6125,55 @@ internal sealed class AddInSession : IDisposable
             }
         }
 
+        /*
+         * STOPPED INSIDE OUR OWN SCRATCH PROCEDURE: clear it before doing anything else.
+         *
+         * A line that will not compile raises the editor's "Compile error" box, and dismissing it
+         * leaves VBA STOPPED INSIDE the scratch module. `Application.Run` never returns, because
+         * that call frame is suspended in the debugger, so nothing written after it can ever run:
+         * the evaluator's own clean-up, its mode check, and the flag it sets for the next
+         * evaluation all sit BENEATH the suspended frame. Three attempts at recovering after the
+         * fact failed for that one reason, and the log said so by containing none of their output
+         * (2026-08-07).
+         *
+         * The recovery therefore belongs HERE, on the way into a later evaluation, on a frame
+         * that is not suspended. The discriminator is exact rather than a guess about modes: if
+         * the editor is stopped and the pane it is stopped in is the scratch module, the session
+         * being ended is one this product started and nobody else can be looking at it. A
+         * developer stopped at their own breakpoint is in one of their own modules and is never
+         * touched.
+         */
+
         _editorSurface?.FlushEdits();
 
-        var evaluator = _immediate ??= new ImmediateEvaluator(_editor);
+        var evaluator = _immediate;
+        if (evaluator is null)
+        {
+            evaluator = _immediate = new ImmediateEvaluator(_editor);
+
+            // PUT THE PROJECT BACK when an evaluation leaves it stopped. A line that will not
+            // compile raises the editor's own "Compile error" box, and behind it the project is
+            // out of design mode: every evaluation after that answered "Not available while
+            // execution is stopped", so one mistyped line made the Immediate window useless until
+            // somebody thought to press Reset (measured 2026-08-07 with `?((`).
+            //
+            // Through the editor's own Reset command, which is what a developer would press, and
+            // which this session already knows how to execute. The evaluator notices; it does not
+            // reach for COM of its own to fix it.
+            evaluator.StoppedUnexpectedly = () =>
+            {
+                Log.Info("immediate: the line left the project stopped, resetting");
+                try
+                {
+                    ExecuteEditorCommand(VbeCommands.Command.Reset);
+                    Log.Info("immediate: reset executed");
+                }
+                catch (Exception ex)
+                {
+                    Log.Info($"immediate: reset FAILED ({ex.GetType().Name}: {ex.Message})");
+                }
+            };
+        }
 
         // The mode is read now rather than taken from the cached flag. The flag is as old as the
         // last poll, and evaluating during an unnoticed break added a module to a stopped
@@ -5875,6 +6207,8 @@ internal sealed class AddInSession : IDisposable
         // Running the line took the host through pane churn that ends with a native pane active
         // and the keyboard on it. The developer is mid-conversation with the prompt.
         _editorSurface?.Focus();
+
+        return result;
     }
 
     /// <summary>Answers the surface's menu bar with the items the editor holds right now.</summary>
@@ -8988,13 +9322,29 @@ internal sealed class AddInSession : IDisposable
             // The title bar is the last thing in the window still announcing the product this one
             // replaced, and the editor rewrites it as the active module changes, so it is retaken
             // on every rename of that window rather than set once.
-            _codePanes.CaptionChanged = window =>
-            {
-                if (_hostChrome is not null && window == CodePaneTracker.MainWindow())
-                {
-                    _hostChrome.Apply();
-                }
-            };
+            /*
+             * ANY rename in the editor retakes the title, not only a rename OF the title's window.
+             *
+             * This used to fire only when the renamed window WAS the frame the chrome owns, which
+             * reads as the careful thing to do and meant the caption was taken over once at
+             * start-up and never again. Two measurements, on 2026-08-07, between them explain it:
+             *
+             *   - a real rename arrives as `rename event for F10AF8` while the chrome owns
+             *     13209A6, so the equality never holds and Apply is never called;
+             *   - and overwriting 13209A6's caption by hand produces NO event at all, so that
+             *     window's own renames do not reach this hook in the first place.
+             *
+             * The frame is retitled at the same moments its neighbours are, so their events are a
+             * perfectly good cue for asking whether ours still says what we put there. Apply is
+             * built for exactly this: it reads the caption, compares it against the one it last
+             * wrote, and writes nothing when they match, so being asked often costs a string
+             * compare and answers almost always no.
+             *
+             * An event rather than a tick, deliberately. A poll was tried here and removed: it
+             * stops when the editor is idle, so it did not fix the case it was added for, and a
+             * caption that changes at a known moment belongs on that moment.
+             */
+            _codePanes.CaptionChanged = _ => _hostChrome?.Apply();
 
             // Any destroy might have been a hidden pane, which the tracker's own picture cannot
             // show (it only holds panes it can match — the active one, in practice). A moment of

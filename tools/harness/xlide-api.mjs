@@ -790,7 +790,22 @@ function clientFor(entry) {
       }
       return false;
     },
-    immediate: (text) => call(`immediate${query({ text })}`, { method: "POST" }),
+    /**
+     * The Immediate window: evaluate a line, or read what the window says.
+     *
+     * ANSWERS THE OUTCOME, not the request. It used to post the line and return `{ran: true}`
+     * without waiting, so a caller learned that an evaluation had been asked for and nothing
+     * else; what the expression came to went only to the page. That is why this panel had a
+     * route and no suite.
+     *
+     *   await api.immediate("?1+1");       // -> { ran: true, text: "2", failed: false }
+     *   await api.immediate("?Nonsense");  // -> { failed: true, text: the error }
+     *   await api.immediate();             // -> the whole window as it stands
+     *
+     * `ran: false` means the evaluation did not finish inside the wait. The line still went in.
+     */
+    immediate: (text) =>
+      call(`immediate${query({ text })}`, { method: "POST", timeout: 20000 }),
 
     /**
      * Every breakpoint the session is holding, and the mode it is in.

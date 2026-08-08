@@ -249,6 +249,16 @@ internal sealed class ImmediateReader : IDisposable
     /// <summary>Treats everything currently in the window as already seen.</summary>
     public void Reset() => _seen = Normalise(ReadAll()) ?? string.Empty;
 
+    /// <summary>
+    /// The window's whole text as it stands, which nothing outside this class could see.
+    ///
+    /// The reader existed to push each NEW run of output to the page, and that is all anybody
+    /// could observe: what the window says right now was reachable only by having watched every
+    /// message that ever arrived. So a probe could type into the Immediate window and never read
+    /// it, which is why the panel had a route and no suite (2026-08-07).
+    /// </summary>
+    public string? Text() => Normalise(ReadAll());
+
     private string? ReadAll()
     {
         var text = _text;

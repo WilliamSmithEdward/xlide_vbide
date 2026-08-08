@@ -840,3 +840,105 @@ four of them.
 The general shape is worth keeping: when a defect resists reproduction, the useful work is often
 not another attempt at reproducing it but a better instrument for the next occurrence. This entry
 is where the next one gets checked against.
+
+## 38. A suspended frame cannot be unwound by the thread it is suspended on
+
+One mistyped line made the Immediate window useless for the rest of the session, and four
+attempts to fix it failed for the same reason before the reason was understood. It is the best
+example this codebase has of a bug where every plausible fix is a timing fix and every timing fix
+is wrong.
+
+**The defect.** VBA cannot evaluate a string, so a line typed into the Immediate panel is compiled
+by writing it into a scratch module and running it by name. `On Error GoTo` inside the generated
+procedure catches run-time errors, so `?1/0` comes back as "Division by zero (error 11)" and all
+is well. A SYNTAX error is not a run-time error: the project never compiles, the handler is never
+installed, and the editor raises its own "Compile error" box instead. Dismissing that box leaves
+VBA stopped INSIDE the scratch procedure, with `Application.Run` suspended mid-call. From then on
+every evaluation answered "Not available while execution is stopped: evaluating adds a procedure
+to the project, which would reset it and end the debugging session" -- blaming a debugging session
+the developer had never started, and recoverable only by pressing Reset by hand.
+
+**Why four fixes failed.** A suspended VBA frame unwinds only when the host thread returns to its
+message loop. Every attempt ran ON that thread:
+
+1. Check the mode after `Application.Run` and reset. `Run` never returns; the check is beneath the
+   suspended frame and is never reached. The log proved it by containing none of its output.
+2. Arm a flag in the `finally` for the next evaluation to act on. Same reason, plus a second one:
+   `Remove` throws when the project is stopped, so anything after it in that block never ran
+   either.
+3. Reset on entry to the next evaluation and sleep one second for the mode to settle. The reset
+   took 1.24 seconds; the budget expired just before it landed, and the line that provoked the
+   recovery was declined anyway.
+4. Poll the condition rather than the clock, re-issuing Reset, for eight seconds. It never
+   cleared, at any budget.
+
+Attempt 4 is the one that gives the answer away. **No budget can be long enough when the waiting
+is itself what prevents the wait from ending.** Holding the host thread in a loop is holding the
+one thing that has to happen for the loop to finish.
+
+**The proof, in one measurement.** Issued as its own request -- an ordinary host-thread hop that
+returns to the pump -- Reset worked instantly: `break` to `design`, and the next line evaluated to
+42. The command was never the problem. The thread it was issued from was.
+
+**The fix.** The recovery moved to the door's own thread, where the same `compile` route already
+lives and for the same stated reason: it is the only thread still moving while the editor is
+occupied. It asks whether the editor is stopped in the scratch module, posts Reset as its own work
+item, waits for the condition on a thread whose waiting costs the host nothing, and only then
+posts the evaluation. There is still a deadline, but it bounds a wait for something that can
+actually happen rather than substituting for one.
+
+**The general rule, which is bigger than this window.** When a fix looks like it needs a timing
+constant, first ask whether the code doing the waiting is holding what it is waiting for. If it
+is, no constant is correct, and the constant that appears to work on one machine is the bug
+arriving later on somebody else's.
+
+Two smaller truths in passing, both of which cost their own confusion:
+
+- `state.debugMode` is a POLLED value. Read the instant an evaluation returns it reports the poll
+  before last: "break" at +0ms and "design" from +500ms, with the evaluation that raised the
+  question having already succeeded. A check that samples it is asserting on the clock.
+- Not every unresolvable name is a failure. `?ThisDoesNotExist` in a module without Option
+  Explicit is a legitimate empty Variant, and the editor's own Immediate window prints exactly the
+  same, so a test asserting failure there is testing its author's grasp of VBA rather than the
+  product.
+
+## 39. The window being renamed is not the window whose name you took
+
+The product's name was on the editor's title bar at start-up and gone by the time anybody looked
+again, for the whole of a session. It was reported twice before it was believed, because every
+fresh launch showed it working.
+
+The caption is taken over once when the surface comes up, and retaken whenever the frame window
+is renamed, since the editor rewrites its own title as the active project changes. The retake was
+guarded on the obvious condition: react when the renamed window IS the frame the chrome owns.
+That guard never once held.
+
+Two measurements, and neither is guessable from the code:
+
+- A real rename arrives as `rename event for F10AF8` while the chrome owns `13209A6`. The editor
+  retitles its neighbours at the same moments it retitles the frame, and those are the events that
+  reach the hook.
+- Overwriting `13209A6`'s caption by hand, on the very window the chrome owns and had just
+  written to, produces **no event at all**. That window's own renames do not reach this hook.
+
+So the condition being waited for was one that never occurs, and the window that does raise
+events was being filtered out for not being the right one.
+
+The fix is to stop asking which window was renamed. Any rename in the editor is a perfectly good
+cue to ask whether our title still says what we put there, and `Apply` is built for being asked
+often: it reads the caption, compares it against the one it last wrote, and writes nothing when
+they match, precisely so a version that wrote unconditionally would not chase the rename it had
+just caused. Being asked costs a string compare and answers almost always no.
+
+**A poll was tried first and removed, and the removal is the part worth keeping.** Re-applying on
+the session's existing tick looked like the robust answer, and failed twice over: that poll stops
+when the editor is idle, so it did not fix the case it was added for; and a caption that changes
+at a known moment belongs on that moment's event rather than on a tick that must keep asking a
+question whose answer is nearly always no. The developer's instinct, on being shown it, was that a
+constant poller is not best practice, and the measurement agreed.
+
+One trap on the way, worth naming because an afternoon went into it. The tracker handles renames
+and then returns BEFORE the line that logs window events, so the log contains no rename lines
+whether or not any were delivered. That emptiness was read as "the event never arrives", which is
+the opposite of the truth. **An absent log line is evidence about the logging, not about the
+event.** Instrument the handler, not the search.
