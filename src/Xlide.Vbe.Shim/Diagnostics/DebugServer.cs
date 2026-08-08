@@ -787,7 +787,22 @@ public sealed record DebugNativeReply(
     [property: JsonPropertyName("panes")] DebugNativePaneRow[] Panes,
     /// <summary>What the SURFACE believes it is showing, for the same-reply comparison.</summary>
     [property: JsonPropertyName("surfaceModule")] string? SurfaceModule,
-    [property: JsonPropertyName("surfaceProject")] string? SurfaceProject);
+    [property: JsonPropertyName("surfaceProject")] string? SurfaceProject,
+    /// <summary>Lines in the native pane's code module. Names agreeing is not parity.</summary>
+    [property: JsonPropertyName("nativeLines")] int NativeLines,
+    /// <summary>Lines the surface holds for what it is showing.</summary>
+    [property: JsonPropertyName("surfaceLines")] int SurfaceLines,
+    /// <summary>
+    /// The native pane's text reduced to a comparable form: length and hash, with line endings
+    /// normalised and trailing blanks dropped. Null when there is no pane.
+    /// </summary>
+    [property: JsonPropertyName("nativeContent")] string? NativeContent,
+    /// <summary>The same reduction of what the surface holds, so the two compare exactly.</summary>
+    [property: JsonPropertyName("surfaceContent")] string? SurfaceContent,
+    /// <summary>The native text itself, only when asked with `text=1`.</summary>
+    [property: JsonPropertyName("nativeText")] string? NativeText,
+    /// <summary>The surface's text itself, only when asked with `text=1`.</summary>
+    [property: JsonPropertyName("surfaceText")] string? SurfaceText);
 
 /// <summary>The breakpoints one module carries, in line order.</summary>
 public sealed record DebugBreakpointRow(

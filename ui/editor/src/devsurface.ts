@@ -140,6 +140,14 @@ export interface DevSurfaceParts {
     definition: monaco.languages.DefinitionProvider;
     rename: monaco.languages.RenameProvider;
   };
+  /**
+   * Every use of the symbol at a position, as the references DIALOG is given them.
+   *
+   * Not a monaco provider: this product deliberately registers none, because Go to References
+   * and its peek were gated off in favour of its own list. So the honest mirror is the function
+   * the menu entry calls, which is this one.
+   */
+  referencesAt(position: { line: number; column: number }): Promise<{ word: string; found: unknown[] } | null>;
   openSettings(): void;
   openSponsors(): void;
 }
@@ -771,6 +779,32 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         did: actions.length > 0,
         detail: `${actions.length} quick fix(es)`,
         data: actions.map((one) => ({ title: one.title, kind: one.kind, isPreferred: one.isPreferred })),
+      };
+    },
+
+    /**
+     * Find All References, as the dialog lists them.
+     *
+     * The dialog is opened by the same lookup, so this cannot show a different set from what the
+     * developer sees — which is the point of there being one function rather than two.
+     */
+    references: async (args) => {
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const answer = await parts.referencesAt({
+        line: where.position.lineNumber,
+        column: where.position.column,
+      });
+
+      if (!answer) {
+        return { did: false, detail: "the editor would not answer here; the host-active module is another" };
+      }
+
+      return {
+        did: answer.found.length > 0,
+        detail: `${answer.found.length} reference(s) to ${answer.word}`,
+        data: answer.found,
       };
     },
 

@@ -2295,6 +2295,8 @@ internal sealed class AddInSession : IDisposable
                 string? activeProject = null;
                 var caretLine = 0;
                 var caretColumn = 0;
+                var nativeLines = 0;
+                string? nativeText = null;
 
                 if (activePane is not null)
                 {
@@ -2314,10 +2316,24 @@ internal sealed class AddInSession : IDisposable
                     using var component = codeModule?.GetObject("Parent");
                     activeModule = component?.GetString("Name");
 
+                    // THE PANE'S TEXT, not a proxy for it. Names agreeing is not parity and
+                    // neither is a line count: what a developer means by "the editor is in sync"
+                    // is that the code is the same code. A surface holding an empty document for
+                    // a module the host has 42 lines of passed every name comparison there was,
+                    // and showed a blank editor (2026-08-08).
+                    //
+                    // Hashed rather than shipped, because this is asked after every step of a
+                    // randomised walk; `text=1` carries the actual text for the run that fails.
+                    nativeLines = codeModule?.GetInt32("CountOfLines") ?? 0;
+                    nativeText = component is null ? null : ProjectReader.ReadSource(component);
+
                     using var collection = component?.GetObject("Collection");
                     using var owner = collection?.GetObject("Parent");
                     activeProject = owner is null ? null : DisplayFromProjectId(ProjectReader.Identity(owner).Id);
                 }
+
+                var surfaceText = _editorSurface?.Text;
+                var wantText = request.Query.TryGetValue("text", out var wantsText) && wantsText != "0";
 
                 var paneRows = (ReadOpenModules() ?? [])
                     .Select(pane => new DebugNativePaneRow(pane.Name, pane.Project))
@@ -2331,7 +2347,13 @@ internal sealed class AddInSession : IDisposable
                         caretColumn,
                         paneRows,
                         _editorSurface?.Module,
-                        DisplayFromProjectId(_shownProject)),
+                        DisplayFromProjectId(_shownProject),
+                        nativeLines,
+                        surfaceText?.Split('\n').Length ?? 0,
+                        ContentKey(nativeText),
+                        ContentKey(surfaceText),
+                        wantText ? nativeText : null,
+                        wantText ? surfaceText : null),
                     DebugJsonContext.Default.DebugNativeReply);
             }
 
@@ -3744,6 +3766,20 @@ internal sealed class AddInSession : IDisposable
                 // here, or the engine keeps diagnosing text that no longer exists — the
                 // problems of a discarded edit survived the close and the reopen (2026-08-05).
                 _analysis?.NotifyLiveText(component, stored ?? text, null, owner);
+
+                // AND THE SURFACE, which this used to leave behind entirely.
+                //
+                // "A host rewrite bypasses the page" was the reason given for correcting the
+                // engine here, and the page was then never corrected at all: a module written
+                // from outside while its pane is open kept whatever text the surface last had.
+                // Found 2026-08-08 with a freshly built fixture — the workbook held 42 lines,
+                // the native pane held them too, and the editor showed an EMPTY document, so
+                // every breakpoint on it was refused as "not an executable statement" because
+                // the line being asked about did not exist on the surface.
+                //
+                // Sync only touches a document the surface actually holds, and leaves an
+                // unwritten one alone, so this cannot overwrite an edit in flight.
+                _editorSurface?.Sync(component, DisplayFromProjectId(foundOwner ?? owner), stored ?? text);
             }
 
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
@@ -7108,6 +7144,28 @@ internal sealed class AddInSession : IDisposable
     /// workbook, the identity itself otherwise. Lowercase for saved ones — comparisons on the
     /// page side are case-insensitive.
     /// </summary>
+    /// <summary>
+    /// A module's text reduced to something two sides can be compared on.
+    ///
+    /// Line endings are normalised and trailing blank lines dropped, because the host and the
+    /// page genuinely disagree about both and neither disagreement is a defect: VBA stores CRLF
+    /// and counts a trailing line the page does not draw. Everything else must match exactly —
+    /// a single changed character is a real difference and has to register as one.
+    ///
+    /// Null for no text at all, which is a different answer from empty text and is reported as
+    /// such: a module the surface does not hold is not a module it holds wrongly.
+    /// </summary>
+    private static string? ContentKey(string? text)
+    {
+        if (text is null)
+        {
+            return null;
+        }
+
+        var normalised = text.Replace("\r\n", "\n").Replace('\r', '\n').TrimEnd('\n');
+        return $"{normalised.Length}:{normalised.GetHashCode(StringComparison.Ordinal)}";
+    }
+
     private static string? DisplayFromProjectId(string? projectId)
     {
         if (string.IsNullOrEmpty(projectId))

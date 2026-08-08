@@ -165,7 +165,7 @@ function clientFor(entry) {
      *
      * The surface's own belief rides along in the same reply, so the comparison is one call.
      */
-    native: () => call("native"),
+    native: ({ text } = {}) => call(`native${query({ text: text ? 1 : undefined })}`),
 
     /** True when the native pane, the surface and the page all name the same module. */
     async inSync() {
@@ -173,11 +173,28 @@ function clientFor(entry) {
       const page = ui.focus.model ? ui.focus.model.split("/").pop() : null;
       const same = (a, b) => (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
 
+      // THE CONTENT, not a proxy for it. A surface holding an empty document for a module the
+      // host has 42 lines of agrees on every name and shows a blank editor, which is how this
+      // was found (2026-08-08). Both sides are reduced the same way in the shim — line endings
+      // normalised, trailing blanks dropped — so a single changed character registers and the
+      // host's CRLF does not.
+      //
+      // A null native content means there is no pane to compare against, which is not a
+      // disagreement; a null surface content against a real pane is.
+      const contentAgrees = below.nativeContent === null
+        || below.nativeContent === below.surfaceContent;
+
       return {
-        agreed: same(below.activeModule, below.surfaceModule) && same(below.surfaceModule, page),
+        agreed: same(below.activeModule, below.surfaceModule) && same(below.surfaceModule, page)
+          && contentAgrees,
+        contentAgrees,
         nativeModule: below.activeModule,
         surfaceModule: below.surfaceModule,
         pageModule: page,
+        nativeLines: below.nativeLines,
+        surfaceLines: below.surfaceLines,
+        nativeContent: below.nativeContent,
+        surfaceContent: below.surfaceContent,
         nativeCaret: `${below.caretLine}:${below.caretColumn}`,
         pageCaret: `${ui.focus.line}:${ui.focus.column}`,
       };

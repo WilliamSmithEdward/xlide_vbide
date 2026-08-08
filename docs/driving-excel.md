@@ -315,12 +315,31 @@ await api.inSync();    // one boolean over native, surface and page
 > where the developer is not looking and a breakpoint on the wrong line, with nothing on screen
 > to say so.
 >
+> **Parity means the CONTENT matches, not the names.** A surface holding an empty document for a
+> module the host has 42 lines of passes every name comparison there is, and shows a blank
+> editor — which is exactly how the first one was found. Both texts are reduced the same way in
+> the shim, so a changed character registers and the host's CRLF does not; `native({text: true})`
+> carries both texts for the run that fails.
+>
 > Every check in this repo read the page and the workbook and never the panes below, until
 > 2026-08-08. It is an invariant in the surface walk now, checked after every step, and the
-> rename suite asserts it after every state change.
+> rename and debugger suites assert it after every state change.
 
 ```bash
-node tools\harnessename-features.mjs   # rename and definition, with parity at each step
+node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at every stage
+```
+
+Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**
+— the rename fixture deliberately does not and the language fixture carries a module of deliberate
+defects, so pressing Run on either raises a modal and tests the dialog guard instead of the
+debugger. The suite sets a breakpoint, runs, and checks that the native pane is on the stopped
+module at the stopped LINE, that the Locals panel holds the procedure's variables with the values
+assigned before the stop, and that Step Over advances the native caret. It leaves break mode with a
+Reset whatever happens: a session left stopped blocks everything after it.
+
+```bash
+node tools\harness
+ename-features.mjs   # rename and definition, with parity at each step
 ```
 
 Rename is the one feature here that rewrites the developer's code, and it had no api at all

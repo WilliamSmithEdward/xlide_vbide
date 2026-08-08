@@ -1,0 +1,151 @@
+/*
+ * The run-and-stop cycle, with parity against the native editor at every stage.
+ *
+ * This is where parity matters most. Run, Step and ToggleBreakpoint act on the host's own ACTIVE
+ * CODE PANE and the caret inside it — not on the page — so a surface that has drifted means a
+ * breakpoint on the wrong line and a step into somewhere the developer is not looking. Checking
+ * only the page here would pass while the debugger walked another module entirely.
+ *
+ * Run against the debug fixture, which is the only one that COMPILES:
+ *   tools\New-DebugFixture.ps1
+ *   node tools\harness\debugger-features.mjs
+ *
+ * Every run leaves break mode with a Reset, whatever happened, because a session left stopped
+ * blocks everything a later test does and the next reader has no idea why.
+ */
+
+import { open } from "./xlide-api.mjs";
+
+const api = await open({});
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const project = await api.project();
+
+const broken = [];
+let checks = 0;
+const check = (what, ok, detail) => {
+  checks++;
+  console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
+  if (!ok) { broken.push(what); }
+};
+
+async function until(what, predicate, budgetMs = 20000) {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    const answer = await predicate();
+    if (answer) { return answer; }
+    await wait(250);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Native, surface and page naming the same module: the definition of tested here. */
+async function parity(after) {
+  checks++;
+  const sync = await api.inSync();
+  console.log(`  ${sync.agreed ? "ok  " : "FAIL"} native parity ${after.padEnd(26)} native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
+  if (!sync.agreed) { broken.push(`native parity ${after}`); }
+  return sync;
+}
+
+/**
+ * Stopped, as the product spells it.
+ *
+ * The mode is a STRING — "design", "run" or "break" — not a number. Comparing it to 2 is a
+ * predicate that is false in every state including the one it is looking for, so the run
+ * reported as never stopping while it was stopped the whole time (2026-08-08).
+ */
+const stopped = async () => {
+  const mode = (await api.breakpoints()).mode ?? (await api.state()).debugMode;
+  return mode === "break";
+};
+
+console.log("the debugger, with the native panes checked at every stage\n");
+
+try {
+  await api.guard(true);
+
+  await api.pane("open", { module: "Runner", project: project.projectId });
+  await until("Runner to be shown", async () => {
+    const ui = await api.ui();
+    return ui.focus.model?.toLowerCase().endsWith("/runner") ? ui : null;
+  });
+  await parity("with Runner shown");
+
+  // It has to compile, or every command below is really a test of the dialog guard.
+  const compiled = await api.compile();
+  check("the fixture compiles", compiled.compiled !== false,
+    JSON.stringify(compiled).slice(0, 200));
+
+  const text = (await api.readModule("Runner", project.projectId)).text ?? "";
+  const lines = text.split(/\r?\n/);
+  const stopLine = lines.findIndex((l) => l.includes("counter = counter + 1")) + 1;
+  console.log(`\n  stopping on line ${stopLine}: ${JSON.stringify(lines[stopLine - 1])}`);
+
+  const set = await api.breakpoint("Runner", stopLine, { project: project.projectId, state: "on" });
+  console.log(`  breakpoint: ${JSON.stringify(set)}`);
+  await wait(1200);
+
+  const recorded = (await api.breakpoints()).breakpoints ?? [];
+  check("the breakpoint was recorded against Runner",
+    recorded.some((r) => r.module.toLowerCase() === "runner" && r.lines.includes(stopLine)),
+    JSON.stringify(recorded));
+
+  await parity("after setting a breakpoint");
+
+  console.log("\n  running Walk:");
+  await api.caret(lines.findIndex((l) => l.includes("Public Sub Walk")) + 1,
+    { module: "Runner", project: project.projectId });
+  await wait(800);
+  await api.command("run");
+
+  const reached = await until("break mode", stopped, 25000).catch(() => false);
+  check("the run stopped at the breakpoint", Boolean(reached));
+
+  if (reached) {
+    const below = await api.native();
+    console.log(`  native pane: ${below.activeModule} at ${below.caretLine}:${below.caretColumn}`);
+    check("the NATIVE pane is on the stopped module",
+      (below.activeModule ?? "").toLowerCase() === "runner", below.activeModule ?? "none");
+    check("the NATIVE caret is on the stopped line",
+      below.caretLine === stopLine, `${below.caretLine}, wanted ${stopLine}`);
+
+    await parity("while stopped");
+
+    const locals = await api.locals();
+    const rows = locals.rows ?? [];
+    console.log(`  locals: ${JSON.stringify(rows.map((r) => `${r.expression}=${r.value}`)).slice(0, 220)}`);
+    check("the Locals panel holds the procedure's variables",
+      ["counter", "label", "ratio"].every((name) =>
+        rows.some((r) => (r.expression ?? "").toLowerCase() === name)),
+      rows.map((r) => r.expression).join(","));
+
+    check("counter holds the value it was assigned before the stop",
+      rows.some((r) => (r.expression ?? "").toLowerCase() === "counter" && String(r.value).trim() === "1"),
+      rows.find((r) => (r.expression ?? "").toLowerCase() === "counter")?.value);
+
+    console.log("\n  stepping:");
+    await api.command("stepOver");
+    await wait(1500);
+
+    const afterStep = await api.native();
+    check("Step Over advanced the native caret",
+      afterStep.caretLine > stopLine, `${stopLine} -> ${afterStep.caretLine}`);
+    await parity("after a step");
+  }
+} finally {
+  // Whatever happened, leave break mode and take the breakpoint out: a session left stopped
+  // blocks everything afterwards, and the next reader cannot tell why.
+  await api.command("reset").catch(() => {});
+  await wait(1200);
+  const text = (await api.readModule("Runner", project.projectId)).text ?? "";
+  const stopLine = text.split(/\r?\n/).findIndex((l) => l.includes("counter = counter + 1")) + 1;
+  await api.breakpoint("Runner", stopLine, { project: project.projectId, state: "off" }).catch(() => {});
+  await api.guard(false, { forget: true }).catch(() => {});
+  await wait(800);
+  console.log(`\n  left break mode: ${!(await stopped())}`);
+}
+
+console.log(`\n${checks} checks, ${broken.length} broken`);
+for (const one of broken) { console.log("  ! " + one); }
+
+process.exit(broken.length === 0 ? 0 : 1);

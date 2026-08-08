@@ -171,18 +171,40 @@ function renameSummary(answer: HostRenameAnswer, newName: string): string {
  * Every use of the symbol at the caret, in xlide's own list. One function, so the key and the
  * right-click entry cannot show two different things.
  */
+async function referencesAt(
+  bridge: EditorBridge,
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): Promise<{ word: string; found: HostLocation[] } | null> {
+  // The same refusal every language provider opens with: this answers for the module the host
+  // believes is active and for no other, because that is what the menu entry does.
+  if (model !== bridge.hostActiveModel()) {
+    return null;
+  }
+
+  return {
+    word: model.getWordAtPosition(position)?.word ?? "",
+    found: await bridge.requestNavigation(model.getOffsetAt(position), true, true),
+  };
+}
+
 async function showReferences(
   bridge: EditorBridge,
   editor: monaco.editor.ICodeEditor,
 ): Promise<void> {
   const model = editor.getModel();
   const position = editor.getPosition();
-  if (!model || !position || model !== bridge.hostActiveModel()) {
+  if (!model || !position) {
     return;
   }
 
-  const word = model.getWordAtPosition(position);
-  const found = await bridge.requestNavigation(model.getOffsetAt(position), true, true);
+  const answer = await referencesAt(bridge, model, position);
+  if (!answer) {
+    return;
+  }
+
+  const word = { word: answer.word };
+  const found = answer.found;
 
   openReferencesDialog(word?.word ?? "this symbol", found, {
     navigate: (module, line, column, workbook) =>
@@ -894,6 +916,11 @@ function boot(): void {
       codeAction: codeActionProvider,
       definition: definitionProvider,
       rename: renameProvider,
+    },
+    referencesAt: async ({ line, column }) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      return model ? referencesAt(bridge, model, new monaco.Position(line, column)) : null;
     },
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),
