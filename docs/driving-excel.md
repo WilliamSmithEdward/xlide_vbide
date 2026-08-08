@@ -47,6 +47,12 @@ with `DOTNET_ROOT` at `%LOCALAPPDATA%\Microsoft\dotnet` and
 tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm -Fresh
 ```
 
+**Always with `-Fresh`.** Excel reuses one process for several workbooks, so launching while an
+older instance is still shutting down attaches to that one and the script dies on "Could not reach
+Excel NNNN through its window". It is not a real failure and it costs a minute every time. The
+switch closes what is running first, and does it more reliably than killing the process by hand,
+because the window can outlive the kill by a second or two.
+
 Not `New-Object -ComObject Excel.Application`. A host created through automation runs in
 **embedding mode** and loads **no add-ins**, so the thing under test is never there. It has to be
 `EXCEL.EXE <workbook>` with a document on the command line, so it initialises promptly.
