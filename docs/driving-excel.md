@@ -127,6 +127,32 @@ reporting the build stamp each is now running. `-NoBuild` copies what the gate j
 
 ## 3. What the api can do
 
+### Day to day, drive it directly. Do not write a script
+
+**The suites are for regressions, not for questions** (the developer, 2026-08-07). A full pass over
+com-leak, format-positions, three-copies and immediate-watch is about two and a half minutes plus
+an Excel restart, and paying that to find out what the caret is doing is what makes a loop feel
+slow. A new `.mjs` per question is worse: it leaves the repo full of files nobody runs twice.
+
+The client is a CLI, with a verb per route. No file needed:
+
+```bash
+node tools\harness\xlide-api.mjs doctor
+node tools\harness\xlide-api.mjs ui
+node tools\harness\xlide-api.mjs problems
+node tools\harness\xlide-api.mjs module Helpers
+node tools\harness\xlide-api.mjs immediate "?1+1"
+node tools\harness\xlide-api.mjs act format
+```
+
+For anything the CLI does not cover, a `node -e` against the module answers in one line.
+
+**Write a suite when the check is a regression worth keeping**: something that was broken, is now
+fixed, and must fail if it breaks again. Those earn a place in the gate. **Run the full suite**
+before a commit touching the editor surface, COM or the engine, and whenever a crash or a leak is
+suspected. A manual check you keep repeating is the signal it has earned a suite, which is how all
+four of the current ones arrived.
+
 ### Every route, and how to call it
 
 The reasoning behind each route is in [debug-api.md](debug-api.md); this is the mapping from route
