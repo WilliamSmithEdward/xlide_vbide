@@ -177,9 +177,21 @@ Check 'models and documents match the modules actually open' {
     $after = Get-Counts
     $script:notes += ("models {0}, documents {1}" -f $after.models, $after.documents)
 
-    # One model per open document, and nothing orphaned behind them. A model left alive
-    # after its pane closed is the leak this surface is most likely to grow.
-    $after.models -eq $after.documents -and $after.documents -eq $before.documents
+    # One model per open document, and no document alive without a tab to show it.
+    #
+    # This used to also demand that the count be UNCHANGED, which is not a property the churn
+    # has. Models are made lazily, when a document is first SHOWN: four tabs sit at one model
+    # until something displays them. The split in this very probe shows a second module, so the
+    # count legitimately rises, and the check passed only when the starting state happened to
+    # have visited a second document already. It failed on a clean session and passed on a dirty
+    # one, which is exactly backwards (2026-08-08).
+    #
+    # What a leak would look like is a model with no document, or a document with no tab. Both
+    # are checked; growth within the open tabs is not a leak, it is laziness working.
+    $tabs = [int] (Page '(() => document.querySelectorAll(".tab").length)()')
+    $script:notes += ("tabs open: {0}" -f $tabs)
+
+    $after.models -eq $after.documents -and $after.documents -le $tabs
 }
 
 Check 'the host did not grow unreasonably through the churn' {
