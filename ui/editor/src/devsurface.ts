@@ -64,12 +64,33 @@ export interface UiSnapshot {
   longTasks: LongTask[];
   /** How many models and documents are alive, since a leak shows here first. */
   census: { models: number; documents: number };
+  /** The find/replace widget: open, its query and scope, and how many matches it holds. */
+  search: {
+    open: boolean;
+    query: string;
+    replacement: string;
+    scope: string;
+    matchCase: boolean;
+    wholeWord: boolean;
+    matches: number;
+    current: number;
+    replaceShown: boolean;
+  };
+  /** The bookmark lines of the model on screen, read from its live decorations. */
+  bookmarks: number[];
 }
 
 export interface DevSurfaceParts {
   workspace: Workspace;
   explorer: Explorer;
   bridge: EditorBridge;
+  search: {
+    state(): UiSnapshot["search"];
+    find(query: string, options?: { scope?: string; matchCase?: boolean; wholeWord?: boolean }): void;
+    open(options?: { scope?: string; withReplace?: boolean }): void;
+    close(): void;
+  };
+  bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
   panes: { list(): { name: string; title: string; open: boolean; permanent: boolean }[] };
   openSettings(): void;
   openSponsors(): void;
@@ -259,6 +280,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     emptyViewShown: workspace.emptyViewShown(),
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
+    search: parts.search.state(),
+    bookmarks: (() => {
+      const model = workspace.activeEditor().getModel();
+      return model ? parts.bookmarks.marksOn(model) : [];
+    })(),
   });
 
   /**
@@ -454,6 +480,66 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focusEditor: () => {
       workspace.activeEditor().focus();
       return { did: true, detail: "the active editor has focus" };
+    },
+
+    /**
+     * Find and replace, driven the way the box is.
+     *
+     * `find` types the query and fires the input event the widget listens for, rather than
+     * setting the value and hoping: an input whose value is assigned in script raises no event
+     * and the widget would never search. That is the same class of miss as clicking a control
+     * that arms on pointerdown.
+     */
+    search: (args) => {
+      const shut = flag(args.close, false);
+      if (shut) {
+        parts.search.close();
+        return { did: true, detail: "the find box is closed" };
+      }
+
+      const query = args.query === undefined ? null : String(args.query);
+      if (query === null) {
+        parts.search.open(args.scope ? { scope: String(args.scope) } : undefined);
+        return { did: true, detail: "the find box is open" };
+      }
+
+      parts.search.find(query, {
+        ...(args.scope ? { scope: String(args.scope) } : {}),
+        matchCase: flag(args.matchCase, false),
+        wholeWord: flag(args.wholeWord, false),
+      });
+      return { did: true, detail: `searching for ${JSON.stringify(query)}` };
+    },
+
+    /**
+     * A bookmark on the caret's line, or a hop between them: the editor's own actions.
+     *
+     * The argument is `which`, NOT `do`. The route uses `do` to pick the action, so an action
+     * that also took `do` had its own value overwrite the selector: `act("bookmark", {do:
+     * "toggle"})` became `do=bookmark&do=toggle` and the door answered "unknown action toggle".
+     * The client refuses a `do` argument now, so the collision cannot be made silently again.
+     */
+    bookmark: (args) => {
+      const which = String(args.which ?? "toggle").toLowerCase();
+      const action = {
+        toggle: "xlide.bookmark.toggle",
+        next: "xlide.bookmark.next",
+        previous: "xlide.bookmark.previous",
+        clear: "xlide.bookmark.clearAll",
+      }[which];
+
+      if (!action) {
+        return { did: false, detail: `which must be toggle, next, previous or clear; got ${which}` };
+      }
+
+      const editor = workspace.activeEditor();
+      const found = editor.getAction(action);
+      if (!found) {
+        return { did: false, detail: `${action} is not registered on this editor` };
+      }
+
+      void found.run();
+      return { did: true, detail: `ran ${action}` };
     },
   };
 

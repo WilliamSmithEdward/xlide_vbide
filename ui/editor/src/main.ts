@@ -509,6 +509,8 @@ function boot(): void {
     workspace,
     explorer: shell.explorerTree(),
     bridge,
+    search: searchWidget,
+    bookmarks,
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),
     openSponsors: () => openSponsorDialog(

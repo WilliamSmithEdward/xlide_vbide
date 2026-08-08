@@ -445,6 +445,64 @@ export class SearchWidget {
     return this.findInput.value.length > 0;
   }
 
+  /**
+   * What the widget is showing, for the debug api's `ui` route.
+   *
+   * Reported from the fields the widget acts on, not scraped from its inputs: the two agreeing
+   * is what makes the report worth anything, and a scrape could not tell a stale render from
+   * the state.
+   */
+  state(): {
+    open: boolean;
+    query: string;
+    replacement: string;
+    scope: string;
+    matchCase: boolean;
+    wholeWord: boolean;
+    matches: number;
+    current: number;
+    replaceShown: boolean;
+  } {
+    return {
+      open: this.isOpen,
+      query: this.findInput.value,
+      replacement: this.replaceInput.value,
+      scope: this.scopeSelect.value,
+      matchCase: this.caseButton.getAttribute("aria-pressed") === "true",
+      wholeWord: this.wordButton.getAttribute("aria-pressed") === "true",
+      matches: this.matches.length,
+      current: this.current,
+      replaceShown: !this.replaceRow.hidden,
+    };
+  }
+
+  /** Types a query and runs the search, the way the find box does when a developer types in it. */
+  find(query: string, options?: { scope?: string; matchCase?: boolean; wholeWord?: boolean }): void {
+    if (!this.isOpen) {
+      this.open(options?.scope ? { scope: options.scope } : undefined);
+    }
+
+    if (options?.scope) {
+      this.scopeSelect.value = options.scope;
+    }
+
+    // The toggles are pressed through their buttons, because pressing them is what runs the
+    // handler that re-searches. Setting aria-pressed alone would leave the widget showing one
+    // thing and searching by another — the first version accepted matchCase and applied
+    // nothing, and a case-sensitive search for `recalculate` still found `Recalculate`.
+    for (const [wanted, button] of [
+      [options?.matchCase, this.caseButton],
+      [options?.wholeWord, this.wordButton],
+    ] as const) {
+      if (wanted !== undefined && (button.getAttribute("aria-pressed") === "true") !== wanted) {
+        button.click();
+      }
+    }
+
+    this.findInput.value = query;
+    this.findInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   open(options?: { scope?: string; withReplace?: boolean }): void {
     if (options?.scope) {
       this.scopeSelect.value = options.scope;

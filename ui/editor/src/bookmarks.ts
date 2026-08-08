@@ -46,6 +46,18 @@ export class Bookmarks {
     }))));
   }
 
+  /**
+   * The marks on a model right now, for the debug api's `ui` route.
+   *
+   * Read from the live decorations rather than from the held map, because the decorations ARE
+   * the truth: they ride the text as it is edited, so the held copy is only what was last
+   * saved off. A reporter that read the map would describe where the marks were put, not where
+   * they are — which is the whole behaviour worth checking.
+   */
+  marksOn(model: monaco.editor.ITextModel): number[] {
+    return this.lines(model);
+  }
+
   /** Adopts a model: restores held marks if its module was closed before, watches disposal. */
   adopt(model: monaco.editor.ITextModel): void {
     if (this.watched.has(model)) {

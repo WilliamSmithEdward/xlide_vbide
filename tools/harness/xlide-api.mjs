@@ -414,6 +414,14 @@ function clientFor(entry) {
      * box arms at pointerdown and fires at pointerup, so `.click()` on it does nothing at all.
      */
     async act(name, args = {}) {
+      // `do` is the route's action selector, so an argument of that name would overwrite it and
+      // the door would answer "unknown action <the argument's value>". Refused loudly rather
+      // than silently: it cost a run of bookmark tests that all failed for this and not for
+      // anything about bookmarks (2026-08-08).
+      if (Object.hasOwn(args, "do")) {
+        throw new Error(`act(${name}): "do" is reserved for the action name; rename that argument`);
+      }
+
       const answer = await call(`act${query({ do: name, ...args })}`, { method: "POST", timeout: 15000 });
       return answer.value ?? answer;
     },

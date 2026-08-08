@@ -233,9 +233,14 @@ ui.dialogs;                       // settings, help, sponsors, references, objec
 ui.waiting.documents;             // text asked for and not yet arrived
 ui.focus;                         // model, line, column, and whether the editor has the keyboard
 ui.emptyViewShown;                // a DIFFERENT question from having no tabs
+ui.search;                        // open, query, scope, matches, current
+ui.bookmarks;                     // the marked lines of the model on screen
+ui.longTasks;                     // main-thread stalls over 50ms, worst first
 
 await api.act("closeActive");
 await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-changes box
+await api.act("search", { query: "Recalculate", scope: "project" });
+await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
