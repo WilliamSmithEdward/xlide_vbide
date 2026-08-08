@@ -212,6 +212,8 @@ export class Dispatcher {
         facts?: string;
         shape?: string;
         mode?: DiagnosticsResult['mode'];
+        /** The positioned reply, so a hit costs nothing rather than a walk of the module. */
+        answer?: DiagnosticsResult;
     }>();
 
     private nextRequestId = 1;
@@ -788,8 +790,14 @@ export class Dispatcher {
 
         if (key !== undefined && facts !== undefined) {
             const memo = this.lastAnalysis.get(key);
-            if (memo && memo.source === source && memo.facts === facts && memo.shape === shape) {
-                return this.positioned(memo.diagnostics, source, memo.mode);
+            // `answer` present is part of the test, not an assumption: entries written by a quick
+            // fix carry findings and no reply, and one of those must not be served as one.
+            if (memo?.answer && memo.source === source && memo.facts === facts && memo.shape === shape) {
+                // The ANSWER, not the findings to be positioned again. Positioning walks the whole
+                // module to build its line-start table, so re-deriving it for a reply that cannot
+                // have changed was a scan of 1.5 MB per memo hit on the largest module - most of
+                // what a hit was still costing (2026-08-08).
+                return memo.answer;
             }
         }
 
@@ -830,6 +838,8 @@ export class Dispatcher {
             throw new RpcError(ErrorCode.InternalError, response.message);
         }
 
+        const answer = this.positioned(response.diagnostics, source, response.incrementalMode);
+
         // Kept whole for quick fixes, which need the parts of a finding that do not travel below,
         // and now for the comparison above as well.
         if (key !== undefined) {
@@ -840,10 +850,11 @@ export class Dispatcher {
                 facts,
                 shape,
                 mode: response.incrementalMode,
+                answer,
             });
         }
 
-        return this.positioned(response.diagnostics, source, response.incrementalMode);
+        return answer;
     }
 
     /**
@@ -859,6 +870,13 @@ export class Dispatcher {
         source: string,
         mode: DiagnosticsResult['mode'],
     ): DiagnosticsResult {
+        // NOTHING TO POSITION, NOTHING TO BUILD. Most modules are clean most of the time, and the
+        // table is a walk of the whole module: on the 64,802-line one that was a 1.5 MB scan per
+        // pass, per clean module, to place no findings at all.
+        if (diagnostics.length === 0) {
+            return { diagnostics: [], mode };
+        }
+
         // Built once for the module: per finding it would be a scan of the whole text each time.
         const starts = lineStarts(source);
 
