@@ -207,6 +207,7 @@ if (runnable) try {
     everyPane.agreed,
     everyPane.stale.map((one) => one.module).join(", "));
 
+
   // BACKSPACE TAKES BACK A LEVEL, which is what makes indenting with spaces bearable now that
   // the tabs option is gone. In LEADING WHITESPACE only: with anything else on the line before
   // the caret it deletes one character, the way it always has.
@@ -242,6 +243,50 @@ if (runnable) try {
   check("Backspace with code before it still deletes one character",
     single.data?.column === afterWord - 1 && (single.data?.text ?? "").includes("Workbook."),
     `caret at column ${single.data?.column}, line now ${JSON.stringify(single.data?.text)}`);
+
+  /*
+   * AND THE FINDING GOES AWAY WHEN THE CODE DOES.
+   *
+   * The pass used to publish per project and only when that project had something to say, so a
+   * workbook going clean said nothing and the last non-empty set stood forever: the error stayed
+   * on screen, pointing at a line that no longer held it. Asking `problems()` about a module
+   * whose text had been restored answered that it still called Close with an argument it does not
+   * contain (2026-08-07).
+   *
+   * The seed is put back to something with nothing wrong in it, and the finding has to retire.
+   */
+  /*
+   * WITH THE PANE CLOSED, which is the case that was broken and the only one that tests it.
+   *
+   * A module OPEN on the surface is re-analysed live on every pause, and that path publishes per
+   * module and clears its own findings, so an open module's error retires whatever the project
+   * pass does. Written while CLOSED there is no live path, and the project pass is the only thing
+   * that can retire it. A first version of this check left the pane open, passed against a build
+   * with the defect deliberately restored, and proved nothing (2026-08-07).
+   */
+  await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
+  await wait(1500);
+
+  /*
+   * RESTORED TO THE ORIGINAL, so the WHOLE PROJECT goes clean, which is the only state the defect
+   * shows in. Removing just the offending line leaves the module without the procedure its caller
+   * expects, so another module complains, the pass is non-empty and publishes anyway, and the
+   * stale finding is cleared by accident. That is exactly why a first version of this check passed
+   * against a build with the guard deliberately restored, and proved nothing.
+   */
+  await api.writeModule(target, original, project.projectId);
+
+  const retired = await until("every finding to retire", async () => {
+    const all = (await api.problems()).findings ?? [];
+    return all.length === 0 ? true : null;
+  }, 25000).catch(() => false);
+
+  check("the findings retire once the whole project is clean",
+    retired === true,
+    "problems() still reports findings for code that is no longer there. A project that goes "
+    + "clean must publish an EMPTY set, or the last non-empty one stands forever: "
+    + JSON.stringify(((await api.problems()).findings ?? [])
+      .map((one) => `${one.module} ${one.line}:${one.column}`)));
 } finally {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
   await wait(1800);

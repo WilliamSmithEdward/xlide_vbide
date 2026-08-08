@@ -1013,3 +1013,58 @@ The other candidate fix, adding the scratch module to the host's active workbook
 have resolved it the opposite way and evaluated against a workbook the developer is not editing.
 
 Measured: with both fixtures open the suite went from 10 passed and 6 failed to 16 and 0.
+
+## 42. A project that goes clean said nothing, so the errors never went away
+
+Found by driving the api by hand rather than by running a suite, which is worth noting on its own:
+the question was "what does `problems()` say right now", and the answer named a module and a line
+that could not possibly hold it.
+
+`problems()` reported `HelpersExtra 6:11 Wrong number of arguments to 'Close'` for a module whose
+entire text is seven lines and contains no `Close` at all, and `Consumer 17:18 Method or data
+member not found: 'HelpersExtra.Thing'` for a `Thing` that is declared right there. Both findings
+described text that had been replaced some minutes earlier.
+
+The engine's live copy was CORRECT, which ruled out the obvious explanation and pointed at the
+publishing rather than the analysis. The pass had run, the log said so, and it said
+`renamefixture.xlsm produced 0 finding(s)`. And there it was:
+
+```csharp
+if (findings.Count > 0)
+{
+    FindingsReady?.Invoke(findings);
+}
+```
+
+**A project with nothing wrong published nothing, so the last non-empty set stood forever.** Fix
+the last error in a workbook and it stays on screen, on a line that no longer holds it, until some
+other error happens to be found. The receiver was already written for the empty case; it was never
+given one.
+
+A second defect was in the same four lines. The publish was per project, from inside the loop over
+projects, and the receiver REPLACES the whole set. With two workbooks open the second project's
+findings wiped the first's, so half the errors were invisible depending on which was analysed
+last. One workbook and that cannot be seen; two is a supported state.
+
+One list for the whole pass, published once, unconditionally. An empty list is not "nothing to
+say", it is "there is nothing wrong any more", and it is the only thing that clears a finding the
+developer has just fixed.
+
+**THE REGRESSION CHECK TOOK THREE ATTEMPTS TO BITE, and each failure was a different way of not
+reproducing the state.** This is the more useful half of the entry.
+
+1. The module was left OPEN. An open module is re-analysed live on every pause, and that path
+   publishes per module and clears its own findings, so the error retired whatever the project
+   pass did. The check passed against a build with the defect deliberately restored.
+2. The pane was closed, but only the offending LINE was removed. That left the module without the
+   procedure its caller expects, so another module complained, the pass was non-empty, it
+   published, and the stale finding was cleared by accident. Passed again.
+3. The module was restored to its ORIGINAL text, so the whole project went clean. Only then did
+   the pass produce zero findings, and only then did the check fail on the broken build, naming
+   both stale findings exactly.
+
+The rule: **a check must reproduce the state, not a state that resembles it.** Each of the first
+two was a fair description of "the code was fixed" and neither reached the condition the bug needs,
+which is a project with NOTHING left to report. When a check will not fail on a build you have
+broken on purpose, the useful question is not "is the fix wrong" but "what is different between
+what I set up and what actually happened".

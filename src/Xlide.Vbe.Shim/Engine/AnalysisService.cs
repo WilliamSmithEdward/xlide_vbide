@@ -709,6 +709,25 @@ internal sealed class AnalysisService : IAsyncDisposable
         var factTypes = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var factProcedures = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        /*
+         * EVERY PROJECT'S FINDINGS, PUBLISHED ONCE, AT THE END OF THE PASS.
+         *
+         * This used to publish per project, from inside the loop, and only when that project had
+         * something to say. Two defects lived in that, and both were user-facing.
+         *
+         * A PROJECT THAT GOES CLEAN SAID NOTHING, so the last non-empty set stood forever: fixing
+         * the last error in a workbook left it on screen, pointing at a line that no longer held
+         * it. Found by asking `problems()` about a module whose text had been restored and being
+         * told it still called Close with an argument it does not contain (2026-08-07).
+         *
+         * AND THE RECEIVER REPLACES, so with two workbooks open the second project's findings
+         * wiped the first's. One workbook and that is invisible; two, which is a supported state,
+         * and half the errors vanish depending on which was analysed last.
+         *
+         * One list, one publish, unconditional. An empty list is the message that clears.
+         */
+        var everything = new List<Finding>();
+
         foreach (var snapshot in snapshots)
         {
             var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
@@ -774,12 +793,13 @@ internal sealed class AnalysisService : IAsyncDisposable
             }
 
             Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
-
-            if (findings.Count > 0)
-            {
-                FindingsReady?.Invoke(findings);
-            }
+            everything.AddRange(findings);
         }
+
+        // Unconditional, and after every project has been read: an empty list is not "nothing to
+        // say", it is "there is nothing wrong any more", which is the only thing that clears a
+        // finding the developer has just fixed.
+        FindingsReady?.Invoke(everything);
 
         // Projects the pass no longer saw are gone — closed workbooks, or a save-as that gave
         // the workbook a new identity. The engine forgets them so their modules stop answering,
