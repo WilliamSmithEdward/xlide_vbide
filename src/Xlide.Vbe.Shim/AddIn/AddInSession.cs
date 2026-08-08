@@ -280,9 +280,28 @@ internal sealed class AddInSession : IDisposable
             })()
             """;
 
+        /*
+         * The wait BACKS OFF rather than sitting at 40ms.
+         *
+         * A flat 40ms before the first poll put a floor of about 70ms under every promise this
+         * door returns — the initial call, the sleep, and the poll, each of the last two a page
+         * round trip. Most of what comes back is a hover or a completion that settled in single
+         * digits and then waited four times as long to be collected.
+         *
+         * It showed up as a scaling curve that would not move: hover measured 77ms on a
+         * 109-line module and 77ms on an 11,000-line one, while the analyzer's own share went
+         * from 1ms to 9ms (2026-08-08). The door was the whole measurement.
+         *
+         * Starting at 2ms and doubling to 40ms keeps a fast answer fast without spinning on a
+         * slow one: a 200ms analysis is polled about a dozen times rather than five, which costs
+         * nothing anybody can measure.
+         */
+        var pause = 2;
+
         while (Environment.TickCount64 < deadline)
         {
-            Thread.Sleep(40);
+            Thread.Sleep(pause);
+            pause = Math.Min(40, pause * 2);
 
             var poll = RunPageScriptOnce(collector, surface, 3000);
             if (poll.Error is not null)

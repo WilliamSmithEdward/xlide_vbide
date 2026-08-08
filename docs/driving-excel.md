@@ -444,6 +444,30 @@ instrument at all.
 answered no key and painted nothing, and **no host counter can see it** — the host thread was fine
 throughout.
 
+### Does it still work in a big module?
+
+```bash
+tools\New-PerfFixture.ps1                # the same code at 109, 1127, 4502 and 11252 lines
+node tools\harness\perf-scaling.mjs
+```
+
+A single timing answers the wrong question. What matters is not "is hover fast" but "is hover
+still fast in the module I actually work in", and that needs a curve.
+
+Measured 2026-08-08, across **103x the lines**: the analyzer's share of a hover goes from 1ms to
+11ms. Sub-linear, and nowhere near anything a developer would feel.
+
+> **Read it against the PROMISE floor, which the script prints first.** Every language feature
+> answers a promise, and the door collects a promise by polling — so an async route costs the
+> call, the waits, and the poll that finds it settled, whatever the feature underneath did. The
+> whole curve sat flat at 77ms until that was noticed: it was the door, not the product.
+>
+> The poll backs off from 2ms now instead of sitting at a flat 40, which took the promise floor
+> to 47ms and made **every async route about 40% cheaper**.
+>
+> A hover in the developer's editor never crosses the door at all. What they wait for is the
+> analyzer's share plus the page's own work — the last column, not the first three.
+
 `bench()` times the page's own work and `perf()` reports the host's. Both have read healthy while
 the surface felt slow, because the cost was in the crossing that neither measures. `trip` is wall
 clock from asking to observable, so the door's own cost is inside the number, which is why
