@@ -136,7 +136,7 @@ internal sealed class HostChrome : IDisposable
     /// </summary>
     private string Compose(string caption)
     {
-        // What the editor was naming beside its own name: the workbook, usually. Kept, because
+        // What the editor was naming beside its own name: the workbook. Kept, because
         // "XLIDE - Book1.xlsm" tells someone which window they are looking at and "XLIDE" alone
         // does not.
         var rest = caption.StartsWith(HostName, StringComparison.Ordinal)
@@ -145,7 +145,35 @@ internal sealed class HostChrome : IDisposable
                 ? caption[OurName.Length..]
                 : string.Empty;
 
-        // The editor's own mode marker comes off, so ours is not printed beside a stale one.
+        /*
+         * THE MAXIMISED CHILD'S TITLE COMES OFF, and this is the whole reason this method cannot
+         * just keep what it found.
+         *
+         * The editor's frame is an MDI frame, and Windows appends " - [Child (Code)]" to whatever
+         * the frame caption CURRENTLY says whenever the maximised child changes. It appends to
+         * ours, not to the editor's original, so a version that kept the tail and re-added the
+         * mode after it grew by one segment per tab click:
+         *
+         *   XLIDE - Book.xlsm [design]
+         *   XLIDE - Book.xlsm - [Runner (Code)] [design]
+         *   XLIDE - Book.xlsm - [Runner (Code)] - [Helper (Code)] [design]
+         *
+         * Dropping it is safe precisely because Windows puts it back: the segment is re-appended
+         * to the composed caption the moment it is needed, so what is rebuilt here is the stable
+         * base and nothing else.
+         */
+        // The CURRENT child is kept and the ones before it dropped, rather than dropping them all:
+        // the module being edited is worth naming, and removing it entirely would leave the title
+        // bar without it until the next time the maximised child changed.
+        var child = rest.IndexOf(" - [", StringComparison.Ordinal);
+        if (child >= 0)
+        {
+            var current = rest.LastIndexOf(" - [", StringComparison.Ordinal);
+            rest = string.Concat(rest.AsSpan(0, child), rest.AsSpan(current));
+        }
+
+        // Any mode marker comes off too, ours or the editor's, so one is not printed beside a
+        // stale one.
         foreach (var marker in ModeMarkers)
         {
             var at = rest.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
@@ -155,8 +183,39 @@ internal sealed class HostChrome : IDisposable
             }
         }
 
-        var composed = string.Concat(OurName, rest.TrimEnd());
-        return Mode is { Length: > 0 } mode ? $"{composed} [{mode}]" : composed;
+        /*
+         * COLLAPSED, because removing a marker leaves the space that preceded it.
+         *
+         * Without this the caption grew by one space per apply, forever: " [design] - Book.xlsm"
+         * loses the marker and keeps both spaces, the next pass keeps three, and since our own
+         * write raises the rename that brings us back here it compounds on itself. Caught by
+         * simulating the editor's appends against this method rather than on a running host, which
+         * is the only reason it was not shipped (2026-08-07).
+         */
+        var tidy = new System.Text.StringBuilder(rest.Length);
+        var space = false;
+        foreach (var character in rest)
+        {
+            if (character == ' ')
+            {
+                space = true;
+                continue;
+            }
+
+            if (space && tidy.Length > 0)
+            {
+                tidy.Append(' ');
+            }
+
+            space = false;
+            tidy.Append(character);
+        }
+
+        // The mode sits BESIDE THE NAME rather than at the end, because the end is where Windows
+        // appends the child title: a mode written last ends up in the middle of the caption the
+        // moment a pane is maximised, and reads as if it belonged to the module.
+        var name = Mode is { Length: > 0 } mode ? $"{OurName} [{mode}]" : OurName;
+        return tidy.Length == 0 ? name : $"{name} {tidy}";
     }
 
     /// <summary>The editor's own mode markers, which are stripped before ours is added.</summary>
