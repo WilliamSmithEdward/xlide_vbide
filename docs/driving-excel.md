@@ -360,7 +360,7 @@ library once, hours apart, and nothing connected them until a stack finally name
 `ComObject.Finalize`. See [lessons.md](lessons.md) entry 36.
 
 ```bash
-node tools\harness\com-leak.mjs        # each operation many times over, live count before and after
+node tools\harness\com-leak.mjs        # every route, many rounds, wrappers AND handles
 node tools\harness\com-leak.mjs 40     # more rounds, for a slower leak
 ```
 
@@ -372,10 +372,32 @@ fails; on a good build every row is flat.
 35 rows: every read route, the `assert` predicates (which reach the debugger's own objects), and
 the STATE-CHANGING routes, each paired with its own undo so the fixture comes back and the suite
 can be run twice. The state-changers were excluded at first and should not have been: they do the
-most COM work of anything here, so a guarantee that skips them is not a guarantee. **That two-way check is the only reason the instrument
-is worth having**: the first two attempts at measuring this both passed on the broken build, and
-both were deleted. One of them was a route that forced a collection and drained the finalizers,
-which reported completely clean with 8,734 leaked wrappers pending.
+most COM work of anything here, so a guarantee that skips them is not a guarantee.
+
+**That two-way check is the only reason the instrument is worth having**: the first two attempts
+at measuring this both passed on the broken build, and both were deleted. One of them was a route
+that forced a collection and drained the finalizers, which reported completely clean with 8,734
+leaked wrappers pending.
+
+Handles ride along, reported per row and judged once over the whole sweep. Per row they are
+unjudgeable: Excel opens and closes handles constantly and this product is a guest in its process,
+so a row's delta is mostly Excel. Taking the floor of four samples cut the swing from plus or
+minus 19 to mostly zero, and what was left still tripped a per-round threshold on rows that cannot
+leak, picking DIFFERENT rows on consecutive runs. Across 250 operations a leak of even one handle
+each is hundreds while the churn is tens, and that is a judgement worth making.
+
+### When the host dies, the harness says why
+
+```js
+await whyDidItDie();   // and every failed call appends this by itself
+```
+
+A probe whose host has gone reports `fetch failed` and `ECONNREFUSED`, which is the shape of the
+failure and not its cause. Windows knows the cause. On 2026-08-07 three crashes were read as
+unrelated instabilities across an afternoon because nobody thought to look, and one line from the
+fourth explained all four. Now `open()` and every route call ask, and print the faulting module,
+the exception code, and **the managed stack when there is one**, which is the frame naming this
+product's own code rather than whichever library noticed the damage.
 
 Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**
 — the rename fixture deliberately does not and the language fixture carries a module of deliberate

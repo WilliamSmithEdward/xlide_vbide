@@ -51,6 +51,7 @@ console.log(`sweeping against ${project.project}, sampling module ${sample}
 `);
 
 let passed = 0;
+let totalRounds = 0;
 const failures = [];
 
 function check(what, ok, detail) {
@@ -63,7 +64,40 @@ function check(what, ok, detail) {
   }
 }
 
-const live = async () => (await api.stats()).comWrappersLive;
+/**
+ * What an operation is holding afterwards, in all three currencies that can run out.
+ *
+ * COM wrappers are the one that killed Excel, but a leak is not obliged to be made of them.
+ * Windows handles are finite per process and their exhaustion is as fatal and as badly
+ * attributed: the failure lands on whoever next asks for one, which is rarely the leaker.
+ * Managed bytes are the mildest of the three and by far the noisiest, so they are printed for
+ * the reader rather than asserted on.
+ */
+const held = async () => {
+  // THE HANDLE COUNT IS NOISY, and the noise is bigger than the signal at these round counts.
+  // Measured across one sweep: swings of -19, -7, -4 and +2 over eight rounds, from Excel's own
+  // transient handles rather than from anything here. A single reading either side of an
+  // operation would fail on a positive swing and pass on a negative one, which is a coin toss
+  // wearing an assertion's clothes.
+  //
+  // The floor is the stable part. A transient handle is open at some sample and closed at
+  // another, so the minimum of several readings is close to what is actually being held, and a
+  // real leak raises the floor because a leaked handle is open at every sample.
+  const samples = [];
+  for (let i = 0; i < 4; i += 1) {
+    samples.push(await api.stats());
+    if (i < 3) { await wait(150); }
+  }
+
+  const last = samples[samples.length - 1];
+  return {
+    wrappers: last.comWrappersLive,
+    handles: Math.min(...samples.map((s) => s.handleCount)),
+    bytes: last.managedMemoryBytes,
+  };
+};
+
+const live = async () => (await held()).wrappers;
 
 /**
  * An operation run many times over, with the live count before and after.
@@ -76,29 +110,51 @@ async function repeat(what, allowance, body, howMany = rounds) {
   await body(0);
   await wait(600);
 
-  const before = await live();
+  const before = await held();
   for (let round = 1; round <= howMany; round += 1) {
     await body(round);
   }
   await wait(1200);
-  const after = await live();
+  const after = await held();
 
   // Against howMany, not the file's default. The state-changing rows run fewer rounds, and
   // dividing by the default understated their per-round figure fourfold while the line above
   // announced a round count that had not happened. An instrument that misreports its own
   // denominator is the same failure as the two this suite was built to replace.
-  const grew = after - before;
+  const grew = after.wrappers - before.wrappers;
   const perRound = (grew / howMany).toFixed(2);
 
-  console.log(`\n  ${what}: ${howMany} rounds, live ${before} -> ${after} (${perRound} per round)`);
+  const handles = after.handles - before.handles;
+  const kb = Math.round((after.bytes - before.bytes) / 1024);
 
-  check(`${what} gives back what it takes`,
+  console.log(`\n  ${what}: ${howMany} rounds, wrappers ${before.wrappers} -> ${after.wrappers} `
+    + `(${perRound} per round), handles ${handles >= 0 ? "+" : ""}${handles}, `
+    + `managed ${kb >= 0 ? "+" : ""}${kb}KB`);
+
+  check(`${what} gives back the wrappers it takes`,
     grew <= allowance,
     `live grew by ${grew} over ${howMany} rounds, ${perRound} per round, allowance ${allowance}. ` +
     "A count that scales with the rounds is a wrapper reaching the finalizer thread.");
+
+  // Handles are REPORTED per row and judged once at the end, over the whole sweep.
+  //
+  // They are worth watching: they are finite per process, and their exhaustion is as fatal as the
+  // COM crash and as badly attributed, since the failure lands on whoever next asks for one. But
+  // per row they are unjudgeable here. Excel opens and closes handles constantly and this product
+  // is a guest in its process, so a single row's delta is mostly Excel. Taking the floor of four
+  // samples cut the swing from ±19 to mostly zero, and what was left still tripped a per-round
+  // threshold on rows that cannot leak, picking DIFFERENT rows on consecutive runs.
+  //
+  // A threshold that fires on noise is a coin toss wearing an assertion's clothes, so the
+  // judgement moved to where the signal beats the noise: across the whole sweep, some 280
+  // operations, where a leak of even one handle per operation is hundreds and Excel's churn is
+  // still tens. The per-row numbers stay on screen, because that is where a reader looks to see
+  // WHICH operation did it once the total says somebody did.
+  totalRounds += howMany;
 }
 
-console.log(`resting live count: ${await live()}\n`);
+const atStart = await held();
+console.log(`resting live count: ${atStart.wrappers}, handles ${atStart.handles}\n`);
 
 // Reading the project tree: the heaviest walk there is, one wrapper per component and several
 // per project. If anything leaks, this is where it shows first.
@@ -251,8 +307,28 @@ await repeat("changing a setting", 0, async () => {
  * costs two interlocked increments, and reported 441 leaked wrappers from a single call to
  * `project()` on the same broken build. That is the instrument.
  */
-const resting = await live();
-console.log(`\nresting live count afterwards: ${resting}`);
+const atEnd = await held();
+console.log(`\nresting live count afterwards: ${atEnd.wrappers}, handles ${atEnd.handles}`);
+
+/*
+ * THE HANDLE VERDICT, over the whole sweep rather than per row.
+ *
+ * Several hundred operations by this point. A leak of one handle per operation is hundreds;
+ * Excel's own churn across the same stretch is tens. That is the separation a per-row check never
+ * had, and it is the whole reason this assertion is here and not up there.
+ */
+const handlesGrew = atEnd.handles - atStart.handles;
+const perOperation = handlesGrew / Math.max(1, totalRounds);
+
+console.log(`handles across ${totalRounds} operations: ${handlesGrew >= 0 ? "+" : ""}${handlesGrew}`
+  + ` (${perOperation.toFixed(3)} per operation)`);
+
+check(`the sweep gives back the handles it takes, over all ${totalRounds} operations`,
+  perOperation < 0.5,
+  `handles grew by ${handlesGrew} across ${totalRounds} operations, ${perOperation.toFixed(3)} `
+  + "each. Excel's own churn over this stretch is tens, so a figure that scales with the "
+  + "operation count is a handle this product opened and never closed. The per-row numbers "
+  + "above name which one.");
 
 console.log(`\n${passed} passed, ${failures.length} failed`);
 for (const failure of failures) {

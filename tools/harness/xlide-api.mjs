@@ -19,11 +19,92 @@
  *   node xlide-api.mjs module CleanModule
  */
 
+import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 const DISCOVERY_DIRECTORY = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
+const run = promisify(execFile);
+
+/**
+ * WHY THE HOST DIED, asked of Windows at the moment it stops answering.
+ *
+ * A probe whose host has gone reports `fetch failed` and `ECONNREFUSED`, which says only that
+ * nothing is listening. Whether Excel exited, was closed, or died taking a fault with it, and
+ * which library it died in, all live in the Windows event log, and looking there is a step
+ * somebody has to think to take.
+ *
+ * On 2026-08-07 nobody took it for three crashes running. They read as three unrelated
+ * instabilities across an afternoon and were nearly filed as "the host is flaky today"; the
+ * fourth carried a managed stack naming `ComObject.Finalize`, and that one line explained all
+ * four. Hours, for a question the machine could have answered every time.
+ *
+ * Best effort by design. No event log, no permission, no PowerShell: answer null and let the
+ * caller report the plain connection error, because a diagnostic that throws while diagnosing a
+ * crash is worse than one that shrugs.
+ */
+export async function whyDidItDie({ withinMinutes = 5 } = {}) {
+  const script = `
+    $since = (Get-Date).AddMinutes(-${Number(withinMinutes) || 5})
+    $events = Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=$since} -MaxEvents 40 -ErrorAction SilentlyContinue |
+      Where-Object { $_.LevelDisplayName -eq 'Error' -and $_.Message -like '*EXCEL*' }
+    if (-not $events) { '[]'; exit }
+    $rows = foreach ($e in $events) {
+      [pscustomobject]@{
+        when     = $e.TimeCreated.ToString('HH:mm:ss')
+        provider = $e.ProviderName
+        message  = $e.Message
+      }
+    }
+    ConvertTo-Json -InputObject @($rows) -Depth 3 -Compress`;
+
+  try {
+    const { stdout } = await run(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { timeout: 20000, maxBuffer: 4 * 1024 * 1024 });
+
+    const rows = JSON.parse(stdout.trim() || "[]");
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return null;
+    }
+
+    return rows.map((row) => {
+      const module = /Faulting module name: ([^,]+),/.exec(row.message)?.[1]?.trim() ?? null;
+      const code = /Exception code: (0x[0-9a-fA-F]+)/.exec(row.message)?.[1] ?? null;
+
+      // The managed frames, when the runtime got far enough to write them. This is the one that
+      // names OUR code rather than whichever library noticed the damage.
+      const stack = /Stack:\s*([\s\S]*)$/.exec(row.message)?.[1]
+        ?.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith("at "))
+        .slice(0, 8) ?? [];
+
+      return { when: row.when, provider: row.provider, module, code, stack };
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Those rows as something worth printing beside a connection error. */
+function describeDeath(rows) {
+  if (rows === null || rows.length === 0) {
+    return "";
+  }
+
+  const lines = rows.map((row) => {
+    const head = `  ${row.when} ${row.provider}`
+      + (row.module ? `: faulted in ${row.module}` : "")
+      + (row.code ? ` (${row.code})` : "");
+    return row.stack.length > 0 ? `${head}\n${row.stack.map((f) => `      ${f}`).join("\n")}` : head;
+  });
+
+  return `\n\nWindows says the host died:\n${lines.join("\n")}`;
+}
 
 /** Every instance whose api answers, newest session first. */
 export async function discover() {
@@ -73,7 +154,11 @@ export async function discover() {
 export async function open({ pid, workbook } = {}) {
   const instances = await discover();
   if (instances.length === 0) {
-    throw new Error("no xlide instance is answering; start Excel and open the editor (Debug build only)");
+    // Ask Windows before blaming the developer for not having started Excel. Most of the time
+    // they have, and it died.
+    throw new Error(
+      "no xlide instance is answering; start Excel and open the editor (Debug build only)"
+      + describeDeath(await whyDidItDie()));
   }
 
   if (pid !== undefined) {
@@ -124,6 +209,13 @@ function clientFor(entry) {
         method,
         body,
         signal: controller.signal,
+      }).catch(async (reason) => {
+        // A HOST THAT HAS GONE says only `fetch failed` and `ECONNREFUSED`, which is the shape of
+        // the failure and not its cause. Windows knows the cause, and asking costs a second at
+        // the one moment anybody wants to know. Three crashes on 2026-08-07 were read as
+        // unrelated instabilities because nobody thought to ask, and one line from the fourth
+        // explained all four.
+        throw new Error(`${route}: ${reason?.message ?? reason}` + describeDeath(await whyDidItDie()));
       });
 
       if (raw) {

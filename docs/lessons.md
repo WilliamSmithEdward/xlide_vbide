@@ -808,3 +808,35 @@ removed. Both were deleted. **An instrument is not proven by passing on a good b
 proven by failing on a bad one**, and the only way to know is to break the code on purpose
 and watch. The counter now reports 441 leaked wrappers per call on the broken build and
 zero on the fixed one, which is the only reason it is worth having.
+
+## 37. An unattributed crash, recorded rather than explained
+
+Left open deliberately, because a crash nobody can reproduce is still a crash, and the worst thing
+to do with one is to quietly decide it was the last bug you fixed.
+
+On 2026-08-07 at 21:01, during a leak sweep, Excel died with an access violation inside
+`VBE7.DLL` (`0xc0000005`, fault offset `0x9d0c7`) and **no managed stack**. It is not entry 36's
+defect: that one produced a FailFast with `ComObject.Finalize` on the stack, and it was fixed and
+proven fixed before this happened. The offset also differs from the other `VBE7.DLL` fault seen
+that day (`0x2736ad`, at 19:20).
+
+What was ruled out, and how. The sweep had just gained five state-changing rows, so each was run
+alone: pane open and close 16 times, component rename and back 14, breakpoint on and off 12,
+module read and write 12, a settings change 12. All survived. The full sweep was then run twice
+more, some 500 operations, and survived both. So it is neither a specific operation nor the sweep
+as a whole, at least not reliably.
+
+What it might be: a sequence effect, a timing window under sustained load, or a host defect this
+product merely provokes. All three are guesses and are recorded as guesses.
+
+**What was actually built instead was the thing that would have attributed it.** `whyDidItDie()`
+in the harness client asks the Windows event log the moment a call fails, and `open()` and every
+route call now append its answer: the faulting module, the exception code, and the managed stack
+when there is one. The plain failure is `fetch failed` and `ECONNREFUSED`, which says only that
+nothing is listening; the difference between that and `faulted in VBE7.DLL (0xc0000005)` is the
+difference between three crashes filed as "the host is flaky today" and one line that explains
+four of them.
+
+The general shape is worth keeping: when a defect resists reproduction, the useful work is often
+not another attempt at reproducing it but a better instrument for the next occurrence. This entry
+is where the next one gets checked against.
