@@ -367,7 +367,12 @@ node tools\harness\com-leak.mjs 40     # more rounds, for a slower leak
 `ComRuntime.TakeWrapper` and `GiveBackWrapper` are the only two doors and each does its own
 counting, so a caller cannot dispose without counting or count without disposing. On a build with
 the defect restored deliberately a single `project()` call leaks **441** wrappers and every row
-fails; on a good build every row is flat. **That two-way check is the only reason the instrument
+fails; on a good build every row is flat.
+
+35 rows: every read route, the `assert` predicates (which reach the debugger's own objects), and
+the STATE-CHANGING routes, each paired with its own undo so the fixture comes back and the suite
+can be run twice. The state-changers were excluded at first and should not have been: they do the
+most COM work of anything here, so a guarantee that skips them is not a guarantee. **That two-way check is the only reason the instrument
 is worth having**: the first two attempts at measuring this both passed on the broken build, and
 both were deleted. One of them was a route that forced a collection and drained the finalizers,
 which reported completely clean with 8,734 leaked wrappers pending.

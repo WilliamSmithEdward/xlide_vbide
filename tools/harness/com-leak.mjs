@@ -71,26 +71,30 @@ const live = async () => (await api.stats()).comWrappersLive;
  * `allowance` is what the operation may legitimately still be holding once it is done: opening a
  * pane keeps the pane. Anything above that is per-iteration, which is the shape of a leak.
  */
-async function repeat(what, allowance, body) {
+async function repeat(what, allowance, body, howMany = rounds) {
   // A round first, so anything the operation sets up once is set up before the baseline.
   await body(0);
   await wait(600);
 
   const before = await live();
-  for (let round = 1; round <= rounds; round += 1) {
+  for (let round = 1; round <= howMany; round += 1) {
     await body(round);
   }
   await wait(1200);
   const after = await live();
 
+  // Against howMany, not the file's default. The state-changing rows run fewer rounds, and
+  // dividing by the default understated their per-round figure fourfold while the line above
+  // announced a round count that had not happened. An instrument that misreports its own
+  // denominator is the same failure as the two this suite was built to replace.
   const grew = after - before;
-  const perRound = (grew / rounds).toFixed(2);
+  const perRound = (grew / howMany).toFixed(2);
 
-  console.log(`\n  ${what}: ${rounds} rounds, live ${before} -> ${after} (${perRound} per round)`);
+  console.log(`\n  ${what}: ${howMany} rounds, live ${before} -> ${after} (${perRound} per round)`);
 
   check(`${what} gives back what it takes`,
     grew <= allowance,
-    `live grew by ${grew} over ${rounds} rounds, ${perRound} per round, allowance ${allowance}. ` +
+    `live grew by ${grew} over ${howMany} rounds, ${perRound} per round, allowance ${allowance}. ` +
     "A count that scales with the rounds is a wrapper reaching the finalizer thread.");
 }
 
@@ -143,10 +147,11 @@ await repeat("a doctor pass", 0, async () => {
  *
  * Excluded, with reasons: `capture` returns a bitmap and is slow; `eval`, `await`, `assert`,
  * `bench`, `trip` and `pagecall` run scripts in the page rather than touching COM; `reload`
- * restarts the surface; `compile`, `command`, `component`, `pane`, `caret`, `type`, `act`,
- * `breakpoint`, `settings` and `undoRename` CHANGE STATE, and a leak sweep that mutates the
- * fixture is a leak sweep nobody will run twice. State-changing paths are covered by
- * three-copies.mjs, which asserts parity rather than counting.
+ * restarts the surface.
+ *
+ * The STATE-CHANGING routes are not excluded, and were only briefly: they do the most COM work
+ * of anything here, so a guarantee that skips them is not a guarantee. They are swept below,
+ * each paired with its own undo so the fixture comes back.
  */
 const READ_ROUTES = [
   ["state", () => api.state()],
@@ -182,6 +187,53 @@ for (const [name, call] of READ_ROUTES) {
     await call().catch(() => null);
   });
 }
+
+/*
+ * THE ROUTES THAT CHANGE STATE, which do the most COM work of anything here.
+ *
+ * Each is paired with its own undo, so a round leaves the fixture where it found it and the suite
+ * can be run twice. That pairing is also what makes the count meaningful: a round that opens a
+ * pane and does not close it is entitled to keep a wrapper, and an allowance big enough to cover
+ * that is an allowance big enough to hide a leak.
+ *
+ * Fewer rounds than the read routes, because each round is a real editor operation with a real
+ * settling time, and a leak that needs more than a few rounds to show is a leak the read sweep
+ * would have found already.
+ */
+const changing = Math.max(2, Math.min(4, Math.floor(rounds / 3)));
+
+await repeat("opening and closing a pane", 0, async () => {
+  await api.pane("open", { module: sample, project: project.projectId });
+  await wait(400);
+  await api.pane("close", { module: sample, project: project.projectId, answer: "discard" });
+  await wait(400);
+}, changing);
+
+await repeat("setting and clearing a breakpoint", 0, async () => {
+  await api.breakpoint(sample, 1, { project: project.projectId, state: "on" });
+  await wait(250);
+  await api.breakpoint(sample, 1, { project: project.projectId, state: "off" });
+  await wait(250);
+}, changing);
+
+await repeat("reading and writing a module", 0, async () => {
+  const held = (await api.readModule(sample, project.projectId)).text ?? "";
+  await api.writeModule(sample, held, project.projectId);
+  await wait(500);
+}, changing);
+
+await repeat("renaming a component and back", 0, async () => {
+  await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
+  await wait(600);
+  await api.component("rename", { name: `${sample}Tmp`, newName: sample, project: project.projectId });
+  await wait(600);
+}, changing);
+
+await repeat("changing a setting", 0, async () => {
+  const was = (await api.settings()).formatIndentSize;
+  await api.settings({ formatIndentSize: was === 4 ? 2 : 4 });
+  await api.settings({ formatIndentSize: was });
+}, changing);
 
 /*
  * WHAT THIS SUITE DELIBERATELY DOES NOT DO: force a collection and see whether Excel survives.
