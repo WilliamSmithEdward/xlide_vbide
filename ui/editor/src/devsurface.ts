@@ -125,6 +125,19 @@ export interface DevSurfaceParts {
   };
   bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
   panes: { list(): { name: string; title: string; open: boolean; permanent: boolean }[] };
+  /**
+   * The registered language providers themselves, so the api asks what the editor asks.
+   *
+   * Not the bridge requests underneath them: every provider refuses to answer for anything but
+   * the host-active module, and that refusal is the difference between a feature that works and
+   * one that is silent on screen.
+   */
+  providers: {
+    hover: monaco.languages.HoverProvider;
+    completion: monaco.languages.CompletionItemProvider;
+    signature: monaco.languages.SignatureHelpProvider;
+    codeAction: monaco.languages.CodeActionProvider;
+  };
   openSettings(): void;
   openSponsors(): void;
 }
@@ -143,6 +156,15 @@ export interface DevSurfaceParts {
  * list to remember to update. The name is its accessible label, its title text, or its id, in that
  * order of usefulness.
  */
+/** A token that never cancels: these calls are asked for deliberately and answered in full. */
+const NO_CANCEL = {
+  isCancellationRequested: false,
+  onCancellationRequested: () => ({ dispose: () => { } }),
+} as never;
+
+/** The trigger context monaco fills in. Nothing in these providers reads it. */
+const EMPTY_CONTEXT = {} as never;
+
 function dialogsUp(): DialogSnapshot[] {
   return [...document.querySelectorAll('[aria-modal="true"]')].map((element) => {
     // The card carries the modal marking; the backdrop is what holds it and what a close removes.
@@ -286,14 +308,31 @@ export function installDevSurface(parts: DevSurfaceParts): void {
    * how a person describes where they are looking ("hover over Recalculate") without counting
    * columns. Null when nothing is open.
    */
+  /** A position as monaco wants it, with the model it belongs to. Null when nothing is open. */
+  const positionFrom = (args: Record<string, unknown>):
+    { model: monaco.editor.ITextModel; position: monaco.Position } | null => {
+    const model = workspace.activeEditor().getModel();
+    const offset = offsetFrom(args);
+    if (!model || offset === null) { return null; }
+
+    const at = model.getPositionAt(offset);
+    return { model, position: new monacoApi.Position(at.lineNumber, at.column) };
+  };
+
   const offsetFrom = (args: Record<string, unknown>): number | null => {
     const model = workspace.activeEditor().getModel();
     if (!model) { return null; }
 
     if (args.word !== undefined) {
-      const wanted = String(args.word);
-      const at = model.getValue().indexOf(wanted);
+      // CASE-INSENSITIVE, because VBA is: the language does not distinguish `total` from `Total`,
+      // and the host RECASES identifiers on write to match their declaration — writing
+      // `total = 1` through the object model comes back `Total = 1`. A case-sensitive lookup
+      // therefore fails to find a word the caller can see on screen, and answers "no such word"
+      // about a word that is right there (2026-08-08).
+      const wanted = String(args.word).toLowerCase();
+      const at = model.getValue().toLowerCase().indexOf(wanted);
       if (at < 0) { return null; }
+
       // The middle of the word, so a provider keyed on "inside an identifier" is satisfied.
       return at + Math.floor(wanted.length / 2);
     }
@@ -646,30 +685,46 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /*
-     * THE LANGUAGE FEATURES, asked at a position.
+     * THE LANGUAGE FEATURES, asked the way the EDITOR asks them.
      *
-     * Each goes through the bridge request its monaco provider goes through, so the whole chain
-     * is exercised — page to shim to engine and back — without depending on a widget being on
-     * screen. Reading the rendered hover widget instead is the trap this repo already paid for:
-     * monaco reuses an open widget, so a probe that triggers and scrapes gets the previous
-     * answer in every state, including the ones where the feature is switched off (finding 1).
+     * Each calls the very provider object monaco calls, with the arguments monaco passes. That
+     * is deliberate and it is the whole point: every one of these providers begins by refusing
+     * to answer for anything but the host-active module, and an api that skipped that gate would
+     * answer for a module the developer's editor stays silent on.
      *
-     * What is on SCREEN is a different question, and `ui`'s `at` field answers that one.
+     * The first version DID skip it, calling the bridge request underneath, and it reported
+     * hover healthy through an entire session in which hover was dead on screen because the host
+     * believed no module was active (2026-08-08). The coverage agreed with the code and
+     * disagreed with the product.
+     *
+     * An api action must report what the same action through the UI would; where it cannot, it
+     * says so.
      */
 
     hover: async (args) => {
-      const offset = offsetFrom(args);
-      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
 
-      const found = await bridge.requestHover(offset);
-      return { did: found !== null, detail: found ? "hover answered" : "nothing to say here", data: found };
+      const found = await parts.providers.hover.provideHover(
+        where.model, where.position, NO_CANCEL, EMPTY_CONTEXT);
+      return {
+        did: Boolean(found),
+        detail: found ? "hover answered" : "the editor would show nothing here",
+        data: found ?? null,
+      };
     },
 
     completions: async (args) => {
-      const offset = offsetFrom(args);
-      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
 
-      const items = await bridge.requestCompletions(offset);
+      const answer = await parts.providers.completion.provideCompletionItems(
+        where.model,
+        where.position,
+        { triggerKind: 0, triggerCharacter: args.trigger === undefined ? undefined : String(args.trigger) } as never,
+        NO_CANCEL);
+
+      const items = answer?.suggestions ?? [];
       return {
         did: items.length > 0,
         detail: `${items.length} completion(s)`,
@@ -678,34 +733,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     signature: async (args) => {
-      const offset = offsetFrom(args);
-      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
 
-      const found = await bridge.requestSignatureHelp(offset);
-      return { did: found !== null, detail: found ? "signature help answered" : "no signature here", data: found };
+      const answer = await parts.providers.signature.provideSignatureHelp(
+        where.model, where.position, NO_CANCEL,
+        { triggerKind: 1, isRetrigger: false } as never);
+
+      return {
+        did: Boolean(answer),
+        detail: answer ? "signature help answered" : "the editor would show nothing here",
+        data: answer?.value ?? null,
+      };
     },
 
     quickFixes: async (args) => {
-      const offset = offsetFrom(args);
-      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
 
-      // The whole word under the position, so a fix attached to an identifier is found from
-      // anywhere inside it rather than only from its first character.
-      const model = workspace.activeEditor().getModel();
-      const position = model?.getPositionAt(offset);
-      const word = model && position ? model.getWordAtPosition(position) : null;
-      const start = model && position && word
-        ? model.getOffsetAt({ lineNumber: position.lineNumber, column: word.startColumn })
-        : offset;
-      const end = model && position && word
-        ? model.getOffsetAt({ lineNumber: position.lineNumber, column: word.endColumn })
-        : offset;
+      // The whole word, so a fix attached to an identifier is offered from anywhere inside it,
+      // which is what the lightbulb does for a caret sitting in the middle of one.
+      const word = where.model.getWordAtPosition(where.position);
+      const range = word
+        ? new monacoApi.Range(
+          where.position.lineNumber, word.startColumn, where.position.lineNumber, word.endColumn)
+        : new monacoApi.Range(
+          where.position.lineNumber, where.position.column,
+          where.position.lineNumber, where.position.column);
 
-      const actions = await bridge.requestCodeActions(start, end);
+      const answer = await parts.providers.codeAction.provideCodeActions(
+        where.model, range, { trigger: 1, only: undefined } as never, NO_CANCEL);
+
+      const actions = answer?.actions ?? [];
       return {
         did: actions.length > 0,
         detail: `${actions.length} quick fix(es)`,
-        data: actions.map((one) => ({ title: one.title, isPreferred: one.isPreferred })),
+        data: actions.map((one) => ({ title: one.title, kind: one.kind, isPreferred: one.isPreferred })),
       };
     },
 

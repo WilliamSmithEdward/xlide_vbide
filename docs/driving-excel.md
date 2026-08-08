@@ -248,16 +248,24 @@ await api.act("hover", { word: "Recalculate" });
 await api.act("completions", { line: 7, column: 12 });
 await api.act("quickFixes", { word: "Recalcualte" });
 await api.at("Recalculate");                    // colour as painted, and the markers on it
+// -> { word, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, message, code}] }
+//
+// `word` matches case-insensitively, because VBA does: the host RECASES identifiers on write, so
+// `total = 1` comes back `Total = 1` and a case-sensitive lookup misses a word that is on screen.
 ```
 
-> **These ask the BRIDGE, which is one gate short of the screen.** Every monaco provider answers
-> only for the host-active module and returns nothing otherwise, and these actions call the bridge
-> request directly — so they exercise page → shim → engine, and they PASS that gate rather than
-> testing it. A feature can be dead on screen while all four report healthy.
+> **These call the provider objects monaco calls**, with the arguments monaco passes, so they
+> answer what the developer's editor would answer — including the refusal every provider opens
+> with, that it will not answer for anything but the host-active module.
 >
-> The gate itself is one comparison: `ui.focus.model` against `ui.focus.host.model`. When they
-> differ, every provider is silent and nothing else looks wrong. Check it first when IntelliSense
-> is reported dead:
+> That is the prime heuristic at work: **an api action must leave, and must report, the state the
+> same action through the UI would.** The first version of these four called the bridge request
+> underneath the providers instead, skipping that refusal, and reported hover healthy through a
+> whole session in which hover was dead on screen (2026-08-08). Coverage that agrees with the code
+> and disagrees with the product is worse than none.
+>
+> When IntelliSense is reported dead, the gate is still worth checking directly — it says WHY in
+> one comparison, `ui.focus.model` against `ui.focus.host.model`:
 >
 > ```bash
 > node -e "import('./tools/harness/xlide-api.mjs').then(async m => { const u = await (await m.open({})).ui(); console.log(u.focus.model === u.focus.host?.model ? 'providers answer' : 'PROVIDERS SILENT: ' + u.focus.model + ' vs ' + u.focus.host?.model); })"

@@ -518,20 +518,6 @@ function boot(): void {
   // from the transport half.
   (globalThis as { xlideBridge?: EditorBridge }).xlideBridge = bridge;
 
-  // And the surface itself, as data and as actions: the debug api's `ui` and `act` routes. See
-  // devsurface.ts for why this is a module rather than a script written fresh per question.
-  installDevSurface({
-    workspace,
-    explorer: shell.explorerTree(),
-    bridge,
-    search: searchWidget,
-    bookmarks,
-    panes: shell.paneVisibility(),
-    openSettings: () => bridge.openSettings?.(),
-    openSponsors: () => openSponsorDialog(
-      { openExternal: (url) => bridge.openExternal(url) },
-      () => workspace.activeEditor().focus()),
-  });
 
   // Tools > Options routes here from the host: the native Options dialog is superseded, and
   // the product's settings are where the choices that matter live.
@@ -545,7 +531,7 @@ function boot(): void {
   // Engine requests are offset-only against the HOST-ACTIVE module (decision 12), so every
   // provider answers only for its model. A background group's model gets no engine answers —
   // honest, where an answer computed against the wrong module's text would not be.
-  monaco.languages.registerCompletionItemProvider(VBA_LANGUAGE_ID, {
+  const completionProvider: monaco.languages.CompletionItemProvider = {
     triggerCharacters: ["."],
     provideCompletionItems: async (model, position) => {
       if (model !== bridge.hostActiveModel()) {
@@ -562,12 +548,14 @@ function boot(): void {
 
       return { suggestions: items.map((item) => toSuggestion(item, range)) };
     },
-  });
+  };
+
+  monaco.languages.registerCompletionItemProvider(VBA_LANGUAGE_ID, completionProvider);
 
   // Hovers come from the same engine: the identifier under the cursor described by its
   // declaration line, its origin, and its documentation. The signature renders as VBA code, the
   // way the extension renders it.
-  monaco.languages.registerHoverProvider(VBA_LANGUAGE_ID, {
+  const hoverProvider: monaco.languages.HoverProvider = {
     provideHover: async (model, position) => {
       if (model !== bridge.hostActiveModel()) {
         return null;
@@ -616,12 +604,14 @@ function boot(): void {
         contents,
       };
     },
-  });
+  };
+
+  monaco.languages.registerHoverProvider(VBA_LANGUAGE_ID, hoverProvider);
 
   // Quick fixes. Every fix answers a finding, so the squiggles already on screen say whether
   // there can be any: no marker touching the range means no round trip, which matters because
   // the lightbulb asks again every time the caret settles.
-  monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, {
+  const codeActionProvider: monaco.languages.CodeActionProvider = {
     provideCodeActions: async (model, range) => {
       const none = { actions: [], dispose: () => { } };
       if (model !== bridge.hostActiveModel()) {
@@ -673,7 +663,9 @@ function boot(): void {
 
       return { actions, dispose: () => { } };
     },
-  }, {
+  };
+
+  monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
     // the keyboard.
@@ -848,7 +840,7 @@ function boot(): void {
 
   // Call tips, triggered the way the extension triggers them: the opening paren, the comma, and
   // the space, because VBA calls procedures without parentheses too.
-  monaco.languages.registerSignatureHelpProvider(VBA_LANGUAGE_ID, {
+  const signatureProvider: monaco.languages.SignatureHelpProvider = {
     signatureHelpTriggerCharacters: ["(", ",", " "],
     signatureHelpRetriggerCharacters: [","],
     provideSignatureHelp: async (model, position) => {
@@ -879,6 +871,29 @@ function boot(): void {
         dispose: () => { },
       };
     },
+  };
+
+  monaco.languages.registerSignatureHelpProvider(VBA_LANGUAGE_ID, signatureProvider);
+
+  // And the surface itself, as data and as actions: the debug api's `ui` and `act` routes. See
+  // devsurface.ts for why this is a module rather than a script written fresh per question.
+  installDevSurface({
+    workspace,
+    explorer: shell.explorerTree(),
+    bridge,
+    search: searchWidget,
+    bookmarks,
+    providers: {
+      hover: hoverProvider,
+      completion: completionProvider,
+      signature: signatureProvider,
+      codeAction: codeActionProvider,
+    },
+    panes: shell.paneVisibility(),
+    openSettings: () => bridge.openSettings?.(),
+    openSponsors: () => openSponsorDialog(
+      { openExternal: (url) => bridge.openExternal(url) },
+      () => workspace.activeEditor().focus()),
   });
 
   // Once, not per editor: the menu registry is the editor's, and every editor draws from it.
