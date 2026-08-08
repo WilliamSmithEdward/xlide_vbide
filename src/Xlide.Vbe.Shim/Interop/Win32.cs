@@ -263,6 +263,16 @@ internal static unsafe partial class Win32
 
     public const uint WmTimer = 0x0113;
 
+    /// <summary>
+    /// The start of the application-private message range.
+    ///
+    /// Used by the overlay's action queue as a fast path beside its timer. Whether a posted
+    /// app-range message reaches a window the host does not manage is the open question there:
+    /// every recorded session before 2026-08-08 says no, and the timer is what makes it safe to
+    /// keep asking.
+    /// </summary>
+    public const uint WmApp = 0x8000;
+
     public const int VkShift = 0x10;
     public const int VkControl = 0x11;
 

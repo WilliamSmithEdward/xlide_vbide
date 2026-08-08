@@ -454,19 +454,41 @@ node tools\harness\perf-scaling.mjs
 A single timing answers the wrong question. What matters is not "is hover fast" but "is hover
 still fast in the module I actually work in", and that needs a curve.
 
-Measured 2026-08-08, across **103x the lines**: the analyzer's share of a hover goes from 1ms to
-11ms. Sub-linear, and nowhere near anything a developer would feel.
+Measured 2026-08-08, across **103x the lines**:
 
-> **Read it against the PROMISE floor, which the script prints first.** Every language feature
-> answers a promise, and the door collects a promise by polling — so an async route costs the
-> call, the waits, and the poll that finds it settled, whatever the feature underneath did. The
-> whole curve sat flat at 77ms until that was noticed: it was the door, not the product.
+| | 109 lines | 11,252 lines |
+| --- | --- | --- |
+| hover | 0.8ms | 15.3ms |
+| completions | 0.6ms | 1.4ms |
+| definition | 0.8ms | 15.0ms |
+| *of which the analyzer* | *0ms* | *13ms* |
+
+The feature cost IS the analyzer's cost, and it grows sub-linearly. Nothing anywhere near
+anything a developer would feel.
+
+> **Two measurements were the instrument, not the product, and finding that out was the whole
+> exercise.**
 >
-> The poll backs off from 2ms now instead of sitting at a flat 40, which took the promise floor
-> to 47ms and made **every async route about 40% cheaper**.
+> The curve first sat flat at 77ms from 109 lines to 11,252 — a number that will not move is
+> usually a number about the harness. The door collects a promise by POLLING and slept a flat
+> 40ms before the first poll, so every async route cost the call, the sleep and the poll
+> whatever the feature had done underneath. The poll backs off from 2ms now.
 >
-> A hover in the developer's editor never crosses the door at all. What they wait for is the
-> analyzer's share plus the page's own work — the last column, not the first three.
+> Then the page-side figures sat at ~31ms at every size, which is suspiciously two Windows timer
+> ticks. It was: work marshalled to the host thread rode `SetTimer(..., 0, 0)`, and a
+> zero-elapse timer does not fire immediately — Windows clamps it to the system timer
+> resolution, 15.6ms. The shim's own marshal counter read a median of 16ms with samples at 31
+> and 47, one two and three ticks. **Every hop to the host thread waited most of a tick, on every
+> keystroke, completion, hover and api call.**
+>
+> A posted message now goes out beside the timer. The timer stays as the guarantee — posted
+> app-range messages had never been seen to arrive at this window, which is why it was written
+> that way — but they do arrive, and the queue drains at once when they do. Measured after:
+> `pagecall` 15.5ms → **0.37ms**, the promise floor 47ms → **15ms**, completions on the largest
+> module 31ms → **1.4ms**.
+>
+> A hover in the developer's editor never crosses the door at all. What they wait for is the last
+> column, not the first three.
 
 `bench()` times the page's own work and `perf()` reports the host's. Both have read healthy while
 the surface felt slow, because the cost was in the crossing that neither measures. `trip` is wall

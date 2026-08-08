@@ -74,13 +74,15 @@ for (const module of sizes) {
   const deep = `${prefix}${Math.max(0, Math.floor((lines / 8) * 0.8))}`;
   const word = text.includes(deep) ? deep : `${prefix}0`;
 
-  const hover = await api.tripFeature("hover", { word }, { n: 8 });
-  const completions = await api.tripFeature("completions", { word }, { n: 8 });
-  const definition = await api.tripFeature("definition", { word }, { n: 8 });
+  // Timed INSIDE the page, so the door appears in none of these. The through-the-door figures
+  // are kept alongside for one size only, at the end, to show how much of them was the harness.
+  const hover = await api.timeFeature("hover", { word }, { n: 8 });
+  const completions = await api.timeFeature("completions", { word }, { n: 8 });
+  const definition = await api.timeFeature("definition", { word }, { n: 8 });
 
   // And the analyzer's own share of it, which the counters report separately.
   await api.perf({ reset: true });
-  await api.tripFeature("hover", { word }, { n: 5 });
+  await api.timeFeature("hover", { word }, { n: 5 });
   const engine = (await api.engineCosts()).find((one) => one.method === "textDocument/hover");
 
   rows.push({

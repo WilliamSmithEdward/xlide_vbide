@@ -783,6 +783,65 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * A language feature timed INSIDE the page, which is the only place the number is honest.
+     *
+     * Everything else measures across the door, and the door collects a promise by polling — so
+     * an async route carries a floor of tens of milliseconds whatever the feature cost. That
+     * floor is most of every figure taken from outside, and it hid a whole scaling curve behind
+     * a flat line until it was noticed (2026-08-08).
+     *
+     * This runs the provider n times here and reports the distribution, so one door round trip
+     * covers every sample and the door's cost is amortised to nothing. What comes back is what
+     * the developer waits for: the page's own work plus the shim and the analyzer behind it,
+     * with nothing of the harness in it.
+     */
+    timeFeature: async (args) => {
+      const which = String(args.what ?? "hover");
+      const runs = Math.max(1, Math.min(50, Number(args.n ?? 10)));
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const call = {
+        hover: () => parts.providers.hover.provideHover(where.model, where.position, NO_CANCEL, EMPTY_CONTEXT),
+        completions: () => parts.providers.completion.provideCompletionItems(
+          where.model, where.position, { triggerKind: 0 } as never, NO_CANCEL),
+        definition: () => parts.providers.definition.provideDefinition(where.model, where.position, NO_CANCEL),
+        signature: () => parts.providers.signature.provideSignatureHelp(
+          where.model, where.position, NO_CANCEL, { triggerKind: 1, isRetrigger: false } as never),
+      }[which];
+
+      if (!call) {
+        return { did: false, detail: `what must be hover, completions, definition or signature; got ${which}` };
+      }
+
+      const samples: number[] = [];
+      let answered = 0;
+
+      for (let run = 0; run < runs; run++) {
+        const began = performance.now();
+        const answer = await call();
+        samples.push(Math.round((performance.now() - began) * 100) / 100);
+        if (answer) { answered++; }
+      }
+
+      const ordered = [...samples].sort((a, b) => a - b);
+      return {
+        did: true,
+        detail: `${which} x${runs}, ${answered} answered`,
+        data: {
+          what: which,
+          runs,
+          answered,
+          minMs: ordered[0],
+          medianMs: ordered[ordered.length >> 1],
+          p95Ms: ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * 0.95))],
+          maxMs: ordered[ordered.length - 1],
+          samplesMs: samples,
+        },
+      };
+    },
+
+    /**
      * Find All References, as the dialog lists them.
      *
      * The dialog is opened by the same lookup, so this cannot show a different set from what the

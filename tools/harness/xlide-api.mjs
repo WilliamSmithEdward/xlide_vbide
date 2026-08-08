@@ -535,6 +535,23 @@ function clientFor(entry) {
      *
      * Answers the same shape `trip` does, so the two read together.
      */
+    /**
+     * A language feature timed INSIDE the page: what the developer actually waits for.
+     *
+     * `tripFeature` times the same thing from out here and therefore carries the door's promise
+     * floor in every sample — which is most of the figure, and hid a whole scaling curve behind
+     * a flat line until it was noticed. This runs the provider n times in the page and brings
+     * back the distribution, so the door is paid once for the run and appears in none of the
+     * numbers.
+     *
+     * Use this for "is the feature fast". Use `tripFeature` for "is the DOOR fast", which is a
+     * question about the harness.
+     */
+    async timeFeature(what, where, { n = 10 } = {}) {
+      const answer = await this.act("timeFeature", { what, n, ...where });
+      return answer.data ?? answer;
+    },
+
     async tripFeature(what, where, { n = 10 } = {}) {
       const samples = [];
       let lastDetail = "";

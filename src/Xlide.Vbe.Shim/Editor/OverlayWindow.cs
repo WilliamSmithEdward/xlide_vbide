@@ -210,6 +210,18 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// app-range messages posted to windows it does not manage — across every recorded session,
     /// not one posted action was ever dispatched — while WM_TIMER demonstrably always arrives:
     /// the write debounce and the poll run on it in those same sessions.
+    ///
+    /// BOTH ARE SENT, and the timer remains the guarantee. A timer set with an elapse of zero
+    /// does not fire immediately: Windows clamps it to the system timer resolution, which is
+    /// 15.6ms by default, so every hop to this thread waits most of a tick. The shim's own
+    /// marshal counter reads a median of 16ms with samples at 31 and 47 — one, two and three
+    /// ticks — and a language feature that hops twice therefore costs about 31ms before anything
+    /// has been computed (2026-08-08).
+    ///
+    /// So a posted message goes out as well. If it arrives, the queue drains at once and the
+    /// tick is saved; if it is swallowed as it always has been, the timer still fires and
+    /// nothing is worse than before. The drain is idempotent, so both arriving costs an empty
+    /// queue check.
     /// </summary>
     public void RunOnHostThread(Action action)
     {
@@ -224,6 +236,11 @@ internal sealed unsafe class OverlayWindow : IDisposable
         }
 
         _actions.Enqueue(action);
+
+        // The fast path, and the one that may do nothing.
+        Win32.PostMessage(_handle, Win32.WmApp + 1, 0, 0);
+
+        // The guarantee.
         Win32.SetTimer(_handle, ActionTimerId, 0, 0);
     }
 
@@ -475,6 +492,14 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         overlay.Resized?.Invoke(overlay.ClientBounds());
                     }
 
+                    return 0;
+                }
+
+                // The posted half of RunOnHostThread. Whether this ever arrives is the open
+                // question it exists to answer; the timer below covers it either way.
+                case Win32.WmApp + 1:
+                {
+                    FromHandle(window)?.DrainActions();
                     return 0;
                 }
 
