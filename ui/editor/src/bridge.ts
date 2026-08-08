@@ -7,6 +7,7 @@ import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
 import type { SearchWidget } from "./searchwidget.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import type { Workspace } from "./workspace.js";
+import { takeFormattingMark } from "./format.js";
 import { applySettings, type EditorSettings } from "./settings.js";
 import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
@@ -94,7 +95,6 @@ export type HostMessage =
     mirrorCommentSpacing: boolean;
     treeFollowsEditor: boolean;
     formatIndentSize?: number;
-    formatUseTabs?: boolean;
     formatCanonicalKeywords?: boolean;
   };
 
@@ -258,7 +258,12 @@ export interface BootTimings {
 
 export type ClientMessage =
   | { type: "ready"; timings?: BootTimings }
-  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string }
+  /**
+   * A change to a module's text. `source` names what made it when that was not the keyboard:
+   * the host holds findings back about a line being typed, and a format that moves a single
+   * line is indistinguishable from a keystroke by shape alone.
+   */
+  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string; source?: "format" }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string; project?: string }
@@ -299,7 +304,6 @@ export type ClientMessage =
     mirrorCommentSpacing: boolean;
     treeFollowsEditor: boolean;
     formatIndentSize: number;
-    formatUseTabs: boolean;
     formatCanonicalKeywords: boolean;
   }
   | { type: "trace"; text: string };
@@ -665,7 +669,6 @@ export class EditorBridge {
       mirrorCommentSpacing: settings.mirrorCommentSpacing,
       treeFollowsEditor: settings.treeFollowsEditor,
       formatIndentSize: settings.formatIndentSize,
-      formatUseTabs: settings.formatUseTabs,
       formatCanonicalKeywords: settings.formatCanonicalKeywords,
     });
   }
@@ -1279,7 +1282,6 @@ export class EditorBridge {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize ?? 4,
-          formatUseTabs: message.formatUseTabs ?? true,
           formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
         });
         return;
@@ -1562,6 +1564,11 @@ export class EditorBridge {
     // divergence would be seen the moment it happened rather than believed impossible. The
     // message names its document (decision 12): the edit belongs to the module it changed,
     // whichever editor made it.
+    // WHERE THE CHANGE CAME FROM, when it was not the keyboard. The host holds back findings
+    // about a line while it is being typed, and tells typing from anything else by the shape of
+    // the change: one line, no newline. A format that moves a single line has that shape, and
+    // running one made the squiggle on that line vanish until the caret was moved off it. The
+    // editor's change event carries no source, so the formatter marks its own edit.
     const fullLength = model.getValueLength();
     const message: Extract<ClientMessage, { type: "contentChanged" }> = {
       type: "contentChanged",
@@ -1570,6 +1577,7 @@ export class EditorBridge {
       revision,
       changes,
       fullLength,
+      ...(takeFormattingMark(model) ? { source: "format" as const } : {}),
     };
     if (fullLength < 64_000) {
       message.fullText = model.getValue();
@@ -1914,7 +1922,6 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: true,
           treeFollowsEditor: true,
           formatIndentSize: 4,
-          formatUseTabs: true,
           formatCanonicalKeywords: true,
         });
         send({
@@ -2163,7 +2170,6 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
-          formatUseTabs: message.formatUseTabs,
           formatCanonicalKeywords: message.formatCanonicalKeywords,
         });
       }

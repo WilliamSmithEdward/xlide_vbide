@@ -235,6 +235,29 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// The engine's own copy of a module, for comparing against the surface's. Null when there
+    /// is no engine or no address for the module.
+    /// </summary>
+    public async Task<System.Text.Json.JsonElement?> LiveSourceAsync(
+        string moduleName,
+        bool includeText,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        return await engine.LiveSourceAsync(home.ProjectId, moduleName, includeText, cancellation)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Asks the engine what can be typed at an offset into a module's live text, or null when
     /// there is no engine or it has not yet seen the module's project.
     /// </summary>
@@ -800,11 +823,21 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Turns the engine's character offsets into lines and columns.
+    /// Turns the engine's findings into lines and columns.
     ///
-    /// The line index is built once per module rather than per finding: converting an offset needs
-    /// to know where every line starts, and rebuilding that for each of several hundred findings
-    /// turns a linear pass into a quadratic one.
+    /// The engine sends both: the span in offsets, and the same span already converted against the
+    /// text it analysed. Its conversion is the one to trust. A request that carries no source
+    /// leaves the engine to choose between its live copy of the module and its seeded one, and
+    /// that choice is invisible from here, so converting the offsets against <paramref name="source"/>
+    /// is right only when the two texts happen to agree. Formatting a module was the reliable way
+    /// to prove they need not: the page had the formatted text and the editor still held the
+    /// original, so the engine measured a finding in one and this measured it in the other, and a
+    /// squiggle six columns left of its word stayed there until the module was written back.
+    ///
+    /// <paramref name="source"/> is still the fallback, for an engine too old to send positions.
+    /// The line index behind it is built once per module rather than per finding: converting an
+    /// offset needs to know where every line starts, and rebuilding that for each of several
+    /// hundred findings turns a linear pass into a quadratic one.
     /// </summary>
     private static IEnumerable<Finding> Convert(
         string projectId,
@@ -812,12 +845,23 @@ internal sealed class AnalysisService : IAsyncDisposable
         string source,
         EngineDiagnostic[] diagnostics)
     {
-        var lineStarts = TextPositions.LineStarts(source);
+        int[]? lineStarts = null;
 
         foreach (var diagnostic in diagnostics)
         {
-            var (startLine, startColumn) = TextPositions.ToLineColumn(lineStarts, diagnostic.Span.Start);
-            var (endLine, endColumn) = TextPositions.ToLineColumn(lineStarts, diagnostic.Span.End);
+            int startLine, startColumn, endLine, endColumn;
+
+            if (diagnostic.At is { } at)
+            {
+                (startLine, startColumn) = (at.StartLine, at.StartColumn);
+                (endLine, endColumn) = (at.EndLine, at.EndColumn);
+            }
+            else
+            {
+                lineStarts ??= TextPositions.LineStarts(source);
+                (startLine, startColumn) = TextPositions.ToLineColumn(lineStarts, diagnostic.Span.Start);
+                (endLine, endColumn) = TextPositions.ToLineColumn(lineStarts, diagnostic.Span.End);
+            }
 
             yield return new Finding(
                 moduleName,

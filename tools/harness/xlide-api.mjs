@@ -168,6 +168,16 @@ function clientFor(entry) {
     native: ({ text } = {}) => call(`native${query({ text: text ? 1 : undefined })}`),
 
     /**
+     * What the ENGINE is holding for a module, against what the surface holds.
+     *
+     * Every finding is computed against the engine's copy, and it is maintained incrementally by
+     * didChange rather than re-sent whole. When a squiggle is drawn in the wrong place, this is
+     * the call that says which side drifted. `text: true` brings both texts back.
+     */
+    engineSource: (module, { text } = {}) =>
+      call(`engine${query({ module, text: text ? 1 : undefined })}`),
+
+    /**
      * EVERY open module's content, host against surface.
      *
      * `inSync()` covers the one on screen; this covers the ones behind it. A background tab

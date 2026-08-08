@@ -766,6 +766,23 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("mode")] int Mode,
     [property: JsonPropertyName("components")] DebugComponentRow[] Components);
 
+/// <summary>
+/// The ENGINE's copy of a module against the surface's.
+///
+/// Every finding is computed against the engine's copy, and it is maintained incrementally by
+/// didChange rather than re-sent whole. When a squiggle is drawn in the wrong place, this is the
+/// question that settles which side drifted, and it could not be asked before 2026-08-08.
+/// </summary>
+public sealed record DebugEngineSourceReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("engineHolds")] bool EngineHolds,
+    [property: JsonPropertyName("engineLines")] int EngineLines,
+    [property: JsonPropertyName("surfaceLines")] int SurfaceLines,
+    [property: JsonPropertyName("engineContent")] string? EngineContent,
+    [property: JsonPropertyName("surfaceContent")] string? SurfaceContent,
+    [property: JsonPropertyName("engineText")] string? EngineText,
+    [property: JsonPropertyName("surfaceText")] string? SurfaceText);
+
 /// <summary>One pane the host's own editor holds open.</summary>
 public sealed record DebugNativePaneRow(
     [property: JsonPropertyName("module")] string Module,
@@ -835,7 +852,6 @@ public sealed record DebugSettingsReply(
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
-    [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
@@ -1083,6 +1099,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugComponentReply))]
 [JsonSerializable(typeof(DebugProjectReply))]
 [JsonSerializable(typeof(DebugSettingsReply))]
+[JsonSerializable(typeof(DebugEngineSourceReply))]
 [JsonSerializable(typeof(DebugNativeReply))]
 [JsonSerializable(typeof(DebugNativePaneRow))]
 [JsonSerializable(typeof(DebugNativePaneRow[]))]

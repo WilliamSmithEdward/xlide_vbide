@@ -91,6 +91,30 @@ export interface DiagnosticPayload {
     message: string;
     severity: string;
     span: { start: number; end: number };
+
+    /**
+     * The same span as one-based lines and columns, measured against THE TEXT THIS ENGINE
+     * ANALYSED.
+     *
+     * An offset means nothing without the text it was counted in, and the caller does not know
+     * which text that was: a request may carry its own source, or leave the engine to choose
+     * between the live copy and the seeded one. The caller used to convert with whatever text it
+     * happened to hold, and when the two differed every finding in the module landed somewhere
+     * else. Formatting a module was the reliable way to see it, because it moves every character
+     * after the indent: a finding at 6:11 came back at 6:6 and stayed there, pointing six columns
+     * left of the word it was about.
+     *
+     * Converting here is the only place that cannot be wrong, because this is where the text is.
+     */
+    at: DiagnosticPosition;
+}
+
+/** A span in one-based lines and columns, which is what an editor draws with. */
+export interface DiagnosticPosition {
+    startLine: number;
+    startColumn: number;
+    endLine: number;
+    endColumn: number;
 }
 
 export interface DiagnosticsResult {
@@ -210,6 +234,27 @@ export interface TextEditPayload {
  * the newline went in; the offset names where it went in, which is the end of the line Enter
  * was pressed on. Same liveness rule as completion.
  */
+/**
+ * debug/liveSource: what the engine is holding for a module.
+ *
+ * Every finding is computed against that copy, and it is maintained incrementally rather than
+ * re-sent whole, so a squiggle on the wrong line is always the same question: does this match
+ * the surface? Debug-only in spirit; harmless in any build.
+ */
+export interface LiveSourceParams {
+    projectId: string;
+    moduleName: string;
+    /** The text itself, rather than only its shape. Large, so asked for deliberately. */
+    includeText?: boolean;
+}
+
+export interface LiveSourceResult {
+    /** False when the engine has no live copy at all, which is different from an empty one. */
+    held: boolean;
+    lines: number;
+    source: string | null;
+}
+
 export interface SmartEnterParams {
     projectId: string;
     moduleName: string;

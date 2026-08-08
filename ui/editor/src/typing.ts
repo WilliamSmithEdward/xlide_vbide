@@ -31,14 +31,13 @@ import { currentSettings } from "./settings.js";
 const CANONICAL_LINE_IDLE_DELAY_MS = 200;
 
 /**
- * One indent level as the developer asked for it: a tab, or that many spaces.
+ * One indent level: that many spaces, the width the developer asked for.
  *
- * The same choice the editor's own `insertSpaces`/`tabSize` follow, so everything that indents
- * agrees. Ships as a tab, which is the standing preference.
+ * The same width the editor's own `tabSize`/`indentSize` follow, so everything that indents
+ * agrees. Never a tab: VBA's code store will not hold one, and expands any it is handed.
  */
 function indentUnitOf(): string {
-  const settings = currentSettings();
-  return settings.formatUseTabs ? "	" : " ".repeat(Math.max(1, settings.formatIndentSize));
+  return " ".repeat(Math.max(1, currentSettings().formatIndentSize));
 }
 
 /** The change a plain Enter makes: a newline plus whatever indent the editor added. */

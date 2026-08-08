@@ -81,7 +81,6 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
-    [property: JsonPropertyName("formatUseTabs")] bool FormatUseTabs,
     [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
 
 /// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>

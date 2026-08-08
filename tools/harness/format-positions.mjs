@@ -1,0 +1,229 @@
+/*
+ * Where a squiggle lands after Format Module, through the whole stack.
+ *
+ * THE DEFECT. A finding crosses from the engine as a character offset, and an offset means
+ * nothing without the text it was counted in. A diagnostics request may leave the source out,
+ * and then the engine picks between its live copy of the module and the copy the project was
+ * seeded with. That choice was invisible to the add-in, which converted the offsets against the
+ * text it had last read out of the editor. While the two agreed nothing looked wrong.
+ *
+ * Formatting is what made them disagree. The page holds the formatted text the moment the format
+ * runs; the editor underneath still holds the original until the write-back. A statement sitting
+ * at indent 0 gains a tab, every character on the line moves one along, and a finding that
+ * belonged at 6:12 was drawn at 6:6, six columns to the left, underlining the wrong word, and it
+ * stayed there, because nothing about waiting makes two different texts the same.
+ *
+ * Indent 0 is the case that matters and the case a lazier fixture misses: a line already indented
+ * four spaces trades them for one tab of the same visual width, and although the columns do move
+ * the finding still lands inside the same word, so the bug hides.
+ *
+ * engine/test/positions.mjs pins the engine's half of this without a host. This is the other
+ * half: the page, the add-in, and the native editor underneath, which must all end up describing
+ * the same text.
+ *
+ *   node tools\harness\format-positions.mjs
+ */
+
+import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+
+const api = await open({});
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const project = await api.project();
+const target = "HelpersExtra";
+const original = (await api.readModule(target, project.projectId)).text ?? "";
+
+let passed = 0;
+const failures = [];
+
+function check(what, ok, detail) {
+  if (ok) {
+    passed++;
+    console.log(`ok   ${what}`);
+  } else {
+    failures.push(`${what}${detail ? `: ${detail}` : ""}`);
+    console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`);
+  }
+}
+
+async function until(what, predicate, budgetMs = 25000) {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    const answer = await predicate();
+    if (answer) { return answer; }
+    await wait(250);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+// The offending statement at COLUMN 1, which is the developer's own recipe.
+const SEED = [
+  "Option Explicit",
+  "",
+  "Public Sub Probe()",
+  "    Dim n As Long",
+  "    n = 1",
+  "Workbooks.Close n",
+  "    Debug.Print n",
+  "End Sub",
+  "",
+];
+
+/** Where the statement really is, where the finding says it is, and whether a squiggle is on it. */
+async function look(label) {
+  const lines = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+    .split(/\r?\n/);
+  const line = lines.findIndex((one) => one.includes("Close")) + 1;
+  const column = line > 0 ? lines[line - 1].indexOf("Close") + 1 : 0;
+
+  const finding = ((await api.problems(target)).findings ?? [])
+    .find((one) => (one.message ?? "").includes("Close"));
+
+  const spot = line > 0 ? await api.ui({ line, column }) : null;
+  const squiggles = spot?.at?.squiggles?.length ?? 0;
+
+  console.log(`\n  ${label}`);
+  console.log(`      the word is at    ${line}:${column}   ${JSON.stringify(lines[line - 1] ?? "")}`);
+  console.log(`      the finding says  ${finding ? `${finding.line}:${finding.column}` : "(none)"}`);
+  console.log(`      squiggles on it   ${squiggles}\n`);
+
+  return { line, column, finding, squiggles };
+}
+
+try {
+  await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
+  await wait(1500);
+  await api.writeModule(target, SEED.join("\r\n"), project.projectId);
+  await wait(2000);
+  await api.pane("open", { module: target, project: project.projectId });
+  await until(`${target} shown`, async () => {
+    const ui = await api.ui();
+    return ui.focus.model?.toLowerCase().endsWith(`/${target.toLowerCase()}`) ? ui : null;
+  });
+
+  await until("the finding to appear", async () =>
+    ((await api.problems(target)).findings ?? []).some((one) => (one.message ?? "").includes("Close")));
+
+  // LET THE ANALYSER CATCH UP. A finding appearing is not a pass having finished, and formatting
+  // into the middle of one is a different experiment from formatting a module it has settled on
+  // (the developer, 2026-08-08).
+  await wait(4000);
+
+  const before = await look("before the format, the statement at column 1:");
+
+  check("the finding is on the word to start with",
+    before.finding?.line === before.line && before.finding?.column === before.column,
+    `word at ${before.line}:${before.column}, finding at ${before.finding?.line}:${before.finding?.column}`);
+
+  console.log("  running Format Module");
+  await api.act("format");
+  await wait(1500);
+
+  const straight = await look("immediately after:");
+
+  check("the format moved the statement along",
+    straight.column > before.column,
+    `column ${before.column} to ${straight.column}, so the format did nothing to expose`);
+
+  check("the finding followed the word it is about",
+    straight.finding?.line === straight.line && straight.finding?.column === straight.column,
+    `word at ${straight.line}:${straight.column}, finding at ${straight.finding?.line}:${straight.finding?.column}`);
+
+  check("the squiggle is drawn on the word",
+    straight.squiggles > 0,
+    "the underline is somewhere else");
+
+  // The engine's copy and the surface's, named outright. When they differ the finding is still
+  // allowed to be right, because the position now travels with it, but a difference here is what
+  // the old arithmetic turned into a misplaced squiggle.
+  const held = await api.engineSource(target, { text: true });
+  console.log(`      engine holds ${held.engineLines} line(s), surface ${held.surfaceLines}, ` +
+    `agreeing: ${held.engineContent === held.surfaceContent}`);
+
+  // AND IT STAYS RIGHT. The old symptom did not heal, so settling is worth asking about.
+  await wait(4500);
+  const settled = await look("four seconds later:");
+
+  check("it is still on the word once everything settles",
+    settled.finding?.line === settled.line && settled.finding?.column === settled.column,
+    `word at ${settled.line}:${settled.column}, finding at ${settled.finding?.line}:${settled.finding?.column}`);
+
+  // PARITY WITH THE EDITOR UNDERNEATH. A format that leaves the native pane holding different
+  // text is not a format that finished, whatever the page shows (the developer, 2026-08-07:
+  // full parity with content, for every action that touches the editor surface).
+  const sync = await until("the write-back to reach the native pane", async () => {
+    const answer = await api.inSync();
+    return answer.agreed ? answer : null;
+  }, 20000).catch(async () => api.inSync());
+
+  const below = await api.native({ text: true });
+
+  // NOT A TAB ANYWHERE. VBA's code store will not hold one: the editor expands every tab it is
+  // handed to the next four-column stop, on both write paths this product uses and mid-line as
+  // well as leading (measured 2026-08-07). While the page could be told to indent with tabs, it
+  // and the workbook disagreed for as long as a module stayed open, so the option was removed
+  // and indentation is spaces. A tab reaching the page is that decision coming undone.
+  check("the page indents with spaces, which is the only thing this host will store",
+    !(below.surfaceText ?? "").includes("\t"),
+    JSON.stringify((below.surfaceText ?? "").slice(0, 120)));
+
+  check("the native editor holds what the page holds",
+    sync.agreed,
+    `native ${sync.nativeModule} ${sync.nativeLines} line(s), surface ${sync.surfaceModule} ` +
+    `${sync.surfaceLines} line(s), content agreeing: ${sync.contentAgrees}`);
+
+  const everyPane = await api.parityAll();
+  check("every other open pane still agrees with the editor",
+    everyPane.agreed,
+    everyPane.stale.map((one) => one.module).join(", "));
+
+  // BACKSPACE TAKES BACK A LEVEL, which is what makes indenting with spaces bearable now that
+  // the tabs option is gone. In LEADING WHITESPACE only: with anything else on the line before
+  // the caret it deletes one character, the way it always has.
+  const size = (await api.settings()).formatIndentSize;
+  const indented = straight.line;
+
+  // The end of the indent, which is where a whole level is at stake. `straight.column` is the
+  // word, and putting the caret there tests ordinary deletion instead.
+  const indentEnds = size + 1;
+
+  await api.caret(indented, { module: target, project: project.projectId, column: indentEnds });
+  await wait(600);
+
+  const level = await api.act("backspace");
+  check(`Backspace at the end of the indent takes back all ${size} spaces at once`,
+    level.data?.column === 1,
+    `caret went to column ${level.data?.column}, wanted 1, line now ${JSON.stringify(level.data?.text)}`);
+
+  check("and takes the whole level, leaving no stray spaces",
+    !(level.data?.text ?? "").startsWith(" "),
+    JSON.stringify(level.data?.text));
+
+  // With code before the caret it is an ordinary Backspace again, which is the developer's own
+  // condition: "assuming no other chars precede it".
+  const line = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+    .split(/\r?\n/)[indented - 1] ?? "";
+  const afterWord = line.indexOf("Workbooks") + "Workbooks".length + 1;
+
+  await api.caret(indented, { module: target, project: project.projectId, column: afterWord });
+  await wait(600);
+
+  const single = await api.act("backspace");
+  check("Backspace with code before it still deletes one character",
+    single.data?.column === afterWord - 1 && (single.data?.text ?? "").includes("Workbook."),
+    `caret at column ${single.data?.column}, line now ${JSON.stringify(single.data?.text)}`);
+} finally {
+  await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
+  await wait(1800);
+  await api.writeModule(target, original, project.projectId);
+  await wait(1800);
+
+  const restored = ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim();
+  console.log(`\n${target} restored: ${restored}`);
+
+  console.log(`\n${passed} passed, ${failures.length} failed`);
+  for (const failure of failures) {
+    console.log(`  ${failure}`);
+  }
+
+  process.exitCode = failures.length === 0 ? 0 : 1;
+}

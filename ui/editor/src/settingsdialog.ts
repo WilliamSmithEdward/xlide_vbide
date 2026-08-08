@@ -41,19 +41,16 @@ const OPTIONS = [
       "The module you are working on unfolds its procedures in the tree, and everything folds "
       + "away when the last tab closes. Off leaves the tree exactly as you left it.",
   },
+  // There is no "indent with tabs" here, and there cannot be a working one: VBA's code store
+  // will not hold a tab, and expands any it is handed. Indentation is this many spaces, and
+  // Backspace in a line's leading whitespace takes back a whole level of them.
   {
     key: "formatIndentSize" as const,
     kind: "number" as const,
     label: "Indent size",
-    description: "One indent level, in spaces. Used by typing, by smart Enter, and by formatting.",
+    description: "One indent level, in spaces. Used by typing, by smart Enter, by Backspace, and by formatting.",
     min: 1,
     max: 8,
-  },
-  {
-    key: "formatUseTabs" as const,
-    kind: "toggle" as const,
-    label: "Indent with tabs",
-    description: "Indent with tab characters instead of spaces, everywhere: typing, smart Enter, and formatting.",
   },
   {
     key: "formatCanonicalKeywords" as const,

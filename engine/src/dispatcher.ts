@@ -16,7 +16,16 @@ import { outlineFor, projectWordsFor } from './outline';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
-import { assembleSymbols, definitionsFor, referencesFor, renameFor, renameModuleFor, type ProjectSymbols } from './navigation';
+import {
+    assembleSymbols,
+    definitionsFor,
+    lineStarts,
+    referencesFor,
+    renameFor,
+    renameModuleFor,
+    toLineColumn,
+    type ProjectSymbols,
+} from './navigation';
 import { semanticTokensFor } from './semantic';
 import { signatureHelpFor } from './signature';
 import {
@@ -50,6 +59,8 @@ import {
     type SemanticTokensResult,
     type SignatureHelpParams,
     type SignatureHelpResult,
+    type LiveSourceParams,
+    type LiveSourceResult,
     type SmartEnterParams,
     type SmartEnterResult,
 } from './protocol';
@@ -199,6 +210,20 @@ export class Dispatcher {
                 return this.search(this.require<SearchParams>(params));
 
             case 'textDocument/didChange':                return this.didChange(this.require<DidChangeParams>(params));
+
+            /*
+             * WHAT THE ENGINE IS HOLDING for a module, which nothing could see until now.
+             *
+             * Every finding is computed against this copy, and it is maintained incrementally by
+             * didChange rather than re-sent whole. So when a squiggle lands on the wrong line,
+             * the question is always whether this copy matches the surface — and there was no
+             * way to ask. A finding was seen one line out after a format on 2026-08-08, healed
+             * before it could be diagnosed, and the one thing that would have settled it in a
+             * single call did not exist.
+             *
+             * Answers the text and a line count; the caller compares against the surface's.
+             */
+            case 'debug/liveSource':                      return this.liveSource(this.require<LiveSourceParams>(params));
 
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);
@@ -580,6 +605,20 @@ export class Dispatcher {
         return result;
     }
 
+    private liveSource(params: LiveSourceParams): LiveSourceResult {
+        this.requireInitialized();
+
+        // Through liveKey, not a hand-rolled join: the live map is keyed on a NUL and a lowercased
+        // module name, and asking it with a slash and the caller's casing answered "the engine is
+        // holding nothing" about a module it was holding.
+        const held = this.liveSources.get(liveKey(params.projectId, params.moduleName));
+        return {
+            held: held !== undefined,
+            lines: held === undefined ? 0 : held.split(/\r?\n/).length,
+            source: params.includeText === true ? (held ?? null) : null,
+        };
+    }
+
     private didChange(params: DidChangeParams): null {
         const key = liveKey(params.projectId, params.moduleName);
 
@@ -678,13 +717,30 @@ export class Dispatcher {
             });
         }
 
+        // Converted HERE, against `source`, because this is the only place that knows which text
+        // the offsets were counted in. The caller may not have sent one, in which case the choice
+        // between the live copy and the seeded one was made above and the caller cannot see it.
+        // Built once for the module: per finding it would be a scan of the whole text each time.
+        const starts = lineStarts(source);
+
         return {
-            diagnostics: response.diagnostics.map((diagnostic) => ({
-                code: diagnostic.code,
-                message: diagnostic.message,
-                severity: diagnostic.severity,
-                span: { start: diagnostic.span.start, end: diagnostic.span.end },
-            })),
+            diagnostics: response.diagnostics.map((diagnostic) => {
+                const start = toLineColumn(starts, diagnostic.span.start);
+                const end = toLineColumn(starts, diagnostic.span.end);
+
+                return {
+                    code: diagnostic.code,
+                    message: diagnostic.message,
+                    severity: diagnostic.severity,
+                    span: { start: diagnostic.span.start, end: diagnostic.span.end },
+                    at: {
+                        startLine: start.line,
+                        startColumn: start.column,
+                        endLine: end.line,
+                        endColumn: end.column,
+                    },
+                };
+            }),
             mode: response.incrementalMode,
         };
     }

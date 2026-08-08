@@ -2295,6 +2295,49 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugDoctorReply);
             }
 
+            case "engine" when request.Query.TryGetValue("module", out var engineModule) && engineModule.Length > 0:
+            {
+                // WHAT THE ENGINE IS HOLDING, which nothing could see until 2026-08-08.
+                //
+                // Every finding is computed against this copy and it is maintained incrementally,
+                // so a squiggle drawn in the wrong place is always the same question: does this
+                // match the surface? A finding was seen six columns out after a format and there
+                // was no way to ask which side had drifted.
+                var wantEngineText = request.Query.TryGetValue("text", out var engineText) && engineText != "0";
+                var surface = _editorSurface?.TextOf(engineModule, DisplayFromProjectId(_shownProject));
+
+                try
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    var held = _analysis?.LiveSourceAsync(engineModule, wantEngineText, deadline.Token)
+                        .GetAwaiter().GetResult();
+
+                    var engineHeld = held?.TryGetProperty("held", out var heldValue) == true && heldValue.GetBoolean();
+                    var engineLines = held?.TryGetProperty("lines", out var linesValue) == true ? linesValue.GetInt32() : 0;
+                    var engineSource = held?.TryGetProperty("source", out var sourceValue) == true
+                        && sourceValue.ValueKind == System.Text.Json.JsonValueKind.String
+                        ? sourceValue.GetString() : null;
+
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugEngineSourceReply(
+                            engineModule,
+                            engineHeld,
+                            engineLines,
+                            surface?.Split('\n').Length ?? 0,
+                            ContentKey(engineSource),
+                            ContentKey(surface),
+                            wantEngineText ? engineSource : null,
+                            wantEngineText ? surface : null),
+                        DebugJsonContext.Default.DebugEngineSourceReply);
+                }
+                catch (Exception ex)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"the engine's copy could not be read ({ex.GetType().Name})"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+            }
+
             case "native":
             {
                 // THE HOST'S OWN EDITOR, underneath the surface that covers it.
@@ -2740,7 +2783,6 @@ internal sealed class AddInSession : IDisposable
                         TreeFollowsEditor = Flag("treeFollowsEditor", settings.TreeFollowsEditor),
                         FormatIndentSize = request.Query.TryGetValue("formatIndentSize", out var indent)
                             && int.TryParse(indent, out var asked) ? asked : settings.FormatIndentSize,
-                        FormatUseTabs = Flag("formatUseTabs", settings.FormatUseTabs),
                         FormatCanonicalKeywords = Flag("formatCanonicalKeywords", settings.FormatCanonicalKeywords),
                     }.Normalized();
 
@@ -2754,7 +2796,6 @@ internal sealed class AddInSession : IDisposable
                         settings.MirrorCommentSpacing,
                         settings.TreeFollowsEditor,
                         settings.FormatIndentSize,
-                        settings.FormatUseTabs,
                         settings.FormatCanonicalKeywords),
                     DebugJsonContext.Default.DebugSettingsReply);
             }

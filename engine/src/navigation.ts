@@ -850,7 +850,7 @@ function lineAt(source: string | undefined, line: number): string {
 }
 
 /** Where each line begins, counting the three line endings VBA modules turn up with. */
-function lineStarts(source: string): number[] {
+export function lineStarts(source: string): number[] {
     const starts = [0];
     for (let at = 0; at < source.length; at++) {
         const character = source[at];
@@ -864,6 +864,33 @@ function lineStarts(source: string): number[] {
         }
     }
     return starts;
+}
+
+/**
+ * A character offset as a one-based line and column, which is what an editor draws with.
+ *
+ * Binary search rather than a scan: a module with several hundred findings converts each of them
+ * against the same index, and scanning from the top for each turns a linear pass into a quadratic
+ * one.
+ */
+export function toLineColumn(starts: readonly number[], offset: number): { line: number; column: number } {
+    if (starts.length === 0) {
+        return { line: 1, column: 1 };
+    }
+
+    let low = 0;
+    let high = starts.length - 1;
+
+    while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if ((starts[middle] as number) <= offset) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+
+    return { line: low + 1, column: offset - (starts[low] as number) + 1 };
 }
 
 /**

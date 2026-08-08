@@ -299,7 +299,6 @@ function boot(): void {
     const settings = currentSettings();
     return {
       indentSize: settings.formatIndentSize,
-      useTabs: settings.formatUseTabs,
       canonicalKeywords: settings.formatCanonicalKeywords,
     };
   });
@@ -338,14 +337,20 @@ function boot(): void {
     renderWhitespace: "selection",
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
     fontSize: 13,
-    // The DEVELOPER'S choice, not a constant. These were hard-coded to four spaces while the
-    // settings dialog offered "indent with tabs" and shipped it ON, so the editor indented with
-    // spaces, Format Module indented with tabs, and smart Enter used a tab of its own: three
-    // behaviours from one preference, two of them contradicting the switch on screen
-    // (2026-08-08). detectIndentation stays off, or monaco would guess from the file and
-    // overrule the choice entirely.
+    // The width is the DEVELOPER'S choice, not a constant; the character is not a choice at all.
+    //
+    // Spaces, always: VBA's code store will not hold a tab, and expands any it is handed, so a
+    // module indented with tabs read back as spaces and the page disagreed with the workbook for
+    // as long as it stayed open. The "indent with tabs" setting was removed the day that was
+    // measured (2026-08-07).
+    //
+    // `useTabStops` is what makes that bearable, and is load-bearing rather than incidental:
+    // Backspace in a line's leading whitespace takes back a whole indent level rather than one
+    // space, so spaces behave like tabs where a developer actually feels the difference.
+    // detectIndentation stays off, or monaco would guess from the file and overrule the width.
     tabSize: currentSettings().formatIndentSize,
-    insertSpaces: !currentSettings().formatUseTabs,
+    insertSpaces: true,
+    useTabStops: true,
     detectIndentation: false,
     autoIndent: "full",
     wordWrap: "off",
@@ -366,7 +371,7 @@ function boot(): void {
   // inserting tabs has been given a switch that half works.
   onSettingsApplied((next) => {
     for (const editor of workspace.editors()) {
-      editor.updateOptions({ tabSize: next.formatIndentSize, insertSpaces: !next.formatUseTabs });
+      editor.updateOptions({ tabSize: next.formatIndentSize });
     }
   });
 

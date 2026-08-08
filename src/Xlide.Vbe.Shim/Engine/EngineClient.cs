@@ -152,6 +152,29 @@ internal sealed class EngineClient : IAsyncDisposable
         return result?.Deserialize(EngineJsonContext.Default.EngineProjectOpened);
     }
 
+    /// <summary>
+    /// What the engine is HOLDING for a module, which nothing could see until now.
+    ///
+    /// Every finding is computed against that copy, and it is maintained incrementally by
+    /// didChange rather than re-sent whole. So a squiggle on the wrong line is always the same
+    /// question — does the engine's copy match the surface's? — and there was no way to ask it.
+    /// </summary>
+    public async Task<JsonElement?> LiveSourceAsync(
+        string projectId,
+        string moduleName,
+        bool includeText,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["includeText"] = includeText,
+        };
+
+        return await CallAsync("debug/liveSource", payload, cancellation).ConfigureAwait(false);
+    }
+
     /// <summary>Tells the engine a project is gone, so its modules stop answering for it.</summary>
     public async Task CloseProjectAsync(string projectId, CancellationToken cancellation)
     {
@@ -307,10 +330,9 @@ internal sealed class EngineClient : IAsyncDisposable
 
             // One indent level as the EDITOR writes it, so smart Enter and the developer's own
             // typing agree. Pressing Enter after a plain line and after `If ... Then` used to
-            // produce different whitespace in the same file.
-            ["indentUnit"] = settings.FormatUseTabs
-                ? "	"
-                : new string(' ', Math.Clamp(settings.FormatIndentSize, 1, 16)),
+            // produce different whitespace in the same file. Spaces, always: VBA's code store
+            // will not hold a tab, and expands any it is handed.
+            ["indentUnit"] = new string(' ', Math.Clamp(settings.FormatIndentSize, 1, 16)),
         };
 
         if (source is not null)
@@ -322,7 +344,7 @@ internal sealed class EngineClient : IAsyncDisposable
         // holds no state, so an answer that ignores a setting is indistinguishable from a
         // setting that never arrived.
         Log.Verbose($"engine: smartEnter layout {settings.BlockLayout}"
-            + $", indentUnit {(settings.FormatUseTabs ? "tab" : $"{settings.FormatIndentSize} spaces")}");
+            + $", indentUnit {settings.FormatIndentSize} spaces");
 
         var result = await CallAsync("textDocument/smartEnter", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSmartEnter);

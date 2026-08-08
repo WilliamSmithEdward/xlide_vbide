@@ -182,6 +182,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
 | `native` | `native({text})` / `inSync()` / `parityAll()` | the HOST's own panes, caret and CONTENT, under the surface |
+| `engine` | `engineSource(module, {text})` | what the ENGINE is holding for a module, against what the surface holds |
 
 Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 
@@ -243,6 +244,8 @@ await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-cha
 await api.act("search", { query: "Recalculate", scope: "project" });
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("format");                        // Format Module; {selection: true} for the selection
+await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a
+                                                // whole indent level in leading whitespace
 
 // IntelliSense and the squiggles, at a word or a position
 await api.act("hover", { word: "Recalculate" });
@@ -304,8 +307,9 @@ distinguishing it from a broken door.
 ### Parity with the native editor
 
 ```js
-await api.native();    // the host's active pane, its caret, and every pane it holds open
-await api.inSync();    // one boolean over native, surface and page
+await api.native();          // the host's active pane, its caret, and every pane it holds open
+await api.inSync();          // one boolean over native, surface and page
+await api.engineSource(m);   // and what the ANALYZER is holding, which is a third copy again
 ```
 
 > **A feature that touches the editor is not fully tested until it validates this.** The surface
@@ -325,8 +329,16 @@ await api.inSync();    // one boolean over native, surface and page
 > 2026-08-08. It is an invariant in the surface walk now, checked after every step, and the
 > rename and debugger suites assert it after every state change.
 
+**There is a THIRD copy, and it is the one findings are measured in.** The engine keeps its own
+live text per module, fed by the page's edits, and prefers it over the copy the project was
+seeded with whenever a request does not carry a source. Nothing could see that copy until
+`engineSource()`, and while it could not be seen, a squiggle drawn in the wrong place had no way
+of being attributed to the side that had drifted. Ask it whenever a finding lands somewhere the
+text does not agree with.
+
 ```bash
 node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at every stage
+node tools\harness\format-positions.mjs    # where a squiggle lands after Format Module
 ```
 
 Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**
@@ -548,7 +560,7 @@ await api.guard(false, { forget: true });
 Two tests, because there are two different exposures and only one of them is ours.
 
 ```bash
-node engine	est\language.mjs          # headless, a gate step, 18 scripts
+node engine\test\language.mjs          # headless, a gate step, 18 scripts
 tools\harness\Test-Language.ps1        # live, needs a running host
 ```
 
@@ -573,6 +585,32 @@ whole produced text). All pass.
 
 The probe reports which scripts survive on the machine it runs on rather than asserting a list,
 and fails only when text reaches COM and is then lost by **our** code.
+
+### The other thing the host will not store: a tab
+
+> **VBA's code store cannot hold a tab character.** The editor expands every one it is handed to
+> the next four-column stop. Measured 2026-08-07 on both write paths this product uses
+> (`AddFromString` for a whole module, `DeleteLines` + `InsertLines` for a small change) and for
+> tabs that are not leading whitespace either: `"    Dim n\tAs Long"` comes back as
+> `"    Dim n   As Long"`.
+
+So there is **no "indent with tabs" setting**, and there cannot be a working one. While there
+was, the page indented with tabs and the workbook held spaces, and the two disagreed for as long
+as the module stayed open, which is the one thing a surface covering the host's own editor must
+never do. It was removed on the developer's call the day it was measured. A `format.useTabs` in
+an older settings file is ignored rather than read.
+
+What remains is **Indent size**, in spaces, governing typing, smart Enter, Backspace and Format
+Module alike. Backspace is what makes that bearable: with `useTabStops` on, pressing it in a
+line's **leading whitespace** takes back a whole indent level rather than one space, and
+everywhere else it deletes one character as it always has.
+
+```bash
+node tools\harness\format-positions.mjs   # positions, parity, and the Backspace behaviour
+```
+
+`act("backspace", {times})` drives it. The `type` route cannot: it goes through
+`trigger("keyboard", "type")`, which only ever inserts.
 
 ---
 

@@ -41,13 +41,20 @@ public sealed record ProductSettings
     [JsonPropertyName("format.indentSize")]
     public int FormatIndentSize { get; init; } = 4;
 
-    /// <summary>
-    /// Indent with tabs rather than spaces, everywhere: typing, smart Enter, and Format Module.
-    /// Tabs, by the developer's standing choice (2026-08-04) — which the editor did not honour
-    /// until 2026-08-08, having been hard-coded to spaces while this said tabs.
-    /// </summary>
-    [JsonPropertyName("format.useTabs")]
-    public bool FormatUseTabs { get; init; } = true;
+    // THERE IS NO "indent with tabs" SETTING, and there cannot be a working one.
+    //
+    // VBA's code store will not hold a tab character. The editor expands every one it is handed
+    // to the next four-column stop, on both write paths this product uses and mid-line as well as
+    // leading: "    Dim n\tAs Long" is read back as "    Dim n   As Long" (measured 2026-08-07).
+    //
+    // So the setting could only ever have been half honoured. The page indented with tabs, the
+    // workbook held spaces, and the two disagreed for as long as the module stayed open, which is
+    // the one thing a surface covering the host's own editor must never do. It was removed on the
+    // developer's call the day it was measured; a `format.useTabs` left in an older settings file
+    // is ignored rather than read.
+    //
+    // Indentation is spaces, FormatIndentSize of them, and Backspace in a line's leading
+    // whitespace takes back a whole level of them.
 
     /// <summary>Format Module: respell keywords in their canonical case.</summary>
     [JsonPropertyName("format.canonicalKeywords")]

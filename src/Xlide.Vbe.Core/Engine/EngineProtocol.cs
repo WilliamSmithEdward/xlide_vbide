@@ -14,11 +14,26 @@ public sealed record EngineDiagnostic(
     [property: JsonPropertyName("code")] string? Code,
     [property: JsonPropertyName("message")] string Message,
     [property: JsonPropertyName("severity")] string Severity,
-    [property: JsonPropertyName("span")] EngineSpan Span);
+    [property: JsonPropertyName("span")] EngineSpan Span,
+    [property: JsonPropertyName("at")] EnginePosition? At = null);
 
 public sealed record EngineSpan(
     [property: JsonPropertyName("start")] int Start,
     [property: JsonPropertyName("end")] int End);
+
+/// <summary>
+/// The span as one-based lines and columns, measured by the engine against the text it analysed.
+///
+/// Null only from an engine older than this field. An offset is meaningless without the text it
+/// was counted in, and a request that sends no source leaves the engine to choose between its live
+/// copy and its seeded one, a choice the caller cannot see. Converting here from a text the caller
+/// merely happened to hold put findings columns away from the words they were about.
+/// </summary>
+public sealed record EnginePosition(
+    [property: JsonPropertyName("startLine")] int StartLine,
+    [property: JsonPropertyName("startColumn")] int StartColumn,
+    [property: JsonPropertyName("endLine")] int EndLine,
+    [property: JsonPropertyName("endColumn")] int EndColumn);
 
 public sealed record EngineDiagnostics(
     [property: JsonPropertyName("diagnostics")] EngineDiagnostic[] Diagnostics,
@@ -187,6 +202,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineDiagnostic))]
 [JsonSerializable(typeof(EngineDiagnostics))]
 [JsonSerializable(typeof(EngineSpan))]
+[JsonSerializable(typeof(EnginePosition))]
 [JsonSerializable(typeof(EngineCompletionItem))]
 [JsonSerializable(typeof(EngineCompletions))]
 [JsonSerializable(typeof(EngineHoverPayload))]

@@ -15,15 +15,12 @@ import { CANONICAL_KEYWORDS, VBA_LANGUAGE_ID } from "./vba.js";
 export interface FormatOptions {
   /** Spaces per indent level. */
   indentSize: number;
-  /** Indent with tabs rather than spaces. */
-  useTabs: boolean;
   /** Respell keywords in their canonical case. */
   canonicalKeywords: boolean;
 }
 
 export const DEFAULT_FORMAT_OPTIONS: FormatOptions = {
   indentSize: 4,
-  useTabs: true,
   canonicalKeywords: true,
 };
 
@@ -174,7 +171,10 @@ function respell(line: string): string {
 
 /** Formats a whole module. Returns the text unchanged when there is nothing to do. */
 export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_OPTIONS): string {
-  const unit = options.useTabs ? "\t" : " ".repeat(Math.max(1, options.indentSize));
+  // Spaces, always. VBA's code store will not hold a tab: the editor expands every one it is
+  // handed to the next four-column stop, so a module formatted with tabs read back as spaces and
+  // the page and the workbook disagreed for as long as it stayed open.
+  const unit = " ".repeat(Math.max(1, options.indentSize));
   const lines = text.split(/\r?\n/);
   const formatted: string[] = [];
 
@@ -229,6 +229,58 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
 }
 
 /**
+ * Models with a formatting edit on its way in, so a change event can be told from a keystroke.
+ *
+ * WHY THE HOST NEEDS TO KNOW. A line being typed does not get squiggled until the caret leaves
+ * it — the VBE's own contract, and the reason the analyzer does not complain about `MsgBox `
+ * while its arguments are still on their way. The host arms that hold when a change event
+ * touches exactly one line and inserts no newline, which is what a keystroke looks like.
+ *
+ * A format looks like that too, whenever it happens to change one line. Formatting a module
+ * whose lines are already indented correctly except one does precisely that: the whole-document
+ * edit goes in, the editor reduces it to the single line that actually moved, and the host reads
+ * a keystroke. The findings on that line are then hidden until the caret is moved off it, so
+ * running Format Module made a red squiggle disappear and stay gone (2026-08-07).
+ *
+ * The editor gives a change event no reason or source, so the only place that knows a format is
+ * responsible is the formatter itself. Armed per model when there is an edit to apply, consumed
+ * by the first change event that follows it, and dropped on a turn of the loop if none does.
+ */
+const formatting = new WeakSet<monaco.editor.ITextModel>();
+
+/**
+ * Whether this model's next change is a format's, clearing the mark as it answers. Asked once
+ * per change event, so a format that produced an edit is credited to exactly one of them.
+ */
+export function takeFormattingMark(model: monaco.editor.ITextModel): boolean {
+  if (!formatting.has(model)) {
+    return false;
+  }
+
+  formatting.delete(model);
+  return true;
+}
+
+/**
+ * The edits a format wants, marked as a format's.
+ *
+ * The mark goes on only when there is something to apply — an already-formatted module produces
+ * no change event, and a mark left standing would be spent on whatever the developer typed next.
+ * The timer is the backstop for an edit the editor declines to apply at all.
+ */
+function marked(
+  model: monaco.editor.ITextModel,
+  edits: monaco.languages.TextEdit[],
+): monaco.languages.TextEdit[] {
+  if (edits.length > 0) {
+    formatting.add(model);
+    setTimeout(() => formatting.delete(model), 2000);
+  }
+
+  return edits;
+}
+
+/**
  * Registers formatting for VBA.
  *
  * Both a whole-document and a range provider, because the editor uses different ones for "format
@@ -241,7 +293,9 @@ export function registerFormatting(getOptions: () => FormatOptions): void {
       const text = model.getValue();
       const formatted = formatVba(text, getOptions());
 
-      return formatted === text ? [] : [{ range: model.getFullModelRange(), text: formatted }];
+      return marked(
+        model,
+        formatted === text ? [] : [{ range: model.getFullModelRange(), text: formatted }]);
     },
   });
 
@@ -258,7 +312,7 @@ export function registerFormatting(getOptions: () => FormatOptions): void {
       const text = model.getValueInRange(whole);
       const formatted = formatVba(text, getOptions());
 
-      return formatted === text ? [] : [{ range: whole, text: formatted }];
+      return marked(model, formatted === text ? [] : [{ range: whole, text: formatted }]);
     },
   });
 }

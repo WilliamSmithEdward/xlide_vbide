@@ -923,6 +923,39 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * Backspace, through the command the key is bound to.
+     *
+     * The shim's `type` route cannot express one: it drives `trigger("keyboard", "type")`, which
+     * only ever inserts. Backspace is `deleteLeft`, and it is worth being able to send because in
+     * a line's leading whitespace it does not delete one character. With `useTabStops` on it
+     * takes back a whole indent level, which is the behaviour that makes indenting with spaces
+     * feel like indenting with tabs, and the only reason removing the tabs setting was tolerable.
+     *
+     * `times` presses it more than once, because the interesting cases are the second and third
+     * press: level two to level one, level one to the margin, and then the margin holding.
+     */
+    backspace: (args) => {
+      const editor = workspace.activeEditor();
+      const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));
+
+      editor.focus();
+      for (let press = 0; press < times; press += 1) {
+        editor.trigger("keyboard", "deleteLeft", null);
+      }
+
+      const at = editor.getPosition();
+      return {
+        did: true,
+        detail: `deleteLeft ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
+        data: {
+          line: at?.lineNumber ?? null,
+          column: at?.column ?? null,
+          text: at ? editor.getModel()?.getLineContent(at.lineNumber) ?? null : null,
+        },
+      };
+    },
+
+    /**
      * Format Module, or Format Selection: the editor's own formatting actions.
      *
      * The third consumer of the indent settings, after typing and smart Enter, and the one where

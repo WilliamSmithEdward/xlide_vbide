@@ -974,7 +974,6 @@ internal sealed class EditorSurface : IDisposable
                 settings.MirrorCommentSpacing,
                 settings.TreeFollowsEditor,
                 settings.FormatIndentSize,
-                settings.FormatUseTabs,
                 settings.FormatCanonicalKeywords),
             EditorMessageContext.Default.SetSettingsMessage));
     }
@@ -1449,7 +1448,19 @@ internal sealed class EditorSurface : IDisposable
 
                             // Read from the raw change set rather than the parsed edits, because
                             // small modules skip the parse and this must fire for them too.
-                            if (document.RootElement.TryGetProperty("changes", out var typedSet)
+                            //
+                            // A change the page has named the source of is not typing, whatever
+                            // its shape. Formatting a module whose lines are already right except
+                            // one produces a one-line change with no newline in it, which is
+                            // exactly what a keystroke produces, and reading it as one armed the
+                            // hold and took the squiggle off that line until the caret was moved
+                            // away (2026-08-07). The page marks its formatter's edits because the
+                            // editor's change event carries no source of its own.
+                            var typedByHand = !document.RootElement.TryGetProperty("source", out var madeBy)
+                                || madeBy.ValueKind != JsonValueKind.String;
+
+                            if (typedByHand
+                                && document.RootElement.TryGetProperty("changes", out var typedSet)
                                 && SingleLineTypedIn(typedSet) is { } typedLine)
                             {
                                 LineTyped?.Invoke(typedLine);
@@ -1596,8 +1607,6 @@ internal sealed class EditorSurface : IDisposable
                         && indentValue.TryGetInt32(out var asked)
                         ? asked
                         : 4;
-                    var useTabs = !document.RootElement.TryGetProperty("formatUseTabs", out var tabsValue)
-                        || tabsValue.ValueKind is not JsonValueKind.False;
                     var canonicalKeywords = !document.RootElement.TryGetProperty("formatCanonicalKeywords", out var keywordsValue)
                         || keywordsValue.ValueKind is not (JsonValueKind.False);
 
@@ -1608,7 +1617,6 @@ internal sealed class EditorSurface : IDisposable
                         MirrorCommentSpacing = mirrorSpacing,
                         TreeFollowsEditor = treeFollows,
                         FormatIndentSize = indentSize,
-                        FormatUseTabs = useTabs,
                         FormatCanonicalKeywords = canonicalKeywords,
                     }.Normalized());
                     break;
