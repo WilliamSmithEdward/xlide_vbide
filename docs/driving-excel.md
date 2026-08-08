@@ -377,7 +377,41 @@ text does not agree with.
 node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at every stage
 node tools\harness\format-positions.mjs    # where a squiggle lands after Format Module
 node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
+node tools\harness\analysis-freshness.mjs  # findings stay true while the work behind them is skipped
 ```
+
+### Work that is skipped, and how to see that it was skipped
+
+A pass no longer re-analyses what has not moved. Two layers decide: the shim leaves a PROJECT
+alone when no module's text has changed since it was seeded, and the engine answers a MODULE from
+its last analysis when both the module's text and the project facts it depends on are unchanged.
+Editing one line of a small module in a 17,000-line project went from 476ms of analyzer time to
+34ms, and a completion asked during that pass went from 332ms to 64ms (2026-08-08).
+
+Both layers are visible from here:
+
+```js
+await api.perf({ reset: true });          // forget, so what follows is what this provoked
+await api.writeModule("Small", text);     // provoke a pass
+await api.engineCosts();                  // what the analyzer was actually asked to do
+```
+
+`engineCosts()` returning nothing at all after a write-back is the project skip: no seed, no
+diagnostics. A diagnostics row whose `calls` matches the module count but whose `totalMs` is a
+few dozen is the engine's memo: every module was asked, most answered from the last pass.
+
+The log says which projects were left alone:
+
+```bash
+node tools\harness\xlide-api.mjs log "finding(s) stand"
+```
+
+The trap to know about: a module's findings depend on more than its own text. Change a
+procedure's SIGNATURE in one module and every call to it elsewhere is right or wrong for a new
+reason, with none of those modules having been touched. That is what the engine's facts
+comparison is for, and `analysis-freshness.mjs` is the check that it works. With the comparison
+removed the suite reports zero findings where it should report one, which is the only way to know
+a check of this kind is worth having.
 
 ### The COM wrappers, which killed Excel four times before anyone counted them
 

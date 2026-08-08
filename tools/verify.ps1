@@ -105,7 +105,16 @@ Step 'engine executable is current' {
     if (-not (Test-Path $exe)) { throw 'engine\dist\xlide-engine.exe has never been packaged; run npm run package in engine\' }
 
     $builtAt = (Get-Item $exe).LastWriteTimeUtc
-    $newer = @(Get-ChildItem (Join-Path $engineRoot 'src') -Recurse -File |
+
+    # The ANALYZER counts as engine source. It lives in the neighbouring checkout and is bundled
+    # INTO this executable, so a pull over there changes what the add-in runs without touching a
+    # single file in this repository. Watching engine\src alone would call that stale executable
+    # current, which is the one answer this step exists to never give.
+    $watched = @(Join-Path $engineRoot 'src')
+    $analyzer = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+    if (Test-Path $analyzer) { $watched += $analyzer }
+
+    $newer = @(Get-ChildItem $watched -Recurse -File -Include *.ts, *.mjs, *.js |
         Where-Object { $_.LastWriteTimeUtc -gt $builtAt })
 
     if ($newer.Count -gt 0) {
@@ -113,7 +122,13 @@ Step 'engine executable is current' {
         throw "engine sources are newer than the packaged executable ($names). Run: npm run package --prefix engine"
     }
 
-    'packaged after every engine source'
+    if ($watched.Count -eq 1) {
+        # Said out loud rather than passed over: the check ran, but half of what it is meant to
+        # watch was not there to watch.
+        return 'packaged after every engine source (the analyzer checkout was not found)'
+    }
+
+    'packaged after every engine source, analyzer included'
 }
 
 Step 'page typecheck' {
@@ -297,7 +312,12 @@ if ($Live) {
         if (-not $excel) { throw 'no editor is open; start one with tools\dev.ps1 -KeepOpen' }
 
         $ran = @()
-        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs') {
+        # analysis-freshness runs against whatever workbook is open: it brings its own two modules
+        # and takes them away again. That is deliberate. It guards a SILENT failure - a squiggle
+        # that should be drawn and is not, because a module's findings were reused after another
+        # module changed the signature it calls - and a guard that only runs when someone
+        # remembers to open a particular fixture is a guard that will not run.
+        foreach ($suite in 'format-positions.mjs', 'three-copies.mjs', 'immediate-watch.mjs', 'analysis-freshness.mjs') {
             $answer = node (Join-Path $repoRoot "tools\harness\$suite") 2>&1
             $answer | Out-Host
 

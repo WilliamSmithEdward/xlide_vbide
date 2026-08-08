@@ -1103,3 +1103,121 @@ Worth noting how it was found. Nothing was broken on screen, no crash, no failin
 suites passed against this defect for as long as it existed, because they reached the state they
 needed through `pane("open")` rather than through the tab strip. What surfaced it was printing
 several unrelated readings side by side and noticing that two of them could not both be true.
+
+## 44. Every pass re-derived what nothing had changed
+
+Adding one comment line to a 109-line module cost **six analyses and 476ms** in a project holding
+17,000 lines. Of that, 446ms produced findings identical to the ones already on screen, for four
+modules that were byte-identical to the ones the last pass had read.
+
+That was the design, not a slip: `AnalyseEverythingAsync` read every project, seeded every one of
+them, and asked the analyzer about every module of every one, on every pass. Correct, and it
+scales with the project rather than with the edit.
+
+The cost was not only the work. The engine serves ONE request at a time, so a pass is also a
+period during which every interactive request queues. Measured on the same fixture: a completion
+in the big module cost **35ms with the pipe idle and up to 332ms during a pass**, provoked by a
+one-line edit to a different, tiny module. 383ms of wall-clock across twelve completions was pure
+wait for the pipe. Nothing on screen said the editor was busy; it just occasionally took a third
+of a second to offer a list it usually offers instantly.
+
+Two layers now skip the work. The shim leaves a PROJECT alone when no module's text has moved
+since it was seeded - not a generation counter, the SOURCES, because the counter says a pass
+happened and the sources say whether anything came of it. The engine answers a MODULE from its
+last analysis when the module's text and the project facts it depends on are both unchanged.
+
+Same edit afterwards: **34ms**, and the completion during the pass: **64ms worst, 35ms median**,
+which is the idle figure. A byte-identical write-back now costs the engine nothing at all - no
+seed, no diagnostics, not one call.
+
+### The part that is easy to get wrong
+
+A module's findings do NOT depend only on its own text. Change a procedure's signature in module
+A and every call to it in module B is right or wrong for a new reason, with B's text untouched. A
+memo keyed on source alone reports B clean forever, and that is a silent failure: nothing goes
+red, nothing is slow, a squiggle that should be there simply is not.
+
+So the comparison is not a heuristic about what looks like a declaration change. It is the exact
+cross-module input the analyzer receives - `projectAnalysisOptionsForModule` for that module -
+serialised and compared. Two requests that agree on the module's text and on that object have the
+same answer, necessarily, and the second need not be computed.
+
+It is kept whole rather than hashed. A digest would hold 44 bytes instead of a few hundred
+kilobytes, and would cost a hash over those bytes on every seed to save a comparison that is
+already cheap: about 2ms per pass spent to save about 60 microseconds of it. The developer's call
+was explicit - lower latency, and memory is not the scarce thing here.
+
+**Proven by failing.** With the facts comparison removed and everything else identical, the new
+suite reports zero findings where it should report one. `analysis-freshness.mjs`.
+
+## 45. Ten callers, no gate, and passes racing each other
+
+`Reanalyse()` had ten call sites and started a pass from each one, unguarded and fire-and-forget.
+Six write-backs in quick succession started **six full passes** over the same text.
+
+The waste was the smaller half. Each pass takes a new generation and re-seeds, and the analyzer
+refuses any request whose generation does not match what it currently holds. So two overlapping
+passes leave a window in which a live analysis names a generation that is no longer current and
+is answered *"No current sources for this project. Send project/open first."* Twenty of those in
+one session's log, each one a module that went unsquiggled until something else provoked a pass.
+
+Coalesced: one pass at a time, with at most one more remembered. Six rapid write-backs now
+provoke **two** passes. The remembered-one is set BEFORE the gate is tried, and read once more
+after it is released, because the gap between the last read and the release is the one place a
+request can be dropped.
+
+The generation is also held per project now. One field was correct only while every pass
+re-seeded everything and they all carried the same number; the moment a pass can leave a project
+alone the numbers diverge, and the single field starts naming another project's.
+
+### What a skip must never record
+
+Two failure paths had to be closed before the skip was safe, and both were found by reading the
+code rather than by running it:
+
+- A seed that FAILED still recorded the project as seeded. The next pass would compare sources,
+  find them unchanged, skip - and the engine had never been told about the project at all. It
+  would answer "send project/open first" to everything for the rest of the session.
+- A module the engine declined left a hole in the findings, and recording a hole as the project's
+  state means the next pass republishes the hole. Forever, because nothing would ask again.
+
+So the recording happens only when the seed took AND every module answered. **A cache entry
+written from a partial result is worse than no cache at all: it is a wrong answer with no route
+back to a right one.**
+
+## 46. The health field that could not report ill health
+
+`engineUp` was `_analysis is not null` - whether the session had constructed the object that talks
+to the engine. True from start-up to shutdown, whatever the engine did.
+
+Killing the engine process on purpose: the door reported `engineUp: true`, the doctor reported
+`healthy: true`, and the editor went on drawing a squiggle for a variable that the module no
+longer contained. The engine is started once and never restarted, so that session was finished as
+a language service and nothing anywhere said so.
+
+Reading the truth instead (`IsReady`, which was already there and already correct) immediately
+paid for itself twice over. It exposed a second thing that had been invisible underneath the
+always-true field: the launcher reported the door healthy BEFORE the engine had connected, on
+every launch, because the field it checked could not be false. It now waits.
+
+**A field that cannot report the bad state is not a check, it is a decoration** - and worse, it
+hides whatever else was relying on it. Two of the six instruments that were wrong before they
+were right this week were wrong in exactly this way.
+
+## 47. The build that was never the build being tested
+
+The shim runs `engine\dist\xlide-engine.exe`. `node build.mjs` writes `engine\dist\engine.cjs`
+and does not touch the executable; only `--package` does.
+
+So a change was made, type-checked, bundled, deployed and measured - and measured as no
+improvement at all, because the executable being run was hours old. Twice, before the timestamps
+were read. The gate had caught this class of thing for the SHIM since 2026-08-06 and there was an
+assertion for the engine in `verify.ps1`, but `dev.ps1` - the loop actually used all day - built
+neither the engine nor checked it.
+
+It builds and checks it now. And the check watches the ANALYZER's sources too, in the neighbouring
+checkout: it is bundled INTO this executable, so a pull over there changes what the add-in runs
+without touching a single file in this repository. Watching `engine\src` alone would call that
+stale executable current, which is the one answer the check exists never to give.
+
+**A staleness check that watches only the sources in this repository is not watching the build.**

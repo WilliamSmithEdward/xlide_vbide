@@ -46,6 +46,9 @@ $registerProject = Join-Path $repoRoot 'tools\Xlide.Vbe.Register\Xlide.Vbe.Regis
 $publishDir = Join-Path $repoRoot "artifacts\publish\Xlide.Vbe.Shim\$($Configuration.ToLowerInvariant())_win-x64"
 $shimPath = Join-Path $publishDir 'Xlide.Vbe.Shim.dll'
 
+# What the shim actually spawns in a build tree. Not the bundle beside it: see the build step.
+$enginePath = Join-Path $repoRoot 'engine\dist\xlide-engine.exe'
+
 # The SDK and the native linker are not necessarily on the machine PATH.
 $localDotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet'
 if (Test-Path (Join-Path $localDotnet 'dotnet.exe')) {
@@ -135,6 +138,54 @@ if (-not $NoBuild) {
         # (0x800711C7, surfacing as xUnit's "did not return valid JSON"), while Debug ones and
         # the NativeAOT shim itself load fine. The gate is about correctness, not codegen.
         dotnet test (Join-Path $repoRoot 'tests\Xlide.Vbe.Core.Tests') -c Debug --nologo
+    }
+
+    Invoke-Step 'Build the engine (bundle, then executable)' {
+        # PACKAGED, not just bundled. `node build.mjs` writes engine.cjs; the shim runs
+        # xlide-engine.exe, which only `--package` refreshes. Building without it leaves the
+        # executable at whatever it was and every measurement afterwards describes the OLD
+        # engine while the source says otherwise (2026-08-08: a 14x improvement measured as no
+        # improvement at all, twice, before the timestamps were read). The staleness assertion
+        # below is what makes that impossible to miss again.
+        Push-Location (Join-Path $repoRoot 'engine')
+        try {
+            # esbuild and postject write their progress to STDERR even when they succeed, and
+            # under $ErrorActionPreference = 'Stop' Windows PowerShell turns a native command's
+            # stderr into a terminating error. So the preference is lifted for the call and the
+            # EXIT CODE is what decides, which is the only thing that actually knows.
+            $wasPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                node build.mjs --package
+            } finally {
+                $ErrorActionPreference = $wasPreference
+            }
+
+            if ($LASTEXITCODE -ne 0) { throw "The engine build failed ($LASTEXITCODE)." }
+        } finally {
+            Pop-Location
+        }
+
+        # The analyzer counts as engine source: it lives in the neighbouring checkout and is
+        # bundled INTO this executable, so a pull over there changes what the add-in runs without
+        # touching a file in this repository. The gate watches both; so does this.
+        $engineSources = @(Join-Path $repoRoot 'engine\src')
+        $analyzerSources = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+        if (Test-Path $analyzerSources) { $engineSources += $analyzerSources }
+
+        $newestEngineSource = Get-ChildItem $engineSources -Recurse -Include *.ts |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        $engineExe = Get-Item $enginePath -ErrorAction SilentlyContinue
+        if (-not $engineExe) { throw "No engine executable at $enginePath after the build." }
+        if ($newestEngineSource -and $newestEngineSource.LastWriteTime -gt $engineExe.LastWriteTime) {
+            throw ("The packaged engine is OLDER than $($newestEngineSource.Name) " +
+                "($($engineExe.LastWriteTime.ToString('HH:mm:ss')) against " +
+                "$($newestEngineSource.LastWriteTime.ToString('HH:mm:ss'))). The package did not " +
+                'take; do not test this build.')
+        }
+
+        Write-Host ("Engine: {0} ({1:N2} MB, built {2:HH:mm:ss})" -f
+            $engineExe.FullName, ($engineExe.Length / 1MB), $engineExe.LastWriteTime)
     }
 
     Invoke-Step 'Publish the shim (ahead-of-time, native)' {

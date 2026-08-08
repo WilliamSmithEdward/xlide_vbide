@@ -2438,7 +2438,12 @@ internal sealed class AddInSession : IDisposable
                         ShownProject: DisplayFromProjectId(_shownProject),
                         DebugMode: _lastPublishedMode,
                         HasUnwrittenEdits: _editorSurface?.HasUnwrittenEdits ?? false,
-                        EngineUp: _analysis is not null,
+                        // Whether the engine is ANSWERING, not whether this session got as far as
+                        // constructing the service that talks to it. The old reading was true from
+                        // start-up to shutdown whatever the engine did, so killing the engine
+                        // process left the door reporting engineUp: true while the editor drew
+                        // squiggles from the last pass that ran (found 2026-08-08 by killing it).
+                        EngineUp: _analysis?.IsReady == true,
                         Frame: $"0x{_frame:X}",
                         FrameRect: $"{frameRect.Left},{frameRect.Top},{frameRect.Right},{frameRect.Bottom}",
                         DocumentArea: $"0x{_documentArea:X}",
@@ -2502,6 +2507,15 @@ internal sealed class AddInSession : IDisposable
                 {
                     findings.Add("the analysis engine is not up, so diagnostics will stay empty");
                 }
+                else if (!_analysis.IsReady)
+                {
+                    // Distinct from the case above, and the more dangerous one: the service is
+                    // there, the last pass's findings are still drawn, and nothing new will ever
+                    // be analysed because the engine is started once and never restarted. The
+                    // doctor called that healthy until 2026-08-08.
+                    findings.Add("the analysis engine is not answering, so the findings on screen "
+                        + "are from the last pass that ran and will not change (the engine is not restarted)");
+                }
 
                 if (_ghostReaders is null)
                 {
@@ -2533,7 +2547,12 @@ internal sealed class AddInSession : IDisposable
                             ? File.GetLastWriteTimeUtc(bundle).ToString("O")
                             : "(missing)",
                         PageBuildStamp: _editorSurface?.PageBuildStamp ?? "(none reported)",
-                        EngineUp: _analysis is not null,
+                        // Whether the engine is ANSWERING, not whether this session got as far as
+                        // constructing the service that talks to it. The old reading was true from
+                        // start-up to shutdown whatever the engine did, so killing the engine
+                        // process left the door reporting engineUp: true while the editor drew
+                        // squiggles from the last pass that ran (found 2026-08-08 by killing it).
+                        EngineUp: _analysis?.IsReady == true,
                         GhostReadersUp: _ghostReaders is not null,
                         SurfaceReady: _surfaceShown,
                         Findings: [.. findings]),

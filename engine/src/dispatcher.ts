@@ -9,7 +9,13 @@
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import type { VbaModuleAnalysisDiagnostic } from '../../../xlide_vscode/src/vbaModuleAnalysis';
-import { moduleKindFromType } from '../../../xlide_vscode/src/vbaProjectAnalysis';
+import {
+    buildVbaProjectIndex,
+    moduleKindFromType,
+    projectAnalysisOptionsForModule,
+    projectProcedureSignatures,
+} from '../../../xlide_vscode/src/vbaProjectAnalysis';
+import type { EventHandlerDocumentType } from '../../../xlide_vscode/src/analyzer';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { outlineFor, projectWordsFor } from './outline';
@@ -67,6 +73,67 @@ import {
 
 function liveKey(projectId: string, moduleName: string): string {
     return `${projectId}\0${moduleName.toLowerCase()}`;
+}
+
+/**
+ * Per seeded module array: what each module's analysis depends on from the REST of the project,
+ * as a string that can be compared.
+ *
+ * This is the exact thing, not an approximation of it. Analysing a module takes the module's own
+ * text plus `projectAnalysisOptionsForModule` for it — the project's types, its class members and
+ * its procedure signatures as that module sees them. Those two inputs decide the findings, so two
+ * requests that agree on both have the same answer and the second need not be computed.
+ *
+ * Keyed on the seeded array's identity, which is replaced whole on every reseed, so a project
+ * that reseeds gets a fresh set and one that does not keeps its own. Built lazily and for the
+ * whole project at once, because the index it needs is a project-wide build and doing it per
+ * module would be doing it once per module.
+ */
+const crossModuleFacts = new WeakMap<readonly ModulePayload[], Map<string, string> | null>();
+
+function crossModuleFingerprint(
+    seeded: readonly ModulePayload[],
+    moduleName: string,
+): string | undefined {
+    let held = crossModuleFacts.get(seeded);
+    if (held === undefined) {
+        held = null;
+        try {
+            const index = buildVbaProjectIndex(seeded.map((module) => ({
+                moduleName: module.moduleName,
+                source: module.source,
+                type: module.type,
+                documentType: module.documentType as EventHandlerDocumentType | undefined,
+            })));
+            const procedures = projectProcedureSignatures(index);
+
+            held = new Map<string, string>();
+            for (const module of seeded) {
+                // KEPT WHOLE, not digested. A digest would hold 44 bytes instead of the few
+                // hundred kilobytes this is for a large project, and it would cost a hash over
+                // those bytes on every seed to save a comparison that is already cheap: about
+                // 2ms per pass spent to save about 60 microseconds of it. Memory is the cheaper
+                // side of that trade here (developer, 2026-08-08).
+                //
+                // And the instance is what makes the comparison fast. Every request under one
+                // seed is handed the SAME string out of this map, so the check against the last
+                // answer's copy is a pointer comparison until the project is seeded again.
+                held.set(
+                    module.moduleName.toLowerCase(),
+                    JSON.stringify(projectAnalysisOptionsForModule(index, module.moduleName, procedures)));
+            }
+        } catch {
+            // Null rather than an empty map, deliberately. An empty map would answer "no facts"
+            // for every module, and "no facts" compares equal to itself, so a project whose index
+            // will not build would look unchanged forever and freeze its findings. Null means
+            // unknown, and unknown is never reused.
+            held = null;
+        }
+
+        crossModuleFacts.set(seeded, held);
+    }
+
+    return held?.get(moduleName.toLowerCase());
 }
 
 /** The analyse request, narrowed: the only worker request this engine keeps hold of. */
@@ -136,6 +203,15 @@ export class Dispatcher {
         source: string;
         diagnostics: readonly VbaModuleAnalysisDiagnostic[];
         request: AnalyzeRequest;
+        /**
+         * What the last DIAGNOSTICS request was answered under, when it was one: the cross-module
+         * facts and the shape of the request. Absent on entries written by a quick fix, which
+         * never reuses them for anything but its own source comparison, and which must not let
+         * one be reused as a diagnostics answer.
+         */
+        facts?: string;
+        shape?: string;
+        mode?: DiagnosticsResult['mode'];
     }>();
 
     private nextRequestId = 1;
@@ -671,6 +747,51 @@ export class Dispatcher {
             return { diagnostics: [] };
         }
 
+        /*
+         * THE SAME TEXT UNDER THE SAME PROJECT HAS THE SAME FINDINGS.
+         *
+         * A full pass asks about every module of a project, and a pass is provoked by a write-back
+         * to one of them. The other modules are byte-identical to the last pass and, unless the
+         * written module changed a DECLARATION, so is everything they depend on. Re-deriving their
+         * findings produces the list already on screen, at full price: on the perf fixture that was
+         * 446ms of an 476ms pass, and the pipe is serialised, so it was also 446ms that every
+         * completion and hover queued behind (2026-08-08).
+         *
+         * The comparison is exact rather than a heuristic about what "looks like" a declaration
+         * change. `facts` IS the analyzer's cross-module input, and `shape` is every other thing
+         * about the request that can move an answer — the caret offset among them, because it
+         * suppresses the transient complaints of a half-typed expression and a cached answer from
+         * a different caret would put them back.
+         */
+        const key = params.projectId !== undefined
+            ? liveKey(params.projectId, params.moduleName)
+            : undefined;
+
+        // No seed, no reuse. Not `?? []`: an empty array is a fresh object every call, so it
+        // would key a fresh WeakMap entry and build an empty index per request, to answer
+        // "unknown" every time anyway.
+        const seeded = params.projectId !== undefined
+            ? this.seededModules.get(params.projectId)
+            : undefined;
+
+        const facts = seeded !== undefined
+            ? crossModuleFingerprint(seeded, params.moduleName)
+            : undefined;
+
+        const shape = JSON.stringify([
+            params.moduleType ?? null,
+            params.documentType ?? null,
+            params.severityOverrides ?? null,
+            params.activeIncompleteExpressionOffset ?? null,
+        ]);
+
+        if (key !== undefined && facts !== undefined) {
+            const memo = this.lastAnalysis.get(key);
+            if (memo && memo.source === source && memo.facts === facts && memo.shape === shape) {
+                return this.positioned(memo.diagnostics, source, memo.mode);
+            }
+        }
+
         const request: AnalyzeRequest = {
             kind: 'analyze',
             requestId: this.nextRequestId++,
@@ -708,23 +829,40 @@ export class Dispatcher {
             throw new RpcError(ErrorCode.InternalError, response.message);
         }
 
-        // Kept whole for quick fixes, which need the parts of a finding that do not travel below.
-        if (params.projectId !== undefined) {
-            this.lastAnalysis.set(liveKey(params.projectId, params.moduleName), {
+        // Kept whole for quick fixes, which need the parts of a finding that do not travel below,
+        // and now for the comparison above as well.
+        if (key !== undefined) {
+            this.lastAnalysis.set(key, {
                 source,
                 diagnostics: response.diagnostics,
                 request,
+                facts,
+                shape,
+                mode: response.incrementalMode,
             });
         }
 
-        // Converted HERE, against `source`, because this is the only place that knows which text
-        // the offsets were counted in. The caller may not have sent one, in which case the choice
-        // between the live copy and the seeded one was made above and the caller cannot see it.
+        return this.positioned(response.diagnostics, source, response.incrementalMode);
+    }
+
+    /**
+     * Findings with line and column added, counted in `source`.
+     *
+     * Here rather than inline because this is the only place that knows which text the offsets
+     * were counted in — the caller may not have sent one, in which case the choice between the
+     * live copy and the seeded one was made inside and the caller cannot see it. A finding
+     * measured in one text and drawn in another is how a squiggle lands on the wrong line.
+     */
+    private positioned(
+        diagnostics: readonly VbaModuleAnalysisDiagnostic[],
+        source: string,
+        mode: DiagnosticsResult['mode'],
+    ): DiagnosticsResult {
         // Built once for the module: per finding it would be a scan of the whole text each time.
         const starts = lineStarts(source);
 
         return {
-            diagnostics: response.diagnostics.map((diagnostic) => {
+            diagnostics: diagnostics.map((diagnostic) => {
                 const start = toLineColumn(starts, diagnostic.span.start);
                 const end = toLineColumn(starts, diagnostic.span.end);
 
@@ -741,7 +879,7 @@ export class Dispatcher {
                     },
                 };
             }),
-            mode: response.incrementalMode,
+            mode,
         };
     }
 

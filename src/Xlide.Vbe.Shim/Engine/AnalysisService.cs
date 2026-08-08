@@ -38,8 +38,40 @@ internal sealed class AnalysisService : IAsyncDisposable
     private EngineClient? _engine;
     private int _generation;
 
-    /// <summary>The generation the engine was last seeded with, which live analysis must name.</summary>
-    private int _lastSeededGeneration;
+    /// <summary>
+    /// What a project was last seeded into the engine with, and what came of it.
+    ///
+    /// The sources are held so a pass can tell whether a project needs re-seeding at all. Most
+    /// passes are provoked by a write-back to ONE module, and re-seeding a project whose text has
+    /// not moved costs the whole project's analysis to produce the findings it produced last time.
+    ///
+    /// The generation is held PER PROJECT rather than in one field. It used to be one, which was
+    /// true only because every project was re-seeded on every pass and so they all carried the
+    /// same number. Once a pass can leave a project alone, the numbers diverge, and a live
+    /// analysis naming the wrong one is answered "send project/open first" and draws nothing.
+    /// </summary>
+    private sealed record SeededProject(
+        int Generation,
+        Dictionary<string, string> Sources,
+        IReadOnlyList<Finding> Findings,
+        IReadOnlyList<string> Types,
+        IReadOnlyList<string> Procedures);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SeededProject> _seeded =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// One pass at a time, with at most one more remembered.
+    ///
+    /// <see cref="Reanalyse"/> has ten callers and used to start a pass from each, unguarded, so a
+    /// gesture that tripped two of them ran two full passes over the same text. That is twice the
+    /// analyzer's work for one answer, and worse: each pass takes a new generation and re-seeds,
+    /// so the two race, and a live analysis that read the generation between them is refused.
+    /// Coalesced, because a pass that has not started yet has nothing to say that a later one
+    /// will not say better.
+    /// </summary>
+    private readonly SemaphoreSlim _onePass = new(1, 1);
+    private int _passWanted;
 
     /// <summary>
     /// Projects the engine has been seeded with. Concurrent because pool threads write it
@@ -159,7 +191,12 @@ internal sealed class AnalysisService : IAsyncDisposable
                     return;
                 }
 
-                await AnalyseEverythingAsync().ConfigureAwait(false);
+                // Through the gate, but NOT through Reanalyse: that returns early unless the
+                // client already reports itself running, and the first pass is the one pass
+                // nothing else will provoke if it is skipped. The editor would sit unsquiggled
+                // until the developer happened to write a module.
+                Interlocked.Exchange(ref _passWanted, 1);
+                await RunPassesAsync().ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -190,24 +227,66 @@ internal sealed class AnalysisService : IAsyncDisposable
     {
         if (_engine is not { IsRunning: true })
         {
+            // Said out loud. This is the path a session takes for the rest of its life once the
+            // engine has died - there is no restart - and it used to take it in silence, so the
+            // symptom was squiggles that stopped following the code with nothing anywhere saying
+            // why (2026-08-08, found by killing the engine process on purpose).
+            Log.Warn("engine: a pass was asked for, but the engine is not running; nothing was analysed");
             return;
         }
 
-        _ = Task.Run(async () =>
+        // Asked for BEFORE trying to run, so a request that arrives while a pass is in flight is
+        // never lost: whoever holds the gate re-reads this before letting go.
+        Interlocked.Exchange(ref _passWanted, 1);
+        _ = Task.Run(RunPassesAsync);
+    }
+
+    /// <summary>
+    /// Runs passes until nothing more is wanted, one at a time.
+    ///
+    /// A caller who finds the gate held returns immediately rather than queueing: the pass in
+    /// flight will see the flag and run again, and two passes over the same text differ only in
+    /// how long the developer waits.
+    /// </summary>
+    private async Task RunPassesAsync()
+    {
+        if (!await _onePass.WaitAsync(0, CancellationToken.None).ConfigureAwait(false))
         {
-            try
+            return;
+        }
+
+        try
+        {
+            while (Interlocked.Exchange(ref _passWanted, 0) == 1)
             {
-                await AnalyseEverythingAsync().ConfigureAwait(false);
+                try
+                {
+                    await AnalyseEverythingAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Shutting down. Whatever is queued goes with it.
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    // Per pass, so one failure does not swallow the pass queued behind it.
+                    Log.Error("engine: re-analysis failed", ex);
+                }
             }
-            catch (OperationCanceledException)
-            {
-                // Shutting down.
-            }
-            catch (Exception ex)
-            {
-                Log.Error("engine: re-analysis failed", ex);
-            }
-        });
+        }
+        finally
+        {
+            _onePass.Release();
+        }
+
+        // The gap between the last read of the flag and the release above is the one place a
+        // request can be dropped: it sets the flag, finds the gate still held, and leaves. Read
+        // once more now that the gate is open, and start over if that is what happened.
+        if (Volatile.Read(ref _passWanted) == 1)
+        {
+            _ = Task.Run(RunPassesAsync);
+        }
     }
 
     /// <summary>
@@ -730,6 +809,34 @@ internal sealed class AnalysisService : IAsyncDisposable
 
         foreach (var snapshot in snapshots)
         {
+            /*
+             * A PROJECT WHOSE TEXT HAS NOT MOVED IS LEFT ALONE.
+             *
+             * A pass re-seeded every project and then analysed every module of it, every time,
+             * however little had changed. Adding one comment line to a 109-line module cost six
+             * analyses and 476ms, of which 446ms was re-deriving findings for four modules that
+             * were byte-identical to the ones already on screen (measured on the perf fixture,
+             * 2026-08-08). The analyzer scales sub-linearly but it does not scale to free, and
+             * the pipe serves one request at a time, so that work is also 476ms during which a
+             * completion in another module waits. It was measured at 332ms.
+             *
+             * Sources compared rather than a generation counted, because the counter says a pass
+             * happened and the sources say whether anything came of it. Most passes come from
+             * gestures that write nothing back.
+             */
+            var held = _seeded.TryGetValue(snapshot.ProjectId, out var was) ? was : null;
+            if (held is not null && SameSources(held.Sources, snapshot.Modules))
+            {
+                // The homes map is not rebuilt either: it is derived from the module set, and
+                // the comparison above has just established that the module set is the same.
+                factTypes.UnionWith(held.Types);
+                factProcedures.UnionWith(held.Procedures);
+                everything.AddRange(held.Findings);
+                _openProjects.TryAdd(snapshot.ProjectId, 0);
+                Log.Verbose($"engine: {snapshot.ProjectId} is unchanged, so its {held.Findings.Count} finding(s) stand");
+                continue;
+            }
+
             var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
                 .ConfigureAwait(false);
 
@@ -740,7 +847,6 @@ internal sealed class AnalysisService : IAsyncDisposable
             }
 
             _openProjects.TryAdd(snapshot.ProjectId, 0);
-            _lastSeededGeneration = snapshot.Generation;
 
             // This project's homes, rebuilt into a fresh map and swapped in whole: readers
             // snapshot the reference, and a name shared across workbooks keeps every home it
@@ -774,6 +880,12 @@ internal sealed class AnalysisService : IAsyncDisposable
 
             var findings = new List<Finding>();
 
+            // Every module answered, or this pass does not get to say what the project looks like.
+            // A single module that the engine declined leaves a hole in `findings`, and recording
+            // a hole as the project's state means the next pass compares sources, finds them
+            // unchanged, skips, and republishes the hole. Forever: nothing would ever ask again.
+            var complete = true;
+
             foreach (var module in snapshot.Modules)
             {
                 var result = await engine.DiagnoseAsync(
@@ -784,7 +896,13 @@ internal sealed class AnalysisService : IAsyncDisposable
                     null,
                     _stopping.Token).ConfigureAwait(false);
 
-                if (result is null || result.Diagnostics.Length == 0)
+                if (result is null)
+                {
+                    complete = false;
+                    continue;
+                }
+
+                if (result.Diagnostics.Length == 0)
                 {
                     continue;
                 }
@@ -794,6 +912,30 @@ internal sealed class AnalysisService : IAsyncDisposable
 
             Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
             everything.AddRange(findings);
+
+            // Recorded only now, with the generation this project was actually seeded at: a pass
+            // that seeds nothing must leave the old number standing, because that is the number
+            // the engine will still answer to.
+            //
+            // And only when the seed took AND every module answered. `opened` is null when the
+            // engine refused the seed, and recording that as seeded would let the next pass skip
+            // a project the engine has never been told about, which answers "send project/open
+            // first" to everything for the rest of the session.
+            if (opened is not null && complete)
+            {
+                _seeded[snapshot.ProjectId] = new SeededProject(
+                    snapshot.Generation,
+                    snapshot.Modules.ToDictionary(m => m.ModuleName, m => m.Source, StringComparer.Ordinal),
+                    findings,
+                    opened.Types,
+                    opened.Procedures);
+            }
+            else
+            {
+                // Nothing recorded, so the next pass re-seeds rather than trusting this one.
+                _seeded.TryRemove(snapshot.ProjectId, out _);
+                Log.Warn($"engine: {snapshot.ProjectId} did not analyse cleanly, so the next pass will do it again");
+            }
         }
 
         // Unconditional, and after every project has been read: an empty list is not "nothing to
@@ -809,6 +951,10 @@ internal sealed class AnalysisService : IAsyncDisposable
         {
             if (!present.Contains(known) && _openProjects.TryRemove(known, out _))
             {
+                // Forgotten here too, or a workbook closed and reopened would be judged unchanged
+                // against the sources of the session before it and never seeded again.
+                _seeded.TryRemove(known, out _);
+
                 try
                 {
                     await engine.CloseProjectAsync(known, _stopping.Token).ConfigureAwait(false);
@@ -897,6 +1043,35 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Whether a project's modules are exactly what it was last seeded with: same names, same
+    /// text, none added, none gone.
+    ///
+    /// Ordinal on both deliberately. Case matters in a module's source, and two sources that
+    /// differ only in case are two different programs. It matters in the NAME too, for a smaller
+    /// reason: the language resolves names case-insensitively, but the engine is seeded with the
+    /// spelling the host reports and hands that spelling back in completions and hovers. A module
+    /// renamed from `helpers` to `Helpers` has changed nothing the analyzer will complain about
+    /// and everything about how its name is offered, so it is a reseed.
+    /// </summary>
+    private static bool SameSources(Dictionary<string, string> seeded, EngineModule[] now)
+    {
+        if (seeded.Count != now.Length)
+        {
+            return false;
+        }
+
+        foreach (var module in now)
+        {
+            if (!seeded.TryGetValue(module.ModuleName, out var was) || !string.Equals(was, module.Source, StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Analyses one module's live text, with the caret so the engine holds back the transient
     /// complaints of an expression mid-edit. Null when there is no engine, no address for the
     /// module, or the engine has not been seeded yet.
@@ -907,7 +1082,7 @@ internal sealed class AnalysisService : IAsyncDisposable
         int caretOffset,
         CancellationToken cancellation)
     {
-        if (_engine is not { IsRunning: true } engine || _lastSeededGeneration == 0)
+        if (_engine is not { IsRunning: true } engine)
         {
             return null;
         }
@@ -917,11 +1092,20 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
+        // This project's own generation, not the last one any project was seeded at. The single
+        // field this replaced was right only while every pass re-seeded everything, and it was
+        // wrong the moment two passes overlapped: the engine answered "send project/open first"
+        // and the module went unsquiggled until the next pause. Seen 20 times in one session.
+        if (!_seeded.TryGetValue(home.ProjectId, out var seeded))
+        {
+            return null;
+        }
+
         try
         {
             var result = await engine.DiagnoseAsync(
                     home.ProjectId,
-                    _lastSeededGeneration,
+                    seeded.Generation,
                     moduleName,
                     home.ModuleType,
                     null,

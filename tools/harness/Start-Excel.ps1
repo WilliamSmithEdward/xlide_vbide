@@ -168,11 +168,19 @@ while (-not $listed -and (Get-Date) -lt $deadline) {
     try {
         $answer = & node (Join-Path $PSScriptRoot 'xlide-api.mjs') doctor 2>$null | Out-String
         if ($answer -match '"healthy"') {
-            $listed = $true
+            # Healthy, or out of patience. The engine is started alongside the surface and takes
+            # a beat longer to connect, so the FIRST answer here is routinely "up but the engine
+            # is not answering yet" - a finding that resolves itself a second later. Reporting it
+            # trains the reader to ignore the doctor, which is the one thing it must not do.
+            #
+            # Invisible until 2026-08-08, because engineUp was hardcoded to whether the service
+            # object existed and so was true before the engine had started at all.
             if ($answer -match '"healthy":\s*true') {
+                $listed = $true
                 Write-Host 'The add-in is up and its door is healthy.' -ForegroundColor Green
             }
-            else {
+            elseif ((Get-Date) -ge $deadline.AddSeconds(-3)) {
+                $listed = $true
                 Write-Host 'The add-in is up but the doctor has findings:' -ForegroundColor Yellow
                 Write-Host $answer
             }
