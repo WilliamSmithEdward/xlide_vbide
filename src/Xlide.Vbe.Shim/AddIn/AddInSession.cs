@@ -2276,6 +2276,65 @@ internal sealed class AddInSession : IDisposable
                     DebugJsonContext.Default.DebugDoctorReply);
             }
 
+            case "native":
+            {
+                // THE HOST'S OWN EDITOR, underneath the surface that covers it.
+                //
+                // Everything else this door reports is the page, or the workbook. Neither is
+                // what Run, Step, Compile and ToggleBreakpoint act on: those act on the native
+                // ACTIVE CODE PANE and the caret inside it. A page showing one module while the
+                // editor's active pane is another is a Run that executes elsewhere and a
+                // breakpoint set on the wrong line, with nothing on screen to say so.
+                //
+                // Asked for by the developer 2026-08-08 -- "are you validating the vbe native
+                // editor surface is staying in sync" -- and the honest answer was no: every
+                // check until then read the page and the workbook and never the panes below.
+                using var activePane = _editor.GetObject("ActiveCodePane");
+
+                string? activeModule = null;
+                string? activeProject = null;
+                var caretLine = 0;
+                var caretColumn = 0;
+
+                if (activePane is not null)
+                {
+                    Span<int> selection = stackalloc int[4];
+                    try
+                    {
+                        activePane.InvokeInt32s("GetSelection", selection);
+                        caretLine = selection[0];
+                        caretColumn = selection[1];
+                    }
+                    catch (Exception)
+                    {
+                        // A pane mid-teardown answers nothing; the rest of the picture stands.
+                    }
+
+                    using var codeModule = activePane.GetObject("CodeModule");
+                    using var component = codeModule?.GetObject("Parent");
+                    activeModule = component?.GetString("Name");
+
+                    using var collection = component?.GetObject("Collection");
+                    using var owner = collection?.GetObject("Parent");
+                    activeProject = owner is null ? null : DisplayFromProjectId(ProjectReader.Identity(owner).Id);
+                }
+
+                var paneRows = (ReadOpenModules() ?? [])
+                    .Select(pane => new DebugNativePaneRow(pane.Name, pane.Project))
+                    .ToArray();
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugNativeReply(
+                        activeModule,
+                        activeProject,
+                        caretLine,
+                        caretColumn,
+                        paneRows,
+                        _editorSurface?.Module,
+                        DisplayFromProjectId(_shownProject)),
+                    DebugJsonContext.Default.DebugNativeReply);
+            }
+
             case "windows":
             {
                 var rows = new List<DebugWindowRow>();

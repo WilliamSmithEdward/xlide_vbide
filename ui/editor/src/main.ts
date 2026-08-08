@@ -679,7 +679,7 @@ function boot(): void {
   // acting on the answer here means acting the same way for all of them. Peek asked and was
   // taken to the definition instead (the developer, 2026-08-07). Going anywhere is the opener's
   // job, below.
-  monaco.languages.registerDefinitionProvider(VBA_LANGUAGE_ID, {
+  const definitionProvider: monaco.languages.DefinitionProvider = {
     provideDefinition: async (model, position) => {
       if (model !== bridge.hostActiveModel()) {
         return null;
@@ -698,7 +698,9 @@ function boot(): void {
 
       return toEditorLocations(bridge, found);
     },
-  });
+  };
+
+  monaco.languages.registerDefinitionProvider(VBA_LANGUAGE_ID, definitionProvider);
 
   // And where a location in another module is opened.
   //
@@ -757,7 +759,7 @@ function boot(): void {
   // The HOST does the renaming, so this returns no edits. A module with no tab has no model to
   // edit, and those are exactly the ones a rename must not miss — so the work goes where the
   // modules are, and the open tabs are refreshed by the ordinary document sync that follows.
-  monaco.languages.registerRenameProvider(VBA_LANGUAGE_ID, {
+  const renameProvider: monaco.languages.RenameProvider = {
     resolveRenameLocation: (model, position): monaco.languages.RenameLocation & monaco.languages.Rejection => {
       if (model !== bridge.hostActiveModel()) {
         return { range: emptyRangeAt(position), text: "", rejectReason: "Rename works in the module the editor is showing." };
@@ -786,7 +788,9 @@ function boot(): void {
       bridge.shell?.notify(renameSummary(answer, newName));
       return { edits: [] };
     },
-  });
+  };
+
+  monaco.languages.registerRenameProvider(VBA_LANGUAGE_ID, renameProvider);
 
   // Semantic colouring, over the grammar rather than instead of it. The grammar already paints
   // the project's words from the lists project/open hands it; what it cannot do is tell a class
@@ -888,6 +892,8 @@ function boot(): void {
       completion: completionProvider,
       signature: signatureProvider,
       codeAction: codeActionProvider,
+      definition: definitionProvider,
+      rename: renameProvider,
     },
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),

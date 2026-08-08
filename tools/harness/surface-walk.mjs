@@ -113,6 +113,34 @@ async function sweep(where) {
   const ui = await api.ui();
   const w = ui.workspace;
 
+  /*
+   * PARITY WITH THE NATIVE EDITOR, which is the definition of tested for anything that touches
+   * the editor (the developer, 2026-08-08).
+   *
+   * The surface covers the host's own code panes; it does not replace them. Run, Step, Compile
+   * and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret inside it, not on the
+   * page — so a page showing one module while the native pane holds another is a Run that
+   * executes where nobody is looking and a breakpoint on the wrong line, with nothing on screen
+   * to say so. Every check in this repo read the page and the workbook and never the panes
+   * below, until this one.
+   */
+  if (!w.empty) {
+    const below = await api.native();
+    const page = ui.focus.model ? ui.focus.model.split("/").pop() : null;
+    const same = (a, b) => (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
+
+    check(where, "the native pane, the surface and the page name the same module",
+      same(below.activeModule, below.surfaceModule) && same(below.surfaceModule, page),
+      `native=${below.activeModule} surface=${below.surfaceModule} page=${page}`);
+
+    // The strip and the host's open panes are two lists of the same thing.
+    const tabs = w.groups.flatMap((g) => g.tabs).map((t) => t.module.toLowerCase()).sort();
+    const panes = below.panes.map((one) => one.module.toLowerCase()).sort();
+    check(where, "the tab strip and the host's open panes hold the same modules",
+      tabs.length === panes.length && tabs.every((m, at) => m === panes[at]),
+      `page=[${tabs}] native=[${panes}]`);
+  }
+
   check(where, "the empty view agrees with having no tabs",
     ui.emptyViewShown === w.empty, `emptyView=${ui.emptyViewShown} empty=${w.empty}`);
 

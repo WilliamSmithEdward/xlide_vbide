@@ -766,6 +766,29 @@ public sealed record DebugProjectReply(
     [property: JsonPropertyName("mode")] int Mode,
     [property: JsonPropertyName("components")] DebugComponentRow[] Components);
 
+/// <summary>One pane the host's own editor holds open.</summary>
+public sealed record DebugNativePaneRow(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project);
+
+/// <summary>
+/// The HOST's editor, underneath the surface that covers it.
+///
+/// Run, Step, Compile and ToggleBreakpoint all act on the native active code pane and the caret
+/// inside it, not on the page. When the two disagree, a Run executes somewhere the developer is
+/// not looking and a breakpoint lands on the wrong line, with nothing on screen to say so. The
+/// surface's own idea is carried alongside so the comparison is one reply rather than two.
+/// </summary>
+public sealed record DebugNativeReply(
+    [property: JsonPropertyName("activeModule")] string? ActiveModule,
+    [property: JsonPropertyName("activeProject")] string? ActiveProject,
+    [property: JsonPropertyName("caretLine")] int CaretLine,
+    [property: JsonPropertyName("caretColumn")] int CaretColumn,
+    [property: JsonPropertyName("panes")] DebugNativePaneRow[] Panes,
+    /// <summary>What the SURFACE believes it is showing, for the same-reply comparison.</summary>
+    [property: JsonPropertyName("surfaceModule")] string? SurfaceModule,
+    [property: JsonPropertyName("surfaceProject")] string? SurfaceProject);
+
 /// <summary>The breakpoints one module carries, in line order.</summary>
 public sealed record DebugBreakpointRow(
     [property: JsonPropertyName("module")] string Module,
@@ -1038,6 +1061,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugComponentReply))]
 [JsonSerializable(typeof(DebugProjectReply))]
 [JsonSerializable(typeof(DebugSettingsReply))]
+[JsonSerializable(typeof(DebugNativeReply))]
+[JsonSerializable(typeof(DebugNativePaneRow))]
+[JsonSerializable(typeof(DebugNativePaneRow[]))]
 [JsonSerializable(typeof(DebugBreakpointsReply))]
 [JsonSerializable(typeof(DebugMarkReply))]
 [JsonSerializable(typeof(DebugOutlineReply))]

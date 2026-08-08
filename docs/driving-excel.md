@@ -181,6 +181,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
+| `native` | `native()` / `inSync()` | the HOST's own panes and caret, under the surface |
 
 Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 
@@ -247,6 +248,9 @@ await api.act("format");                        // Format Module; {selection: tr
 await api.act("hover", { word: "Recalculate" });
 await api.act("completions", { line: 7, column: 12 });
 await api.act("quickFixes", { word: "Recalcualte" });
+await api.act("definition", { word: "Recalculate" });   // where F12 would go, caret unmoved
+await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
+await api.undoRename();                                 // and puts it back
 await api.at("Recalculate");                    // colour as painted, and the markers on it
 // -> { word, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, message, code}] }
 //
@@ -296,6 +300,33 @@ distinguishing it from a broken door.
 > does nothing whatsoever and the probe reports a working feature broken (2026-08-07).
 >
 > If a question needs a DOM script twice, it belongs in `ui/editor/src/devsurface.ts`.
+
+### Parity with the native editor
+
+```js
+await api.native();    // the host's active pane, its caret, and every pane it holds open
+await api.inSync();    // one boolean over native, surface and page
+```
+
+> **A feature that touches the editor is not fully tested until it validates this.** The surface
+> COVERS the host's code panes; it does not replace them. Run, Step, Compile and
+> ToggleBreakpoint all act on the **native active code pane and the caret inside it**, not on the
+> page — so a page showing one module while the native pane holds another is a Run that executes
+> where the developer is not looking and a breakpoint on the wrong line, with nothing on screen
+> to say so.
+>
+> Every check in this repo read the page and the workbook and never the panes below, until
+> 2026-08-08. It is an invariant in the surface walk now, checked after every step, and the
+> rename suite asserts it after every state change.
+
+```bash
+node tools\harnessename-features.mjs   # rename and definition, with parity at each step
+```
+
+Rename is the one feature here that rewrites the developer's code, and it had no api at all
+until 2026-08-08. The suite covers what the fixture was built for: a qualified call follows, a
+bare call that two modules could own is **left alone**, a module whose name merely begins the
+same way is untouched, and `undoRename` puts every module back.
 
 ### The language features, against real receivers
 

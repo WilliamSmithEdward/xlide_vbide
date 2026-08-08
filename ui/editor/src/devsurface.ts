@@ -137,6 +137,8 @@ export interface DevSurfaceParts {
     completion: monaco.languages.CompletionItemProvider;
     signature: monaco.languages.SignatureHelpProvider;
     codeAction: monaco.languages.CodeActionProvider;
+    definition: monaco.languages.DefinitionProvider;
+    rename: monaco.languages.RenameProvider;
   };
   openSettings(): void;
   openSponsors(): void;
@@ -769,6 +771,61 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         did: actions.length > 0,
         detail: `${actions.length} quick fix(es)`,
         data: actions.map((one) => ({ title: one.title, kind: one.kind, isPreferred: one.isPreferred })),
+      };
+    },
+
+    /**
+     * Go to Definition, through the provider F12 goes through.
+     *
+     * Answers the locations the editor would navigate to, so a probe can assert WHERE without
+     * moving the caret — which matters because moving it is what cancels a symbol-navigation
+     * request in the first place (lessons, finding 10).
+     */
+    definition: async (args) => {
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const found = await parts.providers.definition.provideDefinition(
+        where.model, where.position, NO_CANCEL);
+
+      const locations = Array.isArray(found) ? found : (found ? [found] : []);
+      return {
+        did: locations.length > 0,
+        detail: `${locations.length} definition(s)`,
+        data: locations.map((one) => ({
+          uri: String((one as monaco.languages.Location).uri ?? ""),
+          range: (one as monaco.languages.Location).range,
+        })),
+      };
+    },
+
+    /**
+     * RENAME, the flagship, and the one feature here that rewrites the developer's code.
+     *
+     * It had no api at all until now: a change that edits every module using a symbol, across a
+     * workbook, with nothing able to drive it but a hand on F2. `newName` is required, and the
+     * answer carries the provider's own refusal when it declines — which is what the rename box
+     * shows the developer, word for word.
+     *
+     * This DOES change state. It is the same call F2 makes, so what it leaves behind is what the
+     * developer would have: the host applies the edits and the surface republishes. Undo it with
+     * `undoRename`, which is the same path the editor's own Undo Rename takes.
+     */
+    rename: async (args) => {
+      const newName = String(args.newName ?? "");
+      if (!newName) { return { did: false, detail: "newName is required" }; }
+
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const answer = await parts.providers.rename.provideRenameEdits(
+        where.model, where.position, newName, NO_CANCEL);
+
+      const refused = (answer as { rejectReason?: string } | null)?.rejectReason;
+      return {
+        did: !refused,
+        detail: refused ?? `renamed to ${newName}`,
+        data: { refused: refused ?? null },
       };
     },
 

@@ -155,6 +155,33 @@ function clientFor(entry) {
 
     state: (timeout) => call("state", { timeout }),
     windows: () => call("windows"),
+
+    /**
+     * The HOST's own editor, underneath the surface that covers it.
+     *
+     * Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret
+     * inside it — not on the page. When those disagree, a Run executes where the developer is
+     * not looking and a breakpoint lands on the wrong line, and nothing on screen says so.
+     *
+     * The surface's own belief rides along in the same reply, so the comparison is one call.
+     */
+    native: () => call("native"),
+
+    /** True when the native pane, the surface and the page all name the same module. */
+    async inSync() {
+      const [below, ui] = await Promise.all([this.native(), this.ui()]);
+      const page = ui.focus.model ? ui.focus.model.split("/").pop() : null;
+      const same = (a, b) => (a ?? "").toLowerCase() === (b ?? "").toLowerCase();
+
+      return {
+        agreed: same(below.activeModule, below.surfaceModule) && same(below.surfaceModule, page),
+        nativeModule: below.activeModule,
+        surfaceModule: below.surfaceModule,
+        pageModule: page,
+        nativeCaret: `${below.caretLine}:${below.caretColumn}`,
+        pageCaret: `${ui.focus.line}:${ui.focus.column}`,
+      };
+    },
     stats: () => call("stats"),
     locals: () => call("locals"),
     watches: () => call("watches"),
@@ -462,6 +489,30 @@ function clientFor(entry) {
      *
      * Answers the same shape `trip` does, so the two read together.
      */
+    async tripFeature(what, where, { n = 10 } = {}) {
+      const samples = [];
+      let lastDetail = "";
+
+      for (let run = 0; run < n; run++) {
+        const began = Date.now();
+        const answer = await this.act(what, where);
+        samples.push(Date.now() - began);
+        lastDetail = answer.detail;
+      }
+
+      const ordered = [...samples].sort((a, b) => a - b);
+      return {
+        what,
+        runs: ordered.length,
+        minMs: ordered[0],
+        medianMs: ordered[ordered.length >> 1],
+        p95Ms: ordered[Math.min(ordered.length - 1, Math.floor(ordered.length * 0.95))],
+        maxMs: ordered[ordered.length - 1],
+        samplesMs: samples,
+        detail: lastDetail,
+      };
+    },
+
     async tripCaret({ n = 5, lines = [1, 2, 3, 4, 5] } = {}) {
       const before = await this.ui();
       if (!before.focus.host) {
