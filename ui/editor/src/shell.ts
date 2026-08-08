@@ -337,6 +337,9 @@ export class Shell {
   paneVisibility(): PaneVisibilityControl {
     return {
       list: () => this.docks.paneStates(),
+      // Through the method a real drop calls, so driving the docks exercises the product rather
+      // than a synthesised pointer sequence.
+      moveTo: (name, side) => this.docks.movePaneTo(name, side),
       setOpen: (name, open) => {
         if (open) {
           this.docks.open(name);

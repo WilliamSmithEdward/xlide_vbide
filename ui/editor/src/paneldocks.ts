@@ -678,6 +678,29 @@ export class PanelDocks {
   }
 
   /** Executes a drop: the pane leaves its group and lands where the preview said. */
+  /**
+   * Moves a pane to a dock side exactly as dropping it there does.
+   *
+   * The docking gestures had no way of being driven at all: `layout()` could report the
+   * arrangement and `resetLayout()` could put it back, but nothing could MOVE anything, so the
+   * whole surface was reachable only by hand with a mouse. Synthesising the drag is not an
+   * option either, and this repo has the scars: the drop arms on pointerdown and completes on
+   * pointerup against a compass that tracks the pointer, so a synthetic event sequence tests the
+   * synthesiser rather than the product.
+   *
+   * This is the method the real drop calls, with the target a drop on that side would build.
+   * Answers false when there is no such pane, rather than pretending.
+   */
+  movePaneTo(name: string, side: DockSide): boolean {
+    const home = this.findPane(name);
+    if (!home) {
+      return false;
+    }
+
+    this.dropPane(name, home.group, { kind: "side", side });
+    return true;
+  }
+
   private dropPane(name: string, from: Group, target: DropTarget): void {
     // Dropping a lone pane onto its own group's compass is the identity, whatever the zone.
     // A strip drop is NOT: that is a reorder, and a single tab reorders to the same place.

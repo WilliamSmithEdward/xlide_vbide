@@ -279,6 +279,8 @@ await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-cha
 await api.act("search", { query: "Recalculate", scope: "project" });
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("format");                        // Format Module; {selection: true} for the selection
+await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
+                                                //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a
                                                 // whole indent level in leading whitespace
 

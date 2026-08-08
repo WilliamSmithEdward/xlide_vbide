@@ -68,6 +68,13 @@ const OPTIONS = [
 export interface PaneVisibilityControl {
   list(): { name: string; title: string; open: boolean; permanent: boolean }[];
   setOpen(name: string, open: boolean): void;
+  /**
+   * Moves a pane to a dock side, through the method a real drop calls.
+   *
+   * Here rather than on a docking-specific type because this is already the object handed to
+   * everything that drives panes from outside the docks themselves.
+   */
+  moveTo(name: string, side: "left" | "right" | "top" | "bottom"): boolean;
 }
 
 /**

@@ -124,7 +124,11 @@ export interface DevSurfaceParts {
     close(): void;
   };
   bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
-  panes: { list(): { name: string; title: string; open: boolean; permanent: boolean }[] };
+  panes: {
+    list(): { name: string; title: string; open: boolean; permanent: boolean }[];
+    /** Moves a pane to a dock side, through the method a real drop calls. */
+    moveTo(name: string, side: "left" | "right" | "top" | "bottom"): boolean;
+  };
   /**
    * The registered language providers themselves, so the api asks what the editor asks.
    *
@@ -992,6 +996,36 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         detail: `${id} ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
         data: { line: at?.lineNumber ?? null, column: at?.column ?? null },
       };
+    },
+
+    /**
+     * Docks a pane on a side, THROUGH THE METHOD A DROP CALLS.
+     *
+     * The docking gestures had no coverage of any kind: `layout()` reported the arrangement and
+     * `resetLayout()` restored it, and nothing in between could move a thing, so the surface was
+     * drivable only by hand. Synthesising the drag was never the answer: the drop arms on
+     * pointerdown and completes on pointerup against a compass that follows the pointer, so a
+     * synthetic sequence would test the synthesiser.
+     *
+     * Answers the arrangement afterwards, so a caller can see where the pane landed rather than
+     * having to ask separately.
+     */
+    dock: (args) => {
+      const pane = String(args.pane ?? args.name ?? "");
+      const side = String(args.side ?? args.to ?? "");
+
+      if (!pane) {
+        return { did: false, detail: "no pane given; pass pane: \"Immediate\"" };
+      }
+
+      if (side !== "left" && side !== "right" && side !== "top" && side !== "bottom") {
+        return { did: false, detail: `side must be left, right, top or bottom; got ${JSON.stringify(side)}` };
+      }
+
+      const moved = parts.panes.moveTo(pane, side);
+      return moved
+        ? { did: true, detail: `${pane} docked ${side}`, data: { pane, side } }
+        : { did: false, detail: `no pane named ${pane}` };
     },
 
     /**
