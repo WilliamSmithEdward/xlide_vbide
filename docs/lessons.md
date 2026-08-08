@@ -1367,3 +1367,45 @@ they can only diverge if the bug is back.
 
 **`(x as T)?.M()` is a silent branch.** It does nothing when `x` is not a `T`, says nothing, and
 reads as success at every call site. In a release path that is a leak with no symptom.
+
+## 53. The parse was never the cost, and the probe that said otherwise was appending
+
+Analysing the 64,802-line module costs about 3.4 seconds, and a pass over the project it lives in
+costs 4.7. The obvious suspicion is parsing, and the obvious second suspicion is parsing it
+SEVERAL times: the outline parses a module, the project words parse it, the project index parses
+every module, the analyzer's own seed builds that index again, and the analysis parses it once
+more. Five parses of 1.42 MB to answer one question.
+
+Measured, on that module:
+
+| | |
+| --- | --- |
+| `parseModule`, cold | **151ms** |
+| `parseModule`, again on the same string | **0ms** |
+| `buildVbaProjectIndex` over it | 10ms |
+| `projectAnalysisOptionsForModule` | 13ms |
+| `analyzeVbaModuleSource` | **2,420ms** |
+| the same, with a parsed module supplied | 2,190ms |
+
+**The analyzer already memoizes the parse by source string.** The five parses cost one. Every
+structure built on top of it is ten milliseconds. The 2.4 seconds is the semantic rules walk over
+64,802 lines, which is upstream and is the actual product being paid for.
+
+So there is no parsing strategy to win here, and the two obvious follow-ups are both small:
+supplying a pre-parsed module saves 230ms of the 2,420, and the analyzer's own incremental mode
+saves about the same again.
+
+### The incremental probe that lied first
+
+The first probe reported `mode: full` for every analysis and looked like a finding: the
+incremental machinery never engages. It engages fine. The probe appended its edit to the END of
+the module, and the analyzer keys incremental reuse on the text OUTSIDE every procedure staying
+identical - reasonably, since a change there is structural. Appending is the one edit shape that
+can never be incremental, and it is the easiest one to write in a probe.
+
+Editing a procedure BODY, which is what typing actually is: `incremental`, 2,989ms against
+3,318ms full. A reseed forces one full pass and it resumes after.
+
+**A synthetic edit is not a developer's edit, and choosing the convenient one measures the wrong
+thing confidently.** Same shape as lessons 50: the instrument sampled something adjacent to the
+question and reported it as the answer.

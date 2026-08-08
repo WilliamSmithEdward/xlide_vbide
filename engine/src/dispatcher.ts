@@ -91,6 +91,31 @@ function liveKey(projectId: string, moduleName: string): string {
  */
 const crossModuleFacts = new WeakMap<readonly ModulePayload[], Map<string, string> | null>();
 
+/**
+ * The options object as a string that actually reflects its contents.
+ *
+ * PLAIN `JSON.stringify` HAS A BLIND SPOT HERE. `projectAnalysisOptionsForModule` returns
+ * `projectProcedures` as a `Map`, and `JSON.stringify(new Map([...]))` is `"{}"` - not an error,
+ * not a warning, just an empty object where every procedure signature in the project should be.
+ * A fingerprint that cannot see the signatures is a fingerprint that cannot notice the one thing
+ * it exists to notice.
+ *
+ * Honest about what that did and did not cause: `test/freshness.mjs` passes with this handling
+ * REMOVED, because the other fields of the options object happen to move when a signature does,
+ * so the memo still invalidated. It was a blind spot rather than an active defect, and it is
+ * closed here because relying on a neighbouring field to notice is not a design.
+ *
+ * Maps and Sets become their entries. Order is insertion order, which is deterministic for the
+ * same project, so equal contents still produce equal strings.
+ */
+function describe(value: unknown): string {
+    return JSON.stringify(value, (_key, held: unknown) => {
+        if (held instanceof Map) { return { '#map': [...held] }; }
+        if (held instanceof Set) { return { '#set': [...held] }; }
+        return held;
+    });
+}
+
 function crossModuleFingerprint(
     seeded: readonly ModulePayload[],
     moduleName: string,
@@ -120,7 +145,7 @@ function crossModuleFingerprint(
                 // answer's copy is a pointer comparison until the project is seeded again.
                 held.set(
                     module.moduleName.toLowerCase(),
-                    JSON.stringify(projectAnalysisOptionsForModule(index, module.moduleName, procedures)));
+                    describe(projectAnalysisOptionsForModule(index, module.moduleName, procedures)));
             }
         } catch {
             // Null rather than an empty map, deliberately. An empty map would answer "no facts"
