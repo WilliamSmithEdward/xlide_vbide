@@ -297,6 +297,33 @@ distinguishing it from a broken door.
 >
 > If a question needs a DOM script twice, it belongs in `ui/editor/src/devsurface.ts`.
 
+### The language features, against real receivers
+
+```bash
+tools\New-LanguageFixture.ps1              # builds LanguageFixture.xlsm
+node tools\harness\language-features.mjs   # the dot menu, by receiver kind
+```
+
+The rename fixture is shaped for renaming: one method on one class, and a project that
+deliberately does not compile. That makes it the wrong workbook for asking what IntelliSense
+offers, because a receiver with one member proves almost nothing and a project full of errors
+buries the one error a quick-fix test wants to see. `LanguageFixture.xlsm` is shaped for these
+questions instead:
+
+| module | what it is for |
+| --- | --- |
+| `Gadget` | a class with a Sub, a Function, two `Property Get`s, a `Let`, and a **Private** Sub that must never appear in another module's menu |
+| `Shapes` | an `Enum` and a user-defined `Type`, which resolve by their own paths |
+| `Uses` | one receiver per line: class, type, enum, `Application`, `ActiveSheet`, and a call with parameters for signature help |
+| `Defects` | the ONLY module with findings, so a quick-fix test sees exactly one |
+
+**Two of its cases fail on purpose.** A project `Type` receiver offers its own name instead of its
+fields, and an `Enum` receiver offers nothing. Both are analyzer defects, filed as
+[xlide_vscode#11](https://github.com/WilliamSmithEdward/xlide_vscode/issues/11) rather than
+patched here. They are left failing rather than deleted: a suite that drops the cases it cannot
+pass stops being able to say when they start passing. The script exits 0 for those two and
+non-zero for anything else, and announces it if one of them starts working.
+
 ### Walking the surface at random
 
 ```bash
