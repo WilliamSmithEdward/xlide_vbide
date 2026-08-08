@@ -73,6 +73,28 @@ internal sealed class AnalysisService : IAsyncDisposable
     private readonly SemaphoreSlim _onePass = new(1, 1);
     private int _passWanted;
 
+    /*
+     * ONE ANALYSIS PER DOCUMENT VERSION, and where it is actually enforced.
+     *
+     * Two callers ask about the module being edited. The LIVE path asks on a pause in typing and
+     * sends the caret, so a half-typed expression is not underlined yet; the PASS asks with no
+     * caret. Both are about the same text, and the second used to re-derive what the first had
+     * just derived: on the 64,802-line fixture an analysis is nearly four seconds.
+     *
+     * The rule lives in the ENGINE, not here: a request with no caret is served from an answer
+     * computed WITH one, for the same text. The reverse is refused, because serving an
+     * unsuppressed answer to the caret puts the error back under the cursor mid-expression.
+     *
+     * This works in the order the product actually runs in. Typing defers the full pass
+     * (`_fullAnalysisDeferred`) and lets the live analysis keep the shown module honest; the pass
+     * comes afterwards, when things go quiet, and finds the answer already there.
+     *
+     * It does NOT help a host rewrite - a write through the api, a format, a rename - which
+     * skips the deferral on purpose, because the developer just watched the text change and the
+     * Problems pane has to follow it now. Those pay for one analysis, which is the right answer:
+     * there is nothing to reuse, because no live analysis ran.
+     */
+
     /// <summary>
     /// Projects the engine has been seeded with. Concurrent because pool threads write it
     /// during a pass while feature calls read it, and the session's host thread now asks it
@@ -888,6 +910,10 @@ internal sealed class AnalysisService : IAsyncDisposable
 
             foreach (var module in snapshot.Modules)
             {
+                // NO CARET, deliberately, and it is what lets this be free for the module the
+                // developer is editing. The live analysis has already answered about that text
+                // WITH a caret, and the engine serves a caret-less request from a caret-carrying
+                // answer for the same text. Sending one here would only narrow that.
                 var result = await engine.DiagnoseAsync(
                     snapshot.ProjectId,
                     snapshot.Generation,
@@ -1053,6 +1079,8 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// renamed from `helpers` to `Helpers` has changed nothing the analyzer will complain about
     /// and everything about how its name is offered, so it is a reseed.
     /// </summary>
+    private static string LiveCaretKey(string projectId, string moduleName) => $"{projectId}\0{moduleName}";
+
     private static bool SameSources(Dictionary<string, string> seeded, EngineModule[] now)
     {
         if (seeded.Count != now.Length)

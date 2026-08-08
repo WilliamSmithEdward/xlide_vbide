@@ -1409,3 +1409,40 @@ Editing a procedure BODY, which is what typing actually is: `incremental`, 2,989
 **A synthetic edit is not a developer's edit, and choosing the convenient one measures the wrong
 thing confidently.** Same shape as lessons 50: the instrument sampled something adjacent to the
 question and reported it as the answer.
+
+## 54. Two changes built on a duplicate that was not there
+
+The premise: a module being edited is analysed twice, once by the live path for the squiggles and
+once by the full pass for the Problems list. The evidence was two measurements on the 64,802-line
+fixture, one with typing and one without, differing by a call and about a second.
+
+Two changes were built on it. The first, in the engine, was right and is kept. The second, in the
+shim, was not needed and is gone. The premise itself was wrong.
+
+**What the measurement actually was.** Both runs provoked a HOST REWRITE, which deliberately
+skips the deferral and runs a full pass at once, because the developer has just watched the text
+change and the Problems pane has to follow it. So both numbers were the write-back path, and the
+extra call was not a live analysis at all. The log settled it: `live analyses: 0`.
+
+**What the product already does.** `_fullAnalysisDeferred` defers the full pass while typing and
+lets the live analysis keep the shown module honest between passes. The duplicate the change was
+built to remove had already been designed out, years of comments ago, in the file the change was
+being made to.
+
+**What was kept, and why.** The engine now serves a request with NO caret from an answer computed
+WITH one, for the same text, and refuses the reverse. In the order the product runs in - live on
+a pause, then the deferred pass when things go quiet - that is exactly the reuse worth having, and
+the asymmetry is the correctness of it: an unsuppressed answer served to the caret would put the
+error back under the cursor mid-expression. Five checks in `engine/test/freshness.mjs`, and the
+reuse one was proven by narrowing the rule and watching it fail.
+
+**What could not be shown.** The end-to-end win. Live analysis is driven by the surface overlay's
+own timer and there is no way to provoke it from the harness: scripted typing writes text and
+never trips it. So the engine rule is proven at the engine level and unproven in the product, and
+that is a gap in the api rather than in the change - **a path with no drive affordance is a path
+whose behaviour is asserted rather than measured.**
+
+The general shape, for the third time this week: a number was read as evidence for a mechanism
+without checking that the mechanism had run. Lessons 50 was the same, and lessons 53's incremental
+probe was the same. **Before explaining a measurement, confirm the thing you are explaining it
+with actually happened.**

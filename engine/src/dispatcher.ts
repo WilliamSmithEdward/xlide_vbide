@@ -236,6 +236,12 @@ export class Dispatcher {
          */
         facts?: string;
         shape?: string;
+        /**
+         * The caret this answer was computed with, or null for none. Held apart from `shape`
+         * because a request with no caret may reuse an answer computed with one, and not the
+         * other way round. See the comparison in `diagnostics`.
+         */
+        caret?: number | null;
         mode?: DiagnosticsResult['mode'];
         /** The positioned reply, so a hit costs nothing rather than a walk of the module. */
         answer?: DiagnosticsResult;
@@ -806,22 +812,61 @@ export class Dispatcher {
             ? crossModuleFingerprint(seeded, params.moduleName)
             : undefined;
 
+        // The caret is NOT part of the shape. It gets its own comparison below, because the two
+        // callers use it differently and one of them can accept the other's answer.
         const shape = JSON.stringify([
             params.moduleType ?? null,
             params.documentType ?? null,
             params.severityOverrides ?? null,
-            params.activeIncompleteExpressionOffset ?? null,
         ]);
+
+        const caret = params.activeIncompleteExpressionOffset ?? null;
 
         if (key !== undefined && facts !== undefined) {
             const memo = this.lastAnalysis.get(key);
-            // `answer` present is part of the test, not an assumption: entries written by a quick
-            // fix carry findings and no reply, and one of those must not be served as one.
-            if (memo?.answer && memo.source === source && memo.facts === facts && memo.shape === shape) {
+
+            /*
+             * ONE ANALYSIS PER DOCUMENT VERSION, WHICH IS THE WHOLE POINT.
+             *
+             * Two callers ask about the same module. The LIVE path asks on a pause in typing and
+             * sends the caret, which holds back the transient complaints of a half-typed
+             * expression; those findings become the squiggles. The PASS asks afterwards with no
+             * caret, and those findings become the Problems list.
+             *
+             * Same module, same text, seconds apart, analysed twice. On the 64,802-line fixture
+             * that was 3,868ms of a 5,252ms edit spent re-deriving what had just been derived
+             * (2026-08-08).
+             *
+             * Every mature language server treats the problems view as a VIEW OVER THE PUBLISHED
+             * DIAGNOSTICS rather than as a second computation, which is also why theirs cannot
+             * disagree with the underlines. So:
+             *
+             *   a request WITHOUT a caret accepts an answer computed WITH one, for the same text.
+             *   a request WITH a caret needs the same caret.
+             *
+             * The asymmetry is the correctness of it. A caret-suppressed answer holds back a
+             * transient at a known offset, and that is exactly what the developer is looking at,
+             * so the list may show it. The reverse would be wrong: serving an UNsuppressed answer
+             * to a live request puts the error back under the cursor mid-expression, which is the
+             * thing the suppression exists to prevent.
+             *
+             * The designated consequence, recorded because it is a real change: the Problems list
+             * for the module being edited now suppresses the same transient the squiggle does.
+             * The list and the underline agree by construction, which they did not before.
+             *
+             * `answer` present is part of the test, not an assumption: entries written by a quick
+             * fix carry findings and no reply, and one of those must not be served as one.
+             */
+            const usable = memo?.answer
+                && memo.source === source
+                && memo.facts === facts
+                && memo.shape === shape
+                && (caret === null || caret === memo.caret);
+
+            if (usable && memo?.answer) {
                 // The ANSWER, not the findings to be positioned again. Positioning walks the whole
                 // module to build its line-start table, so re-deriving it for a reply that cannot
-                // have changed was a scan of 1.5 MB per memo hit on the largest module - most of
-                // what a hit was still costing (2026-08-08).
+                // have changed was a scan of 1.5 MB per memo hit on the largest module.
                 return memo.answer;
             }
         }
@@ -874,6 +919,7 @@ export class Dispatcher {
                 request,
                 facts,
                 shape,
+                caret,
                 mode: response.incrementalMode,
                 answer,
             });
