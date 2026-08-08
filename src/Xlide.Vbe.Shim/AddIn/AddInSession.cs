@@ -1026,6 +1026,41 @@ internal sealed class AddInSession : IDisposable
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
             }
 
+            case "drainfinalizers":
+            {
+                /*
+                 * MAKES A LEAKED WRAPPER FAIL NOW, WHERE IT CAN BE ATTRIBUTED.
+                 *
+                 * A COM wrapper nothing disposed is released by the FINALIZER thread, and for
+                 * the editor's objects that is an access violation the runtime cannot throw: it
+                 * FailFasts, and Excel goes with it. The damage arrives whenever a collection
+                 * happens to run, which is minutes after whatever created the wrapper and in a
+                 * stack that names nothing about it. Three crashes on 2026-08-07 and two more on
+                 * 2026-08-08 were all read as unrelated because of that delay.
+                 *
+                 * This collapses the delay. Run an operation, call this, and if the host dies
+                 * then THAT operation created the wrapper. It is the bisecting tool the previous
+                 * hunts did not have.
+                 *
+                 * NOT A LEAK COUNTER, and the distinction is the whole reason the last attempt at
+                 * a `gc` route was deleted: that one reported a clean bill of health while 8,734
+                 * wrappers were pending, because it measured the heap rather than the outcome.
+                 * This measures the OUTCOME - the host is alive afterwards, or it is not - and
+                 * says nothing else. `stats.comWrappersLive` is still where a count comes from.
+                 */
+                var before = Com.ComRuntime.WrappersLive;
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugDrainReply(
+                        WrappersLiveBefore: before,
+                        WrappersLiveAfter: Com.ComRuntime.WrappersLive,
+                        Survived: true),
+                    DebugJsonContext.Default.DebugDrainReply));
+            }
+
             case "history":
             {
                 // The session as a script. After a live investigation the useful sequence is

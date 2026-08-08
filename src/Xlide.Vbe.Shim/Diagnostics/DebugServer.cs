@@ -1102,6 +1102,15 @@ public sealed record DebugFindingRow(
 public sealed record DebugProblemsReply(
     [property: JsonPropertyName("findings")] DebugFindingRow[] Findings);
 
+/// <summary>
+/// What a forced finalizer drain saw. `survived: true` in the reply is the whole answer: if a
+/// leaked wrapper had been waiting, this call would not have returned at all.
+/// </summary>
+public sealed record DebugDrainReply(
+    [property: JsonPropertyName("wrappersLiveBefore")] long WrappersLiveBefore,
+    [property: JsonPropertyName("wrappersLiveAfter")] long WrappersLiveAfter,
+    [property: JsonPropertyName("survived")] bool Survived);
+
 /// <summary>A module's text, read through the session's own reader.</summary>
 public sealed record DebugModuleReply(
     [property: JsonPropertyName("module")] string Module,
@@ -1164,6 +1173,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugWatchesReply))]
 [JsonSerializable(typeof(DebugFindingRow))]
 [JsonSerializable(typeof(DebugProblemsReply))]
+[JsonSerializable(typeof(DebugDrainReply))]
 [JsonSerializable(typeof(DebugModuleReply))]
 [JsonSerializable(typeof(DebugStatsReply))]
 [JsonSerializable(typeof(DebugErrorReply))]

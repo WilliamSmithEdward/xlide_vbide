@@ -507,6 +507,21 @@ function clientFor(entry) {
     assert: (that, { value, timeoutMs = 10000 } = {}) =>
       call(`assert${query({ that, value, timeoutMs })}`, { timeout: timeoutMs + 10000 }),
 
+    /**
+     * Forces a collection and waits for the finalizers, which makes a leaked COM wrapper fail
+     * NOW instead of minutes later in a stack that names nothing.
+     *
+     * A wrapper nothing disposed is released by the finalizer thread, and for the editor's
+     * apartment-threaded objects that is an access violation the runtime cannot throw: it
+     * FailFasts and takes Excel with it. Ordinarily that lands whenever a collection happens to
+     * run, which is why five crashes across two days were read as unrelated.
+     *
+     * So: run an operation, call this, and if the call does not come back, THAT operation left a
+     * wrapper behind. It is a bisecting tool, not a health check - the count still comes from
+     * `stats.comWrappersLive`.
+     */
+    drainFinalizers: () => call("drainfinalizers", { timeout: 30000 }),
+
     /** Recent raw durations for percentile work, rather than a max one outlier owns. */
     /**
      * Everything about how fast this session is.

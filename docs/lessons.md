@@ -1303,3 +1303,32 @@ has not been proven either way.
 
 The check is out of the gate until it is. A gate step that fails for reasons nobody can name
 teaches the reader to re-run the gate rather than to read it.
+
+## 51. The finalizer can be made to fire on demand, and it should have been years ago
+
+Five crashes across two days, all with the same stack: `ComObject.Finalize`, `Marshal.Release`,
+FailFast. Every one of them arrived MINUTES after whatever created the wrapper, whenever a
+collection happened to run, which is why three of them were filed as unrelated instabilities
+against three different libraries.
+
+The delay was the whole difficulty, and it is removable. `drainfinalizers` forces a collection and
+waits for the finalizers to run. Do a thing, call it, and if the host does not answer, the thing
+you just did left a wrapper behind. A crash that used to be a report becomes a bisect.
+
+It is deliberately NOT a health check, and that distinction is why the previous attempt at this
+was deleted: a `gc` route built as a leak COUNTER reported a clean bill of health with 8,734
+wrappers pending, because it measured the heap rather than the outcome. This one reports nothing
+except that the process is still alive, which is the only thing it can honestly claim.
+
+**What it established, on the current build.** Startup: clean. Each of eight operation groups,
+drained individually: clean. The whole 380-operation leak sweep: clean. Writing a 64,802-line
+module and restoring it: clean. Five rounds of the exact churn that preceded two crashes, drained
+after every one of ten steps per round: clean, with the live count pinned throughout.
+
+That is real evidence and it is negative. One genuine leak with that signature WAS found and fixed
+in the same session (lessons 49), but the crash at 01:35 was on a build that already carried the
+fix, and it has not been reproduced since across roughly fifteen minutes of hard use with forced
+finalisation at every step.
+
+So it is not attributed, and it is written here rather than closed. The next occurrence has a tool
+waiting for it that none of the previous five had.
