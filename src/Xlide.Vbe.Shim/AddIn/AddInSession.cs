@@ -922,7 +922,19 @@ internal sealed class AddInSession : IDisposable
                 // and a scraped row cannot tell "collapsed" from "rendered wrong" — the render
                 // being stale is the defect worth catching, and scraping it measures the wrong
                 // half. See ui/editor/src/devsurface.ts.
-                var ui = RunPageScript("window.xlideUi.state()", null, WaitMilliseconds(request, 5000));
+                // line/column, or word, adds the `at` field: what is painted at that position
+                // and what squiggles cover it. Asked for by argument rather than always, because
+                // reading the rendered span means touching the DOM for a line that may not be on
+                // screen, and most callers want the surface rather than one word of it.
+                request.Query.TryGetValue("line", out var atLine);
+                request.Query.TryGetValue("column", out var atColumn);
+                request.Query.TryGetValue("word", out var atWord);
+
+                var arguments = string.IsNullOrEmpty(atWord)
+                    ? $"{(int.TryParse(atLine, out var l) ? l : 0)}, {(int.TryParse(atColumn, out var c) ? c : 1)}"
+                    : $"null, null, {System.Text.Json.Nodes.JsonValue.Create(atWord)!.ToJsonString()}";
+
+                var ui = RunPageScript($"window.xlideUi.state({arguments})", null, WaitMilliseconds(request, 5000));
                 return ui.Error is { } uiError
                     ? DebugError(uiError)
                     : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -2788,6 +2800,25 @@ internal sealed class AddInSession : IDisposable
                     WriteModule(moduleName, request.Body, projectId, hostRewrite: true);
                     return System.Text.Json.JsonSerializer.Serialize(
                         new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                }
+
+                // live=1 reads the SURFACE's copy rather than the workbook's.
+                //
+                // They differ for as long as the developer has typed and the write-back timer has
+                // not fired, which is exactly the window every typing behaviour lives in: smart
+                // Enter, comment continuation and auto-indent all produce text that only exists in
+                // the editor until it is written. Without this there was no way to read what
+                // typing produced, so those features could only be checked by eye (2026-08-08).
+                if (request.Query.TryGetValue("live", out var liveFlag) && liveFlag != "0")
+                {
+                    var live = _editorSurface?.TextOf(moduleName, DisplayFromProjectId(projectId));
+                    return live is null
+                        ? System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply($"the surface holds no text for {moduleName}"),
+                            DebugJsonContext.Default.DebugErrorReply)
+                        : System.Text.Json.JsonSerializer.Serialize(
+                            new DebugModuleReply(moduleName, DisplayFromProjectId(projectId), live),
+                            DebugJsonContext.Default.DebugModuleReply);
                 }
 
                 using var found = FindComponent(moduleName, projectId, out var foundProject);
@@ -5906,6 +5937,11 @@ internal sealed class AddInSession : IDisposable
             return;
         }
 
+        // Captured on the host thread, before the hop: the developer's typing choices decide
+        // what Enter leaves behind, and reading them off the session from a background task
+        // would race a settings change.
+        var typing = _settings;
+
         _ = Task.Run(async () =>
         {
             SurfaceTextEdit[] edits = [];
@@ -5914,7 +5950,7 @@ internal sealed class AddInSession : IDisposable
             try
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.SmartEnterAsync(module, source, offset, deadline.Token)
+                var answered = await analysis.SmartEnterAsync(module, source, offset, typing, deadline.Token)
                     .ConfigureAwait(false);
 
                 if (answered is not null)

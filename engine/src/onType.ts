@@ -38,9 +38,25 @@ import type {
     TextEditPayload,
 } from './protocol';
 
-// The extension reads these from settings; this surface has no settings page yet, so the
-// defaults it ships with are the behaviour here (task #12 owns making them configurable).
-const BLOCK_LAYOUT = 'comfy' as const;
+/*
+ * The defaults, used only when a caller sends no settings.
+ *
+ * These were constants, and the comment above them said the surface had no settings page yet.
+ * It did: the dialog offered all three, the page persisted them, the shim stored them, the api
+ * reported them, and none of them reached here. The settings ride the request now.
+ */
+const DEFAULT_BLOCK_LAYOUT = 'comfy' as const;
+const DEFAULT_CONTINUE_COMMENT = true;
+const DEFAULT_MIRROR_COMMENT_SPACING = true;
+
+/**
+ * One indent level when the caller does not say.
+ *
+ * A tab, which is what the analyzer has always defaulted to and what this product's own indent
+ * setting ships as. The caller SHOULD say: the surface knows whether the developer chose tabs or
+ * spaces, and this file cannot.
+ */
+const DEFAULT_INDENT_UNIT = '	';
 const CONTINUE_COMMENT_ON_NEWLINE = true;
 const MIRROR_COMMENT_SPACING = true;
 
@@ -81,8 +97,10 @@ export function smartEnterFor(params: SmartEnterParams & { source: string }): Sm
     if (!blockOpener) {
         // Not a block: a whole-line comment continues its apostrophes, and a `.member` line
         // inside an open With seeds the next dot. Checked in the extension's order.
-        const continuation = CONTINUE_COMMENT_ON_NEWLINE
-            ? commentContinuationText(source, openerIndex, MIRROR_COMMENT_SPACING)
+        const continueComment = params.continueCommentOnNewline ?? DEFAULT_CONTINUE_COMMENT;
+        const mirrorSpacing = params.mirrorCommentSpacing ?? DEFAULT_MIRROR_COMMENT_SPACING;
+        const continuation = continueComment
+            ? commentContinuationText(source, openerIndex, mirrorSpacing)
             : undefined;
         const lineText = continuation ?? withMemberContinuationText(source, openerIndex);
         if (lineText === undefined || lineText.length === 0) {
@@ -102,7 +120,8 @@ export function smartEnterFor(params: SmartEnterParams & { source: string }): Sm
     const insertion = smartBlockInsertion(normalized, body.text, blockOpener, {
         eol,
         insertCloser: !closedAhead,
-        layout: BLOCK_LAYOUT,
+        indentUnit: params.indentUnit ?? DEFAULT_INDENT_UNIT,
+        layout: params.blockLayout ?? DEFAULT_BLOCK_LAYOUT,
     });
 
     const edits: TextEditPayload[] = [];

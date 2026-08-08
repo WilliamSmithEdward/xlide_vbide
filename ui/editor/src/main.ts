@@ -74,7 +74,7 @@ import { openReferencesDialog } from "./referencesdialog.js";
 import { DocumentStore, docUriOf } from "./documents.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
-import { currentSettings } from "./settings.js";
+import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
@@ -316,8 +316,14 @@ function boot(): void {
     renderWhitespace: "selection",
     fontFamily: '"Cascadia Mono", Consolas, "Courier New", monospace',
     fontSize: 13,
-    tabSize: 4,
-    insertSpaces: true,
+    // The DEVELOPER'S choice, not a constant. These were hard-coded to four spaces while the
+    // settings dialog offered "indent with tabs" and shipped it ON, so the editor indented with
+    // spaces, Format Module indented with tabs, and smart Enter used a tab of its own: three
+    // behaviours from one preference, two of them contradicting the switch on screen
+    // (2026-08-08). detectIndentation stays off, or monaco would guess from the file and
+    // overrule the choice entirely.
+    tabSize: currentSettings().formatIndentSize,
+    insertSpaces: !currentSettings().formatUseTabs,
     detectIndentation: false,
     autoIndent: "full",
     wordWrap: "off",
@@ -332,6 +338,15 @@ function boot(): void {
   const transport = webView2Transport();
   const documents = new DocumentStore();
   const bookmarks = new Bookmarks();
+
+  // Indentation follows the setting for the WHOLE session, not only for editors made after the
+  // change. A developer who switches to spaces mid-session and finds the open module still
+  // inserting tabs has been given a switch that half works.
+  onSettingsApplied((next) => {
+    for (const editor of workspace.editors()) {
+      editor.updateOptions({ tabSize: next.formatIndentSize, insertSpaces: !next.formatUseTabs });
+    }
+  });
 
   // Bridge, workspace, and shell reference each other, so they are built in dependency
   // order and stitched by assignment: the bridge first (it only needs the transport), the

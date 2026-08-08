@@ -170,7 +170,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `locals` | `locals()` | the Locals panel |
 | `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
 | `messages` | `messages(last)` | page traffic, both directions |
-| `module` | `readModule(name, project)` / `writeModule(name, text, project)` | through the session's own reader and writer |
+| `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` | through the session's own reader and writer; `live` reads what the surface holds, unwritten |
 | `perf` | `perf({reset})` / `engineCosts()` | placement and marshal durations, and the ANALYZER's cost per method |
 | `placement` | `placement()` | forces a placement pass |
 | `problems` | `problems(module)` | the analyzer's findings |
@@ -241,6 +241,29 @@ await api.act("closeActive");
 await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-changes box
 await api.act("search", { query: "Recalculate", scope: "project" });
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
+await api.act("format");                        // Format Module; {selection: true} for the selection
+
+// IntelliSense and the squiggles, at a word or a position
+await api.act("hover", { word: "Recalculate" });
+await api.act("completions", { line: 7, column: 12 });
+await api.act("quickFixes", { word: "Recalcualte" });
+await api.at("Recalculate");                    // colour as painted, and the markers on it
+```
+
+> **These ask the BRIDGE, which is one gate short of the screen.** Every monaco provider answers
+> only for the host-active module and returns nothing otherwise, and these actions call the bridge
+> request directly — so they exercise page → shim → engine, and they PASS that gate rather than
+> testing it. A feature can be dead on screen while all four report healthy.
+>
+> The gate itself is one comparison: `ui.focus.model` against `ui.focus.host.model`. When they
+> differ, every provider is silent and nothing else looks wrong. Check it first when IntelliSense
+> is reported dead:
+>
+> ```bash
+> node -e "import('./tools/harness/xlide-api.mjs').then(async m => { const u = await (await m.open({})).ui(); console.log(u.focus.model === u.focus.host?.model ? 'providers answer' : 'PROVIDERS SILENT: ' + u.focus.model + ' vs ' + u.focus.host?.model); })"
+> ```
+
+```js
 await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });

@@ -33,12 +33,19 @@ public sealed record ProductSettings
     [JsonPropertyName("explorer.treeFollowsEditor")]
     public bool TreeFollowsEditor { get; init; } = true;
 
-    /// <summary>Format Module: spaces per indent level.</summary>
+    /// <summary>
+    /// One indent level, in spaces. Governs the EDITOR's own indentation, what smart Enter
+    /// leaves behind, and Format Module — which used to be three different behaviours from one
+    /// name (2026-08-08).
+    /// </summary>
     [JsonPropertyName("format.indentSize")]
     public int FormatIndentSize { get; init; } = 4;
 
-    /// <summary>Format Module: indent with tabs rather than spaces. Tabs, by the developer's
-    /// standing choice (2026-08-04).</summary>
+    /// <summary>
+    /// Indent with tabs rather than spaces, everywhere: typing, smart Enter, and Format Module.
+    /// Tabs, by the developer's standing choice (2026-08-04) — which the editor did not honour
+    /// until 2026-08-08, having been hard-coded to spaces while this said tabs.
+    /// </summary>
     [JsonPropertyName("format.useTabs")]
     public bool FormatUseTabs { get; init; } = true;
 

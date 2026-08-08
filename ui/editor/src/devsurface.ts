@@ -20,6 +20,9 @@
  */
 
 import type * as monaco from "monaco-editor";
+// The runtime object, not only its types: getModelMarkers is what draws the squiggles, and a
+// type-only import cannot call it.
+import * as monacoApi from "monaco-editor/editor/editor.api.js";
 
 import type { EditorBridge } from "./bridge.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
@@ -78,6 +81,36 @@ export interface UiSnapshot {
   };
   /** The bookmark lines of the model on screen, read from its live decorations. */
   bookmarks: number[];
+  /**
+   * What is at a position, when `ui` was asked with `line`/`column` or `word`.
+   *
+   * The COLOUR is read off the rendered span, not derived from a token type and a theme map:
+   * what a developer means by "is this word the wrong colour" is the pixel, and every step
+   * between the tokeniser and the pixel is a step that can be wrong. The squiggles are monaco's
+   * markers at that position, which is exactly what draws the underline.
+   */
+  at: AtPosition | null;
+}
+
+export interface AtPosition {
+  line: number;
+  column: number;
+  word: string | null;
+  /** The monaco token class on the rendered span, e.g. "mtk12". Null when nothing is rendered. */
+  tokenClass: string | null;
+  /** The computed colour of that span: what is actually on screen. */
+  colour: string | null;
+  /** Bold, italic and underline as rendered, since a theme can carry those too. */
+  style: { fontWeight: string; fontStyle: string; textDecoration: string } | null;
+  /** Every marker covering the position: this is the squiggle. */
+  squiggles: {
+    severity: string;
+    message: string;
+    code: string | null;
+    owner: string;
+    startColumn: number;
+    endColumn: number;
+  }[];
 }
 
 export interface DevSurfaceParts {
@@ -236,6 +269,8 @@ function flag(value: unknown, whenMissing: boolean): boolean {
 export interface ActResult {
   did: boolean;
   detail: string;
+  /** What the action found, when it is a question as much as an act. */
+  data?: unknown;
 }
 
 /** An action's answer. A promise for anything whose outcome crosses to the host and back. */
@@ -243,6 +278,32 @@ type ActAnswer = ActResult | Promise<ActResult>;
 
 export function installDevSurface(parts: DevSurfaceParts): void {
   const { workspace, explorer, bridge } = parts;
+
+  /**
+   * A position argument as an offset into the active model.
+   *
+   * Takes `line`/`column`, or `word` to find the first occurrence of an identifier — which is
+   * how a person describes where they are looking ("hover over Recalculate") without counting
+   * columns. Null when nothing is open.
+   */
+  const offsetFrom = (args: Record<string, unknown>): number | null => {
+    const model = workspace.activeEditor().getModel();
+    if (!model) { return null; }
+
+    if (args.word !== undefined) {
+      const wanted = String(args.word);
+      const at = model.getValue().indexOf(wanted);
+      if (at < 0) { return null; }
+      // The middle of the word, so a provider keyed on "inside an identifier" is satisfied.
+      return at + Math.floor(wanted.length / 2);
+    }
+
+    const line = Number(args.line ?? 0);
+    const column = Number(args.column ?? 1);
+    if (!Number.isFinite(line) || line < 1) { return null; }
+
+    return model.getOffsetAt({ lineNumber: line, column });
+  };
 
   // Installed at wiring time, not at first ask: `buffered: true` recovers what the observer
   // would have seen slightly earlier, but nothing recovers a stall that happened before the
@@ -269,7 +330,79 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     };
   };
 
-  const state = (): UiSnapshot => ({
+  /**
+   * Colour and squiggles at a position.
+   *
+   * The colour comes off the DOM: monaco renders each token as a span with a class the theme
+   * colours, so the computed style of the span covering the column is what the developer is
+   * looking at. Deriving it from the token type instead would agree with the theme and disagree
+   * with the screen whenever the interesting bug is between them.
+   *
+   * The line has to be RENDERED to be read. Monaco only builds spans for visible lines, so a
+   * position outside the viewport answers a null colour rather than a wrong one.
+   */
+  const describeAt = (where: { lineNumber: number; column: number }): AtPosition => {
+    const editor = workspace.activeEditor();
+    const model = editor.getModel();
+    const word = model?.getWordAtPosition(where) ?? null;
+
+    const markers = model
+      ? monacoApi.editor.getModelMarkers({ resource: model.uri })
+          .filter((marker) =>
+            marker.startLineNumber <= where.lineNumber && marker.endLineNumber >= where.lineNumber
+            && marker.startColumn <= where.column && marker.endColumn >= where.column)
+      : [];
+
+    const severityName: Record<number, string> = { 1: "hint", 2: "info", 4: "warning", 8: "error" };
+
+    // The rendered span under the column, found by walking the line's text nodes and counting
+    // characters: monaco splits a line into spans per token, and the column tells which one.
+    let tokenClass: string | null = null;
+    let colour: string | null = null;
+    let style: AtPosition["style"] = null;
+
+    const lineNode = editor.getDomNode()?.querySelectorAll(".view-line")[
+      where.lineNumber - (editor.getVisibleRanges()[0]?.startLineNumber ?? 1)
+    ];
+
+    if (lineNode) {
+      let seen = 0;
+      for (const span of [...lineNode.querySelectorAll("span span")] as HTMLElement[]) {
+        const length = (span.textContent ?? "").length;
+        if (where.column - 1 < seen + length) {
+          const computed = getComputedStyle(span);
+          tokenClass = span.className;
+          colour = computed.color;
+          style = {
+            fontWeight: computed.fontWeight,
+            fontStyle: computed.fontStyle,
+            textDecoration: computed.textDecorationLine,
+          };
+          break;
+        }
+        seen += length;
+      }
+    }
+
+    return {
+      line: where.lineNumber,
+      column: where.column,
+      word: word?.word ?? null,
+      tokenClass,
+      colour,
+      style,
+      squiggles: markers.map((marker) => ({
+        severity: severityName[marker.severity] ?? String(marker.severity),
+        message: marker.message,
+        code: typeof marker.code === "string" ? marker.code : (marker.code?.value ?? null),
+        owner: marker.owner ?? "",
+        startColumn: marker.startColumn,
+        endColumn: marker.endColumn,
+      })),
+    };
+  };
+
+  const state = (at?: { lineNumber: number; column: number }): UiSnapshot => ({
     workspace: workspace.snapshot(),
     explorer: explorer.treeState(),
     panes: parts.panes.list().map(({ name, title, open }) => ({ name, title, open })),
@@ -285,6 +418,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       const model = workspace.activeEditor().getModel();
       return model ? parts.bookmarks.marksOn(model) : [];
     })(),
+    at: at ? describeAt(at) : null,
   });
 
   /**
@@ -511,6 +645,90 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return { did: true, detail: `searching for ${JSON.stringify(query)}` };
     },
 
+    /*
+     * THE LANGUAGE FEATURES, asked at a position.
+     *
+     * Each goes through the bridge request its monaco provider goes through, so the whole chain
+     * is exercised — page to shim to engine and back — without depending on a widget being on
+     * screen. Reading the rendered hover widget instead is the trap this repo already paid for:
+     * monaco reuses an open widget, so a probe that triggers and scrapes gets the previous
+     * answer in every state, including the ones where the feature is switched off (finding 1).
+     *
+     * What is on SCREEN is a different question, and `ui`'s `at` field answers that one.
+     */
+
+    hover: async (args) => {
+      const offset = offsetFrom(args);
+      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+
+      const found = await bridge.requestHover(offset);
+      return { did: found !== null, detail: found ? "hover answered" : "nothing to say here", data: found };
+    },
+
+    completions: async (args) => {
+      const offset = offsetFrom(args);
+      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+
+      const items = await bridge.requestCompletions(offset);
+      return {
+        did: items.length > 0,
+        detail: `${items.length} completion(s)`,
+        data: items.map((one) => ({ label: one.label, kind: one.kind, detail: one.detail })),
+      };
+    },
+
+    signature: async (args) => {
+      const offset = offsetFrom(args);
+      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+
+      const found = await bridge.requestSignatureHelp(offset);
+      return { did: found !== null, detail: found ? "signature help answered" : "no signature here", data: found };
+    },
+
+    quickFixes: async (args) => {
+      const offset = offsetFrom(args);
+      if (offset === null) { return { did: false, detail: "no module is active, or no such word" }; }
+
+      // The whole word under the position, so a fix attached to an identifier is found from
+      // anywhere inside it rather than only from its first character.
+      const model = workspace.activeEditor().getModel();
+      const position = model?.getPositionAt(offset);
+      const word = model && position ? model.getWordAtPosition(position) : null;
+      const start = model && position && word
+        ? model.getOffsetAt({ lineNumber: position.lineNumber, column: word.startColumn })
+        : offset;
+      const end = model && position && word
+        ? model.getOffsetAt({ lineNumber: position.lineNumber, column: word.endColumn })
+        : offset;
+
+      const actions = await bridge.requestCodeActions(start, end);
+      return {
+        did: actions.length > 0,
+        detail: `${actions.length} quick fix(es)`,
+        data: actions.map((one) => ({ title: one.title, isPreferred: one.isPreferred })),
+      };
+    },
+
+    /**
+     * Format Module, or Format Selection: the editor's own formatting actions.
+     *
+     * The third consumer of the indent settings, after typing and smart Enter, and the one where
+     * a disagreement is most visible: formatting rewrites the whole module at once.
+     */
+    format: (args) => {
+      const whole = !flag(args.selection, false);
+      const id = whole ? "editor.action.formatDocument" : "editor.action.formatSelection";
+      const found = workspace.activeEditor().getAction(id);
+
+      if (!found) {
+        return { did: false, detail: `${id} is not registered on this editor` };
+      }
+
+      // Awaited: formatting replaces the whole model, and a caller reading the text straight
+      // after an un-awaited run reads what was there before.
+      return found.run().then(() => ({ did: true, detail: `ran ${id}` }));
+    },
+
     /**
      * A bookmark on the caret's line, or a hop between them: the editor's own actions.
      *
@@ -568,5 +786,25 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     }
   };
 
-  (globalThis as { xlideUi?: unknown }).xlideUi = { state, act, actions: () => Object.keys(actions).sort() };
+  (globalThis as { xlideUi?: unknown }).xlideUi = {
+    /**
+     * `state()` for the whole surface; `state(line, column)` or `state(null, null, word)` to
+     * also answer what is AT a position: its colour as painted and the squiggles covering it.
+     */
+    state: (line?: number, column?: number, word?: string) => {
+      if (word !== undefined && word !== null && word !== "") {
+        const offset = offsetFrom({ word });
+        const model = workspace.activeEditor().getModel();
+        const position = offset !== null && model ? model.getPositionAt(offset) : null;
+        return state(position ? { lineNumber: position.lineNumber, column: position.column } : undefined);
+      }
+
+      return state(
+        typeof line === "number" && line >= 1
+          ? { lineNumber: line, column: typeof column === "number" && column >= 1 ? column : 1 }
+          : undefined);
+    },
+    act,
+    actions: () => Object.keys(actions).sort(),
+  };
 }

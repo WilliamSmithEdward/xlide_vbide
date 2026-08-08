@@ -20,9 +20,9 @@ export interface EditorSettings {
    * it.
    */
   treeFollowsEditor: boolean;
-  /** Format Module: spaces per indent level. */
+  /** One indent level, in spaces. Governs typing, smart Enter, and Format Module alike. */
   formatIndentSize: number;
-  /** Format Module: indent with tabs rather than spaces. */
+  /** Indent with tabs rather than spaces, everywhere. Ships ON. */
   formatUseTabs: boolean;
   /** Format Module: respell keywords in their canonical case. */
   formatCanonicalKeywords: boolean;
@@ -56,7 +56,9 @@ export function applySettings(next: EditorSettings): void {
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
-    formatUseTabs: next.formatUseTabs === true,
+    // Defaults to TABS when the host says nothing, matching what ships. `=== true` made a
+    // missing value mean spaces, which is the opposite of the shipped default.
+    formatUseTabs: next.formatUseTabs !== false,
     formatCanonicalKeywords: next.formatCanonicalKeywords !== false,
   };
 

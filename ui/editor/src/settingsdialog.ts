@@ -44,16 +44,16 @@ const OPTIONS = [
   {
     key: "formatIndentSize" as const,
     kind: "number" as const,
-    label: "Format: indent size",
-    description: "Spaces per indent level when formatting a module or a selection.",
+    label: "Indent size",
+    description: "One indent level, in spaces. Used by typing, by smart Enter, and by formatting.",
     min: 1,
     max: 8,
   },
   {
     key: "formatUseTabs" as const,
     kind: "toggle" as const,
-    label: "Format: indent with tabs",
-    description: "Formatting indents with tab characters instead of spaces.",
+    label: "Indent with tabs",
+    description: "Indent with tab characters instead of spaces, everywhere: typing, smart Enter, and formatting.",
   },
   {
     key: "formatCanonicalKeywords" as const,

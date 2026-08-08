@@ -1,4 +1,5 @@
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
@@ -434,6 +435,7 @@ internal sealed class AnalysisService : IAsyncDisposable
         string moduleName,
         string source,
         int offset,
+        ProductSettings settings,
         CancellationToken cancellation)
     {
         if (_engine is not { IsRunning: true } engine)
@@ -446,7 +448,8 @@ internal sealed class AnalysisService : IAsyncDisposable
             return null;
         }
 
-        return await engine.SmartEnterAsync(home.ProjectId, moduleName, home.ModuleType, null, offset, cancellation)
+        return await engine.SmartEnterAsync(
+                home.ProjectId, moduleName, home.ModuleType, null, offset, settings, cancellation)
             .ConfigureAwait(false);
     }
 

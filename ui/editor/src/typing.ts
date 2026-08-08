@@ -30,6 +30,17 @@ import { currentSettings } from "./settings.js";
 /** How long a touched line rests before its recase pass, the extension's own figure. */
 const CANONICAL_LINE_IDLE_DELAY_MS = 200;
 
+/**
+ * One indent level as the developer asked for it: a tab, or that many spaces.
+ *
+ * The same choice the editor's own `insertSpaces`/`tabSize` follow, so everything that indents
+ * agrees. Ships as a tab, which is the standing preference.
+ */
+function indentUnitOf(): string {
+  const settings = currentSettings();
+  return settings.formatUseTabs ? "	" : " ".repeat(Math.max(1, settings.formatIndentSize));
+}
+
 /** The change a plain Enter makes: a newline plus whatever indent the editor added. */
 const PLAIN_ENTER = /^\r?\n[ \t]*$/;
 
@@ -300,6 +311,14 @@ class TypingAutomation {
       eol: model.getEOL(),
       insertCloser: !closedAhead,
       layout: currentSettings().blockLayout,
+
+      // THE DEVELOPER'S INDENT, not the analyzer's default.
+      //
+      // smartBlockInsertion takes an indentUnit and this call never passed one, so a block body
+      // was indented with the analyzer's fallback — a tab — whatever the setting said. With
+      // "indent with tabs" OFF, pressing Enter after a plain line gave spaces and pressing it
+      // after `If ... Then` gave a tab, in the same file, from the same key (2026-08-08).
+      indentUnit: indentUnitOf(),
     });
 
     const headerOperations: monaco.editor.IIdentifiedSingleEditOperation[] = headerEdit

@@ -219,6 +219,24 @@ export interface SmartEnterParams {
     offset: number;
     moduleType?: string;
     documentType?: string;
+
+    /*
+     * The developer's typing settings, sent per call.
+     *
+     * They used to be constants in onType.ts with a comment saying the surface had no settings
+     * page yet. It has had one for some time: the dialog offered a block layout and two comment
+     * options, the page persisted them, the shim stored them and the api reported them, and
+     * nothing ever reached the code that acts on them. Three inert switches (2026-08-08).
+     */
+
+    /** Spacer lines around the body, or the body against the closer. */
+    blockLayout?: 'comfy' | 'compact';
+    /** Enter at the end of a whole-line comment continues the apostrophes. */
+    continueCommentOnNewline?: boolean;
+    /** A continued comment also mirrors the spaces after the apostrophes. */
+    mirrorCommentSpacing?: boolean;
+    /** One indent level, as the editor writes it: a tab, or a run of spaces. */
+    indentUnit?: string;
 }
 
 export interface SmartEnterResult {

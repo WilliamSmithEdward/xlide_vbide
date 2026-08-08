@@ -398,9 +398,22 @@ function clientFor(entry) {
      * tell "collapsed" from "rendered wrong", and the render being stale is the defect worth
      * catching.
      */
-    async ui() {
-      const answer = await call("ui", { timeout: 10000 });
+    async ui({ line, column, word } = {}) {
+      const answer = await call(`ui${query({ line, column, word })}`, { timeout: 10000 });
       return answer.value ?? answer;
+    },
+
+    /**
+     * What is AT a word or a position: the colour actually painted and the squiggles covering it.
+     *
+     * The colour is read off the rendered span rather than derived from a token type and a theme
+     * map, because "is this word the wrong colour" is a question about the pixel, and every step
+     * between the tokeniser and the pixel can be the wrong one. Only rendered lines have spans,
+     * so a position off-screen answers a null colour rather than a guess.
+     */
+    async at(where) {
+      const answer = await this.ui(typeof where === "string" ? { word: where } : where);
+      return answer.at;
     },
 
     /**
@@ -582,7 +595,15 @@ function clientFor(entry) {
     breakpoint: (module, line, { project, state } = {}) =>
       call(`breakpoint${query({ module, line, project, state })}`, { method: "POST" }),
 
-    readModule: (name, project) => call(`module${query({ name, project })}`),
+    /**
+     * A module's text. `live: true` reads the SURFACE's copy rather than the workbook's.
+     *
+     * They differ while the developer has typed and the write-back has not fired, which is the
+     * window every typing behaviour lives in: smart Enter, comment continuation and auto-indent
+     * all produce text that exists only in the editor until it is written.
+     */
+    readModule: (name, project, { live } = {}) =>
+      call(`module${query({ name, project, live: live ? 1 : undefined })}`),
     writeModule: (name, text, project) =>
       call(`module${query({ name, project })}`, { method: "POST", body: text }),
 

@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Text;
 using System.Text.Json;
 using Xlide.Vbe.Core;
+using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Interop;
@@ -279,12 +280,19 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>Asks what Enter should leave behind, given the text just after the newline.</summary>
+    /// <param name="settings">
+    /// The developer's typing choices, sent with the request. The engine used to hold these as
+    /// constants and the dialog's switches did nothing at all: block layout and both comment
+    /// options were offered, persisted, echoed to this shim and reported by the api, and never
+    /// reached the code that acts on them (2026-08-08).
+    /// </param>
     public async Task<EngineSmartEnter?> SmartEnterAsync(
         string projectId,
         string moduleName,
         string moduleType,
         string? source,
         int offset,
+        ProductSettings settings,
         CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
@@ -293,12 +301,28 @@ internal sealed class EngineClient : IAsyncDisposable
             ["moduleName"] = moduleName,
             ["moduleType"] = moduleType,
             ["offset"] = offset,
+            ["blockLayout"] = settings.BlockLayout,
+            ["continueCommentOnNewline"] = settings.ContinueCommentOnNewline,
+            ["mirrorCommentSpacing"] = settings.MirrorCommentSpacing,
+
+            // One indent level as the EDITOR writes it, so smart Enter and the developer's own
+            // typing agree. Pressing Enter after a plain line and after `If ... Then` used to
+            // produce different whitespace in the same file.
+            ["indentUnit"] = settings.FormatUseTabs
+                ? "	"
+                : new string(' ', Math.Clamp(settings.FormatIndentSize, 1, 16)),
         };
 
         if (source is not null)
         {
             payload["source"] = source;
         }
+
+        // The typing settings on the wire, because they are the half nobody can see: the engine
+        // holds no state, so an answer that ignores a setting is indistinguishable from a
+        // setting that never arrived.
+        Log.Verbose($"engine: smartEnter layout {settings.BlockLayout}"
+            + $", indentUnit {(settings.FormatUseTabs ? "tab" : $"{settings.FormatIndentSize} spaces")}");
 
         var result = await CallAsync("textDocument/smartEnter", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSmartEnter);
