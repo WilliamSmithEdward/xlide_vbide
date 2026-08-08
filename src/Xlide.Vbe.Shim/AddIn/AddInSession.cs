@@ -1998,6 +1998,7 @@ internal sealed class AddInSession : IDisposable
                         DialogsStanding: DialogWatch.Dialogs().Length,
                         ComWrappersTaken: Com.ComRuntime.WrappersTaken,
                         ComWrappersGivenBack: Com.ComRuntime.WrappersGivenBack,
+                        ComWrappersDisposed: Com.ComRuntime.WrappersDisposed,
                         ComWrappersLive: Com.ComRuntime.WrappersLive),
                     DebugJsonContext.Default.DebugStatsReply));
             }

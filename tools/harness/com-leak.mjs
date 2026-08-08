@@ -361,6 +361,32 @@ check(`the sweep gives back the handles it takes, over all ${totalRounds} operat
   + "operation count is a handle this product opened and never closed. The per-row numbers "
   + "above name which one.");
 
+/*
+ * GIVEN BACK AND ACTUALLY RELEASED MUST BE THE SAME NUMBER.
+ *
+ * This is the check that would have caught the defect every other check in this file missed for
+ * the whole life of the product. `GiveBackWrapper` released with `(wrapper as IDisposable)?.
+ * Dispose()`, and the wrapper StrategyBasedComWrappers hands back is a `ComObject`, which DOES
+ * NOT IMPLEMENT IDisposable. The cast failed, `?.` swallowed it, and the counter incremented
+ * anyway - so every wrapper this product ever took read as returned while its reference went to
+ * the finalizer thread, where releasing an editor object FailFasts the host.
+ *
+ * Every row above passed throughout. Taken and given back were equal to the digit, the live count
+ * sat at its resting 13, handles were flat. All true, and all measuring the INTENTION to release
+ * rather than the release. Read `disposed: 0` against `givenBack: 1882` and there is nothing left
+ * to argue about (2026-08-08, docs/com-wrapper-release.md).
+ *
+ * So the two are counted separately at the source and compared here. They can only diverge if a
+ * wrapper is counted home without being released, which is the bug, exactly.
+ */
+const counters = await api.stats();
+const notReleased = counters.comWrappersGivenBack - counters.comWrappersDisposed;
+check("every wrapper given back was actually released",
+  notReleased === 0,
+  `${counters.comWrappersGivenBack} given back but only ${counters.comWrappersDisposed} released: `
+  + `${notReleased} wrappers are counted home with their reference still held, and the finalizer `
+  + "thread has them. This is the shape of the defect that killed Excel five times.");
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 for (const failure of failures) {
   console.log(`  ${failure}`);

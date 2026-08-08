@@ -1332,3 +1332,38 @@ finalisation at every step.
 
 So it is not attributed, and it is written here rather than closed. The next occurrence has a tool
 waiting for it that none of the previous five had.
+
+## 52. The release that never released, and the three instruments that agreed it did
+
+Has its own file: **[com-wrapper-release.md](com-wrapper-release.md)**. The short form, because
+this is the entry the previous four in this thread were circling.
+
+`GiveBackWrapper` released a COM wrapper with `(wrapper as IDisposable)?.Dispose()`. The wrapper
+`StrategyBasedComWrappers` hands back is a `ComObject`, and **`ComObject` does not implement
+`IDisposable`**. The cast produced null, `?.` swallowed it, and the line had never released
+anything since it was written. The correct call is `ComObject.FinalRelease()`.
+
+So every wrapper this product ever took kept its reference and went to the FINALIZER thread, where
+releasing an apartment-threaded editor object is an access violation that ahead-of-time code
+cannot throw: FailFast, and the host with it. Five crashes across two days, blamed on `ntdll`
+twice, `VBE7.DLL` twice, and this library once.
+
+`taken 1895, givenBack 1882, disposed 0, live 13.`
+
+**Every instrument said it was fine, and each was derived from the last.** The counter incremented
+beside the disposal rather than because of it, so it counted the INTENTION to release. The leak
+sweep asserted on that counter, and passed 36 rows. Handle counts were flat, correctly: a leak
+that still holds a reference releases no handle. A forced finalizer drain survived every operation
+group, the whole sweep, and the churn that had killed Excel twice.
+
+And two earlier fixes were real without being sufficient: both removed places a wrapper was taken
+that nobody needed, which lowered the RATE of a crash whose mechanism was untouched. Lessons 36
+and 49 are those. **"It happens less often now" was the signal to keep going, and it was read as
+the signal to close.**
+
+What found it was counting the two claims separately and comparing them, which is now a gate row:
+given back and actually released must be the same number, and they are counted at the source so
+they can only diverge if the bug is back.
+
+**`(x as T)?.M()` is a silent branch.** It does nothing when `x` is not a `T`, says nothing, and
+reads as success at every call site. In a release path that is a leak with no symptom.

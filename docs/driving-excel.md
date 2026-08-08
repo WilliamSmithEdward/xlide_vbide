@@ -199,6 +199,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `immediate` | `immediate(text)` / `immediate()` | evaluates a line and answers WHAT IT CAME TO; without text, reads the window |
 | `inspect` | `inspect(selector, {styles, rules, max})` | boxes, classes, computed styles, winning rules |
 | `journal` | `journal(lines)` | one capture of a whole moment |
+| `drainfinalizers` | `drainFinalizers()` | forces a collection and WAITS for the finalizers, so a leaked COM wrapper fails at the operation that leaked it rather than minutes later. A bisecting tool, not a health check |
 | `layout` | `layout()` / `resetLayout()` | the arrangement; and putting it back |
 | `locals` | `locals()` | the Locals panel |
 | `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
@@ -416,8 +417,22 @@ a check of this kind is worth having.
 ### The COM wrappers, which killed Excel four times before anyone counted them
 
 ```js
-(await api.stats()).comWrappersLive;   // should return to its resting level, always
+const s = await api.stats();
+s.comWrappersLive;                                 // returns to its resting level, always
+s.comWrappersGivenBack - s.comWrappersDisposed;    // must be ZERO, always
+await api.drainFinalizers();                       // makes a leak fail NOW, at the operation
 ```
+
+**The second line is the one that matters, and it is newer than the first.** Given back and
+actually released are counted separately because for the whole life of this product they were not
+the same: the release was `(wrapper as IDisposable)?.Dispose()`, the wrapper is a `ComObject`, and
+`ComObject` does not implement `IDisposable`. The cast failed silently, the counter incremented
+anyway, and every wrapper ever taken went to the finalizer thread. `comWrappersLive` read a
+perfectly balanced 13 throughout. See [com-wrapper-release.md](com-wrapper-release.md).
+
+`drainFinalizers()` forces a collection and waits, so a wrapper that was leaked fails at the
+operation that leaked it rather than minutes later in a stack that names nothing. Run an
+operation, call it, and if it does not answer, that operation is the one.
 
 Every automation object this product touches is wrapped, and **the wrapper takes its own
 reference** on top of the one the shim holds. A wrapper that is never disposed is given back by

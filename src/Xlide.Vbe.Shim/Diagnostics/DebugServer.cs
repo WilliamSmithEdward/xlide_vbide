@@ -1159,6 +1159,7 @@ public sealed record DebugStatsReply(
     /// </summary>
     [property: JsonPropertyName("comWrappersTaken")] long ComWrappersTaken,
     [property: JsonPropertyName("comWrappersGivenBack")] long ComWrappersGivenBack,
+    [property: JsonPropertyName("comWrappersDisposed")] long ComWrappersDisposed,
     [property: JsonPropertyName("comWrappersLive")] long ComWrappersLive);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
