@@ -194,7 +194,7 @@ internal sealed class AddInSession : IDisposable
     ///
     /// NO COM IN HERE, deliberately: everything it touches is the modules already read, the
     /// folder, and the engine. That is what lets the dialog run it off the host thread, and the
-    /// reason it matters is measured — on a project of 81,795 lines the shared planner takes
+    /// reason it matters is measured: on a project of 81,795 lines the shared planner takes
     /// 2,167ms, and every one of those milliseconds used to be Excel frozen (2026-08-09).
     ///
     /// WHICH PLANNER, and only the planner. Both answer the same shape and both are carried out
@@ -202,7 +202,7 @@ internal sealed class AddInSession : IDisposable
     /// does it. The companion editor's is the default because the two products write into the
     /// same folders and a developer moves between them: one implementation of file naming,
     /// module classification and staleness cannot disagree with itself. The built-in one is not
-    /// a fallback nobody meant to use — it needs no engine, so import and export keep working
+    /// a fallback nobody meant to use, because it needs no engine, so import and export keep working
     /// when the engine is down.
     /// </summary>
     private (SyncPlan Plan, string Planner) BuildPlan(SyncInputs inputs)
@@ -309,7 +309,7 @@ internal sealed class AddInSession : IDisposable
                 // the same folders and a developer moves between them: one implementation of file
                 // naming, module classification and staleness cannot disagree with itself.
                 //
-                // The built-in one is not a fallback nobody meant to use — it needs no engine, so
+                // The built-in one is not a fallback nobody meant to use, because it needs no engine, so
                 // import and export keep working when the engine is down, and it is what a
                 // developer chooses if they would rather the add-in never depended on it.
                 var mode = syncMode ?? (importing ? remembered.ImportMode : remembered.ExportMode);
@@ -358,7 +358,7 @@ internal sealed class AddInSession : IDisposable
                     _analysis?.Reanalyse();
                 }
 
-                Log.Info($"sync: {(importing ? "import" : "export")} applied — "
+                Log.Info($"sync: {(importing ? "import" : "export")} applied: "
                     + $"{applied.Changed.Count} changed, {applied.Skipped.Count} skipped, "
                     + $"{applied.Removed.Count} removed, {applied.Failed.Count} failed");
 
@@ -393,7 +393,7 @@ internal sealed class AddInSession : IDisposable
         // Working out a plan reads the folder and, with the shared planner, waits on the engine:
         // 2,167ms measured on a project of 81,795 lines, every millisecond of it with Excel
         // frozen, because this handler runs on the host user interface thread. The modules have
-        // to be read here — the object model is apartment bound — but nothing after that does.
+        // to be read here, because the object model is apartment bound, but nothing after that does.
         //
         // Apply is deliberately left alone: it writes modules through COM, so it belongs on this
         // thread, and a developer who has just pressed Apply is expecting it to work.
@@ -451,7 +451,7 @@ internal sealed class AddInSession : IDisposable
     /// Raises the system's folder chooser, because a page cannot.
     ///
     /// Modal to the editor's own window, so it cannot end up behind it, and the answer is written
-    /// straight into what the project remembers — which is the same state the api's settings route
+    /// straight into what the project remembers, which is the same state the api's settings route
     /// writes, so choosing a folder either way leaves the product in one place.
     /// </summary>
     private string ChooseSyncFolder(IReadOnlyDictionary<string, string> arguments)
@@ -560,9 +560,9 @@ internal sealed class AddInSession : IDisposable
     ///
     /// The two shapes are nearly the same, which is not a coincidence: the built-in planner was
     /// written from theirs. The mapping is spelled out rather than assumed, because the one field
-    /// that is easy to get wrong is the payload. LEFT is the source side in BOTH directions —
+    /// that is easy to get wrong is the payload. LEFT is the source side in BOTH directions:
     /// exporting, the left is the module and the right is the file; importing, the left is the
-    /// file and the right is the module — so the raw left is what an apply writes either way.
+    /// file and the right is the module, so the raw left is what an apply writes either way.
     /// </summary>
     private static SyncPlan? SharedPlanFrom(
         JsonElement json,
@@ -8946,7 +8946,7 @@ internal sealed class AddInSession : IDisposable
     /// Turns a native panel window into an invisible data engine: floated through the object
     /// model, ghosted, parked off screen, and read by handle.
     ///
-    /// The editor only feeds an ON-SCREEN window (lesson 25) — but "on screen" turned out to mean
+    /// The editor only feeds an ON-SCREEN window (lesson 25), but "on screen" turned out to mean
     /// "has a paintable surface". A LAYERED window renders into its own surface regardless of
     /// occlusion or position, so a floated palette with WS_EX_LAYERED at alpha zero, parked far
     /// off the virtual screen, is fed faithfully through every break and step while being
@@ -8954,7 +8954,7 @@ internal sealed class AddInSession : IDisposable
     /// across steps at alpha 1, at alpha 0, and at -20000,-20000. The themed panel renders what
     /// the reader reads; nothing native is ever visible.
     ///
-    /// Floating uses LinkedWindows.Remove on the window's own linked frame — pure object model.
+    /// Floating uses LinkedWindows.Remove on the window's own linked frame, pure object model.
     /// If any step refuses, the ghost is skipped, and the police pass hides the docked native
     /// window: the canvas stays pure and the panel sits idle.
     ///

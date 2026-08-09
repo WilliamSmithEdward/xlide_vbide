@@ -3,8 +3,8 @@
  * the api leave the project in the SAME state.
  *
  * That is not a style preference. The rule this product is built to is that an api action leaves
- * the state the equivalent UI action would, and the whole design of this surface — one service in
- * the host, two doors onto it — exists to make it true by construction. A test that only drove the
+ * the state the equivalent UI action would, and the whole design of this surface, one service in
+ * the host, two doors onto it, exists to make it true by construction. A test that only drove the
  * api would pass on a product whose button did something else entirely, which is exactly the kind
  * of green nobody should trust.
  *
@@ -264,8 +264,8 @@ try {
   }
 
   // Reading every module of a project and exporting each header walks a great deal of COM. The
-  // number that matters is not how many are live — that rests above zero by design, because the
-  // session holds the editor and its projects for as long as it is up — but whether a wrapper was
+  // number that matters is not how many are live, which rests above zero by design, because the
+  // session holds the editor and its projects for as long as it is up, but whether a wrapper was
   // counted home WITHOUT being released. That one is given back by the finaliser thread instead,
   // where releasing an apartment-threaded object ends the host process.
   const wrappers = await api.stats();

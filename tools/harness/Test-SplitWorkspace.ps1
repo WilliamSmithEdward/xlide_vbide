@@ -218,7 +218,7 @@ Check 'a pane dragged to the right section stays there across a reload' {
     #
     # Standing and SIZED are different moments. The wait above is satisfied as soon as the right
     # section is on screen, which on a freshly started session is before the seeded sizes have been
-    # applied — and every geometry check below then measures a layout that is still arriving. It
+    # applied, and every geometry check below then measures a layout that is still arriving. It
     # failed the three of them on a fresh session and passed on a warmed one, which read as a
     # product defect for an hour and was this (2026-08-09).
     #

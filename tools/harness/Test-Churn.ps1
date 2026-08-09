@@ -68,12 +68,22 @@ function Get-Counts {
     $raw | ConvertFrom-Json
 }
 
+# GDI and USER objects, which is what "a window, a timer, or a device context left behind" means.
+# Kernel handle count cannot answer that question here: this probe makes about a hundred HTTP
+# requests and the door's sockets swamp the signal.
+Add-Type -Namespace Xlide -Name Gui -MemberDefinition @'
+[DllImport("user32.dll")] public static extern uint GetGuiResources(IntPtr process, uint flags);
+'@ -ErrorAction SilentlyContinue
+
 function Get-HostStats {
     $s = Invoke-RestMethod "$api/stats" -TimeoutSec 10
+    $handle = (Get-Process -Id $excel.Id).Handle
     [pscustomobject] @{
         ManagedMb = [Math]::Round($s.managedMemoryBytes / 1MB, 1)
         WorkingMb = [Math]::Round($s.workingSetBytes / 1MB, 1)
         Handles = $s.handleCount
+        Gdi = [Xlide.Gui]::GetGuiResources($handle, 0)
+        User = [Xlide.Gui]::GetGuiResources($handle, 1)
     }
 }
 
@@ -196,21 +206,33 @@ Check 'models and documents match the modules actually open' {
 
 Check 'the host did not grow unreasonably through the churn' {
     $hostAfter = Get-HostStats
-    $script:notes += ("host: managed {0} -> {1} MB, working {2} -> {3} MB, handles {4} -> {5}" -f
+    $script:notes += ("host: managed {0} -> {1} MB, working {2} -> {3} MB, handles {4} -> {5}, gdi {6} -> {7}, user {8} -> {9}" -f
         $hostBefore.ManagedMb, $hostAfter.ManagedMb,
         $hostBefore.WorkingMb, $hostAfter.WorkingMb,
-        $hostBefore.Handles, $hostAfter.Handles)
+        $hostBefore.Handles, $hostAfter.Handles,
+        $hostBefore.Gdi, $hostAfter.Gdi,
+        $hostBefore.User, $hostAfter.User)
 
-    # Deliberately loose, and loose for a MEASURED reason: this probe makes about a hundred
-    # HTTP requests, and the door's own sockets are the largest contributor to handle growth
-    # across a run — a first threshold of three per cycle was measuring the probe rather than
-    # the product (2026-08-06). What it still catches is the unmistakable case: a window, a
-    # timer, or a device context left behind by every cycle.
+    # WINDOWS AND DRAWING OBJECTS, not kernel handles.
     #
-    # Managed memory is reported, never asserted. A heap that has not collected is not a
-    # leak, and a check that says otherwise cries wolf until nobody reads it.
-    $handleGrowth = $hostAfter.Handles - $hostBefore.Handles
-    $handleGrowth -lt ($cycles * 10)
+    # What this check is for is the unmistakable case: a window, a timer, or a device context left
+    # behind by every cycle. It used to ask the kernel handle count, and its own comment admitted
+    # the problem, that the door's HTTP sockets are the largest contributor across a run. Loosening
+    # the threshold did not fix that, it only postponed it: the check passed when run alone and
+    # failed inside the gate, where it runs after forty-five other probes have left sockets waiting
+    # to close. It was measuring the harness (2026-08-09).
+    #
+    # GDI and USER counts are exactly the objects named above and no socket touches them, so the
+    # threshold can be tight enough to mean something: a couple per cycle is noise, ten each is a
+    # cycle that leaks one.
+    #
+    # Managed memory and handles are still REPORTED. A heap that has not collected is not a leak,
+    # and a number worth seeing is not always a number worth failing on.
+    $gdiGrowth = $hostAfter.Gdi - $hostBefore.Gdi
+    $userGrowth = $hostAfter.User - $hostBefore.User
+    $script:notes += ("gdi grew {0}, user grew {1}, over {2} cycles" -f $gdiGrowth, $userGrowth, $cycles)
+
+    $gdiGrowth -lt ($cycles * 2) -and $userGrowth -lt ($cycles * 2)
 }
 
 # Leave the arrangement the way it was found.

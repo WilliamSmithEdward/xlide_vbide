@@ -224,7 +224,7 @@ public static class ModuleSync
 
     /// <summary>
     /// The file a module is written to. A module may be named things a file cannot be, so the unsafe
-    /// characters are replaced and a trailing dot or space is dropped — Windows accepts neither at
+    /// characters are replaced and a trailing dot or space is dropped, because Windows accepts neither at
     /// the end of a name, and silently trims them, which would make the written file and the name we
     /// looked for disagree.
     /// </summary>
@@ -250,7 +250,7 @@ public static class ModuleSync
     /// A .bas is always standard. A .cls is a class unless its header says otherwise: two GUIDs in
     /// VB_Base means a UserForm (the type library and the instance), and one that names an Excel
     /// document class means a sheet or the workbook. VB_PredeclaredId is deliberately NOT used to
-    /// decide this — document modules set it, but so does any class written in the singleton style,
+    /// decide this: document modules set it, but so does any class written in the singleton style,
     /// and treating it as proof would file those as documents and refuse to create them.
     /// </summary>
     public static string ClassifyFile(string fileName, string source)
@@ -372,8 +372,8 @@ public static class ModuleSync
     /// <summary>
     /// A side-by-side comparison, longest common subsequence over whole lines.
     ///
-    /// The common head and tail are taken off first. Two texts that agree — which is most rows in a
-    /// project that is nearly in sync — then need no table at all, and the table that remains is
+    /// The common head and tail are taken off first. Two texts that agree, which is most rows in a
+    /// project that is nearly in sync, then need no table at all, and the table that remains is
     /// over the part that actually differs rather than over both files.
     /// </summary>
     public static IReadOnlyList<SyncDiffLine> Diff(string leftText, string rightText)
@@ -471,7 +471,7 @@ public static class ModuleSync
     /// <param name="most">
     /// The most lines to answer with. Condensing alone is not enough: a FIRST export compares every
     /// module against a file that is not there, so every line is a change and there is no agreement
-    /// to leave out — 163,627 lines and 15MB for a project of 81,795, measured. Nobody reads a
+    /// to leave out: 163,627 lines and 15MB for a project of 81,795, measured. Nobody reads a
     /// comparison that long, so it stops and says how much it did not show.
     /// </param>
     public static IReadOnlyList<SyncDiffLine> Condense(

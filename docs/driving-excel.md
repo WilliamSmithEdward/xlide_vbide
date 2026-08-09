@@ -179,7 +179,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
-| `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
+| `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
@@ -706,7 +706,7 @@ files the companion editor writes and reads, so a repository can be worked on fr
 
 The rule this surface is built to is the one that matters most about it: **an api action must leave
 the same state the equivalent UI action would.** It is not upheld by care here, it is upheld by
-construction. The dialog and the `sync` route reach the same call in the host — `HandleSync` — and
+construction. The dialog and the `sync` route reach the same call in the host, `HandleSync`, and
 neither of them knows how to write a file by itself. There is no second implementation to drift.
 
 ```js
@@ -756,12 +756,12 @@ comes back as the same kind of module.
 | status | export | import |
 | --- | --- | --- |
 | `will-create` | the folder has no such file | the project has no such module |
-| `will-write` | the file is there and differs | — |
-| `will-update` | — | the module is there and differs |
+| `will-write` | the file is there and differs | not applicable |
+| `will-update` | not applicable | the module is there and differs |
 | `will-remove` | a file naming no live module, and only with `mode=trueUp` | a module with no file, and only with `mode=trueUpStandardClass` |
 | `unchanged` | both sides already agree | both sides already agree |
-| `skipping-import` | — | a worksheet or UserForm the project does not already have |
-| `read-error` | — | the file would not read |
+| `skipping-import` | not applicable | a worksheet or UserForm the project does not already have |
+| `read-error` | not applicable | the file would not read |
 
 ### Which planner decided it
 
@@ -788,7 +788,7 @@ await api.settings({ syncEngine: "builtIn" });
 ```
 
 **The fallback is silent, and this is why the plan reports its planner.** If the shared planner
-cannot be reached the built-in one answers and the request succeeds — a developer pressing Export
+cannot be reached the built-in one answers and the request succeeds, because a developer pressing Export
 while the engine is starting should get their export, not a lecture. It is written to the log every
 time. Do not write a test that asks for one planner without asserting `plan.planner`: this suite
 did, and passed 31 checks against the built-in planner while asking for the shared one, because the

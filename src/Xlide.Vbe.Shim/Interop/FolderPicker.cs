@@ -8,7 +8,7 @@ namespace Xlide.Vbe.Shim.Interop;
 ///
 /// The page cannot raise one for itself: a browser will offer a file, and only with a gesture it
 /// trusts, and neither gets you a folder path. So the dialog asks the host for one and the host
-/// shows the real thing, which is also the one a developer already knows how to drive — it has
+/// shows the real thing, which is also the one a developer already knows how to drive: it has
 /// their pinned places, their recent folders, and the address bar they can paste into.
 ///
 /// This is the older SHBrowseForFolder rather than the Common Item Dialog, deliberately. The modern

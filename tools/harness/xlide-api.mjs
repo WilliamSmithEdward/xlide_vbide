@@ -399,7 +399,7 @@ function clientFor(entry) {
      *   await api.component("remove", { name: "Helpers" });
      *
      * `kind` is 1 standard, 2 class, 3 form, or the word for one: "module"/"standard",
-     * "class", "form"/"userform". A kind it cannot read is refused rather than defaulted —
+     * "class", "form"/"userform". A kind it cannot read is refused rather than defaulted:
      * asking for "class" once handed back a STANDARD module and still said ok, which shows
      * up much later as an analyzer complaining that a Friend member is in the wrong module.
      *
@@ -921,7 +921,7 @@ function clientFor(entry) {
 
     /**
      * Carries a plan out. This is the Apply button, and it leaves the project in exactly the state
-     * the button leaves it in — the same service does the work either way.
+     * the button leaves it in, because the same service does the work either way.
      *
      * `ids` names the rows to carry out, which is what the dialog sends after the developer has
      * ticked and unticked. Leave it out and `select` decides: "checked" (the default) takes the

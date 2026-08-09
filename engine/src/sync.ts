@@ -3,8 +3,8 @@
  *
  * `moduleSyncPlan.ts` is imported straight out of the xlide_vscode checkout, exactly the way the
  * analyzer is. That is the whole point of this file: the decisions that have to agree between the
- * two products — what a module's file is called, what kind of module a .cls holds, what counts as
- * a change, which files are stale — are made ONCE, by one implementation, and a fix to it fixes
+ * two products, namely what a module's file is called, what kind of module a .cls holds, what counts as
+ * a change, which files are stale, are made ONCE, by one implementation, and a fix to it fixes
  * both. Anything in here that reimplemented those decisions would be a second opinion waiting to
  * drift.
  *

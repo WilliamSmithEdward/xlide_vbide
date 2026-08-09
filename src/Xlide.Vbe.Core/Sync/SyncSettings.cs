@@ -23,7 +23,7 @@ public sealed record SyncChoice
 /// Kept beside the product's settings and separate from them: this grows a row per workbook a
 /// developer has ever synced, and settings.json is meant to stay small enough to read by hand.
 /// A project is keyed by the same id everything else uses, which for a saved workbook is its path
-/// and for an unsaved one is its COM identity — so an unsaved workbook remembers nothing across a
+/// and for an unsaved one is its COM identity, so an unsaved workbook remembers nothing across a
 /// restart, which is right, because it is a different project by then.
 /// </summary>
 public sealed record SyncSettings

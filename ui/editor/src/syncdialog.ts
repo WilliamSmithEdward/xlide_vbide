@@ -2,8 +2,8 @@
  * Import and export, in one window.
  *
  * The companion editor spells this as three commands and a preview panel. Here it is one surface
- * with a direction on it, because the two directions ask the same questions — which folder, which
- * modules, and what happens to the ones only one side has — and answering them in two places is
+ * with a direction on it, because the two directions ask the same questions, namely which folder, which
+ * modules, and what happens to the ones only one side has, and answering them in two places is
  * how the two ends of a round trip drift apart.
  *
  * NOTHING IS DECIDED HERE. The host works out the plan and the host carries it out; this draws the
@@ -241,6 +241,61 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   list.setAttribute("role", "listbox");
   list.setAttribute("aria-label", "Modules");
 
+  // A LISTBOX HAS TO BEHAVE LIKE ONE.
+  //
+  // The rows were drawn with role="option" inside role="listbox" and none of the behaviour that
+  // role promises: nothing here could be reached, moved through or chosen without a mouse, and
+  // anything reading the page aloud was told it was a listbox regardless. Declaring the role and
+  // not the behaviour is worse than declaring neither, because it announces something untrue
+  // (2026-08-09).
+  //
+  // Focus stays on the LIST and the current row is named by aria-activedescendant, which is the
+  // pattern for a list whose rows also carry a checkbox: the tick is a Tab stop in its own right,
+  // so the rows must not compete for the same stops.
+  list.tabIndex = 0;
+  list.addEventListener("keydown", (event) => {
+    const items = plan?.items ?? [];
+    if (items.length === 0) {
+      return;
+    }
+
+    const at = Math.max(0, items.findIndex((item) => item.id === selectedId));
+
+    if (event.key === " ") {
+      // Space ticks the current row, the way it ticks a focused checkbox.
+      const item = items[at];
+      if (item && actionable(item)) {
+        event.preventDefault();
+        if (ticked.has(item.id)) {
+          ticked.delete(item.id);
+        } else {
+          ticked.add(item.id);
+        }
+
+        drawList();
+      }
+
+      return;
+    }
+
+    const next = event.key === "ArrowDown" ? Math.min(items.length - 1, at + 1)
+      : event.key === "ArrowUp" ? Math.max(0, at - 1)
+      : event.key === "Home" ? 0
+      : event.key === "End" ? items.length - 1
+      : -1;
+
+    if (next < 0) {
+      return;
+    }
+
+    event.preventDefault();
+    if (items[next] && items[next].id !== selectedId) {
+      selectedId = items[next].id;
+      drawList();
+      drawDiff();
+    }
+  });
+
   listSide.append(listHead, list);
 
   const diffSide = document.createElement("div");
@@ -357,10 +412,11 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       list.appendChild(empty);
     }
 
-    for (const item of items) {
+    items.forEach((item, index) => {
       const row = document.createElement("div");
       row.className = "sync-item";
       row.dataset.id = item.id;
+      row.id = `sync-row-${index}`;
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(item.id === selectedId));
       row.classList.toggle("selected", item.id === selectedId);
@@ -417,6 +473,15 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       });
 
       list.appendChild(row);
+    });
+
+    // The row the keyboard is on, named for anything reading the list aloud, and kept in view.
+    const current = items.findIndex((item) => item.id === selectedId);
+    if (current >= 0) {
+      list.setAttribute("aria-activedescendant", `sync-row-${current}`);
+      list.children[current]?.scrollIntoView({ block: "nearest" });
+    } else {
+      list.removeAttribute("aria-activedescendant");
     }
 
     drawCounts();
@@ -547,7 +612,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     plan = answer as unknown as SyncPlan;
     folder = plan.folder;
     folderInput.value = plan.folder;
-    title.textContent = `Import and export — ${plan.project}`;
+    title.textContent = `Import and export: ${plan.project}`;
 
     // The plan's own ticks are the starting point, and they are re-read on every refresh: a row
     // that has become "unchanged" since the last look should not stay ticked from before.
@@ -614,7 +679,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     // Straight back to a fresh plan, which is the honest confirmation: everything that was applied
     // now reads as "same", and anything that did not is still sitting there saying so.
     await refresh();
-    say(failed.length > 0 ? `${summary} — ${failed.join("; ")}` : summary, failed.length > 0 ? "error" : "good");
+    say(failed.length > 0 ? `${summary}: ${failed.join("; ")}` : summary, failed.length > 0 ? "error" : "good");
   }
 
   const onKey = (event: KeyboardEvent): void => {

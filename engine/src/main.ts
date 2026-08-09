@@ -122,7 +122,7 @@ function handleLine(socket: net.Socket, dispatcher: Dispatcher, line: string): v
         // AN ANSWER THAT IS NOT READY YET.
         //
         // Every method here used to answer immediately, so the result went straight out. The
-        // import/export planner reads a folder, so it answers a promise — and a promise handed to
+        // import/export planner reads a folder, so it answers a promise, and a promise handed to
         // JSON.stringify is `{}`, which is a valid reply carrying nothing. The caller got an empty
         // object, decided the plan was unreadable and quietly used its own planner instead, and
         // every test still passed because both planners agree (2026-08-09).
