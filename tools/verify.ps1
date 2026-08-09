@@ -224,10 +224,10 @@ Step 'page probes (headless)' {
 # reads the routes out of the shim itself, so the documents and the client cannot fall behind the
 # door without the gate saying so (2026-08-07: the reference had all of them, the driving guide
 # had twenty, and one route had no client method at all).
-Step 'debug api is documented' {
+Step 'debug api is documented and driven' {
     $answer = node (Join-Path $repoRoot 'tools\harness\audit-routes.mjs') 2>&1
     $answer | Where-Object { $_ -notmatch '^ok ' } | ForEach-Object { Write-Host "  $_" }
-    if ($LASTEXITCODE -ne 0) { throw 'a debug api route is undocumented or unreachable' }
+    if ($LASTEXITCODE -ne 0) { throw 'a debug api route is undocumented, unreachable, or driven by nothing' }
     ($answer | Select-Object -Last 1) -replace '^ok\s+', ''
 }
 

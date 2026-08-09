@@ -16,8 +16,9 @@ belongs here the same day. A door nobody can find the handle for is a door nobod
 > all, which loop to use for which change, where the api stops, and what still needs COM or CDP.
 > Read it when you need to know how to GET somewhere.
 >
-> The two are kept in step by the gate — `tools\harness\audit-routes.mjs` reads the routes out of
-> the shim and fails when one is missing from either document or has no client method.
+> The two are kept in step by the gate. `tools\harness\audit-routes.mjs` reads the routes out of
+> the shim and fails when one is missing from either document, has no client method, or is driven
+> by no probe at all.
 
 Also: [working-with-modals.md](working-with-modals.md) is the rules for opening a modal at all,
 and [testing.md](testing.md) is the gate.
@@ -162,10 +163,17 @@ four of the current ones arrived.
 ### Every route, and how to call it
 
 The reasoning behind each route is in [debug-api.md](debug-api.md); this is the mapping from route
-to client method. **`tools\harness\audit-routes.mjs` proves this table complete** — it reads the
+to client method. **`tools\harness\audit-routes.mjs` proves this table complete**: it reads the
 route cases out of the shim and fails when one is missing here, missing from the reference, or has
 no client method. It runs in the gate, because a route table is exactly the kind of thing that is
 complete on the day it is written and quietly is not, six routes later.
+
+It also asks the question the first three do not: **does anything DRIVE this route?** Documented
+and reachable is not covered, and two routes were neither driven nor known to be undriven until
+somebody counted (2026-08-09). A route left out has to be named in the script's
+`NOT_DRIVEN_ON_PURPOSE` with a reason, and a name there that turns out to be driven fails just as
+loudly, so the list cannot become a pile of things somebody meant to get round to. One entry
+stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 
 | Route | Client | |
 | --- | --- | --- |

@@ -320,11 +320,18 @@ await repeat("changing a setting", 0, async () => {
  * lived. Releasing an apartment-threaded object from the finalizer thread is only SOMETIMES
  * fatal, which is exactly why the crash took a day to attribute in the first place.
  *
- * So the route was removed rather than kept as a weaker second opinion. An instrument that agrees
- * with the code and disagrees with the product is worse than no instrument, because it is
- * believed; and forcing a collection is a smell in any case. The counter above is deterministic,
- * costs two interlocked increments, and reported 441 leaked wrappers from a single call to
- * `project()` on the same broken build. That is the instrument.
+ * So no suite here forces one. An instrument that agrees with the code and disagrees with the
+ * product is worse than no instrument, because it is believed; and forcing a collection is a smell
+ * in any case. The counter above is deterministic, costs two interlocked increments, and reported
+ * 441 leaked wrappers from a single call to `project()` on the same broken build. That is the
+ * instrument.
+ *
+ * The `drainfinalizers` ROUTE does still exist, and this said it had been removed until 2026-08-09.
+ * It came back under a narrower contract: not a check but a BISECTOR. Run one operation, call it,
+ * and if the host dies then that operation made the wrapper - which collapses the delay that made
+ * five crashes across two days look unrelated. It answers about the outcome, the host being alive
+ * or not, and about nothing else. Nothing in the gate calls it, on purpose, and audit-routes.mjs
+ * holds that on the record rather than in a comment.
  */
 const atEnd = await held();
 console.log(`\nresting live count afterwards: ${atEnd.wrappers}, handles ${atEnd.handles}`);
