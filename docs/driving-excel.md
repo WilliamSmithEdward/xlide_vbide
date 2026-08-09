@@ -753,6 +753,37 @@ comes back as the same kind of module.
 | `skipping-import` | — | a worksheet or UserForm the project does not already have |
 | `read-error` | — | the file would not read |
 
+### Which planner decided it
+
+Two planners answer this, and the plan says which one did:
+
+```js
+const plan = await api.syncPlan("export", { folder });
+plan.planner;   // "xlide" or "builtIn"
+```
+
+**`xlide`, the default.** The companion editor's own `moduleSyncPlan.ts`, imported out of the
+xlide_vscode checkout the same way the analyzer is and running inside the engine. The two products
+then decide identically about file names, module kinds, staleness and what counts as a change,
+because it is one implementation. Defects in it are fixed upstream and both products get the fix.
+
+**`builtIn`.** The same decisions worked out in the add-in, in `Xlide.Vbe.Core.Sync`. It needs no
+engine, so import and export keep working when the engine is down.
+
+Switch it with the setting, from the api or from the Settings dialog:
+
+```js
+await api.settings({ syncEngine: "builtIn" });
+(await api.settings()).syncEngine;
+```
+
+**The fallback is silent, and this is why the plan reports its planner.** If the shared planner
+cannot be reached the built-in one answers and the request succeeds — a developer pressing Export
+while the engine is starting should get their export, not a lecture. It is written to the log every
+time. Do not write a test that asks for one planner without asserting `plan.planner`: this suite
+did, and passed 31 checks against the built-in planner while asking for the shared one, because the
+modules could not be serialised to the engine and nothing said so.
+
 ### Three things worth knowing before driving it
 
 **A document module and a UserForm cannot be created from a file.** A sheet belongs to its

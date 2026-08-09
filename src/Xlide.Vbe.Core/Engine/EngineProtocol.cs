@@ -230,6 +230,11 @@ public sealed record EngineProjectOpened(
 // type is registered; leaving it out fails at run time, in the middle of a keystroke.
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
+// The live modules an import/export plan is worked out from travel as a list of these. Ahead-of-time
+// serialisation needs the SHAPE named, and a nested one is not covered by naming the outer: without
+// this line the call throws NoMetadataForType at run time and the planner quietly falls back, which
+// is a green test against the wrong implementation (2026-08-09).
+[JsonSerializable(typeof(List<Dictionary<string, object>>))]
 [JsonSerializable(typeof(EngineSearchResult))]
 [JsonSerializable(typeof(EngineSearchMatch))]
 public sealed partial class EngineJsonContext : JsonSerializerContext;

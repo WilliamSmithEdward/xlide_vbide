@@ -97,6 +97,7 @@ export type HostMessage =
     treeFollowsEditor: boolean;
     formatIndentSize?: number;
     formatCanonicalKeywords?: boolean;
+    syncEngine?: string;
   };
 
 /**
@@ -1334,6 +1335,7 @@ export class EditorBridge {
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize ?? 4,
           formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
+          syncEngine: message.syncEngine ?? "xlide",
         });
         return;
       default: {

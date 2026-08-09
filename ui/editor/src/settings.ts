@@ -24,6 +24,8 @@ export interface EditorSettings {
   formatIndentSize: number;
   /** Format Module: respell keywords in their canonical case. */
   formatCanonicalKeywords: boolean;
+  /** Which planner decides what an import or export will do: "xlide" or "builtIn". */
+  syncEngine: string;
 }
 
 /** What ships: the companion editor's own defaults. */
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   treeFollowsEditor: true,
   formatIndentSize: 4,
   formatCanonicalKeywords: true,
+  syncEngine: "xlide",
 };
 
 let current: EditorSettings = { ...DEFAULT_SETTINGS };
@@ -54,6 +57,7 @@ export function applySettings(next: EditorSettings): void {
     treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
     formatCanonicalKeywords: next.formatCanonicalKeywords !== false,
+    syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
   };
 
   for (const listener of listeners) {

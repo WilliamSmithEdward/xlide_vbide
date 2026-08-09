@@ -6,6 +6,7 @@
 // same contract with a different transport, so it is reused rather than reimplemented, which keeps
 // one analysis path shared with the editor extension instead of two that can disagree.
 
+import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import type { VbaModuleAnalysisDiagnostic } from '../../../xlide_vscode/src/vbaModuleAnalysis';
@@ -314,6 +315,9 @@ export class Dispatcher {
 
             case 'textDocument/outline':
                 return this.outline(this.require<OutlineParams>(params));
+
+            case 'sync/plan':
+                return this.syncPlan(this.require<SyncPlanParams>(params));
 
             case 'workspace/search':
                 return this.search(this.require<SearchParams>(params));
@@ -714,6 +718,18 @@ export class Dispatcher {
 
         this.lastAnalysis.set(key, { source, diagnostics: response.diagnostics, request });
         return response.diagnostics;
+    }
+
+    /**
+     * What an import or export would do, decided by the companion editor's own planner.
+     *
+     * Async, unlike everything else here, because the plan reads the FOLDER: their code compares
+     * each module against the file beside it and works out which files are stale. The modules
+     * arrive with the request rather than being read from a workbook, because this project is open
+     * in Excel and the file on disk is stale by definition.
+     */
+    private syncPlan(params: SyncPlanParams): Promise<unknown> {
+        return syncPlan(params);
     }
 
     private outline(params: OutlineParams): OutlineResult {

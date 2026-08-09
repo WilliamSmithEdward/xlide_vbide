@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
@@ -178,18 +179,36 @@ internal sealed class AddInSession : IDisposable
                 var onDisk = ModuleSyncService.ReadFolder(folder);
                 var displayName = DisplayFromProjectId(syncProjectId) ?? syncProjectId;
 
-                var plan = importing
+                // WHICH PLANNER, and only the planner.
+                //
+                // Both answer the same shape and both are carried out by the same apply below, so
+                // the choice changes who DECIDES what an import would do, never who does it. The
+                // companion editor's planner is the default because the two products write into
+                // the same folders and a developer moves between them: one implementation of file
+                // naming, module classification and staleness cannot disagree with itself.
+                //
+                // The built-in one is not a fallback nobody meant to use — it needs no engine, so
+                // import and export keep working when the engine is down, and it is what a
+                // developer chooses if they would rather the add-in never depended on it.
+                var mode = syncMode ?? (importing ? remembered.ImportMode : remembered.ExportMode);
+                var wantsShared = !string.Equals(_settings.SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase);
+                var shared = wantsShared
+                    ? SharedPlan(syncProjectId, displayName, folder, live, mode, importing)
+                    : null;
+                var planner = shared is null ? "builtIn" : "xlide";
+
+                var plan = shared ?? (importing
                     ? ModuleSync.PlanImport(
                         syncProjectId, displayName, folder, live, onDisk,
-                        ModuleSync.ImportModeFrom(syncMode ?? remembered.ImportMode))
+                        ModuleSync.ImportModeFrom(mode))
                     : ModuleSync.PlanExport(
                         syncProjectId, displayName, folder, live, onDisk,
-                        ModuleSync.ExportModeFrom(syncMode ?? remembered.ExportMode));
+                        ModuleSync.ExportModeFrom(mode)));
 
                 if (syncAction != "apply")
                 {
                     return System.Text.Json.JsonSerializer.Serialize(
-                        SyncPlanReplyFor(plan),
+                        SyncPlanReplyFor(plan, planner),
                         SyncJsonContext.Default.SyncPlanReply);
                 }
 
@@ -313,6 +332,202 @@ internal sealed class AddInSession : IDisposable
             SyncJsonContext.Default.SyncSettingsReply);
     }
 
+    /// <summary>
+    /// The plan as the COMPANION EDITOR'S planner works it out, running in the engine.
+    ///
+    /// Answers null when the engine cannot be reached or will not answer, and the caller falls
+    /// back to the built-in planner. That fallback is deliberate and it is silent by design in one
+    /// direction only: a developer pressing Export while the engine is starting should get their
+    /// export, not a dialog about which planner is in charge. It is written to the log every time,
+    /// so a session that quietly ran on the other planner can still be told apart afterwards.
+    /// </summary>
+    private SyncPlan? SharedPlan(
+        string projectId,
+        string displayName,
+        string folder,
+        IReadOnlyList<LiveModule> live,
+        string? mode,
+        bool importing)
+    {
+        if (_analysis?.Engine is not { } engine)
+        {
+            Log.Info("sync: the engine is not up, so the built-in planner is answering this one");
+            return null;
+        }
+
+        try
+        {
+            var modules = live
+                .Select(module => new Dictionary<string, object>
+                {
+                    ["name"] = module.Name,
+                    ["type"] = module.Kind,
+                    ["source"] = module.Source,
+                })
+                .ToList();
+
+            using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var answer = engine
+                .SyncPlanAsync(
+                    importing ? "import" : "export",
+                    displayName,
+                    folder,
+                    mode,
+                    modules,
+                    cancellation.Token)
+                .GetAwaiter()
+                .GetResult();
+
+            if (answer is not { } json)
+            {
+                Log.Warn("sync: the engine answered nothing; the built-in planner is answering this one");
+                return null;
+            }
+
+            var read = SharedPlanFrom(json, projectId, displayName, folder, mode, importing);
+            if (read is null)
+            {
+                // The one null path that used to say nothing, which is how a green suite ran on
+                // the built-in planner while asking for the shared one.
+                Log.Warn("sync: the engine's plan could not be read"
+                    + $" (it answered {json.ValueKind}, {json.GetRawText().Length} chars);"
+                    + " the built-in planner is answering");
+            }
+
+            return read;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"sync: the engine could not plan this ({ex.Message}); the built-in planner is answering");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads their plan into ours.
+    ///
+    /// The two shapes are nearly the same, which is not a coincidence: the built-in planner was
+    /// written from theirs. The mapping is spelled out rather than assumed, because the one field
+    /// that is easy to get wrong is the payload. LEFT is the source side in BOTH directions —
+    /// exporting, the left is the module and the right is the file; importing, the left is the
+    /// file and the right is the module — so the raw left is what an apply writes either way.
+    /// </summary>
+    private static SyncPlan? SharedPlanFrom(
+        JsonElement json,
+        string projectId,
+        string displayName,
+        string folder,
+        string? mode,
+        bool importing)
+    {
+        if (!json.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        var rows = new List<SyncItem>();
+        foreach (var item in items.EnumerateArray())
+        {
+            var status = StatusFrom(Text(item, "status"));
+            var payload = Text(item, "leftRawCode");
+            rows.Add(new SyncItem
+            {
+                Id = Text(item, "id"),
+                ModuleName = Text(item, "moduleName"),
+                ModuleKind = Text(item, "moduleType"),
+                FileName = Text(item, "relativeName"),
+                Status = status,
+                Checked = Flag(item, "checked"),
+                Detail = Text(item, "detail", ModuleSync.DetailFor(status)),
+                Warning = item.TryGetProperty("warning", out var warning)
+                    && warning.ValueKind == JsonValueKind.String
+                        ? warning.GetString()
+                        : null,
+                ExistsInProject = Flag(item, "existsInWorkbook"),
+                ExistsInFolder = Flag(item, "existsInRepo"),
+                CannotBeCreated = Flag(item, "unsupportedDirectCreation"),
+                LeftTitle = Text(item, "leftTitle"),
+                RightTitle = Text(item, "rightTitle"),
+                Diff = DiffFrom(item, "diff"),
+                DiffWithHeaders = DiffFrom(item, "diffWithHeaders"),
+                PayloadSource = payload,
+            });
+        }
+
+        var warnings = new List<string>();
+        if (json.TryGetProperty("warnings", out var said) && said.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var line in said.EnumerateArray())
+            {
+                if (line.ValueKind == JsonValueKind.String && line.GetString() is { Length: > 0 } text)
+                {
+                    warnings.Add(text);
+                }
+            }
+        }
+
+        return new SyncPlan
+        {
+            Direction = importing ? SyncDirection.Import : SyncDirection.Export,
+            ProjectId = projectId,
+            ProjectName = displayName,
+            Folder = folder,
+            ExportMode = ModuleSync.ExportModeFrom(mode),
+            ImportMode = ModuleSync.ImportModeFrom(mode),
+            Items = rows,
+            Warnings = warnings,
+        };
+    }
+
+    private static List<SyncDiffLine> DiffFrom(JsonElement item, string name)
+    {
+        if (!item.TryGetProperty(name, out var lines) || lines.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        var read = new List<SyncDiffLine>();
+        foreach (var line in lines.EnumerateArray())
+        {
+            read.Add(new SyncDiffLine(
+                Number(line, "leftNumber"),
+                Number(line, "rightNumber"),
+                Text(line, "left"),
+                Text(line, "right"),
+                Text(line, "kind") switch
+                {
+                    "changed" => DiffKind.Changed,
+                    "added" => DiffKind.Added,
+                    "removed" => DiffKind.Removed,
+                    _ => DiffKind.Equal,
+                }));
+        }
+
+        return read;
+    }
+
+    private static SyncStatus StatusFrom(string status) => status switch
+    {
+        "will-create" => SyncStatus.WillCreate,
+        "will-write" => SyncStatus.WillWrite,
+        "will-update" => SyncStatus.WillUpdate,
+        "will-remove" => SyncStatus.WillRemove,
+        "skipping-import" => SyncStatus.SkippingImport,
+        "read-error" => SyncStatus.ReadError,
+        _ => SyncStatus.Unchanged,
+    };
+
+    private static string Text(JsonElement holder, string name, string fallback = "") =>
+        holder.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? fallback
+            : fallback;
+
+    private static bool Flag(JsonElement holder, string name) =>
+        holder.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static int? Number(JsonElement holder, string name) =>
+        holder.TryGetProperty(name, out var value) && value.TryGetInt32(out var read) ? read : null;
+
     /// <summary>Where each project's import/export folder is remembered, beside the settings.</summary>
     private static string SyncSettingsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -351,7 +566,7 @@ internal sealed class AddInSession : IDisposable
     /// The plan as it goes over the wire. One mapping, so the dialog and the api are looking at the
     /// same rows in the same order with the same words on them.
     /// </summary>
-    private static SyncPlanReply SyncPlanReplyFor(SyncPlan plan) => new(
+    private static SyncPlanReply SyncPlanReplyFor(SyncPlan plan, string planner) => new(
         plan.Direction == SyncDirection.Import ? "import" : "export",
         plan.ProjectName,
         plan.ProjectId,
@@ -359,6 +574,7 @@ internal sealed class AddInSession : IDisposable
         plan.Direction == SyncDirection.Import
             ? plan.ImportMode == ImportMode.TrueUpStandardClass ? "trueUpStandardClass" : "updateOnly"
             : plan.ExportMode == ExportMode.TrueUp ? "trueUp" : "exportAll",
+        planner,
         [.. plan.Items.Select(item => new SyncItemRow(
             item.Id,
             item.ModuleName,
@@ -3386,6 +3602,9 @@ internal sealed class AddInSession : IDisposable
                         FormatIndentSize = request.Query.TryGetValue("formatIndentSize", out var indent)
                             && int.TryParse(indent, out var asked) ? asked : settings.FormatIndentSize,
                         FormatCanonicalKeywords = Flag("formatCanonicalKeywords", settings.FormatCanonicalKeywords),
+                        SyncEngine = request.Query.TryGetValue("syncEngine", out var planner)
+                            ? planner
+                            : settings.SyncEngine,
                     }.Normalized();
 
                     OnSettingsChanged(settings);
@@ -3398,7 +3617,8 @@ internal sealed class AddInSession : IDisposable
                         settings.MirrorCommentSpacing,
                         settings.TreeFollowsEditor,
                         settings.FormatIndentSize,
-                        settings.FormatCanonicalKeywords),
+                        settings.FormatCanonicalKeywords,
+                        settings.SyncEngine),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

@@ -913,7 +913,9 @@ public sealed record DebugSettingsReply(
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
-    [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords);
+    [property: JsonPropertyName("formatCanonicalKeywords")] bool FormatCanonicalKeywords,
+    /// <summary>Which planner decides an import or export: "xlide" or "builtIn".</summary>
+    [property: JsonPropertyName("syncEngine")] string SyncEngine);
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

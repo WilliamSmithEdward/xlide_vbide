@@ -35,6 +35,14 @@ public sealed record SyncPlanReply(
     [property: JsonPropertyName("projectId")] string ProjectId,
     [property: JsonPropertyName("folder")] string Folder,
     [property: JsonPropertyName("mode")] string Mode,
+    /// <summary>
+    /// Which planner actually worked this out: "xlide" or "builtIn".
+    ///
+    /// Reported because the fallback is silent. Without it a caller cannot tell the shared planner
+    /// from the built-in one, and a test that cannot tell them apart is a test of whichever one
+    /// happened to answer.
+    /// </summary>
+    [property: JsonPropertyName("planner")] string Planner,
     [property: JsonPropertyName("items")] SyncItemRow[] Items,
     [property: JsonPropertyName("warnings")] string[] Warnings);
 

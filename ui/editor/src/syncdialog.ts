@@ -79,6 +79,8 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   let selectedId: string | null = null;
   let showHeaders = false;
   let busy = false;
+  /** Something asked for a refresh while one was already running. */
+  let wanted = false;
   const ticked = new Set<string>();
 
   const backdrop = document.createElement("div");
@@ -491,7 +493,18 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
 
   async function refresh(): Promise<void> {
     drawDirection();
+
+    // A REFRESH ASKED FOR WHILE ONE IS IN FLIGHT IS REMEMBERED, NOT DROPPED.
+    //
+    // This used to return here, which reads as harmless and is not: pressing Import while the
+    // export plan is still being worked out changed the direction, threw the refresh away, and
+    // left the export's rows on screen under the Import heading. The developer is then looking at
+    // a list that does not match the direction they chose, and Apply would do what the list says.
+    //
+    // Only ever one pending: what matters is that the LAST thing asked for is what ends up drawn,
+    // not that every intermediate state is rendered on the way.
     if (busy) {
+      wanted = true;
       return;
     }
 
@@ -512,6 +525,11 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       drawList();
       drawDiff();
       say(answer.error, "error");
+      if (wanted) {
+        wanted = false;
+        await refresh();
+      }
+
       return;
     }
 
@@ -539,6 +557,11 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     const willAct = plan.items.filter((item) => ticked.has(item.id)).length;
     say(willAct === 0 ? "Everything already matches." : `${willAct} of ${plan.items.length} would change.`);
     drawWarnings();
+
+    if (wanted) {
+      wanted = false;
+      await refresh();
+    }
   }
 
   async function chooseFolder(): Promise<void> {

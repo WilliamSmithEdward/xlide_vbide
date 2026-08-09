@@ -189,6 +189,13 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// <summary>True once an engine is running and answering.</summary>
     public bool IsReady => _engine is { IsRunning: true };
 
+    /// <summary>
+    /// The running engine, for callers that need to ask it something this service does not itself
+    /// wrap. Null until it is up, which is what the import/export planner tests before choosing
+    /// between the shared planner and the built-in one.
+    /// </summary>
+    public EngineClient? Engine => _engine is { IsRunning: true } running ? running : null;
+
     /// <summary>True when a pass has seeded this project into the engine.</summary>
     public bool KnowsProject(string projectId) => _openProjects.ContainsKey(projectId);
 

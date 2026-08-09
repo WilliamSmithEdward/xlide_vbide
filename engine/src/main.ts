@@ -92,14 +92,8 @@ function handleLine(socket: net.Socket, dispatcher: Dispatcher, line: string): v
         return;
     }
 
-    try {
-        const result = dispatcher.handle(request.method, request.params);
-
-        // A message with no id is a notification and is deliberately not answered.
-        if (request.id !== undefined) {
-            respond(socket, { jsonrpc: '2.0', id: request.id, result });
-        }
-    } catch (error) {
+    // One shape for a failure, whether it was thrown or rejected.
+    const fail = (error: unknown): void => {
         if (request.id === undefined) {
             return;
         }
@@ -115,6 +109,38 @@ function handleLine(socket: net.Socket, dispatcher: Dispatcher, line: string): v
                           message: error instanceof Error ? error.message : String(error),
                       },
         });
+    };
+
+    try {
+        const result = dispatcher.handle(request.method, request.params);
+
+        // A message with no id is a notification and is deliberately not answered.
+        if (request.id === undefined) {
+            return;
+        }
+
+        // AN ANSWER THAT IS NOT READY YET.
+        //
+        // Every method here used to answer immediately, so the result went straight out. The
+        // import/export planner reads a folder, so it answers a promise — and a promise handed to
+        // JSON.stringify is `{}`, which is a valid reply carrying nothing. The caller got an empty
+        // object, decided the plan was unreadable and quietly used its own planner instead, and
+        // every test still passed because both planners agree (2026-08-09).
+        //
+        // Checked for rather than making everything async: the synchronous methods are the hot
+        // path, and an await on each would put a microtask between every keystroke and its answer.
+        if (typeof (result as PromiseLike<unknown> | undefined)?.then === 'function') {
+            // Held, because the narrowing above does not survive into the callback.
+            const id = request.id;
+            void Promise.resolve(result).then(
+                (settled) => respond(socket, { jsonrpc: '2.0', id, result: settled }),
+                fail);
+            return;
+        }
+
+        respond(socket, { jsonrpc: '2.0', id: request.id, result });
+    } catch (error) {
+        fail(error);
     }
 }
 

@@ -20,6 +20,20 @@ const api = await open();
 let passed = 0;
 let failed = 0;
 
+// WHICH PLANNER. Everything below runs identically against either, which is the point of having
+// two: the choice decides who works out what an import would do, never who does it or what the
+// answer means. Pass "builtIn" to check the other one; the gate runs both.
+const planner = process.argv[2] === "builtIn" ? "builtIn" : "xlide";
+await api.settings({ syncEngine: planner });
+const chosen = (await api.settings()).syncEngine;
+if (chosen !== planner) {
+  console.log(`FAIL the planner would not switch: asked ${planner}, got ${chosen}`);
+  process.exit(1);
+}
+
+console.log(`planner: ${planner}
+`);
+
 const check = (name, got, want = true) => {
   const ok = JSON.stringify(got) === JSON.stringify(want);
   if (ok) {
@@ -32,6 +46,13 @@ const check = (name, got, want = true) => {
   return ok;
 };
 
+// UNIQUE PER RUN. A fixed name inherits the previous run's module when a cleanup did not take,
+// and then the plan reads "unchanged" instead of "will-create" and the suite reports a defect that
+// is really yesterday's leftovers. Written down in docs/disambiguation.md after the freshness
+// suite did exactly this, and done here after it happened again (2026-08-09).
+const probe = `SyncProbe${process.pid}`;
+const stale = `SyncStale${process.pid}`;
+
 const folder = join(tmpdir(), `xlide-sync-${process.pid}`);
 rmSync(folder, { recursive: true, force: true });
 mkdirSync(folder, { recursive: true });
@@ -41,7 +62,13 @@ const made = [];
 
 const cleanUp = async () => {
   for (const name of made) {
-    await api.component("remove", { name, project: project.projectId }).catch(() => {});
+    try {
+      await api.component("remove", { name, project: project.projectId });
+    } catch (error) {
+      // Said out loud. A cleanup that fails silently leaves a module behind, and the next run
+      // reads it as "unchanged" and blames the product.
+      console.log(`     WARNING: ${name} could not be removed (${error.message})`);
+    }
   }
 
   rmSync(folder, { recursive: true, force: true });
@@ -54,6 +81,16 @@ try {
   console.log("1. an export writes the project out");
 
   const plan = await api.syncPlan("export", { folder });
+
+  // THE PLANNER THAT ANSWERED, asserted before anything else is read.
+  //
+  // The fallback to the built-in planner is silent on purpose - a developer pressing Export while
+  // the engine is starting should get their export - which means a suite that does not check this
+  // tests whichever planner happened to answer. This one did exactly that: 31 green checks against
+  // the built-in planner while asking for the shared one, because the modules could not be
+  // serialised to the engine and nothing said so (2026-08-09).
+  check("the planner that answered is the one that was asked for", plan.planner, planner);
+
   check("every module is offered, and every one is new", plan.items.every((i) => i.status === "will-create"));
   check("a standard module is a .bas", plan.items.some((i) => i.file === "Helper.bas"));
   check("a document module is a .cls", plan.items.some((i) => i.file === "ThisWorkbook.cls"));
@@ -77,8 +114,8 @@ try {
   // ---------------------------------------------------------------------------------------
   console.log("\n2. an import reads it back, including modules the project does not have");
 
-  writeFileSync(join(folder, "SyncProbeOne.bas"), [
-    'Attribute VB_Name = "SyncProbeOne"',
+  writeFileSync(join(folder, `${probe}.bas`), [
+    `Attribute VB_Name = "${probe}"`,
     "Option Explicit",
     "",
     "Public Function OneTwoThree() As Long",
@@ -86,20 +123,20 @@ try {
     "End Function",
     "",
   ].join("\r\n"), "utf8");
-  made.push("SyncProbeOne");
+  made.push(probe);
 
   const incoming = await api.syncPlan("import", { folder });
-  const fresh = incoming.items.find((i) => i.file === "SyncProbeOne.bas");
+  const fresh = incoming.items.find((i) => i.file === `${probe}.bas`);
   check("the new file will create a module", fresh?.status, "will-create");
   check("and it is ticked, because it does something", fresh?.checked, true);
   check("everything already in the project is left alone",
-    incoming.items.filter((i) => i.file !== "SyncProbeOne.bas").every((i) => i.status === "unchanged"));
+    incoming.items.filter((i) => i.file !== `${probe}.bas`).every((i) => i.status === "unchanged"));
 
   const read = await api.syncApply("import", { folder });
   check("the import reported no failures", read.failed, []);
 
   await api.waitFor(() => true, { timeout: 1 }).catch(() => {});
-  const source = await api.readModule("SyncProbeOne", project.projectId);
+  const source = await api.readModule(probe, project.projectId);
   check("the module holds what the file held", source.text.includes("OneTwoThree = 123"));
 
   // ---------------------------------------------------------------------------------------
@@ -129,19 +166,19 @@ try {
   // ---------------------------------------------------------------------------------------
   console.log("\n4. removing is opt-in, in both directions");
 
-  writeFileSync(join(folder, "SyncProbeStale.bas"), 'Attribute VB_Name = "SyncProbeStale"\r\nOption Explicit\r\n', "utf8");
+  writeFileSync(join(folder, `${stale}.bas`), `Attribute VB_Name = "${stale}"\r\nOption Explicit\r\n`, "utf8");
 
   const leaveAlone = await api.syncPlan("export", { folder, mode: "exportAll" });
   check("by default an export leaves an unmatched file alone",
     leaveAlone.items.every((i) => i.status !== "will-remove"));
 
   const tidy = await api.syncPlan("export", { folder, mode: "trueUp" });
-  const doomed = tidy.items.find((i) => i.file === "SyncProbeStale.bas");
+  const doomed = tidy.items.find((i) => i.file === `${stale}.bas`);
   check("asked to match, it offers to delete it", doomed?.status, "will-remove");
   check("with a warning, because it is a delete", typeof doomed?.warning === "string");
 
   await api.syncApply("export", { folder, mode: "trueUp", ids: [doomed.id] });
-  check("and the file is gone", existsSync(join(folder, "SyncProbeStale.bas")), false);
+  check("and the file is gone", existsSync(join(folder, `${stale}.bas`)), false);
 
   // Import true-up must never offer to delete a sheet or the workbook: they belong to the
   // workbook, not to the folder, and the folder will never have a file for them.
@@ -206,7 +243,7 @@ try {
   const tree = await api.eval(`(() => [...document.querySelectorAll(".tree-item")]
     .map(e => (e.textContent || "").trim().split("\\n")[0]).join(","))()`);
   check("the explorer shows a module that arrived from the folder",
-    String(tree.result).includes("SyncProbeOne"));
+    String(tree.result).includes(probe));
 
   const panes = await api.native();
   const helperPane = panes.panes?.find((p) => p.module === "Helper");

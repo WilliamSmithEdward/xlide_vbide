@@ -378,14 +378,22 @@ if ($Live) {
             # adds. Its last section is the one worth having: it applies the same import through
             # the DIALOG and through the route and compares the result byte for byte, which is the
             # only check that would notice the api growing its own idea of what an import means.
-            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs', 'module-sync.mjs')
+            # module-sync runs TWICE, once per planner. The two are meant to decide identically,
+            # and the only way to know they still do is to put the same 32 checks through both.
+            # It is also the one thing that catches a silent fall back to the built-in planner,
+            # which is how a green run against the wrong implementation happened (2026-08-09).
+            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs',
+                                     'module-sync.mjs xlide', 'module-sync.mjs builtIn')
             'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {
           Use-Fixture $fixture | Out-Null
           foreach ($suite in $plan[$fixture]) {
-            $answer = node (Join-Path $repoRoot "tools\harness\$suite") 2>&1
+            # A suite may name arguments after its file, which is how module-sync says which
+            # planner this run is about.
+            $parts = $suite -split ' '
+            $answer = node (Join-Path $repoRoot "tools\harness\$($parts[0])") @($parts | Select-Object -Skip 1) 2>&1
             $answer | Out-Host
 
             $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1

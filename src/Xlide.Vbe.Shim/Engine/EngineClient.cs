@@ -175,6 +175,40 @@ internal sealed class EngineClient : IAsyncDisposable
         return await CallAsync("debug/liveSource", payload, cancellation).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Asks the engine what an import or export would do.
+    ///
+    /// The engine answers with the COMPANION EDITOR'S OWN planner, which is why the modules go
+    /// with the request: their code would otherwise open the .xlsm to read them, and this workbook
+    /// is open in Excel, where the file on disk is stale by definition.
+    ///
+    /// Generously timed. It reads every file in the folder and compares each against a module, and
+    /// a large project against a cold folder is slower than anything else asked of the engine.
+    /// </summary>
+    public async Task<JsonElement?> SyncPlanAsync(
+        string direction,
+        string workbookPath,
+        string folder,
+        string? mode,
+        IReadOnlyList<Dictionary<string, object>> modules,
+        CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["direction"] = direction,
+            ["workbookPath"] = workbookPath,
+            ["folder"] = folder,
+            ["modules"] = modules,
+        };
+
+        if (mode is { Length: > 0 })
+        {
+            payload["mode"] = mode;
+        }
+
+        return await CallAsync("sync/plan", payload, cancellation).ConfigureAwait(false);
+    }
+
     /// <summary>Tells the engine a project is gone, so its modules stop answering for it.</summary>
     public async Task CloseProjectAsync(string projectId, CancellationToken cancellation)
     {

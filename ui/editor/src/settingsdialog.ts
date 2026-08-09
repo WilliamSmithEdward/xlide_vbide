@@ -58,6 +58,23 @@ const OPTIONS = [
     label: "Format: canonical keywords",
     description: "Formatting respells keywords in their canonical case, the way the language spells them.",
   },
+  {
+    key: "syncEngine" as const,
+    kind: "choice" as const,
+    label: "Import and export: which one decides",
+    description:
+      "Both choices import and export the same files, and either way you review the changes before "
+      + "anything is written. What differs is which code works out the plan. 'Shared with xlide for "
+      + "VS Code' uses the very same code the extension does, so both products agree exactly about "
+      + "file names, what kind of module a file holds, and what counts as a change - and it needs "
+      + "xlide's engine to be running. 'Built into the add-in' works it out here instead, so import "
+      + "and export keep working even if the engine does not. If the engine is unavailable, the "
+      + "add-in quietly uses its own and says so in the log.",
+    choices: [
+      { value: "xlide", label: "Shared with xlide for VS Code" },
+      { value: "builtIn", label: "Built into the add-in" },
+    ],
+  },
 ];
 
 /**
@@ -229,12 +246,18 @@ export function openSettingsDialog(
         select.appendChild(entry);
       }
 
+      // BY THE ROW'S OWN KEY, both ways.
+      //
+      // This wrote to blockLayout and read from blockLayout whatever row it was drawing, which was
+      // invisible while blockLayout was the only choice in the list. The second one arrived and
+      // showed up empty (its value had been set to "comfy", which is not one of its options) and
+      // would have rewritten the block layout when changed (2026-08-09).
       select.addEventListener("change", () => {
-        update({ ...currentSettings(), blockLayout: select.value === "compact" ? "compact" : "comfy" });
+        update({ ...currentSettings(), [option.key]: select.value });
       });
 
       refreshers.push(() => {
-        select.value = currentSettings().blockLayout;
+        select.value = String(currentSettings()[option.key]);
       });
       control = select;
     } else if (option.kind === "number") {

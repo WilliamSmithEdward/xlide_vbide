@@ -60,6 +60,18 @@ public sealed record ProductSettings
     [JsonPropertyName("format.canonicalKeywords")]
     public bool FormatCanonicalKeywords { get; init; } = true;
 
+    /// <summary>
+    /// Which code decides what an import or export will do: "xlide" or "builtIn".
+    ///
+    /// "xlide" runs the companion editor's own planner inside the engine, so both products make
+    /// identical decisions about file names, module kinds and what counts as a change, and a fix
+    /// to it fixes both. It is the default for that reason. "builtIn" works it out inside the
+    /// add-in, which needs no engine and keeps import and export working when the engine is not
+    /// running.
+    /// </summary>
+    [JsonPropertyName("sync.engine")]
+    public string SyncEngine { get; init; } = "xlide";
+
     public static ProductSettings Default { get; } = new();
 
     /// <summary>The settings with every value forced into its legal range.</summary>
@@ -69,6 +81,9 @@ public sealed record ProductSettings
             ? "compact"
             : "comfy",
         FormatIndentSize = Math.Clamp(FormatIndentSize, 1, 8),
+        SyncEngine = string.Equals(SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase)
+            ? "builtIn"
+            : "xlide",
     };
 
     /// <summary>
