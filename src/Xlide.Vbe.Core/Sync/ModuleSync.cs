@@ -74,6 +74,12 @@ public enum DiffKind
     Changed,
     Added,
     Removed,
+
+    /// <summary>
+    /// A run of identical lines left out, with how many. Not a line of either side: a marker the
+    /// dialog draws as a break, so a comparison carries the changes and not the whole file.
+    /// </summary>
+    Gap,
 }
 
 /// <summary>One line of a side-by-side comparison. A number is absent where that side has no line.</summary>
@@ -449,6 +455,89 @@ public static class ModuleSync
         return output;
     }
 
+    /// <summary>
+    /// The comparison with its long stretches of agreement left out, keeping <paramref name="context"/>
+    /// identical lines either side of every change.
+    ///
+    /// WHY THIS EXISTS, measured. A plan carried every line of every module twice, as objects: for
+    /// a project of 81,795 lines that was a 15MB answer of which 100% was comparison lines, for a
+    /// dialog that shows one row at a time and a module that is usually identical on both sides.
+    /// Condensed, a row that has not changed carries a single gap, and a row that has carries its
+    /// changes (2026-08-09).
+    ///
+    /// Nothing about the DECISION passes through here. The statuses were already settled; this is
+    /// only what the developer is shown.
+    /// </summary>
+    /// <param name="most">
+    /// The most lines to answer with. Condensing alone is not enough: a FIRST export compares every
+    /// module against a file that is not there, so every line is a change and there is no agreement
+    /// to leave out — 163,627 lines and 15MB for a project of 81,795, measured. Nobody reads a
+    /// comparison that long, so it stops and says how much it did not show.
+    /// </param>
+    public static IReadOnlyList<SyncDiffLine> Condense(
+        IReadOnlyList<SyncDiffLine> diff,
+        int context = 3,
+        int most = 400)
+    {
+        ArgumentNullException.ThrowIfNull(diff);
+
+        // Which lines are worth keeping: every change, and `context` lines around each.
+        var keep = new bool[diff.Count];
+        for (var i = 0; i < diff.Count; i++)
+        {
+            if (diff[i].Kind == DiffKind.Equal)
+            {
+                continue;
+            }
+
+            for (var near = Math.Max(0, i - context); near <= Math.Min(diff.Count - 1, i + context); near++)
+            {
+                keep[near] = true;
+            }
+        }
+
+        var condensed = new List<SyncDiffLine>();
+        var skipped = 0;
+
+        for (var i = 0; i < diff.Count; i++)
+        {
+            if (keep[i])
+            {
+                if (skipped > 0)
+                {
+                    condensed.Add(GapOf(skipped));
+                    skipped = 0;
+                }
+
+                condensed.Add(diff[i]);
+                continue;
+            }
+
+            skipped++;
+        }
+
+        if (skipped > 0)
+        {
+            condensed.Add(GapOf(skipped));
+        }
+
+        if (condensed.Count <= most)
+        {
+            return condensed;
+        }
+
+        var capped = condensed.Take(most).ToList();
+        capped.Add(GapOf(condensed.Count - most, "not shown"));
+        return capped;
+    }
+
+    private static SyncDiffLine GapOf(int lines, string what = "identical") => new(
+        null,
+        null,
+        $"{lines:N0} {what} line{(lines == 1 ? string.Empty : "s")}",
+        string.Empty,
+        DiffKind.Gap);
+
     /// <summary>Works out what writing the project into the folder would do.</summary>
     public static SyncPlan PlanExport(
         string projectId,
@@ -694,6 +783,7 @@ public static class ModuleSync
         DiffKind.Changed => "changed",
         DiffKind.Added => "added",
         DiffKind.Removed => "removed",
+        DiffKind.Gap => "gap",
         _ => "equal",
     };
 

@@ -17,7 +17,7 @@ interface SyncDiffLine {
   rightNumber: number | null;
   left: string;
   right: string;
-  kind: "equal" | "changed" | "added" | "removed";
+  kind: "equal" | "changed" | "added" | "removed" | "gap";
 }
 
 interface SyncItem {
@@ -459,6 +459,17 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       const row = document.createElement("div");
       row.className = "sync-diff-row";
       row.dataset.kind = line.kind;
+
+      // A gap is a run of identical lines left out, and it spans the whole width: it belongs to
+      // neither side, so drawing it in the left column would read as a line of the left file.
+      if (line.kind === "gap") {
+        const span = document.createElement("span");
+        span.className = "sync-gap";
+        span.textContent = line.left;
+        row.appendChild(span);
+        diff.appendChild(row);
+        continue;
+      }
 
       // A line only one side has carries no number for the other, and the host spells that
       // absence as null rather than as a missing field. Tested for loosely on purpose: `=== undefined`

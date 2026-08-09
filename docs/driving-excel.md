@@ -737,7 +737,17 @@ await api.syncPlan("import");
 ```
 
 Each row carries a side-by-side comparison in `diff`, and the same one with the VBA attribute
-headers left in as `diffWithHeaders`. The dialog draws the first and offers the second behind a
+headers left in as `diffWithHeaders`.
+
+**Both are condensed, and capped.** A run of identical lines longer than three either side of a
+change becomes one line of kind `gap`, whose `left` says how many were left out; and a comparison
+longer than 400 lines stops with a gap saying how many were not shown. Nothing about the DECISION
+passes through that - statuses are settled over the whole comparison - it is only what is drawn.
+
+It matters more than it sounds. A first export compares every module against a file that is not
+there, so every line is a change and there is nothing to condense: for a project of 81,795 lines
+the plan was 15.1MB of which 100% was comparison lines, for a dialog that shows one row at a time.
+Capped, the same plan is 0.31MB. The dialog draws the first and offers the second behind a
 tick box, because nobody edits a header but it is exactly what decides whether an exported file
 comes back as the same kind of module.
 

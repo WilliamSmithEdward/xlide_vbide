@@ -108,6 +108,115 @@ internal sealed class AddInSession : IDisposable
     /// files by itself would drift from the button, and the first anyone would know of it is a
     /// harness that passes against a product that is broken. One implementation, two doors.
     /// </summary>
+    /// <summary>
+    /// Reads the editor for everything a plan needs. MUST run on the host thread: every line of it
+    /// is the object model, which is apartment bound.
+    ///
+    /// Answers false with a reason when there is nothing to plan against, so the caller can send
+    /// that reason rather than an empty plan.
+    /// </summary>
+    private bool TryGatherSyncInputs(
+        IReadOnlyDictionary<string, string> query,
+        out SyncInputs? inputs,
+        out string? refusal)
+    {
+        inputs = null;
+        refusal = null;
+
+        try
+        {
+            query.TryGetValue("direction", out var direction);
+            query.TryGetValue("project", out var project);
+            query.TryGetValue("folder", out var asked);
+            query.TryGetValue("mode", out var mode);
+
+            var projectId = ProjectIdFromDisplay(project) ?? _shownProject;
+            if (string.IsNullOrEmpty(projectId))
+            {
+                refusal = Refuse("no project is shown, and none was named");
+                return false;
+            }
+
+            var remembered = LoadSyncSettings().For(projectId);
+            var folder = string.IsNullOrEmpty(asked) ? remembered.Folder : asked;
+            if (string.IsNullOrEmpty(folder))
+            {
+                refusal = Refuse("no folder was given and this project remembers none");
+                return false;
+            }
+
+            using var target = FindProjectByDisplayName(project) ?? _editor?.GetObject("ActiveVBProject");
+            if (target is null)
+            {
+                refusal = Refuse("the project could not be reached");
+                return false;
+            }
+
+            var importing = string.Equals(direction, "import", StringComparison.OrdinalIgnoreCase);
+            inputs = new SyncInputs(
+                projectId,
+                DisplayFromProjectId(projectId) ?? projectId,
+                folder,
+                ModuleSyncService.ReadLiveModules(target),
+                mode ?? (importing ? remembered.ImportMode : remembered.ExportMode),
+                importing);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("sync: the project could not be read for a plan", ex);
+            refusal = Refuse(ex.Message.Trim());
+            return false;
+        }
+    }
+
+    private static string Refuse(string why) => System.Text.Json.JsonSerializer.Serialize(
+        new SyncErrorReply(why), SyncJsonContext.Default.SyncErrorReply);
+
+    /// <summary>Everything a plan needs that had to be read from the editor.</summary>
+    private sealed record SyncInputs(
+        string ProjectId,
+        string DisplayName,
+        string Folder,
+        List<LiveModule> Live,
+        string? Mode,
+        bool Importing);
+
+    /// <summary>
+    /// Works out the plan, and says which planner did.
+    ///
+    /// NO COM IN HERE, deliberately: everything it touches is the modules already read, the
+    /// folder, and the engine. That is what lets the dialog run it off the host thread, and the
+    /// reason it matters is measured — on a project of 81,795 lines the shared planner takes
+    /// 2,167ms, and every one of those milliseconds used to be Excel frozen (2026-08-09).
+    ///
+    /// WHICH PLANNER, and only the planner. Both answer the same shape and both are carried out
+    /// by the same apply, so the choice changes who DECIDES what an import would do, never who
+    /// does it. The companion editor's is the default because the two products write into the
+    /// same folders and a developer moves between them: one implementation of file naming,
+    /// module classification and staleness cannot disagree with itself. The built-in one is not
+    /// a fallback nobody meant to use — it needs no engine, so import and export keep working
+    /// when the engine is down.
+    /// </summary>
+    private (SyncPlan Plan, string Planner) BuildPlan(SyncInputs inputs)
+    {
+        var onDisk = ModuleSyncService.ReadFolder(inputs.Folder);
+        var wantsShared = !string.Equals(_settings.SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase);
+        var shared = wantsShared
+            ? SharedPlan(inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, inputs.Mode, inputs.Importing)
+            : null;
+
+        var plan = shared ?? (inputs.Importing
+            ? ModuleSync.PlanImport(
+                inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, onDisk,
+                ModuleSync.ImportModeFrom(inputs.Mode))
+            : ModuleSync.PlanExport(
+                inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, onDisk,
+                ModuleSync.ExportModeFrom(inputs.Mode)));
+
+        return (plan, shared is null ? "builtIn" : "xlide");
+    }
+
     private string HandleSync(IReadOnlyDictionary<string, string> query, string body)
     {
             // Import and export, the same way the dialog does it.
@@ -176,7 +285,6 @@ internal sealed class AddInSession : IDisposable
                 }
 
                 var live = ModuleSyncService.ReadLiveModules(syncTarget);
-                var onDisk = ModuleSyncService.ReadFolder(folder);
                 var displayName = DisplayFromProjectId(syncProjectId) ?? syncProjectId;
 
                 // WHICH PLANNER, and only the planner.
@@ -191,19 +299,8 @@ internal sealed class AddInSession : IDisposable
                 // import and export keep working when the engine is down, and it is what a
                 // developer chooses if they would rather the add-in never depended on it.
                 var mode = syncMode ?? (importing ? remembered.ImportMode : remembered.ExportMode);
-                var wantsShared = !string.Equals(_settings.SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase);
-                var shared = wantsShared
-                    ? SharedPlan(syncProjectId, displayName, folder, live, mode, importing)
-                    : null;
-                var planner = shared is null ? "builtIn" : "xlide";
-
-                var plan = shared ?? (importing
-                    ? ModuleSync.PlanImport(
-                        syncProjectId, displayName, folder, live, onDisk,
-                        ModuleSync.ImportModeFrom(mode))
-                    : ModuleSync.PlanExport(
-                        syncProjectId, displayName, folder, live, onDisk,
-                        ModuleSync.ExportModeFrom(mode)));
+                var (plan, planner) = BuildPlan(
+                    new SyncInputs(syncProjectId, displayName, folder, live, mode, importing));
 
                 if (syncAction != "apply")
                 {
@@ -277,12 +374,53 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private void OnSyncRequested(int requestId, IReadOnlyDictionary<string, string> arguments, string body)
     {
+        // A PLAN LEAVES THIS THREAD; EVERYTHING ELSE STAYS ON IT.
+        //
+        // Working out a plan reads the folder and, with the shared planner, waits on the engine:
+        // 2,167ms measured on a project of 81,795 lines, every millisecond of it with Excel
+        // frozen, because this handler runs on the host user interface thread. The modules have
+        // to be read here — the object model is apartment bound — but nothing after that does.
+        //
+        // Apply is deliberately left alone: it writes modules through COM, so it belongs on this
+        // thread, and a developer who has just pressed Apply is expecting it to work.
+        arguments.TryGetValue("action", out var action);
+        SyncInputs? inputs = null;
+        string? refusal = null;
+        var planning = action is null or "plan" && TryGatherSyncInputs(arguments, out inputs, out refusal);
+
+        if (planning)
+        {
+            var surface = _editorSurface;
+            _ = Task.Run(() =>
+            {
+                string answer;
+                try
+                {
+                    var (plan, planner) = BuildPlan(inputs!);
+                    answer = System.Text.Json.JsonSerializer.Serialize(
+                        SyncPlanReplyFor(plan, planner),
+                        SyncJsonContext.Default.SyncPlanReply);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("sync: the plan could not be worked out", ex);
+                    answer = System.Text.Json.JsonSerializer.Serialize(
+                        new SyncErrorReply(ex.Message.Trim()),
+                        SyncJsonContext.Default.SyncErrorReply);
+                }
+
+                // Back to the host thread to answer: posting to the page is its business.
+                surface?.RunOnHostThread(() => surface.ShowSyncResult(requestId, answer));
+            });
+
+            return;
+        }
+
         string json;
         try
         {
-            json = arguments.TryGetValue("action", out var action) && action == "browse"
-                ? ChooseSyncFolder(arguments)
-                : HandleSync(arguments, body);
+            json = refusal
+                ?? (action == "browse" ? ChooseSyncFolder(arguments) : HandleSync(arguments, body));
         }
         catch (Exception ex)
         {
@@ -589,8 +727,12 @@ internal sealed class AddInSession : IDisposable
             item.CannotBeCreated,
             item.LeftTitle,
             item.RightTitle,
-            [.. item.Diff.Select(SyncDiffRowFor)],
-            [.. item.DiffWithHeaders.Select(SyncDiffRowFor)]))],
+            // CONDENSED ON THE WAY OUT, not in the plan itself: what a row DOES is decided from
+            // the whole comparison, and only what is SHOWN is shortened. Whole, a project of
+            // 81,795 lines answered 15MB of which every byte was comparison lines, for a dialog
+            // that shows one row at a time (2026-08-09).
+            [.. ModuleSync.Condense(item.Diff).Select(SyncDiffRowFor)],
+            [.. ModuleSync.Condense(item.DiffWithHeaders).Select(SyncDiffRowFor)]))],
         [.. plan.Warnings]);
 
     private static SyncDiffRow SyncDiffRowFor(SyncDiffLine line) =>

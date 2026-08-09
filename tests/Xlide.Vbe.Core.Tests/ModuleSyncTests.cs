@@ -1,4 +1,5 @@
 using Xlide.Vbe.Core.Sync;
+using System.Linq;
 using Xunit;
 
 namespace Xlide.Vbe.Core.Tests;
@@ -177,6 +178,67 @@ public class ModuleSyncTests
         var code = ModuleSync.CodeWithoutHeader(source);
 
         Assert.Contains("    Caption = \"hello\"", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TwoIdenticalFilesCondenseToASingleGap()
+    {
+        const string four = """
+            one
+            two
+            three
+            four
+            """;
+
+        var only = Assert.Single(ModuleSync.Condense(ModuleSync.Diff(four, four)));
+
+        Assert.Equal(DiffKind.Gap, only.Kind);
+        Assert.Contains("4 identical lines", only.Left, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AChangeKeepsItsSurroundingsAndDropsTheRest()
+    {
+        // Two hundred lines differing in one of them: a comparison of the change and its
+        // neighbours, not of the file.
+        var left = string.Join("\n", Enumerable.Range(1, 200).Select(n => $"line {n}"));
+        var right = left.Replace("line 100", "LINE 100", StringComparison.Ordinal);
+
+        var condensed = ModuleSync.Condense(ModuleSync.Diff(left, right), context: 3);
+
+        Assert.Single(condensed, line => line.Kind == DiffKind.Changed);
+        Assert.Contains(condensed, line => line.Left == "line 97");
+        Assert.Contains(condensed, line => line.Left == "line 103");
+        Assert.DoesNotContain(condensed, line => line.Left == "line 50");
+        Assert.Equal(2, condensed.Count(line => line.Kind == DiffKind.Gap));
+        Assert.True(condensed.Count < 20, $"condensed to {condensed.Count} lines, which is not condensed");
+    }
+
+    [Fact]
+    public void ASmallComparisonIsLeftWhole()
+    {
+        // Nothing to gain by breaking up a comparison shorter than the context either side.
+        var condensed = ModuleSync.Condense(
+            ModuleSync.Diff("one\ntwo", "one\nTWO"),
+            context: 3);
+
+        Assert.DoesNotContain(condensed, line => line.Kind == DiffKind.Gap);
+        Assert.Equal(2, condensed.Count);
+    }
+
+    [Fact]
+    public void AComparisonWithNothingInCommonIsCappedAndSaysSo()
+    {
+        // The FIRST export: every module against a file that is not there, so every line is a
+        // change and there is no agreement to condense. This is the case that made a plan 15MB.
+        var whole = string.Join("\n", Enumerable.Range(1, 5000).Select(n => $"line {n}"));
+
+        var condensed = ModuleSync.Condense(ModuleSync.Diff(whole, string.Empty), most: 400);
+
+        Assert.Equal(401, condensed.Count);
+        var last = condensed[^1];
+        Assert.Equal(DiffKind.Gap, last.Kind);
+        Assert.Contains("4,600 not shown lines", last.Left, StringComparison.Ordinal);
     }
 
     [Fact]

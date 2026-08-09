@@ -3097,3 +3097,19 @@ body.objbrowser-page #objbrowser-card {
   color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
   opacity: 1;
 }
+
+/* A run of identical lines left out of a comparison. Spans both sides, because it is about
+   neither of them. */
+.sync-diff-row[data-kind="gap"] {
+  grid-template-columns: 1fr;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+.sync-gap {
+  padding: 2px 12px;
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: 11px;
+  opacity: 0.55;
+}
