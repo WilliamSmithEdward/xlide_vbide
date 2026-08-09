@@ -487,6 +487,19 @@ public sealed record OutlineResultMessage(
     [property: JsonPropertyName("failed")] bool Failed = false);
 
 /// <summary>
+/// The answer to an import/export request, carried as the JSON the service produced rather than as
+/// a shape of its own.
+///
+/// Passing it through verbatim is deliberate: the debug api answers the very same string from the
+/// very same call, so the dialog cannot be looking at a different plan from the one a harness
+/// reads. A shape declared twice is a shape that drifts once.
+/// </summary>
+public sealed record SyncResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("json")] string Json);
+
+/// <summary>
 /// The project's own words for the tokenizer: names that denote types and names that denote
 /// procedures, so a name reads as what it is wherever it appears.
 /// </summary>
@@ -558,6 +571,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
+[JsonSerializable(typeof(SyncResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]
 [JsonSerializable(typeof(SurfaceComponent))]

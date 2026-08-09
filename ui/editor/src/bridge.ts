@@ -80,6 +80,7 @@ export type HostMessage =
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
+  | { type: "syncResult"; id: number; json: string }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
@@ -291,6 +292,7 @@ export type ClientMessage =
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
+  | ({ type: "sync"; id: number; body: string } & Record<string, string | number>)
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
   | { type: "obMembers"; id: number; library: string; typeName: string }
@@ -454,6 +456,13 @@ export class EditorBridge {
     timer: ReturnType<typeof setTimeout>;
   }>();
 
+  /** Import/export requests awaiting their answers, by request identifier. */
+  private readonly pendingSyncs = new Map<number, {
+    resolve: (answer: unknown) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private nextSyncId = 1;
   private nextCompletionId = 1;
   private nextHoverId = 1;
   private nextSignatureId = 1;
@@ -795,6 +804,35 @@ export class EditorBridge {
    * window is generous because the host thread legitimately stalls for seconds while a large
    * module is being shown, and the answer queued behind that stall is still a good answer.
    */
+  /**
+   * Asks the host what an import or export would do, or asks for it to be done.
+   *
+   * The arguments go through untouched and the answer comes back as the host's own JSON, because
+   * the host answers this and the debug api's `sync` route from the SAME call. Shaping it here
+   * would be a second opinion about what a plan is, and second opinions drift.
+   *
+   * Resolves to an object carrying `error` rather than rejecting: a folder that has gone away is
+   * something the dialog says, not something that throws.
+   */
+  requestSync(args: Record<string, string>, body = ""): Promise<Record<string, unknown>> {
+    const id = this.nextSyncId++;
+
+    return new Promise<Record<string, unknown>>((resolve) => {
+      // Long, because it covers reading every module of a project and, for a browse, a developer
+      // deciding where to put them.
+      const timer = setTimeout(() => {
+        this.pendingSyncs.delete(id);
+        resolve({ error: "the host did not answer in time" });
+      }, 120000);
+
+      this.pendingSyncs.set(id, {
+        resolve: (answer) => resolve(answer as Record<string, unknown>),
+        timer,
+      });
+      this.transport.post({ type: "sync", id, body, ...args });
+    });
+  }
+
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
     const id = this.nextOutlineId++;
 
@@ -1230,6 +1268,19 @@ export class EditorBridge {
           clearTimeout(waiter.timer);
           // A failed answer is a shrug, not a statement of colourlessness.
           waiter.resolve(message.failed ? null : message.tokens);
+        }
+        return;
+      }
+      case "syncResult": {
+        const waiter = this.pendingSyncs.get(message.id);
+        if (waiter) {
+          this.pendingSyncs.delete(message.id);
+          clearTimeout(waiter.timer);
+          try {
+            waiter.resolve(JSON.parse(message.json));
+          } catch {
+            waiter.resolve({ error: "the host's answer could not be read" });
+          }
         }
         return;
       }

@@ -405,6 +405,26 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.OutlineResultMessage));
     }
 
+    /// <summary>Answers an import/export request with the service's own JSON, verbatim.</summary>
+    public void ShowSyncResult(int requestId, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new SyncResultMessage("syncResult", requestId, json),
+            EditorMessageContext.Default.SyncResultMessage));
+    }
+
+    /// <summary>
+    /// The dialog asking what an import or export would do, or asking for it to be done.
+    /// </summary>
+    public Action<int, IReadOnlyDictionary<string, string>, string>? SyncRequested { get; set; }
+
     /// <summary>Raised once, when the page has loaded and everything held for it has been sent.</summary>
     public Action? Ready { get; set; }
 
@@ -1788,6 +1808,35 @@ internal sealed class EditorSurface : IDisposable
                         && loopOffset >= 0)
                     {
                         LoopSyncRequested?.Invoke(loopRequestId, loopOffset);
+                    }
+
+                    break;
+
+                case "sync":
+                    if (document.RootElement.TryGetProperty("id", out var syncId)
+                        && syncId.TryGetInt32(out var syncRequestId))
+                    {
+                        // Everything but the id is passed through as the service's own arguments,
+                        // so the dialog and the debug api hand it identical requests.
+                        var syncArguments = new Dictionary<string, string>(StringComparer.Ordinal);
+                        foreach (var syncField in document.RootElement.EnumerateObject())
+                        {
+                            if (syncField.Name is "type" or "id" or "body")
+                            {
+                                continue;
+                            }
+
+                            if (syncField.Value.ValueKind == JsonValueKind.String
+                                && syncField.Value.GetString() is { Length: > 0 } argument)
+                            {
+                                syncArguments[syncField.Name] = argument;
+                            }
+                        }
+
+                        var syncBody = document.RootElement.TryGetProperty("body", out var syncBodyElement)
+                            ? syncBodyElement.GetString() ?? string.Empty
+                            : string.Empty;
+                        SyncRequested?.Invoke(syncRequestId, syncArguments, syncBody);
                     }
 
                     break;

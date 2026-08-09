@@ -178,6 +178,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
+| `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
@@ -697,6 +698,79 @@ await api.guard(false, { forget: true });
 > seconds of being stuck. What is standing is the only evidence that something is standing.
 
 ---
+
+## 3b. Import and export, and why the api and the button cannot disagree
+
+A project's modules go out to a folder as `.bas` and `.cls` files and come back from one. The same
+files the companion editor writes and reads, so a repository can be worked on from either end.
+
+The rule this surface is built to is the one that matters most about it: **an api action must leave
+the same state the equivalent UI action would.** It is not upheld by care here, it is upheld by
+construction. The dialog and the `sync` route reach the same call in the host — `HandleSync` — and
+neither of them knows how to write a file by itself. There is no second implementation to drift.
+
+```js
+import { open } from "./tools/harness/xlide-api.mjs";
+const api = await open();
+
+// What an export WOULD do. Nothing is written.
+const plan = await api.syncPlan("export", { folder: "C:\\src\\modules" });
+for (const item of plan.items) {
+  console.log(item.status, item.file, item.detail);
+}
+// will-create  Helper.bas    Create
+// unchanged    Runner.bas    Already the same
+
+// Do it. Without `ids`, `select` decides: "checked" takes the rows the plan itself ticked.
+const wrote = await api.syncApply("export", { folder: "C:\\src\\modules" });
+console.log(wrote.summary);   // 5 changed, 0 skipped, 0 removed, 0 failed
+
+// And back the other way, after editing a file on disk.
+const back = await api.syncPlan("import", { folder: "C:\\src\\modules" });
+await api.syncApply("import", {
+  folder: "C:\\src\\modules",
+  ids: back.items.filter((i) => i.status === "will-update").map((i) => i.id),
+});
+
+// The folder is remembered per project, so later calls can leave it out entirely.
+await api.syncPlan("import");
+```
+
+Each row carries a side-by-side comparison in `diff`, and the same one with the VBA attribute
+headers left in as `diffWithHeaders`. The dialog draws the first and offers the second behind a
+tick box, because nobody edits a header but it is exactly what decides whether an exported file
+comes back as the same kind of module.
+
+### What the statuses mean
+
+| status | export | import |
+| --- | --- | --- |
+| `will-create` | the folder has no such file | the project has no such module |
+| `will-write` | the file is there and differs | — |
+| `will-update` | — | the module is there and differs |
+| `will-remove` | a file naming no live module, and only with `mode=trueUp` | a module with no file, and only with `mode=trueUpStandardClass` |
+| `unchanged` | both sides already agree | both sides already agree |
+| `skipping-import` | — | a worksheet or UserForm the project does not already have |
+| `read-error` | — | the file would not read |
+
+### Three things worth knowing before driving it
+
+**A document module and a UserForm cannot be created from a file.** A sheet belongs to its
+workbook and a form's designer is not in its `.cls`. Those rows come back `skipping-import` with a
+warning rather than failing at apply time. When the module already exists, its code is replaced
+normally.
+
+**Removing is always opt-in and never touches a document.** `mode` defaults to the safe value in
+both directions, and import true-up only ever deletes standard and class modules.
+
+**Importing a class can change modules you did not select.** VBA unifies identifier case across a
+project: bring in a class named `Tally` and a local variable spelled `tally` in some other module
+becomes `Tally`. The next export will honestly report that module as changed. This is the editor's
+doing, not this product's, and it is a good reason to look at an export plan after an import.
+
+**`action=browse` blocks.** It raises the system's folder chooser, which is what the dialog's
+Browse button uses, and it does not answer until somebody closes it. A harness sets the folder with
+`syncSettings({ folder })` instead.
 
 ## 3a. Language, and what the host will not store
 

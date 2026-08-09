@@ -4,11 +4,13 @@ using Xlide.Vbe.Core;
 using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
+using Xlide.Vbe.Core.Sync;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Engine;
 using Xlide.Vbe.Shim.Interop;
+using Xlide.Vbe.Shim.Sync;
 
 namespace Xlide.Vbe.Shim.AddIn;
 
@@ -97,6 +99,286 @@ internal sealed class AddInSession : IDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "xlide_vbide",
         "settings.json");
+
+    /// <summary>
+    /// Import and export, for whoever is asking.
+    ///
+    /// The dialog and the debug api both land here, which is the whole design: an api that wrote
+    /// files by itself would drift from the button, and the first anyone would know of it is a
+    /// harness that passes against a product that is broken. One implementation, two doors.
+    /// </summary>
+    private string HandleSync(IReadOnlyDictionary<string, string> query, string body)
+    {
+            // Import and export, the same way the dialog does it.
+            //
+            // This route does NOT have its own idea of what an import means: it calls the
+            // service the dialog calls, so a plan read here is the plan drawn there and an
+            // apply leaves the project in the state the button would have left it. That is the
+            // whole point of routing both through one service rather than teaching the api to
+            // write files by itself.
+            query.TryGetValue("action", out var syncAction);
+            query.TryGetValue("direction", out var syncDirection);
+            query.TryGetValue("project", out var syncProject);
+            query.TryGetValue("folder", out var syncFolder);
+            query.TryGetValue("mode", out var syncMode);
+            query.TryGetValue("select", out var syncSelect);
+
+            var syncProjectId = ProjectIdFromDisplay(syncProject) ?? _shownProject;
+            if (string.IsNullOrEmpty(syncProjectId))
+            {
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new SyncErrorReply("no project is shown, and none was named"),
+                    SyncJsonContext.Default.SyncErrorReply);
+            }
+
+            try
+            {
+                if (syncAction == "settings")
+                {
+                    var stored = LoadSyncSettings();
+                    if (syncFolder is not null || query.ContainsKey("exportMode") || query.ContainsKey("importMode"))
+                    {
+                        var was = stored.For(syncProjectId);
+                        var choice = new SyncChoice
+                        {
+                            Folder = syncFolder ?? was.Folder,
+                            ExportMode = query.TryGetValue("exportMode", out var em) ? em : was.ExportMode,
+                            ImportMode = query.TryGetValue("importMode", out var im) ? im : was.ImportMode,
+                        };
+                        stored = stored.With(syncProjectId, choice);
+                        SaveSyncSettings(stored);
+                    }
+
+                    var now = stored.For(syncProjectId);
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new SyncSettingsReply(syncProjectId, now.Folder, now.ExportMode, now.ImportMode),
+                        SyncJsonContext.Default.SyncSettingsReply);
+                }
+
+                var remembered = LoadSyncSettings().For(syncProjectId);
+                var folder = string.IsNullOrEmpty(syncFolder) ? remembered.Folder : syncFolder;
+                if (string.IsNullOrEmpty(folder))
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new SyncErrorReply("no folder was given and this project remembers none"),
+                        SyncJsonContext.Default.SyncErrorReply);
+                }
+
+                var importing = string.Equals(syncDirection, "import", StringComparison.OrdinalIgnoreCase);
+                using var syncTarget = FindProjectByDisplayName(syncProject)
+                    ?? _editor?.GetObject("ActiveVBProject");
+                if (syncTarget is null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new SyncErrorReply("the project could not be reached"),
+                        SyncJsonContext.Default.SyncErrorReply);
+                }
+
+                var live = ModuleSyncService.ReadLiveModules(syncTarget);
+                var onDisk = ModuleSyncService.ReadFolder(folder);
+                var displayName = DisplayFromProjectId(syncProjectId) ?? syncProjectId;
+
+                var plan = importing
+                    ? ModuleSync.PlanImport(
+                        syncProjectId, displayName, folder, live, onDisk,
+                        ModuleSync.ImportModeFrom(syncMode ?? remembered.ImportMode))
+                    : ModuleSync.PlanExport(
+                        syncProjectId, displayName, folder, live, onDisk,
+                        ModuleSync.ExportModeFrom(syncMode ?? remembered.ExportMode));
+
+                if (syncAction != "apply")
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        SyncPlanReplyFor(plan),
+                        SyncJsonContext.Default.SyncPlanReply);
+                }
+
+                // Which rows to carry out. A body names them one per line, which is what the
+                // dialog sends after the developer has ticked and unticked; `select=checked`
+                // takes the plan's own ticks, which is what a caller driving this from a script
+                // almost always means; `select=all` takes everything the plan offered.
+                var chosen = !string.IsNullOrWhiteSpace(body)
+                    ? new HashSet<string>(
+                        body.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                        StringComparer.Ordinal)
+                    : syncSelect == "all"
+                        ? [.. plan.Items.Select(item => item.Id)]
+                        : new HashSet<string>(
+                            plan.Items.Where(item => item.Checked).Select(item => item.Id),
+                            StringComparer.Ordinal);
+
+                var applied = ModuleSyncService.Apply(
+                    syncTarget, plan, chosen,
+                    (component, text, owner) => WriteModule(component, text, owner, hostRewrite: true));
+
+                // The folder and mode that were just used become the ones this project
+                // remembers, exactly as pressing Apply in the dialog does.
+                SaveSyncSettings(LoadSyncSettings().With(syncProjectId, new SyncChoice
+                {
+                    Folder = folder,
+                    ExportMode = importing ? remembered.ExportMode : ModuleSync.ExportModeFrom(syncMode ?? remembered.ExportMode).ToString(),
+                    ImportMode = importing ? ModuleSync.ImportModeFrom(syncMode ?? remembered.ImportMode).ToString() : remembered.ImportMode,
+                }));
+
+                if (importing && (applied.Changed.Count > 0 || applied.Removed.Count > 0))
+                {
+                    // An import changes what the project contains, so the tree and the engine
+                    // are told, the way they are told when a component is added by hand.
+                    PublishProjects();
+                    _analysis?.Reanalyse();
+                }
+
+                Log.Info($"sync: {(importing ? "import" : "export")} applied — "
+                    + $"{applied.Changed.Count} changed, {applied.Skipped.Count} skipped, "
+                    + $"{applied.Removed.Count} removed, {applied.Failed.Count} failed");
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new SyncApplyReply(
+                        $"{applied.Changed.Count} changed, {applied.Skipped.Count} skipped, "
+                            + $"{applied.Removed.Count} removed, {applied.Failed.Count} failed",
+                        [.. applied.Changed],
+                        [.. applied.Skipped],
+                        [.. applied.Removed],
+                        [.. applied.Failed]),
+                    SyncJsonContext.Default.SyncApplyReply);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("sync: the request failed", ex);
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new SyncErrorReply($"sync failed: {ex.Message.Trim()}"),
+                    SyncJsonContext.Default.SyncErrorReply);
+            }
+    }
+
+    /// <summary>
+    /// The import/export dialog, asking. It goes through the same call the debug api's `sync` route
+    /// goes through, so the dialog cannot be shown a plan the api would not answer, and Apply
+    /// cannot leave the project in a state the api would not have left it in.
+    /// </summary>
+    private void OnSyncRequested(int requestId, IReadOnlyDictionary<string, string> arguments, string body)
+    {
+        string json;
+        try
+        {
+            json = arguments.TryGetValue("action", out var action) && action == "browse"
+                ? ChooseSyncFolder(arguments)
+                : HandleSync(arguments, body);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("sync: the dialog's request failed", ex);
+            json = System.Text.Json.JsonSerializer.Serialize(
+                new SyncErrorReply(ex.Message.Trim()),
+                SyncJsonContext.Default.SyncErrorReply);
+        }
+
+        _editorSurface?.ShowSyncResult(requestId, json);
+    }
+
+    /// <summary>
+    /// Raises the system's folder chooser, because a page cannot.
+    ///
+    /// Modal to the editor's own window, so it cannot end up behind it, and the answer is written
+    /// straight into what the project remembers — which is the same state the api's settings route
+    /// writes, so choosing a folder either way leaves the product in one place.
+    /// </summary>
+    private string ChooseSyncFolder(IReadOnlyDictionary<string, string> arguments)
+    {
+        arguments.TryGetValue("project", out var display);
+        arguments.TryGetValue("direction", out var direction);
+        var projectId = ProjectIdFromDisplay(display) ?? _shownProject ?? string.Empty;
+        var remembered = LoadSyncSettings().For(projectId);
+
+        var chosen = FolderPicker.Choose(
+            // The editor's own window, so the chooser is modal to what the developer is looking at
+            // rather than to the desktop. Not the page's overlay: that handle is a debug-only
+            // affordance for cropping screenshots, and this ships.
+            CodePaneTracker.MainWindow(),
+            direction == "import" ? "Import modules from this folder" : "Export modules to this folder",
+            arguments.TryGetValue("folder", out var startAt) && startAt.Length > 0 ? startAt : remembered.Folder);
+
+        if (chosen is null)
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                new SyncSettingsReply(projectId, remembered.Folder, remembered.ExportMode, remembered.ImportMode),
+                SyncJsonContext.Default.SyncSettingsReply);
+        }
+
+        var settings = LoadSyncSettings().With(projectId, remembered with { Folder = chosen });
+        SaveSyncSettings(settings);
+        var now = settings.For(projectId);
+        return System.Text.Json.JsonSerializer.Serialize(
+            new SyncSettingsReply(projectId, now.Folder, now.ExportMode, now.ImportMode),
+            SyncJsonContext.Default.SyncSettingsReply);
+    }
+
+    /// <summary>Where each project's import/export folder is remembered, beside the settings.</summary>
+    private static string SyncSettingsPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "xlide_vbide",
+        "sync.json");
+
+    private static SyncSettings LoadSyncSettings()
+    {
+        try
+        {
+            var path = SyncSettingsPath;
+            return File.Exists(path) ? SyncSettings.Parse(File.ReadAllText(path)) : SyncSettings.Empty;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"sync: the remembered folders could not be read ({ex.GetType().Name})");
+            return SyncSettings.Empty;
+        }
+    }
+
+    private static void SaveSyncSettings(SyncSettings settings)
+    {
+        try
+        {
+            var path = SyncSettingsPath;
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, settings.ToJson());
+        }
+        catch (Exception ex)
+        {
+            Log.Error("sync: the folder could not be remembered; it holds for this session only", ex);
+        }
+    }
+
+    /// <summary>
+    /// The plan as it goes over the wire. One mapping, so the dialog and the api are looking at the
+    /// same rows in the same order with the same words on them.
+    /// </summary>
+    private static SyncPlanReply SyncPlanReplyFor(SyncPlan plan) => new(
+        plan.Direction == SyncDirection.Import ? "import" : "export",
+        plan.ProjectName,
+        plan.ProjectId,
+        plan.Folder,
+        plan.Direction == SyncDirection.Import
+            ? plan.ImportMode == ImportMode.TrueUpStandardClass ? "trueUpStandardClass" : "updateOnly"
+            : plan.ExportMode == ExportMode.TrueUp ? "trueUp" : "exportAll",
+        [.. plan.Items.Select(item => new SyncItemRow(
+            item.Id,
+            item.ModuleName,
+            item.ModuleKind,
+            item.FileName,
+            ModuleSync.NameOf(item.Status),
+            item.Checked,
+            item.Detail,
+            item.Warning,
+            item.ExistsInProject,
+            item.ExistsInFolder,
+            item.CannotBeCreated,
+            item.LeftTitle,
+            item.RightTitle,
+            [.. item.Diff.Select(SyncDiffRowFor)],
+            [.. item.DiffWithHeaders.Select(SyncDiffRowFor)]))],
+        [.. plan.Warnings]);
+
+    private static SyncDiffRow SyncDiffRowFor(SyncDiffLine line) =>
+        new(line.LeftNumber, line.RightNumber, line.Left, line.Right, ModuleSync.NameOf(line.Kind));
 
     private static ProductSettings LoadSettings()
     {
@@ -2807,6 +3089,9 @@ internal sealed class AddInSession : IDisposable
                 }
             }
 
+            case "sync":
+                return HandleSync(request.Query, request.Body);
+
             case "component" when request.Query.TryGetValue("action", out var componentAction):
             {
                 // Adding, renaming and removing components, from INSIDE.
@@ -3510,6 +3795,7 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
+        _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);

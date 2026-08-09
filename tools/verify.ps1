@@ -374,7 +374,11 @@ if ($Live) {
         # at VBA's line ceiling (2026-08-08).
         # Grouped by the fixture each needs, so the gate opens two rather than failing five.
         $plan = [ordered] @{
-            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs')
+            # module-sync writes into a temporary folder of its own and takes back every module it
+            # adds. Its last section is the one worth having: it applies the same import through
+            # the DIALOG and through the route and compares the result byte for byte, which is the
+            # only check that would notice the api growing its own idea of what an import means.
+            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs', 'module-sync.mjs')
             'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs')
         }
 

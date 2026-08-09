@@ -76,6 +76,7 @@ import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
+import { openSyncDialog } from "./syncdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
@@ -464,6 +465,12 @@ function boot(): void {
       // The Panes menu: its own dropdown under its own toolbar button, beside settings
       // (developer, 2026-08-06). Showing and hiding a pane is done while working, not
       // visited once like a preference.
+      if (command.id === "openSync") {
+        openSyncDialog(
+          (args, body) => bridge.requestSync(args, body),
+          () => workspace.activeEditor().focus());
+        return;
+      }
       if (command.id === "openHelp") {
         openHelpDialog(() => workspace.activeEditor().focus());
         return;
@@ -495,7 +502,7 @@ function boot(): void {
     commandAvailable: (command) =>
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
-      || command.id === "openSponsor"
+      || command.id === "openSponsor" || command.id === "openSync"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),

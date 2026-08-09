@@ -903,6 +903,41 @@ function clientFor(entry) {
         timeout: Math.max(10000, Math.ceil(text.length / 1000) * 250),
       }),
 
+    /**
+     * What an import or an export WOULD do, without doing any of it.
+     *
+     * The plan is the same object the import/export dialog draws, from the same service, so a row
+     * read here is the row shown there. Every row carries its status, whether it is ticked, a
+     * side-by-side comparison with the attribute headers hidden, and the same comparison with them
+     * left in.
+     *
+     *   const plan = await api.syncPlan("export", { folder: "C:\\src\\modules" });
+     *   plan.items.map(i => `${i.status} ${i.file}`);
+     *
+     * `folder` may be left out once a project has been synced once: it remembers.
+     */
+    syncPlan: (direction, { project, folder, mode } = {}) =>
+      call(`sync${query({ direction, project, folder, mode })}`, { timeout: 30000 }),
+
+    /**
+     * Carries a plan out. This is the Apply button, and it leaves the project in exactly the state
+     * the button leaves it in — the same service does the work either way.
+     *
+     * `ids` names the rows to carry out, which is what the dialog sends after the developer has
+     * ticked and unticked. Leave it out and `select` decides: "checked" (the default) takes the
+     * rows the plan itself ticked, "all" takes every row it offered.
+     */
+    syncApply: (direction, { project, folder, mode, ids, select } = {}) =>
+      call(`sync${query({ action: "apply", direction, project, folder, mode, select })}`, {
+        method: "POST",
+        body: (ids ?? []).join("\n"),
+        timeout: 60000,
+      }),
+
+    /** The folder and modes a project remembers. Naming any of them writes it. */
+    syncSettings: ({ project, folder, exportMode, importMode } = {}) =>
+      call(`sync${query({ action: "settings", project, folder, exportMode, importMode })}`),
+
     /** Waits for a predicate over state, which is how a harness waits for break mode. */
     async waitFor(predicate, { timeout = 20000, every = 300 } = {}) {
       const deadline = Date.now() + timeout;
@@ -1025,6 +1060,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])));
       case "trip": return api.trip(rest[0] ?? "pagecall", { n: rest[1] });
       case "immediate": return api.immediate(rest.join(" "));
+      // sync export C:\out [mode]     what an export would do
+      // sync import C:\in  [mode]     what an import would do
+      case "sync": return api.syncPlan(rest[0] ?? "export", { folder: rest[1], mode: rest[2] });
+      case "syncApply": return api.syncApply(rest[0] ?? "export", { folder: rest[1], mode: rest[2], select: rest[3] ?? "checked" });
+      case "syncSettings": return api.syncSettings({ folder: rest[0], exportMode: rest[1], importMode: rest[2] });
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
       default: throw new Error(`unknown route ${route}`);
     }
