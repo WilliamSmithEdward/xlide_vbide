@@ -547,14 +547,25 @@ public static class ModuleSync
         IReadOnlyList<RepoFile> folderFiles,
         ExportMode mode)
     {
-        var items = new List<SyncItem>();
         var byFileName = folderFiles.ToDictionary(f => f.FileName, StringComparer.OrdinalIgnoreCase);
         var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
         foreach (var module in modules)
         {
+            live.Add(FileNameFor(module.Name, module.Kind));
+        }
+
+        // ONE MODULE AT A TIME IS ONE CORE AT A TIME.
+        //
+        // Every row is worked out from its own module and its own file and touches nothing else,
+        // and the expensive part of each is a longest-common-subsequence over the whole text. On
+        // a project of 81,795 lines that was 221ms of one core while the rest idled (2026-08-09).
+        //
+        // ORDERED on purpose. A plan that lists its rows differently on consecutive runs is a plan
+        // nobody can trust, and the sort afterwards is by status first, so the order within a
+        // status is the order the modules arrived in.
+        var items = modules.AsParallel().AsOrdered().Select(module =>
+        {
             var fileName = FileNameFor(module.Name, module.Kind);
-            live.Add(fileName);
             var existing = byFileName.GetValueOrDefault(fileName);
             var onDisk = existing?.Source ?? string.Empty;
             var unchanged = existing is not null && SameText(module.Source, onDisk);
@@ -562,7 +573,7 @@ public static class ModuleSync
                 ? SyncStatus.Unchanged
                 : existing is not null ? SyncStatus.WillWrite : SyncStatus.WillCreate;
 
-            items.Add(new SyncItem
+            return new SyncItem
             {
                 Id = $"export:{module.Name}",
                 ModuleName = module.Name,
@@ -584,8 +595,8 @@ public static class ModuleSync
                 Diff = Diff(CodeWithoutHeader(module.Source), CodeWithoutHeader(onDisk)),
                 DiffWithHeaders = Diff(module.Source, onDisk),
                 PayloadSource = module.Source,
-            });
-        }
+            };
+        }).ToList();
 
         if (mode == ExportMode.TrueUp)
         {
@@ -639,15 +650,19 @@ public static class ModuleSync
         IReadOnlyList<RepoFile> folderFiles,
         ImportMode mode)
     {
-        var items = new List<SyncItem>();
         var warnings = new List<string>();
         var byModuleName = modules.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
         var fromFolder = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var incoming = folderFiles.Where(f => IsModuleFileName(f.FileName)).ToList();
+        foreach (var file in incoming)
+        {
+            fromFolder.Add(ModuleNameFromFileName(file.FileName));
+        }
 
-        foreach (var file in folderFiles.Where(f => IsModuleFileName(f.FileName)))
+        // As above: one row per file, each independent, each dominated by its own comparison.
+        var items = incoming.AsParallel().AsOrdered().Select(file =>
         {
             var moduleName = ModuleNameFromFileName(file.FileName);
-            fromFolder.Add(moduleName);
             var existing = byModuleName.GetValueOrDefault(moduleName);
             var kind = existing?.Kind ?? ClassifyFile(file.FileName, file.Source);
             var cannotBeCreated = existing is null && kind is "document" or "userform";
@@ -673,14 +688,17 @@ public static class ModuleSync
                         + "Add the sheet first and this will update its code."
                     : "A UserForm's designer is not in this file, so the form cannot be created from it. "
                         + "Add the form first and this will update its code.";
-                warnings.Add($"{moduleName}: skipped, because a {kind} cannot be created from source.");
+                lock (warnings)
+                {
+                    warnings.Add($"{moduleName}: skipped, because a {kind} cannot be created from source.");
+                }
             }
             else if (existing is not null && kind is "document" or "userform")
             {
                 warning = "The module already exists, so its code will be replaced. The sheet or form itself is untouched.";
             }
 
-            items.Add(new SyncItem
+            return new SyncItem
             {
                 Id = $"import:{file.FileName}",
                 ModuleName = moduleName,
@@ -704,8 +722,8 @@ public static class ModuleSync
                 Diff = Diff(CodeWithoutHeader(file.Source), CodeWithoutHeader(projectSource)),
                 DiffWithHeaders = Diff(file.Source, projectSource),
                 PayloadSource = file.Source,
-            });
-        }
+            };
+        }).ToList();
 
         if (mode == ImportMode.TrueUpStandardClass)
         {

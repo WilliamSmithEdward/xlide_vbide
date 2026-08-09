@@ -153,11 +153,18 @@ internal sealed class AddInSession : IDisposable
             }
 
             var importing = string.Equals(direction, "import", StringComparison.OrdinalIgnoreCase);
+
+            // Timed because the plan's cost decides what is worth moving off this thread, and a
+            // guess about which half is slow is how the wrong half gets optimised.
+            var readingAt = System.Diagnostics.Stopwatch.StartNew();
+            var live = ModuleSyncService.ReadLiveModules(target);
+            Log.Verbose($"sync: read {live.Count} module(s) from the editor in {readingAt.ElapsedMilliseconds}ms");
+
             inputs = new SyncInputs(
                 projectId,
                 DisplayFromProjectId(projectId) ?? projectId,
                 folder,
-                ModuleSyncService.ReadLiveModules(target),
+                live,
                 mode ?? (importing ? remembered.ImportMode : remembered.ExportMode),
                 importing);
             return true;
@@ -200,7 +207,11 @@ internal sealed class AddInSession : IDisposable
     /// </summary>
     private (SyncPlan Plan, string Planner) BuildPlan(SyncInputs inputs)
     {
+        var folderAt = System.Diagnostics.Stopwatch.StartNew();
         var onDisk = ModuleSyncService.ReadFolder(inputs.Folder);
+        Log.Verbose($"sync: read {onDisk.Count} file(s) from the folder in {folderAt.ElapsedMilliseconds}ms");
+
+        var planningAt = System.Diagnostics.Stopwatch.StartNew();
         var wantsShared = !string.Equals(_settings.SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase);
         var shared = wantsShared
             ? SharedPlan(inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, inputs.Mode, inputs.Importing)
@@ -213,6 +224,9 @@ internal sealed class AddInSession : IDisposable
             : ModuleSync.PlanExport(
                 inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, onDisk,
                 ModuleSync.ExportModeFrom(inputs.Mode)));
+
+        Log.Verbose($"sync: worked out {plan.Items.Count} row(s) in {planningAt.ElapsedMilliseconds}ms"
+            + $" ({(shared is null ? "built in" : "shared")})");
 
         return (plan, shared is null ? "builtIn" : "xlide");
     }

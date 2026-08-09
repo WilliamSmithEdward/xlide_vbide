@@ -87,31 +87,38 @@ internal static class ModuleSyncService
     /// <summary>Reads the module files a folder holds. A file that will not read is reported, not dropped.</summary>
     public static List<RepoFile> ReadFolder(string folder)
     {
-        var files = new List<RepoFile>();
         if (!Directory.Exists(folder))
         {
-            return files;
+            return [];
         }
 
-        foreach (var path in Directory.EnumerateFiles(folder).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
-        {
-            var name = Path.GetFileName(path);
-            if (!ModuleSync.IsModuleFileName(name))
+        // READ AT ONCE, in a fixed order.
+        //
+        // A folder holds one file per module and each read waits on the disk rather than on the
+        // processor, so reading them one after another spends the whole wait N times. Ordered so
+        // the plan reads the same twice running - the rows are sorted by status afterwards, and
+        // the order within a status is this one.
+        //
+        // A file that will not read becomes a row saying so rather than an exception: one locked
+        // file must not cost the developer the other twenty.
+        return Directory.EnumerateFiles(folder)
+            .Select(Path.GetFileName)
+            .Where(name => name is not null && ModuleSync.IsModuleFileName(name))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .AsParallel()
+            .AsOrdered()
+            .Select(name =>
             {
-                continue;
-            }
-
-            try
-            {
-                files.Add(new RepoFile(name, File.ReadAllText(path, FileEncoding)));
-            }
-            catch (Exception ex)
-            {
-                files.Add(new RepoFile(name, string.Empty, ex.Message));
-            }
-        }
-
-        return files;
+                try
+                {
+                    return new RepoFile(name!, File.ReadAllText(Path.Combine(folder, name!), FileEncoding));
+                }
+                catch (Exception ex)
+                {
+                    return new RepoFile(name!, string.Empty, ex.Message);
+                }
+            })
+            .ToList();
     }
 
     /// <summary>Carries out the rows a caller selected, and says what happened to each.</summary>
