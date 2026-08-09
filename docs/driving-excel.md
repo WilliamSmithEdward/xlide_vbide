@@ -694,6 +694,18 @@ The line ceiling is the limit everyone knows and not the one that bites. Measure
 | a 60,000-character constant | accepted, broken into 60 |
 | a null character | accepted as text |
 
+**The line break is the one that costs code.** The editor holds 1,022 characters in a line.
+1,023 and above are taken and split, at 1,023, with no continuation character: a 2,018
+character `Debug.Print "aaa..."` became a 1,023 character fragment with an unterminated
+string followed by a 995 character one. The module then held something that could not
+compile, while the surface still showed the line the developer wrote.
+
+So a line the editor would break is not written at all now, and the complaint names the line
+and its length. Refused rather than repaired: a continuation would have to be inserted inside
+the developer's expression, and inside a string literal that means splitting the literal and
+concatenating it, which is rewriting their code to make it fit. `ModuleText.LongestLine`
+carries the number and `Xlide.Vbe.Core.Tests` pins both sides of the boundary.
+
 So a write can be refused at any size, for a reason no line count predicts, and the refusal
 arrives partway: **the delete has landed and the add has not.** A module of 2,002 working lines
 asked to take a body the editor would not have came back holding 31,956 lines of it, neither

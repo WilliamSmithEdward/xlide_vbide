@@ -150,6 +150,42 @@ Check 'module writes through the session writer' {
 # The module that is not there is the cheap half of it. The expensive half - a write the editor
 # refuses partway, which used to cost the module its previous text - is in write-rollback.mjs,
 # which is not run here because provoking it leaves the editor needing a restart (2026-08-09).
+# A LINE THE EDITOR CANNOT HOLD IS NOT WRITTEN AT ALL.
+#
+# It does not refuse one, it BREAKS one, at 1,023 characters and with no continuation character, so
+# a statement is cut in half and a string literal left unterminated. A 2,018-character Debug.Print
+# became a 1,023-character fragment followed by a 995-character one, and nothing said a word: the
+# module held code that could not compile and the surface held the line the developer wrote
+# (2026-08-09). 1,022 is the widest that comes back identical, and the boundary is where the
+# off-by-one would hide, so both sides of it are checked.
+Check 'a line the editor would break is refused, and the module keeps what it had' {
+    $before = (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text
+    $long = "Option Explicit`r`nPublic Sub Wide()`r`n    Debug.Print `"$('a' * 1200)`"`r`nEnd Sub"
+
+    $reported = $false
+    try {
+        $answer = Invoke-RestMethod "$api/module?name=CleanModule" -Method Post -Body $long -TimeoutSec 10
+        $reported = [bool] $answer.error
+    } catch { $reported = $true }
+
+    Start-Sleep -Milliseconds 800
+    $after = (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text
+    $reported -and ($after -eq $before)
+}
+
+Check 'a line of exactly 1,022 characters still writes' {
+    $wide = "Option Explicit`r`n' $('a' * 1020)"
+    Invoke-RestMethod "$api/module?name=CleanModule" -Method Post -Body $wide -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1200
+    $back = (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text
+
+    # Put the module back the way the checks below expect to find it.
+    Invoke-RestMethod "$api/module?name=CleanModule" -Method Post -Body $runner -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1200
+
+    ($back -split "`r`n" | Measure-Object -Maximum -Property Length).Maximum -eq 1022
+}
+
 Check 'a write to a module that is not there is reported, not reported ok' {
     try {
         $answer = Invoke-RestMethod "$api/module?name=NoSuchModuleHere" -Method Post `

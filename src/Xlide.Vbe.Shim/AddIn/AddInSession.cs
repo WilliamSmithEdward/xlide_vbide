@@ -82,6 +82,16 @@ internal sealed class AddInSession : IDisposable
         $"{(projectDisplay ?? string.Empty).ToLowerInvariant()}\0{component.ToLowerInvariant()}";
 
     /// <summary>
+    /// The last thing said about a module's write, so it is said once rather than every debounce.
+    ///
+    /// The write-back fires on a pause in typing, so a module carrying a line the editor will not
+    /// hold is refused again on every pause. The complaint is worth one notice, not one per pause:
+    /// the second is the same sentence and the tenth is in the way of the work. Cleared when the
+    /// module writes, so the next real problem is announced.
+    /// </summary>
+    private readonly Dictionary<string, string> _saidAboutWrite = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Identity of the project whose module the surface is showing, or null when it could not
     /// be told. This is the tie-break for every bare module name that reaches the session while
     /// the page's protocol still speaks in names alone: the module being edited outranks a
@@ -4157,10 +4167,22 @@ internal sealed class AddInSession : IDisposable
         // stopped being the truth.
         _editorSurface.TextChanged = (component, project, text) =>
         {
-            if (WriteModule(component, text, ProjectIdFromDisplay(project)) is { } refused)
+            var refused = WriteModule(component, text, ProjectIdFromDisplay(project));
+            var key = WrittenKey(component, project);
+
+            if (refused is null)
             {
-                _editorSurface?.Notify(refused);
+                _saidAboutWrite.Remove(key);
+                return;
             }
+
+            if (_saidAboutWrite.TryGetValue(key, out var already) && already == refused)
+            {
+                return;
+            }
+
+            _saidAboutWrite[key] = refused;
+            _editorSurface?.Notify(refused);
         };
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
         _editorSurface.LinesShifted = OnLinesShifted;
@@ -4908,6 +4930,27 @@ internal sealed class AddInSession : IDisposable
             {
                 Log.Warn($"write: {component} has no code module");
                 return $"{component} has no code module to write to";
+            }
+
+            // A LINE THE EDITOR CANNOT HOLD IS NOT WRITTEN AT ALL.
+            //
+            // It does not refuse one. It takes it and BREAKS it, at 1,023 characters, with no
+            // continuation character: the statement is cut in half and a string literal is left
+            // unterminated, so what lands is not code. Measured 2026-08-09 - 1,022 characters come
+            // back identical, 1,023 come back as two lines, and a 2,018-character Debug.Print
+            // became a 1,023-character fragment followed by a 995-character one.
+            //
+            // Refused here rather than repaired. A continuation would have to be inserted INSIDE
+            // the developer's expression, and inside a string literal that means splitting it and
+            // concatenating - a rewrite of their code to make it fit, decided by us. Better to say
+            // which line and let them break it where it belongs.
+            if (Core.Editor.ModuleText.FirstLineTooLong(text) is { } tooLong)
+            {
+                Log.Warn($"write: {component} line {tooLong.At} is {tooLong.Length} characters; nothing written");
+                return $"{component} was not written: line {tooLong.At} is {tooLong.Length} characters. "
+                    + $"The editor holds {Core.Editor.ModuleText.LongestLine} in a line and breaks "
+                    + "anything longer in half without a continuation, which would not be valid "
+                    + "code. Break the line yourself and it will write.";
             }
 
             // The baseline belongs to the workbook actually found: a line diff computed against
