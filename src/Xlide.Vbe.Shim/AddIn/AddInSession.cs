@@ -4301,6 +4301,13 @@ internal sealed class AddInSession : IDisposable
         {
             _analysis = new AnalysisService(_editor);
 
+            // The engine dying is not a crash and is not recoverable in this session: it is a
+            // separate process and it is not restarted. Everything else keeps working, which is
+            // precisely why it has to be said - the Problems panel reads "0 Errors" either way.
+            _analysis.EngineStopped = () => _editorSurface?.Notify(
+                "Analysis has stopped. The problems listed are from the last pass and will not "
+                + "change. Close and reopen the editor to start it again.");
+
             // The read of the projects belongs to the thread that owns them. The door is the
             // overlay's action timer, and it answers false while there is no surface to carry
             // it — the service retries rather than reading from the wrong thread.

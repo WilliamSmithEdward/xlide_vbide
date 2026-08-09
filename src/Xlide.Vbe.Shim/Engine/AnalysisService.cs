@@ -73,6 +73,18 @@ internal sealed class AnalysisService : IAsyncDisposable
     private readonly SemaphoreSlim _onePass = new(1, 1);
     private int _passWanted;
 
+    /// <summary>Said once per session, not once per keystroke.</summary>
+    private bool _reportedEngineDown;
+
+    /// <summary>Whether the engine ever connected, so a slow start is not reported as a death.</summary>
+    private bool _engineHasBeenUp;
+
+    /// <summary>
+    /// Raised the first time a pass is wanted and the engine cannot serve it. The session turns it
+    /// into something the developer can see; this class has no surface of its own.
+    /// </summary>
+    public Action? EngineStopped { get; set; }
+
     /*
      * ONE ANALYSIS PER DOCUMENT VERSION, and where it is actually enforced.
      *
@@ -220,6 +232,13 @@ internal sealed class AnalysisService : IAsyncDisposable
                     return;
                 }
 
+                // Remembered so that "analysis has stopped" is only ever said about analysis that
+                // was running. The engine starts asynchronously, and a pass asked for in the
+                // second before it connects takes the same early return as a pass asked for after
+                // it has died - which would greet a developer with "analysis has stopped" as the
+                // editor opened.
+                _engineHasBeenUp = true;
+
                 // Through the gate, but NOT through Reanalyse: that returns early unless the
                 // client already reports itself running, and the first pass is the one pass
                 // nothing else will provoke if it is skipped. The editor would sit unsquiggled
@@ -261,6 +280,24 @@ internal sealed class AnalysisService : IAsyncDisposable
             // symptom was squiggles that stopped following the code with nothing anywhere saying
             // why (2026-08-08, found by killing the engine process on purpose).
             Log.Warn("engine: a pass was asked for, but the engine is not running; nothing was analysed");
+
+            // AND SAID ON SCREEN, once.
+            //
+            // The log line above has been here since the day this was found, and a log is not
+            // where a developer looks. What they see is the Problems panel reading "0 Errors",
+            // which is exactly what it reads when the code is genuinely clean - so the one state
+            // in which the panel means nothing is indistinguishable from the state in which it
+            // means everything is fine (2026-08-09).
+            //
+            // Raised HERE rather than from a timer because this is the honest moment: something
+            // just changed and nothing analysed it. An idle editor stops polling altogether, so a
+            // timer would not have fired at all.
+            if (_engineHasBeenUp && !_reportedEngineDown)
+            {
+                _reportedEngineDown = true;
+                EngineStopped?.Invoke();
+            }
+
             return;
         }
 
