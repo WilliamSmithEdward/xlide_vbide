@@ -430,6 +430,22 @@ export class Dispatcher {
 
     private closeProject(params: { projectId: string }): null {
         this.generations.delete(params.projectId);
+
+        // THE ANALYZER'S OWN PER-DOCUMENT STATE, which nothing else here releases.
+        //
+        // It keeps an incremental parse per document and drops one when it is told that document
+        // closed - `module/didClose`, which this product has never sent, because a module's TAB
+        // closing is not the module leaving the project. So the state survived the WORKBOOK
+        // closing too: every module a session ever analysed stayed held for the life of the
+        // engine, and a developer moving between workbooks all day accumulated all of them
+        // (2026-08-09).
+        //
+        // Released here rather than by starting to send didClose, because this is the point where
+        // the documents are certainly gone, and it needs no cooperation from the shim to be right.
+        for (const module of this.seededModules.get(params.projectId) ?? []) {
+            this.analysis.handle({ kind: 'forget', docKey: `${params.projectId}/${module.moduleName}` });
+        }
+
         this.seededModules.delete(params.projectId);
 
         const prefix = `${params.projectId}\0`;

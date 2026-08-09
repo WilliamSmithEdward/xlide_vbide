@@ -183,7 +183,24 @@ Check 'a pane dragged to the right section stays there across a reload' {
       top: null,
       bottom: { kind: "group", tabs: ["problems", "immediate", "locals"], active: "problems" }
     },
-    sizes: { left: 260, right: 300, top: 200, bottom: 200 },
+    // SIZED FROM THE WINDOW, not fixed.
+    //
+    // These were 260, 300 and 200 flat, which fits the window this was written against and not
+    // the one the editor actually opens with. On a 640x409 host the two side sections claimed 560
+    // of 640 and the bottom claimed 200 of 409, leaving the editor 70 wide and 128 tall - so
+    // "the editor keeps the room the sections do not claim" was correctly reporting that it had
+    // not, and the two compass checks below had no room to drop into. Three checks failing for a
+    // window size, on a fresh session only, because a warmed one had been resized by hand
+    // (2026-08-09).
+    //
+    // A quarter each way leaves the editor half the window at any size, which is what the checks
+    // below are actually about.
+    sizes: {
+      left: Math.max(120, Math.round(innerWidth * 0.25)),
+      right: Math.max(120, Math.round(innerWidth * 0.25)),
+      top: 200,
+      bottom: Math.max(80, Math.round(innerHeight * 0.25))
+    },
     closed: []
   }));
   return "seeded";
@@ -196,11 +213,39 @@ Check 'a pane dragged to the right section stays there across a reload' {
             $state.up -and $state.dock -eq $false -and $state.watch -eq $false
         } catch { $false }
     } 25
+
+    # AND WAIT FOR THE SIZES, not just for the sections to exist.
+    #
+    # Standing and SIZED are different moments. The wait above is satisfied as soon as the right
+    # section is on screen, which on a freshly started session is before the seeded sizes have been
+    # applied — and every geometry check below then measures a layout that is still arriving. It
+    # failed the three of them on a fresh session and passed on a warmed one, which read as a
+    # product defect for an hour and was this (2026-08-09).
+    #
+    # Waits for the seeded bottom size specifically, so what follows can assert what it is actually
+    # about: given the sections have the room they asked for, the editor keeps the rest.
+    WaitFor 'the seeded sizes to be applied' {
+        try {
+            $applied = (Page 'JSON.stringify({ bottom: Math.round(document.getElementById("dock-bottom").getBoundingClientRect().height), right: Math.round(document.getElementById("dock-right").getBoundingClientRect().width) })') | ConvertFrom-Json
+            $applied.bottom -ge 60 -and $applied.right -ge 100
+        } catch { $false }
+    } 20
 }
 
 Check 'the editor keeps the room the sections do not claim' {
     # A flex column sized the editor area to its content — nothing, for a Monaco container —
     # and the bottom section swallowed the workspace (2026-08-06).
+    #
+    # It was also RIGHT once, 2026-08-09, and the seeded layout above is why: fixed sizes of 260
+    # and 300 in a 640-wide window left the editor 70 wide and 128 tall against a 200 bottom, so
+    # this check reported exactly what had happened. The sizes are proportional now.
+    #
+    # Worth the telling because of how it looked: the three geometry checks failed together on
+    # every fresh session and passed on a session that had been resized by hand, so it presented
+    # as a flake and stayed hidden through a stash, a revert to the previous commit, and a layout
+    # reset - all of which changed nothing, because none of them was the cause. What found it was
+    # printing the numbers. Verdicts alone cannot tell a real defect from a fixture that does not
+    # fit.
     $sizes = (Page 'JSON.stringify({ area: Math.round(document.getElementById("editor-area").getBoundingClientRect().height), bottom: Math.round(document.getElementById("dock-bottom").getBoundingClientRect().height) })') | ConvertFrom-Json
     $sizes.area -gt $sizes.bottom
 }

@@ -1577,18 +1577,6 @@ body.live-resize .minimap {
   font-size: 13px;
 }
 
-/* A heading inside the settings card, naming the group of rows under it. */
-.settings-section {
-  margin-top: 6px;
-  padding: 8px 16px 4px 16px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  opacity: 0.65;
-  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-}
-
 #settings-card {
   width: 460px;
   max-width: calc(100vw - 40px);

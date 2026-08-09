@@ -34,7 +34,6 @@ internal sealed class HostChrome : IDisposable
 
     private nint _small;
     private nint _big;
-    private string? _applied;
     private bool _disposed;
 
     private HostChrome(nint window, string? originalCaption, nint previousSmall, nint previousBig)
@@ -87,10 +86,10 @@ internal sealed class HostChrome : IDisposable
             Win32.SetWindowText(_window, ours);
         }
 
-        // What WE want on the window, not what was read: an unchanged reading must not mean
-        // "nothing to do" when the mode or the module has moved underneath it.
-        _applied = ours;
-
+        // The icons go on regardless of the caption. The caption is compared against what the
+        // window actually reads rather than against what was written last time, so a caption
+        // changed by anything else is corrected on the next pass - and the icons are cheap enough
+        // that a comparison to skip them would cost more than the messages do.
         if (_small != 0)
         {
             Win32.SendMessage(_window, Win32.WmSetIcon, Win32.IconSmall, _small);

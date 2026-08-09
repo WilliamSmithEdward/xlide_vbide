@@ -1086,8 +1086,6 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// renamed from `helpers` to `Helpers` has changed nothing the analyzer will complain about
     /// and everything about how its name is offered, so it is a reseed.
     /// </summary>
-    private static string LiveCaretKey(string projectId, string moduleName) => $"{projectId}\0{moduleName}";
-
     private static bool SameSources(Dictionary<string, string> seeded, EngineModule[] now)
     {
         if (seeded.Count != now.Length)
