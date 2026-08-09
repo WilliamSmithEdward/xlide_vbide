@@ -230,19 +230,9 @@ internal sealed class EngineClient : IAsyncDisposable
         CancellationToken cancellation,
         int? activeIncompleteExpressionOffset = null)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["documentKey"] = $"{projectId}/{moduleName}",
-            ["projectId"] = projectId,
-            ["generation"] = generation,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["documentKey"] = $"{projectId}/{moduleName}";
+        payload["generation"] = generation;
 
         if (activeIncompleteExpressionOffset is { } activeOffset)
         {
@@ -258,6 +248,36 @@ internal sealed class EngineClient : IAsyncDisposable
         return result.Value.Deserialize(EngineJsonContext.Default.EngineDiagnostics);
     }
 
+    /// <summary>
+    /// The payload every module-scoped call starts from: which project, which module, what kind of
+    /// module it is, and the live source when the caller has one.
+    ///
+    /// Written once because it was written twelve times. The rule that matters is the last one -
+    /// source is OMITTED rather than sent as null, because the engine reads a missing source as
+    /// "use the seeded copy" - and a rule spelled out twelve times is a rule that will one day be
+    /// spelled eleven ways.
+    /// </summary>
+    private static Dictionary<string, object> ModulePayload(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? source)
+    {
+        var payload = new Dictionary<string, object>
+        {
+            ["projectId"] = projectId,
+            ["moduleName"] = moduleName,
+            ["moduleType"] = moduleType,
+        };
+
+        if (source is not null)
+        {
+            payload["source"] = source;
+        }
+
+        return payload;
+    }
+
     /// <summary>Asks what can be typed at an offset into a module's live source.</summary>
     public async Task<EngineCompletions?> CompleteAsync(
         string projectId,
@@ -267,18 +287,8 @@ internal sealed class EngineClient : IAsyncDisposable
         int offset,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["offset"] = offset;
 
         var result = await CallAsync("textDocument/completion", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineCompletions);
@@ -293,18 +303,8 @@ internal sealed class EngineClient : IAsyncDisposable
         int offset,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["offset"] = offset;
 
         var result = await CallAsync("textDocument/hover", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineHover);
@@ -319,18 +319,8 @@ internal sealed class EngineClient : IAsyncDisposable
         int offset,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["offset"] = offset;
 
         var result = await CallAsync("textDocument/signatureHelp", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSignatureHelp);
@@ -352,11 +342,9 @@ internal sealed class EngineClient : IAsyncDisposable
         ProductSettings settings,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        var typing = new Dictionary<string, object>
         {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
             ["offset"] = offset,
             ["blockLayout"] = settings.BlockLayout,
             ["continueCommentOnNewline"] = settings.ContinueCommentOnNewline,
@@ -369,9 +357,9 @@ internal sealed class EngineClient : IAsyncDisposable
             ["indentUnit"] = new string(' ', Math.Clamp(settings.FormatIndentSize, 1, 16)),
         };
 
-        if (source is not null)
+        foreach (var (key, value) in typing)
         {
-            payload["source"] = source;
+            payload[key] = value;
         }
 
         // The typing settings on the wire, because they are the half nobody can see: the engine
@@ -398,19 +386,9 @@ internal sealed class EngineClient : IAsyncDisposable
         int end,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["start"] = start,
-            ["end"] = end,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["start"] = start;
+        payload["end"] = end;
 
         var result = await CallAsync("textDocument/codeAction", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineCodeActions);
@@ -429,14 +407,9 @@ internal sealed class EngineClient : IAsyncDisposable
         bool includeDeclaration,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-            ["includeDeclaration"] = includeDeclaration,
-        };
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["offset"] = offset;
+        payload["includeDeclaration"] = includeDeclaration;
 
         var result = await CallAsync(method, payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineLocations);
@@ -454,14 +427,9 @@ internal sealed class EngineClient : IAsyncDisposable
         string newName,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-            ["newName"] = newName,
-        };
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["offset"] = offset;
+        payload["newName"] = newName;
 
         var result = await CallAsync("textDocument/rename", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineRename);
@@ -496,17 +464,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string? source,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
 
         var result = await CallAsync("textDocument/semanticTokens", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineSemanticTokens);
@@ -524,21 +482,11 @@ internal sealed class EngineClient : IAsyncDisposable
         bool completeHeader,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["start"] = start,
-            ["end"] = end,
-            ["single"] = single,
-            ["completeHeader"] = completeHeader,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["start"] = start;
+        payload["end"] = end;
+        payload["single"] = single;
+        payload["completeHeader"] = completeHeader;
 
         var result = await CallAsync("textDocument/canonicalCase", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
@@ -553,18 +501,8 @@ internal sealed class EngineClient : IAsyncDisposable
         int offset,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-            ["offset"] = offset,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
+        payload["offset"] = offset;
 
         var result = await CallAsync("textDocument/loopSync", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineTextEdits);
@@ -581,17 +519,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string? source,
         CancellationToken cancellation)
     {
-        var payload = new Dictionary<string, object>
-        {
-            ["projectId"] = projectId,
-            ["moduleName"] = moduleName,
-            ["moduleType"] = moduleType,
-        };
-
-        if (source is not null)
-        {
-            payload["source"] = source;
-        }
+        var payload = ModulePayload(projectId, moduleName, moduleType, source);
 
         var result = await CallAsync("textDocument/outline", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineOutline);

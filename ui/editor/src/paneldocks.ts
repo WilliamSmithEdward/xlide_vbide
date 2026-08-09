@@ -20,6 +20,7 @@ import {
   firstGroup as firstGroupOf,
   indexAtMidpoints,
   prune,
+  resizeAt,
   splitBeside,
   type TreeGroup,
   type TreeNode,
@@ -876,15 +877,10 @@ export class PanelDocks {
         return;
       }
 
-      const before = node.sizes[index - 1] ?? 1;
-      const after = node.sizes[index] ?? 1;
-      const pair = before + after;
-      const minimum = Math.min(MIN_PANE / total, pair / 2);
-
-      let nextBefore = before + deltaPixels / total;
-      nextBefore = Math.max(minimum, Math.min(pair - minimum, nextBefore));
-      node.sizes[index - 1] = nextBefore;
-      node.sizes[index] = pair - nextBefore;
+      // The tree's own arithmetic, which is the tested copy. This used to be written out here
+      // and again in the editor's splitter, so the two implementations of one rule could drift
+      // while the tested one sat unused (2026-08-09).
+      node.sizes = resizeAt(node.sizes, index, deltaPixels / total, MIN_PANE / total);
 
       const cells = [...container.children].filter((child) => child.classList.contains("dock-cell")) as HTMLElement[];
       cells.forEach((cell, cellIndex) => {

@@ -26,6 +26,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
+import { resizeAt } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
 
 export interface WorkspaceHandlers {
@@ -834,16 +835,8 @@ export class Workspace {
         return;
       }
 
-      const before = node.sizes[index - 1] ?? 1;
-      const after = node.sizes[index] ?? 1;
-      const pair = before + after;
-      const minimum = Math.min(MIN_GROUP_SIZE / total, pair / 2);
-
-      let nextBefore = before + deltaPixels / total;
-      nextBefore = Math.max(minimum, Math.min(pair - minimum, nextBefore));
-
-      node.sizes[index - 1] = nextBefore;
-      node.sizes[index] = pair - nextBefore;
+      // The tree's own arithmetic, which is the tested copy; see the same call in paneldocks.
+      node.sizes = resizeAt(node.sizes, index, deltaPixels / total, MIN_GROUP_SIZE / total);
 
       const cells = [...container.children].filter((child) => child.classList.contains("group-cell")) as HTMLElement[];
       cells.forEach((cell, cellIndex) => {

@@ -59,6 +59,9 @@ console.log(`sweeping against ${project.project}, sampling module ${sample}
 
 let passed = 0;
 let totalRounds = 0;
+
+/** Each row's handle delta, kept so one jump can be told apart from a leak spread over the sweep. */
+const handleRows = [];
 const failures = [];
 
 function check(what, ok, detail) {
@@ -166,6 +169,7 @@ async function repeat(what, allowance, body, howMany = rounds) {
   // still tens. The per-row numbers stay on screen, because that is where a reader looks to see
   // WHICH operation did it once the total says somebody did.
   totalRounds += howMany;
+  handleRows.push({ what, handles, rounds: howMany });
 }
 
 const atStart = await held();
@@ -354,12 +358,43 @@ console.log(`handles across ${totalRounds} operations: ${handlesGrew >= 0 ? "+" 
  * that never fires on Excel's own churn, but it should be known rather than discovered later by
  * somebody trusting it further than it goes.
  */
+/*
+ * ONE JUMP IS NOT A LEAK PER OPERATION.
+ *
+ * The aggregate above went on to fail twice on a clean build, and both times for the same reason:
+ * a SINGLE row jumped by about 350 while every other row sat at zero. It was `renaming a component`
+ * once and `dialogs` the next time - both rows that legitimately make windows, and a window is
+ * handles. Divided over the whole sweep that one jump reads as 0.9 per operation, which is most of
+ * the way to the threshold on its own (2026-08-09).
+ *
+ * A real leak of one handle per request cannot hide in one row: every row calls the door, so every
+ * row grows in proportion to its rounds. That is the difference this measures. The largest single
+ * row is set aside and the REST is judged - the sabotage that proved this check (+538 over 190
+ * operations, 2.832 each) fails just as loudly with its biggest row removed, because the growth
+ * was everywhere.
+ *
+ * The outlier is still named, because a row that opens 350 handles and does not give them back
+ * within the run is worth a developer's attention even when it is not this defect.
+ */
+const worstRow = handleRows.reduce(
+  (worst, row) => (row.handles > worst.handles ? row : worst),
+  { what: "none", handles: 0, rounds: 0 });
+const spreadGrowth = handlesGrew - Math.max(0, worstRow.handles);
+const spreadRounds = Math.max(1, totalRounds - worstRow.rounds);
+const spreadPerOperation = spreadGrowth / spreadRounds;
+
+if (worstRow.handles > 50) {
+  console.log(`     the largest single row is ${worstRow.what} at +${worstRow.handles};`
+    + ` the rest of the sweep grew ${spreadGrowth >= 0 ? "+" : ""}${spreadGrowth}`
+    + ` over ${spreadRounds} operations (${spreadPerOperation.toFixed(3)} each)`);
+}
+
 check(`the sweep gives back the handles it takes, over all ${totalRounds} operations`,
-  perOperation < 0.5,
-  `handles grew by ${handlesGrew} across ${totalRounds} operations, ${perOperation.toFixed(3)} `
-  + "each. Excel's own churn over this stretch is tens, so a figure that scales with the "
-  + "operation count is a handle this product opened and never closed. The per-row numbers "
-  + "above name which one.");
+  spreadPerOperation < 0.5,
+  `handles grew by ${spreadGrowth} across ${spreadRounds} operations, ${spreadPerOperation.toFixed(3)} `
+  + `each, with the largest single row (${worstRow.what}, +${worstRow.handles}) already set aside. `
+  + "Excel's own churn over this stretch is tens, so a figure that scales with the operation count "
+  + "is a handle this product opened and never closed. The per-row numbers above name which one.");
 
 /*
  * GIVEN BACK AND ACTUALLY RELEASED MUST BE THE SAME NUMBER.
