@@ -592,6 +592,19 @@ internal sealed class AddInSession : IDisposable
         {
             var status = StatusFrom(Text(item, "status"));
             var payload = Text(item, "leftRawCode");
+
+            // AN UNCHANGED ROW ARRIVES WITHOUT ITS COMPARISON, AND IS DRAWN FROM ITS OWN TEXT.
+            //
+            // The engine stops sending line-by-line agreement for a row whose two sides are equal,
+            // because that is the whole cost of a plan: 163,000 comparison entries for a project of
+            // 81,795 lines, 1,417ms of a 1,710ms plan in the pipe and the JSON either side of it.
+            //
+            // What is written here is the line that would have survived the condensing anyway, from
+            // the same method the built-in planner uses, so an unchanged row is the SAME object
+            // whichever planner answered. Anything with a real difference still arrives drawn by
+            // their planner, because that picture is of a decision and the decisions are theirs.
+            var unchanged = status == SyncStatus.Unchanged;
+
             rows.Add(new SyncItem
             {
                 Id = Text(item, "id"),
@@ -610,8 +623,12 @@ internal sealed class AddInSession : IDisposable
                 CannotBeCreated = Flag(item, "unsupportedDirectCreation"),
                 LeftTitle = Text(item, "leftTitle"),
                 RightTitle = Text(item, "rightTitle"),
-                Diff = DiffFrom(item, "diff"),
-                DiffWithHeaders = DiffFrom(item, "diffWithHeaders"),
+                Diff = unchanged
+                    ? [.. ModuleSync.Identical(ModuleSync.CodeWithoutHeader(payload))]
+                    : DiffFrom(item, "diff"),
+                DiffWithHeaders = unchanged
+                    ? [.. ModuleSync.Identical(payload)]
+                    : DiffFrom(item, "diffWithHeaders"),
                 PayloadSource = payload,
             });
         }
@@ -9816,7 +9833,10 @@ internal sealed class AddInSession : IDisposable
             using var pane = FindCodePane(component, projectId);
             if (pane is null)
             {
-                return;
+                Log.Warn($"modules: nothing named {component} to show"
+                    + (projectDisplay is null ? string.Empty : $" in {projectDisplay}"));
+                return $"no module named {component}"
+                    + (projectDisplay is null ? string.Empty : $" in {projectDisplay}");
             }
 
             pane.Invoke("Show");
@@ -9840,10 +9860,12 @@ internal sealed class AddInSession : IDisposable
             // Activating the native pane moved keyboard focus onto it, and the developer is not
             // looking at it. Without this, the shortcut that switches module works exactly once.
             _editorSurface?.Focus();
+            return null;
         }
         catch (Exception ex)
         {
             Log.Error($"modules: {component} could not be shown", ex);
+            return $"{component} could not be shown: {ex.Message}";
         }
     }
 

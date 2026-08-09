@@ -808,6 +808,29 @@ Capped, the same plan is 0.31MB. The dialog draws the first and offers the secon
 tick box, because nobody edits a header but it is exactly what decides whether an exported file
 comes back as the same kind of module.
 
+**A row with nothing to show does not draw itself at all.** Both planners stopped comparing a
+row whose two sides are known to agree, a pipe apart and for the same reason: the status comes
+from a string equality, never from the comparison, so the screenful of agreement was only ever
+going to condense back to one line. The built-in planner skips the comparison; the engine stops
+sending it and the shim writes the surviving line from the row's own text, using the same
+method, so an unchanged row is the same object whichever planner answered.
+
+Measured on the same project of 81,795 lines, and the second plan is the one a developer
+actually waits for, because the first thing anybody does is export:
+
+| | built in | shared |
+| --- | --- | --- |
+| a first export, every row a new file | 241ms | 1,724ms |
+| planning again, every row unchanged | 249ms | **689ms**, was about 1,700ms |
+
+The 163,000 comparison entries were 1,417ms of a 1,710ms plan, in the pipe and the two JSON
+passes either side of it. What is left of the shared planner's 440ms is the module sources
+going out and `leftRawCode` coming back, and that stays: it is what an apply writes, and it has
+to be their bytes for the two products to write the same file.
+
+A first export is unchanged at 1.7s, on purpose. Those rows have real differences to draw and
+their planner is the one that draws them.
+
 ### What the statuses mean
 
 | status | export | import |

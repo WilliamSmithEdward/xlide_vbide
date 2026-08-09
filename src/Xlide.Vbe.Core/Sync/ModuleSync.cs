@@ -548,8 +548,12 @@ public static class ModuleSync
     /// string equality - so nothing about what the row does changes (2026-08-09).
     ///
     /// Measured on a project of 81,795 lines already in sync: 414ms of planning became 5ms.
+    ///
+    /// Public because the SHARED planner's rows want the same treatment for the same reason, one
+    /// pipe further out. It stops drawing an unchanged row line by line and this writes the line
+    /// that would have survived, so both planners' unchanged rows are the same object.
     /// </summary>
-    private static IReadOnlyList<SyncDiffLine> Identical(string text)
+    public static IReadOnlyList<SyncDiffLine> Identical(string text)
     {
         var lines = text.Length == 0 ? 0 : NormaliseEol(text).Split('\n').Length;
         return lines == 0 ? [] : [GapOf(lines)];

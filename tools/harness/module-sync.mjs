@@ -120,6 +120,22 @@ try {
   const again = await api.syncPlan("export", { folder });
   check("exporting twice changes nothing the second time", again.items.every((i) => i.status === "unchanged"));
 
+  // AN UNCHANGED ROW IS DRAWN THE SAME WAY BY EITHER PLANNER, AND IS ONE LINE.
+  //
+  // Both stopped comparing a row whose two sides are known to agree, for the same reason and a
+  // pipe apart: the built-in one skipped the comparison (414ms of planning became 5ms) and the
+  // engine stopped sending it (1,417ms of a 1,710ms plan). Both write the one line the condensing
+  // would have left, so the row is the same object whichever answered.
+  //
+  // Checked here because nothing else looks at a comparison at all, and this suite runs once per
+  // planner - so the pair of runs is what holds the two together. Without it the shared planner
+  // could go back to shipping 163,000 comparison entries, or stop drawing changed rows entirely,
+  // and every other check would still pass (2026-08-09).
+  const drawn = again.items[0]?.diff ?? [];
+  check("an unchanged row draws one line, not its whole text", drawn.length === 1);
+  check("and that line says how many lines agreed", drawn[0]?.kind, "gap");
+  check("and counts them", /^[\d,]+ identical lines?$/.test(drawn[0]?.left ?? ""));
+
   // ---------------------------------------------------------------------------------------
   console.log("\n2. an import reads it back, including modules the project does not have");
 
