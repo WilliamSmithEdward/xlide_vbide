@@ -685,6 +685,15 @@ internal sealed class AddInSession : IDisposable
         return read;
     }
 
+    /// <summary>
+    /// Their status word as ours. A word we do not know falls to Unchanged, and SAYS SO.
+    ///
+    /// Their vocabulary is seven words and this maps all seven, so the fallback is unreachable
+    /// today. It is reachable the moment they add an eighth, and the failure would be the quietest
+    /// kind there is: a row that means to do something reads as "already the same", is not ticked,
+    /// and the developer is told their project and their folder agree. The planner is imported from
+    /// a checkout that moves on its own, which is exactly the situation this cannot be silent in.
+    /// </summary>
     private static SyncStatus StatusFrom(string status) => status switch
     {
         "will-create" => SyncStatus.WillCreate,
@@ -693,8 +702,16 @@ internal sealed class AddInSession : IDisposable
         "will-remove" => SyncStatus.WillRemove,
         "skipping-import" => SyncStatus.SkippingImport,
         "read-error" => SyncStatus.ReadError,
-        _ => SyncStatus.Unchanged,
+        "unchanged" => SyncStatus.Unchanged,
+        _ => UnknownStatus(status),
     };
+
+    private static SyncStatus UnknownStatus(string status)
+    {
+        Log.Warn($"sync: the shared planner said '{status}', which this does not know."
+            + " The row is being read as unchanged, which may not be what it means.");
+        return SyncStatus.Unchanged;
+    }
 
     private static string Text(JsonElement holder, string name, string fallback = "") =>
         holder.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
