@@ -24,6 +24,9 @@ let failed = 0;
 // two: the choice decides who works out what an import would do, never who does it or what the
 // answer means. Pass "builtIn" to check the other one; the gate runs both.
 const planner = process.argv[2] === "builtIn" ? "builtIn" : "xlide";
+// Put back at the end. A suite that changes a developer's setting and walks away leaves them on
+// whichever planner ran last, which is a surprise the next time they export.
+const plannerWas = (await api.settings()).syncEngine;
 await api.settings({ syncEngine: planner });
 const chosen = (await api.settings()).syncEngine;
 if (chosen !== planner) {
@@ -72,6 +75,12 @@ const cleanUp = async () => {
   }
 
   rmSync(folder, { recursive: true, force: true });
+
+  try {
+    await api.settings({ syncEngine: plannerWas });
+  } catch (error) {
+    console.log(`     WARNING: the planner setting was left on ${planner} (${error.message})`);
+  }
 };
 
 try {
