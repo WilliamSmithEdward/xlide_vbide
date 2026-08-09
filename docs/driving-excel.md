@@ -188,7 +188,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
-| `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
+| `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched |

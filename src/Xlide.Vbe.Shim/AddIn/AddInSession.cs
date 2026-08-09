@@ -3686,9 +3686,15 @@ internal sealed class AddInSession : IDisposable
                         // why every defect in this class had to be found by hand. A stress walk
                         // seeded with both workbooks' Helpers silently held only one of them and
                         // passed its label checks vacuously (2026-08-07).
-                        ShowModule(paneModule, DisplayFromProjectId(paneOwner));
-                        return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                        // And its answer is the show's answer: opening a module that is not there
+                        // replied ok, which is the same lie the write route told about a module
+                        // that is not there (2026-08-09).
+                        var showed = ShowModule(paneModule, DisplayFromProjectId(paneOwner));
+                        return showed is null
+                            ? System.Text.Json.JsonSerializer.Serialize(
+                                new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply)
+                            : System.Text.Json.JsonSerializer.Serialize(
+                                new DebugErrorReply(showed), DebugJsonContext.Default.DebugErrorReply);
 
                     case "close":
                     {
@@ -4155,7 +4161,15 @@ internal sealed class AddInSession : IDisposable
         _frameSubclass ??= FrameSubclass.Install(host, PlaceSurfaceFast);
 
         _editorSurface.KeyPressed = OnSurfaceKey;
-        _editorSurface.ModuleRequested = ShowModule;
+        // The page asked for a module that is gone: say so on the surface rather than leaving the
+        // developer looking at the module they were already on, wondering whether the click landed.
+        _editorSurface.ModuleRequested = (component, project) =>
+        {
+            if (ShowModule(component, project) is { } missing)
+            {
+                _editorSurface?.Notify(missing);
+            }
+        };
         _editorSurface.NavigateRequested = GoTo;
         _editorSurface.CommandRequested = RunCommand;
         // The document names its workbook by display name; the write path resolves that to the
@@ -9782,7 +9796,14 @@ internal sealed class AddInSession : IDisposable
     /// run and debug commands act on it; the surface matters because it is what the developer
     /// sees; neither is left to depend on the editor choosing to move a window.
     /// </summary>
-    private void ShowModule(string component, string? projectDisplay = null)
+    /// <summary>
+    /// Null when the module is on screen. Anything else is why it is not.
+    ///
+    /// A name nothing answers to used to return here in silence, and the route above it replied ok
+    /// to the caller, so asking for a module that is not there and asking for one that is looked
+    /// identical from outside. The same shape as the write route, found the same afternoon.
+    /// </summary>
+    private string? ShowModule(string component, string? projectDisplay = null)
     {
         try
         {

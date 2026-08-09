@@ -186,6 +186,23 @@ Check 'a line of exactly 1,022 characters still writes' {
     ($back -split "`r`n" | Measure-Object -Maximum -Property Length).Maximum -eq 1022
 }
 
+# The same lie, told by the route next door. Opening a module that is not there did nothing and
+# answered exactly like opening one that is: `ran: true`. A caller could not tell an open that
+# landed from an open that found nothing, which for the bridge this door is meant to become is the
+# difference between a working editor and a silent one (2026-08-09).
+Check 'opening a module that is not there is reported, not reported ok' {
+    $shown = (Invoke-RestMethod "$api/state" -TimeoutSec 8).module
+
+    $reported = $false
+    try {
+        $answer = Invoke-RestMethod "$api/pane?action=open&module=NoSuchModuleHere" -Method Post -TimeoutSec 10
+        $reported = [bool] $answer.error
+    } catch { $reported = $true }
+
+    # And it did not move the developer somewhere else on the way to failing.
+    $reported -and ((Invoke-RestMethod "$api/state" -TimeoutSec 8).module -eq $shown)
+}
+
 Check 'a write to a module that is not there is reported, not reported ok' {
     try {
         $answer = Invoke-RestMethod "$api/module?name=NoSuchModuleHere" -Method Post `
