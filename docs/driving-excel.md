@@ -178,7 +178,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
-| `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside |
+| `component` | `component(action, {kind, name, newName, project})` | add, rename, remove — what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
@@ -844,6 +844,7 @@ Building a fixture through the door:
 
 ```js
 await api.component("add", { kind: 1, name: "Helpers" });   // 1 standard, 2 class, 3 form
+await api.component("add", { kind: "class", name: "Account" });  // the words work too
 await api.writeModule("Helpers", source);
 …
 await api.component("rename", { name: "Helpers", newName: "Aides" });

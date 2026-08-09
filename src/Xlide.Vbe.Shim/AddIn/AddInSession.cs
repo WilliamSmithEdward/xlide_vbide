@@ -2826,14 +2826,31 @@ internal sealed class AddInSession : IDisposable
                     {
                         case "add":
                         {
-                            // 1 standard, 2 class, 3 form — the VBE's own numbering.
-                            var kind = request.Query.TryGetValue("kind", out var kindText)
-                                && int.TryParse(kindText, out var parsedKind) ? parsedKind : 1;
+                            // 1 standard, 2 class, 3 form, the VBE's own numbering, and the
+                            // words for them as well.
+                            //
+                            // The words matter because this only parsed an int, and anything
+                            // else fell through to the default: "kind=class" handed back a
+                            // STANDARD module and still answered ok, so a caller asking for a
+                            // class got one that could not hold a Friend member, and the
+                            // analyzer was right to complain about it. Nothing said no. An
+                            // unparseable kind is now refused rather than guessed at.
+                            request.Query.TryGetValue("kind", out var kindText);
+                            var kind = (kindText ?? string.Empty).Trim().ToLowerInvariant() switch
+                            {
+                                "" => 1,
+                                "1" or "module" or "standard" => 1,
+                                "2" or "class" => 2,
+                                "3" or "form" or "userform" => 3,
+                                _ => 0,
+                            };
 
-                            if (kind is not (1 or 2 or 3))
+                            if (kind == 0)
                             {
                                 return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply($"kind {kind} is not 1, 2 or 3"),
+                                    new DebugErrorReply(
+                                        $"kind '{kindText}' is not one of 1/module/standard, "
+                                        + "2/class, 3/form"),
                                     DebugJsonContext.Default.DebugErrorReply);
                             }
 

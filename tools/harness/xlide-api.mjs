@@ -394,8 +394,14 @@ function clientFor(entry) {
      * because the host hands it the VBE. So a fixture can be built with the setting OFF.
      *
      *   await api.component("add", { kind: 1, name: "Helpers" });
+     *   await api.component("add", { kind: "class", name: "Account" });
      *   await api.writeModule("Helpers", source);
      *   await api.component("remove", { name: "Helpers" });
+     *
+     * `kind` is 1 standard, 2 class, 3 form, or the word for one: "module"/"standard",
+     * "class", "form"/"userform". A kind it cannot read is refused rather than defaulted —
+     * asking for "class" once handed back a STANDARD module and still said ok, which shows
+     * up much later as an analyzer complaining that a Friend member is in the wrong module.
      *
      * `name` comes back as the component actually ended up named, not as it was asked for: the
      * editor normalises what it dislikes, and refuses some outright — `Circle` belongs to the

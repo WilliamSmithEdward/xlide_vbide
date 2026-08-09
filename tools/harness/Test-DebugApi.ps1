@@ -90,6 +90,28 @@ Check 'module reads through the session reader' {
     (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text.Length -gt 0
 }
 
+# A KIND ASKED FOR BY NAME IS THE KIND YOU GET.
+#
+# `kind` was parsed as an int and nothing else, so `kind=class` failed to parse, fell through
+# to the default, and added a STANDARD module while still answering ok. The caller had no way
+# to tell: it surfaced much later as the analyzer objecting that a Friend member was in a
+# module that cannot hold one, which is a true finding about a fixture that was built wrong.
+# `kind=module` above was equally unparsed and only looked right because 1 is the default
+# (2026-08-09).
+Check 'a component kind given as a word is honoured, not defaulted' {
+    Invoke-RestMethod "$api/component?action=add&kind=class&name=KindProbe" -Method Post -TimeoutSec 10 | Out-Null
+    Start-Sleep -Milliseconds 1200
+    $made = (Invoke-RestMethod "$api/project" -TimeoutSec 8).components | Where-Object { $_.name -eq 'KindProbe' }
+    Invoke-RestMethod "$api/component?action=remove&name=KindProbe" -Method Post -TimeoutSec 10 | Out-Null
+    $made.kind -eq 'class'
+}
+
+Check 'a kind it cannot read is refused rather than guessed at' {
+    $answer = Invoke-RestMethod "$api/component?action=add&kind=widget&name=NeverMade" -Method Post -TimeoutSec 10
+    $gone = -not ((Invoke-RestMethod "$api/project" -TimeoutSec 8).components | Where-Object { $_.name -eq 'NeverMade' })
+    $answer.error -and $gone
+}
+
 # The round trip: write a runner, break inside it, read locals, reset. This is the shape
 # every debugger-milestone regression will take.
 $runner = @'
