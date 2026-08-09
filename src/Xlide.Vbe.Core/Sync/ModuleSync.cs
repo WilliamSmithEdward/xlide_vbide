@@ -294,18 +294,29 @@ public static class ModuleSync
         line.TrimStart().StartsWith("Attribute ", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// A file also carries the VERSION and BEGIN/END block ahead of the attributes. It is part of
-    /// the round trip and none of it is code, so the shown comparison drops it along with the
-    /// attributes.
+    /// True for a line of the block a file carries ahead of its code: VERSION, the BEGIN/END
+    /// block, and the designer properties a UserForm keeps inside it.
+    ///
+    /// None of it is code and none of it is edited, so the shown comparison drops it along with
+    /// the attributes, and the shim reads the same lines back off an export to learn what kind of
+    /// module it is looking at. One predicate for both: they were written separately, they
+    /// disagreed about the UserForm properties, and the half that draws the diff was the half
+    /// without them - so a form's comparison opened with a screenful of designer noise.
+    ///
+    /// Only ever consulted BEFORE the first line of code, so a Caption or a Client inside a
+    /// procedure is code like anything else.
     /// </summary>
-    private static bool IsHeaderPreamble(string line)
+    public static bool IsHeaderPreamble(string line)
     {
         var trimmed = line.TrimStart();
-        return trimmed.StartsWith("VERSION ", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("BEGIN", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("BEGIN ", StringComparison.OrdinalIgnoreCase)
+        return trimmed.StartsWith("VERSION", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase)
             || trimmed.Equals("END", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("MultiUse ", StringComparison.OrdinalIgnoreCase);
+            || trimmed.StartsWith("MultiUse", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("Caption", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("Client", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("OleObjectBlob", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("StartUpPosition", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Line endings differ between the code store and a file; neither side means anything by it.</summary>

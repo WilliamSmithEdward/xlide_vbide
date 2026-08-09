@@ -132,6 +132,54 @@ public class ModuleSyncTests
     }
 
     [Fact]
+    public void AFormsDesignerBlockIsNotShownAsCode()
+    {
+        // A UserForm's file opens with its designer: a BEGIN block of Caption, ClientHeight,
+        // StartUpPosition and the rest. None of it is code and none of it is editable here, and it
+        // used to be drawn as the first screenful of a form's comparison, because the predicate
+        // that hides it and the predicate the shim reads headers with were written separately and
+        // only one of them knew about designer properties.
+        const string source = """
+            VERSION 5.00
+            Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} FrmMain
+               Caption         =   "Main"
+               ClientHeight    =   3000
+               StartUpPosition =   1
+            End
+            Attribute VB_Name = "FrmMain"
+            Option Explicit
+
+            Private Sub UserForm_Initialize()
+            End Sub
+            """;
+
+        var code = ModuleSync.CodeWithoutHeader(source);
+
+        Assert.StartsWith("Option Explicit", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Caption", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("StartUpPosition", code, StringComparison.Ordinal);
+        Assert.Contains("UserForm_Initialize", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CodeThatMerelyBeginsLikeADesignerLineIsStillCode()
+    {
+        // The designer words mean something only before the first line of code. A procedure that
+        // assigns a Caption is a procedure.
+        const string source = """
+            Option Explicit
+
+            Sub Go()
+                Caption = "hello"
+            End Sub
+            """;
+
+        var code = ModuleSync.CodeWithoutHeader(source);
+
+        Assert.Contains("    Caption = \"hello\"", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AProcedureAttributeIsHiddenWhereverItSits()
     {
         var source = "Sub Go()\r\nAttribute Go.VB_Description = \"does it\"\r\n    Beep\r\nEnd Sub\r\n";

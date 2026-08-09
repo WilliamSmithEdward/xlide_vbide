@@ -150,7 +150,29 @@ Check 'caret lands inside the procedure to be run' {
     # Run acts on the caret, and the host copies the SURFACE's caret into the native pane
     # before every command, so scrolling is not aiming: with the caret on line 1 the editor
     # opens its Macros dialog and waits for a person (2026-08-06). Line 16 is inside RunTotal.
-    (Invoke-RestMethod "$api/caret?module=CleanModule&line=16" -Method Post -TimeoutSec 8).ran
+    #
+    # ASKED, THEN CONFIRMED. `ran` says the command was carried out, not that the caret ended up
+    # where it was sent - and on a freshly started session it sometimes does not, because the
+    # module was written moments earlier and the pane is still catching up. The next check then
+    # runs with the caret on line 1, the editor raises its Macros dialog and waits for a person,
+    # no breakpoint is ever reached, and three checks fail naming none of that. It read as a
+    # product defect twice before the modal guard's own log gave it away (2026-08-09).
+    $landed = $false
+    $tries = 0
+    while (-not $landed -and $tries -lt 10) {
+        Invoke-RestMethod "$api/caret?module=CleanModule&line=16" -Method Post -TimeoutSec 8 | Out-Null
+        Start-Sleep -Milliseconds 300
+        $native = Invoke-RestMethod "$api/native" -TimeoutSec 8
+        $landed = $native.activeModule -eq 'CleanModule' -and $native.caretLine -ge 14 -and $native.caretLine -le 17
+        $tries++
+    }
+
+    if (-not $landed) {
+        $where = Invoke-RestMethod "$api/native" -TimeoutSec 8
+        Write-Output ("     the caret is on {0}:{1}, not inside RunTotal; a run from there opens the Macros dialog" -f $where.activeModule, $where.caretLine)
+    }
+
+    $landed
 }
 
 $reachedBreak = $false

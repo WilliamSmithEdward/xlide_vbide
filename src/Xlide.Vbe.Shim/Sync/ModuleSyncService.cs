@@ -76,7 +76,7 @@ internal static class ModuleSyncService
                 continue;
             }
 
-            var kind = KindOf(component.GetInt32("Type"));
+            var kind = ProjectReader.TypeName(component.GetInt32("Type"));
             var body = ProjectReader.ReadSource(component) ?? string.Empty;
             modules.Add(new LiveModule(name, kind, FullSourceFor(component, name, kind, body)));
         }
@@ -214,16 +214,6 @@ internal static class ModuleSyncService
         return string.Equals(Path.GetDirectoryName(target), root, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>The kind of module, as the analyzer and the plan both name it.</summary>
-    private static string KindOf(int componentType) => componentType switch
-    {
-        1 => "standard",
-        2 => "class",
-        3 => "userform",
-        11 or 100 => "document",
-        _ => "standard",
-    };
-
     /// <summary>
     /// The header the editor would write for this module, spliced onto the body COM gave us.
     ///
@@ -273,7 +263,7 @@ internal static class ModuleSyncService
             var header = new List<string>();
             foreach (var line in lines)
             {
-                if (ModuleSync.IsAttributeLine(line) || IsPreamble(line))
+                if (ModuleSync.IsAttributeLine(line) || ModuleSync.IsHeaderPreamble(line))
                 {
                     header.Add(RewriteName(line, name));
                     continue;
@@ -307,19 +297,6 @@ internal static class ModuleSyncService
             // asked for, and that sidecar is as temporary as the file it belongs to.
             TryDelete(Path.ChangeExtension(temporary, ".frx"));
         }
-    }
-
-    private static bool IsPreamble(string line)
-    {
-        var trimmed = line.TrimStart();
-        return trimmed.StartsWith("VERSION", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("BEGIN", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Equals("END", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("MultiUse", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("Caption", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("Client", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("OleObjectBlob", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("StartUpPosition", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RewriteName(string line, string name) =>
@@ -423,7 +400,7 @@ internal static class ModuleSyncService
         var header = new List<string>();
         foreach (var line in ModuleSync.NormaliseEol(source).Split('\n'))
         {
-            if (ModuleSync.IsAttributeLine(line) || IsPreamble(line))
+            if (ModuleSync.IsAttributeLine(line) || ModuleSync.IsHeaderPreamble(line))
             {
                 header.Add(line);
                 continue;

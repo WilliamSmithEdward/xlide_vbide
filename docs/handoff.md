@@ -496,10 +496,12 @@ shedding as ports land).
 - The hidden-pane caption-match question stands (below, tab-X bullet): why the tracker
   cannot match hidden panes — cosmetic now that resync covers it.
 
-**Standing probes (tools\harness), each self-describing:** Test-CutoutHoles,
-Test-ResizeFollow, Test-CloseVbe, Test-CloseHiddenPane (PASS/FAIL), Test-GhostLocalsPanel
-(PASS/FAIL), Test-CloseConfirm (PASS/FAIL; drives the built page headless via
-close-confirm-page-probe.mjs), Probe-FloatLocals, Probe-GhostLocals, Probe-LocalsLifecycle. The page demo
+**Standing probes (tools\harness), each self-describing:** Test-ResizeFollow,
+Test-CloseVbe, Test-CloseHiddenPane (PASS/FAIL), Test-GhostLocalsPanel (PASS/FAIL),
+Test-CloseConfirm (PASS/FAIL; drives the built page headless via
+close-confirm-page-probe.mjs). The Probe-* scripts that answered how the Locals window
+feeds while hidden are gone: the answer is in the ghost readers, and Test-GhostLocalsPanel
+is the standing version of the question. The page demo
 serves via `.claude/launch.json` (npx http-server :8123) for browser-side verification —
 the demo transport answers search, settings, locals, and modules with canned data.
 
@@ -609,7 +611,7 @@ GHOST PALETTE shipped the same day: **Locals is now OURS** — the themed panel 
 fed by the native window floated, made WS_EX_LAYERED at ALPHA ZERO, click-through, and
 parked at -20000,-20000. The feed gate was never about being SEEN: a layered window
 renders into its own surface regardless of position or occlusion, so the invisible ghost
-is fed through every break and step (`Probe-GhostLocals.ps1` tracked counter 1→4 across
+is fed through every break and step (probed 2026-08-04: the counter tracked 1→4 across
 steps at alpha 0 off-screen; lesson 29). `PrepareLocalsGhost` (AddInSession) floats it via
 `LinkedWindows.Remove`, ghosts it, and attaches the once-dormant LocalsReader;
 PublishLocals pushes on the debug watch; the page's Locals tab is visible and 2555 routes
@@ -620,7 +622,7 @@ Edit element's name — panel-header polish), and external-command steps outrun 
 cadence (real steps go through our command path, which arms the fast watch). NEXT: the
 Watch window by the identical route, then Call Stack. The earlier hole-based findings
 below stand as history; the CAPTIVE PALETTE route (visible, caption-stripped, in-panel)
-remains proven (`tools\harness\Probe-FloatLocals.ps1`):
+remains proven (probed 2026-08-04):
 `window.LinkedWindowFrame.LinkedWindows.Remove(window)` UNDOCKS the Locals window through
 pure object model (its linked frame is type 11); geometry is then settable on the WINDOW
 (`.Left/.Top/.Width/.Height`, points — a 260x160-point request produced a 173x107-pixel
@@ -848,7 +850,6 @@ VS Build Tools 2026 (C++ workload), Node 24, Excel 365 x64 16.0.20228, VBA 7.1, 
 tools\dev.ps1                                  # build, test, register, verify in a real editor
 tools\dev.ps1 -Unregister                      # leave the machine clean
 tools\harness\Get-EditorScreenshot.ps1 -KeepOpen   # launch, capture at true DPI, leave running
-tools\Compare-Lexers.ps1                       # differential gate for the analyzer port
 installer\build.ps1                            # produce xlide-setup.exe
 cd ui\editor; node build.mjs                   # rebuild the surface bundle (esbuild + tsc)
 cd engine;    npm run build                    # the TS language engine sidecar

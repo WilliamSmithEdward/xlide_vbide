@@ -8771,25 +8771,40 @@ internal sealed class AddInSession : IDisposable
     private nint _localsPalette;
     private long _localsPaletteExStyle;
 
+    /// <summary>The floated Watches palette, its original extended styles kept for restoration.</summary>
+    private nint _watchPalette;
+    private long _watchPaletteExStyle;
+
+    /// <summary>The native window kinds this product ghosts, as the object model numbers them.</summary>
+    private const int WatchWindowType = 3;
+    private const int LocalsWindowType = 4;
+
     /// <summary>
-    /// Turns the native Locals window into the panel's invisible data engine: floated through
-    /// the object model, ghosted, parked off screen, and read by handle.
+    /// Turns a native panel window into an invisible data engine: floated through the object
+    /// model, ghosted, parked off screen, and read by handle.
     ///
-    /// The editor only feeds an on-screen Locals window (lesson 25) — but "on screen" turned
-    /// out to mean "has a paintable surface". A LAYERED window renders into its own surface
-    /// regardless of occlusion or position, so a floated palette with WS_EX_LAYERED at alpha
-    /// zero, parked far off the virtual screen, is fed faithfully through every break and
-    /// step while being impossible to see, click, or discover. Probed 2026-08-04: counter
-    /// tracked 1 through 4 across steps at alpha 1, alpha 0, and at -20000,-20000
-    /// (Probe-GhostLocals.ps1). The themed panel renders what the reader reads; nothing
-    /// native is ever visible.
+    /// The editor only feeds an ON-SCREEN window (lesson 25) — but "on screen" turned out to mean
+    /// "has a paintable surface". A LAYERED window renders into its own surface regardless of
+    /// occlusion or position, so a floated palette with WS_EX_LAYERED at alpha zero, parked far
+    /// off the virtual screen, is fed faithfully through every break and step while being
+    /// impossible to see, click, or discover. Probed 2026-08-04: the counter tracked 1 through 4
+    /// across steps at alpha 1, at alpha 0, and at -20000,-20000. The themed panel renders what
+    /// the reader reads; nothing native is ever visible.
     ///
-    /// Floating uses LinkedWindows.Remove on the window's own linked frame — pure object
-    /// model. If any step refuses, the ghost is skipped, and the police pass hides the
-    /// docked native window: the canvas stays pure and the panel sits idle.
+    /// Floating uses LinkedWindows.Remove on the window's own linked frame — pure object model.
+    /// If any step refuses, the ghost is skipped, and the police pass hides the docked native
+    /// window: the canvas stays pure and the panel sits idle.
+    ///
+    /// ONE ROUTINE FOR BOTH PANELS. Locals and Watches were prepared by two copies of this that
+    /// differed in a window number and a word in the log, and the copy had already lost every
+    /// comment above (2026-08-09). The reader is not created here either way: it lives on the
+    /// ghost reading thread, which starts once both palettes are prepared.
     /// </summary>
-    private void PrepareLocalsGhost()
+    private bool PrepareGhostPalette(int windowType, string name, out nint palette, out long exStyle)
     {
+        palette = 0;
+        exStyle = 0;
+
         try
         {
             using var windows = _editor.GetObject("Windows");
@@ -8798,23 +8813,23 @@ internal sealed class AddInSession : IDisposable
             for (var i = 1; i <= count; i++)
             {
                 using var window = windows!.GetItem(i);
-                if (window is null || window.GetInt32("Type") != 4)
+                if (window is null || window.GetInt32("Type") != windowType)
                 {
                     continue;
                 }
 
                 window.SetBool("Visible", true);
 
-                // Undocked; a window already floating answers Remove with an error worth
-                // nothing.
+                // Undocked; a window already floating answers Remove with an error worth nothing.
                 try
                 {
                     using var frame = window.GetObject("LinkedWindowFrame");
                     using var linked = frame?.GetObject("LinkedWindows");
                     linked?.InvokeWithObject("Remove", window);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Log.Verbose($"{name}: the palette would not undock ({ex.GetType().Name}); it may already be floating");
                 }
 
                 // Small: the reader reads the store, not the viewport, and the store does not
@@ -8826,65 +8841,66 @@ internal sealed class AddInSession : IDisposable
                     window.SetInt32("Width", 240);
                     window.SetInt32("Height", 150);
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Log.Verbose($"{name}: the palette would not be placed ({ex.GetType().Name})");
                 }
 
                 var caption = window.GetString("Caption");
-                var palette = caption is { Length: > 0 }
+                var found = caption is { Length: > 0 }
                     ? CodePaneTracker.FindTopLevelByCaption(caption)
                     : 0;
 
-                if (palette == 0)
+                if (found == 0)
                 {
-                    Log.Info("locals: the floated palette was not found; the native window stays");
-                    return;
+                    Log.Info($"{name}: the floated palette was not found; the native window stays");
+                    return false;
                 }
 
-                _localsPalette = palette;
-                _localsPaletteExStyle = Win32.GetWindowLongPtr(palette, Win32.GwlExStyle);
-                Win32.SetWindowLongPtr(palette, Win32.GwlExStyle,
-                    (nint)(_localsPaletteExStyle | Win32.WsExLayered | Win32.WsExTransparent | Win32.WsExNoActivate));
-                Win32.SetLayeredWindowAttributes(palette, 0, 0, Win32.LwaAlpha);
-                Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
+                palette = found;
+                exStyle = Win32.GetWindowLongPtr(found, Win32.GwlExStyle);
+                Win32.SetWindowLongPtr(found, Win32.GwlExStyle,
+                    (nint)(exStyle | Win32.WsExLayered | Win32.WsExTransparent | Win32.WsExNoActivate));
+                Win32.SetLayeredWindowAttributes(found, 0, 0, Win32.LwaAlpha);
+                Win32.SetWindowPos(found, 0, -20000, -20000, 0, 0,
                     Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
 
-                // The reader is not created here: it lives on the ghost reading thread, which
-                // starts once both palettes are prepared and reports its own connect result.
-                Log.Verbose($"locals: palette {palette:X} floated and ghosted");
-                return;
+                Log.Verbose($"{name}: palette {found:X} floated and ghosted");
+                return true;
             }
         }
         catch (Exception ex)
         {
-            Log.Info($"locals: the ghost could not be prepared ({ex.GetType().Name}: {ex.Message})");
+            Log.Info($"{name}: the ghost could not be prepared ({ex.GetType().Name}: {ex.Message})");
         }
+
+        return false;
     }
 
     /// <summary>
-    /// Gives the palette back to the native editor: opaque, its styles restored, on screen,
-    /// and hidden until someone asks for it. A stopped session must leave a usable window.
+    /// Gives a palette back to the native editor: opaque, its styles restored, on screen, and
+    /// hidden until someone asks for it. A stopped session must leave a usable window.
     /// </summary>
-    private void RestoreLocalsPalette()
+    private void RestoreGhostPalette(int windowType, string name, ref nint palette, long exStyle)
     {
-        if (_localsPalette == 0)
+        if (palette == 0)
         {
             return;
         }
 
         try
         {
-            Win32.SetWindowPos(_localsPalette, 0, 300, 300, 0, 0,
+            Win32.SetWindowPos(palette, 0, 300, 300, 0, 0,
                 Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
-            Win32.SetLayeredWindowAttributes(_localsPalette, 0, 255, Win32.LwaAlpha);
-            Win32.SetWindowLongPtr(_localsPalette, Win32.GwlExStyle, (nint)_localsPaletteExStyle);
+            Win32.SetLayeredWindowAttributes(palette, 0, 255, Win32.LwaAlpha);
+            Win32.SetWindowLongPtr(palette, Win32.GwlExStyle, (nint)exStyle);
 
             using var windows = _editor.GetObject("Windows");
             var count = windows?.GetInt32("Count") ?? 0;
             for (var i = 1; i <= count; i++)
             {
                 using var window = windows!.GetItem(i);
-                if (window is not null && window.GetInt32("Type") == 4)
+                if (window is not null && window.GetInt32("Type") == windowType)
                 {
                     window.SetBool("Visible", false);
                 }
@@ -8892,127 +8908,23 @@ internal sealed class AddInSession : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Info($"locals: the palette could not be restored ({ex.GetType().Name})");
+            Log.Info($"{name}: the palette could not be restored ({ex.GetType().Name})");
         }
 
-        _localsPalette = 0;
+        palette = 0;
     }
 
-    /// <summary>The floated Watches palette, its original extended styles kept for restoration.</summary>
-    private nint _watchPalette;
-    private long _watchPaletteExStyle;
+    private void PrepareLocalsGhost() =>
+        PrepareGhostPalette(LocalsWindowType, "locals", out _localsPalette, out _localsPaletteExStyle);
 
-    /// <summary>
-    /// Turns the native Watches window into the Watch panel's invisible data engine, by the
-    /// same route as the Locals ghost above (lesson 29): floated through the object model,
-    /// layered at alpha zero, parked off screen, read by handle. If any step refuses, the
-    /// ghost is skipped, and the police pass hides the docked native window.
-    /// </summary>
-    private void PrepareWatchGhost()
-    {
-        try
-        {
-            using var windows = _editor.GetObject("Windows");
-            var count = windows?.GetInt32("Count") ?? 0;
+    private void PrepareWatchGhost() =>
+        PrepareGhostPalette(WatchWindowType, "watch", out _watchPalette, out _watchPaletteExStyle);
 
-            for (var i = 1; i <= count; i++)
-            {
-                using var window = windows!.GetItem(i);
-                if (window is null || window.GetInt32("Type") != 3)
-                {
-                    continue;
-                }
+    private void RestoreLocalsPalette() =>
+        RestoreGhostPalette(LocalsWindowType, "locals", ref _localsPalette, _localsPaletteExStyle);
 
-                window.SetBool("Visible", true);
-
-                try
-                {
-                    using var frame = window.GetObject("LinkedWindowFrame");
-                    using var linked = frame?.GetObject("LinkedWindows");
-                    linked?.InvokeWithObject("Remove", window);
-                }
-                catch (Exception)
-                {
-                }
-
-                try
-                {
-                    window.SetInt32("Left", 300);
-                    window.SetInt32("Top", 300);
-                    window.SetInt32("Width", 240);
-                    window.SetInt32("Height", 150);
-                }
-                catch (Exception)
-                {
-                }
-
-                var caption = window.GetString("Caption");
-                var palette = caption is { Length: > 0 }
-                    ? CodePaneTracker.FindTopLevelByCaption(caption)
-                    : 0;
-
-                if (palette == 0)
-                {
-                    Log.Info("watch: the floated palette was not found; the native window stays");
-                    return;
-                }
-
-                _watchPalette = palette;
-                _watchPaletteExStyle = Win32.GetWindowLongPtr(palette, Win32.GwlExStyle);
-                Win32.SetWindowLongPtr(palette, Win32.GwlExStyle,
-                    (nint)(_watchPaletteExStyle | Win32.WsExLayered | Win32.WsExTransparent | Win32.WsExNoActivate));
-                Win32.SetLayeredWindowAttributes(palette, 0, 0, Win32.LwaAlpha);
-                Win32.SetWindowPos(palette, 0, -20000, -20000, 0, 0,
-                    Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
-
-                // The reader is not created here: it lives on the ghost reading thread, the
-                // same manner as the Locals ghost above.
-                Log.Verbose($"watch: palette {palette:X} floated and ghosted");
-                return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"watch: the ghost could not be prepared ({ex.GetType().Name}: {ex.Message})");
-        }
-    }
-
-    /// <summary>
-    /// Gives the Watches palette back to the native editor: opaque, its styles restored, on
-    /// screen, and hidden until someone asks for it.
-    /// </summary>
-    private void RestoreWatchPalette()
-    {
-        if (_watchPalette == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            Win32.SetWindowPos(_watchPalette, 0, 300, 300, 0, 0,
-                Win32.SwpNoSize | Win32.SwpNoZOrder | Win32.SwpNoActivate);
-            Win32.SetLayeredWindowAttributes(_watchPalette, 0, 255, Win32.LwaAlpha);
-            Win32.SetWindowLongPtr(_watchPalette, Win32.GwlExStyle, (nint)_watchPaletteExStyle);
-
-            using var windows = _editor.GetObject("Windows");
-            var count = windows?.GetInt32("Count") ?? 0;
-            for (var i = 1; i <= count; i++)
-            {
-                using var window = windows!.GetItem(i);
-                if (window is not null && window.GetInt32("Type") == 3)
-                {
-                    window.SetBool("Visible", false);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Info($"watch: the palette could not be restored ({ex.GetType().Name})");
-        }
-
-        _watchPalette = 0;
-    }
+    private void RestoreWatchPalette() =>
+        RestoreGhostPalette(WatchWindowType, "watch", ref _watchPalette, _watchPaletteExStyle);
 
     /// <summary>
     /// Hides every docked native toolbar, which the surface's toolbar and menus replace.

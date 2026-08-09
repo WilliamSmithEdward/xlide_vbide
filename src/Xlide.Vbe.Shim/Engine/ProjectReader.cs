@@ -26,7 +26,7 @@ internal static class ProjectReader
     /// distinction matters: a document module has an implicit instance and different rules apply to
     /// it than to a class the user news up.
     /// </summary>
-    private static string TypeName(int componentType) => componentType switch
+    public static string TypeName(int componentType) => componentType switch
     {
         1 => "standard",
         2 => "class",

@@ -106,7 +106,6 @@ the editor surface in about a second without restarting Excel.
 | --- | --- |
 | `src/Xlide.Vbe.Shim` | The native add-in: editor integration, tool windows, browser surface |
 | `src/Xlide.Vbe.Core` | Host-independent logic for the add-in, with no COM or Win32 |
-| `src/Xlide.Vba.Analysis` | The analyzer as it is ported to C# |
 | `engine/` | The language engine sidecar |
 | `ui/` | The editor surface rendered in the browser control |
 | `installer/` | The single-file installer |

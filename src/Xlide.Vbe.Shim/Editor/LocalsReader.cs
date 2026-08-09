@@ -17,7 +17,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// hidden never fills, covered fills unreliably and never on a step), and a layered window
 /// renders into its own surface regardless of position or occlusion, so the ghost is fed
 /// faithfully through every break and step while being impossible to see. Probed 2026-08-04:
-/// counter tracked 1 through 4 across steps at alpha 0, off screen (Probe-GhostLocals.ps1).
+/// counter tracked 1 through 4 across steps at alpha 0, off screen (probed 2026-08-04).
 ///
 /// Everything here — creation, connection, every read — runs on the ghost reading thread, never
 /// the host's: the rows are served by an accessibility provider inside this process, and a

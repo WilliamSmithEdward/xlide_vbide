@@ -24,7 +24,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const pageRoot = path.resolve(here, "..");
 const repoRoot = path.resolve(pageRoot, "../..");
 
-// The same neighbouring-checkout convention the other cross-repo tool uses (tools/Compare-Lexers.ps1).
+// The neighbouring-checkout convention this repository uses for anything shared with the spec.
 const specRepo = path.resolve(repoRoot, "..", "xlide_vscode");
 const specRoot = path.join(specRepo, "src");
 

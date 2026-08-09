@@ -39,21 +39,6 @@ await esbuild.build({
     logLevel: 'info',
 });
 
-// The reference lexer, exposed as a command so its output can be compared with the ported one over
-// a corpus. Built alongside because it shares this toolchain; it is not part of the product and
-// leaves when the port is finished.
-await esbuild.build({
-    entryPoints: [join(here, 'src', 'lexdump.ts')],
-    bundle: true,
-    format: 'cjs',
-    platform: 'node',
-    target: 'node22',
-    minify: false,
-    sourcemap: false,
-    outfile: join(outDir, 'lexdump.cjs'),
-    logLevel: 'warning',
-});
-
 const bundleSize = statSync(bundlePath).size;
 console.log(`bundle ${bundlePath} (${(bundleSize / 1024 / 1024).toFixed(2)} MB)`);
 
