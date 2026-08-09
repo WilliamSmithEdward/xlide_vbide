@@ -874,7 +874,7 @@ time. Do not write a test that asks for one planner without asserting `plan.plan
 did, and passed 31 checks against the built-in planner while asking for the shared one, because the
 modules could not be serialised to the engine and nothing said so.
 
-### Three things worth knowing before driving it
+### Some things worth knowing before driving it
 
 **A document module and a UserForm cannot be created from a file.** A sheet belongs to its
 workbook and a form's designer is not in its `.cls`. Those rows come back `skipping-import` with a
@@ -888,6 +888,14 @@ both directions, and import true-up only ever deletes standard and class modules
 project: bring in a class named `Tally` and a local variable spelled `tally` in some other module
 becomes `Tally`. The next export will honestly report that module as changed. This is the editor's
 doing, not this product's, and it is a good reason to look at an export plan after an import.
+
+**An exported file is never half written.** The content goes to a `.<name>.xlide-partial` file
+beside its destination and is then moved over the top, which the file system does as one step,
+so nothing reading the folder can catch a truncated module: not the companion editor watching
+it, not a build, not another Excel importing from the same folder. That last one is the case
+this side has no lock for, and it is the reason the write is shaped this way rather than a
+lock being added. A `.xlide-partial` left behind is junk from a process that died mid-write; it
+is never read as a module, because it is neither a `.bas` nor a `.cls`.
 
 **`action=browse` blocks.** It raises the system's folder chooser, which is what the dialog's
 Browse button uses, and it does not answer until somebody closes it. A harness sets the folder with

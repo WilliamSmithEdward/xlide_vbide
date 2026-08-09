@@ -335,6 +335,29 @@ internal static class ModuleSyncService
             ? $"Attribute VB_Name = \"{name}\""
             : line;
 
+    /// <summary>
+    /// Writes an exported file so it is either the old one or the new one, never half of either.
+    ///
+    /// WriteAllText truncates and then fills, so between those two there is a file on disk with
+    /// the developer's name on it and nothing in it. Anything reading the folder in that window
+    /// reads a truncated module: the companion editor watching the folder, a build, a git status,
+    /// another Excel importing from the same folder - which is the case this side has no lock for.
+    /// A crash or a full disk leaves the same wreckage permanently.
+    ///
+    /// So the content goes to a temporary file beside it and is then moved over the top, which the
+    /// file system does as one step.
+    ///
+    /// Move rather than Replace, though Replace would keep the destination's attributes. Replace
+    /// is the fussier call - it fails outright on some network and non-NTFS volumes - and an
+    /// export folder is exactly the kind of place that is sometimes a share. A moved-in file
+    /// inherits the folder's permissions, which is what every file this writes for the first time
+    /// already gets.
+    ///
+    /// The temporary file is named after the one it will become, so a stray left by a process that
+    /// died mid-write is obviously ours and obviously junk. It sits in the SAME folder on purpose:
+    /// an atomic move needs one volume, and the system temp folder is regularly a different one.
+    /// Nothing reads it as a module either way, because it is neither a .bas nor a .cls.
+    /// </summary>
     private static void WriteFile(string folder, string fileName, string source)
     {
         if (!IsInsideFolder(folder, fileName))
@@ -343,7 +366,20 @@ internal static class ModuleSyncService
         }
 
         Directory.CreateDirectory(folder);
-        File.WriteAllText(Path.Combine(folder, fileName), source, FileEncoding);
+
+        var path = Path.Combine(folder, fileName);
+        var partial = Path.Combine(folder, $".{fileName}.xlide-partial");
+
+        try
+        {
+            File.WriteAllText(partial, source, FileEncoding);
+            File.Move(partial, path, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(partial);
+            throw;
+        }
     }
 
     private static bool DeleteFile(string folder, string fileName)

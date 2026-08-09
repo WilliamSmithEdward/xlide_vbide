@@ -111,6 +111,13 @@ try {
   const written = readdirSync(folder).sort();
   check("the files are on disk", written.length === plan.items.length);
 
+  // A file is written beside its destination and then moved over it, so nothing ever reads a
+  // module that is half written - not the companion editor watching the folder, not a build, not
+  // another Excel importing from the same folder, which is the case this side has no lock for.
+  // The count above would not notice a leftover, because it counts what it expected to find.
+  check("and nothing half written was left beside them",
+    written.every((name) => !name.endsWith(".xlide-partial")), true);
+
   // The header is what makes a file come back as the same KIND of module. Without it a sheet
   // would import as an ordinary class, which is a silent corruption of the workbook.
   const sheet = readFileSync(join(folder, "ThisWorkbook.cls"), "utf8");
