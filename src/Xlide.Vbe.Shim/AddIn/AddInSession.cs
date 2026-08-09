@@ -4014,9 +4014,18 @@ internal sealed class AddInSession : IDisposable
                     // a host rewrite carries: the baseline bookkeeping and the engine's
                     // live-copy correction (the stale-problems lesson). This is also the
                     // bridge's first limb: another editor pushing code into a running VBE.
-                    WriteModule(moduleName, request.Body, projectId, hostRewrite: true);
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                    //
+                    // AND ITS ANSWER IS THE WRITER'S ANSWER. This replied ok unconditionally, so a
+                    // write the editor refused - which can cost the module its previous text - was
+                    // indistinguishable here from one that landed. The fixture builder works around
+                    // it by reading the line count back, which is the right instinct and should not
+                    // have been necessary (2026-08-09).
+                    var complaint = WriteModule(moduleName, request.Body, projectId, hostRewrite: true);
+                    return complaint is null
+                        ? System.Text.Json.JsonSerializer.Serialize(
+                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply)
+                        : System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply(complaint), DebugJsonContext.Default.DebugErrorReply);
                 }
 
                 // live=1 reads the SURFACE's copy rather than the workbook's.
@@ -4141,8 +4150,18 @@ internal sealed class AddInSession : IDisposable
         _editorSurface.CommandRequested = RunCommand;
         // The document names its workbook by display name; the write path resolves that to the
         // project identity so a same-named module in another workbook is never the one written.
+        //
+        // A REFUSED WRITE IS SAID OUT LOUD HERE. This is the developer's own typing on its way to
+        // the module, and a write the editor will not take means the text on screen is not the text
+        // that will run, compile or save. Silence let them go on typing into a surface that had
+        // stopped being the truth.
         _editorSurface.TextChanged = (component, project, text) =>
-            WriteModule(component, text, ProjectIdFromDisplay(project));
+        {
+            if (WriteModule(component, text, ProjectIdFromDisplay(project)) is { } refused)
+            {
+                _editorSurface?.Notify(refused);
+            }
+        };
         _editorSurface.BreakpointToggleRequested = ToggleBreakpoint;
         _editorSurface.LinesShifted = OnLinesShifted;
         _editorSurface.SearchRequested = OnSearchRequested;
@@ -4852,14 +4871,24 @@ internal sealed class AddInSession : IDisposable
     ///
     /// The whole module is replaced rather than the changed range applied. The host's own line
     /// operations are one call per line and its line numbers shift under each other as they are
-    /// applied, so replacing once is both faster and the only version whose failure mode is a
-    /// module unchanged rather than a module half written.
+    /// applied, so replacing once is faster and shifts nothing under anything.
+    ///
+    /// A REPLACE IS TWO CALLS, AND THE EDITOR CAN REFUSE THE SECOND. This used to claim its failure
+    /// mode was a module unchanged. It is not, and the difference is a developer's code: the delete
+    /// lands, the add is refused partway, and what is left is neither body. Measured 2026-08-09 - a
+    /// module of 2,002 working lines was asked to take a body the editor would not have, and came
+    /// back holding 31,956 lines of the new one. The route replied ok. So the old text is kept in
+    /// hand and put back if the write is refused, on both paths, and the complaint is RETURNED
+    /// rather than only logged.
+    ///
+    /// Null means it was written. Anything else is what went wrong, in words, for the caller to
+    /// show and for the door to answer with.
     ///
     /// Writing resets the project, which discards any running state. That is what the host's own
     /// editor does when a module is edited, so it is parity rather than a regression, and it is
     /// why this is debounced rather than done per keystroke.
     /// </summary>
-    private void WriteModule(string component, string text, string? ownerProject = null, bool hostRewrite = false)
+    private string? WriteModule(string component, string text, string? ownerProject = null, bool hostRewrite = false)
     {
         try
         {
@@ -4878,7 +4907,7 @@ internal sealed class AddInSession : IDisposable
             if (found is null || module is null)
             {
                 Log.Warn($"write: {component} has no code module");
-                return;
+                return $"{component} has no code module to write to";
             }
 
             // The baseline belongs to the workbook actually found: a line diff computed against
@@ -4895,6 +4924,17 @@ internal sealed class AddInSession : IDisposable
 
             if (!wroteDiff)
             {
+                // WHAT THE MODULE HOLDS NOW, BEFORE ANY OF IT IS DELETED.
+                //
+                // The copy costs a read of the same text the write reads back anyway, and it is the
+                // only thing standing between a refused write and a developer's lost work. Measured
+                // against the write it protects: 3ms of a 1,037ms write at 1,002 lines, 66ms of a
+                // 12,594ms write at 40,002. Half a percent, at the size where losing it hurts most.
+                //
+                // Only on this path. The diff path already knows the lines it is about to remove
+                // and puts them back itself, so it pays nothing.
+                var wasHolding = ProjectReader.ReadSource(found);
+
                 var existing = module.GetInt32("CountOfLines");
                 if (existing > 0)
                 {
@@ -4905,7 +4945,22 @@ internal sealed class AddInSession : IDisposable
                 // an empty string to one is not.
                 if (text.Length > 0)
                 {
-                    module.Invoke("AddFromString", text);
+                    try
+                    {
+                        module.Invoke("AddFromString", text);
+                    }
+                    catch (Exception refusal)
+                    {
+                        var restored = PutModuleBack(module, wasHolding);
+                        Log.Error($"write: {component} was refused{(restored ? " and its previous text was put back" : string.Empty)}", refusal);
+
+                        // The words the editor used, which name the real limit. "Out of memory" is
+                        // what it says about a module past its identifier budget, and that is far
+                        // more useful to a developer than anything this could invent.
+                        return restored
+                            ? $"{component} was not written: {refusal.Message}. What it held before is back."
+                            : $"{component} was not written: {refusal.Message}. Its previous text could NOT be restored.";
+                    }
                 }
             }
 
@@ -4970,10 +5025,46 @@ internal sealed class AddInSession : IDisposable
             {
                 _fullAnalysisDeferred = true;
             }
+
+            return null;
         }
         catch (Exception ex)
         {
             Log.Error($"write: {component} could not be updated", ex);
+            return $"{component} could not be written: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Puts a module's previous text back after a write the editor refused.
+    ///
+    /// True when the module is holding it again. False is the case that matters: the developer's
+    /// text is gone and nothing here can bring it back, so the caller says so in those words rather
+    /// than reporting a tidy failure. It happens - a module pushed past the editor's identifier
+    /// budget leaves the whole VBE unable to take anything, including what it had a moment ago,
+    /// and it stays that way until Excel is restarted (measured 2026-08-09).
+    /// </summary>
+    private static bool PutModuleBack(DispatchObject module, string? previous)
+    {
+        try
+        {
+            var present = module.GetInt32("CountOfLines");
+            if (present > 0)
+            {
+                module.Invoke("DeleteLines", 1, present);
+            }
+
+            if (!string.IsNullOrEmpty(previous))
+            {
+                module.Invoke("AddFromString", previous);
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("write: the module's previous text could not be put back", ex);
+            return false;
         }
     }
 
@@ -4982,6 +5073,10 @@ internal sealed class AddInSession : IDisposable
     /// prefix and suffix are found, and the window between them is deleted and re-inserted at
     /// one anchor, so nothing shifts under anything. False when the change is too large to be
     /// typing — a paste of a module's worth of text is a whole replace, honestly.
+    ///
+    /// The window it removes is kept until the replacement is in, so an insert the editor refuses
+    /// gives the removed lines back instead of costing them. Free here, unlike on the whole-replace
+    /// path: these lines are already in hand.
     /// </summary>
     private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text)
     {
@@ -5039,8 +5134,30 @@ internal sealed class AddInSession : IDisposable
 
         if (newWindow > 0)
         {
-            module.Invoke("InsertLines", prefix + 1,
-                string.Join("\r\n", newLines.Skip(prefix).Take(newWindow)));
+            try
+            {
+                module.Invoke("InsertLines", prefix + 1,
+                    string.Join("\r\n", newLines.Skip(prefix).Take(newWindow)));
+            }
+            catch
+            {
+                // The lines just removed, back where they were. They are at most LargestDiffLines,
+                // and they are already here, so this costs one call and no read at all.
+                if (oldWindow > 0)
+                {
+                    try
+                    {
+                        module.Invoke("InsertLines", prefix + 1,
+                            string.Join("\r\n", oldLines.Skip(prefix).Take(oldWindow)));
+                    }
+                    catch (Exception putBack)
+                    {
+                        Log.Error("write: a removed window could not be put back", putBack);
+                    }
+                }
+
+                throw;
+            }
         }
 
         return true;
@@ -7712,7 +7829,16 @@ internal sealed class AddInSession : IDisposable
                 {
                     try
                     {
-                        WriteModule(entry.Module, entry.Source, _shownProject, hostRewrite: true);
+                        // A refused write stops the rename here, exactly as a thrown one does. It
+                        // used to be counted as a module renamed, which is the reading a developer
+                        // can least afford in the middle of a rename: half the uses rewritten and a
+                        // report saying all of them were.
+                        if (WriteModule(entry.Module, entry.Source, _shownProject, hostRewrite: true) is { } refused)
+                        {
+                            stopped = $"'{entry.Module}' could not be written, so the rename stopped there. {refused}";
+                            break;
+                        }
+
                         written.Add(entry.Module);
 
                         // The page holds a model per OPEN module. Syncing one that is not open is
@@ -7900,7 +8026,12 @@ internal sealed class AddInSession : IDisposable
 
             try
             {
-                WriteModule(target, text, undo.ProjectId, hostRewrite: true);
+                if (WriteModule(target, text, undo.ProjectId, hostRewrite: true) is { } refused)
+                {
+                    stopped = $"'{target}' could not be written, so the undo stopped there. {refused}";
+                    break;
+                }
+
                 restored.Add(module);
                 surface.Sync(target, display, text);
             }
@@ -7996,7 +8127,12 @@ internal sealed class AddInSession : IDisposable
 
             try
             {
-                WriteModule(target, entry.Source, projectId, hostRewrite: true);
+                if (WriteModule(target, entry.Source, projectId, hostRewrite: true) is { } refused)
+                {
+                    stopped = $"'{target}' could not be written, so the rename stopped there. {refused}";
+                    break;
+                }
+
                 written.Add(target);
                 replaced += entry.Replaced;
                 surface.Sync(target, display, entry.Source);
@@ -9328,7 +9464,14 @@ internal sealed class AddInSession : IDisposable
                     // this document's write only; a sibling tab's typing keeps its debounce.
                     _editorSurface?.DiscardEdits(component, display);
 
-                    WriteModule(component, baseline, ProjectIdFromDisplay(display), hostRewrite: true);
+                    // Discarding means putting the SAVED text back, so a refusal here leaves the
+                    // module holding the edits the developer just asked to throw away. Said out
+                    // loud, because the tab is about to close over it.
+                    if (WriteModule(component, baseline, ProjectIdFromDisplay(display), hostRewrite: true)
+                        is { } refused)
+                    {
+                        _editorSurface?.Notify($"The saved text could not be put back: {refused}");
+                    }
 
                     // The surface may still show the abandoned text. The close below replaces
                     // the document anyway; this covers the close that cannot find a pane, so

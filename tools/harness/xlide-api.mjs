@@ -895,6 +895,11 @@ function clientFor(entry) {
      * time" - that budget is what lets it report a standing dialog instead of hanging, and it is
      * not raised here. The write goes on regardless, so a caller writing a large module waits for
      * the LINE COUNT to arrive rather than for this call to return. `build-fixture.mjs` does.
+     *
+     * THROWS WHEN THE WRITE DID NOT HAPPEN. A module that is not there, or text the editor
+     * refuses, used to answer exactly like a write that landed. Reading the count back is still
+     * the right habit for a big write, because that one outlives the door's budget and its
+     * complaint arrives too late to be the reply (2026-08-09).
      */
     writeModule: (name, text, project) =>
       call(`module${query({ name, project })}`, {

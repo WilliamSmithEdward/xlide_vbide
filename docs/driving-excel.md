@@ -205,7 +205,7 @@ complete on the day it is written and quietly is not, six routes later.
 | `locals` | `locals()` | the Locals panel |
 | `log` | `log({since, match, max, waitMs})` / `waitForLog(match)` | the shim log; BLOCKS with `waitMs` |
 | `messages` | `messages(last)` | page traffic, both directions |
-| `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` | through the session's own reader and writer; `live` reads what the surface holds, unwritten |
+| `module` | `readModule(name, project, {live})` / `writeModule(name, text, project)` | through the session's own reader and writer; `live` reads what the surface holds, unwritten. A write the editor refuses throws rather than answering ok |
 | `perf` | `perf({reset})` / `engineCosts()` | placement and marshal durations, and the ANALYZER's cost per method |
 | `placement` | `placement()` | forces a placement pass |
 | `problems` | `problems(module)` | the analyzer's findings |
@@ -663,6 +663,43 @@ same reading.
 > thread still completes. `PostWebMessageAsString` does not. **Anything that observes a POSTED
 > effect has to be measured across requests, on the client side of the door.** That applies to
 > any future route, not just this one.
+
+### What the editor refuses, and what a refused write used to cost
+
+```bash
+node tools\harness\write-rollback.mjs
+```
+
+**Restart Excel afterwards.** That is not tidiness, it is the price of the only refusal that can
+be provoked on demand: a module pushed past the editor's identifier budget leaves the whole VBE
+answering "Insufficient memory to continue the execution of the program" to every attempt to add a
+component, for the rest of the session. Removing the offending module does not give the memory
+back. This is why the probe is not in the gate.
+
+The line ceiling is the limit everyone knows and not the one that bites. Measured 2026-08-09:
+
+| written | what happened |
+| --- | --- |
+| 65,000 lines of procedures | accepted, and takes the editor some 17s to parse |
+| 65,000 module-level constants | **refused at 32,446**, the identifier budget, nowhere near 65,534 lines |
+| one line of 200,000 characters | accepted, and silently broken into 197 lines |
+| a 60,000-character constant | accepted, broken into 60 |
+| a null character | accepted as text |
+
+So a write can be refused at any size, for a reason no line count predicts, and the refusal
+arrives partway: **the delete has landed and the add has not.** A module of 2,002 working lines
+asked to take a body the editor would not have came back holding 31,956 lines of it, neither
+body, and the route replied ok.
+
+The writer keeps the previous text in hand and puts it back now, and returns the editor's own
+words instead of only logging them. The copy costs a read of text the write reads back anyway:
+3ms of a 1,037ms write at 1,002 lines, 66ms of a 12,594ms write at 40,002. Half a percent, at the
+size where losing it hurts most. The line-diff path pays nothing at all, because the lines it
+removes are already in hand.
+
+`writeModule` throws on a refusal rather than answering ok. A large write still outlives the
+door's three-second budget for the host thread, so a caller writing tens of thousands of lines
+reads the line count back rather than trusting the reply either way. `build-fixture.mjs` does.
 
 ### Waiting, rather than sleeping
 

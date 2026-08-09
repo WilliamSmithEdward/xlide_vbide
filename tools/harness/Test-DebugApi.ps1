@@ -140,6 +140,29 @@ Check 'module writes through the session writer' {
     (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text -match 'RunTotal'
 }
 
+# A WRITE THAT DID NOT HAPPEN MUST NOT ANSWER LIKE ONE THAT DID.
+#
+# This route replied ok to everything. Writing to a module that is not there, writing text the
+# editor refuses - both came back the same as a write that landed, because the writer logged its
+# failures and returned nothing. The fixture builder already worked around it by reading the line
+# count back afterwards, which was the right instinct about the wrong thing to have to do.
+#
+# The module that is not there is the cheap half of it. The expensive half - a write the editor
+# refuses partway, which used to cost the module its previous text - is in write-rollback.mjs,
+# which is not run here because provoking it leaves the editor needing a restart (2026-08-09).
+Check 'a write to a module that is not there is reported, not reported ok' {
+    try {
+        $answer = Invoke-RestMethod "$api/module?name=NoSuchModuleHere" -Method Post `
+            -Body 'Sub A()
+End Sub' -TimeoutSec 10
+        # An error reply carries `error`; a success carries `ran`. Answering ok is the defect.
+        [bool] $answer.error
+    } catch {
+        # A non-200 is a report too, and a clearer one.
+        $true
+    }
+}
+
 Check 'breakpoint is idempotent with state=on' {
     $first = (Invoke-RestMethod "$api/breakpoint?module=CleanModule&line=8&state=on" -Method Post -TimeoutSec 8).ran
     $again = (Invoke-RestMethod "$api/breakpoint?module=CleanModule&line=8&state=on" -Method Post -TimeoutSec 8).ran

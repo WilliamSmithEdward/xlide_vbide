@@ -44,8 +44,11 @@ internal sealed record SyncApplyResult(
 internal static class ModuleSyncService
 {
     /// <summary>How the shim writes a module's text, which is the path that also tells the surface
-    /// and the analyzer about it. Import uses it so an imported module lands everywhere at once.</summary>
-    internal delegate void WriteModuleText(string component, string text, string? projectId);
+    /// and the analyzer about it. Import uses it so an imported module lands everywhere at once.
+    ///
+    /// Null when the module took it. Anything else is what the editor said, and a row that gets one
+    /// is a row that FAILED, however tidily it was asked for.</summary>
+    internal delegate string? WriteModuleText(string component, string text, string? projectId);
 
     /// <summary>Files are written as UTF-8 with no mark, which is what the companion editor writes.</summary>
     private static readonly UTF8Encoding FileEncoding = new(encoderShouldEmitUTF8Identifier: false);
@@ -168,14 +171,35 @@ internal static class ModuleSyncService
                         removed.Add(item.ModuleName);
                         break;
 
+                    // IMPORT COUNTS A ROW CHANGED ONLY IF THE MODULE TOOK IT.
+                    //
+                    // The write's complaint used to be discarded here, so a module the editor
+                    // refused was reported to the developer as imported. That is the worst place in
+                    // the product for a false success: they came here to move code between a
+                    // repository and a workbook, and the whole point is knowing which end has what.
                     case SyncStatus.WillCreate when plan.Direction == SyncDirection.Import:
-                        CreateComponent(project, item, write, plan.ProjectId);
-                        changed.Add(item.ModuleName);
+                        if (CreateComponent(project, item, write, plan.ProjectId) is { } createRefused)
+                        {
+                            failed.Add($"{item.ModuleName} ({createRefused})");
+                        }
+                        else
+                        {
+                            changed.Add(item.ModuleName);
+                        }
+
                         break;
 
                     case SyncStatus.WillUpdate:
-                        write(item.ModuleName, ModuleSync.CodeWithoutHeader(item.PayloadSource), plan.ProjectId);
-                        changed.Add(item.ModuleName);
+                        if (write(item.ModuleName, ModuleSync.CodeWithoutHeader(item.PayloadSource), plan.ProjectId)
+                            is { } updateRefused)
+                        {
+                            failed.Add($"{item.ModuleName} ({updateRefused})");
+                        }
+                        else
+                        {
+                            changed.Add(item.ModuleName);
+                        }
+
                         break;
 
                     case SyncStatus.WillCreate:
@@ -346,8 +370,12 @@ internal static class ModuleSyncService
     /// the editor reads an imported file in the machine's code page, so any character the code page
     /// cannot spell would arrive mangled, and the file this product writes is UTF-8. The header is
     /// ASCII, so importing it is safe, and it is what carries the kind and the attributes.
+    ///
+    /// Null when the module is there with its body in it. Anything else is the editor's complaint
+    /// about the body, and the module exists but is empty - which the caller reports rather than
+    /// counting as an import.
     /// </summary>
-    private static void CreateComponent(
+    private static string? CreateComponent(
         DispatchObject project,
         SyncItem item,
         WriteModuleText write,
@@ -383,10 +411,7 @@ internal static class ModuleSyncService
         }
 
         var body = ModuleSync.CodeWithoutHeader(item.PayloadSource);
-        if (body.Length > 0)
-        {
-            write(item.ModuleName, body, projectId);
-        }
+        return body.Length > 0 ? write(item.ModuleName, body, projectId) : null;
     }
 
     private static void RemoveComponent(DispatchObject project, string moduleName)
