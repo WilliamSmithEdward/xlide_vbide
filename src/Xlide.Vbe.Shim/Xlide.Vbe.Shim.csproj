@@ -19,8 +19,18 @@
 
     <!-- Trim aggressively: this library ships inside a user-visible installer. -->
     <InvariantGlobalization>true</InvariantGlobalization>
-    <UseSystemResourceKeys>true</UseSystemResourceKeys>
     <StackTraceSupport>true</StackTraceSupport>
+
+    <!--
+      Exception messages keep their WORDS.
+
+      UseSystemResourceKeys was true here, which strips the message text and leaves the resource
+      key, so every failure this product reports to a developer arrived as an identifier: a file
+      held open by another program came back as "IO_SharingViolation_File" in the import/export
+      dialog, and every ex.Message in the log is the same. Measured before changing it: the words
+      cost 23,040 bytes, 0.3% of this library and 0.08% of the installer (2026-08-09).
+    -->
+    <UseSystemResourceKeys>false</UseSystemResourceKeys>
   </PropertyGroup>
 
   <PropertyGroup>
