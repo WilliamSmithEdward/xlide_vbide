@@ -54,6 +54,7 @@ const check = (name, got, want = true) => {
 // is really yesterday's leftovers. Written down in docs/disambiguation.md after the freshness
 // suite did exactly this, and done here after it happened again (2026-08-09).
 const probe = `SyncProbe${process.pid}`;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const stale = `SyncStale${process.pid}`;
 
 const folder = join(tmpdir(), `xlide-sync-${process.pid}`);
@@ -214,9 +215,12 @@ try {
 
   // Import true-up must never offer to delete a sheet or the workbook: they belong to the
   // workbook, not to the folder, and the folder will never have a file for them.
-  rmSync(join(folder, "ThisWorkbook.cls"));
-  rmSync(join(folder, "Sheet1.cls"));
-  rmSync(join(folder, "Helper.bas"));
+  // `force`, so a file that is not there fails the CHECK below rather than throwing out of the
+  // suite. Run against the wrong fixture this crashed in cleanup with an ENOENT naming a path,
+  // which says nothing about what went wrong and hides the four checks that would have.
+  for (const gone of ["ThisWorkbook.cls", "Sheet1.cls", "Helper.bas"]) {
+    rmSync(join(folder, gone), { force: true });
+  }
   const strict = await api.syncPlan("import", { folder, mode: "trueUpStandardClass" });
   const removals = strict.items.filter((i) => i.status === "will-remove").map((i) => i.module);
   check("import true-up offers to delete the standard module", removals.includes("Helper"));
@@ -284,6 +288,100 @@ try {
       helperPane.hostContent, helperPane.surfaceContent);
   } else {
     console.log("     (Helper has no open pane, so there is nothing to compare)");
+  }
+
+  // ---------------------------------------------------------------------------------------
+  console.log("\n7. text that is not English, and text the host will not hold");
+
+  /*
+   * WHAT THIS CAN AND CANNOT ASSERT, because the answer is a property of the MACHINE.
+   *
+   * VBA stores module text in the system ANSI code page, so which scripts survive depends on
+   * where this runs: on code page 1252 accented Latin does and Cyrillic does not, and on 1251 it
+   * is the other way round. Asserting a list would make this suite fail on a machine that is
+   * working correctly, so it asks the host first and then holds it to two rules:
+   *
+   *   whatever the module DOES hold must survive export and import exactly, and
+   *   a file carrying what the host will NOT hold must be refused, not imported and mangled.
+   *
+   * The second is the one with a file's life on it. Before the guard, one import and one export
+   * turned a repository file carrying Cyrillic into question marks, byte for byte, reporting
+   * "1 changed, 0 failed" at both ends (2026-08-09).
+   *
+   * The planner-independent half runs in CI: Xlide.Vbe.Core.Tests drives the whole matrix through
+   * PlanExport and PlanImport, and engine/test/language.mjs drives it through the shared planner
+   * on Linux as well as Windows. Only the HOST's conversion needs a real Excel, and that is here.
+   */
+  const langModule = `Lang${process.pid}`;
+  const CANDIDATES = [
+    ["Western European", "déjà vu € œuvre Straße"],
+    ["Cyrillic", "Проверка русского текста"],
+    ["Greek", "Δοκιμή ελληνικού κειμένου"],
+    ["Japanese", "テスト用モジュール"],
+    ["Latin, decomposed", "café"],
+  ];
+
+  const langSource = ["Option Explicit", "",
+    ...CANDIDATES.map(([name, text], i) => `Public Const L${i} As String = "${text}" ' ${name}`)].join("\r\n");
+
+  await api.component("add", { kind: "module", name: langModule, project: project.projectId });
+  made.push(langModule);
+  await api.writeModule(langModule, langSource, project.projectId).catch(() => {});
+  await wait(1500);
+
+  const langHeld = (await api.readModule(langModule, project.projectId)).text ?? "";
+  const kept = CANDIDATES.filter(([, text]) => langHeld.includes(text));
+  const lost = CANDIDATES.filter(([, text]) => !langHeld.includes(text));
+  console.log(`     this machine holds ${kept.length} of ${CANDIDATES.length}: `
+    + `${kept.map(([n]) => n).join(", ") || "none"}`);
+
+  const langFolder = join(folder, "lang");
+  mkdirSync(langFolder, { recursive: true });
+  await api.syncApply("export", { folder: langFolder, select: "all" });
+
+  const exported = readFileSync(join(langFolder, `${langModule}.bas`), "utf8");
+  check("the exported file is what the module holds, character for character",
+    exported.slice(exported.indexOf("Option Explicit")).replace(/\r\n/g, "\n").trimEnd(),
+    langHeld.slice(langHeld.indexOf("Option Explicit")).replace(/\r\n/g, "\n").trimEnd());
+
+  if (kept.length > 0) {
+    check("and every script the host kept is in the file",
+      kept.every(([, text]) => exported.includes(text)));
+  } else {
+    console.log("     (this machine's code page held none of them, so there is nothing to carry)");
+  }
+
+  // A file the host cannot hold must be REFUSED, and must be left alone.
+  if (lost.length > 0) {
+    const [lostName, lostText] = lost[0];
+    const refusedName = `Refused${process.pid}`;
+    const refusedPath = join(langFolder, `${refusedName}.bas`);
+    const refusedSource = [`Attribute VB_Name = "${refusedName}"`, "Option Explicit", "",
+      `Public Const A As String = "${lostText}"`, ""].join("\r\n");
+    writeFileSync(refusedPath, refusedSource, "utf8");
+    const beforeImport = readFileSync(refusedPath);
+
+    const attempt = await api.syncApply("import", { folder: langFolder, select: "all" });
+    await wait(1500);
+
+    // `check` compares against an EXPECTED VALUE; it has no detail argument. Passing the detail
+    // as one makes every call fail with the detail printed as what it wanted, which is what
+    // happened the first time this was written.
+    if (!check(`a file carrying ${lostName}, which this host cannot hold, is refused`,
+      (attempt.failed ?? []).length > 0)) {
+      console.log(`       import said: ${JSON.stringify(attempt)}`);
+    }
+
+    check("and the refusal names the character rather than just failing",
+      (attempt.failed ?? []).some((line) => /cannot store/.test(line)));
+    check("and the file on disk is untouched",
+      beforeImport.equals(readFileSync(refusedPath)));
+
+    const conjured = (await api.project()).components.some((c) => c.name === refusedName);
+    check("and no half-made module was left in the project", conjured, false);
+    if (conjured) { made.push(refusedName); }
+  } else {
+    console.log("     (this machine's code page held every sample, so there is nothing to refuse)");
   }
 
   // Reading every module of a project and exporting each header walks a great deal of COM. The

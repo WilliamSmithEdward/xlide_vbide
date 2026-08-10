@@ -177,10 +177,14 @@ internal static class ModuleSyncService
                     // refused was reported to the developer as imported. That is the worst place in
                     // the product for a false success: they came here to move code between a
                     // repository and a workbook, and the whole point is knowing which end has what.
+                    // The complaint is added as it stands: the writer already names the module it
+                    // is about, and wrapping it in the name again reads as two different things
+                    // went wrong. Only the exception path below adds a name, because an exception
+                    // message has none.
                     case SyncStatus.WillCreate when plan.Direction == SyncDirection.Import:
                         if (CreateComponent(project, item, write, plan.ProjectId) is { } createRefused)
                         {
-                            failed.Add($"{item.ModuleName} ({createRefused})");
+                            failed.Add(createRefused);
                         }
                         else
                         {
@@ -193,7 +197,7 @@ internal static class ModuleSyncService
                         if (write(item.ModuleName, ModuleSync.CodeWithoutHeader(item.PayloadSource), plan.ProjectId)
                             is { } updateRefused)
                         {
-                            failed.Add($"{item.ModuleName} ({updateRefused})");
+                            failed.Add(updateRefused);
                         }
                         else
                         {
@@ -447,7 +451,31 @@ internal static class ModuleSyncService
         }
 
         var body = ModuleSync.CodeWithoutHeader(item.PayloadSource);
-        return body.Length > 0 ? write(item.ModuleName, body, projectId) : null;
+        if (body.Length == 0)
+        {
+            return null;
+        }
+
+        if (write(item.ModuleName, body, projectId) is not { } refused)
+        {
+            return null;
+        }
+
+        // The module exists and is empty, because only the header went in. Take it away again: a
+        // row reported failed should leave the project as it found it, and an empty module named
+        // after a file the developer still has is worse than no module at all.
+        try
+        {
+            components.InvokeWithObject("Remove", made);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"sync: {item.ModuleName} was created, its body was refused, and the empty"
+                + $" module could not be taken away again ({ex.Message})");
+            return $"{refused} An empty {item.ModuleName} was left in the project.";
+        }
+
+        return refused;
     }
 
     private static void RemoveComponent(DispatchObject project, string moduleName)

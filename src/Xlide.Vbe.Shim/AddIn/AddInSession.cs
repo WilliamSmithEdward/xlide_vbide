@@ -92,6 +92,16 @@ internal sealed class AddInSession : IDisposable
     private readonly Dictionary<string, string> _saidAboutWrite = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The last thing said about a module losing a character to the host's code page.
+    ///
+    /// Its own record rather than a row in the one above, because it is not cleared by the write
+    /// succeeding: that write DID succeed, with a character converted, and the surface goes on
+    /// holding the original, so every later write-back finds the same loss. Saying it again each
+    /// time would be exactly the repetition the other record exists to prevent.
+    /// </summary>
+    private readonly Dictionary<string, string> _saidAboutConversion = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Identity of the project whose module the surface is showing, or null when it could not
     /// be told. This is the tie-break for every bare module name that reaches the session while
     /// the page's protocol still speaks in names alone: the module being edited outranks a
@@ -347,9 +357,18 @@ internal sealed class AddInSession : IDisposable
                             plan.Items.Where(item => item.Checked).Select(item => item.Id),
                             StringComparer.Ordinal);
 
+                // ALL OR NOTHING, because the good copy is the file and it is safe on disk.
+                //
+                // A file carrying a character this machine's VBA cannot store would import as
+                // something else - question marks, or a decomposed accent turned into a spacing
+                // one - and the module would then differ from the file, so the next export would
+                // be ticked and would overwrite the developer's source with it. Measured
+                // 2026-08-09: one import and one export destroyed a Cyrillic file byte for byte,
+                // reporting "1 changed, 0 failed" at both ends.
                 var applied = ModuleSyncService.Apply(
                     syncTarget, plan, chosen,
-                    (component, text, owner) => WriteModule(component, text, owner, hostRewrite: true));
+                    (component, text, owner) =>
+                        WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true));
 
                 // The folder and mode that were just used become the ones this project
                 // remembers, exactly as pressing Apply in the dialog does.
@@ -4958,7 +4977,31 @@ internal sealed class AddInSession : IDisposable
     /// editor does when a module is edited, so it is parity rather than a regression, and it is
     /// why this is debounced rather than done per keystroke.
     /// </summary>
-    private string? WriteModule(string component, string text, string? ownerProject = null, bool hostRewrite = false)
+    /// <param name="keepEveryCharacter">
+    /// Refuse the write, and put back what the module held, if the host converts a character on
+    /// the way in rather than storing it.
+    ///
+    /// TRUE FOR IMPORT ONLY, and the asymmetry is the whole point. The host stores module text in
+    /// the system ANSI code page, so a character outside it is converted by Excel before this
+    /// product sees it. Where the developer's good copy lives decides what to do about that:
+    ///
+    ///   IMPORT: the good copy is the FILE, and it is safe on disk. Refusing costs nothing they
+    ///   still have. Accepting costs them the file, because the module now differs from it, so the
+    ///   next export is ticked "will write" and overwrites their source with the converted text.
+    ///   Measured 2026-08-09: a repository file carrying Cyrillic came back byte for byte
+    ///   destroyed after one import and one export, with "1 changed, 0 failed" reported at both.
+    ///
+    ///   TYPING: the good copy is on the SURFACE and nowhere else. Refusing leaves the page and
+    ///   the module disagreeing for as long as the tab stays open, which is the state the tabs
+    ///   setting was removed for. So typing is told once and not refused; it cannot destroy a file
+    ///   either way, because the module never held the good version for an export to write.
+    /// </param>
+    private string? WriteModule(
+        string component,
+        string text,
+        string? ownerProject = null,
+        bool hostRewrite = false,
+        bool keepEveryCharacter = false)
     {
         try
         {
@@ -5000,6 +5043,10 @@ internal sealed class AddInSession : IDisposable
                     + "anything longer in half without a continuation, which would not be valid "
                     + "code. Break the line yourself and it will write.";
             }
+
+            // What the module holds before any of this, when a caller has said the write is all or
+            // nothing. One read, on the import path only, which is already the slow one.
+            var wasHoldingBefore = keepEveryCharacter ? ProjectReader.ReadSource(found) : null;
 
             // The baseline belongs to the workbook actually found: a line diff computed against
             // another workbook's same-named module would write a merge of the two.
@@ -5064,6 +5111,43 @@ internal sealed class AddInSession : IDisposable
             // the baseline instead, so a later comparison sees changes made by something else and
             // not the editor's own tidying of our own write.
             var stored = ProjectReader.ReadSource(found);
+
+            // A CHARACTER THE HOST CONVERTED RATHER THAN STORED.
+            //
+            // Nothing failed: the write was accepted and Excel quietly substituted, because module
+            // text lives in the system ANSI code page. On import that is the developer's file about
+            // to be lost, so the module goes back to what it held and the row is reported failed.
+            // On every other path it is said once and allowed, for the reasons on the parameter.
+            if (Core.Editor.ModuleText.FirstCharacterLost(text, stored ?? string.Empty) is { } lost)
+            {
+                var said = $"{component}: this machine's VBA cannot store {lost.Describe()}, on line "
+                    + $"{lost.Line}. Excel converts it on the way in, so the module would not hold "
+                    + "what was written.";
+
+                if (keepEveryCharacter)
+                {
+                    var restored = PutModuleBack(module, wasHoldingBefore);
+                    Log.Warn($"write: {said} Nothing was written"
+                        + (restored ? " and the module is as it was." : "; the module could NOT be put back."));
+
+                    return restored
+                        ? $"{said} Nothing was written and the file on disk is untouched."
+                        : $"{said} Nothing was written, and the module could NOT be put back.";
+                }
+
+                // Once per module, not once per pause in typing. The surface goes on holding the
+                // character we cannot store, so every later write-back finds the same loss, and
+                // the tenth copy of the sentence is in the way of the work. Kept apart from the
+                // refusal notices because this one is not cleared by the write succeeding: the
+                // write DID succeed, and saying it again next time would be the same repetition.
+                if (!_saidAboutConversion.TryGetValue(writtenKey, out var already) || already != said)
+                {
+                    _saidAboutConversion[writtenKey] = said;
+                    Log.Warn($"write: {said} It was written anyway; this path has nowhere else to keep it.");
+                    _editorSurface?.Notify(said);
+                }
+            }
+
             _writtenModules[writtenKey] = stored ?? text;
 
             if (hostRewrite)

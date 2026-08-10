@@ -73,6 +73,13 @@ jobs:
       # position counted in bytes or code points rather than UTF-16 code units drifts by the width
       # of the text to its left, which no English fixture can show and which corrupts an edit
       # rather than failing one.
+      #
+      # Import and export are in here too, since 2026-08-09. The planner behind them is the
+      # companion's own and it is the DEFAULT, its exposure is the same arithmetic one layer along,
+      # and it had no language coverage anywhere. Running on both runners is the point: string
+      # comparison and normalisation are the runtime's, so a difference in the runner's ICU build
+      # shows on one and not the other. Precomposed and decomposed spellings of one word are a case
+      # of their own, because a repository authored on macOS carries the second.
       - name: Language matrix
         working-directory: xlide_vbide/engine
         run: node test/language.mjs
@@ -142,6 +149,17 @@ jobs:
       # has one.
       - name: Test
         run: dotnet test --no-build -c Release --logger "trx;LogFileName=results.trx"
+
+      # NAMED SEPARATELY THOUGH THE STEP ABOVE ALREADY RAN THEM, and it costs about a second.
+      #
+      # Import and export are where language goes wrong quietly: file names, whether two texts are
+      # the same, where a difference is drawn, and how many lines agreed are all counts, and a count
+      # taken in the wrong unit drifts by the width of the non-ASCII text to its left. When that
+      # breaks, "Test failed" in a run of hundreds is a worse first sentence than "Languages
+      # failed". The half that needs a real Excel is the HOST's code-page conversion, and that runs
+      # in the live gate instead (tools\harness\module-sync.mjs, section 7).
+      - name: Languages
+        run: dotnet test --no-build -c Release --filter "FullyQualifiedName~Language|FullyQualifiedName~ModuleTextConversion"
 
       - name: Publish the native shim
         run: dotnet publish src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj -c Release -r win-x64

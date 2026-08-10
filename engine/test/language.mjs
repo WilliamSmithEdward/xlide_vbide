@@ -314,6 +314,75 @@ check('the code-unit count is what both ends mean by an offset', () => {
         'the astral sample must actually contain surrogate pairs, or it tests nothing');
 });
 
+/*
+ * IMPORT AND EXPORT, over the same matrix.
+ *
+ * The planner behind them is the companion product's own `moduleSyncPlan.ts`, imported out of that
+ * checkout and running in this process, and it is the DEFAULT: the built-in C# one answers only
+ * when it is asked for or when the engine is down. Its language exposure is the same arithmetic as
+ * everything above, one layer along - it compares two texts, counts the lines that agree, and cuts
+ * headers off them - and none of it was covered anywhere until 2026-08-09.
+ *
+ * This runs on Linux as well as Windows in CI, which is the point of the two-runner matrix: string
+ * comparison and normalisation are the runtime's, and a difference in the runner's ICU build is
+ * exactly the sort of thing that shows on one and not the other.
+ */
+const NORMALISATION = [
+    ['Latin, precomposed', 'caf\u00E9 na\u00EFve'],
+    // The same words, decomposed. A repository authored on macOS carries these, they render alike,
+    // and they are not the same text. A plan that normalised anywhere would call a folder in sync
+    // when it holds the other spelling, and quietly keep two of one word in two places.
+    ['Latin, decomposed', 'cafe\u0301 nai\u0308ve'],
+];
+
+function syncModule(sample) {
+    return [
+        'Attribute VB_Name = "Probe"',
+        'Option Explicit',
+        '',
+        `' ${sample}`,
+        `Public Const Note As String = "${sample}"`,
+        '',
+    ].join('\r\n');
+}
+
+const planFor = (source, onDisk) => call('sync/plan', {
+    direction: 'export',
+    workbookPath: 'Book.xlsm',
+    folder: 'C:\\repo',
+    modules: [{ name: 'Probe', type: 'standard', source }],
+    // The folder is answered from what the shim would have read, so a plan can be asked for
+    // without one existing. `readFolder` is the shim's job either way.
+    repoFiles: onDisk === undefined ? undefined : [{ relativeName: 'Probe.bas', source: onDisk }],
+});
+
+console.log(`\n== import and export, ${LANGUAGES.length + NORMALISATION.length} samples ==\n`);
+
+for (const [label, sample] of [...LANGUAGES, ...NORMALISATION]) {
+    const source = syncModule(sample);
+
+    // eslint-disable-next-line no-await-in-loop
+    const plan = await planFor(source);
+    check(`${label}: a module the folder does not have is offered`, () => {
+        assert.ok(Array.isArray(plan.items) && plan.items.length > 0, 'the plan has no rows');
+        assert.equal(plan.items[0].relativeName, 'Probe.bas');
+        assert.equal(plan.items[0].status, 'will-create');
+    });
+
+    check(`${label}: the payload is the module's text, character for character`, () => {
+        assert.equal(plan.items[0].leftRawCode, source);
+    });
+}
+
+check('precomposed and decomposed are not the same text', () => {
+    const [, precomposed] = NORMALISATION[0];
+    const [, decomposed] = NORMALISATION[1];
+    assert.notEqual(precomposed, decomposed,
+        'the two spellings must actually differ, or this tests nothing');
+    assert.equal(precomposed.normalize('NFC'), decomposed.normalize('NFC'),
+        'and they must be the same word, or the case being guarded is not this one');
+});
+
 console.log(`\n${passed} passed, ${failures.length} failed`);
 for (const failure of failures) { console.log(`  ! ${failure}`); }
 
