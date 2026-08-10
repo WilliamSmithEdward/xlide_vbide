@@ -61,15 +61,29 @@ const OPTIONS = [
   {
     key: "syncEngine" as const,
     kind: "choice" as const,
-    label: "Import and export: which one decides",
-    description:
-      "Both choices import and export the same files, and either way you review the changes before "
-      + "anything is written. What differs is which code works out the plan. 'Shared with xlide for "
-      + "VS Code' uses the very same code the extension does, so both products agree exactly about "
-      + "file names, what kind of module a file holds, and what counts as a change - and it needs "
-      + "xlide's engine to be running. 'Built into the add-in' works it out here instead, so import "
-      + "and export keep working even if the engine does not. If the engine is unavailable, the "
-      + "add-in quietly uses its own and says so in the log.",
+    // Short enough to stay on ONE line beside its 'i'. The longer version wrapped, which put the
+    // symbol next to half a heading and left it looking like it belonged to nothing.
+    label: "Import and export",
+    description: "Which one works out what to write. Both let you review it first.",
+    /*
+     * THE LONG ONE GOES BEHIND THE 'i'. At 623 characters it was four times the next longest
+     * description in this list and made its row taller than the other six put together, so the
+     * settings a developer came to change were pushed off the screen by an explanation of one they
+     * probably will not (2026-08-09).
+     *
+     * AND IT WAS WRITTEN FROM THE INSIDE. "Which code works out the plan", "what counts as a
+     * change", the engine as a thing the reader is assumed to know about: all true, none of it a
+     * sentence anyone reading a settings dialog is asking for. What they want to know is whether
+     * this matters to them and what happens if they pick wrong, and the honest answer to both is
+     * "hardly, and nothing" - so that is what it says now, in that order, ending with permission
+     * to leave it alone.
+     */
+    detail:
+      "Both do the same job, and both let you check the changes before anything is written.\n\n"
+      + "Shared with xlide for VS Code: this add-in and the VS Code extension behave identically, "
+      + "so the same folder works the same way in both. Needs xlide's engine running.\n\n"
+      + "Built into the add-in: works even if the engine stops.\n\n"
+      + "Not sure? Leave it as it is.",
     choices: [
       { value: "xlide", label: "Shared with xlide for VS Code" },
       { value: "builtIn", label: "Built into the add-in" },
@@ -235,6 +249,90 @@ export function openSettingsDialog(
 
     text.append(label, description);
 
+    // MORE THAN A LINE OF EXPLANATION GOES BEHIND AN 'i' BESIDE THE LABEL.
+    //
+    // On hover AND on focus, because a tooltip a keyboard cannot reach is a tooltip half the
+    // people using this cannot read. It is a real button for the same reason: focusable, on the
+    // tab order, and answering Enter and Space without any of that being written here.
+    //
+    // The text stays in the DOM either way and the control points at it with aria-describedby, so
+    // a screen reader announces the explanation with the setting whether or not anything is
+    // hovering. Hiding it visually is a visual decision, and it should not be a semantic one.
+    let detailId: string | null = null;
+    if ("detail" in option && typeof option.detail === "string") {
+      detailId = `setting-${option.key}-detail`;
+
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "settings-more";
+
+      // The circle is an inner span so the BUTTON can be the 24px target the pointer needs while
+      // the ink stays the 16px this dialog's type size wants. Marked hidden from the accessibility
+      // tree: a letter i read out beside the label is noise, and aria-label below is the name.
+      const glyph = document.createElement("span");
+      glyph.setAttribute("aria-hidden", "true");
+      glyph.textContent = "i";
+      more.appendChild(glyph);
+
+      more.setAttribute("aria-label", `About ${option.label}`);
+      more.setAttribute("aria-expanded", "false");
+      more.setAttribute("aria-controls", detailId);
+
+      const detail = document.createElement("div");
+      detail.className = "settings-detail";
+      detail.id = detailId;
+      detail.setAttribute("role", "tooltip");
+      detail.textContent = option.detail;
+
+      const show = (open: boolean): void => {
+        more.setAttribute("aria-expanded", String(open));
+        detail.classList.remove("above");
+        detail.classList.toggle("shown", open);
+
+        // ABOVE THE 'i' WHEN THERE IS NO ROOM BELOW IT.
+        //
+        // This row is the last in the list, so its tooltip opens into whatever is under the
+        // dialog, and the editor window on a real machine is not always tall: 640x409 on the
+        // developer's own. Measured after showing rather than guessed from the row's position,
+        // because the height depends on how the words wrap at this width.
+        if (open && detail.getBoundingClientRect().bottom > window.innerHeight - 8) {
+          detail.classList.add("above");
+        }
+      };
+
+      more.addEventListener("pointerenter", () => show(true));
+      more.addEventListener("focus", () => show(true));
+      more.addEventListener("blur", () => show(false));
+      more.addEventListener("click", () => show(more.getAttribute("aria-expanded") !== "true"));
+
+      // Left open while the pointer is on the tooltip itself, so text long enough to want reading
+      // twice can be. Leaving either one closes it.
+      const leave = (event: PointerEvent): void => {
+        const to = event.relatedTarget;
+        if (!(to instanceof Node) || (!more.contains(to) && !detail.contains(to))) {
+          if (document.activeElement !== more) { show(false); }
+        }
+      };
+
+      more.addEventListener("pointerleave", leave);
+      detail.addEventListener("pointerleave", leave);
+
+      // Escape dismisses it without dismissing the dialog behind it, which is the order a reader
+      // expects and the one WCAG asks for.
+      more.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && more.getAttribute("aria-expanded") === "true") {
+          event.preventDefault();
+          event.stopPropagation();
+          show(false);
+        }
+      });
+
+      const beside = document.createElement("span");
+      beside.className = "settings-label-row";
+      label.replaceWith(beside);
+      beside.append(label, more, detail);
+    }
+
     let control: HTMLElement;
     if (option.kind === "choice") {
       const select = document.createElement("select");
@@ -291,6 +389,13 @@ export function openSettingsDialog(
         toggle.checked = currentSettings()[option.key];
       });
       control = toggle;
+    }
+
+    // The explanation belongs to the CONTROL, whether or not anything is hovering: a screen
+    // reader should read the setting and what it does in one breath, the way a sighted reader gets
+    // both from the row.
+    if (detailId !== null) {
+      control.setAttribute("aria-describedby", detailId);
     }
 
     row.append(text, control);

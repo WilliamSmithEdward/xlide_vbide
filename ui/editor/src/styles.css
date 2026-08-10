@@ -1637,6 +1637,96 @@ body.live-resize .minimap {
   line-height: 1.35;
 }
 
+/* The label and its 'i', which sits on the baseline beside the words rather than above them. */
+.settings-label-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/*
+ * 16px of ink inside a 24px target. The circle is the size this dialog's type wants; the button
+ * around it is the size a pointer wants, which is not the same number and should not be pretended
+ * to be. Anything smaller is a pixel hunt, and the label immediately beside it is a target too.
+ */
+.settings-more {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.55;
+  cursor: help;
+}
+
+.settings-more > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font: 600 10px/1 var(--vscode-font-family, sans-serif);
+}
+
+.settings-more:hover,
+.settings-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.settings-more:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
+  border-radius: 4px;
+  opacity: 1;
+}
+
+/*
+ * Hidden by CLIPPING rather than by display:none, so the text stays in the accessibility tree for
+ * the aria-describedby that points at it. A tooltip removed from the tree describes nothing.
+ */
+.settings-detail {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  width: max-content;
+  max-width: min(360px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 4px;
+  background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background, #252526));
+  color: var(--vscode-editorHoverWidget-foreground, inherit);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  font-weight: 400;
+  font-size: 12px;
+  line-height: 1.45;
+  /* Paragraphs, so a choice and what it costs are not one wall of words. */
+  white-space: pre-line;
+  clip-path: inset(50%);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.settings-detail.shown {
+  clip-path: none;
+  pointer-events: auto;
+  opacity: 1;
+}
+
+/* Flipped when the room below has run out, which the last row in the list regularly finds. */
+.settings-detail.above {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
+
 .settings-row select {
   background: var(--vscode-dropdown-background, #3c3c3c);
   color: inherit;
