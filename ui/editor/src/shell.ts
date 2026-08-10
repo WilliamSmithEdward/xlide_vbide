@@ -41,8 +41,6 @@ export interface ShellProperty {
 export interface ShellHandlers {
   /** The developer picked a module. The tree names the workbook; the tab strip cannot yet. */
   activateModule(name: string, workbook?: string): void;
-  /** Whether some group holds a tab for this module, for the explorer's context menu. */
-  moduleIsOpen(name: string): boolean;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
   navigate(module: string, line: number, column: number, selectLine?: boolean, workbook?: string): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
@@ -904,23 +902,22 @@ export class Shell {
    * classes grow them.
    */
   private componentMenu(name: string, kind: number, x: number, y: number, workbook?: string): void {
-    // A document or a form is an object with code behind it; a module is only its code.
-    const openLabel = kind === ComponentKind.Document || kind === ComponentKind.Form
-      ? "Open Code"
-      : "Open";
-
+    /*
+     * WHAT A MENU IS FOR IS WHAT HAS NO SHORTER GESTURE (the developer, 2026-08-10).
+     *
+     * Open and Close were both here and both are the long way round. Clicking the row opens the
+     * module, which is this product's deliberate ergonomic and the reason the tree does not ask
+     * for a double click; the tab's own close box and Ctrl+W close it. A menu whose first item
+     * repeats the click that opened the menu teaches a developer to stop reading it.
+     *
+     * What is left is what a click cannot do: rename the module across every reference to it, and
+     * remove it.
+     */
     const items: ContextMenuItem[] = [
-      // WITH THE WORKBOOK, all three of them. Every call site outside this menu passed one and
-      // this one did not, so a module named the same in two workbooks was opened, renamed or
-      // closed in whichever answered first.
-      { label: openLabel, run: () => this.handlers.activateModule(name, workbook) },
-      {},
+      // WITH THE WORKBOOK. Every call site outside this menu passed one and this one did not, so
+      // a module named the same in two workbooks was renamed in whichever answered first.
       { label: "Rename...", run: () => this.beginRename(name, workbook ?? null) },
     ];
-
-    if (this.handlers.moduleIsOpen(name)) {
-      items.push({}, { label: "Close", run: () => this.handlers.closeModule(name, workbook) });
-    }
 
     // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the workbook
     // and the host refuses Remove on them. Left out rather than shown greyed, the way the rest of

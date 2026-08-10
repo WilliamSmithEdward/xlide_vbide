@@ -139,6 +139,11 @@ const DRIVE = `(async () => {
   const moduleMenu = act('treeMenu', { module: 'Module1' });
   check('right-clicking a module opens its menu', moduleMenu.did, moduleMenu.detail);
   check('a module can be removed', moduleMenu.detail.includes('Remove'), moduleMenu.detail);
+
+  // AND OFFERS ONLY WHAT A CLICK CANNOT DO. Open and Close were both on here and both had a
+  // shorter gesture: the row opens on a single click, the tab closes on its own box or Ctrl+W.
+  check('it offers nothing a click already does',
+    moduleMenu.detail === 'Rename... | Remove...', moduleMenu.detail);
   act('closeDialogs');
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 

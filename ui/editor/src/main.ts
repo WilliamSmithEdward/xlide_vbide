@@ -462,8 +462,6 @@ function boot(): void {
 
   shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
-    moduleIsOpen: (name) => bridge.documents.all()
-      .some((id) => id.module.toLowerCase() === name.toLowerCase()),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
     layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
