@@ -1,81 +1,60 @@
 # Build status
 
-Updated 2026-08-06, at v0.3.0.
+Updated 2026-08-10, at v0.6.0.
 
-A short, current snapshot. The living documents are the newest handover, the highest-dated `docs/handoff-*.md`, for what happened
-and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,
-and [lessons.md](lessons.md) for the findings behind them.
+A short snapshot, and deliberately shorter than it was: this is the one document whose only job
+is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
+four days and three releases after the fact. Everything that belongs to another document has been
+left there. The newest handover (the highest-dated `docs/handoff-*.md`) is what happened and what
+is next, [decisions.md](decisions.md) is the choices that would be expensive to reverse,
+[lessons.md](lessons.md) is the findings behind them, and [debug-api.md](debug-api.md) is the
+door. If a fact lives in one of those, it does not live here.
 
 ## What the product is
 
-A native COM add-in (NativeAOT, so no .NET runtime is required inside Excel) that loads into
-the Visual Basic Editor and replaces its visible surface with a WebView2 page running Monaco.
-The native editor keeps running underneath as the text of record, the compile target, and the
+A native COM add-in (NativeAOT, so no .NET runtime is required inside Excel) that loads into the
+Visual Basic Editor and replaces its visible surface with a WebView2 page running Monaco. The
+native editor keeps running underneath as the text of record, the compile target, and the
 debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
-## What is proven, and how
+## Where it is
 
-- **It loads and renders in a real editor.** `tools\dev.ps1` builds, registers, and launches;
-  `tools\harness\Get-EditorScreenshot.ps1` captures the running editor at true DPI. The shim
-  log's `editor surface: ready` line itemises every start-up stage, so a regression names its
-  own cause. Recent measurements: ready in about 180ms.
-- **The surface is the whole visible editor.** Menu bar (now File, Insert, Run, Tools,
-  Add-Ins, Help), toolbar, module tabs, and six dockable panes — Explorer, Properties,
-  Problems, Immediate, Locals, Watch. The Object Browser is a floating themed window of
-  xlide's own. Nothing native shows through the canvas.
-- **The workspace is arrangeable.** Editor groups split right and down and pass tabs
-  between themselves; tool panes dock in four sections around the editor, each a split of
-  tabbed groups, dragged by one gesture with a five-zone compass (decisions 12 and 13).
-  Every open module holds a live model, so switching tabs keeps undo, scroll, and
-  squiggles. `Test-SplitWorkspace.ps1` is 18 checks over the whole of it.
-- **Locals and Watch are fed from the editor's own windows**, floated and made invisible, read
-  through UI Automation on a dedicated thread. Both verified against a live break, with
-  standing probes: `Test-GhostLocalsPanel.ps1` and `Test-WatchPanel.ps1`.
-- **Search is one floating widget** covering module, workbook, and all-workbook scopes, with a
-  match table whose rows jump the editor.
-- **Unit tests**: 120 pass (`dotnet test`), covering registration, layout arithmetic, edit
-  reconciliation, protocol handling, and the analyzer.
-- **A debug api** (Debug builds only, compiled out of Release and verified absent from the
-  published binary) exposes the running session for diagnosis and automated testing:
-  [debug-api.md](debug-api.md). `Test-DebugApi.ps1` is 41 checks. Beyond reading state it
-  can await a condition in the page, answer the whole visible layout and reset it, say which
-  CSS rule set a property, time the surface, and keep the page's console.
-
-- **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe` —
-  28 MB, per user, no administrator rights, nothing required to be present beforehand. It
-  refuses to build without a language engine or a built page rather than producing something
-  that installs and does half of what it should. `tools\release.ps1` attaches it to a tag.
-
-- **The window is xlide's.** Its title reads `XLIDE - Book1.xlsm` and it carries the product
-  icon, retaken whenever the editor rewrites its own caption and put back when the add-in
-  unloads. The surface names its version in the corner and in an About dialog that also says
-  which build is running and where it was loaded from.
+- **The surface is the whole visible editor.** A toolbar, module tabs, and six dockable panes:
+  Explorer, Properties, Problems, Immediate, Locals, Watch. The Object Browser is a floating
+  themed window of xlide's own. Nothing native shows through the canvas.
+- **There is no menu bar.** All ten of the editor's menus are suppressed; a wrench at the head of
+  the toolbar holds the five dialogs that are genuinely the editor's own. Everything the other
+  menus carried has a home: modules are added from a plus on each workbook row in the tree and
+  removed from the module's own right-click menu, import and export are the sync dialog, and
+  running, stepping, compiling and Design Mode are toolbar buttons.
+- **It installs from one executable.** `installer\build.ps1` produces `xlide-setup.exe`, 29.2 MB,
+  per user, no administrator rights, nothing required beforehand. It refuses to build without a
+  language engine or a built page. `tools\release.ps1` attaches it to a tag.
+- **The window is xlide's**, caption and icon, retaken whenever the editor rewrites its own and
+  put back when the add-in unloads.
 
 ## What is not done
 
-- **Not signed.** The installer is attached to releases now, but it carries no code
-  signature, so Windows warns before running it. Signing and update plumbing are the next
-  release-engineering milestone (decision 8).
-- **The debugger and the UserForm designer** are the two large remaining milestones. Break
-  mode is now reachable from the harness, which is the regression net the debugger needs
-  before it starts.
-- **The analyzer port** is in progress; diagnostics cover the implemented layers.
-- **Watch management stays with the editor's own dialogs** by decision (11), and the watch
-  row parse is verified against a real watch.
+- **Not signed.** The installer carries no code signature, so Windows warns before running it.
+  Signing and update plumbing are the next release-engineering milestone (decision 8).
+- **The debugger and the UserForm designer** are the two large remaining milestones.
+- **Require Variable Declaration** left with the native Options dialog and has no equivalent in
+  xlide's settings. A real gap, recorded where the suppression is.
+- **The native pane's rendering is unobserved.** Parity compares text, so a pane that draws wrong
+  while holding the right text passes every check there is.
 
-## Standing probes
+## How it is checked
 
-`tools\verify.ps1` is the whole local gate in one command — page typecheck, build, bundle
-checks, headless probes, Release build, unit tests, and the Release-carries-no-debug-api
-check — about twenty seconds, with `-Live` adding the standing probes against an open editor.
-`tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload,
-and prove the running build is the one just made, in about a second and with no restart.
+`tools\verify.ps1` is the whole local gate in one command, twelve steps in about twenty seconds:
+vendored spec, engine currency against the analyzer checkout, the variant-as-object guard, page
+typecheck, build and tests, the engine language matrix, the headless page probes, the debug api's
+route audit, the Release build, the unit tests, and the Release-carries-no-debug-api check.
+`-Live` adds the suites that need an open editor.
 
-In `tools\harness`, each self-describing and PASS/FAIL where it can be:
-`Test-DebugApi`, `Test-SplitWorkspace`, `Test-Churn`, `Test-WatchPanel`, `Test-GhostLocalsPanel`,
-`Test-CloseConfirm`, `Test-CloseHiddenPane`, `Test-ObjectBrowser`, `Test-ResizeFollow`,
-`Test-CloseVbe`. `xlide-api.mjs` drives a live session from the command line or a script.
+Counts move, so they are given as of this line rather than as standing facts: 237 unit tests,
+50 api routes all documented and driven, 4 headless page probes.
 
-The page also runs against its own loopback host in a plain browser — two documents, live
-tabs, the close-confirm loop — which is where a layout change is exercised without an
-Excel: `.claude/launch.json`'s `editor-demo` serves `ui/editor/dist`.
+`tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
+prove the running build is the one just made, in about a second and with no restart.
+`tools\harness\xlide-api.mjs` drives a live session from a command line or a script, and
+[driving-excel.md](driving-excel.md) is how.
