@@ -35,7 +35,8 @@ const check = (what, ok, detail) => {
 const CALL = "rgb(220, 220, 170)";
 const PLAIN = "rgb(156, 220, 254)";
 const TYPE = "rgb(78, 201, 184)";
-const NAMES = { [CALL]: "call", [PLAIN]: "identifier", [TYPE]: "type" };
+const KEYWORD = "rgb(197, 134, 192)";
+const NAMES = { [CALL]: "call", [PLAIN]: "identifier", [TYPE]: "type", [KEYWORD]: "keyword" };
 const nameOf = (colour) => NAMES[colour] ?? colour;
 
 const lines = [
@@ -113,7 +114,33 @@ try {
     `it is ${nameOf(library.head)}; the project-procedure rule has started painting things it `
     + "does not know.");
 
-  // 3. A NAME IS ONE COLOUR ALL THE WAY ALONG.
+  /*
+   * 3. THE INTRINSIC OBJECTS ARE OBJECTS, and the keyword beside one is still a keyword.
+   *
+   * `Debug` was painted as a keyword because it rides in the canonical list, which is a SPELLING
+   * list: the formatter is there to turn `debug.print` into `Debug.Print`. Colouring read it as a
+   * claim about the word's kind. The companion grammar keeps `Debug` out of all four of its
+   * keyword patterns and gives it a rule of its own.
+   *
+   * `Print` beside it stays a keyword, and that is not an oversight in either product: `Print #1,`
+   * is a real VBA statement, and the companion's keyword pattern is ordered ahead of its member
+   * pattern, so it wins there too. The pair is checked together because the interesting thing is
+   * that they differ.
+   */
+  const intrinsic = await across("    Debug.Print label", "Debug");
+  check("the intrinsic Debug object is an object, not a keyword",
+    intrinsic.head === PLAIN && intrinsic.oneColour,
+    `it is ${nameOf(intrinsic.head)}. It rides in the canonical list because the formatter respells `
+    + "it, and that list is about spelling, not about what a word is.");
+
+  const statementWord = await across("    Debug.Print label", "Print");
+  check("and Print beside it is still a keyword, as it is upstream",
+    statementWord.head === KEYWORD,
+    `it is ${nameOf(statementWord.head)}. Print is a VBA statement in its own right and the `
+    + "companion grammar orders keywords ahead of members, so a member spelled like one paints "
+    + "as one in both products.");
+
+  // 4. A NAME IS ONE COLOUR ALL THE WAY ALONG.
   const plainType = await across("Public Type PlainRecord", "PlainRecord");
   check("a type name is a type, throughout", plainType.head === TYPE && plainType.oneColour,
     `head ${nameOf(plainType.head)}, tail ${nameOf(plainType.tail)}`);

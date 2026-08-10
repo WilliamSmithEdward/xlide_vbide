@@ -29,9 +29,28 @@ export const CANONICAL_KEYWORDS: readonly string[] = [
 // literal values a fourth, ordinary identifiers a fifth. The two products should read the same
 // module the same way at a glance.
 
+/**
+ * The word in the canonical list that is an OBJECT rather than syntax.
+ *
+ * `Debug` is in CANONICAL_KEYWORDS because the formatter respells it: `debug.print` becomes
+ * `Debug.Print`, and that list is a spelling list. Spreading it into the colouring list as well
+ * painted it as a keyword, which is a claim about what it is. It is the intrinsic debug object and
+ * you call members on it. The companion grammar keeps it out of all four of its keyword patterns
+ * and gives it a rule of its own, `support.variable.vba`, so this was a divergence from the one
+ * thing this tokenizer exists to match.
+ *
+ * `Me` is the same kind of word and is already right: it is in LANGUAGE_VALUES, which every rule
+ * consults before `@keywords`, so it paints as a constant — which is what the companion's
+ * `variable.language.self.vba` renders as too.
+ *
+ * Found sideways, 2026-08-09, while answering whether `Print` in `Debug.Print` should be yellow.
+ * It should not and is not; `Debug` beside it was the wrong colour.
+ */
+const RESERVED_OBJECTS: string[] = ["Debug"];
+
 /** Every word the grammar paints as a keyword, canonical list included. */
 const TOKEN_KEYWORDS: string[] = [
-  ...CANONICAL_KEYWORDS,
+  ...CANONICAL_KEYWORDS.filter((word) => !RESERVED_OBJECTS.includes(word)),
   "Eqv", "Imp", "TypeOf", "AddressOf", "Lib", "Alias", "Spc", "Any", "Shared",
   "Base", "Compare", "Attribute", "Write", "Seek", "Lock", "Unlock", "Put", "Open", "Close",
   "Input", "Print", "LSet", "RSet", "Wend", "GoSub", "Return",
@@ -124,6 +143,7 @@ function buildVbaMonarch(
   defaultToken: "",
   tokenPostfix: ".vba",
   keywords: TOKEN_KEYWORDS,
+  reservedObjects: RESERVED_OBJECTS,
   builtinTypes: BUILTIN_TYPES,
   languageConstants: LANGUAGE_CONSTANTS,
   languageValues: LANGUAGE_VALUES,
@@ -243,6 +263,10 @@ function buildVbaMonarch(
           "@builtinFunctions": "function",
           "@projectProcedures": "function",
           "@keywords": "keyword",
+          // Said rather than left to the default below. It reaches the same colour today, and a
+          // word that is deliberately NOT a keyword should not depend on what the fallthrough
+          // happens to be for that to stay true.
+          "@reservedObjects": "identifier",
           "@default": "identifier",
         },
       }],
