@@ -196,6 +196,33 @@ const DRIVE = `(async () => {
   const gone = act('treeMenu', { module: 'Module1' });
   check('the tree really republished: there is no row left to right-click', !gone.did, gone.detail);
 
+  /*
+   * AND WITH SEVERAL WORKBOOKS, CLOSING THE LAST TAB STILL FOLDS THEM.
+   *
+   * The sole-workbook exception is checked in its own probe, against a books=1 query. NO BACKTICKS
+   * in here, which this file already warns about further up and which I did anyway: the drive is
+   * itself a template literal and a nested one ends it early. This is the half
+   * it must not have cost: folding several away when nothing is open is real tidying, and the
+   * exception is about one row, not about the rule.
+   */
+  const books = () => window.xlideUi.state().explorer.workbooks;
+  check('the demo has more than one workbook', books().length > 1, books().length + '');
+
+  for (const one of books()) { act('expandWorkbook', { workbook: one.name, open: true }); }
+  await sleep(400);
+
+  for (let i = 0; i < 12 && document.querySelectorAll('.tab').length > 0; i++) {
+    if (!act('closeActive').did) { act('answerCloseConfirm', { answer: 'discard' }); }
+    await sleep(250);
+  }
+  await sleep(600);
+
+  check('with several open, the last tab closing folds them all',
+    books().every((one) => !one.expanded),
+    books().map((one) => one.name + '=' + one.expanded).join(', ')
+      + '  tabs left: ' + document.querySelectorAll('.tab').length
+      + '  workspace reported empty: ' + document.getElementById('shell').classList.contains('empty'));
+
   return { pass: checks.every((one) => one.ok), checks };
 })()`;
 

@@ -480,10 +480,16 @@ export class Explorer {
    * being worked on, and once nothing is open there is no such thing, so procedures hanging open
    * under an empty editor point at work that is no longer there.
    *
-   * The workbooks go too. That is a reversal of the first version, which kept them on the grounds
-   * that an expanded workbook is a hand-made choice: with nothing open at all, the tree should be
-   * back where it starts rather than half unpacked (the developer, 2026-08-07). Opening anything
-   * expands its workbook again on the way in.
+   * The workbooks go too, UNLESS THERE IS ONLY ONE. Folding them back was a reversal of the first
+   * version, which kept them on the grounds that an expanded workbook is a hand-made choice: with
+   * nothing open at all, the tree should be back where it starts rather than half unpacked (the
+   * developer, 2026-08-07). Opening anything expands its workbook again on the way in.
+   *
+   * With a single workbook that leaves a tree of one closed row, which is every module in the
+   * project hidden behind a click that has one possible answer. Folding several workbooks is real
+   * tidying and folding the only one is just an empty tree, so the count decides (the developer,
+   * 2026-08-10). Its procedures still fold: those are the accordion's memory of what was being
+   * worked on, and with nothing open there is no such thing.
    *
    * Nothing here happens when the tree has been told not to follow the editor.
    */
@@ -492,8 +498,10 @@ export class Explorer {
       return;
     }
 
+    const soleWorkbook = this.projects.length <= 1;
+
     const wasUnfolded = this.expandedModule !== null
-      || [...this.expandedWorkbooks.values()].some((open) => open);
+      || (!soleWorkbook && [...this.expandedWorkbooks.values()].some((open) => open));
 
     if (!wasUnfolded) {
       return;
@@ -501,11 +509,15 @@ export class Explorer {
 
     this.expandedModule = null;
     this.expandedModuleWorkbook = null;
-    this.expandedWorkbooks.clear();
 
-    // Forgotten too, or the next activation would count as "the attention has not moved" and
-    // leave the workbook it lands in closed.
-    this.attentionWorkbook = null;
+    if (!soleWorkbook) {
+      this.expandedWorkbooks.clear();
+
+      // Forgotten with them, or the next activation would count as "the attention has not moved"
+      // and leave the workbook it lands in closed. Kept when the sole workbook stays open, since
+      // there is no closed workbook for it to strand.
+      this.attentionWorkbook = null;
+    }
 
     this.render();
   }

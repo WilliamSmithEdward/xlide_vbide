@@ -157,6 +157,30 @@ internal sealed class CodePaneTracker : IDisposable
         if (windowEvent.IsNameChange && !windowEvent.IsCaret)
         {
             CaptionChanged?.Invoke(windowEvent.Window);
+
+            /*
+             * A RENAMED COMPONENT KEEPS ITS PANE, so the cache below never hears about it.
+             *
+             * That cache holds the components with panes open and is invalidated when a pane
+             * appears or disappears, on the reasoning that nothing else can change the set. A
+             * rename changes what a component is CALLED without touching a window, and the names
+             * are what a pane's caption is matched against: a stale one matches nothing, and an
+             * unmatched pane is dropped rather than guessed at, which loses the tab.
+             *
+             * Measured before changing it, and it did not reproduce: renaming a module with its
+             * pane shown, in the background, with references and without, all followed correctly,
+             * because something else in the rename path happens to invalidate this. That is luck
+             * to depend on, and the same shape of assumption cost a day elsewhere this week, so
+             * the event that actually corresponds to the change now clears it.
+             *
+             * Only for the editor's own windows. The host rewrites its frame caption constantly,
+             * and invalidating on every one of those would re-read the component list several
+             * times a second to notice nothing.
+             */
+            if (IsEditorClass(ReadClassName(windowEvent.Window)))
+            {
+                _openComponents = null;
+            }
         }
 
         if (!windowEvent.AffectsLayout || windowEvent.IsCaret)
@@ -176,9 +200,9 @@ internal sealed class CodePaneTracker : IDisposable
             Log.Verbose($"window event: {windowEvent.Describe()} {className} {windowEvent.Window:X}");
         }
 
-        // A pane appearing or disappearing is the only thing that can change which components have
-        // panes open, so it is the only thing that invalidates the expensive half of a refresh.
-        // Moves and resizes need nothing but window rectangles.
+        // A pane appearing or disappearing changes which components have panes open. So does a
+        // rename, which is handled above where the name change arrives. Moves and resizes need
+        // nothing but window rectangles.
         if (windowEvent.IsCreate || windowEvent.IsDestroy)
         {
             _openComponents = null;

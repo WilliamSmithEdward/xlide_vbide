@@ -1984,8 +1984,37 @@ export function demoTransport(): HostTransport {
     },
   ];
 
+  /*
+   * ONE WORKBOOK ON REQUEST, with `?books=1`.
+   *
+   * The tree behaves differently at one workbook than at several: closing the last tab folds the
+   * workbooks away, unless there is only one, where folding the only row would hide the whole
+   * project behind a click with one possible answer. Two branches, and the demo could only ever
+   * reach the first, so the interesting one was verifiable against a real Excel and nowhere else.
+   *
+   * The demo exists to make the page drivable without a host, and a demo that cannot reach half
+   * the states the page has is only half a demo.
+   */
+  const soleWorkbook = new URLSearchParams(location.search).get("books") === "1";
+
+  /*
+   * THE HOST SAYS WHEN NOTHING IS OPEN, and the demo did not.
+   *
+   * Closing the last pane makes the real session send `clearDocuments`, which is what puts the
+   * surface into its empty state and folds the tree back. The demo only ever republished a shorter
+   * tab list, so a page driven here could never reach the empty workspace at all: every headless
+   * check about what happens when the last tab closes was measuring a state the demo cannot enter,
+   * and one of them passed for exactly that reason (2026-08-10).
+   */
+  const sendEmptyWhenNothingIsLeft = (): void => {
+    if (openModules.length === 0) {
+      send({ type: "clearDocuments" });
+    }
+  };
+
   const sendProjects = (): void => {
-    send({ type: "setProjects", projects: demoProjects.map((one) => ({ ...one })) });
+    const shown = soleWorkbook ? demoProjects.slice(0, 1) : demoProjects;
+    send({ type: "setProjects", projects: shown.map((one) => ({ ...one })) });
   };
 
   return {
@@ -2070,6 +2099,7 @@ export function demoTransport(): HostTransport {
           }
 
           sendModules();
+          sendEmptyWhenNothingIsLeft();
         }
       }
       if (message.type === "removeComponent") {
