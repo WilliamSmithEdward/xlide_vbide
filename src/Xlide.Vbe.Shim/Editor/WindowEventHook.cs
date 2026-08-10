@@ -138,7 +138,6 @@ internal readonly record struct WindowEvent(uint EventId, nint Window, int Objec
 
     public bool IsHide => EventId == Win32.EventObjectHide;
 
-    public bool IsFocus => EventId == Win32.EventObjectFocus;
 
     public bool IsLocationChange => EventId == Win32.EventObjectLocationChange;
 

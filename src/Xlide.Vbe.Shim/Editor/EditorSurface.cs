@@ -1063,19 +1063,6 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetLocalsMessage));
     }
 
-    /// <summary>Marks a line whose breakpoint the host refused: a brief orange cross.</summary>
-    public void ShowBreakpointRefused(int line)
-    {
-        if (!_loaded)
-        {
-            return;
-        }
-
-        Post(JsonSerializer.Serialize(
-            new BreakpointRefusedMessage("breakpointRefused", line),
-            EditorMessageContext.Default.BreakpointRefusedMessage));
-    }
-
     /// <summary>Which debug mode the editor is in; held so a late page still learns it.</summary>
     public void ShowDebugMode(string mode)
     {

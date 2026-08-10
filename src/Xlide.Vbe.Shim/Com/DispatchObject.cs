@@ -471,40 +471,6 @@ internal sealed unsafe class DispatchObject : IDisposable
         return FromVariant(value);
     }
 
-    /// <summary>
-    /// Calls a method whose last parameter is an in-out automation object, and reports both the
-    /// method's return value and the object the callee wrote into that parameter.
-    ///
-    /// An out parameter cannot be expressed as a return value, so the storage has to be ours, has
-    /// to outlive the call, and has to be read afterwards. The descriptor points straight at an
-    /// interface slot rather than at a second variant, because that is how the parameter is
-    /// declared: a byref variant would reach the callee only through the dispatch layer's type
-    /// coercion, and whether that coercion runs depends on how the callee implements Invoke.
-    /// </summary>
-    public DispatchObject? CallWithByRefObject(
-        string name,
-        ReadOnlySpan<ComVariant> leadingArguments,
-        out DispatchObject? byRefResult)
-    {
-        var dispId = GetDispId(name);
-        if (dispId == DispId.Unknown)
-        {
-            throw new InvalidOperationException($"The object has no member named '{name}'.");
-        }
-
-        nint slot = 0;
-
-        var arguments = new ComVariant[leadingArguments.Length + 1];
-        leadingArguments.CopyTo(arguments);
-        arguments[^1] = ComVariant.CreateRaw(VarEnum.VT_BYREF | VarEnum.VT_DISPATCH, (nint)(&slot));
-
-        using var value = InvokeCore(dispId, InvokeKind.Method, arguments);
-
-        // Whatever the callee put in the slot, it counted for us.
-        byRefResult = Attach(slot);
-        return FromVariant(value);
-    }
-
     /// <summary>Writes a boolean property.</summary>
     public void SetBool(string name, bool value) => SetProperty(name, ComVariant.Create(value));
 

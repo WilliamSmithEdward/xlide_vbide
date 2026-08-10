@@ -63,7 +63,6 @@ export type HostMessage =
   | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
-  | { type: "breakpointRefused"; line: number }
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
@@ -1172,10 +1171,6 @@ export class EditorBridge {
         return;
       case "setBreakpoints":
         this.setBreakpoints(message.lines);
-        return;
-      case "breakpointRefused":
-        // The hover preview owns the affordance now; a refusal after a click draws nothing,
-        // so nothing ever appears that looks like a breakpoint the developer did not get.
         return;
       case "confirmClose":
         this.shell?.confirmClose(message.name, message.project ?? null);

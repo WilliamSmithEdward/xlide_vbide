@@ -100,11 +100,6 @@ public sealed record SearchResultMessage(
     [property: JsonPropertyName("truncated")] bool Truncated,
     [property: JsonPropertyName("replaced")] int Replaced = 0);
 
-/// <summary>A breakpoint the host refused, so the page can mark the line briefly.</summary>
-public sealed record BreakpointRefusedMessage(
-    [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("line")] int Line);
-
 /// <summary>One row of the Watch panel: a watch expression and where it stands.</summary>
 public sealed record SurfaceWatchRow(
     [property: JsonPropertyName("expression")] string Expression,
@@ -531,7 +526,6 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetSettingsMessage))]
 [JsonSerializable(typeof(SetLocalsMessage))]
 [JsonSerializable(typeof(SurfaceLocalRow))]
-[JsonSerializable(typeof(BreakpointRefusedMessage))]
 [JsonSerializable(typeof(ConfirmCloseMessage))]
 [JsonSerializable(typeof(SetWatchesMessage))]
 [JsonSerializable(typeof(SurfaceWatchRow))]
