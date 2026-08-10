@@ -59,6 +59,7 @@ const lines = [
   "End Function",
   "",
   "Public Sub Caller()",
+  "    Print #1, \"the statement, which keeps its keyword\"",
   "    Recalculate \"bare\"",
   `    ${name}.Recalculate "qualified"`,
   `    Debug.Print ${name}.CalculérName(1)`,
@@ -115,30 +116,35 @@ try {
     + "does not know.");
 
   /*
-   * 3. THE INTRINSIC OBJECTS ARE OBJECTS, and the keyword beside one is still a keyword.
+   * 3. `Debug.Print` IS AN OBJECT AND A METHOD, and used to be two keywords.
    *
-   * `Debug` was painted as a keyword because it rides in the canonical list, which is a SPELLING
-   * list: the formatter is there to turn `debug.print` into `Debug.Print`. Colouring read it as a
-   * claim about the word's kind. The companion grammar keeps `Debug` out of all four of its
-   * keyword patterns and gives it a rule of its own.
+   * `Debug` rode in the canonical list, which is a SPELLING list: the formatter is there to turn
+   * `debug.print` into `Debug.Print`. Colouring read it as a claim about the word's kind and
+   * painted the intrinsic debug object the colour of an If.
    *
-   * `Print` beside it stays a keyword, and that is not an oversight in either product: `Print #1,`
-   * is a real VBA statement, and the companion's keyword pattern is ordered ahead of its member
-   * pattern, so it wins there too. The pair is checked together because the interesting thing is
-   * that they differ.
+   * `Print` was worse, because it was defended. After a dot a keyword is not a keyword: there is
+   * no VBA construct where `.Print` is the Print statement. The member rule asked `@keywords`
+   * anyway, so `.Close`, `.Open` and `.Type` painted as syntax too.
    */
   const intrinsic = await across("    Debug.Print label", "Debug");
-  check("the intrinsic Debug object is an object, not a keyword",
-    intrinsic.head === PLAIN && intrinsic.oneColour,
+  check("the intrinsic Debug object is painted as an object",
+    intrinsic.head === TYPE && intrinsic.oneColour,
     `it is ${nameOf(intrinsic.head)}. It rides in the canonical list because the formatter respells `
     + "it, and that list is about spelling, not about what a word is.");
 
-  const statementWord = await across("    Debug.Print label", "Print");
-  check("and Print beside it is still a keyword, as it is upstream",
-    statementWord.head === KEYWORD,
-    `it is ${nameOf(statementWord.head)}. Print is a VBA statement in its own right and the `
-    + "companion grammar orders keywords ahead of members, so a member spelled like one paints "
-    + "as one in both products.");
+  const method = await across("    Debug.Print label", "Print");
+  check("and Print after the dot is a call, not a statement keyword",
+    method.head === CALL,
+    `it is ${nameOf(method.head)}. After a dot the word is a member, always: no VBA construct `
+    + "puts the Print statement there.");
+
+  // AND THE SAME WORD WITHOUT A DOT IS STILL THE STATEMENT. This is what stops the fix above
+  // turning a keyword list into a suggestion.
+  const statement = await across("    Print #1, \"the statement, which keeps its keyword\"", "Print");
+  check("the bare Print statement is still a keyword",
+    statement.head === KEYWORD,
+    `it is ${nameOf(statement.head)}. Print #1, is a real VBA statement and nothing about the `
+    + "member rule should reach it.");
 
   // 4. A NAME IS ONE COLOUR ALL THE WAY ALONG.
   const plainType = await across("Public Type PlainRecord", "PlainRecord");

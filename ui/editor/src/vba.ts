@@ -30,27 +30,39 @@ export const CANONICAL_KEYWORDS: readonly string[] = [
 // module the same way at a glance.
 
 /**
- * The word in the canonical list that is an OBJECT rather than syntax.
+ * The language's own OBJECTS, painted as types.
  *
- * `Debug` is in CANONICAL_KEYWORDS because the formatter respells it: `debug.print` becomes
- * `Debug.Print`, and that list is a spelling list. Spreading it into the colouring list as well
- * painted it as a keyword, which is a claim about what it is. It is the intrinsic debug object and
- * you call members on it. The companion grammar keeps it out of all four of its keyword patterns
- * and gives it a rule of its own, `support.variable.vba`, so this was a divergence from the one
- * thing this tokenizer exists to match.
+ * `Debug` and `Err` are predefined objects you call members on, which is what a class looks like
+ * from the caller's side, so they take the colour this theme gives a type. It is also what tells
+ * them apart from the members hanging off them: `Debug.Print` reads as a thing and an action, the
+ * way `Application.Version` reads as a thing and a property.
  *
- * `Me` is the same kind of word and is already right: it is in LANGUAGE_VALUES, which every rule
- * consults before `@keywords`, so it paints as a constant — which is what the companion's
- * `variable.language.self.vba` renders as too.
- *
- * Found sideways, 2026-08-09, while answering whether `Print` in `Debug.Print` should be yellow.
- * It should not and is not; `Debug` beside it was the wrong colour.
+ * `Err` is in BUILTIN_FUNCTIONS as well, because `Err` is genuinely both: the object, and the
+ * `Err()` function of old code. The object wins here, since the sets ahead of the functions decide
+ * first, and an `Err.Number` is what anybody writing VBA in this decade means.
  */
-const RESERVED_OBJECTS: string[] = ["Debug"];
+const BUILTIN_OBJECTS: string[] = ["Debug", "Err"];
 
-/** Every word the grammar paints as a keyword, canonical list included. */
+/**
+ * Members of those objects that are METHODS rather than properties, painted as calls.
+ *
+ * Small and exact on purpose. A plain `.Something` cannot be told from a property by any rule a
+ * tokenizer has — `Application.Version` is a property and `Debug.Print` is a method, and both are
+ * a dot and a word — so the only members painted as calls are the ones the language defines and
+ * this list names. Everything else stays an ordinary member.
+ */
+const BUILTIN_METHODS: string[] = ["Print", "Assert", "Raise", "Clear"];
+
+/**
+ * Every word the grammar paints as a keyword, canonical list included.
+ *
+ * MINUS THE OBJECTS. `Debug` is in CANONICAL_KEYWORDS because the formatter respells it —
+ * `debug.print` becomes `Debug.Print` — and that list is about SPELLING. Spreading it into the
+ * colouring set turned it into a claim about what kind of word it is, and painted the intrinsic
+ * debug object the colour of an If.
+ */
 const TOKEN_KEYWORDS: string[] = [
-  ...CANONICAL_KEYWORDS.filter((word) => !RESERVED_OBJECTS.includes(word)),
+  ...CANONICAL_KEYWORDS.filter((word) => !BUILTIN_OBJECTS.includes(word)),
   "Eqv", "Imp", "TypeOf", "AddressOf", "Lib", "Alias", "Spc", "Any", "Shared",
   "Base", "Compare", "Attribute", "Write", "Seek", "Lock", "Unlock", "Put", "Open", "Close",
   "Input", "Print", "LSet", "RSet", "Wend", "GoSub", "Return",
@@ -143,7 +155,8 @@ function buildVbaMonarch(
   defaultToken: "",
   tokenPostfix: ".vba",
   keywords: TOKEN_KEYWORDS,
-  reservedObjects: RESERVED_OBJECTS,
+  builtinObjects: BUILTIN_OBJECTS,
+  builtinMethods: BUILTIN_METHODS,
   builtinTypes: BUILTIN_TYPES,
   languageConstants: LANGUAGE_CONSTANTS,
   languageValues: LANGUAGE_VALUES,
@@ -208,11 +221,23 @@ function buildVbaMonarch(
         },
       }]],
 
-      // A member with an argument list is a call; a plain member is a member. The grammar's
-      // quirk is kept: a member spelled like a keyword paints as one (`.Open`, `.Print`).
-      [/(\.)(@identifier)(?=\s*\()/, ["delimiter", {
-        cases: { "@keywords": "keyword", "@default": "function" },
-      }]],
+      /*
+       * AFTER A DOT, A KEYWORD IS NOT A KEYWORD. There is no VBA construct where `.Print` is the
+       * Print statement, or `.Close` the Close statement: the dot makes the next word a member,
+       * always, and nothing else can follow it.
+       *
+       * This used to consult `@keywords` first and keep what the comment called the grammar's
+       * quirk, so `Debug.Print`, `wb.Close`, `Workbooks.Open` and `.Type` all painted the colour of
+       * an If. That is not a considered rule over there either: TextMate matches its keyword
+       * pattern by position and its member pattern comes later in the file, so the keyword wins and
+       * saying "except after a dot" costs a lookbehind on every keyword. This tokenizer has an
+       * explicit member rule and can simply not ask (the developer, 2026-08-09).
+       *
+       * A member with an argument list is a call. A plain member is a member unless the language
+       * says otherwise, which only BUILTIN_METHODS does: a property and a method are both a dot
+       * and a word, so anything wider would paint `Application.Version` as a call.
+       */
+      [/(\.)(@identifier)(?=\s*\()/, ["delimiter", "function"]],
       /*
        * A QUALIFIED MEMBER THE PROJECT DECLARES AS A PROCEDURE IS A CALL, parentheses or not.
        *
@@ -230,8 +255,8 @@ function buildVbaMonarch(
        */
       [/(\.)(@identifier)/, ["delimiter", {
         cases: {
-          "@keywords": "keyword",
           "@languageConstants": "constant",
+          "@builtinMethods": "function",
           "@projectProcedures": "function",
           "@default": "identifier",
         },
@@ -259,14 +284,13 @@ function buildVbaMonarch(
           "@languageConstants": "constant",
           "@languageValues": "constant",
           "@builtinTypes": "type",
+          // BEFORE the functions: `Err` is in both lists, because it is genuinely both the object
+          // and the old `Err()` function, and the object is what anybody means now.
+          "@builtinObjects": "type",
           "@projectTypes": "type",
           "@builtinFunctions": "function",
           "@projectProcedures": "function",
           "@keywords": "keyword",
-          // Said rather than left to the default below. It reaches the same colour today, and a
-          // word that is deliberately NOT a keyword should not depend on what the fallthrough
-          // happens to be for that to stay true.
-          "@reservedObjects": "identifier",
           "@default": "identifier",
         },
       }],
