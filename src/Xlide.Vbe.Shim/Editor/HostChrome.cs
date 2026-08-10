@@ -190,6 +190,13 @@ internal sealed class HostChrome : IDisposable
         }
     }
 
+    /// <summary>
+    /// What a window's title bar reads right now. The same read Apply compares against, exposed so
+    /// the debug api can report the caption a person is looking at rather than the one this class
+    /// believes it wrote — which is exactly the difference the reset defect lived in.
+    /// </summary>
+    public static string? CaptionOf(nint window) => window == 0 ? null : ReadCaption(window);
+
     private static unsafe string? ReadCaption(nint window)
     {
         const int Capacity = 512;

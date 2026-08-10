@@ -132,6 +132,33 @@ try {
       afterStep.caretLine > stopLine, `${stopLine} -> ${afterStep.caretLine}`);
     await parity("after a step");
   }
+
+  /*
+   * THE TITLE BAR SURVIVES A RESET IT DID NOT NEED.
+   *
+   * Pressing Reset a second time changes no execution state and rewrites the caption: the editor
+   * puts "Microsoft Visual Basic for Applications" back on its own window. The refresh used to
+   * skip on a mode that had not changed, so the product's name stayed off its own window until
+   * something else happened to move (2026-08-09, reported from the toolbar button).
+   *
+   * Read from the frame rather than from what the session thinks it wrote. Our record of the
+   * caption is what was wrong.
+   */
+  console.log("\n  the title bar:");
+  const captionNow = async () => (await api.state()).frameCaption ?? "";
+
+  check("the caption is ours while stopped or just after",
+    (await captionNow()).startsWith("XLIDE"), await captionNow());
+
+  for (let press = 1; press <= 3; press += 1) {
+    await api.command("reset");
+    await wait(900);
+    const caption = await captionNow();
+    check(`reset #${press} leaves our name on the window`, caption.startsWith("XLIDE"), caption);
+  }
+
+  check("and it says design once the run is over",
+    (await captionNow()).includes("[design]"), await captionNow());
 } finally {
   // Whatever happened, leave break mode and take the breakpoint out: a session left stopped
   // blocks everything afterwards, and the next reader cannot tell why.

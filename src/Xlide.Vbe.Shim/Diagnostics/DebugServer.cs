@@ -666,6 +666,12 @@ public sealed record DebugStateReply(
     [property: JsonPropertyName("hasUnwrittenEdits")] bool HasUnwrittenEdits,
     [property: JsonPropertyName("engineUp")] bool EngineUp,
     [property: JsonPropertyName("frame")] string Frame,
+    /// <summary>
+    /// What the frame's title bar ACTUALLY READS, off the window rather than out of our record of
+    /// what we last wrote there. The distinction is the whole point: the host rewrites that window
+    /// underneath us, and nothing here could see it happen until this was added.
+    /// </summary>
+    [property: JsonPropertyName("frameCaption")] string? FrameCaption,
     [property: JsonPropertyName("frameRect")] string FrameRect,
     [property: JsonPropertyName("documentArea")] string DocumentArea,
     [property: JsonPropertyName("documentAreaRect")] string DocumentAreaRect,

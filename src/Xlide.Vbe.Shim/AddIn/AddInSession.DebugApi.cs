@@ -2223,6 +2223,7 @@ internal sealed partial class AddInSession
                         // squiggles from the last pass that ran (found 2026-08-08 by killing it).
                         EngineUp: _analysis?.IsReady == true,
                         Frame: $"0x{_frame:X}",
+                        FrameCaption: HostChrome.CaptionOf(_frame),
                         FrameRect: $"{frameRect.Left},{frameRect.Top},{frameRect.Right},{frameRect.Bottom}",
                         DocumentArea: $"0x{_documentArea:X}",
                         DocumentAreaRect: $"{documentsRect.Left},{documentsRect.Top},{documentsRect.Right},{documentsRect.Bottom}",

@@ -5473,6 +5473,21 @@ internal sealed partial class AddInSession : IDisposable
     /// surface; and Apply writes only when the composed caption differs from what is up. So
     /// hanging this on the tab strip's publish, which is an event, costs a few string comparisons
     /// and no round trip to the editor.
+    ///
+    /// APPLY IS THE ONLY COMPARISON, and this must not grow another. It had one: a guard here that
+    /// returned early when the mode, workbook and module all matched what was last written. That
+    /// compares our record of the caption against our record of the caption, and the thing it has
+    /// to notice is the HOST rewriting the window underneath us â€” which changes neither.
+    ///
+    /// Pressing Reset twice was enough. The first press leaves break, the mode changes, the guard
+    /// lets it through. The second press does nothing to the execution state and everything to the
+    /// caption: the editor rewrites the window as "Microsoft Visual Basic for Applications", the
+    /// mode is still design, the module is still the same, and the guard sent the refresh home. The
+    /// product's name was off its own window until the next tab switch (measured 2026-08-09: three
+    /// polls ran in that state, each one calling this, each one returning early).
+    ///
+    /// Apply compares against what the window ACTUALLY READS, which is the only comparison that can
+    /// see that happen, and it writes only on a difference, so this cannot chase its own tail.
     /// </summary>
     private void RefreshWindowTitle()
     {
@@ -5490,11 +5505,6 @@ internal sealed partial class AddInSession : IDisposable
             && _projectNames.TryGetValue(id, out var cased)
                 ? cased
                 : DisplayFromProjectId(_shownProject);
-
-        if (chrome.Mode == _titleMode && chrome.Workbook == workbook && chrome.Module == shown)
-        {
-            return;
-        }
 
         chrome.Mode = _titleMode;
         chrome.Workbook = workbook;
