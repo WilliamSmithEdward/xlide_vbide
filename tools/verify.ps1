@@ -391,7 +391,8 @@ if ($Live) {
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
-            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs')
+            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
+                                     'settings-bite.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

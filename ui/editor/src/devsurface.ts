@@ -1103,6 +1103,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       };
     },
 
+    /**
+     * Types text into the page's editor, without the host seeing it first.
+     *
+     * `type` on the shim goes through the HOST's keyboard pipeline, and the host normalises what
+     * it takes: it respells keywords canonically as they arrive. So text written or typed through
+     * the door is already canonical by the time the page has it, and any page behaviour that acts
+     * on non-canonical text cannot be reached from outside at all. `formatCanonicalKeywords` is
+     * exactly that: a setting whose whole job is respelling keywords, which could not be observed
+     * because nothing could hand the page a keyword spelled the other way (2026-08-09).
+     *
+     * The caret goes where the text ends, as typing does. Multi-line text is inserted rather than
+     * typed line by line, so this does NOT run the enter rules: `press` is for that, and the two
+     * are separate for the same reason `press` and `key` are.
+     */
+    insert: (args) => {
+      const editor = workspace.activeEditor();
+      const text = String(args.text ?? "");
+      if (text.length === 0) {
+        return { did: false, detail: "no text given; pass text: \"...\"", data: null };
+      }
+
+      editor.focus();
+      editor.trigger("keyboard", "type", { text });
+
+      const at = editor.getPosition();
+      return {
+        did: true,
+        detail: `inserted ${text.length} character(s), caret at ${at?.lineNumber}:${at?.column}`,
+        data: {
+          line: at?.lineNumber ?? null,
+          column: at?.column ?? null,
+          text: at ? editor.getModel()?.getLineContent(at.lineNumber) ?? null : null,
+        },
+      };
+    },
+
     backspace: (args) => {
       const editor = workspace.activeEditor();
       const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));
