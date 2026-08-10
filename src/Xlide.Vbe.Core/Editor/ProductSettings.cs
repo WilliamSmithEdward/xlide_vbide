@@ -56,9 +56,12 @@ public sealed record ProductSettings
     // Indentation is spaces, FormatIndentSize of them, and Backspace in a line's leading
     // whitespace takes back a whole level of them.
 
-    /// <summary>Format Module: respell keywords in their canonical case.</summary>
-    [JsonPropertyName("format.canonicalKeywords")]
-    public bool FormatCanonicalKeywords { get; init; } = true;
+    // THERE IS NO "canonical keywords" SETTING, and there cannot be a working one. Two paths
+    // canonicalise keywords before the formatter is ever asked and neither consults a setting: the
+    // HOST respells them as it takes a module, and the page recases every touched line 200ms after
+    // it settles. Typing `public sub go()` with the switch OFF still produced `Public Sub go()`
+    // (2026-08-09). Formatting still respells, always; the switch promised what it could not
+    // deliver. A `format.canonicalKeywords` in an older settings file is ignored rather than read.
 
     /// <summary>
     /// Which code decides what an import or export will do: "xlide" or "builtIn".

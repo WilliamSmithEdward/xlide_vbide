@@ -18,7 +18,6 @@ public class ProductSettingsTests
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.True(settings.MirrorCommentSpacing);
         Assert.Equal(4, settings.FormatIndentSize);
-        Assert.True(settings.FormatCanonicalKeywords);
     }
 
     /// <summary>
@@ -34,6 +33,23 @@ public class ProductSettingsTests
             "{ \"format.useTabs\": true, \"format.indentSize\": 2 }");
 
         Assert.Equal(2, settings.FormatIndentSize);
+    }
+
+    /// <summary>
+    /// A settings file written before the canonical-keywords option was removed still reads.
+    ///
+    /// The same shape as the tabs option above, and removed for the same kind of reason: the
+    /// switch could not be honoured. Two paths canonicalise keywords before the formatter is ever
+    /// asked and neither consulted it, so a developer who turned it off watched their keywords be
+    /// respelled anyway. Formatting still respells, always; the promise is what went.
+    /// </summary>
+    [Fact]
+    public void AnOldFileAskingForPlainKeywordsIsReadWithoutThem()
+    {
+        var settings = ProductSettings.Parse(
+            "{ \"format.canonicalKeywords\": false, \"format.indentSize\": 3 }");
+
+        Assert.Equal(3, settings.FormatIndentSize);
     }
 
     [Theory]

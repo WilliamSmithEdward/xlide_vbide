@@ -994,7 +994,6 @@ internal sealed class EditorSurface : IDisposable
                 settings.MirrorCommentSpacing,
                 settings.TreeFollowsEditor,
                 settings.FormatIndentSize,
-                settings.FormatCanonicalKeywords,
                 settings.SyncEngine),
             EditorMessageContext.Default.SetSettingsMessage));
     }
@@ -1628,9 +1627,6 @@ internal sealed class EditorSurface : IDisposable
                         && indentValue.TryGetInt32(out var asked)
                         ? asked
                         : 4;
-                    var canonicalKeywords = !document.RootElement.TryGetProperty("formatCanonicalKeywords", out var keywordsValue)
-                        || keywordsValue.ValueKind is not (JsonValueKind.False);
-
                     var syncEngine = document.RootElement.TryGetProperty("syncEngine", out var engineValue)
                         && engineValue.ValueKind == JsonValueKind.String
                             ? engineValue.GetString() ?? "xlide"
@@ -1643,7 +1639,6 @@ internal sealed class EditorSurface : IDisposable
                         MirrorCommentSpacing = mirrorSpacing,
                         TreeFollowsEditor = treeFollows,
                         FormatIndentSize = indentSize,
-                        FormatCanonicalKeywords = canonicalKeywords,
                         SyncEngine = syncEngine,
                     }.Normalized());
                     break;

@@ -22,8 +22,6 @@ export interface EditorSettings {
   treeFollowsEditor: boolean;
   /** One indent level, in spaces. Governs typing, smart Enter, and Format Module alike. */
   formatIndentSize: number;
-  /** Format Module: respell keywords in their canonical case. */
-  formatCanonicalKeywords: boolean;
   /** Which planner decides what an import or export will do: "xlide" or "builtIn". */
   syncEngine: string;
 }
@@ -35,7 +33,6 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   mirrorCommentSpacing: true,
   treeFollowsEditor: true,
   formatIndentSize: 4,
-  formatCanonicalKeywords: true,
   syncEngine: "xlide",
 };
 
@@ -56,7 +53,6 @@ export function applySettings(next: EditorSettings): void {
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
-    formatCanonicalKeywords: next.formatCanonicalKeywords !== false,
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
   };
 

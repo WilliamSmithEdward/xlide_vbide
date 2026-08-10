@@ -96,7 +96,6 @@ export type HostMessage =
     mirrorCommentSpacing: boolean;
     treeFollowsEditor: boolean;
     formatIndentSize?: number;
-    formatCanonicalKeywords?: boolean;
     syncEngine?: string;
   };
 
@@ -307,7 +306,6 @@ export type ClientMessage =
     mirrorCommentSpacing: boolean;
     treeFollowsEditor: boolean;
     formatIndentSize: number;
-    formatCanonicalKeywords: boolean;
   }
   | { type: "trace"; text: string };
 
@@ -679,7 +677,6 @@ export class EditorBridge {
       mirrorCommentSpacing: settings.mirrorCommentSpacing,
       treeFollowsEditor: settings.treeFollowsEditor,
       formatIndentSize: settings.formatIndentSize,
-      formatCanonicalKeywords: settings.formatCanonicalKeywords,
     });
   }
 
@@ -1334,7 +1331,6 @@ export class EditorBridge {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize ?? 4,
-          formatCanonicalKeywords: message.formatCanonicalKeywords ?? true,
           syncEngine: message.syncEngine ?? "xlide",
         });
         return;
@@ -1975,7 +1971,6 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: true,
           treeFollowsEditor: true,
           formatIndentSize: 4,
-          formatCanonicalKeywords: true,
         });
         send({
           type: "setLocals",
@@ -2223,7 +2218,6 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
-          formatCanonicalKeywords: message.formatCanonicalKeywords,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

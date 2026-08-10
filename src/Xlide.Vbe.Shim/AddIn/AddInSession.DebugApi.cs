@@ -2851,7 +2851,6 @@ internal sealed partial class AddInSession
                         TreeFollowsEditor = Flag("treeFollowsEditor", settings.TreeFollowsEditor),
                         FormatIndentSize = request.Query.TryGetValue("formatIndentSize", out var indent)
                             && int.TryParse(indent, out var asked) ? asked : settings.FormatIndentSize,
-                        FormatCanonicalKeywords = Flag("formatCanonicalKeywords", settings.FormatCanonicalKeywords),
                         SyncEngine = request.Query.TryGetValue("syncEngine", out var planner)
                             ? planner
                             : settings.SyncEngine,
@@ -2867,7 +2866,6 @@ internal sealed partial class AddInSession
                         settings.MirrorCommentSpacing,
                         settings.TreeFollowsEditor,
                         settings.FormatIndentSize,
-                        settings.FormatCanonicalKeywords,
                         settings.SyncEngine),
                     DebugJsonContext.Default.DebugSettingsReply);
             }

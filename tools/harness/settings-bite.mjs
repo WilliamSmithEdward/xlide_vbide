@@ -101,21 +101,23 @@ try {
     "the explorer snapshot was identical with it on and off");
 
   /*
-   * formatCanonicalKeywords IS NOT CHECKED HERE, and the reason is worth more than the check.
+   * THERE ARE SIX SETTINGS, not seven. `formatCanonicalKeywords` was removed on 2026-08-09 after
+   * this suite could not find a way to observe it.
    *
-   * The setting reaches the formatter: format.ts is `options.canonicalKeywords ? respell(body) :
-   * body`. But its effect cannot be observed from outside, because everything that can put text
-   * into the editor canonicalises keywords first. The HOST respells them as it takes a module, and
-   * the page runs a recase pass of its own per touched line (typing.ts) which does not consult
-   * this setting. Typing `public sub go()` straight into the page with the setting OFF still
-   * produced `Public Sub go()` before the formatter was asked (2026-08-09).
+   * It reached the formatter and was conditional there, but two paths canonicalise keywords before
+   * the formatter is ever asked and neither consults a setting: the HOST respells them as it takes
+   * a module, and the page recases every touched line 200ms after it settles. Typing
+   * `public sub go()` with the switch OFF still produced `Public Sub go()`.
    *
-   * So there is nothing left for the formatter to respell, either way. That is not proof the
-   * setting is dead - the code path is there and it is conditional - but nothing a developer can
-   * do makes it visible, which is a question about the product rather than a check to write.
+   * So the switch promised what it could not deliver. Formatting still respells, always. If a
+   * `formatCanonicalKeywords` row ever comes back to the dialog, this comment is the reason to
+   * ask what changed underneath it first.
    */
-  console.log("     (formatCanonicalKeywords is not checked: see the comment. Its effect is");
-  console.log("      unreachable because typing recases keywords before the formatter runs.)");
+  const known = Object.keys(await api.settings());
+  check("no setting has appeared that nothing here exercises",
+    !known.includes("formatCanonicalKeywords"),
+    `settings answers ${JSON.stringify(known)}. A new one needs a row above, or a reason here.`);
+
 } finally {
   await api.settings(restore).catch(() => {});
   if (made) {

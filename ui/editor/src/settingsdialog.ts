@@ -53,12 +53,6 @@ const OPTIONS = [
     max: 8,
   },
   {
-    key: "formatCanonicalKeywords" as const,
-    kind: "toggle" as const,
-    label: "Format: canonical keywords",
-    description: "Formatting respells keywords in their canonical case, the way the language spells them.",
-  },
-  {
     key: "syncEngine" as const,
     kind: "choice" as const,
     // Short enough to stay on ONE line beside its 'i'. The longer version wrapped, which put the

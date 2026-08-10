@@ -300,7 +300,19 @@ function boot(): void {
     const settings = currentSettings();
     return {
       indentSize: settings.formatIndentSize,
-      canonicalKeywords: settings.formatCanonicalKeywords,
+      /*
+       * ALWAYS ON, and no longer a setting.
+       *
+       * Two paths canonicalise keywords before the formatter is ever asked and neither consults a
+       * setting: the HOST respells them as it takes a module, and the page runs its own recase per
+       * touched line. Typing `public sub go()` with the switch OFF still produced `Public Sub go()`
+       * (2026-08-09). So the switch promised something it could not deliver, on a row in a dialog
+       * that was already too tall.
+       *
+       * The respell stays because it still covers a real window: paste, then Format Module inside
+       * the 200ms before the recase timer fires.
+       */
+      canonicalKeywords: true,
     };
   });
 
