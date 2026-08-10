@@ -384,6 +384,13 @@ try {
     console.log("     (this machine's code page held every sample, so there is nothing to refuse)");
   }
 
+  // Section 8, an import must not write over unwritten edits, lives in import-guard.mjs
+  // rather than here. It needs the module ON THE SURFACE with edits pending, and by this point
+  // this suite has opened, closed and re-opened enough that the shim's document key for a
+  // freshly opened module no longer matches what a live read asks with. A check whose
+  // precondition is unreliable reports on the precondition and not on its subject, so it runs
+  // where the precondition holds (2026-08-09).
+
   // Reading every module of a project and exporting each header walks a great deal of COM. The
   // number that matters is not how many are live, which rests above zero by design, because the
   // session holds the editor and its projects for as long as it is up, but whether a wrapper was

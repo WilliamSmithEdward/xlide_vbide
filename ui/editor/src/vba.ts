@@ -193,8 +193,28 @@ function buildVbaMonarch(
       [/(\.)(@identifier)(?=\s*\()/, ["delimiter", {
         cases: { "@keywords": "keyword", "@default": "function" },
       }]],
+      /*
+       * A QUALIFIED MEMBER THE PROJECT DECLARES AS A PROCEDURE IS A CALL, parentheses or not.
+       *
+       * This rule did not consult `@projectProcedures`, while both the rule above it (a member
+       * with an argument list) and the bare-word rule below it do. So one procedure was painted
+       * two ways: `Helpers.Total(1)` read as a call and `Helpers.Recalculate "x"` as an ordinary
+       * identifier, and the second of those is how EVERY Sub call with arguments looks in VBA,
+       * where a Sub takes its arguments without parentheses. Spotted on screen, 2026-08-09.
+       *
+       * THE TRADE, which is the same one the other two rules already make: a project procedure
+       * whose name matches a library member paints that member as a call, so a project Sub named
+       * `Value` would colour `Range.Value` yellow. The tokenizer is a heuristic built from the
+       * words the engine sends, and accepting that here rather than above it is what makes one
+       * procedure look like one thing.
+       */
       [/(\.)(@identifier)/, ["delimiter", {
-        cases: { "@keywords": "keyword", "@languageConstants": "constant", "@default": "identifier" },
+        cases: {
+          "@keywords": "keyword",
+          "@languageConstants": "constant",
+          "@projectProcedures": "function",
+          "@default": "identifier",
+        },
       }]],
 
       // A name with an argument list is a call when the project (or the runtime) declares a

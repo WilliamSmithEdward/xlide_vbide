@@ -382,9 +382,16 @@ if ($Live) {
             # and the only way to know they still do is to put the same 32 checks through both.
             # It is also the one thing that catches a silent fall back to the built-in planner,
             # which is how a green run against the wrong implementation happened (2026-08-09).
-            'DebugFixture.xlsm'  = @('immediate-watch.mjs', 'analysis-freshness.mjs',
+            # import-guard runs FIRST on this fixture, before the sync suites open and close
+            # anything: it needs a module on the surface with edits pending, and that precondition
+            # stops holding once the surface has been worked over (2026-08-09).
+            'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
+                                     'analysis-freshness.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn')
-            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs')
+            # colouring runs here because it declares its own module and needs nothing of the
+            # fixture. It pins the one visible feature that had no check at all: a tokenizer
+            # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
+            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

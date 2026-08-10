@@ -1,8 +1,26 @@
 # Handoff
 
-Everything needed to pick this up cold. Rewritten at the end of the session that made the surface
-the whole visible editor; the previous version described a foundation, this one describes a product
-with a short list of holes.
+> ## This is a LOG, not the current state
+> **Its newest entry is 2026-08-06.** The dated handoffs beside it are newer, and the latest of
+> those is where the project stands: `docs/handoff-YYYY-MM-DD-HHMM.md`, most recent wins.
+>
+> Every entry below was true when it was written and some of it is not true now. That is what a
+> log is for, and it is worth keeping: the reasoning behind a decision is often only in the entry
+> that made it. But a specific name reads as current precisely because it is specific, so read
+> dates before names here.
+>
+> **The standing sections, 1 to 10 below, have aged in place** and are the ones most likely to
+> mislead, because they are written as reference rather than as history. Known examples, all in
+> them: `Test-CutoutHoles.ps1` is described as a standing probe in four places and was deleted on
+> 2026-08-07, which the 2026-08-06 entry above them correctly records; `tools\page.ps1` and
+> `tools\verify.ps1` are still right.
+>
+> Checked mechanically on 2026-08-09: of 140 repository paths named across `docs/`, one names
+> something that no longer exists, and it is that probe.
+
+Everything needed to pick this up cold, as of the date above. Rewritten at the end of the session
+that made the surface the whole visible editor; the previous version described a foundation, this
+one describes a product with a short list of holes.
 
 Read this, then [lessons.md](lessons.md) for the long-form findings with evidence,
 [architecture.md](architecture.md) for the design, and [decisions.md](decisions.md) for choices

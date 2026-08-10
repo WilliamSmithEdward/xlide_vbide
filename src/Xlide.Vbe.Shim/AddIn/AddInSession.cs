@@ -368,7 +368,32 @@ internal sealed partial class AddInSession : IDisposable
                 var applied = ModuleSyncService.Apply(
                     syncTarget, plan, chosen,
                     (component, text, owner) =>
-                        WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true));
+                    {
+                        /*
+                         * A MODULE WITH EDITS THE DEVELOPER HAS NOT WRITTEN IS NOT IMPORTED OVER.
+                         *
+                         * Import writes the module and then syncs the surface, which replaces the
+                         * document on screen: measured 2026-08-09, typing into a module and then
+                         * importing over it took the typing away with no question, no notice, and
+                         * "1 changed, 0 failed". Closing a tab in that state raises a whole
+                         * save/discard/cancel gate, because throwing a developer's work away
+                         * silently is not something this product does anywhere else.
+                         *
+                         * Refused rather than asked, and the difference is worth stating: an
+                         * import touching twelve modules would ask twelve questions, and the
+                         * developer already has somewhere to see this - the row says so, beside
+                         * every other row that could not be applied. They write or discard, and
+                         * import again.
+                         */
+                        if (_editorSurface?.HasUnwritten(component, DisplayFromProjectId(owner)) == true)
+                        {
+                            return $"{component} was not imported: it has edits you have not written "
+                                + "yet, and importing would replace them. Write them or discard them, "
+                                + "then import again.";
+                        }
+
+                        return WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true);
+                    });
 
                 // The folder and mode that were just used become the ones this project
                 // remembers, exactly as pressing Apply in the dialog does.
