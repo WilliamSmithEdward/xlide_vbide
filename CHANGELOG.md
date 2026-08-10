@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 ## Unreleased
 
@@ -11,20 +11,20 @@ editor.
   the missing `Set`, the parentheses a `Call` wants, `Option Explicit` at the top of a module, a
   stub for a procedure that does not exist yet, a placeholder for an argument that was left out.
   Every finding also offers to silence itself on the line above.
-- Semantic colouring. A name that denotes a type is coloured as the kind of type it is â€” class,
-  enum, or user-defined â€” and a host global is tinted apart from an ordinary identifier, unless
+- Semantic colouring. A name that denotes a type is coloured as the kind of type it is - class,
+  enum, or user-defined - and a host global is tinted apart from an ordinary identifier, unless
   something in the module has declared that name itself, in which case it is the developer's and
   is coloured as one.
 - Rename, across every module of the workbook, whether a module has a tab open or not. A symbol
   goes with its declaration, its qualified calls, and the bare calls that can only mean it; a
-  module takes its qualified references, its `As` and `New` types, and â€” for an interface â€” the
+  module takes its qualified references, its `As` and `New` types, and - for an interface - the
   `Implements` statement and the `Interface_Member` prefix that is the contract. A name inside a
   string or a comment is left alone. It refuses rather than half-does: a name already taken, a
   name VBA will not accept, or a call nothing can resolve stops the whole rename.
 - Go to Definition and Find All References, on Ctrl+click, F12, Shift+F12, and the editor's
   right-click menu. Both answer across every module of the workbook and stop at its edge: two open
   workbooks can each hold a `Module1` and a `Recalculate`, and they are unrelated. A definition in
-  a module with no tab open is still reached â€” the module opens on the way.
+  a module with no tab open is still reached - the module opens on the way.
 
 ### Changed
 

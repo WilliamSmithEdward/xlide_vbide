@@ -77,14 +77,14 @@ Not `New-Object -ComObject Excel.Application`. A host created through automation
 ### The editor must be opened
 
 Excel loads VBE add-ins when the **VBE** starts, not when Excel does. Nothing is under test until
-the editor is up — and it is opened through Excel's own ribbon command, not the object model:
+the editor is up - and it is opened through Excel's own ribbon command, not the object model:
 
 ```powershell
 $excel.CommandBars.ExecuteMso('VisualBasic')      # not $excel.VBE.MainWindow.Visible
 ```
 
 `$excel.VBE` is one of the two properties "Trust access to the VBA project object model" gates,
-and with that off it is **null**, so the obvious line fails — or worse, is swallowed by a
+and with that off it is **null**, so the obvious line fails - or worse, is swallowed by a
 try/catch and the script carries on believing the editor is open. `ExecuteMso` is not gated.
 `tools\harness\Open-VbeEditor.ps1` is that one line with the reason attached, and every harness
 script goes through it.
@@ -139,7 +139,7 @@ about a minute an iteration.**
 tools\Update-Page.ps1
 ```
 
-builds, copies into the published shim's `ui\editor\dist`, and reloads every live editor —
+builds, copies into the published shim's `ui\editor\dist`, and reloads every live editor -
 reporting the build stamp each is now running. `-NoBuild` copies what the gate just built.
 
 > Excel holds **both** the shim DLL and the engine executable. `npm run package` fails with a
@@ -279,7 +279,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
-| Run script in the page | `ask(script)` — see the trap below |
+| Run script in the page | `ask(script)` - see the trap below |
 | Reload the page and wait for it | `reload()` |
 | Put the arrangement back | `resetLayout()` |
 
@@ -326,7 +326,7 @@ await api.at("Recalculate");                    // colour as painted, and the ma
 ```
 
 > **These call the provider objects monaco calls**, with the arguments monaco passes, so they
-> answer what the developer's editor would answer — including the refusal every provider opens
+> answer what the developer's editor would answer - including the refusal every provider opens
 > with, that it will not answer for anything but the host-active module.
 >
 > That is the prime heuristic at work: **an api action must leave, and must report, the state the
@@ -335,7 +335,7 @@ await api.at("Recalculate");                    // colour as painted, and the ma
 > whole session in which hover was dead on screen (2026-08-08). Coverage that agrees with the code
 > and disagrees with the product is worse than none.
 >
-> When IntelliSense is reported dead, the gate is still worth checking directly — it says WHY in
+> When IntelliSense is reported dead, the gate is still worth checking directly - it says WHY in
 > one comparison, `ui.focus.model` against `ui.focus.host.model`:
 >
 > ```bash
@@ -383,10 +383,10 @@ await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
 > **Removing a component asks first, and the question is the product's, not a browser confirm.**
 > `chooseMenuItem` with `Remove` raises it and changes nothing; `answerRemoveConfirm` is what
 > decides. Cancel is the answer an unrecognised one gets, and Cancel is what holds focus while the
-> box is up. There is no route that removes a component without the question — `component` below
+> box is up. There is no route that removes a component without the question - `component` below
 > is the one that skips it, and it is a fixture primitive.
 
-`act` answers `{did, detail}`. **`did: false` is an answer, not a failure** — closing a tab when
+`act` answers `{did, detail}`. **`did: false` is an answer, not a failure** - closing a tab when
 nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop
 distinguishing it from a broken door.
 
@@ -416,13 +416,13 @@ await api.engineSource(m);   // and what the ANALYZER is holding, which is a thi
 > **A feature that touches the editor is not fully tested until it validates this.** The surface
 > COVERS the host's code panes; it does not replace them. Run, Step, Compile and
 > ToggleBreakpoint all act on the **native active code pane and the caret inside it**, not on the
-> page — so a page showing one module while the native pane holds another is a Run that executes
+> page - so a page showing one module while the native pane holds another is a Run that executes
 > where the developer is not looking and a breakpoint on the wrong line, with nothing on screen
 > to say so.
 >
 > **Parity means the CONTENT matches, not the names.** A surface holding an empty document for a
 > module the host has 42 lines of passes every name comparison there is, and shows a blank
-> editor — which is exactly how the first one was found. Both texts are reduced the same way in
+> editor - which is exactly how the first one was found. Both texts are reduced the same way in
 > the shim, so a changed character registers and the host's CRLF does not; `native({text: true})`
 > carries both texts for the run that fails.
 >
@@ -547,8 +547,8 @@ fourth explained all four. Now `open()` and every route call ask, and print the 
 the exception code, and **the managed stack when there is one**, which is the frame naming this
 product's own code rather than whichever library noticed the damage.
 
-Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**
-— the rename fixture deliberately does not and the language fixture carries a module of deliberate
+Run against `DebugFixture.xlsm` (`tools\New-DebugFixture.ps1`), the only fixture that **compiles**.
+The rename fixture deliberately does not and the language fixture carries a module of deliberate
 defects, so pressing Run on either raises a modal and tests the dialog guard instead of the
 debugger. The suite sets a breakpoint, runs, and checks that the native pane is on the stopped
 module at the stopped LINE, that the Locals panel holds the procedure's variables with the values
@@ -565,7 +565,7 @@ module, so the **debugger** activates a module the page was not showing and neve
 page has to open a tab and follow, or you step into a procedure and watch a different module's
 code.
 
-The native panes are covered by the surface, so a user cannot click one — which makes the
+The native panes are covered by the surface, so a user cannot click one - which makes the
 debugger the realistic driver of this direction, and the only one worth testing. Measured: the
 native pane crosses to `Helper`, the page follows, a tab appears, all three agree, every open
 module's content still matches, and the Locals panel shows the new frame's `value` and `prefix`.
@@ -615,7 +615,7 @@ node tools\harness\surface-walk.mjs --steps 80 --seed 424242
 ```
 
 Picks each action from a deterministic stream and re-checks every invariant after every step, so
-a failure replays from the seed it prints. **Start Excel with two workbooks** — `-Workbook` takes
+a failure replays from the seed it prints. **Start Excel with two workbooks** - `-Workbook` takes
 a list, and they land in one process, which is one session and one door. Half of what this checks
 does not exist with a single workbook open.
 
@@ -645,21 +645,21 @@ console.table(await api.engineCosts()); // ranked by total time spent
 (await api.history()).routeCosts;       // the door's own cost, per route
 ```
 
-**`engineCosts()` is the one to reach for first.** Every language feature goes down one pipe —
-completions, hover, signature help, diagnostics, navigation, rename, semantic tokens, outline —
+**`engineCosts()` is the one to reach for first.** Every language feature goes down one pipe -
+completions, hover, signature help, diagnostics, navigation, rename, semantic tokens, outline -
 and that pipe serves **one request at a time**. So each method's latency is two things added
 together, and only one is the analyzer's doing:
 
-- **`waitMs`** — queued behind another call. A diagnostics pass over a large module delays every
+- **`waitMs`** - queued behind another call. A diagnostics pass over a large module delays every
   keystroke's completion request behind it.
-- **`callMs`** — the round trip once on the pipe. This one is the analyzer's.
+- **`callMs`** - the round trip once on the pipe. This one is the analyzer's.
 
 A combined figure reports the first as slow completions and sends the hunt at the wrong file.
 Nothing measured any of this before 2026-08-07: the features a developer feels most had no
 instrument at all.
 
 `longTasks` is the other half. A frame is 16ms; anything over 50ms is a stretch where the surface
-answered no key and painted nothing, and **no host counter can see it** — the host thread was fine
+answered no key and painted nothing, and **no host counter can see it** - the host thread was fine
 throughout.
 
 ### Does it still work in a big module?
@@ -687,21 +687,21 @@ anything a developer would feel.
 > **Two measurements were the instrument, not the product, and finding that out was the whole
 > exercise.**
 >
-> The curve first sat flat at 77ms from 109 lines to 11,252 — a number that will not move is
+> The curve first sat flat at 77ms from 109 lines to 11,252 - a number that will not move is
 > usually a number about the harness. The door collects a promise by POLLING and slept a flat
 > 40ms before the first poll, so every async route cost the call, the sleep and the poll
 > whatever the feature had done underneath. The poll backs off from 2ms now.
 >
 > Then the page-side figures sat at ~31ms at every size, which is suspiciously two Windows timer
 > ticks. It was: work marshalled to the host thread rode `SetTimer(..., 0, 0)`, and a
-> zero-elapse timer does not fire immediately — Windows clamps it to the system timer
+> zero-elapse timer does not fire immediately - Windows clamps it to the system timer
 > resolution, 15.6ms. The shim's own marshal counter read a median of 16ms with samples at 31
 > and 47, one two and three ticks. **Every hop to the host thread waited most of a tick, on every
 > keystroke, completion, hover and api call.**
 >
-> A posted message now goes out beside the timer. The timer stays as the guarantee — posted
+> A posted message now goes out beside the timer. The timer stays as the guarantee - posted
 > app-range messages had never been seen to arrive at this window, which is why it was written
-> that way — but they do arrive, and the queue drains at once when they do. Measured after:
+> that way - but they do arrive, and the queue drains at once when they do. Measured after:
 > `pagecall` 15.5ms → **0.37ms**, the promise floor 47ms → **15ms**, completions on the largest
 > module 31ms → **1.4ms**.
 >
@@ -786,7 +786,7 @@ await api.waitUntilResponsive();
 
 **Every fixed sleep in a probe is a race that has not lost yet.** A `settle(2500)` was right until
 a host round trip joined the path it was waiting on, and then it reported a working feature
-broken — twice in one afternoon (2026-08-07).
+broken - twice in one afternoon (2026-08-07).
 
 ### Not being stuck behind a modal
 
@@ -801,7 +801,7 @@ await api.guard(false, { forget: true });
   returns each dialog's caption, **the text it says**, and its buttons.
 - A **notice** (every button an acknowledgement) is safe to clear; a **question** is only ever
   declined, guard or no guard.
-- With the guard **off**, a dialog the door did not raise is left alone however long it stands —
+- With the guard **off**, a dialog the door did not raise is left alone however long it stands -
   right for a person at a keyboard, wrong for an unattended run.
 
 > **`heartbeatAgeMs` cannot detect a modal.** A VBA modal PUMPS messages, so the host thread keeps
@@ -976,11 +976,11 @@ whole produced text). All pass.
 **The live probe is about what survives the round trip**, and the headline is not ours:
 
 > **VBA stores module text in the system ANSI code page, not in Unicode.** A character outside
-> that page does not survive being written at all — it comes back as a question mark, from Excel,
+> that page does not survive being written at all - it comes back as a question mark, from Excel,
 > before xlide sees it. On a Western European system, measured 2026-08-07: accented Latin
 > survives, and Cyrillic, Greek, Hebrew, Arabic, Thai, CJK and emoji do not.
 >
-> This is why the companion product patches `PROJECTCODEPAGE` in its own tests — the code page is
+> This is why the companion product patches `PROJECTCODEPAGE` in its own tests - the code page is
 > a property of the VBA project. Nothing in xlide_vbide can widen it.
 
 The probe reports which scripts survive on the machine it runs on rather than asserting a list,
@@ -1049,7 +1049,7 @@ These are not oversights; they are the boundary.
 | Answer a QUESTION dialog automatically | Deliberate. It declines or acknowledges; it never agrees | `dismiss(button)` by name, when you know |
 | Send real mouse or keyboard input to the page | Synthesised DOM events do not reach the editor's own mouse handling | CDP, section 6 |
 | Reach a second Excel process | One door per add-in session | `discover()` lists them, each with its own port |
-| Run in a Release build | The whole door is `#if DEBUG` | — |
+| Run in a Release build | The whole door is `#if DEBUG` | - |
 
 ---
 
@@ -1057,8 +1057,8 @@ These are not oversights; they are the boundary.
 
 **Neither the add-in nor the normal harness needs it. Drive with it OFF.**
 
-That setting — Trust Center → Macro Settings → *Trust access to the VBA project object model*,
-`HKCU\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM` — is a barrier on the way IN from
+That setting - Trust Center → Macro Settings → *Trust access to the VBA project object model*,
+`HKCU\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM` - is a barrier on the way IN from
 outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reached from
 **automation**: another process, or VBA code, asking Excel for its VBA project. Off, those raise
 1004, *"Programmatic access to Visual Basic Project is not trusted."*
@@ -1067,7 +1067,7 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | --- | --- | --- |
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
 | The debug api | **no** | The door runs inside the add-in's own process and calls the same objects |
-| `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` — Excel running its own ribbon button — not through `$excel.VBE` |
+| `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` - Excel running its own ribbon button - not through `$excel.VBE` |
 | Building a fixture | **no** | `api.component()` adds, renames and removes from inside |
 | Reading a module back | **no** | `api.readModule()` reads the real object model, from inside |
 | Running a procedure | **no** | `Application.Run` is not gated (measured) |
@@ -1075,15 +1075,15 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | Verifying WITHOUT the add-in | **yes** | See the warning in section 5 |
 
 This is worth caring about twice over: needing a security setting changed before a product works
-is a real adoption barrier, and xlide does not have one — and a harness that leaves the setting off
+is a real adoption barrier, and xlide does not have one - and a harness that leaves the setting off
 is a harness that cannot be blamed for what a macro does while it runs.
 
 **Verified 2026-08-07, with the box unticked and `AccessVBOM = 0`:**
 
 | | |
 | --- | --- |
-| `Workbook.VBProject` from automation | **null** — refused |
-| `Application.VBE` from automation | **null** — refused |
+| `Workbook.VBProject` from automation | **null** - refused |
+| `Application.VBE` from automation | **null** - refused |
 | xlide loading, surface up | **yes** (seen on screen) |
 | `doctor` | healthy, no findings |
 | `state` | named the shown module and its workbook |
@@ -1093,13 +1093,13 @@ is a harness that cannot be blamed for what a macro does while it runs.
 The add-in was reading and driving the VBA project throughout, from inside, while nothing outside
 could reach it at all.
 
-> **The refusal is a NULL, not an exception** — at least through PowerShell's COM binder.
+> **The refusal is a NULL, not an exception** - at least through PowerShell's COM binder.
 > `$excel.VBE` simply evaluates to nothing, so a probe written as `try { … } catch { }` reports
 > success and prints an empty string. Test it as `$null -eq $excel.VBE`, or the experiment says
 > the gate is open when it is shut.
 
 To reproduce: untick the box, close Excel completely, open a macro workbook and press Alt+F11
-(the harness cannot open the editor for you — `$excel.VBE` is exactly what is refused; Excel's own
+(the harness cannot open the editor for you - `$excel.VBE` is exactly what is refused; Excel's own
 ribbon button, `CommandBars.ExecuteMso('VisualBasic')`, is not). Tick it back afterwards to get the
 harness working again.
 
@@ -1118,7 +1118,7 @@ Excel's object model is used, and the rest goes through the door.
 | Open, close, save a workbook | `$excel.Workbooks…` | not needed |
 | Run a procedure | `$excel.Run('Module.Proc')`, or `api.immediate()` | not needed |
 | **Build a fixture** | `api.component("add"/"rename"/"remove")` + `api.writeModule()` | **not needed** |
-| **Read a module back** | `api.readModule(name)` — the real object model, read from inside | **not needed** |
+| **Read a module back** | `api.readModule(name)` - the real object model, read from inside | **not needed** |
 | Compile and read the errors | `api.compile()` | not needed |
 
 Building a fixture through the door:
@@ -1133,11 +1133,11 @@ await api.component("remove", { name: "Aides" });
 ```
 
 `name` comes back as the component actually ended up named, not as it was asked for. A name the
-editor refuses outright — `Circle` belongs to the Excel object library — is reported as a refusal
+editor refuses outright - `Circle` belongs to the Excel object library - is reported as a refusal
 **and nothing is added**, so a failed name never leaves a stray `Module1` behind.
 
 > A `Run` against a project that does not compile fails for a reason that has nothing to do with
-> what you asked. Check `compile()` first, or your experiment is measuring the wrong thing — which
+> what you asked. Check `compile()` first, or your experiment is measuring the wrong thing - which
 > is exactly how a shadowing question got answered wrongly on 2026-08-07 before being redone in a
 > workbook of its own.
 
@@ -1164,11 +1164,11 @@ $text = $code.Lines(1, $code.CountOfLines)
 There is exactly one reason left to want this, and it is a good one: **verifying without trusting
 the thing under test.** `api.readModule` reads the real object model, but it reads it through the
 add-in. When the question is "did the add-in actually do what it said", an answer that comes back
-through the add-in is weaker evidence than one that does not — and that distinction found two real
+through the add-in is weaker evidence than one that does not - and that distinction found two real
 defects on 2026-08-06.
 
 `tools\New-RenameFixture.ps1` no longer takes this route: it builds its nine modules through the
-door and needs no trust setting at all. Its three phases are worth copying for any fixture —
+door and needs no trust setting at all. Its three phases are worth copying for any fixture -
 Excel makes an empty `.xlsm` (automation is fine for that, no add-in needed), `Start-Excel.ps1`
 opens it properly so the add-in loads, and `tools\harness\build-fixture.mjs` writes the components
 through the api.
@@ -1205,7 +1205,7 @@ document.querySelectorAll("*").forEach((n) => { if (n.shadowRoot) { roots.push(n
 ## 7. Traps, each paid for once
 
 **`/eval` answers are encoded twice.** The browser returns a result as JSON, so a script that
-builds its answer with `JSON.stringify` comes back quoted twice — and one parse leaves a string
+builds its answer with `JSON.stringify` comes back quoted twice - and one parse leaves a string
 that reads as an object right up until every property of it is `undefined`. That reported `false`
 for working code twice in one day. Use `api.ask()`, or the reply's `value`.
 
@@ -1219,14 +1219,14 @@ from the page convert with `ProjectIdFromDisplay`. Forgetting it makes `FindComp
 find nothing.
 
 **The rename fixture deliberately does not compile.** `Helpers` and `Rival` each declare a public
-`Recalculate` and `Consumer` calls it bare — that ambiguity is what the fixture is FOR. Never
+`Recalculate` and `Consumer` calls it bare - that ambiguity is what the fixture is FOR. Never
 compile it as part of a wider experiment, and never take a `Run` failure against it as evidence
 of anything.
 
 **A write can fail and the reply will not say so.** `writeModule` answers the same way whether the
 module took the text or not; the refusal is in the LOG. Building a fixture on unchecked writes
 produced one with an empty `Rival`, so the duplicate `Recalculate` was not there, so it no longer
-exercised the collision it exists for — and it looked fine. Read the line count back from
+exercised the collision it exists for - and it looked fine. Read the line count back from
 `project()` after writing anything you are going to make claims about. (The cause of that
 particular failure is fixed: an empty module's baseline splits into one empty line, so the write
 asked to delete a line from a module that had none, and the editor refused the whole thing.)

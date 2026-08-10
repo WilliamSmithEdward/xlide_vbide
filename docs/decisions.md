@@ -212,7 +212,7 @@ after a failed load. Both are recorded in `lessons.md` with the evidence.
 ## 10. The product never requires "Trust access to the VBA project object model"
 
 That Trust Center setting gates exactly two doors: `Application.VBE` and
-`Workbook.VBProject` — the bridges from the host's own object model into the editor's. It does
+`Workbook.VBProject` - the bridges from the host's own object model into the editor's. It does
 not gate an editor add-in: the editor hands its object model to `OnConnection` directly, and
 everything reachable from that instance works with the setting off.
 
@@ -221,7 +221,7 @@ read or write goes through the `OnConnection` instance; execution reaches the ho
 `AccessibleObjectFromWindow` on a worksheet window and `Application.Run`. A feature that could
 only be built on one of the gated bridges is a feature that asks every user to weaken a security
 setting first, and it gets redesigned or dropped. The development harness scripts do use
-`Workbook.VBProject` to seed fixtures — they run on a development machine, they are not the
+`Workbook.VBProject` to seed fixtures - they run on a development machine, they are not the
 product, and they must never migrate into it.
 
 ## 11. Watches are managed by the editor's own dialogs, not replaced by ours
@@ -266,18 +266,18 @@ with a modal at all are in [working-with-modals.md](working-with-modals.md).
 ## 12. The surface holds every open module live, not one at a time
 
 Until v0.1.5 the page held one Monaco model: activating a tab was a host round-trip that read
-the module and replaced the model, disposing the previous one, and every message about text —
-edits out, syncs in, squiggles — implicitly meant "the shown module". That shape cannot show
+the module and replaced the model, disposing the previous one, and every message about text -
+edits out, syncs in, squiggles - implicitly meant "the shown module". That shape cannot show
 two modules side by side, so it goes.
 
 The host↔page document protocol is module-addressed. The page keeps a live model per open
-module, keyed by workbook AND name (`xlide:/{project}/{module}` — two workbooks' Module1 are
+module, keyed by workbook AND name (`xlide:/{project}/{module}` - two workbooks' Module1 are
 two models, where the old name-only URI would have collided the moment both were alive).
 `openDocument` carries the workbook and text; `contentChanged` says which module it edits;
 `syncDocument` and `setDiagnostics` name their module. Which modules are OPEN stays the host's
 truth (the object model's pane list, published as before); which model each editor shows is
-the page's. Tab activation still tells the host — the native pane underneath follows, because
-the debugger and the compiler act on the active pane — but it no longer re-sends text the page
+the page's. Tab activation still tells the host - the native pane underneath follows, because
+the debugger and the compiler act on the active pane - but it no longer re-sends text the page
 already holds.
 
 The host mirrors the same shape: per-document text, unwritten-edit flags, and write-back
@@ -295,14 +295,14 @@ learn module addressing the same day.
 
 ### Shape (2026-08-06)
 
-Two systems, deliberately separate. TOOL PANES dock in four sections around the editor —
-left, right, top, bottom — each section a split tree of tabbed groups. The EDITOR is one
+Two systems, deliberately separate. TOOL PANES dock in four sections around the editor -
+left, right, top, bottom - each section a split tree of tabbed groups. The EDITOR is one
 contained unit in the middle whose module tabs split against each other the same way. A tool
 pane never enters the editor unit and an editor tab never leaves it: the editor's tabs are
 the host's open panes, and its groups answer to that list.
 
 Both use one gesture, the studio's, from one implementation (`dragcompass.ts`): drag by the
-title, and a five-zone compass appears over the region under the pointer — the centre tabs
+title, and a five-zone compass appears over the region under the pointer - the centre tabs
 onto that group, an edge splits beside it, and an edge of the editor area docks against the
 editor. The page dims while a drag is live, so a drag reads as a mode.
 
@@ -312,12 +312,12 @@ left edge" and "just left of centre" are a few pixels apart, and a guess there i
 toss the developer has to undo. A release off every zone drops nothing.
 
 The preview says which kind of change a release makes. Landing in something that already
-stands is a JOIN, outlined at that thing's own bounds — an editor edge whose section
+stands is a JOIN, outlined at that thing's own bounds - an editor edge whose section
 already exists previews the SECTION, not a half of the editor the drop would never touch.
 Carving space that does not exist yet is NEW, dashed, because the shape is a proposal.
 
-A drag ends when the window does. Losing focus — alt-tab, a screenshot tool, the host
-stealing focus, which this host does freely — Escape, or the document being hidden all
+A drag ends when the window does. Losing focus - alt-tab, a screenshot tool, the host
+stealing focus, which this host does freely - Escape, or the document being hidden all
 abandon it, because a dim and a compass that outlive the gesture leave the surface looking
 permanently mid-drag.
 
@@ -338,21 +338,21 @@ The explorer may not be closed: with every tab shut it is the only route back to
 Every other pane has an X on its group and a checkable row in the Panes menu, which is also
 how a closed one returns.
 
-Editor splits and movable panels are built in this codebase's own idiom — the tab strip,
-splitters, and pointer handling that already survived the host's focus-stealing habits —
+Editor splits and movable panels are built in this codebase's own idiom - the tab strip,
+splitters, and pointer handling that already survived the host's focus-stealing habits -
 rather than adopted from a docking library (dockview was the candidate: MIT, framework-free,
 and current). Three reasons. The tab strip is not a generic tab strip: its identity model,
 badge and dirty rendering, close-confirm interception, and its defenses against host echoes
 rebuilding elements mid-press are product behaviour a library would have to be bent around.
-The environment is hostile in measured ways — the host steals focus mid-gesture, pointer
-streams end in pointercancel, echoes arrive between press and release — and those lessons are
+The environment is hostile in measured ways - the host steals focus mid-gesture, pointer
+streams end in pointercancel, echoes arrive between press and release - and those lessons are
 encoded in code we own, not in a dependency that never met this host. And the surface ships
 inside a native add-in where every dependency is a supply-chain and size commitment; the frame
 around the editor has needed none so far.
 
 The costs accepted: floating and OS-popout windows are out of scope until built, and drop-zone
 polish is ours to maintain. Revisit if the layout ambitions outgrow a split tree and two
-docks — the protocol work of decision 12 is what a library would sit on either way, so
+docks - the protocol work of decision 12 is what a library would sit on either way, so
 nothing here forecloses that.
 
 ## 14. The spec's typing helpers are vendored here, not read from a neighbouring checkout
@@ -367,14 +367,14 @@ this repo, instead of `../../../xlide_vscode/src`.
 
 The build must not depend on a directory outside the repository. Reading a sibling checkout
 worked on the one machine that had both repos and nowhere else, which meant the page could
-only ever be built by hand — CI could build the C# and package whatever bundle happened to
+only ever be built by hand - CI could build the C# and package whatever bundle happened to
 be committed, but it could not build the bundle. That hole stayed invisible until CI was
 asked to build the page and could not resolve a single spec import. A dependency that only
 one machine can satisfy is not a dependency, it is a local habit.
 
 Nine files, 2,316 lines, no imports of their own outside the set. The copy is byte-identical
 to its source and the bundle it produces is byte-identical to the bundle the sibling produced,
-apart from the build stamp — checked, not assumed, because "it should be the same code" is
+apart from the build stamp - checked, not assumed, because "it should be the same code" is
 the belief this whole change exists to stop relying on.
 
 The split that was already there stays: behaviour resolves to the vendored sources, types
@@ -386,7 +386,7 @@ than trusted. `npm run spec:check` compares it against a neighbouring checkout w
 one, and against its own manifest when there is not; the entry points come from the page's
 real imports, so importing something never vendored fails rather than quietly working here
 and breaking there. The gate runs it, which puts the drift failure on the machine that has
-both repos — the only machine that can answer the question.
+both repos - the only machine that can answer the question.
 
 The cost accepted: a sync is now a deliberate step after the spec changes something the page
 uses, and the hand-written declarations still describe the API by hand. Revisit if the spec
@@ -405,13 +405,13 @@ does not expire.
 - ASCII prose, no em dashes, wrap at 100. Comments explain constraints, never narrate. Commit
   messages say what changed, why, and what the defect looked like.
 - Report status literally; a check that passes by not looking hard enough is worse than none.
-- The user rejects backwards-compatibility hacks — full refactors are fine.
+- The user rejects backwards-compatibility hacks - full refactors are fine.
 - No synthetic input (SendKeys) in production, ever.
 - The whole UI should end up ours: consistently dark, VS-style ergonomics, the VBE alive
   underneath as the engine. The module is the source of truth; typing follows xlide_vscode.
 - Every native window should eventually be replaced by the surface (user, 2026-08-01): Locals,
   Watch, Object Browser, Properties, Call Stack, and dialogs wherever the object model allows a
   faithful rebuild (References and Macros are scriptable; parts of Options are not). Until a
-  replacement exists, the native window stays reachable — shown through a punched hole in the
+  replacement exists, the native window stays reachable - shown through a punched hole in the
   surface, never by retreating the surface (the toolbar-revert bug, fixed 2026-08-02); the menu
   routing table in RouteMenuCommand is where "open ours instead" gets decided per window.

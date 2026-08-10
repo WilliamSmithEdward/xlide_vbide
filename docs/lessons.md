@@ -3,8 +3,11 @@
 Behaviour discovered by running against real Excel, with the evidence that established it. Each
 entry cost real debugging time and is not obvious from documentation.
 
-For a shorter list aimed at someone starting work, see the newest handover: the highest-dated `docs/handoff-*.md`. This file is the
-long form, with the evidence.
+For a shorter list aimed at someone starting work, see the newest handover: the highest-dated
+`docs/handoff-*.md`. This file is the long form, with the evidence.
+[lessons-2026-08-07.md](lessons-2026-08-07.md) is one day kept separately, thirty short findings
+from a session of parity work and an adversarial bug hunt; nine of them are probes that tested
+themselves, which is the failure this project keeps paying for.
 
 Environment for all entries: Excel 365 x64 build 16.0.20228.20124, VBA 7.1, Windows 11, .NET 10.
 
@@ -221,7 +224,7 @@ same probe in a harness-launched Excel read it fine. Elevated child processes es
 sandbox, which is why HKLM writes were real and per-user writes were not.
 
 Consequence: registration state must be established from the developer's own context, never
-from inside the agent environment — `tools\Register-DevShim.ps1` exists for exactly that, and
+from inside the agent environment - `tools\Register-DevShim.ps1` exists for exactly that, and
 verifying persistence means the developer's regedit, not the sandbox's Test-Path. More
 generally: when an integration works in every harness run and fails in every human run, suspect
 the harness's environment before the product, and prove any "the system is corrupt" theory
@@ -257,21 +260,21 @@ hop, the feature has never worked, whatever the demo shows.
 A band of native chrome survived at the bottom of the start-up loader through three
 increasingly clever explanations: an aggressive placement heartbeat (shipped, changed
 nothing), a DWM border theory (the border was already dark), and a startup-HMENU theory
-(built on the shim's own log showing the client 37px shorter during loading — a real
+(built on the shim's own log showing the client 37px shorter during loading - a real
 observation, wrongly attributed). The truth was a one-line bug in the fix itself: PixelRect
 is four EDGES, and the loading rectangle passed a height where the bottom edge belongs. It
 was the first rectangle in the tree with a nonzero top, which is exactly where the
 edges-versus-size conventions stop agreeing, so every existing call had been silently
 compatible with the wrong reading.
 
-Evidence: a six-second watcher polling the live loading phase five times a second — menu
+Evidence: a six-second watcher polling the live loading phase five times a second - menu
 handle, window rect, client rect, overlay rect, all physical pixels. It showed menu=0
 throughout, the client constant, and the overlay bottom exactly one menu-height short; the
 2x shortfall in the logged height named the constructor mix-up directly. After the fix the
 same watcher showed the overlay bottom equal to the client bottom on every row.
 
 Consequence: when a rectangle type exists, learn whether it is edges or origin-and-size
-before constructing one — and treat a helper that works everywhere else as suspect anyway if
+before constructing one - and treat a helper that works everywhere else as suspect anyway if
 yours is the first call with a different shape. And when screenshots breed theories, switch
 to numbers: a short polling watch of the live window settles in seconds what reasoning about
 compositors cannot settle at all.
@@ -279,19 +282,19 @@ compositors cannot settle at all.
 ## 20. A tree that cycled once a second, and the log line that said the data never changed
 
 The explorer's unfolded class appeared to collapse and expand in a loop. Two theory-led fixes
-went out first — stop the accordion following unchanged active-module pushes, stop clearing
-fetched outlines on identical project pushes — both real hardenings, neither the cause. The
+went out first - stop the accordion following unchanged active-module pushes, stop clearing
+fetched outlines on identical project pushes - both real hardenings, neither the cause. The
 third pass started from the log instead and ended the hunt in one line: the outline request was
 answering every second with exactly 1,565 procedures, every time. The data never changed. The
 cycle was the drawing: two update paths redrew the tree unconditionally on the host's
 once-a-second pushes, a redraw wipes and rebuilds the rows, and rebuilding a 1,565-row list
-resets its scroll — which the eye reads as collapse and expand.
+resets its scroll - which the eye reads as collapse and expand.
 
 Evidence: the shim log's outline lines, identical count at one-second cadence; the two
 screenshots showing both "states" with the chevron open in each.
 
-Consequence: every sink that receives pushed state must be idempotent — identical input changes
-nothing, not even a repaint — and any rebuild of a scrolling surface must put the scroll back.
+Consequence: every sink that receives pushed state must be idempotent - identical input changes
+nothing, not even a repaint - and any rebuild of a scrolling surface must put the scroll back.
 And when a UI loops, read the data cadence out of the log before theorising about state: if the
 data is constant, the bug is in the drawing.
 
@@ -303,7 +306,7 @@ The first: expanding a large class in the tree flashed its 1,565 procedures and 
 them. The outline request's timeout resolved as an empty list, and while the editor spends
 seconds absorbing 918KB of module, a timed-out empty could land after the real answer and
 replace it. The fix is a vocabulary correction, throughout the pipeline: a timeout or a host
-failure resolves as null — "no answer" — and only a real answer, a real empty included, may
+failure resolves as null - "no answer" - and only a real answer, a real empty included, may
 replace what an unfolded list already shows. One request per module in flight with at most one
 trailing refresh, so answers cannot come home out of order at all. The engine memoises the
 outline against the exact source string, and the host stopped shipping the module's whole text
@@ -314,7 +317,7 @@ were still being typed. The editor extension holds syntax-category findings on t
 line, but a semantic verdict about a half-typed line is the same wrong in a different
 category. The model the VBE itself uses is the right one: a line is validated when the caret
 leaves it. `ActiveLineHold` (Core, pinned by its own tests) is the publish-side of that
-contract — typing on a line hides verdicts touching it from the squiggles, the panel, and
+contract - typing on a line hides verdicts touching it from the squiggles, the panel, and
 the badges at once, because they publish from one filter point; the caret settling anywhere
 else republishes from the unfiltered cache with no re-analysis involved.
 
@@ -324,7 +327,7 @@ show-transition where the late answers straddled the 2s timeout); the screenshot
 
 Consequence: give "no answer" its own value the moment a channel gets a timeout, and never
 let it share a spelling with "empty". Hold verdicts about text mid-keystroke until the line
-is left — the VBE had this right for thirty years. And filter at the single point every
+is left - the VBE had this right for thirty years. And filter at the single point every
 surface publishes through, so squiggles, panel, and badges cannot disagree.
 
 ## 22. Two absences that had to be read from the windows themselves
@@ -336,8 +339,8 @@ maintains.
 The Immediate window exposes no handle, shares its window class with the code panes, and its
 caption is localised, so it was identified by closing it and diffing which pane stopped being
 visible. The hide is asynchronous: whenever the window list had not caught up, the diff
-answered "0 windows changed", the reader never attached, and Debug.Print silently went nowhere
-— while evaluation itself worked perfectly, which read as a broken Immediate to anyone typing
+answered "0 windows changed", the reader never attached, and Debug.Print silently went nowhere,
+while evaluation itself worked perfectly, which read as a broken Immediate to anyone typing
 in it. The identification that survives timing: the object model NAMES the localised caption,
 the handle CARRIES the same caption, visible or hidden, and matching the two cannot lose a
 race. The diff remains only as a fallback, and a failed attachment retries on the first
@@ -345,18 +348,18 @@ evaluation, by which time the window certainly exists.
 
 The cancelled shutdown: the host asks about unsaved changes AFTER OnBeginShutdown, and Cancel
 abandons the shutdown with no callback. The watchdog inferred cancellation from its timer
-ticking — but an app-modal dialog pumps timers too, so the session revived while the save
+ticking - but an app-modal dialog pumps timers too, so the session revived while the save
 dialog was still on screen, painted the surface over an undecided shutdown, and when the
 developer chose Save, the real teardown ripped through a seconds-old session mid-start and
 crashed the host. The signal that actually distinguishes the states: an app-modal dialog
 DISABLES the application's windows. A disabled frame is a question still open; an enabled
 frame held across consecutive ticks is the cancellation.
 
-Evidence: the session logs — "immediate: 0 windows changed when it closed" with "immediate:
+Evidence: the session logs - "immediate: 0 windows changed when it closed" with "immediate:
 ok" answers around it; and the crash log's timeline, revive at +1.5s into the dialog,
 OnDisconnection four seconds later, then nothing.
 
-Consequence: when a component gives no notification, do not manufacture one from timing —
+Consequence: when a component gives no notification, do not manufacture one from timing -
 find the state the OS already maintains about it (captions, enabled bits, ownership) and read
 that. And treat "my timer ticked" with suspicion inside any window of modality: modal loops
 pump everybody's timers.
@@ -366,8 +369,8 @@ pump everybody's timers.
 The surface took 2.1s to boot and the obvious suspects were the obvious ones: 3.4MB of
 JavaScript must be slow to compile, or the cache must not be helping. Both were wrong, and one
 log line convicted the real cost. The page was taught to itemise its own ready message from
-the browser's resource timeline — document arrival, request departure, bytes complete,
-compile-and-run — and it read: html 3ms, request 0ms, fetch 2025ms, compile+run 77ms. The
+the browser's resource timeline - document arrival, request departure, bytes complete,
+compile-and-run - and it read: html 3ms, request 0ms, fetch 2025ms, compile+run 77ms. The
 document was instant, the request left at time zero, the compile was noise. The two seconds
 were the WebView2 folder mapping brokering the bundle through the browser's host pipe at
 about two megabytes a second, every boot, from local disk.
@@ -375,14 +378,14 @@ about two megabytes a second, every boot, from local disk.
 The fix followed from the diagnosis rather than preceding it: serve the same bytes over a
 loopback socket (ephemeral port, GET/HEAD only, per-session path token, one directory) and
 keep the mapping as the fallback. Boot went from 2164ms to 181ms, fetch from 2025ms to 49ms,
-and nothing else changed — same page, same CSP, same everything.
+and nothing else changed - same page, same CSP, same everything.
 
 Evidence: the before and after ready lines, in the log, four minutes apart.
 
 Consequence: when a duration needs cutting, make the thing being cut report its own stages
-first — the browser already keeps the resource timeline; asking it is one message field. And
+first - the browser already keeps the resource timeline; asking it is one message field. And
 keep the itemised line in the log permanently: the next regression in any stage then names
-itself. Beware fetch-time labels too — "transfer: cache" from an app-scheme response meant
+itself. Beware fetch-time labels too - "transfer: cache" from an app-scheme response meant
 nothing; the byte count over the socket was the number that could be believed.
 
 ## 24. The surface that retreated, and the phantom strip inside the hole
@@ -710,11 +713,11 @@ page, and the typing automation rebinds Tab and Backspace on each of them. Every
 created by `monaco.editor.create` shares ONE keybinding service; `editor.addCommand` is not
 scoped to the editor it was called on. Two groups produced two identical Backspace rules
 with identical when-clauses, both matched, the later registration won everywhere, and its
-handler ran `deleteLeft` on ITS editor — so pressing Backspace in the group being typed in
+handler ran `deleteLeft` on ITS editor - so pressing Backspace in the group being typed in
 deleted a character in the other group, and the key read as dead.
 
 What confirmed it was the shape of the failure, not the symptom: the live page answered
-`prevented: true, handled: false` — the key WAS claimed and the command DID run, so the
+`prevented: true, handled: false` - the key WAS claimed and the command DID run, so the
 binding was alive and pointed somewhere else. A dead key would have been prevented false.
 
 The fix is a context key created on each editor (`editor.createContextKey`), included in
@@ -724,8 +727,8 @@ surface binds per editor needs the same treatment; the search widget's Escape cl
 had it by accident, because its open flag was per editor for another reason entirely.
 
 Two traps in probing this. A synthetic KeyboardEvent is enough to exercise the keybinding
-path — Monaco resolves bindings from the event, and only text INSERTION needs a trusted
-event — so a probe can press Backspace without a focused window. But the caret must start
+path - Monaco resolves bindings from the event, and only text INSERTION needs a trusted
+event - so a probe can press Backspace without a focused window. But the caret must start
 somewhere a Backspace can do work: parked at the start of an empty first line it is
 correctly a no-op, and reading that as a fault sent a probe hunting a bug that was not
 there. A check that inserts its own text first asserts the key, not the fixture.
@@ -736,13 +739,13 @@ The surface holds caches whose whole job is to spare a page that already has the
 the last tab list, the last language facts, the last chrome state. They compare what is
 about to be sent against what was sent last, and send nothing when the two match.
 
-A page reload — a developer's F5, a devtools reload, a crash recovery — produces a second
+A page reload - a developer's F5, a devtools reload, a crash recovery - produces a second
 `ready` on the same session. The document table survives it (the surface re-opens every
 live document from its own copy), but everything else the page draws came from the FIRST
 boot's held-message replay, and a second ready has nothing held. Republishing on ready
 looked like the fix and was not: `PublishModules` compared its list against the pre-reload
 list, matched, and sent nothing. The reloaded page came back with its models and no tabs at
-all — and the traffic tap proved it, showing every republish EXCEPT setModules.
+all - and the traffic tap proved it, showing every republish EXCEPT setModules.
 
 So a ready that is not the first must clear the caches before republishing. The rule
 generalises: any "has this changed" memo held ACROSS a client that can restart has to be
@@ -1703,3 +1706,19 @@ each one producing a confident wrong reading about the product.
 
 **A gesture that spans two round trips is not one gesture.** Drive a menu in a single call, or
 what is measured is the menu closing.
+
+## 62. A capability needs four layers, and the analyzer is almost never the missing one
+
+Measured across every language feature on 2026-08-06, and true of all of them: a capability
+reaches a developer only when the analyzer computes it, the engine exposes an operation for it,
+the shim routes that operation, and the page registers a provider. Miss any one and the feature is
+invisible, with nothing on screen to say which layer stopped.
+
+The instinct is to look at the analyzer first, because that is where the intelligence is. It was
+the missing layer in none of the seven cases audited. Six were the engine or the shim having no
+operation to call, and one was the page never registering the provider it imported. Quick fixes,
+semantic highlighting, go to definition, find references and rename all sat complete in the
+analyzer and reached nothing.
+
+**Read the layers outward from the developer, not inward from the cleverness.** The provider
+register is the cheapest thing to check and the likeliest to be the answer.

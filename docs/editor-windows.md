@@ -67,13 +67,13 @@ above; the registration mechanism was recorded nowhere else.
 
 Registry: `HKCU\Software\Microsoft\VBA\VBE\6.0\Addins64`, subkey = ProgID. Frame class
 `wndclass_desked_gsk`, document area `MDIClient`, and the code panes, Immediate, Locals, Watch and
-Object Browser windows all share class `VbaWindow` — a window's class says nothing about what it
+Object Browser windows all share class `VbaWindow` - a window's class says nothing about what it
 is; only the object model knows.
 
-Add-in discovery is **HKCU-only** — vbe7.dll's own strings carry
+Add-in discovery is **HKCU-only** - vbe7.dll's own strings carry
 `HKEY_CURRENT_USER\Software\Microsoft\VBA\VBE\6.0` and `...\Addins64`, and Rubberduck's installer
 writes the Addins keys under HKCU even when elevated (HKLM there is only .NET COM classes). There
-is no HKLM enumeration to fall back on, and the per-user registration needs no elevation — that
+is no HKLM enumeration to fall back on, and the per-user registration needs no elevation - that
 is the entire documented mechanism.
 
 **The dev-loop registration mirage (lesson 17, read it):** the agent tool shell virtualizes
@@ -83,7 +83,7 @@ reads the real hive, which never got the key. A day went to Click-to-Run/App-V t
 regedit screenshot showed the truth. Registration on the dev machine is therefore done by the
 developer running `tools\Register-DevShim.ps1` in their own terminal (no admin); the published
 shim path is stable across rebuilds so one real registration survives the dev loop. Elevated
-child processes escape the sandbox (UAC-relaunched writes land for real) — useful, but not a
+child processes escape the sandbox (UAC-relaunched writes land for real) - useful, but not a
 substitute. Verify persistence with the developer's regedit, never with in-sandbox reads.
 
 Click-to-Run keeps machine-level VBA values (`Vbe71DllPath`) only inside its overlay
@@ -91,7 +91,7 @@ Click-to-Run keeps machine-level VBA values (`Vbe71DllPath`) only inside its ove
 installer writes the per-user registration only and never prompts for elevation; when it already
 runs elevated on a C2R machine it also plants the overlay copy, and `--overlay-only` runs that
 step deliberately (`tools\Register-InOfficeOverlay.ps1` is the standalone form).
-`Register-MachineWide.ps1` (real-HKLM mirror) was retired — the VBE never reads that hive.
+`Register-MachineWide.ps1` (real-HKLM mirror) was retired - the VBE never reads that hive.
 
 `Window.Type`: 0 code, 2 object browser, 3 watch, 4 locals, 5 immediate, 6 project, 7 properties,
 10 linked frame, 15 our tool window. `VBProject.Mode`: 1 = break, 2 = design.
@@ -111,7 +111,7 @@ entry; 761 by every toolbar toggle. The current command set is by-ID and every I
 (checked against the full dump), but menu replication MUST execute by path
 (`bar.Controls.Item(i).Controls.Item(j).Execute()`), which is verified working live.
 
-`MenuBar.Visible = false` returns E_FAIL — a genuine refusal (the identical call hides the
+`MenuBar.Visible = false` returns E_FAIL - a genuine refusal (the identical call hides the
 Standard toolbar). The menu bar cannot be hidden, only covered.
 
 DWM: attribute 20 (19 on older builds) = dark title bar; 34 border colour, 35 caption colour,

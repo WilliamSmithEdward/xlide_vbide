@@ -112,7 +112,7 @@ fault was real: with no module open the editor area is `display:none` and measur
 guard that skips a zero-sized region skipped the entire editor-edge branch.
 
 Two habits would have found it in one pass instead of three. Measure the thing being aimed at
-rather than assuming it is where it looks — `getBoundingClientRect()` on the region under test says
+rather than assuming it is where it looks - `getBoundingClientRect()` on the region under test says
 `0x0` immediately. And take an intermittent report as a clue about state rather than noise: "works,
 then doesn't" was the difference between a module being open and not, which is exactly what the
 reporter eventually said.
