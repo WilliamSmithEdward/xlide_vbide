@@ -392,3 +392,26 @@ The cost accepted: a sync is now a deliberate step after the spec changes someth
 uses, and the hand-written declarations still describe the API by hand. Revisit if the spec
 becomes a published package, at which point the vendored directory is what gets published and
 the check becomes a version bump.
+
+## 13. Conventions and user directives (binding)
+
+Carried here from the handoff log on 2026-08-09, when the dated handovers were consolidated.
+These are the developer's own directives rather than design choices, and they were the only
+copy: a handover is a narrative and gets superseded, which is the wrong shelf for a rule that
+does not expire.
+
+- Never mention the other add-in product in anything public. Clean-room; cite only Microsoft
+  specs and documented interfaces.
+- ASCII prose, no em dashes, wrap at 100. Comments explain constraints, never narrate. Commit
+  messages say what changed, why, and what the defect looked like.
+- Report status literally; a check that passes by not looking hard enough is worse than none.
+- The user rejects backwards-compatibility hacks — full refactors are fine.
+- No synthetic input (SendKeys) in production, ever.
+- The whole UI should end up ours: consistently dark, VS-style ergonomics, the VBE alive
+  underneath as the engine. The module is the source of truth; typing follows xlide_vscode.
+- Every native window should eventually be replaced by the surface (user, 2026-08-01): Locals,
+  Watch, Object Browser, Properties, Call Stack, and dialogs wherever the object model allows a
+  faithful rebuild (References and Macros are scriptable; parts of Options are not). Until a
+  replacement exists, the native window stays reachable — shown through a punched hole in the
+  surface, never by retreating the surface (the toolbar-revert bug, fixed 2026-08-02); the menu
+  routing table in RouteMenuCommand is where "open ours instead" gets decided per window.

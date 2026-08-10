@@ -39,8 +39,24 @@ nothing, check this first.
 dotnet publish src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj -c Debug -r win-x64
 ```
 
-with `DOTNET_ROOT` at `%LOCALAPPDATA%\Microsoft\dotnet` and
-`%ProgramFiles(x86)%\Microsoft Visual Studio\Installer` on PATH.
+The whole of it, as something to paste. Nothing here is on the system PATH, and forgetting any
+of it fails confusingly rather than clearly:
+
+Nothing below is on the system PATH; forgetting any of it fails confusingly rather than clearly.
+
+```powershell
+# The SDK (user-local .NET 10.0.302).
+$env:PATH = "$env:LOCALAPPDATA\Microsoft\dotnet;$env:PATH"
+
+# NativeAOT publishing finds the linker through vswhere. Without this the error text reads as a
+# linker fault, not a discovery fault.
+$env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
+
+# Required to RUN anything framework-dependent, or it reports .NET is not installed.
+$env:DOTNET_ROOT = "$env:LOCALAPPDATA\Microsoft\dotnet"
+```
+
+VS Build Tools 2026 (C++ workload), Node 24, Excel 365 x64 16.0.20228, VBA 7.1, Windows 11.
 
 ### Excel must be started as an ordinary process
 

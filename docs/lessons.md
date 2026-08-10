@@ -3,7 +3,7 @@
 Behaviour discovered by running against real Excel, with the evidence that established it. Each
 entry cost real debugging time and is not obvious from documentation.
 
-For a shorter list aimed at someone starting work, see [handoff.md](handoff.md). This file is the
+For a shorter list aimed at someone starting work, see the newest handover, [handoff-2026-08-09-2031.md](handoff-2026-08-09-2031.md). This file is the
 long form, with the evidence.
 
 Environment for all entries: Excel 365 x64 build 16.0.20228.20124, VBA 7.1, Windows 11, .NET 10.

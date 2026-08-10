@@ -1,7 +1,7 @@
 ﻿# Parity audit: what is wired, what is not
 
 Measured 2026-08-06 against the shipping build, as step 1 of the parity goal in
-[handoff.md](handoff.md) section 9. Four layers have to line up for a capability to reach a
+the open list in the newest handover, [handoff-2026-08-09-2031.md](handoff-2026-08-09-2031.md). Four layers have to line up for a capability to reach a
 developer: the analyzer has to compute it, the engine has to expose an operation, the shim has to
 route it, and the page has to register a provider. A capability missing any one of them is
 invisible, and the analyzer is almost never the missing one.
