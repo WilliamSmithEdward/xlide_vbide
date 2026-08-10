@@ -63,6 +63,24 @@ if (!runnable) {
 const project = runnable ? await api.project(home.project) : null;
 const original = runnable ? (await api.readModule(target, project.projectId)).text ?? "" : "";
 
+/*
+ * THE FIXTURE'S OWN DELIBERATE ERROR, PUT ASIDE FOR THE ONE CHECK THAT NEEDS A CLEAN PROJECT.
+ *
+ * `Consumer` calls `Recalculate` unqualified while `Helpers` and `Rival` both export it. That is
+ * on purpose: it is what the rename cases are built around, and VBA itself refuses to compile it.
+ * Since the analyzer learned to report it (xlide_vscode #12, 2026-08-09) this project can never
+ * publish an empty finding set, and the retirement check below has no reachable clean state to
+ * observe - it failed on a correct product for a correct reason.
+ *
+ * So the call is qualified for the duration and put back in the finally. Qualified is the fix the
+ * finding itself asks for, so this is the fixture briefly in its corrected state rather than a
+ * check working around an inconvenient truth.
+ */
+const AMBIGUOUS = "Consumer";
+const ambiguousOriginal = runnable
+  ? (await api.readModule(AMBIGUOUS, project.projectId)).text ?? ""
+  : "";
+
 let passed = 0;
 const failures = [];
 
@@ -276,6 +294,15 @@ if (runnable) try {
    */
   await api.writeModule(target, original, project.projectId);
 
+  // And the fixture's permanent error, so "clean" is a state this project can actually be in.
+  if (ambiguousOriginal.includes('Recalculate "ambiguous"')) {
+    await api.writeModule(
+      AMBIGUOUS,
+      ambiguousOriginal.replace('Recalculate "ambiguous"', 'Helpers.Recalculate "ambiguous"'),
+      project.projectId);
+    await wait(1800);
+  }
+
   const retired = await until("every finding to retire", async () => {
     const all = (await api.problems()).findings ?? [];
     return all.length === 0 ? true : null;
@@ -293,8 +320,15 @@ if (runnable) try {
   await api.writeModule(target, original, project.projectId);
   await wait(1800);
 
+  if (ambiguousOriginal.length > 0) {
+    await api.writeModule(AMBIGUOUS, ambiguousOriginal, project.projectId);
+    await wait(1200);
+  }
+
   const restored = ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim();
-  console.log(`\n${target} restored: ${restored}`);
+  const ambiguousBack = ambiguousOriginal.length === 0
+    || ((await api.readModule(AMBIGUOUS, project.projectId)).text ?? "").trim() === ambiguousOriginal.trim();
+  console.log(`\n${target} restored: ${restored}, ${AMBIGUOUS} restored: ${ambiguousBack}`);
 
   console.log(`\n${passed} passed, ${failures.length} failed`);
   for (const failure of failures) {

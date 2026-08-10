@@ -5,9 +5,18 @@
 
 import { isReservedIdentifier } from './analyzer/lexer/keywordTable';
 
-export const VBA_IDENTIFIER_PATTERN = '[A-Za-z_][A-Za-z0-9_]*';
-export const VBA_IDENTIFIER_RE = /[A-Za-z_][A-Za-z0-9_]*/;
-export const VBA_IDENTIFIER_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// VBA identifiers may use any locale letter, and a combining mark continues a
+// name (Thai and Devanagari build a letter from a base plus a mark). The
+// ASCII-only forms made go-to-definition, find-references, rename and
+// smart-enter block completion do nothing at all on a Cyrillic, Greek, Thai or
+// Japanese name: VS Code selects the word with VBA_IDENTIFIER_RE, and it
+// matched none of it.
+//
+// Any regex built from VBA_IDENTIFIER_PATTERN needs the `u` flag, or \p{L} is
+// read as a literal 'p{L}' and silently matches nothing.
+export const VBA_IDENTIFIER_PATTERN = '[\\p{L}_][\\p{L}\\p{M}\\p{N}_]*';
+export const VBA_IDENTIFIER_RE = /[\p{L}_][\p{L}\p{M}\p{N}_]*/u;
+export const VBA_IDENTIFIER_NAME_RE = /^[\p{L}_][\p{L}\p{M}\p{N}_]*$/u;
 export const VBA_MODULE_NAME_MAX_LENGTH = 31;
 
 /** Input-box validator for VBA module names: undefined when valid, message otherwise. */
@@ -24,7 +33,7 @@ export function validateVbaModuleName(name: string): string | undefined {
     return undefined;
 }
 
-const VBA_IDENTIFIER_WORD_RE = /[A-Za-z_][A-Za-z0-9_]*/g;
+const VBA_IDENTIFIER_WORD_RE = /[\p{L}_][\p{L}\p{M}\p{N}_]*/gu;
 
 export interface VbaIdentifierOccurrence {
     line: number;
@@ -125,6 +134,58 @@ export function detectEol(source: string): string {
 /** True for VBE attribute header lines such as `Attribute VB_Name = "..."`. */
 export function isVbaAttributeLine(line: string): boolean {
     return /^\s*Attribute\s+(?:VB_[A-Za-z0-9_]+|[A-Za-z_][\w.]*\.VB_[A-Za-z0-9_]+)\s*=/.test(line);
+}
+
+/**
+ * Drops the block a class or UserForm header opens with, returning the index of
+ * the first line after it.
+ *
+ * A standard module's header is attribute lines alone, but a class opens with
+ * `VERSION 1.0 CLASS` / `BEGIN` / ... / `END` and a UserForm with `VERSION 5.00`
+ * / `Begin {GUID} Name` / ... / `End`, the form's block nesting once per
+ * control. Filtering attribute lines alone left all of that on screen, so
+ * hiding headers did nothing on a .cls and even less on a .frm.
+ *
+ * A block that never closes is left alone: showing too much beats hiding code.
+ */
+export function vbaHeaderBlockEnd(lines: readonly string[]): number {
+    let index = 0;
+    while (index < lines.length && lines[index].trim() === '') {
+        index += 1;
+    }
+    if (index >= lines.length || !/^\s*VERSION\b/i.test(lines[index])) {
+        return 0;
+    }
+    index += 1;
+    while (index < lines.length && lines[index].trim() === '') {
+        index += 1;
+    }
+    if (index >= lines.length || !/^\s*Begin\b/i.test(lines[index])) {
+        // `VERSION` with no block after it: drop just that line.
+        return index;
+    }
+    let depth = 0;
+    for (; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (/^\s*Begin\b/i.test(line)) {
+            depth += 1;
+            continue;
+        }
+        if (/^\s*End\b/i.test(line)) {
+            depth -= 1;
+            if (depth === 0) {
+                return index + 1;
+            }
+            continue;
+        }
+        // Inside the block only property assignments and blank lines are legal.
+        // Anything else means the block never closed, and scanning on would let
+        // a body `End Sub` close it and take the whole module with it.
+        if (line.trim() !== '' && !/^\s*[\w.]+\s*=/.test(line)) {
+            return 0;
+        }
+    }
+    return 0;
 }
 
 /**
