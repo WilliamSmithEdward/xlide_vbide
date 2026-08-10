@@ -759,7 +759,21 @@ public sealed record DebugDialogRow(
 
 public sealed record DebugDialogsReply(
     [property: JsonPropertyName("dialogs")] DebugDialogRow[] Dialogs,
-    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs);
+    [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
+    /// <summary>
+    /// WHAT THE WATCHER TOOK OFF THE SCREEN BEFORE THIS WAS ASKED, newest last.
+    ///
+    /// This route observes a thing that another part of this door is actively removing, and an
+    /// instrument that changes what it measures has to say so in its own answer. An empty
+    /// `dialogs` means one of two opposite things — nothing opened, or something opened and was
+    /// cancelled a second ago — and reading it as the first when it was the second is a mistake
+    /// that has been made here (2026-08-09: a menu item was driven, its dialog was cancelled by
+    /// the guard, `dialogs` answered empty, and it read exactly like an item that never ran).
+    ///
+    /// The `guard` route has always reported this. Nobody checking whether a dialog appeared
+    /// thinks to ask a route about the guard, so it is answered here as well.
+    /// </summary>
+    [property: JsonPropertyName("recentlyCleared")] string[] RecentlyCleared);
 
 /// <summary>
 /// The dialog guard: whether it is on, and what it has taken off the screen.

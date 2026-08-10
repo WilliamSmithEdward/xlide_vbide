@@ -1663,6 +1663,29 @@ internal sealed class EditorSurface : IDisposable
 
                     break;
 
+                case "pageError":
+                    /*
+                     * The page telling the host it is dying, from boot.js, which runs before the
+                     * bundle and therefore before anything that could fail to run.
+                     *
+                     * Kept as the FIRST one. A bundle that throws on load throws once and then
+                     * produces a cascade of consequences, and the consequences are the easy part
+                     * to find. Recorded on the surface rather than raised as an event because the
+                     * one caller is a diagnostic that has to be able to read it long afterwards.
+                     */
+                    if (document.RootElement.TryGetProperty("text", out var errorText)
+                        && errorText.GetString() is { Length: > 0 } said)
+                    {
+                        // Logged in every configuration. A page that threw is worth a line in a
+                        // Release log too, where there is no door to ask afterwards.
+                        Log.Warn($"page: {said}");
+#if DEBUG
+                        FirstPageError ??= said;
+#endif
+                    }
+
+                    break;
+
                 case "removeComponent":
                     if (document.RootElement.TryGetProperty("name", out var doomedName)
                         && doomedName.GetString() is { Length: > 0 } removing)
@@ -2094,6 +2117,16 @@ internal sealed class EditorSurface : IDisposable
     /// is not in the log", and the only cure is being able to ask.
     /// </summary>
     internal string? PageBuildStamp { get; private set; }
+
+    /// <summary>
+    /// The first thing the page reported going wrong, pushed from boot.js.
+    ///
+    /// The counterpart to the stamp above and the reason doctor can name a cause. A page that
+    /// throws while its modules initialise never reports a stamp; boot.js runs before those
+    /// modules and says why, so the two together turn "the page did not boot" into "the page did
+    /// not boot BECAUSE".
+    /// </summary>
+    internal string? FirstPageError { get; private set; }
 #endif
 
     private static string DescribeTimings(JsonElement message)

@@ -40,6 +40,91 @@ const BUILD_NUMBER = (() => {
   return next;
 })();
 
+/*
+ * THE PAGE'S BLACK BOX, written by hand and kept out of the bundle on purpose.
+ *
+ * The console ring used to be installed by the host once the page reported itself ready. That is
+ * too late to be worth much: a bundle that throws while its modules initialise never reaches
+ * ready, so the ring was never created, so the one route built to say what went wrong answered
+ * `{"installed": false, "lines": []}` at exactly the moment it was needed. That happened on
+ * 2026-08-09 and the cause — a const read during its own temporal dead zone — was found by
+ * reading source instead.
+ *
+ * So it lives here, ahead of everything, and catches three things the bundle cannot report about
+ * itself: a synchronous throw during load, a rejected promise nobody handled, and console output
+ * from before the surface existed. The JavaScript context survives a module that throws, so the
+ * host can still read this ring out of a page that never finished booting.
+ *
+ * Deliberately plain ES5 with no imports: it must not be able to fail for any of the reasons the
+ * thing it is watching can fail.
+ */
+const BOOT_JS = `(function () {
+  if (window.__xlideConsoleInstalled) { return; }
+  window.__xlideConsoleInstalled = true;
+
+  var ring = [];
+  window.__xlideConsole = ring;
+
+  function push(line) {
+    try {
+      ring.push(line);
+      if (ring.length > 500) { ring.shift(); }
+    } catch (ignored) { /* a ring that throws would take the page with it */ }
+  }
+
+  function describe(one) {
+    if (typeof one === "string") { return one; }
+    if (one && one.stack) { return String(one.stack); }
+    if (one && one.message) { return String(one.message); }
+    try { return JSON.stringify(one); } catch (e) { return String(one); }
+  }
+
+  ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+    var original = console[level];
+    console[level] = function () {
+      try {
+        var parts = [];
+        for (var i = 0; i < arguments.length; i++) { parts.push(describe(arguments[i])); }
+        push(level + ": " + parts.join(" "));
+      } catch (ignored) { /* as above */ }
+      return original.apply(console, arguments);
+    };
+  });
+
+  /*
+   * TOLD TO THE HOST, not left to be fetched.
+   *
+   * The host could read the ring above with a script call, and that is a poor way to learn a page
+   * is dead: it costs a round trip inside a route that has a deadline, and the first attempt spent
+   * the entire budget of the one route that most needed to answer. Pushing costs nothing and
+   * arrives before anybody asks.
+   *
+   * chrome.webview is the WebView2 host channel. It exists from the first line of the first
+   * script, independent of the bundle, which is exactly the property needed here: the bundle is
+   * the thing that may never run.
+   */
+  function tell(text) {
+    try {
+      window.chrome.webview.postMessage(JSON.stringify({ type: "pageError", text: text }));
+    } catch (ignored) { /* no host, or none listening yet: the ring still has it */ }
+  }
+
+  // The two that matter. A bundle that dies on load dies here, with the file and line.
+  window.addEventListener("error", function (event) {
+    var line = "UNCAUGHT: " + describe(event.error || event.message)
+      + (event.filename ? "  at " + event.filename + ":" + event.lineno + ":" + event.colno : "");
+    push(line);
+    tell(line);
+  });
+
+  window.addEventListener("unhandledrejection", function (event) {
+    var line = "UNHANDLED REJECTION: " + describe(event.reason);
+    push(line);
+    tell(line);
+  });
+})();
+`;
+
 const INDEX_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -51,6 +136,13 @@ const INDEX_HTML = `<!doctype html>
      the browser hidden until ready, and this keeps even a reload from ever flashing white. -->
 <style>html,body{margin:0;height:100%;background:#1e1e1e}</style>
 <link rel="stylesheet" href="./editor.css">
+<!-- THE FIRST THING THAT RUNS, and it has to be, because what it catches is the bundle failing
+     to run at all. A classic script tag in the head executes synchronously before ./editor.js,
+     so the error handlers are already standing when the bundle's modules initialise.
+
+     A separate file rather than an inline block: the CSP above is script-src 'self' with no
+     'unsafe-inline', and weakening it to hold six lines of bootstrap would be a poor trade. -->
+<script src="./boot.js"></script>
 </head>
 <body>
 <div id="shell">
@@ -203,6 +295,7 @@ async function main() {
   ]);
 
   await writeFile(path.join(dist, "index.html"), INDEX_HTML, "utf8");
+  await writeFile(path.join(dist, "boot.js"), BOOT_JS, "utf8");
   await ensureCodicon();
 
   const names = (await readdir(dist)).sort();

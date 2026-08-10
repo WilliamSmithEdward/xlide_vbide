@@ -348,6 +348,19 @@ await api.act("unfoldModule", { module: "Helpers" });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");
 
+// WHEN THE SCREEN IS BLANK, one question. `doctor` names the cause rather than the silence:
+// boot.js installs ahead of the bundle, so a module that throws on load is caught and pushed to
+// the host before anything asks.
+await api.doctor();
+// -> findings: ["the page never reported a build stamp because it THREW while loading:
+//               UNCAUGHT: ReferenceError: ... at editor.js:1:7"]
+await api.console({ last: 20 });   // the same ring, readable out of a page that never booted
+
+// AN EMPTY `dialogs` IS TWO DIFFERENT ANSWERS. Read `recentlyCleared` with it, or a dialog the
+// guard cancelled a second ago is indistinguishable from an action that did nothing.
+await api.dialogs();
+// -> { dialogs: [], heartbeatAgeMs: 31, recentlyCleared: ["Macros: &Macro Name:"] }
+
 // THE MENUS, the editor's own, with the ids the suppression table is written in.
 await api.menus();          // the bar: File, Edit, View ... each with `suppressed`
 await api.menus([8]);       // one menu's items

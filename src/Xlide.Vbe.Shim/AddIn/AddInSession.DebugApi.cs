@@ -246,13 +246,92 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// Puts a small ring buffer in front of the page's console, so the `console` route can
-    /// answer what the page said. Installed at every ready, including a reload's — the page
-    /// that comes back is a new one and carries none of this.
+    /// ASKS the page what it recorded going wrong. The fallback behind the pushed report.
+    ///
+    /// The FIRST rather than the last: a bundle that dies on load throws once and then produces a
+    /// cascade of consequences, and the consequences are the part that is easy to find.
+    ///
+    /// This can be asked of a page that never booted, which is the whole reason it exists — a
+    /// module throwing during initialisation leaves the JavaScript context perfectly alive, so the
+    /// ring boot.js installed before it is still there to be read.
+    /// </summary>
+    private (string? Error, bool Asked) AskPageForItsError()
+    {
+        /*
+         * A SECOND, well inside the deadline of the route that calls it.
+         *
+         * The first version asked for three, which is the whole budget a host-thread route gets,
+         * so doctor stopped answering at all in the one state this was added for: the page dead,
+         * the finding ready, and the route timing out before it could say so. Measured immediately
+         * after adding it, against a bundle broken on purpose (2026-08-09). A diagnostic that
+         * spends the caller's entire budget is not a diagnostic.
+         */
+        var read = RunPageScript(
+            """
+            (function () {
+              var ring = window.__xlideConsole;
+              if (!ring) { return null; }
+              for (var i = 0; i < ring.length; i++) {
+                if (ring[i].indexOf("UNCAUGHT") === 0 || ring[i].indexOf("UNHANDLED REJECTION") === 0) {
+                  return ring[i];
+                }
+              }
+              return null;
+            })()
+            """,
+            null,
+            1000);
+
+        // "The page recorded nothing" and "the page could not be asked" are opposite answers, and
+        // reporting the second as the first would say a broken page is probably still starting.
+        if (!read.Answered || read.Error is not null)
+        {
+            return (null, false);
+        }
+
+        if (string.IsNullOrWhiteSpace(read.Result) || read.Result == "null")
+        {
+            return (null, true);
+        }
+
+        // The page answers as JSON, so a string comes back quoted. Unwrapped with JsonDocument
+        // rather than a generic Deserialize: this library is published ahead-of-time and the
+        // reflecting overloads are refused outright there.
+        var line = read.Result.Trim();
+        if (line.StartsWith('"'))
+        {
+            try
+            {
+                using var parsed = System.Text.Json.JsonDocument.Parse(line);
+                line = parsed.RootElement.GetString() ?? line;
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Left as it came. A finding that says something odd beats no finding.
+            }
+        }
+
+        // One line, trimmed: a stack can be a dozen frames and a finding is meant to be read.
+
+        var firstLine = line.Split('\n')[0].Trim();
+        return (firstLine.Length > 300 ? firstLine[..300] + "..." : firstLine, true);
+    }
+
+    /// <summary>
+    /// A FALLBACK. The page installs this ring itself, in boot.js, ahead of its own bundle.
+    ///
+    /// This ran at page-ready and was the only installer, which made the ring useless for the
+    /// failure it most needed to cover: a bundle that throws while its modules initialise never
+    /// reaches ready, so the ring was never created and the `console` route answered
+    /// `{"installed": false, "lines": []}` at exactly the moment somebody was asking why the page
+    /// was blank (2026-08-09). Ownership moved into the page, where nothing can run before it.
+    ///
+    /// Kept because a page served from somewhere without boot.js — an older bundle, a hand-built
+    /// dist — should still say something rather than nothing. It no-ops when boot.js has run,
+    /// which it detects through the same flag boot.js sets.
     ///
     /// The console is WRAPPED rather than replaced: everything still reaches DevTools when a
-    /// client is attached. Only uncaught errors go to the shim log (bounded, deliberately);
-    /// this is for the rest, which is otherwise invisible during a live test.
+    /// client is attached.
     /// </summary>
     private void InstallConsoleRing()
     {
@@ -1528,8 +1607,19 @@ internal sealed partial class AddInSession
                 var rows = DialogWatch.Dialogs()
                     .Select(row => new DebugDialogRow(row.Window, row.Caption, row.Text, row.Buttons, row.Enabled))
                     .ToArray();
+
+                // NOT drained here. `guard` owns the draining, and a read that emptied the list
+                // would make this route the reason the next caller sees nothing — the same class
+                // of problem it is here to expose. The last few are enough to tell "nothing
+                // opened" from "something opened and was taken away".
+                string[] cleared;
+                lock (_dialogGate)
+                {
+                    cleared = [.. _guardCleared.TakeLast(5)];
+                }
+
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugDialogsReply(rows, PerfCounters.HeartbeatAgeMs),
+                    new DebugDialogsReply(rows, PerfCounters.HeartbeatAgeMs, cleared),
                     DebugJsonContext.Default.DebugDialogsReply));
             }
 
@@ -1883,13 +1973,18 @@ internal sealed partial class AddInSession
                     + $"{(dialog.Text.Length > 0 ? $" ({dialog.Text})" : string.Empty)} with {pressed}, "
                     + $"host thread quiet for {PerfCounters.HeartbeatAgeMs}ms");
 
-            if (pressed is not null && !mine)
-            {
-                _guardCleared.Add($"{dialog.Caption}: {dialog.Text}".Trim().TrimEnd(':'));
-            }
-
             lock (_dialogGate)
             {
+                // UNDER THE GATE, like every read of it. This add was outside any lock while the
+                // `guard` route enumerated the same list from a request thread, which is a list
+                // being written during someone else's enumeration: rare, and an exception in a
+                // watcher rather than a wrong answer. It matters more now that `dialogs` reads it
+                // too, so there are two readers and one writer instead of one of each.
+                if (pressed is not null && !mine)
+                {
+                    _guardCleared.Add($"{dialog.Caption}: {dialog.Text}".Trim().TrimEnd(':'));
+                }
+
                 _dialogsWeRaised.Remove(dialog.Window);
             }
         }
@@ -2268,7 +2363,32 @@ internal sealed partial class AddInSession
 
                 if (_editorSurface?.PageBuildStamp is null)
                 {
-                    findings.Add("the page never reported a build stamp; it may not have finished booting");
+                    /*
+                     * A CAUSE, not the symptom restated.
+                     *
+                     * This used to say only that the page had not reported a stamp, which is the
+                     * observation written out longhand: it names what did not happen and nothing
+                     * about why. The page's own black box knows why — boot.js installs before the
+                     * bundle and catches a module that throws on load — and the JavaScript context
+                     * survives that throw, so it can be read out of a page that never booted.
+                     *
+                     * Read here rather than left to a second call, because the whole point of a
+                     * doctor is that one question is enough (2026-08-09: the page died, doctor
+                     * described the silence, and the reason was found by reading source).
+                     */
+                    // PUSHED FIRST, asked second. boot.js posts the error to the host the moment
+                    // it happens, so the usual case costs nothing and works even when the surface
+                    // is too far gone to answer a script. The script read stays as the fallback
+                    // for a page serving an older bundle that does not push.
+                    var pushed = _editorSurface?.FirstPageError;
+                    var (died, asked) = pushed is not null ? (pushed, true) : AskPageForItsError();
+                    findings.Add(died is not null
+                        ? $"the page never reported a build stamp because it THREW while loading: {died}"
+                        : asked
+                            ? "the page never reported a build stamp, and it recorded no error, so it "
+                                + "is more likely still starting than broken"
+                            : "the page never reported a build stamp, and it did not answer when asked "
+                                + "what went wrong, so the surface itself is not responding");
                 }
 
                 // A standing dialog owns the host thread, and every OTHER route answers normally
