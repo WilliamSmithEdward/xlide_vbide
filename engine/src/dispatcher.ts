@@ -214,7 +214,20 @@ export class Dispatcher {
     private readonly semanticMemo = new Map<string, { source: string; result: SemanticTokensResult }>();
 
     /** One workbook's symbol index, kept against the exact module texts it was built from. */
-    private readonly symbolsMemo = new Map<string, { sources: string[]; symbols: ProjectSymbols }>();
+    /**
+     * The assembled symbols per project, and what they were assembled FROM.
+     *
+     * The fingerprint carries each module's name as well as its source. It carried only the
+     * sources until 2026-08-10, and a rename is the one edit that changes a name and no text: the
+     * memo hit, the old assembly came back, and it still knew the module by the name it no longer
+     * had. So a module nothing references could be renamed once and the second rename was refused
+     * as not being a module of this workbook, by an assembly that was one rename out of date.
+     *
+     * It only ever showed on a rename with nothing to replace. Replacing a mention rewrites
+     * another module's text, which misses the memo and rebuilds, which is why every rename that
+     * did something worked and only the ones that did nothing else broke.
+     */
+    private readonly symbolsMemo = new Map<string, { fingerprint: string[]; symbols: ProjectSymbols }>();
 
     /**
      * The last analysis of each module, kept whole: the findings as the analyzer made them, and
@@ -559,10 +572,17 @@ export class Dispatcher {
         const seeded = this.seededModules.get(params.projectId) ?? [];
         const wanted = params.moduleName.toLowerCase();
         if (!seeded.some((module) => module.moduleName.toLowerCase() === wanted)) {
+            // NAMES WHAT IT DOES HAVE. A refusal that only says "not a module of this workbook"
+            // about a module the developer can see in the tree sends the reader to the object
+            // model, which agrees with them, and the disagreement is here. Whether the seed is
+            // stale or the project is the wrong one is the whole question, and both answers are
+            // in this list.
+            const known = seeded.map((module) => module.moduleName).sort();
             return {
                 modules: [],
                 oldName: params.moduleName,
-                refused: `'${params.moduleName}' is not a module of this workbook.`,
+                refused: `'${params.moduleName}' is not a module of this workbook. `
+                    + `The engine was seeded with: ${known.join(', ') || '(nothing)'}.`,
             };
         }
 
@@ -637,15 +657,19 @@ export class Dispatcher {
             modules.push({ moduleName, type: 'standard', documentType: undefined, source });
         }
 
+        // NAME AND SOURCE, because a rename changes the first and not the second. Joined by a
+        // character a name cannot hold, so no two different pairs can spell the same fingerprint.
+        const fingerprint = modules.map((module) => `${module.moduleName}\u0000${module.source}`);
+
         const memo = this.symbolsMemo.get(projectId);
         if (memo
-            && memo.sources.length === modules.length
-            && memo.sources.every((held, index) => held === modules[index].source)) {
+            && memo.fingerprint.length === fingerprint.length
+            && memo.fingerprint.every((held, index) => held === fingerprint[index])) {
             return memo.symbols;
         }
 
         const symbols = assembleSymbols(modules);
-        this.symbolsMemo.set(projectId, { sources: modules.map((module) => module.source), symbols });
+        this.symbolsMemo.set(projectId, { fingerprint, symbols });
         return symbols;
     }
 

@@ -1722,3 +1722,29 @@ analyzer and reached nothing.
 
 **Read the layers outward from the developer, not inward from the cleverness.** The provider
 register is the cheapest thing to check and the likeliest to be the answer.
+
+## 63. A memo keyed on content cannot see the edit that changes only a name
+
+The engine assembles a project's symbols once and memoises them, keyed on the modules' sources,
+which is the right key for every edit but one. A rename changes a module's NAME and no text at
+all, so a reseed after one carries an identical set of sources: the memo hit, handed back the
+assembly built before the rename, and that assembly still knew the module by the name it no longer
+had. The next rename of it was refused as not being a module of this workbook, by an assembly one
+rename out of date, while the object model and the tree both showed the new name.
+
+It hid behind its own narrowness. A rename with mentions to replace rewrites another module's
+text, which misses the memo and rebuilds it, so every rename that DID something worked. Only a
+rename with nothing to replace showed it, which in practice means a module nothing references: a
+new one, or a document. It surfaced on `ThisWorkbook`, which made it look like a document-handling
+defect until a brand-new standard module did exactly the same thing.
+
+Three readings ruled things out before the cause was found, and each was worth the minute:
+renaming a document through the object model works, so it is not the host; the refusal survives
+fourteen seconds, so it is not a debounce; the log shows an analysis pass two milliseconds after
+the rename, so it is not a missing re-analysis. What remained was a pass that ran and changed
+nothing, which is the signature of a cache.
+
+**A fingerprint has to carry every input the answer depends on, not every input that usually
+moves.** The name was load-bearing and was not in the key, and the memo was cleared on
+`closeProject` and on nothing else, so a reseed alone never cleared it.
+
