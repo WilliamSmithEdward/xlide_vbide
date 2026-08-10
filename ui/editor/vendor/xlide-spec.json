@@ -1,10 +1,11 @@
 {
   "source": "xlide_vscode",
-  "commit": "c0a2feb11e9a4377d99ca57ee4c21cd4963c0f3b",
+  "commit": "54eec969b8a80627a2e96bf7f61ed4a9a6587176",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
-    "vbaSmartTab"
+    "vbaSmartTab",
+    "vbaSourceScan"
   ],
   "files": {
     "analyzer/lexer/keywordTable.ts": "8ad84b78d73c56012d2912d7296817ab22e59a00aec53f5d19a755fd687713ba",

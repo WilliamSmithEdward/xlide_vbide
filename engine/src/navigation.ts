@@ -17,6 +17,7 @@ import {
     projectClassMemberAtDefinition,
     sourceMemberDefinitionsAt,
 } from '../../../xlide_vscode/src/vbaReferenceResolution';
+import { VBA_IDENTIFIER_PATTERN } from '../../../xlide_vscode/src/vbaSourceScan';
 import type { VbaModuleSymbols } from '../../../xlide_vscode/src/vbaSymbolIndex';
 import { buildLiveVbaProjectIndex } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import type { LocationPayload, ModulePayload } from './protocol';
@@ -207,8 +208,17 @@ export function referencesFor(
  * here rather than on the surface because a rename that produces something VBA cannot parse turns
  * one compiling project into a broken one across several modules at once, and the surface has no
  * business knowing the language's rules.
+ *
+ * A LETTER MEANS ANY LETTER. This read [A-Za-z] until 2026-08-09, so renaming something TO
+ * `Calculér` or `Вычислить` was refused as not a legal name, by us, on a language that accepts
+ * both. The marks are here for the same reason they are in the analyzer's pattern: Thai and
+ * Devanagari build one letter from a base and a mark.
+ *
+ * Not the spec's VBA_IDENTIFIER_NAME_RE, and the difference is deliberate: that one admits a
+ * leading underscore and VBA does not, and the 255-character ceiling is real. Loosening either to
+ * share a constant would accept names the host then refuses.
  */
-const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]{0,254}$/;
+const IDENTIFIER = /^\p{L}[\p{L}\p{M}\p{N}_]{0,254}$/u;
 
 /**
  * The reserved words a rename must not produce. Not the full keyword list — a name that merely
@@ -932,19 +942,51 @@ function* identifierPositions(line: string, wanted: string): Generator<number> {
     }
 }
 
-/** The identifier the offset is inside or immediately after, or nothing. */
+/**
+ * The identifier the offset is inside or immediately after, or nothing.
+ *
+ * FOUND BY THE ANALYZER'S OWN RULE, not by walking characters against a local idea of what one is.
+ * This walked outwards while `/[A-Za-z0-9_]/` matched, so a procedure called `Calculér` was read as
+ * `Calcul` and one called `Вычислить` as nothing at all - and everything built on this then looked
+ * up a name that does not exist. Measured 2026-08-09 against five scripts: go to definition
+ * answered "0 definition(s)" for every one of them, and rename produced text with the name still
+ * in it, while an ASCII-named procedure in the SAME module resolved correctly.
+ *
+ * It looked like an analyzer defect from outside, because the symbol tree holds the right name and
+ * the outline shows it. It was here.
+ *
+ * Scanning with the shared pattern also fixes something the character walk got wrong on its own
+ * terms: a name cannot START with a digit, and walking outwards from an offset happily accepted
+ * one. Bounded to the line the offset is on, which is what the walk did too, since no identifier
+ * character matched a newline.
+ */
+const IDENTIFIER_SCAN = new RegExp(VBA_IDENTIFIER_PATTERN, 'gu');
+
 function identifierAt(source: string, offset: number): { text: string; start: number; end: number } | null {
-    let start = Math.min(Math.max(offset, 0), source.length);
-    let end = start;
+    const at = Math.min(Math.max(offset, 0), source.length);
+    const lineStart = source.lastIndexOf('\n', Math.max(0, at - 1)) + 1;
+    const lineBreak = source.indexOf('\n', at);
+    const lineEnd = lineBreak < 0 ? source.length : lineBreak;
+    const line = source.slice(lineStart, lineEnd);
+    const wanted = at - lineStart;
 
-    while (start > 0 && isIdentifierChar(source[start - 1])) {
-        start--;
-    }
-    while (end < source.length && isIdentifierChar(source[end])) {
-        end++;
+    IDENTIFIER_SCAN.lastIndex = 0;
+    for (let found = IDENTIFIER_SCAN.exec(line); found !== null; found = IDENTIFIER_SCAN.exec(line)) {
+        const start = found.index;
+        const end = start + found[0].length;
+
+        // Inside it, or immediately after it: a caret at the end of a word is on that word, which
+        // is what a developer means by clicking there.
+        if (wanted >= start && wanted <= end) {
+            return { text: found[0], start: lineStart + start, end: lineStart + end };
+        }
+
+        if (start > wanted) {
+            break;
+        }
     }
 
-    return end > start ? { text: source.slice(start, end), start, end } : null;
+    return null;
 }
 
 /**
@@ -981,8 +1023,26 @@ function qualifierBefore(source: string, start: number): string | undefined {
     return from < at ? source.slice(from, at) : undefined;
 }
 
+/*
+ * The continuation half of VBA_IDENTIFIER_PATTERN: a letter, a combining mark, a digit or an
+ * underscore. Thai and Devanagari build one letter from a base plus a mark, which is why marks
+ * continue a name. The `u` flag is required, or \p{L} is read as a literal 'p{L}' and matches
+ * nothing at all - silently, which is the way this kind of mistake usually arrives.
+ *
+ * Used by six boundary checks besides identifierAt: whether a match is a whole word, whether a
+ * qualifier precedes a name, and so on. Fixing only the one that reads the name would have left a
+ * non-ASCII name resolving and then failing its own word-boundary test, which is a worse state
+ * than not resolving.
+ *
+ * Tests ONE UTF-16 code unit, because that is what its callers hand it while walking a string. An
+ * astral letter is two, and each half tests false; identifierAt does not have that limit because
+ * it matches over the line. No VBA project can hold an astral identifier on any Windows code page,
+ * so this is a boundary worth naming rather than one worth engineering around.
+ */
+const IDENTIFIER_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
+
 function isIdentifierChar(character: string | undefined): boolean {
-    return character !== undefined && /[A-Za-z0-9_]/.test(character);
+    return character !== undefined && IDENTIFIER_CHARACTER.test(character);
 }
 
 function locationOf(

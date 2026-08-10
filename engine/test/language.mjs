@@ -315,6 +315,85 @@ check('the code-unit count is what both ends mean by an offset', () => {
 });
 
 /*
+ * A NON-ASCII NAME, rather than non-ASCII text around an ASCII one.
+ *
+ * Everything above puts the sample in comments and string literals and calls a procedure named
+ * `Target`, which tests the ARITHMETIC and nothing about the identifier itself. A developer whose
+ * procedure is called `Calculér` is a different case, and it was covered nowhere: the surface read
+ * that name as `Calcul` until 2026-08-09 because Monaco's word pattern was ASCII-only, and finding
+ * that led here, because go to definition still answered nothing once the word was right.
+ */
+const NAMED = [
+    ['accented Latin', 'Calculér'],
+    ['German', 'Grüße'],
+    ['Greek', 'Υπολογισμός'],
+    ['Cyrillic', 'Вычислить'],
+    ['Japanese', '計算'],
+];
+
+console.log(`\n== ${NAMED.length} non-ASCII procedure names, through definition and rename ==\n`);
+
+for (const [label, name] of NAMED) {
+    const source = [
+        'Option Explicit',
+        '',
+        `Public Function ${name}(ByVal n As Long) As Long`,
+        `    ${name} = n`,
+        'End Function',
+        '',
+        'Public Sub Caller()',
+        `    Debug.Print ${name}(1)`,
+        'End Sub',
+        '',
+    ].join('\r\n');
+
+    const projectId = `Named-${label}`;
+    // eslint-disable-next-line no-await-in-loop
+    await call('project/open', {
+        projectId,
+        generation: 1,
+        modules: [{ moduleName: 'Sample', source, type: 'standard' }],
+    });
+
+    const callSite = source.lastIndexOf(`Debug.Print ${name}`) + 'Debug.Print '.length;
+    // eslint-disable-next-line no-await-in-loop
+    const definition = await call('textDocument/definition', {
+        projectId,
+        moduleName: 'Sample',
+        moduleType: 'standard',
+        source,
+        offset: callSite + 1,
+    });
+
+    const lines = source.split('\r\n');
+    const wantLine = lines.findIndex((one) => one.startsWith(`Public Function ${name}`)) + 1;
+
+    check(`${label}: go to definition finds a procedure named ${name}`, () => {
+        const found = definition.locations ?? [];
+        assert.equal(found.length, 1, `expected one location, got ${found.length}`);
+        assert.equal(found[0].line, wantLine, 'the line is wrong');
+        assert.equal(found[0].length, name.length,
+            'the length is the name in UTF-16 code units, which is what a selection is measured in');
+    });
+
+    // eslint-disable-next-line no-await-in-loop
+    const renamed = await call('textDocument/rename', {
+        projectId,
+        moduleName: 'Sample',
+        moduleType: 'standard',
+        source,
+        offset: callSite + 1,
+        newName: 'Renamed',
+    });
+
+    check(`${label}: rename rewrites all three occurrences and nothing else`, () => {
+        const text = (renamed.modules ?? [])[0]?.source ?? '';
+        assert.equal(text, source.split(name).join('Renamed'),
+            'the produced text is not the source with the name replaced');
+    });
+}
+
+/*
  * IMPORT AND EXPORT, over the same matrix.
  *
  * The planner behind them is the companion product's own `moduleSyncPlan.ts`, imported out of that

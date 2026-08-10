@@ -9,7 +9,10 @@ import type { SearchMatchPayload, SearchParams, SearchResult } from './protocol'
 /** Enough for a results list; past this the query needs narrowing, not scrolling. */
 const MATCH_LIMIT = 500;
 
-const WORD_CHARACTER = /[A-Za-z0-9_]/;
+// Any letter, not an ASCII one. Whole-word search over `Calculér` matched `Calcul` and then
+// refused it for having a letter after it, so whole-word search could not find a name with an
+// accent in it (2026-08-09). The `u` flag is required or \p{L} matches nothing.
+const WORD_CHARACTER = /[\p{L}\p{M}\p{N}_]/u;
 
 export function searchModules(
     modules: Iterable<{ projectId: string; module: string; source: string }>,

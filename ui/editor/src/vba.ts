@@ -1,4 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { VBA_IDENTIFIER_PATTERN } from "xlide-spec/vbaSourceScan";
 
 export const VBA_LANGUAGE_ID = "vba";
 
@@ -264,9 +265,23 @@ export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = 
     { open: "[", close: "]" },
     { open: '"', close: '"' },
   ],
-  // VBA identifiers are letters, digits and underscore; the trailing type-declaration
-  // characters are deliberately excluded so double click selects the bare name.
-  wordPattern: /[A-Za-z_][A-Za-z0-9_]*/g,
+  /*
+   * VBA identifiers are letters, digits and underscore; the trailing type-declaration characters
+   * are deliberately excluded so double click selects the bare name.
+   *
+   * LETTERS MEANS ANY LETTER, and this said [A-Za-z_] until 2026-08-09. Monaco's word pattern is
+   * what getWordAtPosition uses, and that is what hover, go to definition, find references, rename
+   * and double click all ask first - so an identifier carrying one accented letter was read as the
+   * ASCII part before it and everything downstream looked up a name that does not exist. Measured
+   * live: `Calculér` read back as `Calcul`, go to definition answered "0 definition(s)", and a
+   * position inside `' Straße € déjà vu œuvre` had no word at all.
+   *
+   * The pattern comes from the vendored spec rather than being written again here, because that
+   * copy is synced from the analyzer and is the rule the rest of the chain already agrees on. It
+   * needs the `u` flag or \p{L} is read as a literal 'p{L}' and matches nothing; `g` is Monaco's
+   * requirement, since it walks the line with lastIndex.
+   */
+  wordPattern: new RegExp(VBA_IDENTIFIER_PATTERN, "gu"),
 
   indentationRules: {
     // Opens a block. `Declare [PtrSafe] Function` never matches: the line starts with Declare,
