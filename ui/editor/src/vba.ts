@@ -96,6 +96,31 @@ function buildVbaMonarch(
 ): monaco.languages.IMonarchLanguage {
   return {
   ignoreCase: true,
+
+  /*
+   * COMPILES EVERY RULE BELOW WITH THE `u` FLAG, which is what makes \p{L} mean a letter rather
+   * than a literal 'p{L}'. Monarch reads this: `flags = (ignoreCase ? 'i' : '') + (unicode ? 'u' : '')`.
+   *
+   * Without it every declaration rule stopped at the first accented letter, so a name was painted
+   * in two pieces: measured 2026-08-09, `RécordAccent` rendered teal as far as the accent and then
+   * light blue, and `CalculérName` yellow then light blue, while their ASCII neighbours were one
+   * colour throughout.
+   */
+  unicode: true,
+
+  /**
+   * A VBA identifier, for the rules below to share rather than spell out a dozen times. Monarch
+   * inlines an `@name` reference into the rule's own regex, so this is the same pattern the
+   * analyzer uses, in the same places the ASCII one used to be.
+   */
+  // The `u` here is for the TYPE CHECKER, which reads the literal as written. Monarch takes
+  // `.source` and recompiles with its own flags (monarchCompile.js:83), so the flag on the
+  // literal never reaches the tokenizer; `unicode: true` above is what actually sets it.
+  identifier: /[\p{L}_][\p{L}\p{M}\p{N}_]*/u,
+
+  /** One character that CONTINUES a name, for the lookaheads that ask "is the name over yet". */
+  identifierTail: /[\p{L}\p{M}\p{N}_]/u,
+
   defaultToken: "",
   tokenPostfix: ".vba",
   keywords: TOKEN_KEYWORDS,
@@ -141,18 +166,18 @@ function buildVbaMonarch(
 
       // Declaration names: what follows the declaring keyword is the declared thing, and it
       // is painted as one. Order matters: these run before the general word rule below.
-      [/\b(Sub|Function)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "function"]],
-      [/\b(Property)(\s+)(Get|Let|Set)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "keyword", "", "function"]],
-      [/\b(Event)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "function"]],
-      [/\b(Implements)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "type"]],
-      [/\b(Type|Enum)(\s+)([A-Za-z_]\w*)/, ["keyword", "", "type"]],
+      [/\b(Sub|Function)(\s+)(@identifier)/, ["keyword", "", "function"]],
+      [/\b(Property)(\s+)(Get|Let|Set)(\s+)(@identifier)/, ["keyword", "", "keyword", "", "function"]],
+      [/\b(Event)(\s+)(@identifier)/, ["keyword", "", "function"]],
+      [/\b(Implements)(\s+)(@identifier)/, ["keyword", "", "type"]],
+      [/\b(Type|Enum)(\s+)(@identifier)/, ["keyword", "", "type"]],
 
       // What follows As or New names a type, built-in or the project's own.
-      [/\b(As|New)(\s+)([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)/, ["keyword", "", "type"]],
+      [/\b(As|New)(\s+)(@identifier(?:\.@identifier)*)/, ["keyword", "", "type"]],
 
       // A statement that starts with a bare name is a call: `InternalBeginAsyncOpen`,
       // `RequireDbConnection Me, "..."`. A name being assigned, labelled, or dotted is not.
-      [/^(\s*)([A-Za-z_]\w*)(?![\w])(?!\s*[=:.(])/, ["", {
+      [/^(\s*)(@identifier)(?!@identifierTail)(?!\s*[=:.(])/, ["", {
         cases: {
           "@keywords": "keyword",
           "@languageConstants": "constant",
@@ -165,17 +190,17 @@ function buildVbaMonarch(
 
       // A member with an argument list is a call; a plain member is a member. The grammar's
       // quirk is kept: a member spelled like a keyword paints as one (`.Open`, `.Print`).
-      [/(\.)([A-Za-z_]\w*)(?=\s*\()/, ["delimiter", {
+      [/(\.)(@identifier)(?=\s*\()/, ["delimiter", {
         cases: { "@keywords": "keyword", "@default": "function" },
       }]],
-      [/(\.)([A-Za-z_]\w*)/, ["delimiter", {
+      [/(\.)(@identifier)/, ["delimiter", {
         cases: { "@keywords": "keyword", "@languageConstants": "constant", "@default": "identifier" },
       }]],
 
       // A name with an argument list is a call when the project (or the runtime) declares a
       // procedure by that name, and stays a variable otherwise: array indexing wears the same
       // parentheses, and `values(index, 1)` is data, not a call.
-      [/([A-Za-z_]\w*)(?=\s*\()/, {
+      [/(@identifier)(?=\s*\()/, {
         cases: {
           "@keywords": "keyword",
           "@languageConstants": "constant",
@@ -189,7 +214,7 @@ function buildVbaMonarch(
       }],
 
       // Every word that remains: constants, types, built-ins, keywords, then identifiers.
-      [/[a-zA-Z_]\w*/, {
+      [/@identifier/, {
         cases: {
           "@languageConstants": "constant",
           "@languageValues": "constant",
@@ -291,15 +316,17 @@ export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = 
       "^[ \\t]*(?:(?:Public|Private|Friend|Global|Static)[ \\t]+)*(?:Sub|Function)[ \\t]+\\w"
       + "|^[ \\t]*(?:(?:Public|Private|Friend)[ \\t]+)*Property[ \\t]+(?:Get|Let|Set)[ \\t]+\\w"
       + "|^[ \\t]*If[ \\t]+\\S.+\\bThen[ \\t]*(?:'.*)?$"
-      + "|^[ \\t]*(?:For[ \\t]+Each[ \\t]+[A-Za-z_][A-Za-z0-9_]*[ \\t]+In[ \\t]+\\S.*"
-      + "|For[ \\t]+[A-Za-z_][A-Za-z0-9_]*[ \\t]*=.*\\bTo\\b.+)[ \\t]*(?:'.*)?$"
+      + "|^[ \\t]*(?:For[ \\t]+Each[ \\t]+[\p{L}_][\p{L}\p{M}\p{N}_]*[ \\t]+In[ \\t]+\\S.*"
+      + "|For[ \\t]+[\p{L}_][\p{L}\p{M}\p{N}_]*[ \\t]*=.*\\bTo\\b.+)[ \\t]*(?:'.*)?$"
       + "|^[ \\t]*Do(?:[ \\t]+(?:While|Until)[ \\t]+\\S.*)?[ \\t]*(?:'.*)?$"
       + "|^[ \\t]*While[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
       + "|^[ \\t]*With[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
       + "|^[ \\t]*Select[ \\t]+Case[ \\t]+\\S.*[ \\t]*(?:'.*)?$"
       + "|^[ \\t]*(?:Type|Enum)[ \\t]+\\w"
       + "|^[ \\t]*#[ \\t]*If[ \\t]+\\S.+\\bThen[ \\t]*(?:'.*)?$",
-      "i",
+      // `u` so the \p{L} in the For rules above is a letter rather than a literal 'p{L}', which
+      // would match nothing and quietly stop the rule firing for every loop, ASCII included.
+      "iu",
     ),
     // Closes a block. Else/ElseIf/Case pull their own line back; the on-enter rules indent the
     // lines that follow them again.
@@ -336,7 +363,7 @@ export const vbaLanguageConfiguration: monaco.languages.LanguageConfiguration = 
       action: { indentAction: monaco.languages.IndentAction.Indent },
     },
     {
-      beforeText: /^[ \t]*(?:For[ \t]+Each[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+In[ \t]+\S.*|For[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=.*\bTo\b.+|Do(?:[ \t]+(?:While|Until)[ \t]+\S.*)?|While[ \t]+\S.*|With[ \t]+\S.*)[ \t]*(?:'.*)?$/i,
+      beforeText: /^[ \t]*(?:For[ \t]+Each[ \t]+[\p{L}_][\p{L}\p{M}\p{N}_]*[ \t]+In[ \t]+\S.*|For[ \t]+[\p{L}_][\p{L}\p{M}\p{N}_]*[ \t]*=.*\bTo\b.+|Do(?:[ \t]+(?:While|Until)[ \t]+\S.*)?|While[ \t]+\S.*|With[ \t]+\S.*)[ \t]*(?:'.*)?$/iu,
       action: { indentAction: monaco.languages.IndentAction.Indent },
     },
     {

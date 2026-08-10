@@ -23,6 +23,9 @@ $here = $PSScriptRoot
 $repo = Split-Path -Parent (Split-Path -Parent $here)
 $failures = 0
 
+# The session is a partial class across AddInSession.cs and AddInSession.DebugApi.cs, so a
+# seam is looked for across `AddInSession*.cs` rather than in whichever file it was in on the
+# day the check was written. Select-String and Test-Path both take the wildcard (2026-08-09).
 function Test-Seam {
     param([string] $Label, [string] $Path, [string[]] $Patterns)
 
@@ -45,9 +48,9 @@ function Test-Seam {
 
 Test-Seam 'the palette window exists and behaves' (Join-Path $repo 'src\Xlide.Vbe.Shim\Editor\BrowserPalette.cs') @(
     'XlidePalette', 'view=objbrowser', 'public void Hide', 'AdoptOwnerIcon', 'Reveal\(\)', 'Win32.SwHide')
-Test-Seam 'the command is intercepted before the native execute' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'the command is intercepted before the native execute' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'command == VbeCommands.Command.ObjectBrowser', 'OpenBrowserPalette\(\);')
-Test-Seam 'the session answers libraries, types, members, and hides with the frame' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'the session answers libraries, types, members, and hides with the frame' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'BrowseLibraries', 'BrowseTypes', 'BrowseMembers', 'ScanModuleMembers', '_browserPalette\?\.Hide\(\)')
 Test-Seam 'members carry a line and libraries a kind' (Join-Path $repo 'src\Xlide.Vbe.Shim\Editor\EditorMessages.cs') @(
     'record ObMemberRow', '"line"', 'record ObLibraryRow', '"kind"')
@@ -61,9 +64,9 @@ Test-Seam 'the dev doors are gated to Debug' (Join-Path $repo 'src\Xlide.Vbe.Shi
     '^#if DEBUG', 'DebugReply', '\\"api\\":')
 Test-Seam 'the dev build asks for the DevTools protocol' (Join-Path $repo 'src\Xlide.Vbe.Shim\WebView\WebView2Surface.cs') @(
     'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'DevToolsPort', 'MessageTap')
-Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'case "log"', 'case "messages"', 'case "capture"', 'case "breakpoint"', 'case "immediate"')
-Test-Seam 'the api carries the locals, watches, problems, module, and stats routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'the api carries the locals, watches, problems, module, and stats routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'case "locals"', 'case "watches"', 'case "problems"', 'case "module"', 'case "stats"')
 Test-Seam 'the perf counters exist and are Debug-gated' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\PerfCounters.cs') @(
     '^#if DEBUG', 'PlacementFull', 'Marshal', 'RaiseToAtLeast')

@@ -57,7 +57,20 @@ function routesOf(source) {
   return [...found].sort();
 }
 
-const routes = routesOf(read("src/Xlide.Vbe.Shim/AddIn/AddInSession.cs"));
+/*
+ * EVERY PART OF THE SESSION, not the file the switch happened to be in.
+ *
+ * This read AddInSession.cs alone, and the routes moved to AddInSession.DebugApi.cs when the debug
+ * api was split off as a partial (2026-08-09). The check said so rather than reporting zero gaps
+ * across zero routes, which is the failure it was built to avoid; reading the whole folder means
+ * the next split does not need it edited at all.
+ */
+const sessionParts = readdirSync(join(root, "src/Xlide.Vbe.Shim/AddIn"))
+  .filter((file) => file.startsWith("AddInSession") && file.endsWith(".cs"))
+  .map((file) => read(`src/Xlide.Vbe.Shim/AddIn/${file}`))
+  .join("\n");
+
+const routes = routesOf(sessionParts);
 if (routes.length === 0) {
   console.log("FAIL no routes found; the switch this reads may have moved");
   process.exit(1);

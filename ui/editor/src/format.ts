@@ -57,7 +57,23 @@ const MIDDLES = [
 ];
 
 /** A label, which VBA puts hard against the left margin. */
-const LABEL = /^[A-Za-z_]\w*:(?!=)/;
+/*
+ * A LETTER MEANS ANY LETTER, here as everywhere else. See NAME_START below: this said
+ * [A-Za-z_]\w* and so did not recognise `étape:` as a line label at all.
+ */
+const LABEL = /^[\p{L}_][\p{L}\p{M}\p{N}_]*:(?!=)/u;
+
+/*
+ * WHERE A WORD STARTS AND WHAT CONTINUES IT, for the keyword canonicaliser below.
+ *
+ * `\w` is ASCII in JavaScript however the rest is written, so walking a word with it stopped at
+ * the first accented letter and handed the canonicaliser the ASCII HEAD of the name. When that
+ * head is a keyword the name comes back respelled: measured 2026-08-09, Format Module turned
+ * `inés` into `Inés` and `toé` into `Toé`, while `plainName` beside them was untouched. `Inés` is
+ * a name, and `to`, `as`, `is`, `on`, `do` and `if` all start ordinary words.
+ */
+const NAME_START = /[\p{L}_]/u;
+const NAME_PART = /[\p{L}\p{M}\p{N}_]/u;
 
 /** Directives, which are never indented. */
 const DIRECTIVE = /^#(?:if|elseif|else|end\s+if|const)\b/i;
@@ -144,9 +160,9 @@ function respell(line: string): string {
       break;
     }
 
-    if (ch !== undefined && /[A-Za-z_]/.test(ch)) {
+    if (ch !== undefined && NAME_START.test(ch)) {
       let end = index;
-      while (end < line.length && /\w/.test(line.charAt(end))) {
+      while (end < line.length && NAME_PART.test(line.charAt(end))) {
         end += 1;
       }
 

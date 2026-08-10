@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "a9fba550714532eb84e5500427e55dc0a23d7b1c",
+  "commit": "d414c103b0c08dbe3dea8cba5d6babd7442adf8a",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
@@ -13,7 +13,7 @@
     "analyzer/lexer/tokenKinds.ts": "2032c749c1290f2c40e4c7d5882984e092a74e451f0e2dcbc21443fbcee6194e",
     "analyzer/lexer/tokenize.ts": "fc40e684b1f8e9f9b16083960ecf31204cf0c59623856353c194639dfe725844",
     "analyzer/lexer/trivia.ts": "6fad65c2a9b540b241ddb430eb2898c834210cf59919811aabaf2eebc13cb6d7",
-    "vbaSmartEnter.ts": "4a8a981e452c33b11ec0c4e741b6d0d2425cb3886d6d1cb4d30b1c9e6b015273",
+    "vbaSmartEnter.ts": "0cd52149861094dd5323c0ec17931dfb1b18df7496046b5589a378629de06162",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
     "vbaSourceScan.ts": "b7626a93d2adf9b47138c8b75ff726dd2f6b58834a38ab6ade16b980ddb0c398",
     "vbaStructuralDiagnostics.ts": "14cd1791114e4b56ffc48faa99a5c3178c76e5f7efec009d7212758924c3cba4"

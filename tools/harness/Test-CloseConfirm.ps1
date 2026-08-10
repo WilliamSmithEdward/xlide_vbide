@@ -25,6 +25,9 @@ $here = $PSScriptRoot
 $repo = Split-Path -Parent (Split-Path -Parent $here)
 $failures = 0
 
+# The session is a partial class across AddInSession.cs and AddInSession.DebugApi.cs, so a
+# seam is looked for across `AddInSession*.cs` rather than in whichever file it was in on the
+# day the check was written. Select-String and Test-Path both take the wildcard (2026-08-09).
 function Test-Seam {
     param([string] $Label, [string] $Path, [string[]] $Patterns)
 
@@ -53,15 +56,15 @@ Test-Seam 'surface message is registered' (Join-Path $repo 'src\Xlide.Vbe.Shim\E
     'ConfirmCloseMessage', 'JsonSerializable\(typeof\(ConfirmCloseMessage\)\)')
 Test-Seam 'surface can ask and can drop edits' (Join-Path $repo 'src\Xlide.Vbe.Shim\Editor\EditorSurface.cs') @(
     'public void ConfirmClose', 'public void DiscardEdits')
-Test-Seam 'session gates, saves, and reverts' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'session gates, saves, and reverts' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'OnModuleCloseRequested', 'case "save"', 'case "discard"', 'SaveWorkbookOf', 'ModuleDiffersFromSaved')
-Test-Seam 'a revert corrects the engine live copy (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'a revert corrects the engine live copy (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'hostRewrite: true', 'NotifyLiveText')
 # The host's own copy of the findings goes stale the same way, for a different reason: a live
 # answer is only accepted while its module is the one on screen, and a discarded module is
 # closing. Nothing replaced the findings computed from the text that had just been thrown away,
 # so the panel reported errors in code that no longer existed (developer, 2026-08-06).
-Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'private void DropFindingsFor', 'DropFindingsFor\(component, display\)')
 # Ctrl+W is a SURFACE command, and the seam moved with it.
 #
@@ -74,7 +77,7 @@ Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Pa
 #
 # The check asserted the old shape for every commit since, and failed for every one of them,
 # unnoticed because this probe is not in the gate (2026-08-08).
-Test-Seam 'Ctrl+W is answered by the page, and its close lands in the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession.cs') @(
+Test-Seam 'Ctrl+W is answered by the page, and its close lands in the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'The closing keys are handled above, as SURFACE commands',
     'OnModuleCloseRequested\(paneModule')
 Test-Seam 'built bundle carries the modal' (Join-Path $repo 'ui\editor\dist\editor.js') @(
