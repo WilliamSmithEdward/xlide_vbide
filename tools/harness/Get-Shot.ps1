@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    A picture of the running editor — or of one widget in it — as a PNG.
+    A picture of the running editor - or of one widget in it - as a PNG.
 
 .DESCRIPTION
     The debug api renders windows as BMP, because a bitmap is what PrintWindow gives and

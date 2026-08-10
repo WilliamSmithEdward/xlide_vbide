@@ -169,7 +169,7 @@ export class Menubar {
 
       if (item.icon) {
         // The glyph carries no meaning to anything that cannot see it, so the caption becomes the
-        // name and the icon is marked decorative — otherwise this is a button called "button".
+        // name and the icon is marked decorative - otherwise this is a button called "button".
         button.classList.add("menu-top-icon");
         button.setAttribute("aria-label", item.caption);
         button.title = item.caption;

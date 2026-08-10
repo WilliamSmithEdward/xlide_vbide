@@ -168,7 +168,7 @@ try {
     if ($null -eq $excel) { throw 'Excel never answered on COM.' }
 
     # This one test genuinely needs the VBA project object model: it HIDES and re-shows the
-    # editor, and there is no ungated equivalent of that — Excel's ribbon command opens the
+    # editor, and there is no ungated equivalent of that - Excel's ribbon command opens the
     # editor but does not close it. Everything else in the harness works with the setting off,
     # so the failure is named rather than left to arrive as a null-reference three lines later.
     if ($null -eq $excel.VBE) {

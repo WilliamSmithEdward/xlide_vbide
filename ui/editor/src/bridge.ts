@@ -100,7 +100,7 @@ export type HostMessage =
 
 /**
  * One library the Object Browser lists: a referenced type library, or an open workbook's
- * project — the kind says which, and only a project's members can be navigated to.
+ * project - the kind says which, and only a project's members can be navigated to.
  */
 export interface ObLibrary {
   name: string;
@@ -116,7 +116,7 @@ export interface ObType {
 
 /**
  * One member of a type, its signature spelled the way VBA would. The line is where the
- * member lives in its module — meaningful only for project members, zero elsewhere.
+ * member lives in its module - meaningful only for project members, zero elsewhere.
  */
 export interface ObMember {
   name: string;
@@ -361,19 +361,19 @@ export class EditorBridge {
 
   /**
    * The frame and the editor grid, assigned right after construction and before the ready
-   * message lets the host speak. Assigned rather than constructor-taken because the three —
-   * bridge, workspace, shell — reference each other, and the bridge is built first.
+   * message lets the host speak. Assigned rather than constructor-taken because the three -
+   * bridge, workspace, shell - reference each other, and the bridge is built first.
    */
   shell: Shell | null = null;
   workspace: Workspace | null = null;
 
   /** The floating search widget; assigned after construction, the same way openSettings is.
-   * Search answers from the host route here — the widget owns the whole search UI. */
+   * Search answers from the host route here - the widget owns the whole search UI. */
   searchWidget: SearchWidget | null = null;
   private readonly disposables: monaco.IDisposable[] = [];
 
   /**
-   * Debug decorations — the stopped line and the breakpoint dots — ride the host-active
+   * Debug decorations - the stopped line and the breakpoint dots - ride the host-active
    * document's MODEL, not an editor: they are visible in whichever group shows that model,
    * and they survive the model moving between groups.
    */
@@ -398,7 +398,7 @@ export class EditorBridge {
   /** Monotonic counters over locally originated edits, one per document. */
   private readonly revisions = new Map<string, number>();
 
-  /** The document the host says is active — the one its native active pane shows. */
+  /** The document the host says is active - the one its native active pane shows. */
   private hostActive: DocumentId | null = null;
 
   /** Completion requests awaiting their answers, by request identifier. */
@@ -515,8 +515,8 @@ export class EditorBridge {
    * Wires one group's editor into the bridge: the caret authority, the breakpoint margin,
    * and its hover preview. Called once per editor as the workspace creates groups.
    *
-   * Only the ACTIVE group's caret reaches the host — the caret decides what a Run acts on,
-   * and there is one native caret — and only the active group's margin toggles breakpoints,
+   * Only the ACTIVE group's caret reaches the host - the caret decides what a Run acts on,
+   * and there is one native caret - and only the active group's margin toggles breakpoints,
    * because the toggle targets the host-active module and a background group's margin would
    * aim at the wrong one.
    */
@@ -571,7 +571,7 @@ export class EditorBridge {
   /**
    * Asks the host to open an address outside the surface.
    *
-   * This page may not navigate anywhere, by policy — the whole point of it is that it is a fixed
+   * This page may not navigate anywhere, by policy - the whole point of it is that it is a fixed
    * document over a host, not a browser. The host has no such restriction and opens the address
    * in whatever the machine uses, but only if it is one of the few it holds: what is sent from
    * here is a request, not an instruction.
@@ -598,8 +598,8 @@ export class EditorBridge {
 
   /**
    * Places the waiting caret if the shown module is the one it belongs to. A navigation that
-   * named no workbook matches the module by name alone — a finding that could not say still
-   * navigates — and one that named it must match both parts.
+   * named no workbook matches the module by name alone - a finding that could not say still
+   * navigates - and one that named it must match both parts.
    */
   private applyPendingCaret(): void {
     const pending = this.pendingCaret;
@@ -655,7 +655,7 @@ export class EditorBridge {
 
   /** Asks the host to close a module's pane, which is what closes its tab. The host holds a
    * close whose module has unsaved changes and asks back with confirmClose; the developer's
-   * choice returns through the same message as the action — "save" or "discard". */
+   * choice returns through the same message as the action - "save" or "discard". */
   closeModule(name: string, project?: string, action?: string): void {
     this.transport.post({
       type: "closeModule",
@@ -805,8 +805,8 @@ export class EditorBridge {
   }
 
   /**
-   * Asks the host for a module's procedures, for its node in the tree. Resolves null — never
-   * empty — when no answer comes: a timeout is not a statement that the module has no
+   * Asks the host for a module's procedures, for its node in the tree. Resolves null - never
+   * empty - when no answer comes: a timeout is not a statement that the module has no
    * procedures, and the difference decides whether the tree keeps what it already shows. The
    * window is generous because the host thread legitimately stalls for seconds while a large
    * module is being shown, and the answer queued behind that stall is still a good answer.
@@ -891,7 +891,7 @@ export class EditorBridge {
    *
    * The host holds it, not the page: a rename edits several modules and the editor's undo stack
    * is per model, so Ctrl+Z in the module you are looking at would reverse that module's share
-   * and leave every other one renamed — a half-renamed project, which is worse than no undo.
+   * and leave every other one renamed - a half-renamed project, which is worse than no undo.
    */
   requestRenameUndo(): Promise<HostRenameAnswer> {
     const id = this.nextRenameId++;
@@ -976,7 +976,7 @@ export class EditorBridge {
   /**
    * Makes sure the page has a module's text, asking the host if it does not.
    *
-   * The page holds a module's text once it has been ACTIVATED — not because its pane is open — so
+   * The page holds a module's text once it has been ACTIVATED - not because its pane is open - so
    * a workspace opened onto eight modules holds one. Anything that DRAWS a module without going
    * to it needs this: the editor's peek window resolves each result to a model, and with no model
    * it draws an empty window (2026-08-07).
@@ -1039,7 +1039,7 @@ export class EditorBridge {
    * host-active: the editor colours every model it is showing, and a split shows two.
    *
    * Resolves null rather than empty when the host cannot answer, so the caller can keep the
-   * colouring already on screen — a module that suddenly loses its analysed colours reads as the
+   * colouring already on screen - a module that suddenly loses its analysed colours reads as the
    * analysis having broken, which is exactly what it would be lying about.
    */
   requestSemanticTokens(model: monaco.editor.ITextModel): Promise<HostSemanticToken[] | null> {
@@ -1454,7 +1454,7 @@ export class EditorBridge {
    * How many text models exist in the page, against how many documents are open.
    *
    * The two must match. A model that outlives the document it belonged to is the leak this
-   * surface is most likely to grow — models are created per open module and disposed when
+   * surface is most likely to grow - models are created per open module and disposed when
    * its pane closes, and nothing else would notice one that stayed. Monaco is bundled
    * rather than global, so a probe cannot count them without this.
    */
@@ -1507,7 +1507,7 @@ export class EditorBridge {
   }
 
   /**
-   * A module is open: its model exists from here until its pane closes. Idempotent — a model
+   * A module is open: its model exists from here until its pane closes. Idempotent - a model
    * that already exists adopts the text in place (the host re-opens everything after a page
    * reload, and re-sends a clean document whose module changed underneath), keeping its undo
    * stack and caret. Which group shows it is the workspace's business, decided when the tab
@@ -1688,7 +1688,7 @@ export class EditorBridge {
 
   /**
    * Replaces one held set of model decorations. Clears the previous model's when the target
-   * moved — the stopped line must not survive on a module the debugger has left — and applies
+   * moved - the stopped line must not survive on a module the debugger has left - and applies
    * the new set on the model that carries it now.
    */
   private applyModelDecor(
@@ -1743,7 +1743,7 @@ export class EditorBridge {
     }
 
     // The preview tells the truth before the click: a dim dot where a breakpoint can go, an
-    // orange cross where one cannot — and a click on a refused line does nothing at all, so
+    // orange cross where one cannot - and a click on a refused line does nothing at all, so
     // the red dot only ever appears where it is real (the developer's design, 2026-08-04).
     const breakable = lineCanCarryBreakpoint(this.model()?.getLineContent(line) ?? "");
 
@@ -1963,7 +1963,7 @@ export function demoTransport(): HostTransport {
   };
 
   // The demo's tree, held rather than sent once, so removing a component can take it out of both
-  // lists and republish — which is what the host does, and what makes the removal exercisable
+  // lists and republish - which is what the host does, and what makes the removal exercisable
   // here at all. Two workbooks, and a name that lives in only one of them.
   const demoProjects: ExplorerProject[] = [
     {
@@ -2163,7 +2163,7 @@ export function demoTransport(): HostTransport {
       if (message.type === "definition" || message.type === "references") {
         // The offset is into whichever module is host-active, so the word has to be read out of
         // THAT module's text. Reading it out of Module1's regardless answered about a word that
-        // was not under the caret whenever Module2 was showing — and, because Module1 is searched
+        // was not under the caret whenever Module2 was showing - and, because Module1 is searched
         // first, made an answer in another module impossible to produce here. That is the one case
         // the surface has now got wrong twice.
         const asked = activeModule === "Module2" ? DEMO_MODULE_2 : DEMO_MODULE;

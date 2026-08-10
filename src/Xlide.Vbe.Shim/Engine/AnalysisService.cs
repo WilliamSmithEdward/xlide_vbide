@@ -120,7 +120,7 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// each was. Requests arrive with a module name and nothing else; this is what turns the
     /// name back into the engine's addressing. A name can live in several open workbooks at
     /// once, so the value is every home it has, and resolution prefers the shown project.
-    /// Swapped wholesale per pass — readers snapshot the reference.
+    /// Swapped wholesale per pass - readers snapshot the reference.
     /// </summary>
     private Dictionary<string, List<(string ProjectId, string ModuleType)>> _moduleHomes =
         new(StringComparer.OrdinalIgnoreCase);
@@ -134,8 +134,8 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// <summary>
     /// The engine address a bare module name means right now.
     ///
-    /// Almost every request is about the module on the surface — live text, diagnostics,
-    /// completion, hover, everything the editor itself asks — and for those the shown project
+    /// Almost every request is about the module on the surface - live text, diagnostics,
+    /// completion, hover, everything the editor itself asks - and for those the shown project
     /// always wins: its home when the name has one there, and the shown project directly when
     /// the pass has not seeded it yet, because answering with a same-named module elsewhere is
     /// exactly how one workbook's live text overwrote another's. Only the outline serves
@@ -182,8 +182,8 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>
     /// Runs an action on the host thread, which owns the object model, answering false while
-    /// there is nothing to carry it. The full pass runs on pool threads — the pipe conversation
-    /// belongs there — but the read of the projects does not: the editor's objects live on the
+    /// there is nothing to carry it. The full pass runs on pool threads - the pipe conversation
+    /// belongs there - but the read of the projects does not: the editor's objects live on the
     /// host's thread, and calling them from anywhere else worked only by luck. Wired by the
     /// session to the overlay's action timer.
     /// </summary>
@@ -781,8 +781,8 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>
     /// Reads the projects on the host thread, which owns them, and hands the snapshots back to
-    /// this pool thread. Null when the read could not be run — the session is between surfaces,
-    /// or the host thread never answered — and the pass is abandoned rather than served stale:
+    /// this pool thread. Null when the read could not be run - the session is between surfaces,
+    /// or the host thread never answered - and the pass is abandoned rather than served stale:
     /// whatever prompted it will prompt again.
     /// </summary>
     private async Task<List<ProjectSnapshot>?> ReadProjectsAsync(int generation)
@@ -802,8 +802,8 @@ internal sealed class AnalysisService : IAsyncDisposable
             }
         }
 
-        // At start-up the engine can finish connecting a beat before the surface — and its
-        // host-thread door — exists, so a declined marshal is retried rather than answered by
+        // At start-up the engine can finish connecting a beat before the surface - and its
+        // host-thread door - exists, so a declined marshal is retried rather than answered by
         // reading from the wrong thread, which is exactly the call this method exists to end.
         for (var attempt = 0; ; attempt++)
         {
@@ -1013,7 +1013,7 @@ internal sealed class AnalysisService : IAsyncDisposable
         // finding the developer has just fixed.
         FindingsReady?.Invoke(everything);
 
-        // Projects the pass no longer saw are gone — closed workbooks, or a save-as that gave
+        // Projects the pass no longer saw are gone - closed workbooks, or a save-as that gave
         // the workbook a new identity. The engine forgets them so their modules stop answering,
         // and the homes map drops their entries so a shared name stops offering a dead address.
         var present = new HashSet<string>(snapshots.Select(s => s.ProjectId), StringComparer.OrdinalIgnoreCase);

@@ -47,7 +47,7 @@ const BUILD_NUMBER = (() => {
  * too late to be worth much: a bundle that throws while its modules initialise never reaches
  * ready, so the ring was never created, so the one route built to say what went wrong answered
  * `{"installed": false, "lines": []}` at exactly the moment it was needed. That happened on
- * 2026-08-09 and the cause — a const read during its own temporal dead zone — was found by
+ * 2026-08-09 and the cause - a const read during its own temporal dead zone - was found by
  * reading source instead.
  *
  * So it lives here, ahead of everything, and catches three things the bundle cannot report about

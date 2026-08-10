@@ -44,17 +44,17 @@ internal static class VbeMenus
     };
 
     /// <summary>
-    /// Items the surface has replaced outright, left out of every menu it serves — the
+    /// Items the surface has replaced outright, left out of every menu it serves - the
     /// developer's standing rule (2026-08-04, extended 2026-08-05: the end goal is menus
     /// stripped to what only they can reach). Suppression is by id, which is safe exactly
     /// because every id here was MEASURED unique across the menu bar (2026-08-05 full
     /// enumeration; the one id that repeats everywhere, 746, is not here).
     ///
     /// The window replacements: 761 is every native toolbar's visibility toggle and 30045
-    /// the Toolbars popup that held them — the surface's toolbar is the toolbar; 830 is the
+    /// the Toolbars popup that held them - the surface's toolbar is the toolbar; 830 is the
     /// native window list, whose job the tab strip does; 2554 Immediate, 2555 Locals, 2557
     /// Project Explorer, 222 Properties Window are panels now. Watch (2556), Call Stack
-    /// (620), and Object Browser (473) keep their items until their ports land — and the
+    /// (620), and Object Browser (473) keep their items until their ports land - and the
     /// View menu goes ENTIRELY when Watch and Call Stack do (developer, 2026-08-05), with
     /// the UserForm designer's Toolbox (548) and Tab Order (469) moving to the designer
     /// backlog rather than surviving here.
@@ -66,11 +66,11 @@ internal static class VbeMenus
     /// buttons and the Tab key itself; List Properties/Methods 2529, List Constants 2530,
     /// Quick Info 2531, Parameter Info 2532, and Complete Word 2533 are the engine's
     /// completions, hovers, and signature help. These also acted on the COVERED native
-    /// pane, not on the surface — traps as much as duplicates. Bookmarks stays: nothing on
+    /// pane, not on the surface - traps as much as duplicates. Bookmarks stays: nothing on
     /// the surface does its job yet.
     /// </summary>
     /// <remarks>
-    /// 2026-08-05, the second half: the Edit and View menus are GONE ENTIRELY (30003, 30004 —
+    /// 2026-08-05, the second half: the Edit and View menus are GONE ENTIRELY (30003, 30004 -
     /// the top-level popups themselves). Bookmarks became the surface's own (page-side, in the
     /// command palette and context menu); Watch became a panel fed by its own ghost palette;
     /// Call Stack sits on the toolbar's debug cluster; Definition and Last Position ride their
@@ -81,8 +81,8 @@ internal static class VbeMenus
     /// <remarks>
     /// 2026-08-05, the Debug menu's watch items: Add Watch 1820, Edit Watch 940, and Quick
     /// Watch 229 are the Watch PANEL's own buttons now (developer: move the watch triggers
-    /// into our UI and out of the menu bar). They still open the editor's dialogs — decision
-    /// 11 keeps those, because driving a modal invisibly can hang the editor — but the panel
+    /// into our UI and out of the menu bar). They still open the editor's dialogs - decision
+    /// 11 keeps those, because driving a modal invisibly can hang the editor - but the panel
     /// is where a watch is read, so it is where the work belongs. Decision 11's "reachable
     /// forever" clause was about there being NO other route; the panel is that route, and
     /// these items may only be suppressed while it carries them.
@@ -90,22 +90,22 @@ internal static class VbeMenus
     /// <remarks>
     /// 2026-08-05, the last of that evening: the DEBUG menu (30165) and the FORMAT menu
     /// (30006) are gone entirely, and the bar reads File Insert Run Tools Add-Ins Window
-    /// Help. Debug's commands all have homes — stepping, breakpoints, and the Call Stack
+    /// Help. Debug's commands all have homes - stepping, breakpoints, and the Call Stack
     /// were already toolbar buttons, the watches are the panel's, and Compile 578, Run To
     /// Cursor 1811, Set Next Statement 1812, and Show Next Statement 1813 joined the
     /// toolbar's debug cluster the same day (the last three greyed outside a break, the way
-    /// the Call Stack button is). Format needed nothing: every item on it — Align 32787,
+    /// the Call Stack button is). Format needed nothing: every item on it - Align 32787,
     /// Make Same Size 32790, Size to Fit 551, Size to Grid 550, Horizontal Spacing 32791,
     /// Vertical Spacing 32800, Center in Form 32789, Arrange Buttons 31215, Group 164,
-    /// Ungroup 165, Order 32809 — arranges controls on a UserForm, and the designer that
+    /// Ungroup 165, Order 32809 - arranges controls on a UserForm, and the designer that
     /// would give them meaning is backlog #14, which brings its own surfaces when it lands.
     /// </remarks>
     /// <remarks>
     /// 2026-08-06: the WINDOW menu (30009, from the same 2026-08-05 full enumeration) goes,
     /// and the bar reads File Insert Run Tools Add-Ins Help. Its window list (830) was
     /// already replaced by the tab strips; Split, Tile, Cascade, and Arrange Icons manage
-    /// native MDI children the surface covers, and the surface's own editor groups — split
-    /// right, split down, drag a tab between groups — are that job done where the developer
+    /// native MDI children the surface covers, and the surface's own editor groups - split
+    /// right, split down, drag a tab between groups - are that job done where the developer
     /// actually looks (developer: "remove the window ribbon").
     /// </remarks>
     /// <remarks>
@@ -150,8 +150,8 @@ internal static class VbeMenus
         //
         // WHAT IT ALSO HELD, recorded because a suppression that quietly drops a capability is
         // the failure this table is supposed to prevent. Most of the native Options dialog
-        // governs the pane this surface covers — full module view, procedure separator, the
-        // editor colours, docking — so it was already describing a window nobody looks at. Two
+        // governs the pane this surface covers - full module view, procedure separator, the
+        // editor colours, docking - so it was already describing a window nobody looks at. Two
         // items are not that: Auto Syntax Check, which the analyzer's squiggles replace, and
         // REQUIRE VARIABLE DECLARATION, which puts `Option Explicit` at the top of every new
         // module and has no equivalent in xlide's settings. That one is a real gap, not a
@@ -165,8 +165,8 @@ internal static class VbeMenus
     /// <summary>
     /// The one menu left, and it is not one of the editor's.
     ///
-    /// Tools and Add-Ins between them hold six enabled items — References, Macros, Options,
-    /// VBAProject Properties, Digital Signature, Add-In Manager — and none of them has anywhere
+    /// Tools and Add-Ins between them hold six enabled items - References, Macros, Options,
+    /// VBAProject Properties, Digital Signature, Add-In Manager - and none of them has anywhere
     /// else to be: they are the editor's own dialogs and this product does not reimplement them.
     /// Two menus for six items, next to nothing else, is a menu bar pretending to be a menu bar.
     /// So they are composed into one, and it carries the product's name because at that point it
@@ -258,7 +258,7 @@ internal static class VbeMenus
             // A wrench, not a word (the developer, 2026-08-09). The caption is still carried: it
             // is the accessible name and the tooltip, and what the page falls back to if the icon
             // ever goes missing. VBA rather than xlide, because it says what is BEHIND the button
-            // — the editor's own dialogs — and the whole surface is xlide already.
+            // - the editor's own dialogs - and the whole surface is xlide already.
             items.Add(new SurfaceMenuItem(
                 XlideMenuPosition, "VBA", Enabled: true, Separator: false, Popup: true,
                 Checked: false, Shortcut: null, Icon: "wrench"));
@@ -393,7 +393,7 @@ internal static class VbeMenus
     ///
     /// What Read answers is the product's menu; this is the editor's. The difference between the
     /// two is the only place a suppression can be checked, and until this existed there was no way
-    /// to ask the running editor for a menu's ids at all — they were measured once by hand and
+    /// to ask the running editor for a menu's ids at all - they were measured once by hand and
     /// written into a comment, which is how a table of numbers goes quietly out of date.
     ///
     /// Debug only, through the api. Nothing in the product reads it.
@@ -553,7 +553,7 @@ internal static class VbeMenus
 
     /*
      * Property reads that tolerate refusal. A control answers only the questions that make sense
-     * for what it is — a popup has no State, a built-in button no ShortcutText — and a refusal is
+     * for what it is - a popup has no State, a built-in button no ShortcutText - and a refusal is
      * an answer here, not a fault.
      */
 

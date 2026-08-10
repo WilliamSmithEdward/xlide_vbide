@@ -12,8 +12,8 @@
  *      something else
  *
  * The third is why this exists. A composition checked by reading it back through the code that
- * built it cannot see it; each position is resolved through `ControlAt` — the same call the
- * execute path makes — and checked against the id it should have landed on.
+ * built it cannot see it; each position is resolved through `ControlAt` - the same call the
+ * execute path makes - and checked against the id it should have landed on.
  *
  *   node tools\harness\menu-bar.mjs
  */
@@ -116,7 +116,7 @@ for (let rank = 0; rank < sources.length; rank++) {
  *
  * Everything above resolves positions; this executes one. Both bands of the arithmetic are driven
  * through the surface the way a click drives them, and the proof is the host's own line naming the
- * control id it invoked — not the dialog, which the debug api's guard cancels within a couple of
+ * control id it invoked - not the dialog, which the debug api's guard cancels within a couple of
  * seconds by design. Polling `dialogs` afterwards finds nothing and reads exactly like an item
  * that did not run (2026-08-09; the guard's own log line is what settled it).
  */

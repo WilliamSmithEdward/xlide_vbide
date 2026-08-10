@@ -35,7 +35,7 @@ public sealed record ProductSettings
 
     /// <summary>
     /// One indent level, in spaces. Governs the EDITOR's own indentation, what smart Enter
-    /// leaves behind, and Format Module — which used to be three different behaviours from one
+    /// leaves behind, and Format Module - which used to be three different behaviours from one
     /// name (2026-08-08).
     /// </summary>
     [JsonPropertyName("format.indentSize")]
@@ -90,8 +90,8 @@ public sealed record ProductSettings
     };
 
     /// <summary>
-    /// Reads settings from their file's text. Anything unreadable — missing, empty, malformed,
-    /// or holding the wrong shapes — answers the defaults, because a broken settings file must
+    /// Reads settings from their file's text. Anything unreadable - missing, empty, malformed,
+    /// or holding the wrong shapes - answers the defaults, because a broken settings file must
     /// never be a broken editor.
     /// </summary>
     public static ProductSettings Parse(string? json)

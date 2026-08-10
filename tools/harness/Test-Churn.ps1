@@ -4,7 +4,7 @@
 # and disposed when a group dissolves; a Monaco model per open module, made when a pane opens
 # and disposed when it closes; a listener per model; DOM for every dock group. Before the
 # workspace could rearrange, none of that moved. A dispose that misses one of them leaks
-# quietly, and the symptom arrives days later as a session that has become slow — by which
+# quietly, and the symptom arrives days later as a session that has become slow - by which
 # time the cause is unrecoverable.
 #
 # So this does the churn on purpose, many times, and asserts that the counts come back to

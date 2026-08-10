@@ -11,7 +11,7 @@ namespace Xlide.Setup;
 /// Installs and removes the product for the current user.
 ///
 /// The primary registration lives under the user's own profile and registry hive and needs no
-/// administrator rights — the editor resolves class registration through the user hive, and a
+/// administrator rights - the editor resolves class registration through the user hive, and a
 /// development tool that demands elevation excludes exactly the people most likely to want it.
 ///
 /// Click-to-Run Office resolves some registry namespaces through its own overlay. When the

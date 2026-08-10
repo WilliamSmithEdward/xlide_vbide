@@ -1,6 +1,6 @@
 /*
  * The editor area: one or more groups, each a tab strip over a Monaco editor, arranged in a
- * split tree — the ergonomics of the studio's editor grid, built in this codebase's own idiom
+ * split tree - the ergonomics of the studio's editor grid, built in this codebase's own idiom
  * (decision 13).
  *
  * Ownership is split three ways. The HOST owns which documents are open and which is active:
@@ -12,7 +12,7 @@
  * the active tab of some group.
  *
  * A document lives in exactly ONE group. Splitting moves the tab rather than duplicating it,
- * because the host's open list is a set — one pane per module — and a model shown twice would
+ * because the host's open list is a set - one pane per module - and a model shown twice would
  * need two view states for one identity. (The native editor's own Window > Split is a
  * different feature, and it went with the Window menu.)
  *
@@ -110,7 +110,7 @@ class EditorGroup {
   active: DocumentId | null = null;
 
   /**
-   * The documents this group has shown, most recent first — what it falls back to when it loses
+   * The documents this group has shown, most recent first - what it falls back to when it loses
    * its active tab. Position in the strip is where a tab was dropped and says nothing about what
    * anyone was reading.
    */
@@ -170,7 +170,7 @@ class EditorGroup {
   /** Shows a document this group holds: model on the editor, view states swapped. */
   show(id: DocumentId): void {
     // A group shows what it HOLDS. Asked for anything else it would draw a module with no tab in
-    // its own strip and report it as active — which a group waiting on a document whose tab closed
+    // its own strip and report it as active - which a group waiting on a document whose tab closed
     // meanwhile did (2026-08-07).
     if (!this.holds(id)) {
       return;
@@ -219,7 +219,7 @@ class EditorGroup {
    * The most recently shown survivor, not the departed tab's neighbour in the strip: what a group
    * should fall back to is what was last being read in it (the developer, 2026-08-07).
    *
-   * A tab that has never been shown HERE may have no model at all — the host publishes a module's
+   * A tab that has never been shown HERE may have no model at all - the host publishes a module's
    * text when it is activated, not when its pane opens, so a workspace opened onto eight modules
    * holds text for the one that was looked at. A group whose every survivor is untouched cannot
    * show anything by itself, and returns false rather than leaving a blank pane unexplained.
@@ -254,7 +254,7 @@ class EditorGroup {
    * saved view states holding documents that were no longer open: the stack then decided which
    * tab a close falls back to, using entries from before the workspace was emptied, which is the
    * blank-view defect of 2026-08-07 arriving through a second door. The view states are a leak
-   * besides — one monaco view state per document ever shown, for the life of the page.
+   * besides - one monaco view state per document ever shown, for the life of the page.
    */
   forget(): void {
     this.tabs = [];
@@ -292,8 +292,8 @@ class EditorGroup {
 
     // A group awaiting text for the tab that just left would wait forever: show() refuses a
     // document the group no longer holds, so nothing would ever clear `pending`, and the
-    // fallback below skips any group that has one. Latent rather than seen — the host re-opens
-    // every live document at ready, so the page rarely lacks a survivor's text — but a stuck
+    // fallback below skips any group that has one. Latent rather than seen - the host re-opens
+    // every live document at ready, so the page rarely lacks a survivor's text - but a stuck
     // `pending` disables the fallback permanently, which is too sharp an edge to leave.
     if (this.pending && this.key(this.pending) === key) {
       this.pending = null;
@@ -446,7 +446,7 @@ export class Workspace {
     this.announceActive();
   }
 
-  /** The editor of the active group — what "the editor" means for every editor-wide feature. */
+  /** The editor of the active group - what "the editor" means for every editor-wide feature. */
   activeEditor(): monaco.editor.IStandaloneCodeEditor {
     return this.activeGroup.editor;
   }
@@ -572,8 +572,8 @@ export class Workspace {
      * THE HOST IS TOLD WHAT THE PAGE IS SHOWING, when the host itself named nothing.
      *
      * Closing the active module's pane leaves the host with no active module: it sends the
-     * remaining tabs with `active: null`. The page promotes one of them to show — the strip and
-     * the editor look completely normal — and the host still believes nothing is active.
+     * remaining tabs with `active: null`. The page promotes one of them to show - the strip and
+     * the editor look completely normal - and the host still believes nothing is active.
      *
      * That is not cosmetic. Every language provider answers only for the HOST-active module and
      * returns nothing otherwise, so hover, completions, signature help and quick fixes all go
@@ -637,7 +637,7 @@ export class Workspace {
    * A document's text arrived. Any group that asked for it shows it.
    *
    * A group that loses its active tab can only fall back to a document the page already holds,
-   * and the page holds a module's text once it has been activated — not merely because its pane
+   * and the page holds a module's text once it has been activated - not merely because its pane
    * is open. So a group with nothing to fall back to asks the host and waits here, rather than
    * calling show() on a document that does not exist yet and silently staying blank.
    */
@@ -682,8 +682,8 @@ export class Workspace {
     this.activeGroup = group;
     this.markActiveGroup();
 
-    // Focusing a group activates its document, so the native active pane — the compile and
-    // run target — follows the developer's eyes. Ordered BEFORE any engine request the new
+    // Focusing a group activates its document, so the native active pane - the compile and
+    // run target - follows the developer's eyes. Ordered BEFORE any engine request the new
     // focus produces, which is what keeps offset-only requests honest (decision 12).
     if (group.active) {
       this.handlers.activate(group.active);
@@ -736,7 +736,7 @@ export class Workspace {
   }
 
   /**
-   * The developer picked a tab: shown NOW, page-locally — the felt win of live models — and
+   * The developer picked a tab: shown NOW, page-locally - the felt win of live models - and
    * the host is asked to activate the native pane behind it. The host's echo confirms, and a
    * refusal reconciles back on the next publish.
    */
@@ -774,7 +774,7 @@ export class Workspace {
   splitActive(direction: "right" | "down"): void {
     const from = this.activeGroup;
     if (from.active) {
-      // moveTab refuses the degenerate case — splitting a group by its own only tab.
+      // moveTab refuses the degenerate case - splitting a group by its own only tab.
       this.moveTab(from.active, from, { split: { of: from, direction: direction === "right" ? "right" : "bottom" } });
     }
   }
@@ -786,7 +786,7 @@ export class Workspace {
     this.markActiveGroup();
 
     // Explicit, after every (re)attach: an editor created in a detached container reports a
-    // few pixels and its automatic layout does not recover on its own — one measure against
+    // few pixels and its automatic layout does not recover on its own - one measure against
     // the real container gives the observer truth to track from.
     for (const group of this.groups) {
       group.editor.layout();
@@ -990,7 +990,7 @@ export class Workspace {
 
   /**
    * Moves a tab: into another group (at an index), or into a fresh split of a group. The
-   * host is not consulted — geography is the developer's — but the active document may
+   * host is not consulted - geography is the developer's - but the active document may
    * change, and that IS the host's, so it is asked.
    */
   private moveTab(
@@ -1114,7 +1114,7 @@ export class Workspace {
       this.pressedClose = null;
     });
 
-    // The middle button closes, the way every tabbed editor closes — any tab, focused or
+    // The middle button closes, the way every tabbed editor closes - any tab, focused or
     // not. The mousedown is claimed too, so the browser's middle-click autoscroll cannot
     // swallow the click before it becomes an auxclick.
     strip.addEventListener("mousedown", (event) => {
@@ -1168,7 +1168,7 @@ export class Workspace {
 
   /**
    * Makes the strip's tabs draggable: within the strip to reorder, onto another strip to
-   * move, onto a group's body to move there or split it — the drop zone overlay says which.
+   * move, onto a group's body to move there or split it - the drop zone overlay says which.
    *
    * Reordering moves the element in the DOM as the pointer crosses its neighbours'
    * midpoints, so the feedback is the reorder itself; the element is moved rather than
@@ -1197,7 +1197,7 @@ export class Workspace {
 
       // The same compass the tool panes use: a code editor tab arranges against the other
       // code editor tabs with the identical gesture (developer, 2026-08-06). The editor is
-      // a contained unit, so the compass only ever appears over the editor's own groups —
+      // a contained unit, so the compass only ever appears over the editor's own groups -
       // a module tab never leaves the editor area, and a tool pane never enters it.
       const compass = new DragCompass();
 
@@ -1225,7 +1225,7 @@ export class Workspace {
 
         drop = null;
 
-        // Over a strip — this one or another group's — the drag is a reorder/move-at-index.
+        // Over a strip - this one or another group's - the drag is a reorder/move-at-index.
         // No compass there: the strip already shows exactly where the tab would sit.
         for (const candidate of this.groups) {
           const bounds = candidate.strip.getBoundingClientRect();
@@ -1256,7 +1256,7 @@ export class Workspace {
         // an edge splits it.
         //
         // A group is offered only what it can honour. Over the tab's OWN group, centre is
-        // where it already is, and a split is impossible when it is the only tab — the tab
+        // where it already is, and a split is impossible when it is the only tab - the tab
         // would leave the group and dissolve it, which is the same picture one splitter
         // wider. Showing a zone that does nothing is a promise the drop cannot keep, and it
         // reads as a bug from outside (developer, 2026-08-06).

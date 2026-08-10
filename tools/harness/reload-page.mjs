@@ -2,7 +2,7 @@
  * Puts the bundle now on disk in front of every live editor.
  *
  * The shim serves the page over loopback from a folder, reading each file as it is asked for, so
- * a page change needs no republish and no restart — only a reload. Restarting the host is for
+ * a page change needs no republish and no restart - only a reload. Restarting the host is for
  * SHIM changes, because a host holds an add-in library open for its lifetime.
  *
  * Reloading through the api rather than by hand because it WAITS for the page to say it is ready:

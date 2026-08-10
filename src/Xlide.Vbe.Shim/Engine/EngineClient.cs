@@ -157,7 +157,7 @@ internal sealed class EngineClient : IAsyncDisposable
     ///
     /// Every finding is computed against that copy, and it is maintained incrementally by
     /// didChange rather than re-sent whole. So a squiggle on the wrong line is always the same
-    /// question — does the engine's copy match the surface's? — and there was no way to ask it.
+    /// question - does the engine's copy match the surface's? - and there was no way to ask it.
     /// </summary>
     public async Task<JsonElement?> LiveSourceAsync(
         string projectId,

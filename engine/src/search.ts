@@ -1,7 +1,7 @@
 // Finds text across the modules the engine already holds.
 //
-// The engine is the one place every open workbook's every module exists as text — seeded at
-// analysis, overlaid by the live keystroke stream — so scoped search belongs here rather than
+// The engine is the one place every open workbook's every module exists as text - seeded at
+// analysis, overlaid by the live keystroke stream - so scoped search belongs here rather than
 // in the host, which would have to read every module through the object model per search.
 
 import type { SearchMatchPayload, SearchParams, SearchResult } from './protocol';

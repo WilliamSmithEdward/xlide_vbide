@@ -68,7 +68,7 @@ export interface ShellHandlers {
   /** The developer edited a property of the shown component. */
   editProperty(component: string, name: string, value: string): void;
   /** The developer closed a module's tab, however they did it; the workbook when known. The
-   * action carries their answer to the unsaved-changes question — "save" or "discard" — and
+   * action carries their answer to the unsaved-changes question - "save" or "discard" - and
    * is absent on the plain close the host checks. */
   closeModule(name: string, workbook?: string, action?: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
@@ -257,7 +257,7 @@ export class Shell {
 
     // Every tool pane is a SEAT the dock system moves around: its title tab and its body
     // elements travel together. Problems brings its filter row, and the explorer and the
-    // properties inspector are panes like any other now — dockable to any side, tabbable
+    // properties inspector are panes like any other now - dockable to any side, tabbable
     // onto any group (the developer's ask, 2026-08-06).
     const seat = (name: string, title: string, bodies: HTMLElement[], onShown?: () => void): PanelSeat => ({
       name,
@@ -573,7 +573,7 @@ export class Shell {
 
   /**
    * Replaces the Locals panel content. Stopped false is the idle state. Stopped true with no
-   * rows is a break with nothing readable in scope — the panel must not claim "not stopped"
+   * rows is a break with nothing readable in scope - the panel must not claim "not stopped"
    * while the editor sits at a breakpoint, whatever the reader managed to see.
    */
   setLocals(stopped: boolean, context: string | null, rows: { expression: string; value: string; kind: string }[]): void {
@@ -620,7 +620,7 @@ export class Shell {
   }
 
   /**
-   * The editor's debug mode — "design", "run", or "break". Controls that only mean
+   * The editor's debug mode - "design", "run", or "break". Controls that only mean
    * something stopped (the Call Stack button) grey with it, honestly, instead of
    * clicking into silence.
    */
@@ -765,7 +765,7 @@ export class Shell {
    * The host is holding a tab close because the module has unsaved changes. Ask, and answer
    * the close with the choice: Save writes the workbook and closes, Don't Save puts the
    * module back to its saved text and closes, Cancel leaves everything as it is. Questions
-   * queue one at a time — a Close Others across several dirty modules asks about each in
+   * queue one at a time - a Close Others across several dirty modules asks about each in
    * turn, the way answering one file at a time reads everywhere else.
    */
   confirmClose(name: string, project: string | null): void {
@@ -915,7 +915,7 @@ export class Shell {
       // closed in whichever answered first.
       { label: openLabel, run: () => this.handlers.activateModule(name, workbook) },
       {},
-      { label: "Rename…", run: () => this.beginRename(name, workbook ?? null) },
+      { label: "Rename...", run: () => this.beginRename(name, workbook ?? null) },
     ];
 
     if (this.handlers.moduleIsOpen(name)) {
@@ -926,7 +926,7 @@ export class Shell {
     // and the host refuses Remove on them. Left out rather than shown greyed, the way the rest of
     // this menu treats what does not apply.
     if (kind !== ComponentKind.Document) {
-      items.push({}, { label: "Remove…", run: () => this.confirmRemove(name, kind, workbook) });
+      items.push({}, { label: "Remove...", run: () => this.confirmRemove(name, kind, workbook) });
     }
 
     // The tree marked the row this menu is about, and that mark is part of the gesture. It comes
@@ -939,7 +939,7 @@ export class Shell {
    * Asks before removing a component, because nothing brings one back.
    *
    * The editor's undo stack is per module and dies with the module, so a removal is not undoable
-   * by any route the developer has — not Ctrl+Z, not closing the workbook without saving once the
+   * by any route the developer has - not Ctrl+Z, not closing the workbook without saving once the
    * host has written it. That is the whole reason this asks at all, and the reason Cancel is what
    * has focus: the safe answer is the one a stray Return should pick.
    */
@@ -1057,7 +1057,7 @@ export class Shell {
   /**
    * Renames a module, and with it everything in the workbook that names it.
    *
-   * This used to open the Properties panel and leave the developer to retype "(Name)" — which
+   * This used to open the Properties panel and leave the developer to retype "(Name)" - which
    * renames the component and leaves every `OldName.Something` in every other module pointing at
    * a module that no longer exists. The rename goes through the host now; the panel is still
    * where a name can be edited by hand for anyone who wants only that.
@@ -1077,7 +1077,7 @@ export class Shell {
   }
 
   private renderPanel(): void {
-    // The toggles always carry the full counts — a filtered-out severity still says how many it
+    // The toggles always carry the full counts - a filtered-out severity still says how many it
     // is hiding, which is what makes toggling it back on an informed act.
     const totals: Record<SeverityGroup, number> = { errors: 0, warnings: 0, messages: 0 };
     for (const finding of this.findings) {
@@ -1096,7 +1096,7 @@ export class Shell {
 
     // Worst first, then by where they are, so the order does not depend on which module the
     // engine happened to analyse first. Severities the developer pressed out stay out of the
-    // list; every other surface — badges, squiggles, tree — keeps the full picture.
+    // list; every other surface - badges, squiggles, tree - keeps the full picture.
     const sorted = [...this.findings]
       .filter((finding) => this.severityFilters[severityGroup(finding.severity)])
       .sort((a, b) =>

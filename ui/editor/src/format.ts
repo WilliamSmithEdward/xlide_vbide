@@ -248,7 +248,7 @@ export function formatVba(text: string, options: FormatOptions = DEFAULT_FORMAT_
  * Models with a formatting edit on its way in, so a change event can be told from a keystroke.
  *
  * WHY THE HOST NEEDS TO KNOW. A line being typed does not get squiggled until the caret leaves
- * it — the VBE's own contract, and the reason the analyzer does not complain about `MsgBox `
+ * it - the VBE's own contract, and the reason the analyzer does not complain about `MsgBox `
  * while its arguments are still on their way. The host arms that hold when a change event
  * touches exactly one line and inserts no newline, which is what a keystroke looks like.
  *
@@ -280,7 +280,7 @@ export function takeFormattingMark(model: monaco.editor.ITextModel): boolean {
 /**
  * The edits a format wants, marked as a format's.
  *
- * The mark goes on only when there is something to apply — an already-formatted module produces
+ * The mark goes on only when there is something to apply - an already-formatted module produces
  * no change event, and a mark left standing would be spent on whatever the developer typed next.
  * The timer is the backstop for an edit the editor declines to apply at all.
  */

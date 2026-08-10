@@ -81,7 +81,7 @@ function liveKey(projectId: string, moduleName: string): string {
  * as a string that can be compared.
  *
  * This is the exact thing, not an approximation of it. Analysing a module takes the module's own
- * text plus `projectAnalysisOptionsForModule` for it — the project's types, its class members and
+ * text plus `projectAnalysisOptionsForModule` for it - the project's types, its class members and
  * its procedure signatures as that module sees them. Those two inputs decide the findings, so two
  * requests that agree on both have the same answer and the second need not be computed.
  *
@@ -193,7 +193,7 @@ export class Dispatcher {
 
     /**
      * The live text of modules being edited, by project and module, fed by didChange. One
-     * string instance per keystroke, shared by every feature that asks about the module — which
+     * string instance per keystroke, shared by every feature that asks about the module - which
      * is what lets the analyzer's identity-keyed token cache actually hit.
      */
     private readonly liveSources = new Map<string, string>();
@@ -206,7 +206,7 @@ export class Dispatcher {
     private readonly outlineMemo = new Map<string, { source: string; result: OutlineResult }>();
 
     /**
-     * The last colouring answered per module, keyed by the exact text it described — the same
+     * The last colouring answered per module, keyed by the exact text it described - the same
      * bargain the outline strikes, and for a stronger reason: the surface re-asks for the whole
      * module's tokens after every edit, and two passes over 26,000 lines per keystroke is the
      * kind of cost that shows up as the editor feeling slow rather than as anything visible.
@@ -219,8 +219,8 @@ export class Dispatcher {
     /**
      * The last analysis of each module, kept whole: the findings as the analyzer made them, and
      * the text they describe. Quick fixes are resolved from these rather than from anything the
-     * surface sends back, because a finding carries fix data — the missing argument's name, the
-     * unclosed block's expected closer — that never crosses to the surface at all.
+     * surface sends back, because a finding carries fix data - the missing argument's name, the
+     * unclosed block's expected closer - that never crosses to the surface at all.
      *
      * The request is kept too, so a fix asked for against text the diagnostics have not caught up
      * with can be answered by analysing that text under the same options the squiggles used.
@@ -329,7 +329,7 @@ export class Dispatcher {
              *
              * Every finding is computed against this copy, and it is maintained incrementally by
              * didChange rather than re-sent whole. So when a squiggle lands on the wrong line,
-             * the question is always whether this copy matches the surface — and there was no
+             * the question is always whether this copy matches the surface - and there was no
              * way to ask. A finding was seen one line out after a format on 2026-08-08, healed
              * before it could be diagnosed, and the one thing that would have settled it in a
              * single call did not exist.
@@ -422,7 +422,7 @@ export class Dispatcher {
 
         // The project's own words, for the surface's tokenizer: names that are types and names
         // that are procedures. This is what lets `ROneCOne.Create(...)` read as a type and a
-        // call while `values(index, 1)` stays a variable — the distinction the extension makes
+        // call while `values(index, 1)` stays a variable - the distinction the extension makes
         // with its semantic tokens.
         const facts = projectWordsFor(params.projectId, params.modules);
         return { modules: params.modules.length, types: facts.types, procedures: facts.procedures };
@@ -853,7 +853,7 @@ export class Dispatcher {
          *
          * The comparison is exact rather than a heuristic about what "looks like" a declaration
          * change. `facts` IS the analyzer's cross-module input, and `shape` is every other thing
-         * about the request that can move an answer — the caret offset among them, because it
+         * about the request that can move an answer - the caret offset among them, because it
          * suppresses the transient complaints of a half-typed expression and a cached answer from
          * a different caret would put them back.
          */
@@ -992,7 +992,7 @@ export class Dispatcher {
      * Findings with line and column added, counted in `source`.
      *
      * Here rather than inline because this is the only place that knows which text the offsets
-     * were counted in — the caller may not have sent one, in which case the choice between the
+     * were counted in - the caller may not have sent one, in which case the choice between the
      * live copy and the seeded one was made inside and the caller cannot see it. A finding
      * measured in one text and drawn in another is how a squiggle lands on the wrong line.
      */

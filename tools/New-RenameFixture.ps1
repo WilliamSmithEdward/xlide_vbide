@@ -18,7 +18,7 @@
 
     The result deliberately does NOT compile: Helpers and Rival each declare a public
     Recalculate, and Consumer calls it bare. That collision is the point of the fixture, so never
-    compile it as part of a wider experiment — every Run against it will fail for a reason that
+    compile it as part of a wider experiment - every Run against it will fail for a reason that
     has nothing to do with what you asked.
 
 .EXAMPLE
@@ -194,13 +194,13 @@ End Sub
 # Built through the DOOR, not through Workbook.VBProject.
 #
 # The old shape needed "Trust access to the VBA project object model" turned on, because
-# VBComponents.Add is exactly what that setting gates. The add-in is already past that gate — the
-# host hands it the VBE at OnConnection — so the components go in through the debug api and the
+# VBComponents.Add is exactly what that setting gates. The add-in is already past that gate - the
+# host hands it the VBE at OnConnection - so the components go in through the debug api and the
 # setting can stay OFF, which is where it belongs (2026-08-07).
 #
 # Three phases, because each needs a different thing:
 #   1. An empty macro workbook. Only Excel can make one, and an automation-created Excel is fine
-#      for it — no add-in is needed to save a blank file.
+#      for it - no add-in is needed to save a blank file.
 #   2. The same workbook opened as an ORDINARY process with the editor up, which is what loads
 #      the add-in and therefore what opens the door.
 #   3. The components, through the door.
@@ -239,7 +239,7 @@ $plan = @{
 }
 
 # Written WITHOUT a byte-order mark. In PowerShell 5.1 `-Encoding utf8` means "UTF-8 with a BOM",
-# and JSON.parse refuses one — naming a character that does not appear to be in the file.
+# and JSON.parse refuses one - naming a character that does not appear to be in the file.
 $planPath = Join-Path ([System.IO.Path]::GetTempPath()) "xlide-fixture-$PID.json"
 [System.IO.File]::WriteAllText(
     $planPath,

@@ -6,8 +6,8 @@ namespace Xlide.Vbe.Shim.Interop;
 /*
  * Just enough of the type-library machinery to browse what a project references.
  *
- * A workbook's project references real type libraries — Excel's own, the VBA runtime,
- * Office, stdole — and those libraries are the Object Browser's subject matter. The
+ * A workbook's project references real type libraries - Excel's own, the VBA runtime,
+ * Office, stdole - and those libraries are the Object Browser's subject matter. The
  * libraries describe themselves through ITypeLib and ITypeInfo, whose data lives in
  * caller-released structures reached through raw pointers.
  *
@@ -107,7 +107,7 @@ internal struct ParamDesc
     public short Flags;
 }
 
-/// <summary>ELEMDESC: one element — a parameter or a return — as its type plus flags.</summary>
+/// <summary>ELEMDESC: one element - a parameter or a return - as its type plus flags.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct ElemDesc
 {

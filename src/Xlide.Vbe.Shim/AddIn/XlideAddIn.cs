@@ -164,7 +164,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
                 // No editor frame: the teardown is mid-flight, or the editor window is gone
                 // until the developer next opens it. Both are the same wait. A dying process
                 // takes the watchdog with it, and in a living one the tick costs a window
-                // enumeration, so there is no budget to spend — standing down here is what
+                // enumeration, so there is no budget to spend - standing down here is what
                 // would strand a cancelled shutdown whose editor window did not survive.
                 _watchdogEnabledTicks = 0;
                 _watchdogTicks++;
@@ -182,14 +182,14 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             // chose Save, the real teardown ripped through a seconds-old session mid-start and
             // took the host down with it. What the dialog does do is DISABLE the frame, the way
             // every app-modal dialog disables its application's windows; an enabled frame held
-            // across consecutive ticks is the cancellation. The wait costs nothing — while the
-            // dialog is up the developer is looking at the dialog — and it does not spend the
+            // across consecutive ticks is the cancellation. The wait costs nothing - while the
+            // dialog is up the developer is looking at the dialog - and it does not spend the
             // patience budget above, because a dialog can sit unanswered for minutes.
             //
             // Visible as well as enabled, now that the watchdog also outlives OnDisconnection:
             // a real teardown that briefly re-enables windows on its way down hides them first,
-            // and a cancellation with the editor window closed simply waits here — ticking
-            // costs a window enumeration — until the developer reopens it, which is the first
+            // and a cancellation with the editor window closed simply waits here - ticking
+            // costs a window enumeration - until the developer reopens it, which is the first
             // moment a revival has anything to serve anyway.
             if (!Win32.IsWindowEnabled(frame) || !Win32.IsWindowVisible(frame))
             {
@@ -251,7 +251,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             {
                 // Not goodbye yet. The host says HostShutdown BEFORE it asks about unsaved
                 // changes, and Cancel abandons the whole shutdown with no callback that ever
-                // says so — observed 2026-08-02: OnBeginShutdown and OnDisconnection landed
+                // says so - observed 2026-08-02: OnBeginShutdown and OnDisconnection landed
                 // three seconds before the save prompt appeared, the developer cancelled, and
                 // the editor came back with the add-in dead and nothing listening. The editor
                 // never re-calls OnConnection inside that Excel, so the watchdog and the

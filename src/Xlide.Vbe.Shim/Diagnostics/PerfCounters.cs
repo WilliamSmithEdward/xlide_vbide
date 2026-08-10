@@ -41,7 +41,7 @@ internal static class PerfCounters
 
     /// <summary>
     /// The fast placement pass, timed as well as counted. Counting alone said the storm had been
-    /// tamed and said nothing about what one pass costs — and a pass that runs inside the modal
+    /// tamed and said nothing about what one pass costs - and a pass that runs inside the modal
     /// resize loop delays the loop, which is what a cursor lagging its own window looks like.
     /// </summary>
     public static void PlacementFast(long milliseconds)

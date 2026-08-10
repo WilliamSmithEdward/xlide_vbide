@@ -14,7 +14,7 @@
  * Closing the last tab folds the whole thing back, workbooks included: with nothing open there is
  * nothing for the tree to be following, and it should read as at rest rather than half unpacked.
  *
- * All of that following is one setting — "Explorer follows the editor", on by default. Off, the
+ * All of that following is one setting - "Explorer follows the editor", on by default. Off, the
  * tree does nothing on its own: it unfolds what is clicked and stays as it was left, which is the
  * right answer for anyone who arranges the tree deliberately and does not want it rearranged
  * underneath them (the developer, 2026-08-07).
@@ -172,7 +172,7 @@ export class Explorer {
       if (add?.dataset.addProject) {
         const box = add.getBoundingClientRect();
         // Under the button rather than at the pointer, so the menu hangs off the control that
-        // opened it however it was opened — including from the keyboard, where there is no pointer
+        // opened it however it was opened - including from the keyboard, where there is no pointer
         // and a click reports 0,0.
         this.handlers.projectAdd(add.dataset.addProject, Math.round(box.left), Math.round(box.bottom));
         return;
@@ -350,7 +350,7 @@ export class Explorer {
   private projectsKey = "";
 
   setActive(name: string | null, workbook?: string): void {
-    // The tree follows the module being edited — but only when it genuinely changed. The host
+    // The tree follows the module being edited - but only when it genuinely changed. The host
     // republishes the module list on all sorts of occasions with the same active module;
     // following every push would fold what was just unfolded by hand, and even redrawing on
     // every push wipes and rebuilds a large unfolded list, which reads as flicker.
@@ -442,8 +442,8 @@ export class Explorer {
    * a workbook collapsed by hand stays collapsed while work continues inside another.
    */
   private setExpandedModule(name: string, workbook?: string): void {
-    // Following is what the setting governs. A module CLICKED in the tree still unfolds — that
-    // goes through toggleModule — so switching this off makes the tree passive, not inert.
+    // Following is what the setting governs. A module CLICKED in the tree still unfolds - that
+    // goes through toggleModule - so switching this off makes the tree passive, not inert.
     if (!currentSettings().treeFollowsEditor && !this.unfoldingByHand) {
       return;
     }
@@ -561,7 +561,7 @@ export class Explorer {
    * Which workbook the unfolded module belongs to, resolved rather than trusted.
    *
    * `expandedModuleWorkbook` is null whenever the owner could not be worked out when the module
-   * was unfolded — the projects had not arrived yet, or the caller had no workbook to give. The
+   * was unfolded - the projects had not arrived yet, or the caller had no workbook to give. The
    * render and the snapshot both used to read that null as "every workbook", so with two
    * workbooks holding a `Helpers` the accordion unfolded BOTH of them, which is not an accordion.
    * Found by a randomised walk on 2026-08-07; the fourth defect in this codebase of the form "a
@@ -634,7 +634,7 @@ export class Explorer {
 
   private applyOutline(module: string, procedures: ExplorerProcedure[] | null): void {
     // No answer is not an answer: a timeout or a host failure says nothing about the module,
-    // and what is already unfolded stays. Only a real answer may replace it — including a real
+    // and what is already unfolded stays. Only a real answer may replace it - including a real
     // empty one, which is a module whose procedures were genuinely deleted.
     if (procedures === null || this.expandedModule !== module) {
       return;
@@ -698,7 +698,7 @@ export class Explorer {
    *
    * NOT A BUTTON ANY MORE, and it cannot be one. The row carries its own control now, and a button
    * inside a button is not valid HTML: the browser un-nests it and which one a click lands on stops
-   * being predictable. So the row is a treeitem that takes the keyboard for itself — Enter and
+   * being predictable. So the row is a treeitem that takes the keyboard for itself - Enter and
    * Space toggle it in the tree's own keydown, which is what the button element used to give free.
    *
    * The name is the part that gives way. A long workbook name truncates rather than pushing the

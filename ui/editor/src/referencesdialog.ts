@@ -3,8 +3,8 @@
  *
  * The editor has a references window of its own, and it cannot be used here: it renders each
  * result by resolving its address to an editor MODEL, and this surface only holds models for
- * modules with a tab open. So the one reference a developer most needs to be shown — the use in
- * a module they have never opened, the one that breaks when they change something — is the one
+ * modules with a tab open. So the one reference a developer most needs to be shown - the use in
+ * a module they have never opened, the one that breaks when they change something - is the one
  * that window structurally cannot draw.
  *
  * This renders text instead. The host sends the line with each location, so a module with no tab
@@ -72,8 +72,8 @@ export function openReferencesDialog(
     body.appendChild(empty);
   }
 
-  // Grouped by module, in the order the modules first appear, so the module being worked in —
-  // which is where the answer came from — is usually the group at the top.
+  // Grouped by module, in the order the modules first appear, so the module being worked in -
+  // which is where the answer came from - is usually the group at the top.
   const byModule = new Map<string, HostLocation[]>();
   for (const location of locations) {
     const held = byModule.get(location.module);

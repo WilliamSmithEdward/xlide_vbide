@@ -5,8 +5,8 @@
  * rather than write it twice: two strips that scroll almost the same way is how one of them ends
  * up with the wheel behaviour and the other without.
  *
- * The edges are deliberately not buttons in appearance. They run nothing — they reveal what is
- * already there — and something that looks like the commands beside it is something a person
+ * The edges are deliberately not buttons in appearance. They run nothing - they reveal what is
+ * already there - and something that looks like the commands beside it is something a person
  * presses expecting a command.
  */
 

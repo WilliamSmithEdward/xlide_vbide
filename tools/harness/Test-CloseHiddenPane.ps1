@@ -1,7 +1,7 @@
 # Closing a HIDDEN pane must still remove its tab from the strip.
 #
 # Guards the 2026-08-04 fix (the tab X's third and real mechanism): the pane tracker only
-# holds the pane windows it can match — the active one, in practice — so a hidden pane's
+# holds the pane windows it can match - the active one, in practice - so a hidden pane's
 # close changes nothing in its picture, Changed never fires, and the strip kept a dead tab.
 # Any window destroy now arms a moment of polls that re-read the object model's open list
 # and republish; this probe closes the hidden pane exactly as the host's close path does

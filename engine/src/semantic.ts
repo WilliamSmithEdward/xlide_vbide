@@ -4,7 +4,7 @@
 // name that denotes a type and every name that denotes a procedure, and its grammar paints them.
 // That gets `ROneCOne.Create(...)` reading as a type and a call. What a grammar cannot do is tell
 // a class from an enum from a user-defined type, or tell a host global from a local that shadows
-// its name — those need the analysis, and this is where it comes from.
+// its name - those need the analysis, and this is where it comes from.
 //
 // Two collectors, the same pair the extension uses: type references resolved against the project's
 // own types, and host globals that no declaration in the module has shadowed.

@@ -11,7 +11,7 @@
  * Read every figure against the two FLOORS printed first. `pagecall` is a script that answers
  * immediately; the promise floor is what the door costs to collect an answer that is not, which
  * every language feature is. A figure near the promise floor is a statement about the door and
- * not about the product — and a hover in the developer's own editor never crosses the door at
+ * not about the product - and a hover in the developer's own editor never crosses the door at
  * all, so what they wait for is the ANALYZER'S SHARE plus the page's work: the last column.
  *
  * Not a gate step. It takes a while, and a timing that runs on every commit is a timing nobody
@@ -39,7 +39,7 @@ const floor = await api.trip("pagecall", { n: 10 });
 // TWO floors, and the second is the one that matters here.
 //
 // `pagecall` is a script that answers immediately. Every language feature answers a PROMISE, and
-// the door collects a promise by polling — so an async route costs the call, the waits, and the
+// the door collects a promise by polling - so an async route costs the call, the waits, and the
 // poll that finds it settled, whatever the feature underneath did. Asking about a word that is
 // not in the module exercises exactly that path with no analyzer work behind it.
 //

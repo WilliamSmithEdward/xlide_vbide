@@ -39,7 +39,7 @@ export interface SearchWidgetHandlers {
 }
 
 export class SearchWidget {
-  /** The active group's editor — the widget searches wherever the developer is. */
+  /** The active group's editor - the widget searches wherever the developer is. */
   private readonly editorOf: () => monaco.editor.IStandaloneCodeEditor;
   private readonly handlers: SearchWidgetHandlers;
 
@@ -420,7 +420,7 @@ export class SearchWidget {
     editor.addCommand(KeyCode.Escape, () => this.close(), "xlideSearchOpen");
 
     // Module-scope matches ride the text: an edit re-finds after a beat, and a model switch
-    // re-finds against the new model — but only for the editor the widget is bound to.
+    // re-finds against the new model - but only for the editor the widget is bound to.
     editor.onDidChangeModelContent(() => {
       if (editor !== this.editor || this.root.hidden || this.scope() !== "module" || this.findInput.value.length === 0) {
         return;
@@ -488,7 +488,7 @@ export class SearchWidget {
 
     // The toggles are pressed through their buttons, because pressing them is what runs the
     // handler that re-searches. Setting aria-pressed alone would leave the widget showing one
-    // thing and searching by another — the first version accepted matchCase and applied
+    // thing and searching by another - the first version accepted matchCase and applied
     // nothing, and a case-sensitive search for `recalculate` still found `Recalculate`.
     for (const [wanted, button] of [
       [options?.matchCase, this.caseButton],

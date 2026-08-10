@@ -2,7 +2,7 @@
 //
 // Unlike hover and completion, a fix is not resolved from the caret: it is resolved from a finding
 // the analyzer already reported, and most fixes need more of that finding than the surface ever
-// sees — which argument is missing, where the unclosed block wants its closer. So the fix data
+// sees - which argument is missing, where the unclosed block wants its closer. So the fix data
 // stays here, on the analysis the engine holds, rather than being carried down to the surface and
 // asked for back. The request names a span; every finding overlapping it offers what it can fix.
 
@@ -53,8 +53,8 @@ export function codeActionsFor(
                 })),
             };
 
-            // Two findings on the same line can each offer the same whole-module fix — adding
-            // Option Explicit, most obviously — and the same entry twice in the menu reads as a
+            // Two findings on the same line can each offer the same whole-module fix - adding
+            // Option Explicit, most obviously - and the same entry twice in the menu reads as a
             // bug. Identity is the title and the edits, since that is the whole of what applying
             // it would do.
             const identity = JSON.stringify([action.title, action.edits]);
@@ -73,7 +73,7 @@ export function codeActionsFor(
 /**
  * Whether a finding is close enough to the asked-about span to offer its fixes. Touching counts:
  * the caret sitting at either end of a squiggle is the developer pointing at it, and an empty
- * range — which is what a caret is — would otherwise match nothing at all.
+ * range - which is what a caret is - would otherwise match nothing at all.
  */
 function overlaps(
     finding: { start: number; end: number },

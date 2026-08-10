@@ -337,7 +337,7 @@ export interface LoopSyncResult {
  * A span rather than an offset, because the surface asks about a selection as readily as a caret,
  * and an empty selection is a span whose ends meet. No diagnostics travel with the request: the
  * engine resolves fixes from the analysis it holds, which carries the fix data the surface never
- * saw. Same liveness rule as completion — the source of the module being typed in travels with
+ * saw. Same liveness rule as completion - the source of the module being typed in travels with
  * the request, since a fix must edit the text on screen and not the text last written back.
  */
 export interface CodeActionParams {
@@ -401,7 +401,7 @@ export interface LocationPayload {
      *
      * Carried because the surface's own references list renders TEXT rather than editor models,
      * and only modules with a tab open have a model. Sending the line is what lets a reference in
-     * a module nobody has opened be shown at all — which is the reference most worth showing.
+     * a module nobody has opened be shown at all - which is the reference most worth showing.
      */
     preview?: string;
 }
@@ -463,7 +463,7 @@ export interface RenameResult {
 /**
  * workspace/renameModule: the new text of every module that mentions a module being renamed.
  *
- * The module's own name is not in its text — it belongs to the component, which the add-in
+ * The module's own name is not in its text - it belongs to the component, which the add-in
  * renames through the object model. This works out only what the OTHER modules must say
  * afterwards, so the add-in can compute everything before it changes anything.
  */
@@ -475,7 +475,7 @@ export interface RenameModuleParams {
 }
 
 /**
- * textDocument/semanticTokens: the analysed colouring of a whole module — which identifiers name
+ * textDocument/semanticTokens: the analysed colouring of a whole module - which identifiers name
  * types, which kind of type each names, and which are host globals nothing has shadowed. Same
  * liveness rule as completion.
  */
@@ -489,8 +489,8 @@ export interface SemanticTokensParams {
 }
 
 /**
- * One coloured span. The type is the analyzer's own vocabulary — class, enum, struct, type,
- * variable — and the modifiers are the standard semantic-token ones, of which only
+ * One coloured span. The type is the analyzer's own vocabulary - class, enum, struct, type,
+ * variable - and the modifiers are the standard semantic-token ones, of which only
  * `defaultLibrary` is used, for host globals. Offsets into the request's source.
  */
 export interface SemanticTokenPayload {

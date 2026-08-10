@@ -2,7 +2,7 @@ namespace Xlide.Vbe.Core.Editor;
 
 /// <summary>
 /// The VBE's contract with a line being typed: a line is validated when the caret leaves it,
-/// never while the hand is still in it. This is the publish-side half of that contract — while
+/// never while the hand is still in it. This is the publish-side half of that contract - while
 /// a module's line is held, findings that touch it are kept out of what the surface shows, and
 /// the moment the caret settles anywhere else the hold ends and the caller republishes from
 /// findings it already has. No re-analysis is involved in either direction.
@@ -24,7 +24,7 @@ public sealed class ActiveLineHold
 
     /// <summary>
     /// Typing edited this line: verdicts about it now wait for the caret to leave. True when
-    /// this changed the hold — the caller republishes so verdicts already on screen about the
+    /// this changed the hold - the caller republishes so verdicts already on screen about the
     /// line's previous text retire immediately.
     /// </summary>
     public bool Begin(string module, int line)
@@ -54,7 +54,7 @@ public sealed class ActiveLineHold
         return true;
     }
 
-    /// <summary>Unconditional release — the module switched, or the surface reset.</summary>
+    /// <summary>Unconditional release - the module switched, or the surface reset.</summary>
     public bool Release()
     {
         if (Module is null)

@@ -37,7 +37,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "undo", target: "editor", icon: "discard", label: "Undo (Ctrl+Z)" },
   { id: "redo", target: "editor", icon: "redo", label: "Redo (Ctrl+Y)" },
 
-  // Compile leads the run cluster the way it leads the editor's own Debug menu — the menu
+  // Compile leads the run cluster the way it leads the editor's own Debug menu - the menu
   // that is gone as of 2026-08-05, its commands rehomed here.
   { id: "compile", target: "host", icon: "check-all", label: "Compile project", separatorBefore: true },
   { id: "run", target: "host", icon: "play", label: "Run (F5)" },
@@ -60,7 +60,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "toggleBreakpoint", target: "host", icon: "debug-breakpoint", label: "Toggle breakpoint (F9)" },
   { id: "clearAllBreakpoints", target: "host", icon: "clear-all", label: "Clear all breakpoints" },
   // The View menu's Call Stack, rehomed when the menu went (2026-08-05): a break-mode
-  // dialog belongs beside the stepping it narrates — and greyed anywhere else, because
+  // dialog belongs beside the stepping it narrates - and greyed anywhere else, because
   // the native command is disabled outside a break and a click into silence reads as a
   // defect ("won't appear again", 2026-08-05).
   { id: "callStack", target: "host", icon: "list-tree", label: "Call stack (break mode)", needsBreak: true },

@@ -18,7 +18,7 @@ namespace Xlide.Vbe.Shim.WebView;
 ///
 /// The listener binds 127.0.0.1 on an ephemeral port, answers GET and HEAD only, serves only
 /// what lies under the one directory it was given, and requires a random path token minted per
-/// session — a stranger process scanning local ports learns nothing and fetches nothing, and
+/// session - a stranger process scanning local ports learns nothing and fetches nothing, and
 /// the served content is the product's own page bundle in any case.
 /// </summary>
 internal sealed class LoopbackPageServer : IDisposable

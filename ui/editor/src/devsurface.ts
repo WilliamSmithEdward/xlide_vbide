@@ -205,8 +205,8 @@ function dialogsUp(): DialogSnapshot[] {
  * A CAVEAT worth more than the instrument: **a stall provoked through the `eval` route is not a
  * page task and neither type sees it.** Testing this by holding the main thread from a debug-api
  * script reported nothing at all, which reads exactly like a broken observer, and would have read
- * exactly like "no jank" had it been believed (2026-08-07). Provoke from inside the page — a
- * setTimeout, a real interaction — or provoke nothing and read what the session collected.
+ * exactly like "no jank" had it been believed (2026-08-07). Provoke from inside the page - a
+ * setTimeout, a real interaction - or provoke nothing and read what the session collected.
  */
 interface LongTask {
   startedAt: number;
@@ -318,7 +318,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
   /**
    * A position argument as an offset into the active model.
    *
-   * Takes `line`/`column`, or `word` to find the first occurrence of an identifier — which is
+   * Takes `line`/`column`, or `word` to find the first occurrence of an identifier - which is
    * how a person describes where they are looking ("hover over Recalculate") without counting
    * columns. Null when nothing is open.
    */
@@ -339,7 +339,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
     if (args.word !== undefined) {
       // CASE-INSENSITIVE, because VBA is: the language does not distinguish `total` from `Total`,
-      // and the host RECASES identifiers on write to match their declaration — writing
+      // and the host RECASES identifiers on write to match their declaration - writing
       // `total = 1` through the object model comes back `Total = 1`. A case-sensitive lookup
       // therefore fails to find a word the caller can see on screen, and answers "no such word"
       // about a word that is right there (2026-08-08).
@@ -683,7 +683,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      *
      * Through the DOM, and deliberately: the menu hangs off a `contextmenu` listener on the tree,
      * so there is no method behind it to call. A real event on the real row is the only thing that
-     * exercises what a right-click exercises — which row was marked, which workbook the menu was
+     * exercises what a right-click exercises - which row was marked, which workbook the menu was
      * told about, which items the component's class earns.
      *
      * `module` names a component row; `workbook` alone names a workbook row, and narrows a
@@ -767,7 +767,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
-     * Opens the surface's own menu — the wrench at the head of the toolbar — and reports it.
+     * Opens the surface's own menu - the wrench at the head of the toolbar - and reports it.
      *
      * Its items come from the HOST, so unlike every other menu on this surface it is not there the
      * moment the button is pressed. Awaited rather than slept on, and reported empty rather than
@@ -819,7 +819,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       // ask first, and a caller should not have to spell the character to reach it.
       const wanted = rows.find((one) => {
         const text = (one.textContent ?? "").trim();
-        return text === label || text.replace(/[.…]+$/, "") === label.replace(/[.…]+$/, "");
+        return text === label || text.replace(/\.+$/, "") === label.replace(/\.+$/, "");
       });
 
       if (!wanted) {
@@ -1014,7 +1014,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     /**
      * A language feature timed INSIDE the page, which is the only place the number is honest.
      *
-     * Everything else measures across the door, and the door collects a promise by polling — so
+     * Everything else measures across the door, and the door collects a promise by polling - so
      * an async route carries a floor of tens of milliseconds whatever the feature cost. That
      * floor is most of every figure taken from outside, and it hid a whole scaling curve behind
      * a flat line until it was noticed (2026-08-08).
@@ -1074,7 +1074,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * Find All References, as the dialog lists them.
      *
      * The dialog is opened by the same lookup, so this cannot show a different set from what the
-     * developer sees — which is the point of there being one function rather than two.
+     * developer sees - which is the point of there being one function rather than two.
      */
     references: async (args) => {
       const where = positionFrom(args);
@@ -1100,7 +1100,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * Go to Definition, through the provider F12 goes through.
      *
      * Answers the locations the editor would navigate to, so a probe can assert WHERE without
-     * moving the caret — which matters because moving it is what cancels a symbol-navigation
+     * moving the caret - which matters because moving it is what cancels a symbol-navigation
      * request in the first place (lessons, finding 10).
      */
     definition: async (args) => {
@@ -1126,7 +1126,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      *
      * It had no api at all until now: a change that edits every module using a symbol, across a
      * workbook, with nothing able to drive it but a hand on F2. `newName` is required, and the
-     * answer carries the provider's own refusal when it declines — which is what the rename box
+     * answer carries the provider's own refusal when it declines - which is what the rename box
      * shows the developer, word for word.
      *
      * This DOES change state. It is the same call F2 makes, so what it leaves behind is what the

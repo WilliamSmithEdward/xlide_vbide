@@ -1,5 +1,5 @@
 /*
- * The open documents, as live Monaco models — one per (workbook, module), for as long as the
+ * The open documents, as live Monaco models - one per (workbook, module), for as long as the
  * module's pane is open (decision 12).
  *
  * Identity is the pair, never the bare name: two workbooks holding a Module1 are two documents,

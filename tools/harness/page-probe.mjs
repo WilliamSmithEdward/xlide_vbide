@@ -172,7 +172,7 @@ export async function runPageProbe({ label, drive, serve, after, path = "/", nee
     const { socket, send, once } = await connect(launched.wsUrl);
 
     // Attach to a blank target first and navigate under Page events, so the drive only runs once
-    // the document it drives has finished loading — evaluating during the navigation ran in a
+    // the document it drives has finished loading - evaluating during the navigation ran in a
     // context the load then destroyed.
     const { targetId } = await send("Target.createTarget", { url: "about:blank" });
     const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });

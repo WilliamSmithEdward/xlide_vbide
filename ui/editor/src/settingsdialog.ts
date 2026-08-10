@@ -1,6 +1,6 @@
 /*
  * The settings dialog: a small modal card over the editor, one row per choice, saved the
- * moment a choice changes. There is no OK button because there is nothing to defer — the host
+ * moment a choice changes. There is no OK button because there is nothing to defer - the host
  * writes each change through and echoes it back, and the dialog shows the echo.
  */
 
@@ -87,7 +87,7 @@ const OPTIONS = [
 
 /**
  * The panes the Panes menu shows and hides. Supplied by the shell, because pane visibility is
- * page-local arrangement rather than a setting the host persists — it lives with the dock
+ * page-local arrangement rather than a setting the host persists - it lives with the dock
  * layout, and this is the route back for a pane that was closed with its X.
  */
 export interface PaneVisibilityControl {
@@ -104,7 +104,7 @@ export interface PaneVisibilityControl {
 
 /**
  * The Panes menu: one checkable row per pane, dropped under its toolbar button. Its own
- * menu rather than a settings section (developer, 2026-08-06) — showing and hiding a pane
+ * menu rather than a settings section (developer, 2026-08-06) - showing and hiding a pane
  * is a thing done while working, not a preference visited once.
  */
 export function openPanesMenu(panes: PaneVisibilityControl, anchor: HTMLElement): void {

@@ -5,12 +5,12 @@
 # Save saves the workbook and closes, Don't Save reverts the module to its saved baseline
 # and closes, Cancel keeps the tab. Two legs, PASS/FAIL:
 #
-#   1. Seams — the contract's load-bearing pieces exist in the sources, in the BUILT page
+#   1. Seams - the contract's load-bearing pieces exist in the sources, in the BUILT page
 #      bundle, and in the PUBLISHED bundle (the stale-deploy tripwire: a rebuilt page that
 #      never reached the publish tree has bitten before).
-#   2. Page behaviour — close-confirm-page-probe.mjs drives the built page headless through
+#   2. Page behaviour - close-confirm-page-probe.mjs drives the built page headless through
 #      the whole flow: ask, Escape, dedupe, queue, Don't Save, Cancel, middle-click, Save.
-#   3. Engine behaviour — engine-live-probe.mjs walks the built engine over its own pipe
+#   3. Engine behaviour - engine-live-probe.mjs walks the built engine over its own pipe
 #      through the stale-problems story (2026-08-05): the live copy outranks the seed, a
 #      reseed alone cannot heal it, the corrective didChange the revert now sends does.
 #

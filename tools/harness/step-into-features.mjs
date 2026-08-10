@@ -7,7 +7,7 @@
  * asked for. The surface has to catch up, or the developer steps into a procedure and watches a
  * different module's code.
  *
- * The native panes are covered by the surface, so a user cannot click one — which makes the
+ * The native panes are covered by the surface, so a user cannot click one - which makes the
  * debugger the realistic driver of this direction, and the only one worth testing.
  */
 
@@ -56,7 +56,7 @@ try {
   });
 
   // Helper is CLOSED first rather than assumed closed. The page having no tab for it is the
-  // harder half of this case — following the host means opening one — and a precondition that is
+  // harder half of this case - following the host means opening one - and a precondition that is
   // hoped for instead of established is a check that passes for the wrong reason. An earlier run
   // in the same session had left Helper open, and the assertion duly failed on the setup rather
   // than on the product (2026-08-08).

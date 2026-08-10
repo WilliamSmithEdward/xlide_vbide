@@ -12,8 +12,8 @@
  *
  * Everything asked so far was at a DECLARATION, where zero completions is the right answer, so
  * nothing had ever tested the case a developer actually uses: type a dot after something and see
- * what it offers. Each receiver here resolves by a different path — a project class, a
- * user-defined type, an enum, and the host's own type libraries — and any one of them can be the
+ * what it offers. Each receiver here resolves by a different path - a project class, a
+ * user-defined type, an enum, and the host's own type libraries - and any one of them can be the
  * only broken one.
  *
  * Asked through the provider monaco calls, so the answer is the menu the developer would see.
@@ -131,7 +131,7 @@ const unexpected = broken.filter((one) => !KNOWN.includes(one));
 const fixed = KNOWN.filter((one) => !broken.includes(one));
 
 if (fixed.length > 0) {
-  console.log(`\n  UPSTREAM FIXED: ${fixed.join(", ")} — xlide_vscode#11 can be closed and this list trimmed.`);
+  console.log(`\n  UPSTREAM FIXED: ${fixed.join(", ")} - xlide_vscode#11 can be closed and this list trimmed.`);
 }
 if (unexpected.length > 0) {
   console.log(`\n  ${unexpected.length} failure(s) beyond the known upstream ones.`);

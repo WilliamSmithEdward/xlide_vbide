@@ -3,8 +3,8 @@
     Builds DebugFixture.xlsm: a workbook that COMPILES, for exercising the debugger.
 
 .DESCRIPTION
-    Neither other fixture can be run. The rename fixture deliberately does not compile — two
-    modules declare the same public name, which is the whole point of it — and the language
+    Neither other fixture can be run. The rename fixture deliberately does not compile - two
+    modules declare the same public name, which is the whole point of it - and the language
     fixture carries a module of deliberate defects. Pressing Run on either raises a compile
     error, and a compile error is a modal, so a debugger test against them tests the dialog
     guard instead of the debugger.

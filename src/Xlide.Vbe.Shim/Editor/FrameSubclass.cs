@@ -10,7 +10,7 @@ namespace Xlide.Vbe.Shim.Editor;
 ///
 /// The window-event route is correct but late: events are posted, so on every tick of a resize
 /// drag the frame relayouts and paints its native chrome first, and the surface catches up a
-/// beat later — the old editor flickering through the new one, which is exactly what it looked
+/// beat later - the old editor flickering through the new one, which is exactly what it looked
 /// like (developer's report, 2026-08-04). A subclass receives WM_SIZE synchronously, before the
 /// frame's own handler moves a single native band, so the surface is already covering the new
 /// rectangle when anything under it paints.

@@ -1,7 +1,7 @@
 // Serves hovers by reusing the editor extension's hover resolver.
 //
 // Same shape as completion: the resolver is pure, the project facts come from the shared
-// assembly, and the answer describes the identifier under the cursor — its declaration line, its
+// assembly, and the answer describes the identifier under the cursor - its declaration line, its
 // origin, and its documentation when any is known.
 
 import { resolveHover } from '../../../xlide_vscode/src/analyzer';

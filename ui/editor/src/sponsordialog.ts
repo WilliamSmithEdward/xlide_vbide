@@ -33,7 +33,7 @@ const LINKS: SponsorLink[] = [
   },
   {
     // An emoji, because the icon set has no note and no dollar: this row was drawing a codicon
-    // that does not exist, which is not a broken glyph but nothing at all — the label simply sat
+    // that does not exist, which is not a broken glyph but nothing at all - the label simply sat
     // further left than the two above it (the developer, 2026-08-07).
     label: "Cash App",
     detail: "$williamesmithjcil",

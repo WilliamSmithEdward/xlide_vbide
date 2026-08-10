@@ -3,8 +3,8 @@
     Rebuild the editor page and put it into the RUNNING editor, without restarting anything.
 
 .DESCRIPTION
-    The surface is a web page. Changing it needs none of what changing the shim needs — no
-    publish, no re-registration, no Excel restart — but the loop was being run by hand:
+    The surface is a web page. Changing it needs none of what changing the shim needs - no
+    publish, no re-registration, no Excel restart - but the loop was being run by hand:
     build, copy the bundle into the published shim's directory, reload the page, wait, look.
     A dozen times in an afternoon (2026-08-06). This is that loop, once, with the waiting
     done properly through the debug api instead of by sleeping a guess.

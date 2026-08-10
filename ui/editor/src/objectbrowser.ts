@@ -1,16 +1,16 @@
 /*
  * The xlide Object Browser page: the whole document of the floating palette window the host
- * opens beside the editor (the developer's choice, 2026-08-05 — the native browser can
+ * opens beside the editor (the developer's choice, 2026-08-05 - the native browser can
  * neither float nor be adopted, lesson 32, so it retired in favour of this).
  *
  * A library picker chooses the subject: each open workbook's project, or any type library
- * the projects reference — Excel, VBA, Office, stdole — served by the host's typelib reader.
+ * the projects reference - Excel, VBA, Office, stdole - served by the host's typelib reader.
  * Types on the left, members with VBA-spelled signatures on the right, the selected member's
  * full signature in the detail strip. Project members carry their line and jump to their
  * definition in the editor; Escape asks the host to hide the window, exactly like its
  * close box.
  *
- * The page speaks to its own host window directly — it is a second browser surface with its
+ * The page speaks to its own host window directly - it is a second browser surface with its
  * own transport, not a view inside the editor page.
  */
 

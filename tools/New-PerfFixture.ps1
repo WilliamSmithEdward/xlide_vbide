@@ -5,7 +5,7 @@
 .DESCRIPTION
     Every performance figure taken so far came from a module of a few dozen lines, which answers
     the wrong question. What a developer wants to know is not "is hover fast" but "is hover still
-    fast in the module I actually work in" — and the honest way to answer that is a curve rather
+    fast in the module I actually work in" - and the honest way to answer that is a curve rather
     than a number.
 
     So this holds the same shape of code at four sizes:

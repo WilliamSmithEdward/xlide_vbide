@@ -17,15 +17,15 @@ import "monaco-editor/features/folding/register.js";
 import "monaco-editor/features/format/register.js";
 import "monaco-editor/features/gotoError/register.js";
 import "monaco-editor/features/gotoLine/register.js";
-// Ctrl+click on a symbol. The commands the same feature is named for — F12, Shift+F12, the peek
-// windows, and their right-click entries — live in a module its register never imports, so they
+// Ctrl+click on a symbol. The commands the same feature is named for - F12, Shift+F12, the peek
+// windows, and their right-click entries - live in a module its register never imports, so they
 // come in by their own path. That is the third feature here whose register module covers less
 // than its name does; the pattern is worth expecting rather than rediscovering.
 import "monaco-editor/features/gotoSymbol/register.js";
 import "monaco-editor/editor/contrib/gotoSymbol/browser/goToCommands.js";
 // And the window those commands open. goToCommands asks ReferencesController for the peek, and
 // the STANDALONE editor registers that controller in a module of its own that nothing else
-// imports — so Find All References ran, resolved, and showed nothing. Fourth feature here whose
+// imports - so Find All References ran, resolved, and showed nothing. Fourth feature here whose
 // pieces arrive separately.
 import "monaco-editor/editor/standalone/browser/referenceSearch/standaloneReferenceSearch.js";
 import "monaco-editor/features/hover/register.js";
@@ -62,7 +62,7 @@ import "monaco-editor/features/wordPartOperations/register.js";
 
 // Not a contribution but the registry the right-click menu is built from, and the expression the
 // menu asks before drawing an entry. Reached directly because one entry the editor registers
-// unconditionally has to be moved rather than merely not registered — see foldPeekIntoTheMenu.
+// unconditionally has to be moved rather than merely not registered - see foldPeekIntoTheMenu.
 import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/actions.js";
 import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/contextkey.js";
 
@@ -112,7 +112,7 @@ const scriptMs = performance.now();
  */
 const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable"];
 
-/** `defaultLibrary` marks a host-injected global — Application, ThisWorkbook, ActiveSheet. */
+/** `defaultLibrary` marks a host-injected global - Application, ThisWorkbook, ActiveSheet. */
 const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
 
 /**
@@ -128,7 +128,7 @@ const offeredTargets = new Map<string, HostLocation>();
  *
  * A module with no tab open has no model, and its URI is built rather than the location dropped.
  * Dropping it is how the definition provider came to navigate from inside itself: with nothing
- * left to return there was no way to reach the module but to go there — and a provider that moves
+ * left to return there was no way to reach the module but to go there - and a provider that moves
  * the caret cancels the very request that asked for it, because the editor watches the position
  * while a provider runs. That is why Peek Definition jumped instead of peeking. The provider
  * answers the question; the opener is what acts on the answer.
@@ -391,7 +391,7 @@ function boot(): void {
   // Bridge, workspace, and shell reference each other, so they are built in dependency
   // order and stitched by assignment: the bridge first (it only needs the transport), the
   // workspace next (its editor factory wires each new editor into everything), the search
-  // widget on the workspace's active editor, and the shell last — its toolbar keeps only
+  // widget on the workspace's active editor, and the shell last - its toolbar keeps only
   // the commands that resolve as actions at build time, so every per-editor action must be
   // registered before it looks. Nothing host-driven runs before bridge.start().
   const bridge = new EditorBridge(transport ?? demoTransport(), documents);
@@ -443,12 +443,12 @@ function boot(): void {
 
   // Automatic layout rides ResizeObserver and tracks the window live; the settle here is
   // only the safety net for a final frame the observer missed. It waits for the resize to
-  // pause — running it per event doubled every layout of a drag, which read as latency and
-  // churn (2026-08-05) — and a measure that finds nothing changed costs nothing.
+  // pause - running it per event doubled every layout of a drag, which read as latency and
+  // churn (2026-08-05) - and a measure that finds nothing changed costs nothing.
   //
   // The live-resize class is the minimap's peace: its canvas repaints a frame behind the
   // layout that moved it, so during a drag its blocks were alternately stale, clipped, and
-  // redrawn — a flicker at the right edge. Faded out while events stream and back in at
+  // redrawn - a flicker at the right edge. Faded out while events stream and back in at
   // the settle, the same deliberate quiet native apps keep during a live resize.
   let resizeSettled: ReturnType<typeof setTimeout> | undefined;
   window.addEventListener("resize", () => {
@@ -576,7 +576,7 @@ function boot(): void {
   // for member access, and by ordinary typing for identifiers and keywords.
   //
   // Engine requests are offset-only against the HOST-ACTIVE module (decision 12), so every
-  // provider answers only for its model. A background group's model gets no engine answers —
+  // provider answers only for its model. A background group's model gets no engine answers -
   // honest, where an answer computed against the wrong module's text would not be.
   const completionProvider: monaco.languages.CompletionItemProvider = {
     triggerCharacters: ["."],
@@ -721,8 +721,8 @@ function boot(): void {
 
   // Go to definition, across the modules of one workbook and never past it.
   //
-  // Nothing but an answer comes out of here. Every command that asks — F12, Ctrl+click, Shift+F2,
-  // and Peek Definition — comes through this one provider, and it cannot tell which is asking, so
+  // Nothing but an answer comes out of here. Every command that asks - F12, Ctrl+click, Shift+F2,
+  // and Peek Definition - comes through this one provider, and it cannot tell which is asking, so
   // acting on the answer here means acting the same way for all of them. Peek asked and was
   // taken to the definition instead (the developer, 2026-08-07). Going anywhere is the opener's
   // job, below.
@@ -736,7 +736,7 @@ function boot(): void {
 
       // The text is fetched before the answer is given, for any module the page does not already
       // hold. Peek draws each result by resolving it to a MODEL, and the page holds a module's
-      // text once it has been ACTIVATED — not because its pane is open — so peeking into a module
+      // text once it has been ACTIVATED - not because its pane is open - so peeking into a module
       // nobody had opened drew an empty window (2026-08-07). Asked for without activating
       // anything, which is what makes a peek a peek.
       await Promise.all(found
@@ -755,7 +755,7 @@ function boot(): void {
   // editor that asked; for every other document it returns null and the jump silently does not
   // happen. This is the seam the editor offers for exactly that, and the host fills it: the host
   // owns the modules, including the ones with no tab, so it opens the module, brings its group
-  // forward and places the caret — the same path the tree and the references list already take.
+  // forward and places the caret - the same path the tree and the references list already take.
   //
   // The answer MUST be true. Anything else is read as "not handled" and falls through to the
   // built-in handler, which then fails, so a navigation that worked reads as one that did nothing.
@@ -789,7 +789,7 @@ function boot(): void {
   // No reference provider is registered, deliberately.
   //
   // Registering one buys the editor's own Go to References and Peek References, and both draw
-  // their results by resolving each one to a MODEL — which this surface only has for modules with
+  // their results by resolving each one to a MODEL - which this surface only has for modules with
   // a tab open. So the use in a module nobody has opened, the one worth being shown, is the one
   // they cannot draw: the editor's window showed 3 of the 4 uses xlide's list showed (the
   // developer, 2026-08-06). Find All References below answers the same question over the same
@@ -804,7 +804,7 @@ function boot(): void {
   // not (the developer, 2026-08-06).
   //
   // The HOST does the renaming, so this returns no edits. A module with no tab has no model to
-  // edit, and those are exactly the ones a rename must not miss — so the work goes where the
+  // edit, and those are exactly the ones a rename must not miss - so the work goes where the
   // modules are, and the open tabs are refreshed by the ordinary document sync that follows.
   const renameProvider: monaco.languages.RenameProvider = {
     resolveRenameLocation: (model, position): monaco.languages.RenameLocation & monaco.languages.Rejection => {
@@ -959,7 +959,7 @@ function boot(): void {
 
   // Shift+F2 is what a VBA developer's hands already do, so it names the editor's OWN Go to
   // Definition rather than an xlide action that forwards to it. A forwarding action would appear
-  // in the command palette as a second Go to Definition — two entries, two keys, one thing — which
+  // in the command palette as a second Go to Definition - two entries, two keys, one thing - which
   // is the shape this menu has been getting rid of all morning. A rule adds the key and nothing
   // else, and the palette keeps one entry.
   monaco.editor.addKeybindingRule({
@@ -975,7 +975,7 @@ function boot(): void {
 
   // The bundle's own resource entry splits the two costs that scriptMs lumps together:
   // everything before responseEnd is fetching, everything after is compiling and running.
-  // A transfer size of zero is the browser's cache answering — the number that says whether
+  // A transfer size of zero is the browser's cache answering - the number that says whether
   // a second boot is allowed to be cheaper than the first.
   const bundleEntry = performance
     .getEntriesByType("resource")
@@ -1012,12 +1012,12 @@ function boot(): void {
  * slide-out holds one item, and reaching it costs a second click and a hover on a menu with room
  * for it.
  *
- * The entry is MOVED, not copied — the same command object, so the label and the Alt+F12 the menu
+ * The entry is MOVED, not copied - the same command object, so the label and the Alt+F12 the menu
  * draws beside it are the editor's own and cannot drift from what the key actually does.
  *
  * The submenu itself is left alone. An entry whose children all resolve away is not drawn at all
  * (`menuService`: `if (submenuActions.length > 0)`), so Peek disappears because it is empty rather
- * than because it was hidden — and if xlide ever answers implementations or type definitions, it
+ * than because it was hidden - and if xlide ever answers implementations or type definitions, it
  * comes back holding exactly those. Hiding the submenu outright would have left them unreachable.
  *
  * This reaches into a registry entry the editor owns, so it names what it is looking for and does
@@ -1049,7 +1049,7 @@ function foldPeekIntoTheMenu(): void {
  *
  * Only what the VBA host alone can do is sent to it: running a procedure, and the breakpoints
  * the debugger owns. Everything about the code itself is xlide's, because xlide knows more
- * about it — the editor's Go to Definition crosses modules, understands members reached through
+ * about it - the editor's Go to Definition crosses modules, understands members reached through
  * a receiver, and reads the text as typed rather than as last written back, none of which the
  * host's own does (the developer, 2026-08-06: everything should be xlide).
  *
@@ -1065,7 +1065,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // These three keys never reach the page. The browser's accelerator hook claims F5, F8 and F9
   // before the document is offered them, because the surface covers the pane the editor used to
   // receive them through (`AddInSession.OnSurfaceKey`). Declaring them here is therefore a
-  // statement of what the key means, which is what the menu draws — and a fallback that does the
+  // statement of what the key means, which is what the menu draws - and a fallback that does the
   // same thing if the hook ever stops claiming them.
   const hostActions: Array<[string, string, string, number]> = [
     ["xlide.run", "Run Sub/UserForm", "run", monaco.KeyCode.F5],
@@ -1087,7 +1087,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
 
   // The VBE's Last Position steps back through where the caret has been. So does this, and it
   // steps back through every move rather than only the ones that were jumps. It keeps a menu
-  // entry because the editor's own menu has no equivalent to duplicate — and its own name,
+  // entry because the editor's own menu has no equivalent to duplicate - and its own name,
   // because "Cursor Undo" is not what a VBA developer is looking for.
   editor.addAction({
     id: "xlide.lastPosition",
@@ -1098,7 +1098,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     run: (target) => { target.trigger("xlide", "cursorUndo", null); },
   });
 
-  // Go to Definition, invoked ON the definition, has nowhere to go — so the editor runs its
+  // Go to Definition, invoked ON the definition, has nowhere to go - so the editor runs its
   // "alternative definition command", which by default goes to references. That command opens the
   // window this surface cannot use, and it is now gated off anyway, so it would only report having
   // found nothing.
@@ -1116,7 +1116,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   //
   // A rename edits every module that uses the symbol, and the undo stack is PER MODEL: Ctrl+Z in
   // the module on screen reverses that module's share and leaves the rest renamed, which is a
-  // half-renamed project — worse than no undo at all. So the reversal is the host's, over the
+  // half-renamed project - worse than no undo at all. So the reversal is the host's, over the
   // same modules the rename touched, and it is a command of its own rather than a key that
   // already means something narrower.
   editor.addAction({
@@ -1135,7 +1135,7 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // Find All References, in xlide's own list.
   //
   // The editor's window renders each result by resolving it to a MODEL, and this surface only has
-  // models for modules with a tab open — so the use in a module nobody has opened, which is the
+  // models for modules with a tab open - so the use in a module nobody has opened, which is the
   // one worth being shown, is the one it cannot draw. This list renders the line the host sends
   // instead, so an unopened module is listed like any other and clicking it opens it.
   editor.addAction({
@@ -1239,8 +1239,8 @@ function toSuggestion(item: HostCompletionItem, range: monaco.Range): monaco.lan
 }
 
 // One bundle, two documents: the editor surface, and the Object Browser palette the host
-// opens in its own floating window. The palette wants none of the editor's machinery —
-// no Monaco boot, no shell, no bridge — so it takes its own door before any of that starts.
+// opens in its own floating window. The palette wants none of the editor's machinery -
+// no Monaco boot, no shell, no bridge - so it takes its own door before any of that starts.
 const entry = new URLSearchParams(window.location.search).get("view") === "objbrowser"
   ? bootObjectBrowserPage
   : boot;

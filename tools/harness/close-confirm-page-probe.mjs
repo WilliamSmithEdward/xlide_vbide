@@ -12,7 +12,7 @@ import { runPageProbe } from "./page-probe.mjs";
 
 // What the page is asked to do, and what must be true after each step. Runs inside the
 // browser; the return value is the probe's verdict. The queue step presses a second tab
-// while the question is up — a user cannot click through the backdrop, but this is exactly
+// while the question is up - a user cannot click through the backdrop, but this is exactly
 // the shape a Close Others produces, so the synthetic press stands in for that message.
 
 const DRIVE = `(async () => {

@@ -2,7 +2,7 @@
  * Is every route the shim serves documented, reachable from the client, and DRIVEN by something?
  *
  * Asked of the SOURCE, not of anyone's memory. A route table is exactly the kind of thing that is
- * complete on the day it is written and quietly is not, six routes later — which is what it was
+ * complete on the day it is written and quietly is not, six routes later - which is what it was
  * when this was written: the reference had all thirty-two, the driving guide had twenty, and one
  * route had no client method at all (2026-08-07).
  *
@@ -28,8 +28,8 @@ const root = join(here, "..", "..");
 const read = (relative) => readFileSync(join(root, relative), "utf8");
 
 /**
- * The cases inside the switches on request.Route, and only those. The file holds other switches —
- * the assert vocabulary, the page-message kinds — whose cases are not routes, so matching
+ * The cases inside the switches on request.Route, and only those. The file holds other switches -
+ * the assert vocabulary, the page-message kinds - whose cases are not routes, so matching
  * `case "..."` across the file answers a different question by nine extra names.
  */
 function routesOf(source) {
@@ -92,7 +92,7 @@ const inClient = (route) => new RegExp("call\\(`?\"?" + escaped(route) + "[`\"$)
  * The client methods that reach each route.
  *
  * Taken by walking back from each `call(...)` to the nearest property or method definition above
- * it, because the client writes them three ways — `name: (args) => call(...)`, `async name(args) {`
+ * it, because the client writes them three ways - `name: (args) => call(...)`, `async name(args) {`
  * and a multi-line body with the call some lines down. A regex that knew only the first shape read
  * `act` and `ui` as unreachable while four suites were calling them, which is the wrong answer in
  * the direction that matters: it would have sent somebody to write a method that already existed.

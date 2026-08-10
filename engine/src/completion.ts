@@ -1,8 +1,8 @@
 // Serves completions by reusing the editor extension's analyzer resolvers.
 //
 // The resolvers are pure: source text in, plain completion data out, with project facts passed as
-// data. The facts come from the shared assembly in moduleContext.ts — the same assembly hover
-// uses — so every feature describes the same project. Reusing the resolvers keeps one completion
+// data. The facts come from the shared assembly in moduleContext.ts - the same assembly hover
+// uses - so every feature describes the same project. Reusing the resolvers keeps one completion
 // behaviour shared between the two products instead of two that drift.
 
 import {
@@ -24,7 +24,7 @@ export function completionsFor(
 ): CompletionItemPayload[] {
     const ctx = assembleContext(seeded, params);
 
-    // In a declaration's type position — after As, most visibly — type names are the whole
+    // In a declaration's type position - after As, most visibly - type names are the whole
     // answer: built-ins, the host model's objects, and the project's own classes and types.
     // First, the way the extension orders it; this resolver was simply never called here, and
     // "Dim i As Int" offered nothing (2026-08-04).

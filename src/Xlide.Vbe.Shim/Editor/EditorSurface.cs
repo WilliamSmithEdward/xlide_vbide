@@ -31,7 +31,7 @@ internal sealed class EditorSurface : IDisposable
     internal WebView2Surface? Browser => _browser;
 
     /// <summary>
-    /// The overlay the page is drawn in — NOT <see cref="Host"/>, which is the document area
+    /// The overlay the page is drawn in - NOT <see cref="Host"/>, which is the document area
     /// the overlay is a child of. The surface covers more than the document area (it draws
     /// the menu bar and the toolbar), so a screenshot crop that used the parent landed tens
     /// of pixels high. Debug builds only.
@@ -54,12 +54,12 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Every module the surface holds live, keyed by (workbook, module). One model per key on
-    /// the page, one mirror per key here — two workbooks' Module1 are two documents (decision
+    /// the page, one mirror per key here - two workbooks' Module1 are two documents (decision
     /// 12), where a name-keyed table would have merged them.
     /// </summary>
     private readonly Dictionary<string, OpenDoc> _docs = new(StringComparer.Ordinal);
 
-    /// <summary>The active document's key — the module the native active pane shows.</summary>
+    /// <summary>The active document's key - the module the native active pane shows.</summary>
     private string? _activeKey;
 
     /// <summary>The identity two documents are the same by, spelled like the page's tab key.</summary>
@@ -115,7 +115,7 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>The window this surface is a child of, which is the editor's document area.</summary>
     public nint Host => _host;
 
-    /// <summary>The active module — the one the native active pane shows — or null when nothing is.</summary>
+    /// <summary>The active module - the one the native active pane shows - or null when nothing is.</summary>
     public string? Module => ActiveDoc?.Module;
 
     /// <summary>The active module's workbook, by the display name the page's tabs use.</summary>
@@ -164,8 +164,8 @@ internal sealed class EditorSurface : IDisposable
     public Action<string>? ComponentSelected { get; set; }
 
     /// <summary>Raised when the developer closes a module's tab, with its workbook when the
-    /// tab carries one. The third value is their answer for unsaved changes — "save" or
-    /// "discard" — and null on the first ask, before any question has been put.</summary>
+    /// tab carries one. The third value is their answer for unsaved changes - "save" or
+    /// "discard" - and null on the first ask, before any question has been put.</summary>
     public Action<string, string?, string?>? ModuleCloseRequested { get; set; }
 
     /// <summary>Raised when the developer changed a setting in the page's dialog.</summary>
@@ -535,13 +535,13 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Raised on the host thread with each change to the shown module's text: (module, whole
-    /// text or null, edits or null). Whoever mirrors the text — the engine — listens here.
+    /// text or null, edits or null). Whoever mirrors the text - the engine - listens here.
     /// </summary>
     public Action<string, string?, EngineTextEdit[]?>? LiveTextPushed { get; set; }
 
     /// <summary>
-    /// Raised when a change event was plain typing confined to one line — no newline in it,
-    /// every range on that line — with the 1-based line. This is what begins the hold that
+    /// Raised when a change event was plain typing confined to one line - no newline in it,
+    /// every range on that line - with the 1-based line. This is what begins the hold that
     /// keeps fresh verdicts off the line still being typed.
     /// </summary>
     public Action<int>? LineTyped { get; set; }
@@ -552,7 +552,7 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Raised when an edit added or removed lines in a module: everything anchored in it below
-    /// afterLine moves by delta. This is how line-anchored bookkeeping — breakpoints — follows
+    /// afterLine moves by delta. This is how line-anchored bookkeeping - breakpoints - follows
     /// the text.
     /// </summary>
     public Action<string, int, int>? LinesShifted { get; set; }
@@ -587,13 +587,13 @@ internal sealed class EditorSurface : IDisposable
         // Growing gives the browser its new size BEFORE the window reaches it.
         //
         // The overlay grows in one call and the browser catches up in its own time, so for a
-        // frame the strip between the old edge and the new one is the overlay's own ground —
+        // frame the strip between the old edge and the new one is the overlay's own ground -
         // a flat band at the right edge on every tick of a drag (the developer, 2026-08-06).
         // The window's paint handler already covers that strip deliberately, because what lies
         // under it is the old native editor and THAT bleeding through is worse. Painting it
         // sooner is not the answer; not exposing it is.
         //
-        // A child may be larger than its parent — it is simply clipped — so sizing it first
+        // A child may be larger than its parent - it is simply clipped - so sizing it first
         // means the parent grows into a child that already covers the new area. Only when
         // growing: shrinking the child first would expose the same band on the inside edge,
         // which is the same defect facing the other way.
@@ -612,7 +612,7 @@ internal sealed class EditorSurface : IDisposable
 #endif
 
         // The browser's size normally rides the WM_SIZE the placement above produces; it is
-        // asserted here as well, so a size message that never arrived — a raced resize storm —
+        // asserted here as well, so a size message that never arrived - a raced resize storm -
         // cannot leave the page laid out for a width the window no longer has, with its right
         // edge (minimap, scrollbar) falling outside the visible surface (2026-08-05). The
         // browser side skips the call when nothing changed, so the assertion is free.
@@ -629,12 +629,12 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Punches holes in the surface where a native window must show through, in the frame's
-    /// client space — one tenant today: the Object Browser. An empty set makes it whole.
+    /// client space - one tenant today: the Object Browser. An empty set makes it whole.
     /// </summary>
     public void SetCutouts(ReadOnlySpan<PixelRect> holes) => _overlay?.SetCutouts(holes);
 
     /// <summary>Raised once, on the host thread, a quiet moment after the last armed frame
-    /// event — when whoever owns placement runs its full pass once instead of per event.</summary>
+    /// event - when whoever owns placement runs its full pass once instead of per event.</summary>
     public Action? PlacementSettled { get; set; }
 
     /// <summary>Starts or restarts the settle debounce; each frame event pushes it out.</summary>
@@ -652,8 +652,8 @@ internal sealed class EditorSurface : IDisposable
     ///
     /// A document already open keeps what it has: unwritten edits outrank the read that produced
     /// this call (the page's model is ahead of the module, not behind it), and a clean document
-    /// whose module changed underneath adopts the new text as a sync — an in-place edit that
-    /// keeps the model's undo stack and caret — never as a reload.
+    /// whose module changed underneath adopts the new text as a sync - an in-place edit that
+    /// keeps the model's undo stack and caret - never as a reload.
     /// </summary>
     public void Show(string moduleName, string? project, string text)
     {
@@ -684,7 +684,7 @@ internal sealed class EditorSurface : IDisposable
     ///
     /// Show() is the only other way a document reaches the page, and it moves the active one,
     /// because it is what activating a pane calls. The page needs a third thing: text for a module
-    /// it is going to draw but not go to — a definition it is peeking at, a reference it is
+    /// it is going to draw but not go to - a definition it is peeking at, a reference it is
     /// listing. Peeking one and being taken there instead is exactly the bug this answers.
     ///
     /// A document the page already has is left alone. It may be ahead of the module (unwritten
@@ -758,7 +758,7 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>
     /// Drops every document that is no longer in the editor's open list, flushing any unwritten
-    /// edits first — a pane closed natively mid-debounce still gets its write. The page prunes
+    /// edits first - a pane closed natively mid-debounce still gets its write. The page prunes
     /// its own models from the same open list, so no message is needed.
     /// </summary>
     public void PruneDocuments(IReadOnlyCollection<(string Module, string? Project)> open)
@@ -768,7 +768,7 @@ internal sealed class EditorSurface : IDisposable
         var keep = new HashSet<string>(open.Select(pair => DocKey(pair.Module, pair.Project)), StringComparer.Ordinal);
 
         // Removed from the table BEFORE any flush callback runs: a flush reaches WriteModule,
-        // which republishes, which prunes again — and the re-entrant pass must see a table
+        // which republishes, which prunes again - and the re-entrant pass must see a table
         // without the closing documents, not a half-walked one.
         List<OpenDoc>? closing = null;
         foreach (var (key, doc) in _docs.ToArray())
@@ -959,8 +959,8 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>
     /// Every document this surface holds text for, with enough to tell them apart.
     ///
-    /// Which modules have TEXT and which merely have tabs are different lists — text arrives when
-    /// a module is activated, a tab exists because its pane does — and two defects came from
+    /// Which modules have TEXT and which merely have tabs are different lists - text arrives when
+    /// a module is activated, a tab exists because its pane does - and two defects came from
     /// nothing ever showing the difference (2026-08-07).
     /// </summary>
     public IReadOnlyList<(string Module, string? Project, int Lines, bool Unwritten, bool Active)> DocumentTable =>
@@ -1228,7 +1228,7 @@ internal sealed class EditorSurface : IDisposable
     /// Forgets one document's unwritten edits instead of writing them. For the moment the
     /// developer has chosen to discard: the module is about to be put back to its saved text,
     /// and the debounced write of the abandoned text must not land on top of it. Only this
-    /// document forgets — a sibling tab's pending edits are not the developer's answer here.
+    /// document forgets - a sibling tab's pending edits are not the developer's answer here.
     /// </summary>
     public void DiscardEdits(string moduleName, string? project)
     {
@@ -1312,8 +1312,8 @@ internal sealed class EditorSurface : IDisposable
                         : null;
 #endif
                     // Every live document is (re)opened before anything held is flushed: a page
-                    // that reloaded mid-session lost its models, and the messages behind it —
-                    // squiggles, tabs — land on models, so the models come first. An open the
+                    // that reloaded mid-session lost its models, and the messages behind it -
+                    // squiggles, tabs - land on models, so the models come first. An open the
                     // page already has is adopted idempotently.
                     foreach (var doc in _docs.Values.ToArray())
                     {
@@ -1410,7 +1410,7 @@ internal sealed class EditorSurface : IDisposable
                             // Breakpoints are line-anchored bookkeeping, and edits move lines.
                             // Each change that adds or removes lines shifts every anchor below
                             // it, so a dot stays on the statement it was set on instead of
-                            // drifting onto whatever scrolled into its number — the ghost dot
+                            // drifting onto whatever scrolled into its number - the ghost dot
                             // no click could remove (2026-08-04).
                             if (document.RootElement.TryGetProperty("changes", out var shiftSet)
                                 && shiftSet.ValueKind == JsonValueKind.Array)
@@ -1446,7 +1446,7 @@ internal sealed class EditorSurface : IDisposable
                             }
 
                             // The findings shown must describe this text, not the text as of
-                            // the last write: a deleted error must go, and it must go soon —
+                            // the last write: a deleted error must go, and it must go soon -
                             // where soon costs little, and on the line's own goodbye otherwise.
                             _changedSinceLiveAnalysis = true;
                             _overlay?.StartAnalyseTimer(updated.Length >= LargeModuleCharacters
@@ -1454,8 +1454,8 @@ internal sealed class EditorSurface : IDisposable
                                 : LiveAnalysisDelayMilliseconds);
 
                             // The engine mirrors this text and answers requests from its copy,
-                            // so the change stream continues to it — small edits for a large
-                            // module, the whole text for a small one — ordered ahead of any
+                            // so the change stream continues to it - small edits for a large
+                            // module, the whole text for a small one - ordered ahead of any
                             // request about the text it makes.
                             LiveTextPushed?.Invoke(editedDoc.Module, parsedEdits is null ? updated : null, parsedEdits);
 
@@ -2157,7 +2157,7 @@ internal sealed class EditorSurface : IDisposable
             if (Log.VerboseEnabled)
             {
                 var head = json.Length <= 48 ? json : json[..48];
-                Log.Verbose($"page <- {head}…, {json.Length} chars");
+                Log.Verbose($"page <- {head}..., {json.Length} chars");
             }
 
             _browser?.PostMessage(json);

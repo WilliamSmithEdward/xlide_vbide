@@ -1,7 +1,7 @@
 // Type surface of xlide_vscode/src/vbaSmartEnter.ts, for this project's type-check only.
 //
-// The page bundles the spec repo's smart-editing helpers directly — build.mjs aliases
-// "xlide-spec/*" to ../../xlide_vscode/src/* — so the BEHAVIOUR always comes from the spec.
+// The page bundles the spec repo's smart-editing helpers directly - build.mjs aliases
+// "xlide-spec/*" to ../../xlide_vscode/src/* - so the BEHAVIOUR always comes from the spec.
 // The spec compiles under its own, laxer compiler settings, and pulling its sources into this
 // project's stricter type-check fails on idioms its own settings allow. tsc therefore resolves
 // the alias here instead: signatures only, kept in step by hand with the spec's exports, which

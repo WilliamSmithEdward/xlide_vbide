@@ -1,9 +1,9 @@
 /*
- * The tool-pane docking: four sections around the editor — left, right, top, bottom — each
+ * The tool-pane docking: four sections around the editor - left, right, top, bottom - each
  * holding a split tree of PANEL GROUPS, each group a tab strip over one visible pane. The
  * studio's docking, in this codebase's own idiom (decision 13), and the same shape the
  * editor groups use for code: a pane is dragged by its title tab, a zone preview names the
- * landing — the middle of a group joins its tabs, an edge splits the section beside it, an
+ * landing - the middle of a group joins its tabs, an edge splits the section beside it, an
  * edge of the editor area begins a new section on that side.
  *
  * Every pane is a SEAT: its tab button and its body elements move together, wherever the
@@ -11,7 +11,7 @@
  * and survives the session in localStorage like the splitter positions do.
  *
  * A section exists while it has panes: the last tab leaving a section removes it and the
- * editor takes the room back. There is no collapse chevron — a pane the developer does not
+ * editor takes the room back. There is no collapse chevron - a pane the developer does not
  * want open goes where they put things they are not using, which is any other section or
  * none (the chevron went 2026-08-06, by request).
  */
@@ -54,7 +54,7 @@ export interface PanelDockHandlers {
   openPanesChanged?(): void;
 }
 
-// The tree itself, and the arithmetic on it, live in docktree.ts — pure, and unit tested,
+// The tree itself, and the arithmetic on it, live in docktree.ts - pure, and unit tested,
 // because pruning and collapsing are where a docking layout's bugs are and a drag is a slow
 // way to find them. Here a tab is a pane's name.
 type Node = TreeNode<string>;
@@ -69,7 +69,7 @@ interface StoredLayout {
 const STORAGE_KEY = "xlide.docks.v1";
 
 /** The arrangement a first run gets: explorer over properties on the left, the four tool
- * panes tabbed along the bottom — today's layout, said in the new vocabulary. */
+ * panes tabbed along the bottom - today's layout, said in the new vocabulary. */
 function defaultLayout(): Record<DockSide, Node | null> {
   return {
     left: {
@@ -106,8 +106,8 @@ export class PanelDocks {
   private sizes: Record<DockSide, number> = { ...DEFAULT_SIZES };
 
   /**
-   * Panes the developer has closed. A closed pane keeps nothing — where it sat is forgotten
-   * — and comes back through the settings dialog, docked at the bottom where a returning
+   * Panes the developer has closed. A closed pane keeps nothing - where it sat is forgotten
+   * - and comes back through the settings dialog, docked at the bottom where a returning
    * pane is findable. Closing is a choice about clutter, not a way to lose a pane: every
    * closed one is listed, checked back on, and returns.
    */
@@ -605,7 +605,7 @@ export class PanelDocks {
           target = { kind: "strip", side: host.side, path: host.path, index };
 
           // The strip shows the landing itself, by moving the tab as the pointer crosses
-          // its neighbours' midpoints — the same feedback the editor's tabs give, and
+          // its neighbours' midpoints - the same feedback the editor's tabs give, and
           // clearer than any overlay could be about where a tab will sit.
           const before = [...host.strip.querySelectorAll<HTMLElement>(".panel-tab")]
             .filter((one) => one !== tab)[index] ?? null;
@@ -625,7 +625,7 @@ export class PanelDocks {
           const box = hovered.box;
 
           // Only what the group can honour: over the pane's OWN group, centre is where it
-          // already is, and a split is impossible when it is the only tab there — a zone
+          // already is, and a split is impossible when it is the only tab there - a zone
           // that does nothing is a promise the drop cannot keep.
           const allowed = host.group !== from ? ALL_ZONES
             : from.tabs.length > 1 ? EDGE_ZONES
@@ -641,7 +641,7 @@ export class PanelDocks {
 
       // Over the editor itself: the compass's edges begin a section on that side. Measured
       // against the EDITOR AREA, not the workspace, which includes the sections themselves.
-      // No centre here — a tool pane never joins the editor's own tabs.
+      // No centre here - a tool pane never joins the editor's own tabs.
       const area = this.editorRegion();
       if (area.width > 0 && area.height > 0 && inside(area)) {
         const zone = compass.over(area, during.clientX, during.clientY, EDGE_ZONES);

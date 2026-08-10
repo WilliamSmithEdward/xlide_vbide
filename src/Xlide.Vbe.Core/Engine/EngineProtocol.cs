@@ -114,7 +114,7 @@ public sealed record EngineRenamedModule(
     [property: JsonPropertyName("replaced")] int Replaced);
 
 /// <summary>
-/// The result of a rename: every module it rewrites, whole. Refused says why nothing changed —
+/// The result of a rename: every module it rewrites, whole. Refused says why nothing changed -
 /// a rename that cannot reach every use must do none of them.
 /// </summary>
 public sealed record EngineRename(
@@ -141,8 +141,8 @@ public sealed record EngineLocations(
     [property: JsonPropertyName("locations")] EngineLocation[] Locations);
 
 /// <summary>
-/// One coloured span. The type is the analyzer's vocabulary — class, enum, struct, type,
-/// variable — and the only modifier used is defaultLibrary, which marks a host global.
+/// One coloured span. The type is the analyzer's vocabulary - class, enum, struct, type,
+/// variable - and the only modifier used is defaultLibrary, which marks a host global.
 /// </summary>
 public sealed record EngineSemanticToken(
     [property: JsonPropertyName("start")] int Start,
@@ -179,7 +179,7 @@ public sealed record EngineSearchResult(
     [property: JsonPropertyName("truncated")] bool Truncated);
 
 /// <summary>
-/// What opening a project taught the engine: how many modules, and the project's own words —
+/// What opening a project taught the engine: how many modules, and the project's own words -
 /// names that denote types and names that denote procedures, for the surface's tokenizer.
 /// </summary>
 public sealed record EngineProjectOpened(

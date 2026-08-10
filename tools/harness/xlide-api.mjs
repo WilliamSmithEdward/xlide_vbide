@@ -265,7 +265,7 @@ function clientFor(entry) {
      * The HOST's own editor, underneath the surface that covers it.
      *
      * Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret
-     * inside it — not on the page. When those disagree, a Run executes where the developer is
+     * inside it - not on the page. When those disagree, a Run executes where the developer is
      * not looking and a breakpoint lands on the wrong line, and nothing on screen says so.
      *
      * The surface's own belief rides along in the same reply, so the comparison is one call.
@@ -287,7 +287,7 @@ function clientFor(entry) {
      *
      * `inSync()` covers the one on screen; this covers the ones behind it. A background tab
      * holds a copy the developer is not looking at, so a module written from outside while its
-     * tab sits behind another goes stale with nothing to notice until it is clicked — and then
+     * tab sits behind another goes stale with nothing to notice until it is clicked - and then
      * the developer is the one who notices.
      *
      * A pane the surface holds no text for is reported as `held: false` rather than as a
@@ -319,8 +319,8 @@ function clientFor(entry) {
 
       // THE CONTENT, not a proxy for it. A surface holding an empty document for a module the
       // host has 42 lines of agrees on every name and shows a blank editor, which is how this
-      // was found (2026-08-08). Both sides are reduced the same way in the shim — line endings
-      // normalised, trailing blanks dropped — so a single changed character registers and the
+      // was found (2026-08-08). Both sides are reduced the same way in the shim - line endings
+      // normalised, trailing blanks dropped - so a single changed character registers and the
       // host's CRLF does not.
       //
       // A null native content means there is no pane to compare against, which is not a
@@ -391,7 +391,7 @@ function clientFor(entry) {
       call(`compile${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
 
     /**
-     * The documents the surface HOLDS text for — which is not the list of tabs.
+     * The documents the surface HOLDS text for - which is not the list of tabs.
      *
      * Text arrives when a module is activated; a tab exists because its pane does. A workspace
      * opened onto eight modules holds one, and two defects came from nothing ever showing the
@@ -400,7 +400,7 @@ function clientFor(entry) {
     documents: () => call("documents"),
 
     /**
-     * Adds, renames or removes a component — the pieces a fixture is made of.
+     * Adds, renames or removes a component - the pieces a fixture is made of.
      *
      * Done from INSIDE, which is the point: reaching in through `Workbook.VBProject` needs "Trust
      * access to the VBA project object model" turned on, and the add-in is already past that gate
@@ -417,14 +417,14 @@ function clientFor(entry) {
      * up much later as an analyzer complaining that a Friend member is in the wrong module.
      *
      * `name` comes back as the component actually ended up named, not as it was asked for: the
-     * editor normalises what it dislikes, and refuses some outright — `Circle` belongs to the
+     * editor normalises what it dislikes, and refuses some outright - `Circle` belongs to the
      * Excel object library.
      */
     component: (action, { kind, name, newName, project } = {}) =>
       call(`component${query({ action, kind, name, newName, project })}`, { method: "POST" }),
 
     /**
-     * Opens or closes a module's code pane — a TAB, as the strip draws it.
+     * Opens or closes a module's code pane - a TAB, as the strip draws it.
      *
      * `caret` opens one on the way to a line; this is how one goes away. A close goes through the
      * same gate the tab's own X uses, so a module with unwritten edits raises the question;
@@ -436,7 +436,7 @@ function clientFor(entry) {
       call(`pane${query({ action, module, project, answer })}`, { method: "POST" }),
 
     /**
-     * The developer's settings — read them, or change ONE without restating the rest.
+     * The developer's settings - read them, or change ONE without restating the rest.
      *
      * The page's own update takes the whole object, so changing one thing from a harness meant
      * spelling out all seven and getting a default wrong on the way. Named arguments here; the
@@ -453,7 +453,7 @@ function clientFor(entry) {
      * whether the editor has a pane open on it.
      *
      * Not the same question as `documents()` (what the surface holds text for) or the tab strip
-     * (what has a pane). This is the object model's own answer, read from inside — the question a
+     * (what has a pane). This is the object model's own answer, read from inside - the question a
      * fixture asks twice, once to build and once to check.
      */
     project: (project) => call(`project${query({ project })}`),
@@ -500,11 +500,11 @@ function clientFor(entry) {
      *
      * Reading a log for what one step did means finding where that step began, and "scroll up
      * until it looks about right" is how a session ends up reasoning about the wrong three
-     * seconds. Mark, act, then `log({ since: mark.at })` — a slice that starts with words you
+     * seconds. Mark, act, then `log({ since: mark.at })` - a slice that starts with words you
      * chose is a slice you can be sure is yours.
      *
      *   const mark = await api.mark("renaming Recalculate");
-     *   …
+     *   ...
      *   const what = await api.log({ since: mark.at });
      */
     mark: (text) => call(`mark${query({ text })}`, { method: "POST" }),
@@ -589,7 +589,7 @@ function clientFor(entry) {
      *
      * Prefer `.value` over `.result`. The browser returns a result as JSON, so a script returning
      * a string comes back quoted, and one that builds its answer with JSON.stringify comes back
-     * quoted TWICE — and a single parse leaves a string that reads as an object right up until
+     * quoted TWICE - and a single parse leaves a string that reads as an object right up until
      * every property of it is undefined, which is a probe reporting false for something that
      * worked (2026-08-07, twice). `value` is already unwrapped.
      */
@@ -605,7 +605,7 @@ function clientFor(entry) {
     /**
      * Waits for a condition IN the page, instead of sleeping a guess.
      *
-     * One request, polled inside the page, answering `met` and how long it took — so a probe
+     * One request, polled inside the page, answering `met` and how long it took - so a probe
      * says what it is waiting for rather than how long it hopes that takes. Every fixed sleep in
      * a probe is a race that has not lost yet: 2500ms was right until a round trip to the host
      * was added to the path it was waiting on, and then it reported the feature broken
@@ -619,8 +619,8 @@ function clientFor(entry) {
 
     /**
      * Reloads the page and waits for it to come back, answering with the bundle it is now
-     * running. A page change needs no republish and no restart — the bundle is served from a
-     * folder on disk — so this plus a copy is the whole page loop. See tools\Update-Page.ps1.
+     * running. A page change needs no republish and no restart - the bundle is served from a
+     * folder on disk - so this plus a copy is the whole page loop. See tools\Update-Page.ps1.
      */
     reload: ({ waitMs = 20000 } = {}) =>
       call(`reload${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
@@ -716,7 +716,7 @@ function clientFor(entry) {
      *
      * Measured HERE and not in the shim, and that is not a stylistic choice. A route body runs
      * on the host thread, and the caret is delivered to the page by a message that same thread
-     * pumps — so a route that posts and then waits to see the effect waits forever. Written that
+     * pumps - so a route that posts and then waits to see the effect waits forever. Written that
      * way it reported the caret never moving, through four seconds a sample; the identical
      * sequence across requests lands on the first poll (2026-08-07). Anything that observes a
      * POSTED effect belongs on this side of the door.
@@ -727,7 +727,7 @@ function clientFor(entry) {
      * A language feature timed INSIDE the page: what the developer actually waits for.
      *
      * `tripFeature` times the same thing from out here and therefore carries the door's promise
-     * floor in every sample — which is most of the figure, and hid a whole scaling curve behind
+     * floor in every sample - which is most of the figure, and hid a whole scaling curve behind
      * a flat line until it was noticed. This runs the provider n times in the page and brings
      * back the distribution, so the door is paid once for the run and appears in none of the
      * numbers.
@@ -819,7 +819,7 @@ function clientFor(entry) {
     /**
      * Times a scenario in the page: min, median, p95, max, and the raw samples.
      *
-     * `what` is one of tabswitch, layout, type. The raw samples are the point — a median that
+     * `what` is one of tabswitch, layout, type. The raw samples are the point - a median that
      * moved is a fact, and a median that moved because one sample in twenty doubled is a
      * different fact.
      */
@@ -888,7 +888,7 @@ function clientFor(entry) {
     },
 
     /**
-     * Puts the last rename back — every module it touched, and the component's old name.
+     * Puts the last rename back - every module it touched, and the component's old name.
      *
      * The editor's own undo cannot: a rename edits several modules and the undo stack is per
      * model, so Ctrl+Z reverses one module's share and leaves the rest renamed.

@@ -71,7 +71,7 @@ internal static unsafe class DialogWatch
                 }
 
                 // What the dialog SAYS, not just what it is called. Every VBA compile error wears
-                // the same caption — "Microsoft Visual Basic for Applications" — so the caption
+                // the same caption - "Microsoft Visual Basic for Applications" - so the caption
                 // alone cannot tell "Ambiguous name detected: Recalculate" from anything else,
                 // and a harness that only reads captions learns nothing about what went wrong
                 // (2026-08-07).
@@ -106,7 +106,7 @@ internal static unsafe class DialogWatch
     /// The button that answers a dialog without deciding anything, or null when every button it
     /// offers commits to something.
     ///
-    /// A NOTICE — every button an acknowledgement — is always safe: it is reporting, not asking.
+    /// A NOTICE - every button an acknowledgement - is always safe: it is reporting, not asking.
     /// That is the case the old policy missed. It would press only Cancel, Close or No, so a
     /// compile error offering OK and Help matched nothing and stood for six minutes with the host
     /// thread behind it (2026-08-07). A real question is still only ever declined.

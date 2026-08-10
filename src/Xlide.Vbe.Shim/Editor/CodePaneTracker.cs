@@ -14,7 +14,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// <param name="Bounds">Screen rectangle of the pane.</param>
 /// <param name="IsVisible">Whether the pane is currently shown.</param>
 /// <param name="Project">
-/// Identity of the project the component belongs to, or null when it could not be told apart —
+/// Identity of the project the component belongs to, or null when it could not be told apart -
 /// a caption names only the component, so when two projects share the component's name the
 /// pane's owner is ambiguous from here.
 /// </param>
@@ -102,8 +102,8 @@ internal sealed class CodePaneTracker : IDisposable
 
     /// <summary>
     /// Raised on any window destruction in the process. A dying pane cannot be told from a
-    /// dying tooltip here — destruction strips a window of its class name before the event
-    /// arrives — so the listener treats every destroy as "a pane may have closed" and
+    /// dying tooltip here - destruction strips a window of its class name before the event
+    /// arrives - so the listener treats every destroy as "a pane may have closed" and
     /// re-derives cheaply for a moment. The need: the tracker only ever holds the pane
     /// windows it can match, the active one in practice, so a HIDDEN pane's close changes
     /// nothing in its picture and Changed stays silent while the strip shows a dead tab.
@@ -114,8 +114,8 @@ internal sealed class CodePaneTracker : IDisposable
     /// Raised when the editor's own frame or its document area moves or resizes.
     ///
     /// This is a different fact from <see cref="Changed"/>, and the difference bit: Changed
-    /// fires only when the PANE list differs, so an editor with no visible pane — the empty
-    /// workspace — resized in silence, and the surface sat at its old size while the window
+    /// fires only when the PANE list differs, so an editor with no visible pane - the empty
+    /// workspace - resized in silence, and the surface sat at its old size while the window
     /// grew around it (the developer's report, 2026-08-04). The frame's own window events are
     /// the one signal that exists in every state.
     /// </summary>
@@ -168,7 +168,7 @@ internal sealed class CodePaneTracker : IDisposable
 
         // Moves are logged only for the editor's own windows. The hook hears the whole
         // process, and resizing the HOST streams thousands of move events for its own
-        // controls per second — a line each was most of the resize lag all by itself.
+        // controls per second - a line each was most of the resize lag all by itself.
         // Appearing and disappearing stays logged for everything: those are rare and every
         // one of them is a story.
         if (!windowEvent.IsLocationChange || IsEditorClass(className))
@@ -235,7 +235,7 @@ internal sealed class CodePaneTracker : IDisposable
     /// of these events and only 236 came from the three (2026-08-06):
     ///
     /// - The toolbars, 236 of them, are half the traffic and move no pane. What they DO change is
-    ///   how much room is left for the MDI client — and the MDI client says so itself, with its
+    ///   how much room is left for the MDI client - and the MDI client says so itself, with its
     ///   own event, which is still heard.
     /// - Our own overlay, 59 of them, moved because we moved it a moment earlier. A refresh
     ///   caused by our own placement is a loop that tells us nothing.
@@ -253,7 +253,7 @@ internal sealed class CodePaneTracker : IDisposable
     public void Refresh()
     {
         // Reading window rectangles can itself raise events on some systems. Re-entering here
-        // would recurse without bound — but DROPPING the re-entrant call loses the burst's
+        // would recurse without bound - but DROPPING the re-entrant call loses the burst's
         // tail, and the tail is where the truth lives: closing a hidden pane fires its destroy
         // events while the refresh its hide events started is still running, that refresh
         // still sees the dying window, and with the trailing events swallowed the strip showed
@@ -292,7 +292,7 @@ internal sealed class CodePaneTracker : IDisposable
             {
                 // The burst outran the trailing passes. Not silently: the picture is declared
                 // stale, and the poll the listener arms is what finishes the story once the
-                // storm has passed — a teardown's tail once outran every pass here and left a
+                // storm has passed - a teardown's tail once outran every pass here and left a
                 // closed module's tab on the strip.
                 _refreshDropped = true;
                 Log.Verbose("code panes: a burst outran the trailing passes, deferring to the poll");
@@ -520,8 +520,8 @@ internal sealed class CodePaneTracker : IDisposable
 
     /// <summary>
     /// Identity of the project that owns a component, or null when it will not say. One more
-    /// hop than the component read itself — the component's collection's parent is the project
-    /// — and deliberately forgiving: a pane whose project cannot be named is still a pane.
+    /// hop than the component read itself - the component's collection's parent is the project
+    /// - and deliberately forgiving: a pane whose project cannot be named is still a pane.
     /// </summary>
     private static string? ProjectIdentityOf(DispatchObject component)
     {
@@ -629,7 +629,7 @@ internal sealed class CodePaneTracker : IDisposable
     /// The pane-class window carrying this exact caption, visible or hidden, or zero.
     ///
     /// This is how the Immediate window is identified: the object model names its localised
-    /// caption, the handle carries the same caption, and neither changes with visibility — so
+    /// caption, the handle carries the same caption, and neither changes with visibility - so
     /// the identification cannot lose the race that diffing visible panes across an
     /// asynchronous hide loses. The caption is unique among the editor's tool windows; code
     /// panes carry their module titles.
@@ -640,7 +640,7 @@ internal sealed class CodePaneTracker : IDisposable
     /// The frame descendant carrying this exact caption regardless of window class, or zero.
     ///
     /// The pane-class filter above is right for the Immediate window, which shares its class with
-    /// the code panes. The Object Browser does not — its class is its own — so callers locating an
+    /// the code panes. The Object Browser does not - its class is its own - so callers locating an
     /// arbitrary tool window by its object-model caption match on the caption alone. Tool captions
     /// are localised words like "Locals"; module panes carry their file-qualified titles, so the
     /// two vocabularies do not collide.

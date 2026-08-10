@@ -73,8 +73,8 @@ public static class RegistrationPlan
 
     /// <summary>
     /// Root of the Click-to-Run registry overlay, relative to HKLM. C2R Office resolves the
-    /// Software\Microsoft\VBA namespace through this overlay — the editor's machine-level VBA
-    /// values exist only here — and on some machines the per-user Addins64 read resolves into it
+    /// Software\Microsoft\VBA namespace through this overlay - the editor's machine-level VBA
+    /// values exist only here - and on some machines the per-user Addins64 read resolves into it
     /// and comes back empty, hiding a correct HKCU registration. Registration planted here is in
     /// the view those reads consult. Office updates can rebuild the overlay, so anything written
     /// under it must be re-asserted rather than assumed durable.

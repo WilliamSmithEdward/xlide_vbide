@@ -1,12 +1,12 @@
 /*
  * Bookmarks, the surface's own. The native editor's bookmarks live in the pane the surface
- * covers, and their menu — the Edit menu's last survivor — is gone (2026-08-05), so the job
+ * covers, and their menu - the Edit menu's last survivor - is gone (2026-08-05), so the job
  * moved here whole: toggle a mark on a line, hop between marks, clear them all.
  *
  * The marks are Monaco decorations, which ride the text as it is edited, so bookmarks shift
  * with their lines for free. Models stay alive for as long as their modules are open
- * (decision 12), so a live model's marks simply persist on it; a model being disposed — its
- * pane closed — has its lines captured at the last moment they exist, and restored if the
+ * (decision 12), so a live model's marks simply persist on it; a model being disposed - its
+ * pane closed - has its lines captured at the last moment they exist, and restored if the
  * module returns, keyed by the model's URI.
  *
  * One store serves every editor group: the marks belong to the DOCUMENT, and jumping walks
@@ -52,7 +52,7 @@ export class Bookmarks {
    * Read from the live decorations rather than from the held map, because the decorations ARE
    * the truth: they ride the text as it is edited, so the held copy is only what was last
    * saved off. A reporter that read the map would describe where the marks were put, not where
-   * they are — which is the whole behaviour worth checking.
+   * they are - which is the whole behaviour worth checking.
    */
   marksOn(model: monaco.editor.ITextModel): number[] {
     return this.lines(model);

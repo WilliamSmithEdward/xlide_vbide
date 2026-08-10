@@ -21,7 +21,7 @@ internal static class Log
     /// <summary>
     /// The file, held open. Opening per line was the whole cost of logging: a fresh
     /// CreateFile invites the antivirus to every append, and verbose logging writes thousands
-    /// of lines during a resize storm — the host's UI thread was visibly dragging under it
+    /// of lines during a resize storm - the host's UI thread was visibly dragging under it
     /// ("resizing is slippery", 2026-08-04). A kept-open stream flushed per line is two
     /// orders of magnitude cheaper and loses nothing in a crash, because every line is
     /// flushed before the call returns.
@@ -100,7 +100,7 @@ internal static class Log
 
     /*
      * Consecutive duplicate collapsing. Verbose logging turns window-event storms into log
-     * storms — a resize drag repeats one identical line hundreds of times — and a log that is
+     * storms - a resize drag repeats one identical line hundreds of times - and a log that is
      * mostly repetition hides the line that matters. An identical consecutive line is counted
      * instead of written; the count is flushed when a different line arrives, so the shape of
      * the burst is preserved in one line.
@@ -142,7 +142,7 @@ internal static class Log
                 if (_suppressed > 0)
                 {
                     text.Append(CultureInfo.InvariantCulture,
-                        $"{DateTime.Now:HH:mm:ss.fff} [info] [host] … last line repeated {_suppressed} more time(s){Environment.NewLine}");
+                        $"{DateTime.Now:HH:mm:ss.fff} [info] [host] ... last line repeated {_suppressed} more time(s){Environment.NewLine}");
                     _suppressed = 0;
                 }
 

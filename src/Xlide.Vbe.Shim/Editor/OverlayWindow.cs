@@ -121,7 +121,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// Raised on the host thread at each loader animation step, while the loader is showing.
     ///
     /// The loading phase is event-starved: no pane exists yet, so nothing else re-places the
-    /// surface, while the editor is still arranging itself underneath — restoring its size,
+    /// surface, while the editor is still arranging itself underneath - restoring its size,
     /// raising its own bands. Whoever owns placement listens here and re-asserts it, which is
     /// what keeps the loader covering the window it was placed over rather than the window as
     /// it was a moment ago.
@@ -207,15 +207,15 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// thread, and this is its way back.
     ///
     /// The hop rides a window timer, not a posted message. The host's message loop swallows
-    /// app-range messages posted to windows it does not manage — across every recorded session,
-    /// not one posted action was ever dispatched — while WM_TIMER demonstrably always arrives:
+    /// app-range messages posted to windows it does not manage - across every recorded session,
+    /// not one posted action was ever dispatched - while WM_TIMER demonstrably always arrives:
     /// the write debounce and the poll run on it in those same sessions.
     ///
     /// BOTH ARE SENT, and the timer remains the guarantee. A timer set with an elapse of zero
     /// does not fire immediately: Windows clamps it to the system timer resolution, which is
     /// 15.6ms by default, so every hop to this thread waits most of a tick. The shim's own
-    /// marshal counter reads a median of 16ms with samples at 31 and 47 — one, two and three
-    /// ticks — and a language feature that hops twice therefore costs about 31ms before anything
+    /// marshal counter reads a median of 16ms with samples at 31 and 47 - one, two and three
+    /// ticks - and a language feature that hops twice therefore costs about 31ms before anything
     /// has been computed (2026-08-08).
     ///
     /// So a posted message goes out as well. If it arrives, the queue drains at once and the
@@ -363,7 +363,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>
     /// Punches holes in the overlay where a native window must show through. Retired with the
     /// purely-xlide directive and brought back for exactly ONE tenant (2026-08-05): the
-    /// Object Browser, whose content the editor only paints inside its own window tree —
+    /// Object Browser, whose content the editor only paints inside its own window tree -
     /// it cannot float, cannot be adopted, and has no replacement until the typelib view is
     /// sanctioned. The hole is real absence: painting, hit-testing, and the browser's child
     /// windows all stop at the region boundary, so the native window inside it is fully live.
@@ -559,7 +559,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
                         return 0;
                     }
 
-                    // The browser owns the pixels — but only the ones it covers. During a
+                    // The browser owns the pixels - but only the ones it covers. During a
                     // resize this window grows before the browser child has, and the fringe
                     // beyond it holds whatever was on screen before: the old native editor,
                     // bleeding through every drag tick. The fringe is painted the theme's
@@ -654,7 +654,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>
     /// The loader frame: the wordmark over the editor's dark ground, three dots pulsing beneath
     /// it, and past the stall threshold a line saying where the log is. Plain GDI, because this
-    /// paints before anything richer exists — being before everything else is its whole point.
+    /// paints before anything richer exists - being before everything else is its whole point.
     /// </summary>
     private void PaintLoader(nint window)
     {

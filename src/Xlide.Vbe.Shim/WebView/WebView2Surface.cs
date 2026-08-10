@@ -63,7 +63,7 @@ internal sealed class WebView2Surface : IDisposable
     /// Begins creating a browser inside <paramref name="parentWindow"/>. Returns as soon as the
     /// work is started; nothing is rendered until the two callbacks have run. The optional
     /// <paramref name="entryQuery"/> rides the bundle navigation ("?view=..."), which is how a
-    /// second surface — the Object Browser palette — boots the same bundle into a different
+    /// second surface - the Object Browser palette - boots the same bundle into a different
     /// page.
     /// </summary>
     public static WebView2Surface? Start(nint parentWindow, PixelRect bounds, string entryQuery = "")
@@ -86,7 +86,7 @@ internal sealed class WebView2Surface : IDisposable
     /// Where dev builds put the browser's DevTools protocol: a free port picked once per
     /// process. The branch that first built this pinned 9333, and a second Excel then
     /// either collided or shared a browser cluster with the first, mixing their targets
-    /// on one socket — the developer runs several Excels, so the port is per instance and
+    /// on one socket - the developer runs several Excels, so the port is per instance and
     /// the discovery file (debug-api-{pid}.json) is how tools learn it.
     /// </summary>
     public static readonly int DevToolsPort = PickFreeLoopbackPort();
@@ -217,7 +217,7 @@ internal sealed class WebView2Surface : IDisposable
 
     /// <summary>
     /// Sizes the browser to the window's client area. Idempotent: an unchanged size is not
-    /// re-sent, so callers may assert the bounds freely — placement does, on every pass, which
+    /// re-sent, so callers may assert the bounds freely - placement does, on every pass, which
     /// is what keeps a resize message that never arrived from leaving the page laid out for a
     /// width the window no longer has (the clipped minimap of 2026-08-05).
     /// </summary>

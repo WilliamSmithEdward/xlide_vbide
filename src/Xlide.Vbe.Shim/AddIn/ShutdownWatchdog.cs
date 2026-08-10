@@ -10,7 +10,7 @@ namespace Xlide.Vbe.Shim.AddIn;
 /// OnBeginShutdown stops the session before the host shows its save prompt, and when the
 /// developer cancels there, no callback says so: the host keeps running and the add-in is a
 /// corpse. This window is the one thing deliberately left alive. Its timer keeps firing on the
-/// host thread — which only still pumps if the shutdown was in fact abandoned — and whoever
+/// host thread - which only still pumps if the shutdown was in fact abandoned - and whoever
 /// listens can look around and stand the session up again.
 /// </summary>
 internal sealed unsafe class ShutdownWatchdog : IDisposable

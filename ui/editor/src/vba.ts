@@ -47,8 +47,8 @@ const BUILTIN_OBJECTS: string[] = ["Debug", "Err"];
  * Members of those objects that are METHODS rather than properties, painted as calls.
  *
  * Small and exact on purpose. A plain `.Something` cannot be told from a property by any rule a
- * tokenizer has — `Application.Version` is a property and `Debug.Print` is a method, and both are
- * a dot and a word — so the only members painted as calls are the ones the language defines and
+ * tokenizer has - `Application.Version` is a property and `Debug.Print` is a method, and both are
+ * a dot and a word - so the only members painted as calls are the ones the language defines and
  * this list names. Everything else stays an ordinary member.
  */
 const BUILTIN_METHODS: string[] = ["Print", "Assert", "Raise", "Clear"];
@@ -56,8 +56,8 @@ const BUILTIN_METHODS: string[] = ["Print", "Assert", "Raise", "Clear"];
 /**
  * Every word the grammar paints as a keyword, canonical list included.
  *
- * MINUS THE OBJECTS. `Debug` is in CANONICAL_KEYWORDS because the formatter respells it —
- * `debug.print` becomes `Debug.Print` — and that list is about SPELLING. Spreading it into the
+ * MINUS THE OBJECTS. `Debug` is in CANONICAL_KEYWORDS because the formatter respells it -
+ * `debug.print` becomes `Debug.Print` - and that list is about SPELLING. Spreading it into the
  * colouring set turned it into a claim about what kind of word it is, and painted the intrinsic
  * debug object the colour of an If.
  */
@@ -116,8 +116,8 @@ const BUILTIN_FUNCTIONS: string[] = [
 
 /**
  * The tokenizer, built around what the project itself declares. The companion editor gets this
- * knowledge from its semantic tokens; here the engine sends the project's words — names that
- * denote types, names that denote procedures — and the tokenizer is rebuilt around them, which
+ * knowledge from its semantic tokens; here the engine sends the project's words - names that
+ * denote types, names that denote procedures - and the tokenizer is rebuilt around them, which
  * is what lets `ROneCOne.Create(...)` read as a type and a call while `values(index, 1)` stays
  * a variable.
  */
@@ -319,8 +319,8 @@ function buildVbaMonarch(
 let appliedFactsKey = "\0";
 
 /**
- * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration —
- * the whole module, on this thread — so the rebuild happens only when the words actually
+ * Rebuilds the tokenizer around the project's words. Open models re-tokenize on registration -
+ * the whole module, on this thread - so the rebuild happens only when the words actually
  * changed: the lists arrive after every analysis pass, and they are almost always the same.
  */
 export function updateVbaLanguageFacts(

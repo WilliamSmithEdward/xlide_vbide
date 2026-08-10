@@ -3,7 +3,7 @@
  *
  * The host owns the truth: it loads the file, sends the settings at ready, and echoes every
  * change back once it is written. The page applies what arrives and asks for what the dialog
- * changes — it never assumes a change took until the echo lands, which is what makes the
+ * changes - it never assumes a change took until the echo lands, which is what makes the
  * dialog's state the file's state and not a hope about it.
  */
 

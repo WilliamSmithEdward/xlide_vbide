@@ -8,22 +8,22 @@ namespace Xlide.Vbe.Shim.Editor;
 /// <summary>
 /// Reads what the editor's own Locals window holds, through the accessibility interface: each
 /// variable is a list item whose name is the row's columns run together, and an edit control
-/// names the broken procedure. The editor exposes no debugger object — no stack, no frames, no
-/// variables — so its own window is the only place this information surfaces.
+/// names the broken procedure. The editor exposes no debugger object - no stack, no frames, no
+/// variables - so its own window is the only place this information surfaces.
 ///
 /// The window it reads is the GHOST PALETTE (see AddInSession.PrepareLocalsGhost): the native
 /// Locals window floated through the object model, made layered at alpha zero, and parked off
-/// the virtual screen. The editor only feeds a window with a paintable surface (lesson 25 —
+/// the virtual screen. The editor only feeds a window with a paintable surface (lesson 25 -
 /// hidden never fills, covered fills unreliably and never on a step), and a layered window
 /// renders into its own surface regardless of position or occlusion, so the ghost is fed
 /// faithfully through every break and step while being impossible to see. Probed 2026-08-04:
 /// counter tracked 1 through 4 across steps at alpha 0, off screen (probed 2026-08-04).
 ///
-/// Everything here — creation, connection, every read — runs on the ghost reading thread, never
+/// Everything here - creation, connection, every read - runs on the ghost reading thread, never
 /// the host's: the rows are served by an accessibility provider inside this process, and a
 /// client on the provider's own thread is the unsupported configuration. The day the panel
-/// actually died (2026-08-05) the crash was an undersized variant out-parameter — the story is
-/// on ComVariantBlock — but the thread separation stands on its own; GhostReaderThread has the
+/// actually died (2026-08-05) the crash was an undersized variant out-parameter - the story is
+/// on ComVariantBlock - but the thread separation stands on its own; GhostReaderThread has the
 /// full rationale.
 /// </summary>
 internal sealed class LocalsReader : IDisposable
@@ -42,7 +42,7 @@ internal sealed class LocalsReader : IDisposable
 
     /// <summary>
     /// Consecutive read failures, and when the next attempt may run. A fault does not end the
-    /// reader for the session — the first failure of a streak is logged in full, the rest wait
+    /// reader for the session - the first failure of a streak is logged in full, the rest wait
     /// out a pause quietly, and a later success announces the recovery.
     /// </summary>
     private int _consecutiveFailures;
@@ -112,7 +112,7 @@ internal sealed class LocalsReader : IDisposable
     /// <summary>
     /// The window's current content, or null when it cannot be read.
     ///
-    /// The placeholder rows the window shows outside a break — "&lt;No Variables&gt;" — do not
+    /// The placeholder rows the window shows outside a break - "&lt;No Variables&gt;" - do not
     /// parse as rows, so an idle window reads as an empty snapshot rather than as a variable
     /// with an angle-bracketed name.
     /// </summary>
@@ -235,7 +235,7 @@ internal sealed class LocalsReader : IDisposable
         catch (Exception ex)
         {
             // Backed off rather than stopped: this runs on every requested read, and a
-            // recurring fault would write the same line several times a second — so the first
+            // recurring fault would write the same line several times a second - so the first
             // failure of a streak is logged in full and the rest wait out a pause quietly.
             _consecutiveFailures++;
             _retryAt = Environment.TickCount64 + 5000;
@@ -259,8 +259,8 @@ internal sealed class LocalsReader : IDisposable
     /// One row's columns, split back apart.
     ///
     /// The row's accessible name is its columns run together with the header words in between:
-    /// "Expression counter Value 42 Type Long". The expression is a single token — an identifier
-    /// or an indexed path, never containing a space — while the value can be anything, including
+    /// "Expression counter Value 42 Type Long". The expression is a single token - an identifier
+    /// or an indexed path, never containing a space - while the value can be anything, including
     /// the words Value or Type inside a string literal, so the value takes everything between
     /// the first " Value " and the LAST " Type ". The placeholder the idle window shows has no
     /// expression token and parses as nothing.

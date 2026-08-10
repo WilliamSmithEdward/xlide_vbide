@@ -3,8 +3,8 @@
 //
 // The workbook is the boundary, not a setting. Two open workbooks can each hold a Module1 and a
 // Recalculate, and they are unrelated: an answer that crossed from one to the other would send a
-// developer to code that has nothing to do with what they clicked, and — once rename is built on
-// these same spans — would edit it. Everything here is addressed by (project, module) already, so
+// developer to code that has nothing to do with what they clicked, and - once rename is built on
+// these same spans - would edit it. Everything here is addressed by (project, module) already, so
 // the boundary is the address rather than a rule applied on top of one.
 //
 // The resolution itself is the extension's, unchanged: a shared, vscode-free resolver that is
@@ -30,7 +30,7 @@ export interface ProjectSymbols {
 }
 
 /**
- * Assembles a workbook's symbols from the text the engine holds — live where a module is being
+ * Assembles a workbook's symbols from the text the engine holds - live where a module is being
  * typed in, seeded elsewhere.
  *
  * Live rather than seeded, deliberately and unlike the completion context: an answer here is a
@@ -84,7 +84,7 @@ export function definitionsFor(
         return [];
     }
 
-    // A member reached through a receiver — Sheet1.Refresh, Me.Total, obj.Item — resolves to the
+    // A member reached through a receiver - Sheet1.Refresh, Me.Total, obj.Item - resolves to the
     // member's own declaration wherever it lives, which is what makes this cross-module at all.
     const members = sourceMemberDefinitionsAt(
         source,
@@ -154,7 +154,7 @@ export function referencesFor(
     }
 
     // A type reference takes precedence over bare value resolution, but only when the cursor is
-    // not on a member — the unified resolver owns those, and it knows more than this does.
+    // not on a member - the unified resolver owns those, and it knows more than this does.
     const onMember = sourceMemberDefinitionsAt(
         source,
         word.text,
@@ -221,7 +221,7 @@ export function referencesFor(
 const IDENTIFIER = /^\p{L}[\p{L}\p{M}\p{N}_]{0,254}$/u;
 
 /**
- * The reserved words a rename must not produce. Not the full keyword list — a name that merely
+ * The reserved words a rename must not produce. Not the full keyword list - a name that merely
  * collides with a statement keyword is caught by the analyzer's own diagnostics on the next pass,
  * and refusing every one of them here would reject names VBA accepts.
  */
@@ -276,20 +276,20 @@ export function renameFor(
     //
     // Starting from a call site and starting from the declaration must rename the same set, and
     // they did not: asked at `CleanModule.RunTotal`, the member resolver answered with every
-    // module declaring a RunTotal, and the rename went through all of them — including a
+    // module declaring a RunTotal, and the rename went through all of them - including a
     // BrokenModule.RunTotal that has nothing to do with it (the developer, 2026-08-06). Resolving
     // to the one declaration first and collecting from there makes every entry point agree, and
     // makes the entry point that was already correct the only one there is.
     const anchor = anchorFor(symbols, moduleName, source, offset);
 
-    // A module's name is not a symbol. No declaration in any module's text holds it — it belongs
-    // to the component — so the resolver finds nothing for `Helpers` in `Helpers.Recalc`, and
+    // A module's name is not a symbol. No declaration in any module's text holds it - it belongs
+    // to the component - so the resolver finds nothing for `Helpers` in `Helpers.Recalc`, and
     // refusing there is exactly why renaming a module from code did nothing. If the word names a
     // module of this workbook, this IS a module rename, and it is the same operation the
     // explorer asks for; the add-in does the component half either way.
     //
     // BOTH halves are required, and asking the name alone was a bug: nothing there resolved, AND
-    // the word stands where only a module can — before a dot, or after As, New or Implements.
+    // the word stands where only a module can - before a dot, or after As, New or Implements.
     // A workbook with modules called Log, Config or Data has locals called Log, Config and Data,
     // and renaming one of those renamed the MODULE and left the local untouched (2026-08-07).
     if (!anchor.at
@@ -306,7 +306,7 @@ export function renameFor(
 
     // The new name must not already mean something where the old one does. Nothing else checks:
     // a rename onto a name the module already declares produced two `Public Sub Beta()` in one
-    // module — a project that no longer compiles, reported as a rename that worked (2026-08-07).
+    // module - a project that no longer compiles, reported as a rename that worked (2026-08-07).
     const taken = anchor.at
         ? symbols.project.resolveDefinition(anchor.at.module, newName, anchor.at.offset)
         : symbols.project.resolveDefinition(moduleName, newName, offset);
@@ -377,7 +377,7 @@ export function renameFor(
 /**
  * Every module a MODULE rename rewrites, with its new text.
  *
- * A module's name is not in its own text — it belongs to the component — so this rewrites what
+ * A module's name is not in its own text - it belongs to the component - so this rewrites what
  * OTHER modules say about it. The component itself is renamed by the add-in, which owns the
  * object model; this only works out what the code has to say afterwards.
  *
@@ -416,7 +416,7 @@ export function renameModuleFor(
     }
 
     // A workbook cannot hold two components of one name, and the host would refuse the rename
-    // halfway through — after the code had been rewritten to call something that cannot exist.
+    // halfway through - after the code had been rewritten to call something that cannot exist.
     if (newName.toLowerCase() !== oldName.toLowerCase()
         && symbols.byModule.has(newName.toLowerCase())) {
         return { modules: [], refused: `This workbook already has a module called '${newName}'.` };
@@ -433,8 +433,8 @@ export function renameModuleFor(
         // A procedure of that name SHADOWS the module for a qualified call into it. Measured
         // against a live host (2026-08-07): with a module `Aides` and a caller saying
         // `Aides.Ping`, adding a `Public Sub Aides()` to the caller turns the call into a runtime
-        // failure, and removing it again fixes it. A bare `Aides` is unaffected — VBA takes the
-        // procedure — which is why this refuses only where a QUALIFIED mention would land.
+        // failure, and removing it again fixes it. A bare `Aides` is unaffected - VBA takes the
+        // procedure - which is why this refuses only where a QUALIFIED mention would land.
         if (sites.some((site) => site.qualified)
             && symbols.project.visibleProcedureNames(module.moduleName).has(newName.toLowerCase())) {
             return {
@@ -462,7 +462,7 @@ export function renameModuleFor(
  * Where a module's name is used as a qualifier, as a type, or as an implemented interface.
  *
  * Each site says which it is, because only a QUALIFIER can be shadowed by a procedure of the same
- * name — a type position cannot, and the difference decides whether a rename is safe.
+ * name - a type position cannot, and the difference decides whether a rename is safe.
  */
 function mentionsOfModule(
     source: string,
@@ -479,7 +479,7 @@ function mentionsOfModule(
     // variable in some other module that merely starts with the same word is left alone.
     const implementsIt = implementsInterface(source, wanted);
 
-    // Only code counts. A module's name in a string is data, and in a comment it is prose — and
+    // Only code counts. A module's name in a string is data, and in a comment it is prose - and
     // prose ends in a full stop, which made `IShape.` read as a qualified reference and rewrote
     // one word of a sentence while leaving the two beside it (found by the fixture, 2026-08-06).
     const inCode = codePositions(source);
@@ -532,7 +532,7 @@ function codePositions(source: string): boolean[] {
     let inComment = false;
 
     // Where a statement begins: the start of the source, a new line, or a colon. REM is a comment
-    // only there — `Dim REMainder` is a name, and treating it as one is the difference between
+    // only there - `Dim REMainder` is a name, and treating it as one is the difference between
     // reading a module and mangling it.
     let statementStart = true;
 
@@ -659,7 +659,7 @@ function qualifies(source: string, after: number): boolean {
 /**
  * Whether the name sits in a type position: the three keywords that can precede one.
  *
- * `As` and `New` are the obvious pair. `Implements` is the one worth naming separately — a class
+ * `As` and `New` are the obvious pair. `Implements` is the one worth naming separately - a class
  * that implements an interface names it in a statement with no dot and no As, so a rename that
  * knew only the pair would rename the interface everywhere except in the classes that implement
  * it, which is the one place the compiler will not let you get away with it.
@@ -704,7 +704,7 @@ function replaceSpans(
  * One declaration is the answer. None means the symbol is a local, a parameter or something else
  * with no project-level declaration, and the caret's own position is the right anchor. More than
  * one means the name genuinely resolves to several procedures and nothing can prove which was
- * meant — which is the collision the developer asked to be warned about rather than guessed at.
+ * meant - which is the collision the developer asked to be warned about rather than guessed at.
  */
 function anchorFor(
     symbols: ProjectSymbols,
@@ -748,8 +748,8 @@ function anchorFor(
  *
  * A bare call is only ambiguous when more than one module declares the name: with a single
  * definition in the workbook there is nothing else it could mean, and the resolver renames it.
- * When there IS a collision the resolver leaves it alone, which is right — nothing can prove
- * which one was meant — but leaving it alone SILENTLY is not: the developer is the only one who
+ * When there IS a collision the resolver leaves it alone, which is right - nothing can prove
+ * which one was meant - but leaving it alone SILENTLY is not: the developer is the only one who
  * knows, and they cannot decide about a call they were never told about.
  *
  * So what is left behind is counted and handed back. Warning about it is the surface's job.
@@ -790,7 +790,7 @@ function leftAlone(
                     continue;
                 }
 
-                // A qualified use says which one it means, so it is not ambiguous — and it was
+                // A qualified use says which one it means, so it is not ambiguous - and it was
                 // either renamed already or belongs to a different module.
                 if (qualifierBefore(module.source, offset) !== undefined) {
                     continue;
@@ -817,7 +817,7 @@ function leftAlone(
 /**
  * One module's text with every named span replaced. Applied back to front so that an earlier
  * replacement cannot move the span of a later one, and refused outright if any span does not
- * still hold the name — a rename computed against text that has since moved must not be applied
+ * still hold the name - a rename computed against text that has since moved must not be applied
  * to it by arithmetic that no longer describes it.
  */
 function replaceAll(
@@ -991,7 +991,7 @@ function identifierAt(source: string, offset: number): { text: string; start: nu
 
 /**
  * The receiver an identifier is reached through, when it is written as one word and a dot. A
- * quoted module name — `'Sheet One'.Refresh` — is a name with spaces in it, which is why the
+ * quoted module name - `'Sheet One'.Refresh` - is a name with spaces in it, which is why the
  * quotes are stripped rather than treated as the start of a string.
  */
 function qualifierBefore(source: string, start: number): string | undefined {

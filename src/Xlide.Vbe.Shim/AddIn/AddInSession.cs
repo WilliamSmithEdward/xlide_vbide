@@ -56,13 +56,13 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// The VBE validates a line when the caret leaves it. While the developer is typing on a
     /// line, verdicts touching it are held out of every publish; the caret settling elsewhere
-    /// releases the hold and republishes from the unfiltered findings above — no re-analysis.
+    /// releases the hold and republishes from the unfiltered findings above - no re-analysis.
     /// </summary>
     private readonly ActiveLineHold _activeLineHold = new();
 
     /// <summary>
     /// What each module read back as the last time this add-in wrote it, keyed by
-    /// <see cref="WrittenKey"/> — one baseline per (workbook, module), never per bare name.
+    /// <see cref="WrittenKey"/> - one baseline per (workbook, module), never per bare name.
     ///
     /// This is the baseline a later comparison is made against, and it is deliberately not the
     /// surface's text. The editor rewrites what it is given as it takes a module in: it completes
@@ -855,7 +855,7 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// A change from the page's dialog: adopted, written through, and echoed back — the echo is
+    /// A change from the page's dialog: adopted, written through, and echoed back - the echo is
     /// the page's confirmation that the choice will survive the session.
     /// </summary>
     private void OnSettingsChanged(ProductSettings updated)
@@ -1055,8 +1055,8 @@ internal sealed partial class AddInSession : IDisposable
             return false;
         }
 
-        // In the frame's message chain, so a resize re-places the surface synchronously —
-        // before the native layout paints — instead of a posted event later. The event route
+        // In the frame's message chain, so a resize re-places the surface synchronously -
+        // before the native layout paints - instead of a posted event later. The event route
         // stays as the correcting pass.
         _frameSubclass ??= FrameSubclass.Install(host, PlaceSurfaceFast);
 
@@ -1140,7 +1140,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // The active-line hold: typing on a line hides the verdicts about it, and the caret
         // settling anywhere else brings them back. Both handlers run on the host thread, and
-        // both republish only when the hold actually changed — a keystroke on an already-held
+        // both republish only when the hold actually changed - a keystroke on an already-held
         // line and a caret resting where it was cost nothing.
         _editorSurface.LineTyped = line =>
         {
@@ -1178,7 +1178,7 @@ internal sealed partial class AddInSession : IDisposable
             // The what-was-last-sent caches reset FIRST: they exist to spare a page that
             // already has the picture, and a page that just booted has nothing. Without
             // this, PublishModules compared against the pre-reload list, matched, and sent
-            // nothing — the tabs stayed gone (the tap showed every republish EXCEPT
+            // nothing - the tabs stayed gone (the tap showed every republish EXCEPT
             // setModules, 2026-08-06).
             _lastModulesKey = null;
             _lastLanguageFactsKey = null;
@@ -1198,7 +1198,7 @@ internal sealed partial class AddInSession : IDisposable
         };
 
         // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
-        // arranging itself — restoring its size, raising its own bands — and with no pane open
+        // arranging itself - restoring its size, raising its own bands - and with no pane open
         // there is no window event to notice any of it. Without this, the loader keeps covering
         // the window as it was at the first placement, and a band of native chrome outlives it.
         _editorSurface.LoadingPulse = RefreshSurfacePlacement;
@@ -1213,7 +1213,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // Both ghosts are read from one dedicated thread; the host thread only asks and looks.
         // Reading from here re-enters the editor's own accessibility provider and dies in
-        // native faults — GhostReaderThread carries the story.
+        // native faults - GhostReaderThread carries the story.
         _ghostReaders = GhostReaderThread.Start(_localsPalette, _watchPalette);
 
         DarkenTitleBar(host);
@@ -1368,7 +1368,7 @@ internal sealed partial class AddInSession : IDisposable
 
             // The surface shows one (module, WORKBOOK) pair, and a module name is not unique
             // across workbooks: two open workbooks can each hold a Helpers. Comparing the name
-            // alone made a navigation to the other workbook's Helpers a no-op on the surface —
+            // alone made a navigation to the other workbook's Helpers a no-op on the surface -
             // the native pane moved and the surface stayed where it was, showing a different
             // workbook's module of the same name (2026-08-07). A navigation that names no
             // project keeps the old meaning: whichever one is shown.
@@ -1428,7 +1428,7 @@ internal sealed partial class AddInSession : IDisposable
 
             // The read of the projects belongs to the thread that owns them. The door is the
             // overlay's action timer, and it answers false while there is no surface to carry
-            // it — the service retries rather than reading from the wrong thread.
+            // it - the service retries rather than reading from the wrong thread.
             _analysis.HostMarshal = action =>
             {
                 var surface = _editorSurface;
@@ -1560,9 +1560,9 @@ internal sealed partial class AddInSession : IDisposable
             UpdatePolling();
 
             // A drag is the same answer per mouse move with only rectangles changed, and the
-            // frame routes already follow rectangles synchronously. Everything below — the
+            // frame routes already follow rectangles synchronously. Everything below - the
             // full placement with policing and bands, the module and project publishes, debug
-            // state, resync — is for events that changed WHAT is on screen, not where its
+            // state, resync - is for events that changed WHAT is on screen, not where its
             // edges sit this instant; running it per move tick was the drag latency of
             // 2026-08-05. A geometry-only event takes the fast path and arms the settle,
             // whose full pass re-derives placement once the events pause. Debug freshness
@@ -1593,7 +1593,7 @@ internal sealed partial class AddInSession : IDisposable
                         && !string.Equals(followedDisplay, _editorSurface.Project, StringComparison.OrdinalIgnoreCase))))
             {
                 // Before the active document changes: activating a pane is the moment the host
-                // may read the module — F5 is one keystroke away — so the text is made true.
+                // may read the module - F5 is one keystroke away - so the text is made true.
                 _editorSurface.FlushEdits();
 
                 // The object model's active pane resolves the owner a caption could not.
@@ -1727,8 +1727,8 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         // The Object Browser is ours (developer, 2026-08-05): a floating themed window of our
-        // own over the typelib catalog, outside the canvas. The native window — which cannot
-        // float, cannot be adopted, and paints only docked (lesson 32) — is never opened at all.
+        // own over the typelib catalog, outside the canvas. The native window - which cannot
+        // float, cannot be adopted, and paints only docked (lesson 32) - is never opened at all.
         if (command == VbeCommands.Command.ObjectBrowser)
         {
             OpenBrowserPalette();
@@ -1785,7 +1785,7 @@ internal sealed partial class AddInSession : IDisposable
             ForgetBreakpoints();
         }
 
-        // A save just cleaned the workbook — but the flag flips a beat AFTER the command
+        // A save just cleaned the workbook - but the flag flips a beat AFTER the command
         // returns, so one immediate republish read the old value and the dot lingered. The
         // next few polls re-derive it; the change-key keeps the repeats free.
         if (command == VbeCommands.Command.Save)
@@ -1796,7 +1796,7 @@ internal sealed partial class AddInSession : IDisposable
 
         WatchDebugState();
 
-        // A command can change the native window landscape — the Object Browser above all —
+        // A command can change the native window landscape - the Object Browser above all -
         // and no event the tracker recognises announces it. The menu route always re-derived
         // placement after executing; this route learned the same manners (2026-08-05, the
         // Browser opening invisible under the surface).
@@ -1860,7 +1860,7 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             // A write is normally about the module on the surface, so it goes to the shown
-            // project's component — never to a same-named module in another workbook that
+            // project's component - never to a same-named module in another workbook that
             // happened to enumerate first. A caller who knows better says so: the close
             // path reverts background tabs, whose owner is the tab's workbook, not the
             // shown one.
@@ -1907,8 +1907,8 @@ internal sealed partial class AddInSession : IDisposable
             var writtenKey = WrittenKey(component, DisplayFromProjectId(foundOwner ?? owner));
 
             // The changed lines alone, when the last read-back says where they are. Replacing a
-            // whole large module makes the host reparse every line of it — seconds, on the
-            // thread the keystrokes live on — where typing only ever touches a few. The whole
+            // whole large module makes the host reparse every line of it - seconds, on the
+            // thread the keystrokes live on - where typing only ever touches a few. The whole
             // replace below remains for a module with no baseline or a rewrite too large to
             // call an edit.
             var baseline = _writtenModules.TryGetValue(writtenKey, out var known) ? known : null;
@@ -2006,11 +2006,11 @@ internal sealed partial class AddInSession : IDisposable
 
             if (hostRewrite)
             {
-                // The engine's live copy of a module OUTRANKS its seeded copy everywhere —
-                // search, completion, diagnosis — which is what keeps answers exact
+                // The engine's live copy of a module OUTRANKS its seeded copy everywhere -
+                // search, completion, diagnosis - which is what keeps answers exact
                 // mid-keystroke, and the typing path maintains it by streaming edits ahead of
                 // the write. A host rewrite bypasses the page, so the live copy is corrected
-                // here, or the engine keeps diagnosing text that no longer exists — the
+                // here, or the engine keeps diagnosing text that no longer exists - the
                 // problems of a discarded edit survived the close and the reopen (2026-08-05).
                 _analysis?.NotifyLiveText(component, stored ?? text, null, owner);
 
@@ -2019,7 +2019,7 @@ internal sealed partial class AddInSession : IDisposable
                 // "A host rewrite bypasses the page" was the reason given for correcting the
                 // engine here, and the page was then never corrected at all: a module written
                 // from outside while its pane is open kept whatever text the surface last had.
-                // Found 2026-08-08 with a freshly built fixture — the workbook held 42 lines,
+                // Found 2026-08-08 with a freshly built fixture - the workbook held 42 lines,
                 // the native pane held them too, and the editor showed an EMPTY document, so
                 // every breakpoint on it was refused as "not an executable statement" because
                 // the line being asked about did not exist on the surface.
@@ -2038,7 +2038,7 @@ internal sealed partial class AddInSession : IDisposable
             PublishModules();
 
             // The full pass re-reads every module, reseeds the engine, and diagnoses the whole
-            // project — work worth doing, but not per pause: the live pass keeps the shown
+            // project - work worth doing, but not per pause: the live pass keeps the shown
             // module honest between full passes, and a full pass running is what a completion
             // queues behind. It runs when the write was structural, or when its turn has come.
             // A host rewrite never waits its turn: the developer just watched the text change,
@@ -2101,7 +2101,7 @@ internal sealed partial class AddInSession : IDisposable
     /// Writes only the lines that changed between the baseline and the new text: the common
     /// prefix and suffix are found, and the window between them is deleted and re-inserted at
     /// one anchor, so nothing shifts under anything. False when the change is too large to be
-    /// typing — a paste of a module's worth of text is a whole replace, honestly.
+    /// typing - a paste of a module's worth of text is a whole replace, honestly.
     ///
     /// The window it removes is kept until the replacement is in, so an insert the editor refuses
     /// gives the removed lines back instead of costing them. Free here, unlike on the whole-replace
@@ -2144,7 +2144,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // Never ask to delete lines that are not there.
         //
-        // An EMPTY module has CountOfLines 0, but the empty baseline splits into one empty line —
+        // An EMPTY module has CountOfLines 0, but the empty baseline splits into one empty line -
         // so the window says "delete 1 from line 1" and the editor refuses the whole write with
         // "Invalid procedure call or argument". Nothing is written, and the only place it is said
         // is the log: the write route's reply looks like every other success. It took the code out
@@ -2218,7 +2218,7 @@ internal sealed partial class AddInSession : IDisposable
     ///
     /// The key is lowercased, because two workbooks holding `Helpers` and `helpers` are holding
     /// the same module as far as VBA is concerned. Reporting the key back is what a first version
-    /// did, and the `breakpoints` route then answered `helpers @ renamefixture.xlsm` — so a
+    /// did, and the `breakpoints` route then answered `helpers @ renamefixture.xlsm` - so a
     /// caller comparing against the name the product shows found nothing, which is a door that
     /// mangles its own answers. The spellings are kept so the route can hand back what a
     /// developer would recognise (2026-08-08).
@@ -2320,8 +2320,8 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Answers the Search panel: the engine searches the modules it holds — live text where a
-    /// module is being edited — and the hits come back with workbook display names. The edits
+    /// Answers the Search panel: the engine searches the modules it holds - live text where a
+    /// module is being edited - and the hits come back with workbook display names. The edits
     /// the developer has not paused long enough to write are flushed first, so the search
     /// describes what they see.
     /// </summary>
@@ -2430,8 +2430,8 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// What the Browser lists at its top level: the open projects first — the developer's
-    /// own code is what they browse most — then every referenced type library.
+    /// What the Browser lists at its top level: the open projects first - the developer's
+    /// own code is what they browse most - then every referenced type library.
     /// </summary>
     private ObLibraryRow[] BrowseLibraries()
     {
@@ -2558,7 +2558,7 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// Finds a module's members by reading its declarations: procedures, module-level
     /// variables and constants, events, API declares, and Enum and Type blocks. A line
-    /// scan, not a parse — it reads the declaration lines the developer wrote and skips
+    /// scan, not a parse - it reads the declaration lines the developer wrote and skips
     /// procedure bodies, which is exactly the list the Browser shows.
     /// </summary>
     private static ObMemberRow[] ScanModuleMembers(string source)
@@ -2736,7 +2736,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// Replace across a scope: the same search, then every hit's line rewritten through the
-    /// module the hit lives in — ReplaceLine, surgical, no module reset. The shown module's
+    /// module the hit lives in - ReplaceLine, surgical, no module reset. The shown module's
     /// resync adopts the change the way it adopts any edit made outside the surface.
     /// </summary>
     private void OnReplaceAllRequested(int id, string query, bool matchCase, bool wholeWord, string scope, string replacement)
@@ -2772,9 +2772,9 @@ internal sealed partial class AddInSession : IDisposable
                     replaced = ReplaceMatches(matches, query, matchCase, wholeWord, replacement);
 
                     // The modules changed under everything that mirrors them. The shown one is
-                    // resynced NOW — waiting for a pane event left the editor showing the old
+                    // resynced NOW - waiting for a pane event left the editor showing the old
                     // text while the panel claimed the replacement had happened ("replace is
-                    // not working", 2026-08-04) — and the full pass re-reads the rest.
+                    // not working", 2026-08-04) - and the full pass re-reads the rest.
                     ResyncFromModule();
                     _resyncPanePolls = Math.Max(_resyncPanePolls, 2);
                     _analysis?.Reanalyse();
@@ -2842,8 +2842,8 @@ internal sealed partial class AddInSession : IDisposable
 
                 replaced += inModule;
 
-                // A replace is a host rewrite: the engine's live copy of this module — which
-                // outranks its seeded copy in every answer — still holds the pre-replace text
+                // A replace is a host rewrite: the engine's live copy of this module - which
+                // outranks its seeded copy in every answer - still holds the pre-replace text
                 // for any module the developer has typed in, and the dirty-dot comparison
                 // still holds the pre-replace text as current. Both adopt the truth here.
                 if (inModule > 0 && component is not null
@@ -2944,7 +2944,7 @@ internal sealed partial class AddInSession : IDisposable
         {
             // Refused silently on screen, by design (the developer, 2026-08-04): the hover
             // preview already showed an orange cross where no breakpoint can go, and a click
-            // there draws nothing — nothing may ever appear that looks like a breakpoint the
+            // there draws nothing - nothing may ever appear that looks like a breakpoint the
             // developer did not get. The page mirrors CanBreakOn for that preview.
             Log.Info($"breakpoint: {module}({line}) is not an executable statement");
             return;
@@ -3389,7 +3389,7 @@ internal sealed partial class AddInSession : IDisposable
     ///
     /// THE TAB STRIP AND THE EXPLORER TREE ARE SEPARATE PUBLISHES, and the analyzer is a third
     /// thing again. Nothing refreshes on its own, so every site that adds, removes or renames a
-    /// component has to say so — and each one remembering a different subset is exactly how this
+    /// component has to say so - and each one remembering a different subset is exactly how this
     /// went wrong twice in one day: inserting a component from the page refreshed neither the
     /// strip nor the tree, and the first version of the `component` route refreshed the strip
     /// only, leaving the explorer listing three components while the strip showed eight.
@@ -3444,7 +3444,7 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         // Asks for a fresh read and shows the latest one that has landed; the reading thread
-        // answers within a tick or two. Until it does — or while reads are failing — an empty
+        // answers within a tick or two. Until it does - or while reads are failing - an empty
         // snapshot stands in, so the panel honestly shows a stopped emptiness rather than
         // whatever it said before the break.
         _ghostReaders?.RequestRead();
@@ -3472,7 +3472,7 @@ internal sealed partial class AddInSession : IDisposable
     private string? _lastPublishedMode;
 
     /// <summary>
-    /// Tells the page which debug mode the editor is in — "design", "run", or "break" — so
+    /// Tells the page which debug mode the editor is in - "design", "run", or "break" - so
     /// controls that only mean something stopped (the Call Stack button) can grey honestly
     /// instead of clicking into silence.
     /// </summary>
@@ -3653,7 +3653,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// Tracks each panel's own visibility transitions. With two docks the page can show more
-    /// than one panel at once, so a message about one panel says nothing about the others —
+    /// than one panel at once, so a message about one panel says nothing about the others -
     /// and only the Immediate mirror costs anything to watch.
     /// </summary>
     private void OnPanelChanged(string name, bool open)
@@ -3750,7 +3750,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // Every live document is compared, not just the active one: a macro can rewrite a
         // module whose tab sits in a background group, and that model must not drift. Project
-        // identities resolve once per workbook rather than once per document — the resolve
+        // identities resolve once per workbook rather than once per document - the resolve
         // walks the project collection, and this runs on every pane follow.
         Dictionary<string, string?>? identities = null;
         var adopted = false;
@@ -3904,8 +3904,8 @@ internal sealed partial class AddInSession : IDisposable
         // catches the tab strip up with everything that happened while the editor was busy.
         //
         // A close ALSO republishes the module list outright, because the tracker cannot see
-        // this change: it only ever holds the pane windows it can match — the active one, in
-        // practice — so closing a HIDDEN pane leaves its picture identical, Changed never
+        // this change: it only ever holds the pane windows it can match - the active one, in
+        // practice - so closing a HIDDEN pane leaves its picture identical, Changed never
         // fires, and the strip kept showing the closed module's tab ("the tab X doesn't close
         // it if it's not focused", 2026-08-04, the real mechanism at last). The strip's truth
         // is the object model's open list; after a close it is re-read and re-sent, and the
@@ -3927,8 +3927,8 @@ internal sealed partial class AddInSession : IDisposable
             _codePanes.Refresh();
         }
 
-        // Every tick, not only the resync ones: a save made on the host's side of the fence —
-        // Excel's own Ctrl+S, an autosave — flips the dirty flags with no event we hear, and
+        // Every tick, not only the resync ones: a save made on the host's side of the fence -
+        // Excel's own Ctrl+S, an autosave - flips the dirty flags with no event we hear, and
         // the dots must follow. The change-key inside makes an unchanged strip cost a read
         // and no message.
         PublishModules();
@@ -3951,7 +3951,7 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Starts reading the Immediate window, its handle already worked out — by caption match
+    /// Starts reading the Immediate window, its handle already worked out - by caption match
     /// normally, by the visibility diff as the fallback. The window keeps its handle once
     /// hidden, which is what makes it readable afterwards.
     /// </summary>
@@ -4050,7 +4050,7 @@ internal sealed partial class AddInSession : IDisposable
     /// Gives the page a module's text without activating it.
     ///
     /// The page holds a module's text once it has been ACTIVATED, so a workspace opened onto eight
-    /// modules holds one — and anything that draws a module it is not showing (peeking a
+    /// modules holds one - and anything that draws a module it is not showing (peeking a
     /// definition, previewing a reference) had nothing to draw. Answered without touching which
     /// pane is active, because being taken to what you asked to look at is the whole complaint.
     /// </summary>
@@ -4063,7 +4063,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // The page names a workbook the way it is shown; the object model wants the project's own
         // identity. Every other route that takes a project from the page converts here, and this
-        // one did not — so the component was never found and the answer never came (2026-08-07).
+        // one did not - so the component was never found and the answer never came (2026-08-07).
         var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
 
         surface.RunOnHostThread(() =>
@@ -4102,7 +4102,7 @@ internal sealed partial class AddInSession : IDisposable
         Log.Info($"immediate: evaluate '{(line.Length > 80 ? line[..80] : line)}'");
 
         // An attachment that failed at start-up is retried the moment output is about to
-        // matter. The window certainly exists by now — start-up toggled it visible — and the
+        // matter. The window certainly exists by now - start-up toggled it visible - and the
         // caption identification does not care that it is hidden.
         if (_immediateReader is null && _immediateCaption is { Length: > 0 } caption)
         {
@@ -4644,7 +4644,7 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// Answers a quick-fix request from the surface: what can be fixed over a span, and the edits
     /// that would fix it. Answered the same way a hover is, and empty on failure for the same
-    /// reason — a lightbulb that does not appear is what the developer already sees when there is
+    /// reason - a lightbulb that does not appear is what the developer already sees when there is
     /// nothing to fix.
     /// </summary>
     private void OnCodeActionsRequested(int requestId, int start, int end)
@@ -4701,7 +4701,7 @@ internal sealed partial class AddInSession : IDisposable
 
         if (surface is null || _analysis is not { } analysis)
         {
-            // Not "this module is empty" — "nothing here can answer yet". The page keeps what
+            // Not "this module is empty" - "nothing here can answer yet". The page keeps what
             // it already shows.
             _editorSurface?.ShowOutline(requestId, [], failed: true);
             return;
@@ -4711,8 +4711,8 @@ internal sealed partial class AddInSession : IDisposable
         // name unfold the right workbook's procedures.
         var projectId = ProjectIdFromDisplay(projectDisplay);
 
-        // No source travels with the request: the engine's live copy is exact — didChange rides
-        // the same FIFO pipe ahead of this — and serialising a 918KB module once a second to
+        // No source travels with the request: the engine's live copy is exact - didChange rides
+        // the same FIFO pipe ahead of this - and serialising a 918KB module once a second to
         // tell the engine what it already holds was most of this request's cost.
         _ = Task.Run(async () =>
         {
@@ -4802,7 +4802,7 @@ internal sealed partial class AddInSession : IDisposable
 
                     // The word was a MODULE's name, not a symbol in one. The engine says so
                     // rather than the page guessing, because only the engine knows every module
-                    // of the workbook — and the page only knows the ones with a tab open. The
+                    // of the workbook - and the page only knows the ones with a tab open. The
                     // component half is the add-in's either way, so it goes to the same route
                     // the explorer's Rename uses.
                     renamedComponent = outcome.Answer.Module;
@@ -4837,7 +4837,7 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
-            // The writes are the host's own object model, so they belong on the host thread —
+            // The writes are the host's own object model, so they belong on the host thread -
             // the same thread every other module write happens on.
             surface.RunOnHostThread(() =>
             {
@@ -4871,7 +4871,7 @@ internal sealed partial class AddInSession : IDisposable
                         written.Add(entry.Module);
 
                         // The page holds a model per OPEN module. Syncing one that is not open is
-                        // harmless — the page has nothing by that name to sync — and syncing one
+                        // harmless - the page has nothing by that name to sync - and syncing one
                         // that is open is the whole point.
                         surface.Sync(entry.Module, display, entry.Source);
                     }
@@ -4903,8 +4903,8 @@ internal sealed partial class AddInSession : IDisposable
     ///
     /// So nothing is written until everything is known. The engine works out every module's new
     /// text and hands it back whole, having already refused a name that is taken, is not an
-    /// identifier, or is a keyword. Only then is the component renamed — the one step that can
-    /// still be refused by the host — and only if THAT succeeds is a single line of code written.
+    /// identifier, or is a keyword. Only then is the component renamed - the one step that can
+    /// still be refused by the host - and only if THAT succeeds is a single line of code written.
     /// The window where the project is inconsistent is the gap between two operations that have
     /// both already been proven possible.
     /// </summary>
@@ -4963,8 +4963,8 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// Renames the component, then writes what every module must say afterwards. The host thread
-    /// owns both, and both entry points — the explorer's Rename and renaming a module's name in
-    /// code — land here so there is one order rather than two.
+    /// owns both, and both entry points - the explorer's Rename and renaming a module's name in
+    /// code - land here so there is one order rather than two.
     ///
     /// The component goes first because it is the only step the HOST can still refuse, and the
     /// only one whose failure leaves nothing changed. Its answer is read back rather than
@@ -4979,8 +4979,8 @@ internal sealed partial class AddInSession : IDisposable
     /// share and leaves every other one renamed, which is a half-renamed project and worse than
     /// no undo at all. So the reversal is the add-in's, over the same modules the rename touched.
     ///
-    /// One slot. A second rename replaces it — undo goes back one step, the way the operation is
-    /// one step — and the texts are the ones read out of the modules immediately before writing,
+    /// One slot. A second rename replaces it - undo goes back one step, the way the operation is
+    /// one step - and the texts are the ones read out of the modules immediately before writing,
     /// not the ones the engine was given, because the editor rewrites what it is handed.
     /// </summary>
     private sealed record RenameUndo(
@@ -5113,7 +5113,7 @@ internal sealed partial class AddInSession : IDisposable
         var display = DisplayFromProjectId(projectId);
 
         // Captured BEFORE the component is renamed, while every module still answers to the name
-        // it has now — including the one about to change.
+        // it has now - including the one about to change.
         var before = CaptureBefore(modules.Select(entry => entry.Module), projectId);
 
         string actual;
@@ -5273,7 +5273,7 @@ internal sealed partial class AddInSession : IDisposable
     /// squiggles describing the text on screen rather than the text as of the last write-back:
     /// an error the developer deleted goes away on the next pause, not the next module write.
     /// The caret rides along so the engine holds back the transient complaints of the
-    /// expression being typed. A result computed for text that has moved on is dropped — the
+    /// expression being typed. A result computed for text that has moved on is dropped - the
     /// keystroke that moved it has already scheduled the next pass.
     /// </summary>
     private void OnLiveAnalysisDue()
@@ -5408,7 +5408,7 @@ internal sealed partial class AddInSession : IDisposable
             _analysis.PreferredProject = owner;
         }
 
-        // A project the engine has never been seeded with — a workbook just opened or created.
+        // A project the engine has never been seeded with - a workbook just opened or created.
         // Nothing else would ask for the pass: only this session's own writes call Reanalyse,
         // which is how an externally added workbook stayed unanalysed forever. Gated, because
         // a new workbook shows two panes in quick succession and the first pass has not had
@@ -5484,7 +5484,7 @@ internal sealed partial class AddInSession : IDisposable
     /// APPLY IS THE ONLY COMPARISON, and this must not grow another. It had one: a guard here that
     /// returned early when the mode, workbook and module all matched what was last written. That
     /// compares our record of the caption against our record of the caption, and the thing it has
-    /// to notice is the HOST rewriting the window underneath us — which changes neither.
+    /// to notice is the HOST rewriting the window underneath us - which changes neither.
     ///
     /// Pressing Reset twice was enough. The first press leaves break, the mode changes, the guard
     /// lets it through. The second press does nothing to the execution state and everything to the
@@ -5558,9 +5558,9 @@ internal sealed partial class AddInSession : IDisposable
                 UpdatePolling();
             }
 
-            // Dirty is a WORKBOOK fact — the editor persists all of a workbook's modules
+            // Dirty is a WORKBOOK fact - the editor persists all of a workbook's modules
             // together (probed 2026-08-04: a module edit flips Workbook.Saved false, Save
-            // flips it true) — so it is read once per workbook and worn by every tab the
+            // flips it true) - so it is read once per workbook and worn by every tab the
             // workbook owns.
             //
             // But the host's flag alone over-reports: it never flips back when an edit is
@@ -5675,7 +5675,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// A workbook's Saved flag, by display name, through the same trust-free application route
-    /// the evaluator uses. Null when it cannot be read — a missing dot is a small wrong, a
+    /// the evaluator uses. Null when it cannot be read - a missing dot is a small wrong, a
     /// lying dot is a large one, so unknown must never invent one.
     /// </summary>
     private bool? WorkbookSaved(string display)
@@ -5703,7 +5703,7 @@ internal sealed partial class AddInSession : IDisposable
         }
         catch (Exception)
         {
-            // The application answer went stale — a workbook closed mid-read, or the host is
+            // The application answer went stale - a workbook closed mid-read, or the host is
             // busy. Re-found on the next read.
             _hostApp?.Dispose();
             _hostApp = null;
@@ -5714,7 +5714,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// What the developer calls a project, from its identity alone: the file's name for a saved
-    /// workbook, the identity itself otherwise. Lowercase for saved ones — comparisons on the
+    /// workbook, the identity itself otherwise. Lowercase for saved ones - comparisons on the
     /// page side are case-insensitive.
     /// </summary>
     /// <summary>
@@ -5722,7 +5722,7 @@ internal sealed partial class AddInSession : IDisposable
     ///
     /// Line endings are normalised and trailing blank lines dropped, because the host and the
     /// page genuinely disagree about both and neither disagreement is a defect: VBA stores CRLF
-    /// and counts a trailing line the page does not draw. Everything else must match exactly —
+    /// and counts a trailing line the page does not draw. Everything else must match exactly -
     /// a single changed character is a real difference and has to register as one.
     ///
     /// Null for no text at all, which is a different answer from empty text and is reported as
@@ -6061,7 +6061,7 @@ internal sealed partial class AddInSession : IDisposable
         // the menu route opens ours. The Object Browser (2) is put away too: the editor
         // remembers it open across sessions, and a remembered one reappeared blank at start-up
         // (2026-08-05). The Locals and Watch windows are NOT hidden here: both become ghost
-        // palettes a moment later — the editor only feeds a window with a paintable surface
+        // palettes a moment later - the editor only feeds a window with a paintable surface
         // (lessons 25 and 29), and hiding one removes the feature rather than restyling it.
         const int immediateWindow = 5;
         ReadOnlySpan<int> replaced = [immediateWindow, 2, 6, 7];
@@ -6271,7 +6271,7 @@ internal sealed partial class AddInSession : IDisposable
     /// command, the menus are all on the surface's bar, and every run and step command keeps the
     /// key it always had. The toggles that would bring the bars back are suppressed from the
     /// surface's View menu, so a hidden bar stays hidden. A docked bar left visible would claim
-    /// rows the surface covers — since it stopped retreating for chrome, that is a toolbar on
+    /// rows the surface covers - since it stopped retreating for chrome, that is a toolbar on
     /// screen that cannot be pressed.
     ///
     /// Floating bars are left alone: they float above the surface and contest nothing. So is the
@@ -6378,7 +6378,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // The identification that survives timing: the object model names the window's
         // localised caption, and the handle carries the same caption, visible or not. The old
-        // way — diffing which pane stopped being visible across the hide — lost whenever the
+        // way - diffing which pane stopped being visible across the hide - lost whenever the
         // hide had not yet reached the window list, and answered "0 windows changed"; that is
         // a hidden Immediate whose Debug.Print output nothing can mirror. The caption is kept
         // so a failed attachment can be retried when the first evaluation actually needs it.
@@ -6413,7 +6413,7 @@ internal sealed partial class AddInSession : IDisposable
     private string? _immediateCaption;
 
     /// <summary>
-    /// Publishes every finding to the surface's panel, across all modules — except the ones the
+    /// Publishes every finding to the surface's panel, across all modules - except the ones the
     /// active-line hold is keeping back, so the panel and the badges never announce a verdict
     /// about a line still being typed.
     /// </summary>
@@ -6457,17 +6457,17 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// A close asked for by the developer — the tab's X, its middle-click, Ctrl+W, or the tab
+    /// A close asked for by the developer - the tab's X, its middle-click, Ctrl+W, or the tab
     /// menu. A module whose text still differs from the workbook's last saved text does not just
     /// close: the developer is asked first, and the answer comes back through the same message
-    /// with a choice on it. "save" saves the workbook — the editor persists all of a workbook's
-    /// modules together, so saving the workbook is what saving a module means — and "discard"
+    /// with a choice on it. "save" saves the workbook - the editor persists all of a workbook's
+    /// modules together, so saving the workbook is what saving a module means - and "discard"
     /// writes the saved text back over the module, which is the closest thing to closing without
     /// saving that a document living inside a workbook can have.
     ///
     /// The question gates on the module's OWN text, not the workbook dot. The dot is a workbook
     /// fact and can stand on a sibling's changes; a question here offers a revert of THIS module,
-    /// so it is only asked when this module's changes can be named — and therefore reverted.
+    /// so it is only asked when this module's changes can be named - and therefore reverted.
     /// </summary>
     private void OnModuleCloseRequested(string component, string? projectDisplay, string? action)
     {
@@ -6499,7 +6499,7 @@ internal sealed partial class AddInSession : IDisposable
                 if (display is not null
                     && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline))
                 {
-                    // The debounced write of the abandoned text must not chase the revert —
+                    // The debounced write of the abandoned text must not chase the revert -
                     // this document's write only; a sibling tab's typing keeps its debounce.
                     _editorSurface?.DiscardEdits(component, display);
 
@@ -6532,7 +6532,7 @@ internal sealed partial class AddInSession : IDisposable
                 else
                 {
                     // No snapshot to go back to. Closing with the text kept is the only honest
-                    // remainder — inventing a revert target would destroy real work.
+                    // remainder - inventing a revert target would destroy real work.
                     Log.Info($"close: {component} has no saved text to revert to; closing as it is");
                 }
 
@@ -6573,7 +6573,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// Saves a workbook by display name, through the same trust-free application route the
-    /// Saved flag is read by. False when the workbook cannot be found or the save is refused —
+    /// Saved flag is read by. False when the workbook cannot be found or the save is refused -
     /// the caller keeps the tab open on false, so it needs the truth, not best effort.
     /// </summary>
     private bool SaveWorkbookOf(string display)
@@ -6659,8 +6659,8 @@ internal sealed partial class AddInSession : IDisposable
         {
             // The teardown a close starts finishes AFTER this returns, and its window events
             // can land while a refresh is already mid-flight. The tracker queues those now,
-            // but a close is the one moment staleness is guaranteed visible — the tab must
-            // leave the strip — so the next few polls re-derive the picture unconditionally
+            // but a close is the one moment staleness is guaranteed visible - the tab must
+            // leave the strip - so the next few polls re-derive the picture unconditionally
             // rather than trusting the event stream alone.
             _resyncPanePolls = 3;
             _pollsRemaining = Math.Max(_pollsRemaining, (int)(2_000 / DebugPollMilliseconds));
@@ -6757,7 +6757,7 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             // Not just the analyzer: the strip and the tree both have to hear about it too, and
-            // this used to tell only the analyzer — so a module inserted from the page appeared
+            // this used to tell only the analyzer - so a module inserted from the page appeared
             // in neither list until something else happened to republish them.
             ComponentsChanged();
         }
@@ -6961,7 +6961,7 @@ internal sealed partial class AddInSession : IDisposable
     private DispatchObject? FindComponent(string component) => FindComponent(component, null, out _);
 
     /// <summary>
-    /// The component carrying this name — within one project when its identity is given, in
+    /// The component carrying this name - within one project when its identity is given, in
     /// whichever project answers first otherwise. The identity of the owning project comes back
     /// either way, which is how the session learns what "shown" means in a world where two
     /// workbooks may both hold a Module1.
@@ -7123,7 +7123,7 @@ internal sealed partial class AddInSession : IDisposable
     /// reaches. Anything less leaves native chrome showing through a themed product.
     ///
     /// Native tool windows do not shrink it: the canvas is purely xlide, and every native
-    /// window is replaced, ghosted, floated, or policed away — because the
+    /// window is replaced, ghosted, floated, or policed away - because the
     /// old retreat to the document area handed the menu bar and toolbar rows back to the native
     /// editor every time one opened, and the product visibly reverted.
     ///
@@ -7208,7 +7208,7 @@ internal sealed partial class AddInSession : IDisposable
     ///
     /// Only a page that has not loaded yet says no: covering the menu bar with a surface that
     /// cannot draw its own menus takes every menu away, so the native bar stays until the
-    /// replacement is genuinely standing. Native tool windows stopped saying no long ago —
+    /// replacement is genuinely standing. Native tool windows stopped saying no long ago -
     /// today every one is replaced, ghosted, floated, or policed away, and the canvas is
     /// purely xlide.
     /// </summary>
@@ -7241,7 +7241,7 @@ internal sealed partial class AddInSession : IDisposable
 
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
 
-        // The full pass — window policing, band silencing, chrome — is object-model work,
+        // The full pass - window policing, band silencing, chrome - is object-model work,
         // and it was running once per frame event of a drag: measurable latency and repaint
         // churn (2026-08-05). The bounds followed above; everything else holds still until
         // the events pause, and then ONE full pass re-derives it all.
@@ -7261,7 +7261,7 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// A frame or document-area event: the frame moved, resized, was shown, or is going away.
-    /// Bounds follow synchronously — that is what keeps the surface glued to the window — and
+    /// Bounds follow synchronously - that is what keeps the surface glued to the window - and
     /// the full pass waits for the settle, EXCEPT where eventfulness is the point: a hiding
     /// frame is the editor closing and the surface must go with it now, with no object-model
     /// work at all (lesson 27).
@@ -7291,7 +7291,7 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         // The frame hiding is the editor's window closing: Alt+F4, its X, a shutdown's first
-        // act. Placement work there is worse than pointless — reacting to the hide event with
+        // act. Placement work there is worse than pointless - reacting to the hide event with
         // the cutout pass put object-model calls INSIDE the editor's own close handling, and
         // the editor faulted under them, taking the host down (three crash records,
         // 2026-08-04: VBE7, ntdll, and this shim faulting by turn, each at a close; the
@@ -7342,12 +7342,12 @@ internal sealed partial class AddInSession : IDisposable
     /// rather than by visibility.
     ///
     /// Covering them was not enough: the bands paint without clipping their siblings, so
-    /// every resize stamped the native menu bar straight over the surface — "the native menu
+    /// every resize stamped the native menu bar straight over the surface - "the native menu
     /// bar bleeds thru", 2026-08-04. Hiding their windows was not enough either: the editor's
     /// own layout shows them again on every resize, and the beat between its show and our
     /// next hide is the same flash. An EMPTY window region ends the argument: the window
     /// stays exactly as visible as the editor believes, its layout never changes, and it owns
-    /// no pixels to paint with — Office never sets or resets regions on these, so nothing
+    /// no pixels to paint with - Office never sets or resets regions on these, so nothing
     /// fights back. The commands lose nothing: menu reading and execution go through the
     /// object model, which has driven invisible bars since the Standard toolbar was retired.
     ///
@@ -7397,7 +7397,7 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// Keeps the canvas purely xlide: no native tool window may stand docked and visible in
     /// the frame. This replaced the cutout-hole machinery (developer, 2026-08-05: "I'd like
-    /// our canvas to be purely xlide") — holes meant tracking native windows pixel-for-pixel
+    /// our canvas to be purely xlide") - holes meant tracking native windows pixel-for-pixel
     /// through a poll, and every window turned out to have a better home. The replaced
     /// windows (Project Explorer 6, Properties 7) are re-hidden if any native route re-shows
     /// them, and so is the Object Browser (2) now that its floating palette replaces it
@@ -7539,8 +7539,8 @@ internal sealed partial class AddInSession : IDisposable
                 UpdatePolling();
             };
 
-            // The frame resizing is not a pane event. With no visible pane — the empty
-            // workspace — nothing else hears it, and the surface sat at its old size while the
+            // The frame resizing is not a pane event. With no visible pane - the empty
+            // workspace - nothing else hears it, and the surface sat at its old size while the
             // window grew around it. The frame's own events re-derive placement in every state.
             _codePanes.FrameChanged = OnFrameChanged;
 
@@ -7572,7 +7572,7 @@ internal sealed partial class AddInSession : IDisposable
             _codePanes.CaptionChanged = _ => _hostChrome?.Apply();
 
             // Any destroy might have been a hidden pane, which the tracker's own picture cannot
-            // show (it only holds panes it can match — the active one, in practice). A moment of
+            // show (it only holds panes it can match - the active one, in practice). A moment of
             // polls re-reads the object model's open list and republishes; the page skips the
             // rebuild when nothing changed, so a dying tooltip costs a diff and no work.
             _codePanes.WindowDestroyed = () =>
@@ -7628,7 +7628,7 @@ internal sealed partial class AddInSession : IDisposable
         _frameSubclass = null;
 
         // The native menu and toolbar windows come back before the surface goes: a session
-        // that stops — shutdown, disconnection, revival teardown — must leave the editor
+        // that stops - shutdown, disconnection, revival teardown - must leave the editor
         // whole, not silently menu-less.
         SetNativeChromeBands(visible: true);
 
@@ -7636,7 +7636,7 @@ internal sealed partial class AddInSession : IDisposable
         _immediateReader = null;
 
         // The reading thread stops before the palettes change back: a reader must not touch a
-        // window mid-restoration. Its join is bounded — see GhostReaderThread.Dispose.
+        // window mid-restoration. Its join is bounded - see GhostReaderThread.Dispose.
         _ghostReaders?.Dispose();
         _ghostReaders = null;
 

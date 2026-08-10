@@ -8,7 +8,7 @@
  *
  *   node build-fixture.mjs <plan.json>
  *
- * The plan is JSON — { modules: [{ name, kind, code }], sheetCode, openAtEnd } — because module
+ * The plan is JSON - { modules: [{ name, kind, code }], sheetCode, openAtEnd } - because module
  * text is full of quotes, doubled quotes and CRLFs, and a file crosses once where a command line
  * would be escaped through two shells.
  */
@@ -37,8 +37,8 @@ if (!health.healthy) {
 /**
  * Writes a module and CHECKS that it took, because once it did not.
  *
- * The first write to a module that is freshly added AND currently shown fails — the editor
- * answers "Invalid procedure call or argument" — and the write route reports that in the log
+ * The first write to a module that is freshly added AND currently shown fails - the editor
+ * answers "Invalid procedure call or argument" - and the write route reports that in the log
  * rather than in its reply. Building a fixture on an unchecked write produced one with an empty
  * Rival, which meant the duplicate `Recalculate` was not there, which meant the fixture no longer
  * exercised the collision it exists for. It looked fine (2026-08-07).
@@ -116,7 +116,7 @@ for (const module of plan.modules) {
 
 /*
  * The first worksheet's own module. Its name is the CODE name, which is what the object model
- * calls it and what a document module is addressed by — not the tab caption a user sees, which
+ * calls it and what a document module is addressed by - not the tab caption a user sees, which
  * can differ and would address nothing.
  */
 if (plan.sheetCode) {
@@ -134,7 +134,7 @@ if (plan.sheetCode) {
 
 /*
  * Which panes are open is part of the fixture. A module with no tab is the one a rename silently
- * misses, so leaving most of them closed is the arrangement the interesting test needs — and it
+ * misses, so leaving most of them closed is the arrangement the interesting test needs - and it
  * comes for free here, because adding a component through the door does not open a pane for it.
  */
 if (plan.openAtEnd) {
@@ -145,7 +145,7 @@ if (plan.openAtEnd) {
 await api.command("save");
 
 // Read it back from the object model rather than trusting the writes: the editor rewrites what it
-// is given — it respells keywords and completes what it thinks is unfinished — so what is IN the
+// is given - it respells keywords and completes what it thinks is unfinished - so what is IN the
 // workbook is the only thing worth reporting.
 const built = await api.project();
 const written = built.components.filter((component) => component.lines > 0);

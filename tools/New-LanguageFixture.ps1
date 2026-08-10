@@ -3,7 +3,7 @@
     Builds LanguageFixture.xlsm: a workbook for exercising the language features.
 
 .DESCRIPTION
-    The rename fixture is shaped for renaming — one method on one class, and a project that
+    The rename fixture is shaped for renaming - one method on one class, and a project that
     deliberately does not compile. That makes it the wrong workbook for asking what IntelliSense
     offers: a receiver with one member proves almost nothing, and a project full of deliberate
     errors buries the one error a quick-fix test wants to see.

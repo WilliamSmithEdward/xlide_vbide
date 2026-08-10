@@ -61,7 +61,7 @@ internal sealed partial class AddInSession
     /// promise settles or the budget runs out.
     ///
     /// Only the START of each call crosses to the host thread. The browser delivers its
-    /// answer by calling back on that same thread, so THIS thread — a pool thread — is the
+    /// answer by calling back on that same thread, so THIS thread - a pool thread - is the
     /// one that waits; waiting on the host thread would be waiting for a callback that
     /// cannot arrive until the waiting stops.
     /// </summary>
@@ -109,7 +109,7 @@ internal sealed partial class AddInSession
         }
 
         // A promise: collect the ticket until it settles. The page keeps running between
-        // polls, which is the whole point — this thread is not holding anything it needs.
+        // polls, which is the whole point - this thread is not holding anything it needs.
         var deadline = Environment.TickCount64 + budgetMs;
         var collector = $$"""
             (function () {
@@ -126,7 +126,7 @@ internal sealed partial class AddInSession
          * The wait BACKS OFF rather than sitting at 40ms.
          *
          * A flat 40ms before the first poll put a floor of about 70ms under every promise this
-         * door returns — the initial call, the sleep, and the poll, each of the last two a page
+         * door returns - the initial call, the sleep, and the poll, each of the last two a page
          * round trip. Most of what comes back is a hover or a completion that settled in single
          * digits and then waited four times as long to be collected.
          *
@@ -251,7 +251,7 @@ internal sealed partial class AddInSession
     /// The FIRST rather than the last: a bundle that dies on load throws once and then produces a
     /// cascade of consequences, and the consequences are the part that is easy to find.
     ///
-    /// This can be asked of a page that never booted, which is the whole reason it exists — a
+    /// This can be asked of a page that never booted, which is the whole reason it exists - a
     /// module throwing during initialisation leaves the JavaScript context perfectly alive, so the
     /// ring boot.js installed before it is still there to be read.
     /// </summary>
@@ -326,8 +326,8 @@ internal sealed partial class AddInSession
     /// `{"installed": false, "lines": []}` at exactly the moment somebody was asking why the page
     /// was blank (2026-08-09). Ownership moved into the page, where nothing can run before it.
     ///
-    /// Kept because a page served from somewhere without boot.js — an older bundle, a hand-built
-    /// dist — should still say something rather than nothing. It no-ops when boot.js has run,
+    /// Kept because a page served from somewhere without boot.js - an older bundle, a hand-built
+    /// dist - should still say something rather than nothing. It no-ops when boot.js has run,
     /// which it detects through the same flag boot.js sets.
     ///
     /// The console is WRAPPED rather than replaced: everything still reaches DevTools when a
@@ -364,7 +364,7 @@ internal sealed partial class AddInSession
             """;
 
         // Fire and forget on a pool thread: this runs from the ready handler, which is ON
-        // the host thread, and the script's answer arrives on that same thread — waiting
+        // the host thread, and the script's answer arrives on that same thread - waiting
         // here would wait for a callback that cannot arrive until the waiting stops.
         _ = Task.Run(() => RunPageScriptOnce(install, null, 4000));
     }
@@ -415,7 +415,7 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// Whether the page is running a bundle older than the one on disk — the question behind
+    /// Whether the page is running a bundle older than the one on disk - the question behind
     /// "why is my fix not in the page", which cost three rounds of confusion in one day. The
     /// page stamps itself to the second at build time; a stamp before the file's own write
     /// time by more than a minute means the browser is serving something cached.
@@ -505,7 +505,7 @@ internal sealed partial class AddInSession
         // The sweep used to sit below them, which read as "every request heals first" and was
         // not: dialogs, dismiss and guard all return before reaching it, and those are exactly
         // the routes a caller uses while something is standing. Armed and watching, the guard
-        // therefore never ran once — fourteen seconds of polling with a modal on screen and an
+        // therefore never ran once - fourteen seconds of polling with a modal on screen and an
         // empty cleared list (2026-08-07).
         //
         // The heartbeat is no help here and this is why it cannot be the trigger: a VBA modal
@@ -1036,7 +1036,7 @@ internal sealed partial class AddInSession
                 //
                 // The page answers because the page knows. Every earlier version of this
                 // question was a querySelectorAll written fresh in whichever probe was asking,
-                // and a scraped row cannot tell "collapsed" from "rendered wrong" — the render
+                // and a scraped row cannot tell "collapsed" from "rendered wrong" - the render
                 // being stale is the defect worth catching, and scraping it measures the wrong
                 // half. See ui/editor/src/devsurface.ts.
                 // line/column, or word, adds the `at` field: what is painted at that position
@@ -1120,7 +1120,7 @@ internal sealed partial class AddInSession
                 var budget = WaitMilliseconds(request, 10000);
 
                 // The predicate is compiled to a function ONCE, here, while this script is
-                // still the browser's own synchronous evaluation — which the page's content
+                // still the browser's own synchronous evaluation - which the page's content
                 // policy exempts. Evaluating a string from inside a later timer callback is
                 // not exempt and is refused outright ("unsafe-eval is not an allowed
                 // source"), so a waiter that eval'd per tick never ran its predicate at all
@@ -1190,8 +1190,8 @@ internal sealed partial class AddInSession
 
             case "console":
             {
-                // What the page said to itself. Only UNCAUGHT errors reach the shim log —
-                // deliberately, because forwarding every line would drown it — so a warning
+                // What the page said to itself. Only UNCAUGHT errors reach the shim log -
+                // deliberately, because forwarding every line would drown it - so a warning
                 // or a console.error the page handled is invisible without a DevTools client
                 // attached, which is exactly the situation during a live test. The ring is
                 // installed at page ready and read here.
@@ -1217,15 +1217,15 @@ internal sealed partial class AddInSession
 
             case "inspect" when request.Query.TryGetValue("selector", out var selector) && selector.Length > 0:
             {
-                // What the page actually has, where it is, and — with `styles` — what those
+                // What the page actually has, where it is, and - with `styles` - what those
                 // properties computed to, plus WHICH RULES claimed them.
                 //
                 // The rule list is the point. This page shares a document with a large
                 // bundled stylesheet, and a structural class of ours (`.row` on a split
                 // container) silently inherited `align-items: baseline` from an unrelated
                 // rule, collapsing every cell to its tab strip's height. It read as a flex
-                // bug in our own code and took an hour; the loop that finally found it —
-                // walk every stylesheet, keep the rules this element matches — is this
+                // bug in our own code and took an hour; the loop that finally found it -
+                // walk every stylesheet, keep the rules this element matches - is this
                 // route (2026-08-06).
                 request.Query.TryGetValue("styles", out var wanted);
                 var withRules = request.Query.TryGetValue("rules", out var rulesFlag) && rulesFlag != "0";
@@ -1561,7 +1561,7 @@ internal sealed partial class AddInSession
             case "reload":
             {
                 // Reload the page and WAIT for it to come back, answering with the bundle it
-                // is now running. The manual version — reload, sleep a guess, hope — was run
+                // is now running. The manual version - reload, sleep a guess, hope - was run
                 // a dozen times in one afternoon, and a guess that is too short reports on
                 // the page that is going away (2026-08-06).
                 var reloadHost = _editorSurface;
@@ -1609,7 +1609,7 @@ internal sealed partial class AddInSession
                     .ToArray();
 
                 // NOT drained here. `guard` owns the draining, and a read that emptied the list
-                // would make this route the reason the next caller sees nothing — the same class
+                // would make this route the reason the next caller sees nothing - the same class
                 // of problem it is here to expose. The last few are enough to tell "nothing
                 // opened" from "something opened and was taken away".
                 string[] cleared;
@@ -1628,7 +1628,7 @@ internal sealed partial class AddInSession
                 // Does this project compile, and if not, what does it say?
                 //
                 // Not just the menu command. A compile error is a MODAL, so running it and
-                // waiting on the host thread hangs the thread that raised it — which is how a
+                // waiting on the host thread hangs the thread that raised it - which is how a
                 // probe left one standing for six minutes, and why the answer nobody could read
                 // was on screen the whole time (2026-08-07). The command is started and not
                 // waited for; the answering happens here, on the door's own thread, which is the
@@ -1677,7 +1677,7 @@ internal sealed partial class AddInSession
                 // Types into the editor the way a person does, so the behaviour that only happens
                 // WHILE typing can be tested: smart Enter, comment continuation, auto-indent.
                 //
-                // Through the editor's own keyboard pipeline — `trigger("keyboard", "type")` —
+                // Through the editor's own keyboard pipeline - `trigger("keyboard", "type")` -
                 // not by setting the text. Setting text goes around every handler that makes
                 // typing feel like anything, which means a probe that sets text is testing
                 // nothing this product does. \n is sent as a real Enter for the same reason: it
@@ -1689,7 +1689,7 @@ internal sealed partial class AddInSession
                 // Smart Enter runs from a content-change listener and defers its own work to a
                 // microtask, the way the editor's auto-indent lands first. A script that types a
                 // newline and then the next line synchronously never lets that run, so the
-                // continuation is computed against a line that already has the next line on it —
+                // continuation is computed against a line that already has the next line on it -
                 // and the first version of this route reported that comment continuation was
                 // broken when it was not (2026-08-07). One turn of the loop between segments is
                 // the difference between typing and setting text.
@@ -1739,10 +1739,10 @@ internal sealed partial class AddInSession
                 // Reading a log for what one step did means finding where that step began, and
                 // "scroll up until it looks like the right place" is how a session ends up
                 // reasoning about the wrong three seconds. A probe that marks its steps can ask
-                // for exactly the slice between two marks — `log({ since })` with the offset this
+                // for exactly the slice between two marks - `log({ since })` with the offset this
                 // hands back.
                 // The offset is taken BEFORE the marker is written, so reading from it returns
-                // the marker itself — a slice that starts with the words the caller chose is a
+                // the marker itself - a slice that starts with the words the caller chose is a
                 // slice they can be sure is theirs.
                 var at = Log.Path is { } logPath && File.Exists(logPath)
                     ? new FileInfo(logPath).Length
@@ -1842,11 +1842,11 @@ internal sealed partial class AddInSession
             return DebugError("the surface is not up yet");
         }
 
-        // The sweep already ran, at the top of this method, so every route heals — including the
+        // The sweep already ran, at the top of this method, so every route heals - including the
         // ones that answer without the host thread and used to return before reaching it. A modal
         // this door raised earlier may still be standing, and waiting for a timeout to notice is
         // the wrong instrument: a VBA modal PUMPS messages, so marshaled work still runs and no
-        // timeout ever comes (measured 2026-08-06 — state answered normally while the Macros
+        // timeout ever comes (measured 2026-08-06 - state answered normally while the Macros
         // dialog owned the editor), while the developer is looking at a stuck editor throughout.
 
         // What was already standing before this request. Anything that appears while it is
@@ -1958,7 +1958,7 @@ internal sealed partial class AddInSession
             // A dialog this door did not raise is cleared only while a caller has asked for the
             // guard, and only when it is a NOTICE. Declining a question nobody asked this door to
             // raise would be answering for the developer; clearing a notice only takes an already
-            // finished announcement off the screen — and off the host thread it is holding.
+            // finished announcement off the screen - and off the host thread it is holding.
             if (!mine && !(_guardEverything && DialogWatch.IsNotice(dialog)))
             {
                 continue;
@@ -2199,8 +2199,8 @@ internal sealed partial class AddInSession
     /// A page script's answer, unwrapped as far as it is wrapped.
     ///
     /// The browser returns a result as JSON, so a script returning a string returns a QUOTED
-    /// string; a script that builds its answer with JSON.stringify — which every useful one does,
-    /// because that is how a structure crosses — returns it quoted twice. Unwrapping stops at the
+    /// string; a script that builds its answer with JSON.stringify - which every useful one does,
+    /// because that is how a structure crosses - returns it quoted twice. Unwrapping stops at the
     /// first thing that is not itself a JSON document, so a plain string stays a plain string.
     /// </summary>
     private static System.Text.Json.Nodes.JsonNode? Unwrap(string result)
@@ -2368,8 +2368,8 @@ internal sealed partial class AddInSession
                      *
                      * This used to say only that the page had not reported a stamp, which is the
                      * observation written out longhand: it names what did not happen and nothing
-                     * about why. The page's own black box knows why — boot.js installs before the
-                     * bundle and catches a module that throws on load — and the JavaScript context
+                     * about why. The page's own black box knows why - boot.js installs before the
+                     * bundle and catches a module that throws on load - and the JavaScript context
                      * survives that throw, so it can be read out of a page that never booted.
                      *
                      * Read here rather than left to a second call, because the whole point of a
@@ -2392,7 +2392,7 @@ internal sealed partial class AddInSession
                 }
 
                 // A standing dialog owns the host thread, and every OTHER route answers normally
-                // while it does — so a session can look healthy for minutes while nothing it is
+                // while it does - so a session can look healthy for minutes while nothing it is
                 // asked to do can run. It was found by a person looking at the screen, which is
                 // the one instrument a harness does not have (2026-08-07).
                 foreach (var standing in DialogWatch.Dialogs())
@@ -2565,7 +2565,7 @@ internal sealed partial class AddInSession
                 // The active one is not the only one that can drift. A background tab holds a
                 // copy the developer is not looking at, so a module written from outside while
                 // its tab sits behind another goes stale with nothing to notice until it is
-                // clicked — and then it is the developer who notices.
+                // clicked - and then it is the developer who notices.
                 var paneRows = (ReadOpenModules() ?? [])
                     .Select(pane =>
                     {
@@ -2662,7 +2662,7 @@ internal sealed partial class AddInSession
             case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:
             {
                 // A module's shape, from the analyzer, so a caller can assert on structure rather
-                // than read the text back and parse it a second time — in a second language, with
+                // than read the text back and parse it a second time - in a second language, with
                 // a second set of bugs.
                 if (_analysis is not { } outlineAnalysis)
                 {
@@ -2709,7 +2709,7 @@ internal sealed partial class AddInSession
                 // Adding, renaming and removing components, from INSIDE.
                 //
                 // This is what a fixture is made of, and until now it was the one thing a harness
-                // had to reach in through `Workbook.VBProject` for — which needs "Trust access to
+                // had to reach in through `Workbook.VBProject` for - which needs "Trust access to
                 // the VBA project object model" turned on. The add-in is already past that gate:
                 // the host hands it the VBE at OnConnection. So the fixture can be built through
                 // the door, and the setting can stay off (2026-08-07).
@@ -2763,8 +2763,8 @@ internal sealed partial class AddInSession
                             }
 
                             // Named here rather than left as Module1, because a fixture is its
-                            // names. The editor refuses some outright — Circle is owned by the
-                            // Excel object library — and says so with a bare HRESULT, so the
+                            // names. The editor refuses some outright - Circle is owned by the
+                            // Excel object library - and says so with a bare HRESULT, so the
                             // refusal is reported with the name that caused it.
                             if (componentName is { Length: > 0 })
                             {
@@ -2776,7 +2776,7 @@ internal sealed partial class AddInSession
                                 {
                                     // Taken back out. A refused name otherwise leaves a Module1
                                     // nobody asked for, in a project a fixture is about to make
-                                    // claims about — and the next run finds it and is confused by
+                                    // claims about - and the next run finds it and is confused by
                                     // it. Add either produces the component that was asked for or
                                     // produces nothing.
                                     try { components?.InvokeWithObject("Remove", added); }
@@ -2795,7 +2795,7 @@ internal sealed partial class AddInSession
                             // The strip AND the tree. Neither republishes on its own, and they are
                             // separate publishes: the first version of this route refreshed the
                             // tabs only, so the explorer went on listing three components while
-                            // the strip showed eight — a surface describing two different
+                            // the strip showed eight - a surface describing two different
                             // projects at once (the developer, 2026-08-07).
                             ComponentsChanged();
 
@@ -2817,7 +2817,7 @@ internal sealed partial class AddInSession
                             //
                             // This used to be its own COM call: find the component, call Remove,
                             // republish. That was true of the collection and false of everything
-                            // else — the page's unwritten edits were left to be flushed into a
+                            // else - the page's unwritten edits were left to be flushed into a
                             // module that no longer existed, and this session went on holding a
                             // baseline and breakpoints for it. A harness removing a component saw
                             // a different machine state than a developer removing the same one
@@ -2887,7 +2887,7 @@ internal sealed partial class AddInSession
             {
                 // Opening and CLOSING a module's pane.
                 //
-                // `caret` opens one on the way to a line, and until now nothing closed one — so
+                // `caret` opens one on the way to a line, and until now nothing closed one - so
                 // every test of what the tab strip does when a tab goes had to reach into the
                 // page's private workspace through eval, which is a test of the probe as much as
                 // of the thing. Four defects in the strip this week were found that way and each
@@ -2900,7 +2900,7 @@ internal sealed partial class AddInSession
                     case "open":
                         // The workbook is PASSED ON. It was computed and then dropped, so
                         // `project=` did nothing at all on open and a bare name resolved
-                        // shown-project-first — meaning the second workbook's copy of a shared
+                        // shown-project-first - meaning the second workbook's copy of a shared
                         // module name could not be opened from a script by any argument.
                         //
                         // That is why the two-workbook state was unreachable from the harness, and
@@ -2920,7 +2920,7 @@ internal sealed partial class AddInSession
                     case "close":
                     {
                         // Through the same gate the tab's own X uses, so a module with unwritten
-                        // edits gets the question rather than the guillotine — and `action` is how
+                        // edits gets the question rather than the guillotine - and `action` is how
                         // a caller answers it in advance.
                         request.Query.TryGetValue("answer", out var closeAnswer);
                         OnModuleCloseRequested(paneModule, DisplayFromProjectId(paneOwner), closeAnswer);
@@ -3090,7 +3090,7 @@ internal sealed partial class AddInSession
             {
                 // What is actually THERE, as opposed to what the surface is showing.
                 //
-                // This is the question a fixture asks twice — once to build and once to check —
+                // This is the question a fixture asks twice - once to build and once to check -
                 // and it was the last one that could only be answered by reaching in through
                 // `Workbook.VBProject`, which needs the trust setting. Answered from inside, where
                 // the add-in already is.
@@ -3146,15 +3146,15 @@ internal sealed partial class AddInSession
 
                 // The identity of the project THIS REPLY DESCRIBES, read off that project.
                 //
-                // It used to be DisplayFromProjectId(_shownProject) — the workbook the surface
-                // happened to be showing — so asking about the second workbook answered with the
+                // It used to be DisplayFromProjectId(_shownProject) - the workbook the surface
+                // happened to be showing - so asking about the second workbook answered with the
                 // second workbook's components under the FIRST workbook's id. The reply
                 // contradicted itself, and a caller doing the obvious thing (read `projectId`,
                 // pass it to `pane` or `module`) was then addressing the wrong workbook while
                 // holding a reply that looked right.
                 //
                 // That is why the two-workbook state could never be set up from a script, which
-                // is why every defect in this class — navigation, tab labels, breakpoints — had
+                // is why every defect in this class - navigation, tab labels, breakpoints - had
                 // to be found by hand (2026-08-07).
                 // Through DisplayFromProjectId, so the shape is unchanged: the field carries the
                 // workbook FILE NAME, which is the form every route's `project=` argument takes.

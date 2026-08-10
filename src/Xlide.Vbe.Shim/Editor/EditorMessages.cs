@@ -62,7 +62,7 @@ public sealed record SetCaretMessage(
 
 /// <summary>
 /// The modules the editor has open, and which one is showing. Projects runs parallel to
-/// Modules — the workbook each tab belongs to, by the name the tree uses — so the strip can
+/// Modules - the workbook each tab belongs to, by the name the tree uses - so the strip can
 /// say WHICH Module1 when two workbooks hold one.
 /// </summary>
 public sealed record SetModulesMessage(
@@ -108,7 +108,7 @@ public sealed record SurfaceWatchRow(
     [property: JsonPropertyName("context")] string Context);
 
 /// <summary>
-/// One library the Object Browser lists: a referenced type library, or an open project —
+/// One library the Object Browser lists: a referenced type library, or an open project -
 /// the kind says which, because only a project's members can be navigated to.
 /// </summary>
 public sealed record ObLibraryRow(
@@ -123,7 +123,7 @@ public sealed record ObTypeRow(
 
 /// <summary>
 /// One member of a type: its signature spelled the way VBA would. The line is where the
-/// member lives in its module — meaningful only for project members, zero elsewhere.
+/// member lives in its module - meaningful only for project members, zero elsewhere.
 /// </summary>
 public sealed record ObMemberRow(
     [property: JsonPropertyName("name")] string Name,
@@ -179,7 +179,7 @@ public sealed record SurfaceLocalRow(
 /// <summary>
 /// What the debugger has in scope. Context names the broken procedure. Stopped false is the
 /// idle state; stopped true with no rows is a break whose variables cannot be read yet, or a
-/// scope with nothing in it — the panel must not claim "not stopped" during a break.
+/// scope with nothing in it - the panel must not claim "not stopped" during a break.
 /// </summary>
 public sealed record SetLocalsMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -416,7 +416,7 @@ public sealed record CodeActionResultMessage(
 
 /// <summary>
 /// The answer to one rename: which modules changed and how many uses went in each, or the reason
-/// nothing changed. The new text is not sent back — the host has already written it, and the open
+/// nothing changed. The new text is not sent back - the host has already written it, and the open
 /// tabs are refreshed by the ordinary document sync.
 /// </summary>
 public sealed record RenameResultMessage(
@@ -479,7 +479,7 @@ public sealed record SurfaceOutlineProcedure(
 
 /// <summary>
 /// The answer to one outline request: the module's procedures in declaration order. Failed
-/// marks an answer that is a shrug rather than a statement — the engine timed out or threw —
+/// marks an answer that is a shrug rather than a statement - the engine timed out or threw -
 /// so the page keeps what it already shows instead of blanking an unfolded list.
 /// </summary>
 public sealed record OutlineResultMessage(

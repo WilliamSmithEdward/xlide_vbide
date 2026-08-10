@@ -1,15 +1,15 @@
-﻿<#
+<#
 .SYNOPSIS
     Everything that must hold before a commit, in one command.
 
 .DESCRIPTION
-    The gate was being assembled by hand each time â€” page typecheck here, page build there,
-    dotnet build, dotnet test, a Release publish, a string check for the debug door â€” and a
+    The gate was being assembled by hand each time - page typecheck here, page build there,
+    dotnet build, dotnet test, a Release publish, a string check for the debug door - and a
     hand-assembled gate is one someone eventually runs four fifths of. This runs the lot and
     says PASS or FAIL once, naming what failed.
 
     It does NOT need an editor: everything here is buildable and checkable on any machine.
-    The live probes are a separate act, because they need a host â€” `-Live` runs them too,
+    The live probes are a separate act, because they need a host - `-Live` runs them too,
     which requires an editor already open (tools\dev.ps1 -KeepOpen).
 
 .EXAMPLE
@@ -39,7 +39,7 @@ $ErrorActionPreference = 'Continue'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $pageRoot = Join-Path $repoRoot 'ui\editor'
 
-# The SDK and the native linker are not necessarily on the machine PATH â€” the same reason
+# The SDK and the native linker are not necessarily on the machine PATH - the same reason
 # dev.ps1 does this. A verify that cannot find the compiler is not a verdict about the code.
 $localDotnet = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet'
 if (Test-Path (Join-Path $localDotnet 'dotnet.exe')) {
@@ -233,7 +233,7 @@ Step 'debug api is documented and driven' {
 }
 
 # Named, not left to whichever directory the gate was started from. Both of these used to be
-# bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory â€” so
+# bare `dotnet build` / `dotnet test`, which pick the solution out of the CURRENT directory - so
 # the gate passed from the repo root and failed with MSB1003 from anywhere else (2026-08-07). A
 # check whose answer depends on where you are standing is not a check.
 $solution = Join-Path $repoRoot 'xlide_vbide.slnx'
@@ -316,7 +316,7 @@ if ($Live) {
 
         # A session that has only just launched is still seeding: the engine is starting, the
         # first analysis pass has not run, and the ghost readers may not be attached. Probes
-        # that assert a healthy session then fail on the truth that it is not healthy YET â€”
+        # that assert a healthy session then fail on the truth that it is not healthy YET  - 
         # which is a real answer to the wrong question (2026-08-06, on a release gate).
         $discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
         if (Test-Path $discovery) {

@@ -361,7 +361,7 @@ internal sealed class DebugServer : IDisposable
             {
                 // REFUSED rather than clamped. A body larger than the buffer used to be silently
                 // shortened to whatever fitted, and the caller most likely to send one is
-                // `module` POST — so an oversized module would be written to the workbook
+                // `module` POST - so an oversized module would be written to the workbook
                 // TRUNCATED, losing the developer's code behind a reply that said it worked. "A
                 // write that fails must fail in its reply, not only in the log" applies to the
                 // door as much as it did to the writer (lessons-2026-08-07).
@@ -691,7 +691,7 @@ public sealed record DebugWindowsReply(
 
 /// <summary>
 /// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
-/// leaves it out — the difference between the editor's menu and the product's.
+/// leaves it out - the difference between the editor's menu and the product's.
 /// </summary>
 public sealed record DebugMenuRow(
     [property: JsonPropertyName("index")] int Index,
@@ -765,8 +765,8 @@ public sealed record DebugDialogsReply(
     ///
     /// This route observes a thing that another part of this door is actively removing, and an
     /// instrument that changes what it measures has to say so in its own answer. An empty
-    /// `dialogs` means one of two opposite things — nothing opened, or something opened and was
-    /// cancelled a second ago — and reading it as the first when it was the second is a mistake
+    /// `dialogs` means one of two opposite things - nothing opened, or something opened and was
+    /// cancelled a second ago - and reading it as the first when it was the second is a mistake
     /// that has been made here (2026-08-09: a menu item was driven, its dialog was cancelled by
     /// the guard, `dialogs` answered empty, and it read exactly like an item that never ran).
     ///
@@ -1053,7 +1053,7 @@ public sealed record DebugPerfReply(
 /// What a script run in the page answered with.
 ///
 /// Two fields for one answer, because the encoding bit twice. `result` is the browser's own JSON
-/// of the value, so a script returning a STRING comes back quoted — and a script returning a
+/// of the value, so a script returning a STRING comes back quoted - and a script returning a
 /// JSON string comes back quoted twice. One parse then leaves a string that reads as an object
 /// right up until every property of it is undefined, which is a probe reporting false for
 /// something that worked (2026-08-07). `value` is that unwrapped as far as it goes, so a caller
@@ -1067,7 +1067,7 @@ public sealed record DebugEvalReply(
 
 /// <summary>
 /// A condition waited for in the page: whether it came true, and how long it took. Elapsed
-/// is the interesting half when it did — a condition met in 4ms and one met in 4 seconds are
+/// is the interesting half when it did - a condition met in 4ms and one met in 4 seconds are
 /// different facts about the same PASS.
 /// </summary>
 public sealed record DebugAwaitReply(
@@ -1076,7 +1076,7 @@ public sealed record DebugAwaitReply(
     [property: JsonPropertyName("detail")] string Detail);
 
 /// <summary>
-/// One element the page holds: where it is, what it is, and — when asked — which CSS rules
+/// One element the page holds: where it is, what it is, and - when asked - which CSS rules
 /// claim a property and what the winner computed to. The rule list is the point: a page
 /// sharing a stylesheet with a large bundle loses arguments it never knew it was having.
 /// </summary>

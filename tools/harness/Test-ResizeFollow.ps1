@@ -1,10 +1,10 @@
-# Does the overlay follow a frame resize, with panes open and with none visible —
+# Does the overlay follow a frame resize, with panes open and with none visible -
 # and does the BROWSER follow the overlay?
 #
 # Guards the 2026-08-04 fix: placement used to follow only PANE events, so the empty
 # workspace resized in silence. Also guards the 2026-08-05 fix: the browser's size rode
 # only on WM_SIZE delivery, and a raced resize left the page laid out for a width the
-# window no longer had — its minimap and scrollbar fell off the right edge. Placement now
+# window no longer had - its minimap and scrollbar fell off the right edge. Placement now
 # asserts the browser bounds every pass, so the Chromium child must match the overlay
 # after every resize here. Run tools\dev.ps1 -KeepOpen first, then this. Expected:
 # MATCH on every line (measured DPI-aware; without UseRealPixels a scaling artifact reads

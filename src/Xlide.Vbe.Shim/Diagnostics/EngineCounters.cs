@@ -7,8 +7,8 @@ namespace Xlide.Vbe.Shim.Diagnostics;
 /// <summary>
 /// What the analyzer costs, per method, split into QUEUED and CALLED.
 ///
-/// Every language feature this product has goes down one pipe — completions, hover, signature
-/// help, diagnostics, navigation, rename, semantic tokens, outline — and that pipe serves ONE
+/// Every language feature this product has goes down one pipe - completions, hover, signature
+/// help, diagnostics, navigation, rename, semantic tokens, outline - and that pipe serves ONE
 /// request at a time behind a semaphore. So a method's total latency is two different things
 /// added together, and only one of them is the analyzer's fault: the wait to get on the pipe,
 /// and the round trip once on it. A diagnostics pass over a large module delays every keystroke's
@@ -17,7 +17,7 @@ namespace Xlide.Vbe.Shim.Diagnostics;
 /// Nothing measured this before today. It is the largest perf blind spot in the product: the
 /// features a developer feels most are the ones with no instrument at all.
 ///
-/// Per method rather than in aggregate, because the methods have nothing in common — hover is
+/// Per method rather than in aggregate, because the methods have nothing in common - hover is
 /// called on a mouse move and diagnostics on a debounce, and averaging them describes neither.
 /// Debug only, allocation-light, never throws.
 /// </summary>

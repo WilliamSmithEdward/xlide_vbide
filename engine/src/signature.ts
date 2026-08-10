@@ -2,7 +2,7 @@
 //
 // Same shape as hover: the resolver is pure, the project facts come from the shared assembly,
 // and the answer is the callee's signature line with the active parameter marked. Signatures are
-// never invented — a callee with no known signature yields no tip.
+// never invented - a callee with no known signature yields no tip.
 
 import { resolveSignatureHelp } from '../../../xlide_vscode/src/analyzer';
 import { assembleContext } from './moduleContext';

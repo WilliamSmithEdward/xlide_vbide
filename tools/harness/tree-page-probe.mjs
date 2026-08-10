@@ -3,7 +3,7 @@
 //
 // Two things live on a row and both are here, because they are one surface: the plus that adds to
 // a workbook, and the menus that a right-click opens. The destructive one gets the most attention
-// — the menu offers Remove on a module and not on a document, the box asks before anything goes,
+// - the menu offers Remove on a module and not on a document, the box asks before anything goes,
 // Cancel and Escape keep the module, and Remove takes it out of the tree AND out of the tab strip
 // without raising the unsaved-changes question on the way.
 //
@@ -56,7 +56,7 @@ const DRIVE = `(async () => {
   // The keyboard's way back to it. A pointer-only reveal would leave this at 0.
   //
   // AFTER THE FADE, not during it. getComputedStyle reports the value the transition has reached,
-  // so reading it in the same tick as the focus reports the opacity it is coming FROM — 0, every
+  // so reading it in the same tick as the focus reports the opacity it is coming FROM - 0, every
   // time, which reads exactly like a rule that does not work.
   plusButtons[0].focus();
   await sleep(200);
@@ -83,7 +83,7 @@ const DRIVE = `(async () => {
 
   /*
    * ALWAYS VISIBLE, at any pane width. The row used to be content-box, so it was the pane's width
-   * PLUS its own padding, and the last ten pixels of it — where a right-aligned control sits —
+   * PLUS its own padding, and the last ten pixels of it - where a right-aligned control sits -
    * hung off the edge into the tree's own horizontal scroll. The control was there and could not
    * be seen, which is worse than not having it.
    *

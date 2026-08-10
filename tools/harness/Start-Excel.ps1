@@ -10,7 +10,7 @@
     add-ins at all, so the thing under test is never there.
 
     ATTACHED THROUGH ITS WINDOW, not the running object table. A host publishes itself in the ROT
-    lazily — ten to forty seconds after it is visibly ready — and none of that wait says anything
+    lazily - ten to forty seconds after it is visibly ready - and none of that wait says anything
     about the add-in. Asking a worksheet window for its native object model answers in under a
     second, and names the instance by window so there is no chance of adopting a different one.
 
@@ -153,7 +153,7 @@ $excel.DisplayAlerts = $false
 # The editor is opened through Excel's OWN ribbon command, not through $excel.VBE.
 #
 # That matters more than it looks: `Application.VBE` and `Workbook.VBProject` are exactly what
-# "Trust access to the VBA project object model" refuses, and with it off they come back NULL —
+# "Trust access to the VBA project object model" refuses, and with it off they come back NULL -
 # not an exception, a null, so a try/catch reports success and prints nothing. ExecuteMso is
 # Excel executing its own Developer > Visual Basic button, and is not gated. So this script, and
 # everything the debug api does after it, works with that setting OFF (verified 2026-08-07).

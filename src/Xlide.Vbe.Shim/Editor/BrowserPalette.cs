@@ -9,11 +9,11 @@ namespace Xlide.Vbe.Shim.Editor;
 
 /// <summary>
 /// The Object Browser as the developer chose it (2026-08-05): a real top-level window of our
-/// own, dark, floating beside the editor — hosting a second browser surface that boots the
+/// own, dark, floating beside the editor - hosting a second browser surface that boots the
 /// editor bundle into its browser page (?view=objbrowser). Nothing native is involved, so
 /// there is nothing the editor can blank, close, or reclaim.
 ///
-/// The palette answers the page's questions itself — libraries, types, members, navigation —
+/// The palette answers the page's questions itself - libraries, types, members, navigation -
 /// through delegates its owner wires to the typelib catalog and the engine. Closing hides
 /// the window; a second summons presents it again with its state intact.
 /// </summary>
@@ -39,7 +39,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
     /// <summary>A library's types; null when the library is unknown.</summary>
     public Func<string, ObTypeRow[]?>? TypesRequested { get; set; }
 
-    /// <summary>A type's members, answered through the reply — some answers wait on the engine.</summary>
+    /// <summary>A type's members, answered through the reply - some answers wait on the engine.</summary>
     public Action<string, string, Action<ObMemberRow[]>>? MembersRequested { get; set; }
 
     /// <summary>The developer picked a project member; the editor goes to it.</summary>
@@ -121,7 +121,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
     /// Stamps the editor's own icon onto the window, so an xlide window reads as part of
     /// the editor (developer, 2026-08-05). The running editor is the source: its window is
     /// asked via WM_GETICON, its class is the fallback, and the handles are shared rather
-    /// than copied — the palette lives strictly inside the editor's lifetime, so borrowing
+    /// than copied - the palette lives strictly inside the editor's lifetime, so borrowing
     /// is safe, and no icon resource is taken from anyone's files.
     /// </summary>
     private static void AdoptOwnerIcon(nint window, nint owner)
@@ -156,7 +156,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
 
     /// <summary>
     /// Hides the palette. An owned window does not follow its owner out of sight, so the
-    /// editor closing must say this explicitly — otherwise the palette outlives the editor
+    /// editor closing must say this explicitly - otherwise the palette outlives the editor
     /// window and is standing there, ownerless-looking, when the editor next opens
     /// ("this pops up when I first open xlide", 2026-08-05). Pure user32, so it is safe on
     /// the editor's close path (lesson 27).
@@ -184,8 +184,8 @@ internal sealed unsafe class BrowserPalette : IDisposable
     {
         // The browser is created invisible and shown on the page's word (the editor's loader
         // discipline, lesson 27). This window has no loader, so the page's FIRST message is
-        // its word: revealing any earlier is a call on a controller that does not exist yet —
-        // the white nothing of 09:18 — and the browser's idle ground is the theme's, so there
+        // its word: revealing any earlier is a call on a controller that does not exist yet -
+        // the white nothing of 09:18 - and the browser's idle ground is the theme's, so there
         // is no flash to hide.
         _browser?.Reveal();
 
@@ -354,7 +354,7 @@ internal sealed unsafe class BrowserPalette : IDisposable
                     return 0;
 
                 case Win32.WmClose:
-                    // Ours alone — nothing native sends this window anything. Closing hides,
+                    // Ours alone - nothing native sends this window anything. Closing hides,
                     // so the next summons presents the same page, state intact.
                     Win32.ShowWindow(window, Win32.SwHide);
                     return 0;

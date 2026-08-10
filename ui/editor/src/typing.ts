@@ -1,5 +1,5 @@
 // VBA typing automation: Smart Enter, Smart Tab, Smart Backspace, canonical casing, and loop
-// iterator sync — the extension's typing feel, re-created over Monaco.
+// iterator sync - the extension's typing feel, re-created over Monaco.
 //
 // The structural half runs HERE, in the page, on the extension's own pure helpers, bundled
 // straight from its source: what Enter leaves behind, what Tab means at this caret, what
@@ -84,13 +84,13 @@ class TypingAutomation {
 
     // Tab and Backspace, rebound under the extension's own when-clauses. Both fall through to
     // the editor's stock command whenever the smart answer is "nothing", so the keys never go
-    // dead — they only gain the VBE-flavoured cases.
+    // dead - they only gain the VBE-flavoured cases.
     //
     // The scope key is what makes them safe with more than one editor group. A standalone
     // editor's addCommand registers into a keybinding service SHARED by every editor on the
     // page, and the when-clause is the only scoping there is: with two groups, two identical
     // Backspace rules matched, the later one won everywhere, and its handler deleted in ITS
-    // editor — so Backspace looked dead in the group being typed in (2026-08-06). A context
+    // editor - so Backspace looked dead in the group being typed in (2026-08-06). A context
     // key created on THIS editor is true only in this editor's context, so each rule matches
     // exactly the editor it belongs to.
     const scope = `xlideTypingScope${nextEditorScope++}`;
@@ -314,7 +314,7 @@ class TypingAutomation {
       // THE DEVELOPER'S INDENT, not the analyzer's default.
       //
       // smartBlockInsertion takes an indentUnit and this call never passed one, so a block body
-      // was indented with the analyzer's fallback — a tab — whatever the setting said. With
+      // was indented with the analyzer's fallback - a tab - whatever the setting said. With
       // "indent with tabs" OFF, pressing Enter after a plain line gave spaces and pressing it
       // after `If ... Then` gave a tab, in the same file, from the same key (2026-08-08).
       indentUnit: indentUnitOf(),

@@ -8,14 +8,14 @@ namespace Xlide.Vbe.Shim.Editor;
 /// accessibility call they make happens here, never on the host thread.
 ///
 /// The day the panels died (2026-08-05, "locals: skipped 4 unreadable element(s)", 24 sessions
-/// straight) the crash itself turned out to be an undersized variant out-parameter — see
+/// straight) the crash itself turned out to be an undersized variant out-parameter - see
 /// ComVariantBlock in Interop/UiAutomation.cs for that story. The thread stays because the old
 /// arrangement was wrong independently: the variable rows are served by the editor's own
 /// accessibility provider inside this process, and a client asking from the provider's OWN
-/// thread is the configuration the accessibility framework documents as unsupported — it
+/// thread is the configuration the accessibility framework documents as unsupported - it
 /// re-enters the provider mid-call and worked on borrowed luck. A separate thread asks the way
 /// every real client does: serviced while the editor's thread pumps, which during a break it
-/// does constantly — that is what makes the debugger interactive.
+/// does constantly - that is what makes the debugger interactive.
 ///
 /// The host thread therefore only ever ASKS (<see cref="RequestRead"/>) and LOOKS
 /// (<see cref="Locals"/>, <see cref="Watches"/>); it never waits. If a read wedges, the
@@ -83,7 +83,7 @@ internal sealed class GhostReaderThread : IDisposable
     private void Run()
     {
         // The automation object, the elements, and every read stay on this one thread, so the
-        // apartment can simply be the multithreaded one — the same shape as any external
+        // apartment can simply be the multithreaded one - the same shape as any external
         // accessibility client.
         var initialized = Win32.CoInitializeEx(0, Win32.ApartmentMultithreaded) >= 0;
 

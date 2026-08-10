@@ -1,5 +1,5 @@
 // Pins the engine contract the no-save close depends on (fixed 2026-08-05): the engine's
-// live copy of a module — fed by textDocument/didChange — OUTRANKS its seeded copy in
+// live copy of a module - fed by textDocument/didChange - OUTRANKS its seeded copy in
 // diagnosis, a reseed alone cannot heal a stale live copy, and the corrective full-source
 // didChange the host now sends after a revert (or a Replace All) is what makes the
 // Problems pane follow the text. Walks the BUILT engine (engine/dist/engine.cjs) through
@@ -150,7 +150,7 @@ try {
   check("the live copy outranks the seed", liveDirty.includes("undeclared-variable"), liveDirty.join(","));
 
   // What a full pass does after a revert: reseed with the reverted module text. Today's
-  // contract is that this alone CANNOT heal the live copy — which is why the host must
+  // contract is that this alone CANNOT heal the live copy - which is why the host must
   // correct it. If this check ever fails, the engine started dropping live copies on seed,
   // and the shim's correction has become redundant: rethink both together.
   await seed(2, CLEAN);
@@ -159,7 +159,7 @@ try {
     reseeded.includes("undeclared-variable"), reseeded.join(","));
 
   // The fix: the corrective full-source didChange the host sends for every rewrite that
-  // bypassed the page — the revert and Replace All.
+  // bypassed the page - the revert and Replace All.
   notify("textDocument/didChange", { projectId: PROJECT, moduleName: MODULE, source: CLEAN });
   const corrected = await diagnose(2);
   check("the corrective didChange heals it (the fix)", corrected.length === 0, corrected.join(","));

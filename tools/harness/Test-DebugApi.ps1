@@ -332,7 +332,7 @@ Check 'log waits for an event instead of sleeping for it' {
     #
     # It watches for the line the COMMAND ITSELF writes, not for a publish that follows.
     # Matching on "modules: publish" made the check depend on modules being open, which they
-    # are early in a fresh session and are not after two suites have run against it — so it
+    # are early in a fresh session and are not after two suites have run against it - so it
     # passed all day and then failed on a run where nothing had changed but the order
     # (2026-08-06). A probe should assert what it is testing, not the weather.
     $since = (Invoke-RestMethod "$api/log?max=1" -TimeoutSec 8).next

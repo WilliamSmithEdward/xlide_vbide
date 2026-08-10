@@ -1,5 +1,5 @@
 /*
- * The drag furniture shared by both drags — tool panes between sections, and code editor
+ * The drag furniture shared by both drags - tool panes between sections, and code editor
  * tabs between editor groups. One implementation, so a tab and a pane behave identically
  * under the hand: the page dims to say a drag is a mode, a compass of five zones appears
  * over whatever region the pointer is on, the zone under the pointer lights, and a preview
@@ -58,7 +58,7 @@ export class DragCompass {
    * The drag became real: dim the page and stand the compass by.
    *
    * `abandon` is called when the drag ends without a release the pointer stream could
-   * report — the window losing focus (alt-tab, or the host stealing it, which this host
+   * report - the window losing focus (alt-tab, or the host stealing it, which this host
    * does freely), the document being hidden, or Escape. Without it the dim and the compass
    * outlived the drag and the surface was left looking permanently mid-gesture
    * (developer, 2026-08-06).
@@ -98,7 +98,7 @@ export class DragCompass {
 
   /**
    * The pointer is over a region: places the compass on it, shows only the zones that region
-   * allows, and answers the zone under the pointer — null when the pointer is on the region
+   * allows, and answers the zone under the pointer - null when the pointer is on the region
    * but not on any petal, which means a release would drop nothing.
    */
   over(bounds: DOMRect, x: number, y: number, allowed: DropZone[]): DropZone | null {

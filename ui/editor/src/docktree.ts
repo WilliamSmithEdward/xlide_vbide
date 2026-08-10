@@ -1,8 +1,8 @@
 /*
- * The split tree, as arithmetic — no DOM, no pointer, no Monaco.
+ * The split tree, as arithmetic - no DOM, no pointer, no Monaco.
  *
  * Both layouts are the same shape: a section of tool panes and the editor area are each a
- * tree of splits ending in groups, and every drag does one of four things to it — put a
+ * tree of splits ending in groups, and every drag does one of four things to it - put a
  * thing in a group, split a group beside another, take a thing out, or dissolve what is
  * left empty. That last one is where the bugs live: removing a pane can empty a group, which
  * can leave a split with one child, which must collapse into its parent, and the sizes have
@@ -73,7 +73,7 @@ export function groupHolding<T>(node: TreeNode<T> | null, tab: T): TreeGroup<T> 
  * they still partition one.
  *
  * Renormalising matters. A split whose sizes no longer sum to one lays out at the wrong
- * proportions — subtly, so it reads as a rendering quirk rather than as arithmetic.
+ * proportions - subtly, so it reads as a rendering quirk rather than as arithmetic.
  */
 export function prune<T>(node: TreeNode<T> | null): TreeNode<T> | null {
   if (!node) {
@@ -109,7 +109,7 @@ export function prune<T>(node: TreeNode<T> | null): TreeNode<T> | null {
  * Puts a newcomer beside an existing group, splitting the tree where that group sits.
  *
  * A split in the SAME direction absorbs the newcomer as a sibling rather than nesting a
- * two-deep tree of one axis — which is what keeps three panes side by side looking like
+ * two-deep tree of one axis - which is what keeps three panes side by side looking like
  * three panes side by side, with two splitters, instead of a pane next to a pair.
  */
 export function splitBeside<T>(

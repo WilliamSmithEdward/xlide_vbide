@@ -19,8 +19,8 @@ export function outlineFor(
     seeded: readonly ModulePayload[],
     params: OutlineParams,
 ): OutlineProcedure[] {
-    // The live source when the request is about the module being edited; the seeded copy —
-    // current as of the last write-back — for every other module.
+    // The live source when the request is about the module being edited; the seeded copy -
+    // current as of the last write-back - for every other module.
     const source = params.source
         ?? seeded.find((module) => module.moduleName.toLowerCase() === params.moduleName.toLowerCase())?.source;
     if (source === undefined) {

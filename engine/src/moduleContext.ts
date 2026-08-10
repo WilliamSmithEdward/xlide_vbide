@@ -62,7 +62,7 @@ export interface AssembledContext {
  *
  * What is cached is built from the seeded copy of the requested module, not its live text. The
  * live text still drives every resolver directly; only the cross-module facts lag until the
- * next write-back, which is the same bargain the editor extension strikes — and what turns the
+ * next write-back, which is the same bargain the editor extension strikes - and what turns the
  * per-keystroke cost of a completion from indexing the whole project into scanning one module.
  */
 const contextCache = new WeakMap<readonly ModulePayload[], Map<string, AssembledContext>>();

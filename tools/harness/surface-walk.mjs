@@ -76,7 +76,7 @@ async function closeOne() {
  * An unweighted walk over these actions drains the workspace: there are two ways to close a tab
  * and one to open one, so it reaches empty and stays there. The first run of this reported 1,223
  * checks and nothing broken while spending 54 of 70 steps with nothing open, never splitting,
- * and never once holding two modules of the same name — every check about those passed because
+ * and never once holding two modules of the same name - every check about those passed because
  * the state never happened (2026-08-07). Opening is weighted to outpace closing, and the
  * coverage line at the end says which states were actually reached.
  */
@@ -119,7 +119,7 @@ async function sweep(where) {
    *
    * The surface covers the host's own code panes; it does not replace them. Run, Step, Compile
    * and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret inside it, not on the
-   * page — so a page showing one module while the native pane holds another is a Run that
+   * page - so a page showing one module while the native pane holds another is a Run that
    * executes where nobody is looking and a breakpoint on the wrong line, with nothing on screen
    * to say so. Every check in this repo read the page and the workbook and never the panes
    * below, until this one.
@@ -145,7 +145,7 @@ async function sweep(where) {
      *
      * Names agreeing is not parity: a surface holding an empty document for a module the host
      * has 42 lines of passes every name check there is and shows a blank editor. And the active
-     * module is not the only one that can drift — a background tab holds a copy nobody is
+     * module is not the only one that can drift - a background tab holds a copy nobody is
      * looking at, so it can be wrong until it is clicked, and then the developer finds out.
      *
      * A pane the surface holds no text for is not a disagreement: it has simply never been
@@ -218,8 +218,8 @@ async function sweep(where) {
    * THE PROVIDER GATE, and it is the most valuable check here.
    *
    * Every language provider answers only for the host-active module and returns nothing
-   * otherwise, so when the editor shows one module and the host believes another — or believes
-   * none — hover, completions, signature help and quick fixes all go silent on a tab that looks
+   * otherwise, so when the editor shows one module and the host believes another - or believes
+   * none - hover, completions, signature help and quick fixes all go silent on a tab that looks
    * and behaves normally. Nothing else on screen is wrong, which is why it reached a developer
    * rather than a test: closing the active module's pane left the host with `active: null`, the
    * page promoted a tab to show, and the host was never told (2026-08-08).
@@ -227,7 +227,7 @@ async function sweep(where) {
   if (!w.empty) {
     check(where, "the editor and the host agree which module is active",
       ui.focus.host !== null && ui.focus.model === ui.focus.host.model,
-      `editor=${ui.focus.model} host=${ui.focus.host?.model ?? "null"} — every language provider is silent`);
+      `editor=${ui.focus.model} host=${ui.focus.host?.model ?? "null"} - every language provider is silent`);
   }
 
   // Panes are permanent or not; none should vanish from the list.

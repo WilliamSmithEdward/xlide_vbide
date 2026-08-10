@@ -6,7 +6,7 @@ namespace Xlide.Vbe.Shim.Editor;
 
 /// <summary>
 /// The Object Browser's data: every type library a project references, read into browsable
-/// rows — libraries, their types, and each type's members with signatures rendered the way
+/// rows - libraries, their types, and each type's members with signatures rendered the way
 /// VBA would spell them.
 ///
 /// Libraries load once and stay loaded; types and members are read on first request and

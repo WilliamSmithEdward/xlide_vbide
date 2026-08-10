@@ -2,7 +2,7 @@
  * The run-and-stop cycle, with parity against the native editor at every stage.
  *
  * This is where parity matters most. Run, Step and ToggleBreakpoint act on the host's own ACTIVE
- * CODE PANE and the caret inside it — not on the page — so a surface that has drifted means a
+ * CODE PANE and the caret inside it - not on the page - so a surface that has drifted means a
  * breakpoint on the wrong line and a step into somewhere the developer is not looking. Checking
  * only the page here would pass while the debugger walked another module entirely.
  *
@@ -50,7 +50,7 @@ async function parity(after) {
 /**
  * Stopped, as the product spells it.
  *
- * The mode is a STRING — "design", "run" or "break" — not a number. Comparing it to 2 is a
+ * The mode is a STRING - "design", "run" or "break" - not a number. Comparing it to 2 is a
  * predicate that is false in every state including the one it is looking for, so the run
  * reported as never stopping while it was stopped the whole time (2026-08-08).
  */

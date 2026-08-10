@@ -51,7 +51,7 @@ function WaitFor([string] $what, [scriptblock] $condition, [int] $seconds = 15) 
 }
 
 # Two documents, so there is something to split against: the fixture's CleanModule, and
-# ThisWorkbook, which every workbook has. The activation is asked for and then WAITED for —
+# ThisWorkbook, which every workbook has. The activation is asked for and then WAITED for -
 # the host opens panes and echoes tabs on its own schedule.
 Check 'both modules open, ThisWorkbook active' {
     Page 'window.xlideBridge.activateModule("CleanModule")' | Out-Null
@@ -80,7 +80,7 @@ Check 'split right makes two groups showing different modules' {
 Check 'an edit to a background document writes its own module' {
     if (-not $script:splitStood) { throw 'the split never stood' }
     # ThisWorkbook is host-active; CleanModule is a background document. The edit goes to
-    # CleanModule's MODEL — the same channel every keystroke uses — and must land in
+    # CleanModule's MODEL - the same channel every keystroke uses - and must land in
     # CleanModule, never in the active module.
     $r = Page @'
 (() => {
@@ -233,7 +233,7 @@ Check 'a pane dragged to the right section stays there across a reload' {
 }
 
 Check 'the editor keeps the room the sections do not claim' {
-    # A flex column sized the editor area to its content — nothing, for a Monaco container —
+    # A flex column sized the editor area to its content - nothing, for a Monaco container -
     # and the bottom section swallowed the workspace (2026-08-06).
     #
     # It was also RIGHT once, 2026-08-09, and the seeded layout above is why: fixed sizes of 260
@@ -327,10 +327,10 @@ Check 'a drop on a compass zone lands in that zone, and only there' {
 
 Check 'the preview shows the section it would join, and a drag ends when focus leaves' {
     # An edge whose section already stands is a JOIN, and the preview is that section's own
-    # bounds — painting half the editor there described a drop that would not happen. An
+    # bounds - painting half the editor there described a drop that would not happen. An
     # edge with no section is a NEW one, dashed, because the shape is a proposal. And a drag
-    # that loses the window — alt-tab, a screenshot tool, the host stealing focus, which
-    # this host does freely — must end, or the dim and compass outlive it (2026-08-06).
+    # that loses the window - alt-tab, a screenshot tool, the host stealing focus, which
+    # this host does freely - must end, or the dim and compass outlive it (2026-08-06).
     $r = Page @'
 (() => {
   const fire = (el, type, x, y) => el.dispatchEvent(new PointerEvent(type, { pointerId: 1, clientX: x, clientY: y, button: 0, buttons: type === "pointerup" ? 0 : 1, bubbles: true, cancelable: true }));

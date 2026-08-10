@@ -126,15 +126,15 @@ internal partial interface IUIAutomationElementArray
 /// A variant sized for the vtable, never read.
 ///
 /// Several methods above return one. They are placeholders, so this only has to be the right
-/// size — and the right size is TWENTY-FOUR bytes on x64: eight of type tag and padding, then a
+/// size - and the right size is TWENTY-FOUR bytes on x64: eight of type tag and padding, then a
 /// sixteen-byte data union (its widest member is a record's two pointers). Sixteen was the x86
 /// size, and an out-parameter eight bytes short is not harmless even on a placeholder: the
 /// callee initialises the whole variant, so the last eight bytes land on whatever the caller
 /// keeps beside the buffer. That is the corruption that took the Locals reader down for a whole
 /// day (2026-08-05): Release stack layouts had left the overhang on dead space, the Debug
 /// builds the dev loop switched to that morning put a live slot there, and every property read
-/// died in a frameless NullReferenceException while the same reads from outside the process —
-/// made with a full-size variant — worked all along.
+/// died in a frameless NullReferenceException while the same reads from outside the process -
+/// made with a full-size variant - worked all along.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Size = 24)]
 internal struct ComVariantBlock;
@@ -208,7 +208,7 @@ internal static class UiAutomationIds
     public const int EditControl = 50004;
 
     /// <summary>
-    /// UIA_PaneControlTypeId: what the Locals window's context box actually reads as — a bare
+    /// UIA_PaneControlTypeId: what the Locals window's context box actually reads as - a bare
     /// child window with no richer role (measured 2026-08-05).
     /// </summary>
     public const int PaneControl = 50033;

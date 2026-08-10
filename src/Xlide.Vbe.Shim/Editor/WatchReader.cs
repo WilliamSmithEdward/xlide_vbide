@@ -8,7 +8,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// <summary>
 /// Reads what the editor's own Watches window holds, through the accessibility interface: each
 /// watch is a list item whose name is the row's four columns run together. The editor exposes
-/// no debugger object — no watches, no values — so its own window is the only place this
+/// no debugger object - no watches, no values - so its own window is the only place this
 /// information surfaces.
 ///
 /// The window it reads is a GHOST PALETTE, prepared exactly the way the Locals one is (see
@@ -187,9 +187,9 @@ internal sealed class WatchReader : IDisposable
     /// <summary>
     /// One row's columns, split back apart.
     ///
-    /// A REAL watch row's accessible name carries no "Expression" header word — measured
+    /// A REAL watch row's accessible name carries no "Expression" header word - measured
     /// 2026-08-05 against a watch added through the native dialog: " counter Value
-    /// &lt;Out of context&gt; Type Empty Context BreakProbe.BreakHere " — the leading space is
+    /// &lt;Out of context&gt; Type Empty Context BreakProbe.BreakHere " - the leading space is
     /// the watch-type icon column's empty cell. The expression is everything before the FIRST
     /// " Value " (a watch expression can contain spaces: "counter &gt; 40"); the value can be
     /// anything, including the header words inside a string literal, so it takes everything
