@@ -121,7 +121,7 @@ the editor surface in about a second without restarting Excel.
 with the reasoning behind each. [docs/lessons.md](docs/lessons.md),
 [docs/ui-lessons.md](docs/ui-lessons.md), and [docs/editor-windows.md](docs/editor-windows.md) hold
 behaviour of the host that is documented nowhere else and was established by measurement.
-The newest handover, [docs/handoff-2026-08-09-2031.md](docs/handoff-2026-08-09-2031.md), is written for someone starting cold. Handovers are dated; the most recent one wins.
+The newest handover is written for someone starting cold: the highest-dated `docs/handoff-*.md`. They are dated because each supersedes the last, so the most recent one wins and the others are history.
 
 ## About the code
 

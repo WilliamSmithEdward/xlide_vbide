@@ -2,7 +2,7 @@
 
 Updated 2026-08-06, at v0.3.0.
 
-A short, current snapshot. The living documents are the newest handover, [handoff-2026-08-09-2031.md](handoff-2026-08-09-2031.md), for what happened
+A short, current snapshot. The living documents are the newest handover, the highest-dated `docs/handoff-*.md`, for what happened
 and what is next, [decisions.md](decisions.md) for choices that would be expensive to reverse,
 and [lessons.md](lessons.md) for the findings behind them.
 
