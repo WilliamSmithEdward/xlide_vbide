@@ -373,6 +373,11 @@ await api.act("treeAdd", { workbook: "TwinFixture.xlsm" });   // the row's green
 await api.act("menuBar");                                // the wrench: the editor's own dialogs
 await api.act("chooseMenuItem", { label: "Remove" });    // pointerup, which is what a menu listens for
 await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
+
+// THE PRODUCT'S RENAME, which is not `component action=rename`. This one renames the component
+// AND every mention of it; that one is the bare setter and leaves the mentions behind.
+await api.act("renameModule", { module: "Helpers", newName: "Support" });
+// -> renamed Helpers to Support: 4 mention(s) in 2 module(s) [Runner, Consumer]
 ```
 
 > **`treeMenu` needs the row to exist**, and a collapsed workbook has no component rows at all, so

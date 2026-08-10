@@ -734,6 +734,44 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * Renames a module and everything that names it, the way the tree's Rename does.
+     *
+     * THE ONE STATE-CHANGING PRODUCT ACTION THAT NOTHING COULD DRIVE. It spans modules, it has an
+     * engine behind it, and until now the only way to reach it was a person typing into
+     * `window.prompt`, which no probe can answer. `component?action=rename` is not the same
+     * operation: that is the fixture primitive, the bare `VBComponent.Name` setter, and it leaves
+     * every reference to the old name pointing at a module that no longer answers to it.
+     *
+     * The prompt is the only thing skipped, because the prompt is where the human's answer comes
+     * from. Everything after it is the code the menu item runs.
+     *
+     * Answers what the host answered: how many mentions were replaced, in how many modules, or the
+     * refusal in the words the rename box would have shown.
+     */
+    renameModule: async (args) => {
+      const module = String(args.module ?? "");
+      const newName = String(args.newName ?? "");
+      if (!module || !newName) {
+        return { did: false, detail: "renameModule needs module and newName" };
+      }
+
+      const workbook = args.workbook === undefined || args.workbook === null
+        ? null
+        : String(args.workbook);
+
+      const answer = await bridge.requestModuleRename(module, workbook, newName);
+      if (answer.refused) {
+        return { did: false, detail: answer.refused };
+      }
+
+      return {
+        did: true,
+        detail: `renamed ${module} to ${newName}: ${answer.replaced} mention(s) in `
+          + `${answer.modules.length} module(s) [${answer.modules.join(", ")}]`,
+      };
+    },
+
+    /**
      * Presses a workbook row's plus and reports the menu it opened.
      *
      * The plus is hidden until the row is hovered, and CSS :hover cannot be provoked from script,
