@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "54eec969b8a80627a2e96bf7f61ed4a9a6587176",
+  "commit": "a9fba550714532eb84e5500427e55dc0a23d7b1c",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
