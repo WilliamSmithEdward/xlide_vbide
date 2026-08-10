@@ -191,7 +191,35 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   const modeSelect = document.createElement("select");
   modeSelect.id = "sync-mode";
   modeSelect.className = "sync-mode";
-  modeSelect.addEventListener("change", () => void refresh());
+
+  /*
+   * THE CHOSEN MODE, REMEMBERED, BECAUSE THE CONTROL CANNOT REMEMBER IT ITSELF.
+   *
+   * Each direction has its own two options, so drawDirection rebuilds the list every time it runs
+   * - and it runs at the top of every refresh. replaceChildren threw the selection away, and the
+   * request four lines later read `modeSelect.value` back off the rebuilt list: the first option.
+   *
+   * So choosing "Delete them" did nothing at all. The plan was asked for with the keeping mode
+   * every time, the dropdown snapped back on its own, and the row that would have offered the
+   * delete never appeared. Measured 2026-08-09: set to trueUp, dispatch change, read back
+   * exportAll, synchronously. The api was never affected, which is why nothing caught it: a caller
+   * passes the mode as an argument and never touches this control.
+   *
+   * Kept per direction rather than as one value, because trueUp means nothing to an import.
+   */
+  const modeFor: Record<"export" | "import", string> = {
+    export: "exportAll",
+    import: "updateOnly",
+  };
+
+  modeSelect.addEventListener("change", () => {
+    modeFor[direction] = modeSelect.value;
+
+    // The sentence beside it follows the choice immediately, rather than waiting for the plan to
+    // come back: a hint that lags the control it explains is the confusion this replaced.
+    drawModeHint();
+    void refresh();
+  });
 
   const modeHint = document.createElement("span");
   modeHint.className = "sync-row-hint";
@@ -376,12 +404,12 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     modeSelect.replaceChildren();
     const choices = direction === "export"
       ? [
-        { value: "exportAll", label: "Leave the file alone" },
-        { value: "trueUp", label: "Delete the file" },
+        { value: "exportAll", label: "Keep them" },
+        { value: "trueUp", label: "Delete them" },
       ]
       : [
-        { value: "updateOnly", label: "Leave the module alone" },
-        { value: "trueUpStandardClass", label: "Delete the module" },
+        { value: "updateOnly", label: "Keep them" },
+        { value: "trueUpStandardClass", label: "Delete them" },
       ];
 
     for (const choice of choices) {
@@ -391,12 +419,38 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       modeSelect.appendChild(option);
     }
 
+    // Put the choice back on the list that was just rebuilt under it.
+    modeSelect.value = modeFor[direction];
+
+    // PLURAL, because this is a rule about a class of things and not about one file. "A file with
+    // no module" reads as though the dialog has one in mind and is asking what to do with it.
     modeLabel.textContent = direction === "export"
-      ? "A file with no module"
-      : "A module with no file";
+      ? "Files with no module"
+      : "Modules with no file";
+
+    drawModeHint();
+  }
+
+  /**
+   * What the CHOSEN option does, in the present tense.
+   *
+   * This said "Deleting makes the folder match the project exactly" whatever was selected, so a
+   * reader who had chosen to keep their files was being told about deleting, next to a control
+   * that said Keep. The one sentence beside a choice has to be about the choice that is made, or
+   * it reads as a warning about what is happening rather than a note about what is not.
+   */
+  function drawModeHint(): void {
+    const deleting = modeSelect.value === "trueUp" || modeSelect.value === "trueUpStandardClass";
+
     modeHint.textContent = direction === "export"
-      ? "Deleting makes the folder match the project exactly."
-      : "Only standard and class modules are ever deleted.";
+      ? deleting
+        ? "Files in the folder that no longer match a module are deleted, so the folder ends up "
+          + "matching the project exactly."
+        : "Files in the folder that no longer match a module are left where they are."
+      : deleting
+        ? "Modules with no file are removed from the workbook. Only standard and class modules are "
+          + "ever removed; sheets, the workbook and forms are always left alone."
+        : "Modules with no file are left in the workbook.";
   }
 
   function drawList(): void {
