@@ -55,8 +55,12 @@ body {
   position: absolute;
   inset: 0;
   display: grid;
-  /* menu bar, toolbar, main, status. */
-  grid-template-rows: auto auto 1fr auto;
+  /* Toolbar, main, status. THREE rows, not four: the menu bar was the first of them until its
+     one remaining button moved onto the toolbar. Leaving the fourth behind did not leave a gap —
+     it slid `1fr` onto the row after main, so the editor sized to its content and the window did
+     not fill (reported within the minute, 2026-08-09). A row count is a thing to change WITH the
+     markup, never after it. */
+  grid-template-rows: auto 1fr auto;
   min-height: 0;
 }
 
@@ -683,14 +687,23 @@ span.prop-value.readonly {
   padding-left: 44px;
 }
 
-/* A workbook's row: a real button, because everything on it can be done to — it toggles, it
-   carries the workbook menu — and a row that responds to the pointer is how that is announced. */
+/* A workbook's row: the twisty, the name, and the plus that adds to it. A treeitem rather than a
+   button, because it holds a button and nesting them is invalid; the tree's keydown gives it back
+   the Enter and Space the element used to carry. */
 .tree-workbook {
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 4px 10px 4px 6px;
+  /* BORDER-BOX, and this is the whole reason the plus is reliably on screen. With content-box the
+     row is 100% of the pane PLUS its own padding, so a 260px pane held a 270px row and the last
+     10px — which is exactly where a right-aligned control sits — hung off the edge into the
+     tree's horizontal scroll. The control was there and could not be seen (measured 2026-08-09:
+     plus at 266 in a pane 260 wide). The row now ends where the pane ends. */
+  box-sizing: border-box;
+  /* Tight on the right: the plus brings its own padding, and doubling it pushed the control off a
+     narrow pane rather than the name it was supposed to be protecting. */
+  padding: 2px 4px 2px 6px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -698,6 +711,18 @@ span.prop-value.readonly {
   font-weight: 600;
   text-align: left;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+/* THE NAME IS WHAT GIVES WAY. A long workbook name truncates so the plus stays on screen: a
+   control that is only sometimes reachable is worse than a name that is only sometimes whole, and
+   the row's tooltip carries the name in full either way. min-width: 0 is what lets it — a flex
+   item refuses to shrink below its content without it, so the name would push the plus out. */
+.tree-workbook-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -713,6 +738,77 @@ span.prop-value.readonly {
 .tree-workbook .codicon {
   font-size: 14px;
   opacity: 0.8;
+}
+
+/* The plus, on the workbook the pointer is over (the developer, 2026-08-09). 24px square, the
+   smallest target this product ships.
+
+   HIDDEN WITH OPACITY, never with display or visibility, and this is the part that matters. It
+   keeps its space in the row at all times, so hovering does not reflow the name beside it and the
+   row does not twitch as the pointer crosses the tree. It also stays focusable, which is what lets
+   the rule below bring it back for a keyboard: `visibility: hidden` would take it out of the tab
+   order and leave the plus reachable by pointer only.
+
+   STICKY as well as right-aligned. The row ends where the pane ends now, so the plus is inside it
+   at any pane width; sticky covers the other way it could go missing, which is the tree scrolling
+   sideways because some module has a long name. */
+.tree-add {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  right: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  /* Opaque, because a sticky control slides over the name when the tree is scrolled and a
+     translucent one would put the plus on top of legible text. */
+  background: var(--vscode-sideBar-background, #252526);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+}
+
+/* Hovering the row is what shows it — anywhere on the row, the name included, rather than only
+   over the 24 pixels the button occupies, which would be a control you have to already know about
+   to find. Focus shows it too, so tabbing through the tree reveals what the pointer would. */
+.tree-workbook:hover .tree-add,
+.tree-workbook:focus-within .tree-add,
+.tree-add:focus-visible {
+  opacity: 1;
+}
+
+/* The fade is decoration; the appearing is the information. */
+@media (prefers-reduced-motion: reduce) {
+  .tree-add {
+    transition: none;
+  }
+}
+
+/* GREEN, and the theme's own green for adding rather than a new one: this is the colour the sync
+   dialog already gives an added row, so "green means something is being added" is one idea in this
+   product and not two. The shape carries the meaning as well — colour is never the only cue. */
+.tree-add .codicon {
+  font-size: 15px;
+  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+}
+
+.tree-add:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+.tree-add:hover .codicon,
+.tree-add:focus-visible .codicon {
+  /* Brighter on the way in, still the same hue. */
+  color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.tree-add:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
 }
 
 
@@ -777,35 +873,38 @@ body.live-resize .minimap {
 
 
 
-/* The menu bar and its dropdowns. The bar is a shell row; the dropdowns are fixed-position
-   children of the body so they can hang over the editor without being clipped by any row. */
+/* The menu button, at the head of the toolbar. It was a row of its own carrying ten native menus;
+   it is one button carrying one menu, so it lives on the bar with everything else. The dropdowns
+   are still fixed-position children of the body, so they hang over the editor unclipped. */
 
 #menubar {
   display: flex;
-  align-items: stretch;
-  padding: 0 4px;
+  align-items: center;
+  flex: 0 0 auto;
+  /* Nothing on the right. The strip that follows sets the gap, and it is the same 2px that sits
+     between any two commands: the menu button is on this bar now, so it should be spaced like
+     something on this bar and not like a row that used to be somewhere else (measured at 10px
+     against the buttons' 2px, 2026-08-09). */
+  padding: 0 0 0 4px;
   user-select: none;
-  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
-  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
 #menubar[hidden] {
   display: none;
 }
 
-/* The wordmark, over the menu bar's empty right end. Out of the grid's flow, so it does not take
-   a row; out of the pointer's way, so a menu that opens under it is unaffected. Quiet on purpose:
-   it should be legible when looked for and invisible when working. */
+/* The wordmark, at the far end of the same row. It used to float over the menu bar's empty right
+   end, which stopped being empty when the bar became the toolbar: an absolute wordmark would sit
+   on top of whichever commands happened to scroll under it. In the flow now, after the strip, so
+   it is pinned right and nothing passes beneath it. Quiet on purpose: legible when looked for and
+   invisible when working. */
 
 #brand {
-  position: absolute;
-  top: 0;
-  right: 10px;
-  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: baseline;
   gap: 5px;
-  padding: 3px 0;
+  padding: 0 8px 0 6px;
   pointer-events: none;
   user-select: none;
 }
@@ -830,6 +929,23 @@ body.live-resize .minimap {
   font: inherit;
   padding: 3px 9px;
   cursor: default;
+}
+
+/* The icon form, for the one menu this product composes rather than mirrors. Sized and squared to
+   match the command buttons it now sits beside, since it is on the same bar as them. */
+.menu-top-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.menu-top-icon .codicon {
+  font-size: 16px;
 }
 
 .menu-top:hover,
@@ -941,7 +1057,9 @@ body.live-resize .minimap {
   gap: 2px;
   flex: 1 1 auto;
   min-width: 0;
-  padding: 3px 6px;
+  /* 2px on the left, so the first command sits the same distance from the menu button as the
+     commands sit from each other; 6px on the right, away from the wordmark. */
+  padding: 3px 6px 3px 2px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1749,9 +1867,14 @@ body.live-resize .minimap {
   font-size: 12px;
 }
 
-/* The unsaved-changes question a closing tab asks: a small centred card, three answers. */
+/* The small centred card the page asks a question on: the unsaved-changes gate a closing tab
+   raises, and the confirmation before a component is removed. One set of rules for both, because
+   a second question styled on its own is how two dialogs come to look like two products.
 
-#close-confirm-backdrop {
+   The close gate keeps its element ids on top of these classes. Harnesses name those ids to
+   address that dialog specifically, and the styling moving to classes must not move them. */
+
+.modal-backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
@@ -1762,7 +1885,7 @@ body.live-resize .minimap {
   z-index: 95;
 }
 
-#close-confirm-card {
+.modal-card {
   width: 420px;
   max-width: calc(100vw - 40px);
   background: var(--vscode-editorWidget-background, #252526);
@@ -1773,25 +1896,25 @@ body.live-resize .minimap {
   font-size: 13px;
 }
 
-#close-confirm-title {
+.modal-title {
   font-weight: 600;
   line-height: 1.4;
 }
 
-#close-confirm-detail {
+.modal-detail {
   margin-top: 6px;
   opacity: 0.7;
   font-size: 12px;
 }
 
-#close-confirm-buttons {
+.modal-buttons {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 16px;
 }
 
-.close-confirm-button {
+.modal-button {
   border: 1px solid var(--vscode-editorWidget-border, #454545);
   border-radius: 3px;
   background: var(--vscode-button-secondaryBackground, #3a3d41);
@@ -1801,21 +1924,33 @@ body.live-resize .minimap {
   cursor: pointer;
 }
 
-.close-confirm-button:hover {
+.modal-button:hover {
   background: var(--vscode-button-secondaryHoverBackground, #45494e);
 }
 
-.close-confirm-button.primary {
+.modal-button.primary {
   border-color: transparent;
   background: var(--vscode-button-background, #0e639c);
   color: var(--vscode-button-foreground, #ffffff);
 }
 
-.close-confirm-button.primary:hover {
+.modal-button.primary:hover {
   background: var(--vscode-button-hoverBackground, #1177bb);
 }
 
-.close-confirm-button:focus-visible {
+/* Destructive and unrecoverable, so it does not wear the same blue as Save. The wording carries
+   the warning as well: colour alone must never be what says this one is different. */
+.modal-button.danger {
+  border-color: transparent;
+  background: var(--vscode-inputValidation-errorBorder, #be1100);
+  color: #ffffff;
+}
+
+.modal-button.danger:hover {
+  background: var(--vscode-errorForeground, #f14c4c);
+}
+
+.modal-button:focus-visible {
   outline: 1px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: 1px;
 }

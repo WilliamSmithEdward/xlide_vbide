@@ -213,11 +213,12 @@ Step 'engine language matrix' {
 }
 
 Step 'page probes (headless)' {
-    foreach ($probe in 'close-confirm-page-probe.mjs', 'objbrowser-page-probe.mjs') {
+    $probes = 'close-confirm-page-probe.mjs', 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs'
+    foreach ($probe in $probes) {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1
         if ($answer -notmatch '"pass":true') { throw "$probe did not pass" }
     }
-    'close-confirm, object browser'
+    'close-confirm, object browser, tree rows'
 }
 
 # A route table is complete on the day it is written and quietly is not, six routes later. This
@@ -386,7 +387,7 @@ if ($Live) {
             # anything: it needs a module on the surface with edits pending, and that precondition
             # stops holding once the surface has been worked over (2026-08-09).
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
-                                     'analysis-freshness.mjs',
+                                     'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer

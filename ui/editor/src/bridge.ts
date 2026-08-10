@@ -280,6 +280,7 @@ export type ClientMessage =
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string; project?: string; action?: string }
   | { type: "insertComponent"; kind: number; project?: string }
+  | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
   | { type: "hover"; id: number; offset: number }
   | { type: "signatureHelp"; id: number; offset: number }
@@ -686,6 +687,15 @@ export class EditorBridge {
    */
   insertComponent(kind: number, project?: string): void {
     this.transport.post({ type: "insertComponent", kind, ...(project ? { project } : {}) });
+  }
+
+  /**
+   * Asks the host to remove a component, the developer having already been asked whether they
+   * mean it. The page does not close the tab first: the host prunes it from the pane list it
+   * republishes, so the tab goes because the component went, in that order and once.
+   */
+  removeComponent(name: string, project?: string): void {
+    this.transport.post({ type: "removeComponent", name, ...(project ? { project } : {}) });
   }
 
   /** Asks the host to toggle the breakpoint on a line, same as clicking the margin. */
@@ -1957,6 +1967,32 @@ export function demoTransport(): HostTransport {
     });
   };
 
+  // The demo's tree, held rather than sent once, so removing a component can take it out of both
+  // lists and republish — which is what the host does, and what makes the removal exercisable
+  // here at all. Two workbooks, and a name that lives in only one of them.
+  const demoProjects: ExplorerProject[] = [
+    {
+      name: "Book1.xlsm",
+      components: [
+        { name: "Sheet1", kind: 100 },
+        { name: "ThisWorkbook", kind: 100 },
+        { name: "Module1", kind: 1 },
+        { name: "SalesRow", kind: 2 },
+      ],
+    },
+    {
+      name: "Book2.xlsm",
+      components: [
+        { name: "ThisWorkbook", kind: 100 },
+        { name: "Helpers", kind: 1 },
+      ],
+    },
+  ];
+
+  const sendProjects = (): void => {
+    send({ type: "setProjects", projects: demoProjects.map((one) => ({ ...one })) });
+  };
+
   return {
     post(message) {
       console.log("[xlide demo] page -> host", message);
@@ -1990,27 +2026,7 @@ export function demoTransport(): HostTransport {
             { expression: "label", value: '"hello"', kind: "String", context: "Module1.Demo" },
           ],
         });
-        send({
-          type: "setProjects",
-          projects: [
-            {
-              name: "Book1.xlsm",
-              components: [
-                { name: "Sheet1", kind: 100 },
-                { name: "ThisWorkbook", kind: 100 },
-                { name: "Module1", kind: 1 },
-                { name: "SalesRow", kind: 2 },
-              ],
-            },
-            {
-              name: "Book2.xlsm",
-              components: [
-                { name: "ThisWorkbook", kind: 100 },
-                { name: "Helpers", kind: 1 },
-              ],
-            },
-          ],
-        });
+        sendProjects();
         send({
           type: "setDiagnostics",
           moduleName: "Module1",
@@ -2059,6 +2075,28 @@ export function demoTransport(): HostTransport {
           }
 
           sendModules();
+        }
+      }
+      if (message.type === "removeComponent") {
+        // What the host does, in the order it does it: the component leaves the project, its tab
+        // leaves the strip, and both lists are republished. A document module is refused here too,
+        // so the demo cannot be used to prove a removal the real host would never perform.
+        const owner = message.project
+          ? demoProjects.find((one) => one.name === message.project)
+          : demoProjects.find((one) => one.components.some((part) => part.name === message.name));
+        const doomed = owner?.components.find((part) => part.name === message.name);
+
+        if (owner && doomed && doomed.kind !== 100) {
+          owner.components = owner.components.filter((part) => part !== doomed);
+
+          const at = openModules.indexOf(message.name);
+          if (at >= 0) {
+            openModules.splice(at, 1);
+          }
+          dirtyModules.delete(message.name);
+
+          sendModules();
+          sendProjects();
         }
       }
       if (message.type === "selectComponent") {

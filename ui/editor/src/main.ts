@@ -532,6 +532,7 @@ function boot(): void {
     },
     closeModule: (name, workbook, action) => bridge.closeModule(name, workbook, action),
     insertComponent: (kind, project) => bridge.insertComponent(kind, project),
+    removeComponent: (name, project) => bridge.removeComponent(name, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
   });

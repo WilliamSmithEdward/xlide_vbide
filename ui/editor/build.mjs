@@ -54,12 +54,17 @@ const INDEX_HTML = `<!doctype html>
 </head>
 <body>
 <div id="shell">
-  <!-- The wordmark sits over the menu bar's empty right end rather than inside it, because the
-       menu bar replaces its own children whenever it rebuilds. It never takes the pointer, so a
-       menu opened beneath it still behaves as though it were not there. -->
-  <div id="brand" aria-hidden="true"><span id="brand-name">XLIDE</span><span id="brand-version"></span></div>
-  <div id="menubar" role="menubar" aria-label="Menus"></div>
-  <div id="toolbar" role="toolbar" aria-label="Editor commands"></div>
+  <!-- ONE BAR. The menu bar was its own row above this one, mirroring the editor's ten native
+       menus; nine of them are gone and the tenth is this product's own, so a row holding a single
+       button was a row spent on nothing (the developer, 2026-08-09: get rid of the native bar
+       entirely). The menu button leads the toolbar and the wordmark closes it.
+
+       Both live inside the toolbar and both survive its rebuild: buildToolbar keeps whatever it
+       finds here and puts the sliding strip of commands between them. -->
+  <div id="toolbar" role="toolbar" aria-label="Editor commands">
+    <div id="menubar" role="menubar" aria-label="Menus"></div>
+    <div id="brand" aria-hidden="true"><span id="brand-name">XLIDE</span><span id="brand-version"></span></div>
+  </div>
   <!-- The four dock sections around the editor. Each holds a split tree of tabbed pane
        groups; the panes themselves are the elements below, which the dock system places
        wherever the developer has dragged them. -->

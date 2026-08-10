@@ -43,6 +43,10 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "run", target: "host", icon: "play", label: "Run (F5)" },
   { id: "break", target: "host", icon: "debug-pause", label: "Break (Ctrl+F5)" },
   { id: "reset", target: "host", icon: "debug-stop", label: "Reset (Shift+F5)" },
+  // The Run menu's last item without a home, rehomed here the day that menu went (2026-08-09).
+  // A toggle: pressing it again is where you started, which is why the label says so rather than
+  // naming a direction the button cannot know it is going in.
+  { id: "designMode", target: "host", icon: "edit", label: "Toggle design mode" },
 
   { id: "stepInto", target: "host", icon: "debug-step-into", label: "Step into (F8)", separatorBefore: true },
   { id: "stepOver", target: "host", icon: "debug-step-over", label: "Step over (Shift+F8)" },
@@ -101,6 +105,12 @@ export function buildToolbar(
   run: (command: ToolbarCommand) => void,
   available: (command: ToolbarCommand) => boolean = () => true,
 ): void {
+  // The menu button and the wordmark are the toolbar's fixed ends and they are NOT ours to
+  // rebuild: the menu bar owns its own button and rebuilds it whenever the host's menus change,
+  // and this runs again on every settings change. Taken out before the wipe and put back around
+  // the strip, so the row reads menu, commands, wordmark at every width.
+  const lead = root.querySelector("#menubar");
+  const trail = root.querySelector("#brand");
   root.replaceChildren();
 
   // The strip is one row that slides. A pane half a screen wide cannot show thirty commands, and
@@ -110,7 +120,13 @@ export function buildToolbar(
   const strip = document.createElement("div");
   strip.className = "toolbar-strip";
 
+  if (lead) {
+    root.append(lead);
+  }
   root.append(strip);
+  if (trail) {
+    root.append(trail);
+  }
 
   const missing: string[] = [];
 

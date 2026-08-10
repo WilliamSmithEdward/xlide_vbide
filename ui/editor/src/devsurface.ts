@@ -678,6 +678,126 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return { did: true, detail: `toggled ${module}` };
     },
 
+    /**
+     * Right-clicks a row of the tree and reports the menu it produced.
+     *
+     * Through the DOM, and deliberately: the menu hangs off a `contextmenu` listener on the tree,
+     * so there is no method behind it to call. A real event on the real row is the only thing that
+     * exercises what a right-click exercises — which row was marked, which workbook the menu was
+     * told about, which items the component's class earns.
+     *
+     * `module` names a component row; `workbook` alone names a workbook row, and narrows a
+     * component row when the same name lives in two open books. Matching is case-insensitive,
+     * because the editor unifies identifier case and the name a caller has may not be the spelling
+     * the tree is showing.
+     */
+    treeMenu: (args) => {
+      const module = args.module === undefined ? "" : String(args.module);
+      const workbook = args.workbook === undefined ? "" : String(args.workbook);
+      const same = (a: string | undefined, b: string): boolean =>
+        (a ?? "").toLowerCase() === b.toLowerCase();
+
+      if (!module && !workbook) {
+        return { did: false, detail: "name a module or a workbook" };
+      }
+
+      const row = module
+        ? [...document.querySelectorAll<HTMLElement>("[data-component]")].find((one) =>
+          same(one.dataset.component, module) && (!workbook || same(one.dataset.workbook, workbook)))
+        : [...document.querySelectorAll<HTMLElement>("[data-project]")].find((one) =>
+          same(one.dataset.project, workbook));
+
+      if (!row) {
+        return {
+          did: false,
+          detail: module
+            ? `the tree has no row for ${module}${workbook ? ` in ${workbook}` : ""}`
+              + " (an unexpanded workbook has no rows)"
+            : `the tree has no row for the workbook ${workbook}`,
+        };
+      }
+
+      const box = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: Math.round(box.left + 8),
+        clientY: Math.round(box.top + box.height / 2),
+      }));
+
+      const labels = [...document.querySelectorAll(".menu-dropdown .menu-item")]
+        .map((one) => (one.textContent ?? "").trim());
+
+      return labels.length > 0
+        ? { did: true, detail: labels.join(" | ") }
+        : { did: false, detail: `right-clicking ${module || workbook} opened no menu` };
+    },
+
+    /**
+     * Chooses an item of the open context menu by its label.
+     *
+     * On `pointerup`, which is what the menu listens for. A synthesised `click` lands on nothing
+     * and reports having worked, the same trap as every other control in this product that arms
+     * on a pointer event rather than on click.
+     */
+    chooseMenuItem: (args) => {
+      const label = String(args.label ?? "");
+      if (!label) {
+        return { did: false, detail: "no label given" };
+      }
+
+      const rows = [...document.querySelectorAll<HTMLElement>(".menu-dropdown .menu-item")];
+      if (rows.length === 0) {
+        return { did: false, detail: "no context menu is open" };
+      }
+
+      // Prefix rather than equality: a destructive item wears a trailing ellipsis to say it will
+      // ask first, and a caller should not have to spell the character to reach it.
+      const wanted = rows.find((one) => {
+        const text = (one.textContent ?? "").trim();
+        return text === label || text.replace(/[.…]+$/, "") === label.replace(/[.…]+$/, "");
+      });
+
+      if (!wanted) {
+        return {
+          did: false,
+          detail: `no item named ${label}; the menu offers `
+            + rows.map((one) => (one.textContent ?? "").trim()).join(" | "),
+        };
+      }
+
+      if (wanted.classList.contains("disabled")) {
+        return { did: false, detail: `${label} is disabled` };
+      }
+
+      wanted.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+      return { did: true, detail: `chose ${(wanted.textContent ?? "").trim()}` };
+    },
+
+    /**
+     * Answers the box that asks before a component is removed. `answer` is remove or cancel.
+     *
+     * Its own action rather than a generic button-clicker, so a script cannot delete a module by
+     * naming a button that happened to move. Cancel is what an unrecognised answer gets.
+     */
+    answerRemoveConfirm: (args) => {
+      const answer = String(args.answer ?? "cancel").toLowerCase();
+      const wanted = { remove: "Remove", cancel: "Cancel" }[answer];
+      if (!wanted) {
+        return { did: false, detail: `answer must be remove or cancel; got ${answer}` };
+      }
+
+      const button = [...document.querySelectorAll("#remove-confirm-buttons button")]
+        .find((one) => (one.textContent ?? "").trim() === wanted) as HTMLButtonElement | undefined;
+
+      if (!button) {
+        return { did: false, detail: "no remove-component box is up" };
+      }
+
+      button.click();
+      return { did: true, detail: `answered ${wanted}` };
+    },
+
     settings: () => {
       parts.openSettings();
       return { did: true, detail: "settings dialog opened" };

@@ -34,6 +34,13 @@ internal static class VbeCommands
         public const int Run = 186;
         public const int Break = 189;
         public const int Reset = 228;
+
+        /// <summary>
+        /// Design Mode, the Run menu's one item that was not already a button. Measured off a
+        /// running editor on 2026-08-09, the day the Run menu was retired; a toggle, so pressing
+        /// it twice is where it started.
+        /// </summary>
+        public const int DesignMode = 212;
         public const int ToggleBreakpoint = 51;
         public const int StepInto = 188;
         public const int StepOver = 194;
@@ -251,6 +258,7 @@ internal static class VbeCommands
         "run" => Command.Run,
         "break" => Command.Break,
         "reset" => Command.Reset,
+        "designMode" => Command.DesignMode,
         "stepInto" => Command.StepInto,
         "stepOver" => Command.StepOver,
         "stepOut" => Command.StepOut,

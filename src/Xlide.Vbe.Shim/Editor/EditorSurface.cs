@@ -178,6 +178,12 @@ internal sealed class EditorSurface : IDisposable
     /// </summary>
     public Action<int, string?>? ComponentInsertRequested { get; set; }
 
+    /// <summary>
+    /// Raised when the developer has confirmed removing a component: (name, workbook). The page
+    /// asks the question; by the time this is raised the answer was Remove.
+    /// </summary>
+    public Action<string, string?>? ComponentRemoveRequested { get; set; }
+
     /// <summary>Raised when the editor wants completions: request identifier, caret offset.</summary>
     public Action<int, int>? CompletionRequested { get; set; }
 
@@ -1653,6 +1659,19 @@ internal sealed class EditorSurface : IDisposable
                             : null;
 
                         ComponentInsertRequested?.Invoke(insertKind, targetProject);
+                    }
+
+                    break;
+
+                case "removeComponent":
+                    if (document.RootElement.TryGetProperty("name", out var doomedName)
+                        && doomedName.GetString() is { Length: > 0 } removing)
+                    {
+                        var owningProject = document.RootElement.TryGetProperty("project", out var removeFrom)
+                            ? removeFrom.GetString()
+                            : null;
+
+                        ComponentRemoveRequested?.Invoke(removing, owningProject);
                     }
 
                     break;

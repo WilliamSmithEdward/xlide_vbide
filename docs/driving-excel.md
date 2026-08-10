@@ -240,6 +240,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
+| `menus` | `menus(path)` | the editor's own menus with their ids, `suppressed` on each; `menus([900])` is the composed xlide menu and the real control behind each position |
 | `native` | `native({text})` / `inSync()` / `parityAll()` | the HOST's own panes, caret and CONTENT, under the surface |
 | `engine` | `engineSource(module, {text})` | what the ENGINE is holding for a module, against what the surface holds |
 
@@ -346,7 +347,29 @@ await api.act("expandWorkbook", { workbook: "TwinFixture.xlsm", open: true });
 await api.act("unfoldModule", { module: "Helpers" });
 await api.act("key", { code: "KeyW", ctrl: true, target: "document" });
 await api.act("closeDialogs");
+
+// THE MENUS, the editor's own, with the ids the suppression table is written in.
+await api.menus();          // the bar: File, Edit, View ... each with `suppressed`
+await api.menus([8]);       // one menu's items
+await api.menus([900]);     // the composed xlide menu, and the real id behind each position
+
+// The tree's right-click menus, and the one destructive thing on them.
+await api.act("treeMenu", { module: "Helpers" });        // -> detail is the menu, " | " separated
+await api.act("treeMenu", { workbook: "TwinFixture.xlsm" });  // the workbook row's menu instead
+await api.act("chooseMenuItem", { label: "Remove" });    // pointerup, which is what a menu listens for
+await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
 ```
+
+> **`treeMenu` needs the row to exist**, and a collapsed workbook has no component rows at all, so
+> `expandWorkbook` comes first or the answer is `did: false` saying exactly that. It names the row
+> case-insensitively for the usual reason: the editor recases identifiers, so the spelling a script
+> holds may not be the spelling the tree is showing.
+>
+> **Removing a component asks first, and the question is the product's, not a browser confirm.**
+> `chooseMenuItem` with `Remove` raises it and changes nothing; `answerRemoveConfirm` is what
+> decides. Cancel is the answer an unrecognised one gets, and Cancel is what holds focus while the
+> box is up. There is no route that removes a component without the question — `component` below
+> is the one that skips it, and it is a fixture primitive.
 
 `act` answers `{did, detail}`. **`did: false` is an answer, not a failure** — closing a tab when
 nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop

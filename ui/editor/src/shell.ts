@@ -10,7 +10,7 @@
  */
 
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
-import { Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
+import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
 import type { PaneVisibilityControl } from "./settingsdialog.js";
@@ -73,6 +73,8 @@ export interface ShellHandlers {
   closeModule(name: string, workbook?: string, action?: string): void;
   /** The developer asked for a new component: 1 module, 2 class module, 3 form. */
   insertComponent(kind: number, project?: string): void;
+  /** The developer confirmed removing a component; the workbook when the tree could say which. */
+  removeComponent(name: string, workbook?: string): void;
   /** A module's procedures, for its unfolded node in the tree; null when no answer came. */
   requestOutline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A line for the host's log, from the corners only the log's data cadence explains. */
@@ -95,6 +97,17 @@ interface TabIdentity {
 /** The identity two tabs are the same by. Case-insensitive, the way the host compares names. */
 function tabKey(tab: TabIdentity): string {
   return `${(tab.project ?? "").toLowerCase()}\0${tab.name.toLowerCase()}`;
+}
+
+/** What to call a component in a sentence. Falls back to the word that is true of all of them. */
+function kindWord(kind: number): string {
+  switch (kind) {
+    case ComponentKind.StandardModule: return "module";
+    case ComponentKind.ClassModule: return "class module";
+    case ComponentKind.Form: return "form";
+    case ComponentKind.ActiveXDesigner: return "designer";
+    default: return "component";
+  }
 }
 
 /** Severity order for sorting, worst first. */
@@ -195,6 +208,7 @@ export class Shell {
       open: (name, workbook) => handlers.activateModule(name, workbook),
       context: (name, kind, x, y, workbook) => this.componentMenu(name, kind, x, y, workbook),
       projectContext: (project, x, y) => this.workbookMenu(project, x, y),
+      projectAdd: (project, x, y) => showContextMenu(x, y, this.newComponentItems(project)),
       outline: (module, workbook) => handlers.requestOutline(module, workbook),
       openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
       trace: (text) => handlers.trace(text),
@@ -781,23 +795,28 @@ export class Shell {
 
     const backdrop = document.createElement("div");
     backdrop.id = "close-confirm-backdrop";
+    backdrop.className = "modal-backdrop";
 
     const card = document.createElement("div");
     card.id = "close-confirm-card";
+    card.className = "modal-card";
     card.setAttribute("role", "alertdialog");
     card.setAttribute("aria-modal", "true");
     card.setAttribute("aria-label", "Unsaved changes");
 
     const title = document.createElement("div");
     title.id = "close-confirm-title";
+    title.className = "modal-title";
     title.textContent = `Do you want to save the changes you made to ${asked.name}?`;
 
     const detail = document.createElement("div");
     detail.id = "close-confirm-detail";
+    detail.className = "modal-detail";
     detail.textContent = "Your changes will be lost if you don't save them.";
 
     const buttons = document.createElement("div");
     buttons.id = "close-confirm-buttons";
+    buttons.className = "modal-buttons";
 
     const resolve = (action: "save" | "discard" | null): void => {
       this.askedCloseConfirm = null;
@@ -819,7 +838,9 @@ export class Shell {
     const button = (label: string, action: "save" | "discard" | null, primary = false): HTMLButtonElement => {
       const control = document.createElement("button");
       control.type = "button";
-      control.className = primary ? "close-confirm-button primary" : "close-confirm-button";
+      control.className = primary
+        ? "close-confirm-button modal-button primary"
+        : "close-confirm-button modal-button";
       control.textContent = label;
       control.addEventListener("click", () => resolve(action));
       buttons.appendChild(control);
@@ -884,7 +905,9 @@ export class Shell {
    */
   private componentMenu(name: string, kind: number, x: number, y: number, workbook?: string): void {
     // A document or a form is an object with code behind it; a module is only its code.
-    const openLabel = kind === 100 || kind === 3 ? "Open Code" : "Open";
+    const openLabel = kind === ComponentKind.Document || kind === ComponentKind.Form
+      ? "Open Code"
+      : "Open";
 
     const items: ContextMenuItem[] = [
       // WITH THE WORKBOOK, all three of them. Every call site outside this menu passed one and
@@ -899,10 +922,103 @@ export class Shell {
       items.push({}, { label: "Close", run: () => this.handlers.closeModule(name, workbook) });
     }
 
+    // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the workbook
+    // and the host refuses Remove on them. Left out rather than shown greyed, the way the rest of
+    // this menu treats what does not apply.
+    if (kind !== ComponentKind.Document) {
+      items.push({}, { label: "Remove…", run: () => this.confirmRemove(name, kind, workbook) });
+    }
+
     // The tree marked the row this menu is about, and that mark is part of the gesture. It comes
     // back when the menu goes, however it goes, or a right-click leaves a grey row pointing at a
     // module nobody is looking at (2026-08-08).
     showContextMenu(x, y, items, () => this.explorer.restoreSelectionToActive());
+  }
+
+  /**
+   * Asks before removing a component, because nothing brings one back.
+   *
+   * The editor's undo stack is per module and dies with the module, so a removal is not undoable
+   * by any route the developer has — not Ctrl+Z, not closing the workbook without saving once the
+   * host has written it. That is the whole reason this asks at all, and the reason Cancel is what
+   * has focus: the safe answer is the one a stray Return should pick.
+   */
+  private confirmRemove(name: string, kind: number, workbook?: string): void {
+    if (document.getElementById("remove-confirm-backdrop")) {
+      return;
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.id = "remove-confirm-backdrop";
+    backdrop.className = "modal-backdrop";
+
+    const card = document.createElement("div");
+    card.id = "remove-confirm-card";
+    card.className = "modal-card";
+    card.setAttribute("role", "alertdialog");
+    card.setAttribute("aria-modal", "true");
+    card.setAttribute("aria-label", "Remove component");
+
+    const title = document.createElement("div");
+    title.id = "remove-confirm-title";
+    title.className = "modal-title";
+    title.textContent = `Remove ${name}?`;
+
+    const detail = document.createElement("div");
+    detail.id = "remove-confirm-detail";
+    detail.className = "modal-detail";
+    detail.textContent = `The ${kindWord(kind)} and all of its code will be deleted`
+      + `${workbook ? ` from ${workbook}` : ""}. This cannot be undone. `
+      + "Export it first if you want to keep a copy.";
+
+    const buttons = document.createElement("div");
+    buttons.id = "remove-confirm-buttons";
+    buttons.className = "modal-buttons";
+
+    const resolve = (removing: boolean): void => {
+      document.removeEventListener("keydown", onKey, true);
+      backdrop.remove();
+
+      if (removing) {
+        this.handlers.removeComponent(name, workbook);
+      }
+
+      // The question took focus; the editor is where it belongs afterwards.
+      this.handlers.menuClosed();
+    };
+
+    const button = (label: string, removing: boolean, danger = false): HTMLButtonElement => {
+      const control = document.createElement("button");
+      control.type = "button";
+      control.className = danger ? "modal-button danger" : "modal-button";
+      control.textContent = label;
+      control.addEventListener("click", () => resolve(removing));
+      buttons.appendChild(control);
+      return control;
+    };
+
+    button("Remove", true, true);
+    const cancel = button("Cancel", false);
+
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        resolve(false);
+      }
+    };
+
+    backdrop.addEventListener("click", (event) => {
+      if (event.target === backdrop) {
+        resolve(false);
+      }
+    });
+    document.addEventListener("keydown", onKey, true);
+
+    card.append(title, detail, buttons);
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    cancel.focus();
   }
 
   /**
@@ -911,13 +1027,27 @@ export class Shell {
    */
   private workbookMenu(project: string, x: number, y: number): void {
     showContextMenu(x, y, [
-      { label: "New Module", run: () => this.handlers.insertComponent(1, project) },
-      { label: "New Class Module", run: () => this.handlers.insertComponent(2, project) },
-      { label: "New UserForm", run: () => this.handlers.insertComponent(3, project) },
+      ...this.newComponentItems(project),
       {},
       { label: "References...", run: () => this.hostCommand("references") },
       { label: "Project Properties...", run: () => this.hostCommand("projectProperties") },
     ]);
+  }
+
+  /**
+   * What the plus on a workbook's row offers: the same three things, and only those three.
+   *
+   * ONE LIST, shared with the right-click menu. Two places offering "add something to this
+   * workbook" is two places to add the next component kind to, and the one that gets forgotten is
+   * whichever the author was not looking at. The right-click menu is this plus the project's own
+   * dialogs, which a plus has no business promising.
+   */
+  private newComponentItems(project: string): ContextMenuItem[] {
+    return [
+      { label: "New Module", run: () => this.handlers.insertComponent(1, project) },
+      { label: "New Class Module", run: () => this.handlers.insertComponent(2, project) },
+      { label: "New UserForm", run: () => this.handlers.insertComponent(3, project) },
+    ];
   }
 
   private hostCommand(id: string): void {

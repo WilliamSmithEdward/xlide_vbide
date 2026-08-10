@@ -249,6 +249,19 @@ function clientFor(entry) {
     windows: () => call("windows"),
 
     /**
+     * The editor's menus with their ids, suppressed ones included.
+     *
+     *   await api.menus()            the menu bar
+     *   await api.menus([8])         the eighth menu's items
+     *   await api.menus([900])       the composed xlide menu, and what each position resolves to
+     *
+     * `suppressed` is the difference between the editor's menu and the product's, which is the
+     * only place a suppression can be checked. The ids in VbeMenus were measured by hand once and
+     * written into a comment before this existed.
+     */
+    menus: (path = []) => call(`menus${query({ path: path.join(",") || undefined })}`),
+
+    /**
      * The HOST's own editor, underneath the surface that covers it.
      *
      * Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret
@@ -646,11 +659,16 @@ function clientFor(entry) {
      * Drives the surface through the methods a click reaches.
      *
      * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
-     * `settings`, `sponsors`, `closeDialogs`, `focusEditor`, `search`, `dock`, `bookmark`,
-     * `format`, `undo`, and the language ones: `hover`, `completions`, `signature`, `quickFixes`,
-     * `definition`, `references`, `rename`. `act("actions")` answers the live list, which is the
-     * one that cannot be out of date. Answers {did, detail}; `did: false` means the page declined,
-     * which is an answer and not a failure.
+     * `treeMenu`, `chooseMenuItem`, `answerRemoveConfirm`, `settings`, `sponsors`, `closeDialogs`,
+     * `focusEditor`, `search`, `dock`, `bookmark`, `format`, `undo`, and the language ones:
+     * `hover`, `completions`, `signature`, `quickFixes`, `definition`, `references`, `rename`.
+     * `act("actions")` answers the live list, which is the one that cannot be out of date. Answers
+     * {did, detail}; `did: false` means the page declined, which is an answer and not a failure.
+     *
+     * REMOVING A COMPONENT takes three of them, and that is the point: `treeMenu` opens the row's
+     * menu, `chooseMenuItem` with `Remove` raises the question, `answerRemoveConfirm` answers it.
+     * Nothing on this path deletes anything until the last call. The `component` route's
+     * `action=remove` is the one that skips the question, and it is a fixture primitive.
      *
      * TWO WAYS TO SEND A KEY, and they are not interchangeable:
      *

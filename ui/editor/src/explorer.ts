@@ -103,6 +103,8 @@ export interface ExplorerHandlers {
   context(name: string, kind: number, x: number, y: number, workbook?: string): void;
   /** Right click on a workbook's row. */
   projectContext(project: string, x: number, y: number): void;
+  /** The developer pressed a workbook's plus: what can be added to it, under the button. */
+  projectAdd(project: string, x: number, y: number): void;
   /** A module's procedures, for its unfolded node; null when no answer came. */
   outline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A procedure was picked: go to its line in its module, in its workbook. */
@@ -164,6 +166,18 @@ export class Explorer {
         return;
       }
 
+      // Before the row itself: the plus sits INSIDE the workbook row, so without this the same
+      // click would also toggle the workbook open or shut underneath the menu it just opened.
+      const add = (event.target as HTMLElement).closest("[data-add-project]") as HTMLElement | null;
+      if (add?.dataset.addProject) {
+        const box = add.getBoundingClientRect();
+        // Under the button rather than at the pointer, so the menu hangs off the control that
+        // opened it however it was opened — including from the keyboard, where there is no pointer
+        // and a click reports 0,0.
+        this.handlers.projectAdd(add.dataset.addProject, Math.round(box.left), Math.round(box.bottom));
+        return;
+      }
+
       const procedure = this.procedureAt(event);
       if (procedure) {
         this.handlers.openProcedure(procedure.module, procedure.line, procedure.workbook);
@@ -202,13 +216,32 @@ export class Explorer {
 
     this.root.addEventListener("keydown", (event) => {
       // A button already turns Enter into a click; this turns it into an open instead, so the
-      // keyboard can do everything the mouse can. Workbook and procedure rows keep the click.
+      // keyboard can do everything the mouse can. Procedure rows keep the click.
       if (event.key === "Enter") {
         const name = this.componentAt(event);
         if (name) {
           event.preventDefault();
           this.handlers.open(name);
+          return;
         }
+      }
+
+      // The workbook row stopped being a button when it grew one, and with the element went the
+      // keyboard behaviour the element carried. Enter and Space toggle it, as they did.
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+
+      const row = event.target as HTMLElement;
+      if (row.classList?.contains("tree-workbook") && row.dataset.project) {
+        event.preventDefault();
+        const workbook = row.dataset.project;
+        this.expandedWorkbooks.set(workbook, !(this.expandedWorkbooks.get(workbook) ?? false));
+        this.render();
+
+        // The rebuild threw away the element the keyboard was on, and focus went to the body with
+        // it: the next Tab would start from the top of the page rather than from the tree.
+        (this.root.querySelector(`[data-project="${CSS.escape(workbook)}"]`) as HTMLElement | null)?.focus();
       }
     });
 
@@ -660,13 +693,26 @@ export class Explorer {
     this.root.scrollTop = scrollTop;
   }
 
+  /**
+   * A workbook's row: the twisty, the name, and the button that adds to it.
+   *
+   * NOT A BUTTON ANY MORE, and it cannot be one. The row carries its own control now, and a button
+   * inside a button is not valid HTML: the browser un-nests it and which one a click lands on stops
+   * being predictable. So the row is a treeitem that takes the keyboard for itself — Enter and
+   * Space toggle it in the tree's own keydown, which is what the button element used to give free.
+   *
+   * The name is the part that gives way. A long workbook name truncates rather than pushing the
+   * plus off the edge of a narrow pane, because a control that is only sometimes reachable is worse
+   * than a name that is only sometimes complete, and the full name is on the row's tooltip.
+   */
   private workbookRow(name: string, isOpen: boolean): HTMLElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "tree-workbook";
-    button.dataset.project = name;
-    button.setAttribute("role", "treeitem");
-    button.setAttribute("aria-expanded", String(isOpen));
+    const row = document.createElement("div");
+    row.className = "tree-workbook";
+    row.dataset.project = name;
+    row.tabIndex = 0;
+    row.title = name;
+    row.setAttribute("role", "treeitem");
+    row.setAttribute("aria-expanded", String(isOpen));
 
     const chevron = document.createElement("span");
     chevron.className = `codicon codicon-chevron-${isOpen ? "down" : "right"}`;
@@ -676,8 +722,26 @@ export class Explorer {
     icon.className = "codicon codicon-file-code";
     icon.setAttribute("aria-hidden", "true");
 
-    button.append(chevron, icon, document.createTextNode(name));
-    return button;
+    const label = document.createElement("span");
+    label.className = "tree-workbook-name";
+    label.textContent = name;
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "tree-add";
+    add.dataset.addProject = name;
+    // The icon is decorative and the plus is not a word, so the name of the workbook has to be in
+    // the label or a screen reader hears "button" beside nine identical ones.
+    add.setAttribute("aria-label", `Add to ${name}`);
+    add.title = `Add to ${name}`;
+
+    const plus = document.createElement("span");
+    plus.className = "codicon codicon-add";
+    plus.setAttribute("aria-hidden", "true");
+    add.appendChild(plus);
+
+    row.append(chevron, icon, label, add);
+    return row;
   }
 
   private item(component: ExplorerComponent, workbook: string): HTMLElement {

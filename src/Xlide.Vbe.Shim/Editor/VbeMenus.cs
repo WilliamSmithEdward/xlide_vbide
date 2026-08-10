@@ -108,13 +108,88 @@ internal static class VbeMenus
     /// right, split down, drag a tab between groups — are that job done where the developer
     /// actually looks (developer: "remove the window ribbon").
     /// </remarks>
+    /// <remarks>
+    /// 2026-08-09: the LAST FOUR top-level menus go, and what is left is folded into one. The bar
+    /// read File Insert Run Tools Add-Ins Help; it reads `xlide` and nothing else.
+    ///
+    /// FILE (30002). Save is the toolbar's, Import File and Export File are the sync dialog and
+    /// better than the native pair, Close and Return keeps its Alt+Q, Print the developer waved
+    /// off. Remove was the blocker and it now lives on the module's own row in the tree, which is
+    /// where it belonged: File's own Remove carries id 746, the id that repeats across every menu,
+    /// so it could not have been suppressed on its own even if it had stayed.
+    ///
+    /// RUN (30012). Run 186, Break 189 and Reset 228 have been toolbar buttons for days. Design
+    /// Mode 212 became one in the same change (the developer: "u can add a button for design mode
+    /// to the bar"). Run Project 5415 is disabled in this host.
+    ///
+    /// HELP (30010). About xlide is the toolbar's. Native F1 goes with the menu, deliberately
+    /// (the developer, 2026-08-09: "f1 native gone").
+    ///
+    /// INSERT (30005). Module 3039, Class Module 2579 and UserForm 512 are the plus button on
+    /// every workbook row in the tree, and the workbook's own context menu. What genuinely goes
+    /// with it is Procedure 559, the Add Procedure dialog; a developer types `Sub Name` instead.
+    /// The designer entries wait for the designer, as the rest of them do.
+    ///
+    /// TOOLS (30007) and ADD-INS (30038) are suppressed as MENUS but not as items: the surface
+    /// composes them into the one `xlide` menu below, which is the only thing left on the bar.
+    /// </remarks>
     private static readonly HashSet<int> Replaced =
     [
         30003, 30004, 30006, 30165, 30009,
+        30002, 30005, 30012, 30010,
+        30007, 30038,
+        // Additional Controls 642, off the xlide menu (the developer, 2026-08-09). It registers
+        // ActiveX controls onto a UserForm's toolbox and is disabled anywhere else, which is
+        // everywhere until the designer lands: an item that is grey every time it is seen teaches
+        // a developer to stop reading the menu. It returns with the designer, backlog #14, with
+        // the rest of that surface.
+        642,
+        // Options 522, off the xlide menu the same day: the toolbar's Settings is where a
+        // developer goes to change how this editor behaves, and two dialogs answering that
+        // question is one too many.
+        //
+        // WHAT IT ALSO HELD, recorded because a suppression that quietly drops a capability is
+        // the failure this table is supposed to prevent. Most of the native Options dialog
+        // governs the pane this surface covers — full module view, procedure separator, the
+        // editor colours, docking — so it was already describing a window nobody looks at. Two
+        // items are not that: Auto Syntax Check, which the analyzer's squiggles replace, and
+        // REQUIRE VARIABLE DECLARATION, which puts `Option Explicit` at the top of every new
+        // module and has no equivalent in xlide's settings. That one is a real gap, not a
+        // rehoming, and it belongs in the settings dialog before anybody misses it.
+        522,
         761, 830, 2554, 2555, 2557, 222, 30045,
         128, 129, 21, 19, 22, 478, 756, 141, 570, 313, 15, 14, 2529, 2530, 2531, 2532, 2533,
         1820, 940, 229,
     ];
+
+    /// <summary>
+    /// The one menu left, and it is not one of the editor's.
+    ///
+    /// Tools and Add-Ins between them hold six enabled items — References, Macros, Options,
+    /// VBAProject Properties, Digital Signature, Add-In Manager — and none of them has anywhere
+    /// else to be: they are the editor's own dialogs and this product does not reimplement them.
+    /// Two menus for six items, next to nothing else, is a menu bar pretending to be a menu bar.
+    /// So they are composed into one, and it carries the product's name because at that point it
+    /// is the product's menu and not the editor's (the developer, 2026-08-09).
+    ///
+    /// HOW THE ADDRESSING SURVIVES IT. Items are addressed by their position chain and nothing
+    /// else, which is the invariant this whole class rests on, so a synthetic menu has to have
+    /// synthetic positions that lead back to real ones without ambiguity. A child of the xlide
+    /// menu is numbered `rank * SourceStride + realPosition`, where rank is the source's place in
+    /// XlideSources. That is arithmetic, not a remembered table: nothing is stored between the
+    /// read that produced a path and the execute that uses it, so nothing can go stale in
+    /// between, and the real position is preserved exactly as the rest of this class expects.
+    /// </summary>
+    private const int XlideMenuPosition = 900;
+
+    /// <summary>One source's worth of positions. Far above any menu's item count.</summary>
+    private const int SourceStride = 1000;
+
+    /// <summary>Which menus the xlide menu is made of, in the order it shows them.</summary>
+    private static readonly int[] XlideSources = [ToolsMenu, AddInsMenu];
+
+    private const int ToolsMenu = 30007;
+    private const int AddInsMenu = 30038;
 
     /// <summary>
     /// Reads the items of one menu: the bar itself for an empty path, or the submenu the path leads
@@ -125,7 +200,12 @@ internal static class VbeMenus
     {
         ArgumentNullException.ThrowIfNull(editor);
 
-        using var controls = ControlsAt(editor, path);
+        if (path.Length == 1 && path[0] == XlideMenuPosition)
+        {
+            return ReadXlideMenu(editor);
+        }
+
+        using var controls = ControlsAt(editor, Resolve(editor, path));
         if (controls is null)
         {
             return [];
@@ -169,7 +249,210 @@ internal static class VbeMenus
                 shortcut));
         }
 
+        // Everything the editor put on its bar is suppressed now, so the bar the surface draws is
+        // this one item and nothing else. Appended rather than substituted for a real entry: it
+        // stands for no single menu, and giving it one menu's position would make it look like it
+        // did the next time somebody read this.
+        if (path.Length == 0)
+        {
+            // A wrench, not a word (the developer, 2026-08-09). The caption is still carried: it
+            // is the accessible name and the tooltip, and what the page falls back to if the icon
+            // ever goes missing. VBA rather than xlide, because it says what is BEHIND the button
+            // — the editor's own dialogs — and the whole surface is xlide already.
+            items.Add(new SurfaceMenuItem(
+                XlideMenuPosition, "VBA", Enabled: true, Separator: false, Popup: true,
+                Checked: false, Shortcut: null, Icon: "wrench"));
+        }
+
         return [.. items];
+    }
+
+    /// <summary>
+    /// The xlide menu's items: every source menu's controls in turn, each numbered into its own
+    /// band, with a divider where one source ends and the next begins.
+    /// </summary>
+    private static SurfaceMenuItem[] ReadXlideMenu(DispatchObject editor)
+    {
+        var items = new List<SurfaceMenuItem>();
+
+        for (var rank = 0; rank < XlideSources.Length; rank++)
+        {
+            var at = PositionOf(editor, XlideSources[rank]);
+            if (at == 0)
+            {
+                continue;
+            }
+
+            using var controls = ControlsAt(editor, [at]);
+            var count = controls?.GetInt32("Count") ?? 0;
+            var firstOfSource = true;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var control = controls!.GetItem(i);
+                if (control is null || !TryBool(control, "Visible", fallback: true))
+                {
+                    continue;
+                }
+
+                var caption = TryString(control, "Caption");
+                if (string.IsNullOrEmpty(caption))
+                {
+                    continue;
+                }
+
+                var id = TryInt(control, "Id", fallback: 0);
+                if (Replaced.Contains(id))
+                {
+                    continue;
+                }
+
+                var popup = TryInt(control, "Type", fallback: 0) == PopupControlType;
+                var shortcut = ExtractShortcut(ref caption, control, id, popup);
+
+                items.Add(new SurfaceMenuItem(
+                    (rank * SourceStride) + i,
+                    caption,
+                    TryBool(control, "Enabled", fallback: true),
+                    // The editor's own grouping within a source, and a divider between sources:
+                    // the menu is a join, and a reader should be able to see the seam.
+                    (firstOfSource && items.Count > 0) || TryBool(control, "BeginGroup", fallback: false),
+                    popup,
+                    !popup && TryInt(control, "State", fallback: 0) != 0,
+                    shortcut));
+
+                firstOfSource = false;
+            }
+        }
+
+        return [.. items];
+    }
+
+    /// <summary>
+    /// A path as the editor would address it. Chains that do not start in the xlide menu are
+    /// already real and are handed back untouched.
+    /// </summary>
+    private static int[] Resolve(DispatchObject editor, ReadOnlySpan<int> path)
+    {
+        if (path.Length < 2 || path[0] != XlideMenuPosition)
+        {
+            return path.ToArray();
+        }
+
+        var rank = path[1] / SourceStride;
+        var position = path[1] % SourceStride;
+        if (rank < 0 || rank >= XlideSources.Length || position <= 0)
+        {
+            return path.ToArray();
+        }
+
+        var at = PositionOf(editor, XlideSources[rank]);
+        if (at == 0)
+        {
+            return path.ToArray();
+        }
+
+        // [900, rank*1000 + i, rest...] becomes [realTopLevel, i, rest...]: the same depth, so
+        // everything downstream counts levels the way it always did.
+        var real = new int[path.Length];
+        real[0] = at;
+        real[1] = position;
+        for (var i = 2; i < path.Length; i++)
+        {
+            real[i] = path[i];
+        }
+
+        return real;
+    }
+
+    /// <summary>
+    /// Where a top-level menu sits on the bar right now, or 0 when it is not there.
+    ///
+    /// By id rather than by a remembered position: the bar's contents are the host's business and
+    /// a hard-coded position is a bet on a layout nobody promised.
+    /// </summary>
+    private static int PositionOf(DispatchObject editor, int id)
+    {
+        using var controls = ControlsAt(editor, []);
+        var count = controls?.GetInt32("Count") ?? 0;
+
+        for (var i = 1; i <= count; i++)
+        {
+            using var control = controls!.GetItem(i);
+            if (control is not null && TryInt(control, "Id", fallback: 0) == id)
+            {
+                return i;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
+    /// Every control at a path, INCLUDING the ones the surface suppresses, each with its id.
+    ///
+    /// What Read answers is the product's menu; this is the editor's. The difference between the
+    /// two is the only place a suppression can be checked, and until this existed there was no way
+    /// to ask the running editor for a menu's ids at all — they were measured once by hand and
+    /// written into a comment, which is how a table of numbers goes quietly out of date.
+    ///
+    /// Debug only, through the api. Nothing in the product reads it.
+    /// </summary>
+    public static (int Index, int Id, string Caption, bool Popup, bool Enabled, bool Suppressed)[]
+        Describe(DispatchObject editor, ReadOnlySpan<int> path)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+
+        // The xlide menu is not one of the editor's, so there is nothing at that position to walk
+        // to and asking the bar for control 900 is a bare HRESULT. Answered from the composition
+        // instead, which is the more useful answer anyway: it is the one place a reader can see
+        // which real control each synthetic position leads to.
+        if (path.Length == 1 && path[0] == XlideMenuPosition)
+        {
+            var composed = new List<(int, int, string, bool, bool, bool)>();
+            foreach (var item in ReadXlideMenu(editor))
+            {
+                using var control = ControlAt(editor, [XlideMenuPosition, item.Index]);
+                composed.Add((
+                    item.Index,
+                    control is null ? 0 : TryInt(control, "Id", fallback: 0),
+                    item.Caption,
+                    item.Popup,
+                    item.Enabled,
+                    false));
+            }
+
+            return [.. composed];
+        }
+
+        using var controls = ControlsAt(editor, Resolve(editor, path));
+        if (controls is null)
+        {
+            return [];
+        }
+
+        var count = controls.GetInt32("Count");
+        var rows = new List<(int, int, string, bool, bool, bool)>(count);
+
+        for (var i = 1; i <= count; i++)
+        {
+            using var control = controls.GetItem(i);
+            if (control is null)
+            {
+                continue;
+            }
+
+            var id = TryInt(control, "Id", fallback: 0);
+            rows.Add((
+                i,
+                id,
+                TryString(control, "Caption") ?? string.Empty,
+                TryInt(control, "Type", fallback: 0) == PopupControlType,
+                TryBool(control, "Enabled", fallback: true),
+                Replaced.Contains(id)));
+        }
+
+        return [.. rows];
     }
 
     /// <summary>The control a non-empty path leads to, or null when the path no longer exists.</summary>
@@ -182,8 +465,12 @@ internal static class VbeMenus
             return null;
         }
 
-        using var controls = ControlsAt(editor, path[..^1]);
-        return controls?.GetItem(path[^1]);
+        // Resolved WHOLE and before anything is walked. Doing it inside ControlsAt would translate
+        // the parents and leave the leaf synthetic, which is the one position that names the item
+        // about to be executed.
+        var real = Resolve(editor, path);
+        using var controls = ControlsAt(editor, real.AsSpan()[..^1]);
+        return controls?.GetItem(real[^1]);
     }
 
     /// <summary>

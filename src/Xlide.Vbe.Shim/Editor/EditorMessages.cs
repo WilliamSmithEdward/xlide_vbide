@@ -273,7 +273,14 @@ public sealed record SurfaceMenuItem(
     [property: JsonPropertyName("separator")] bool Separator,
     [property: JsonPropertyName("popup")] bool Popup,
     [property: JsonPropertyName("checked")] bool Checked,
-    [property: JsonPropertyName("shortcut")] string? Shortcut);
+    [property: JsonPropertyName("shortcut")] string? Shortcut,
+    /// <summary>
+    /// A codicon name to draw INSTEAD of the caption, for the entries this product composes rather
+    /// than mirrors. Null for everything read from the editor, which has captions and no icons.
+    /// The caption is still carried when this is set: it becomes the accessible name, because an
+    /// icon on its own is a button a screen reader can only call "button".
+    /// </summary>
+    [property: JsonPropertyName("icon")] string? Icon = null);
 
 /// <summary>The items of one menu, named by the path the page asked about.</summary>
 public sealed record SetMenuMessage(

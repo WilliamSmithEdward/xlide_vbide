@@ -1115,6 +1115,13 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ComponentSelected = OnComponentSelected;
         _editorSurface.ModuleCloseRequested = OnModuleCloseRequested;
         _editorSurface.ComponentInsertRequested = InsertComponent;
+        _editorSurface.ComponentRemoveRequested = (component, project) =>
+        {
+            if (RemoveComponent(component, project) is { } refused)
+            {
+                _editorSurface?.Notify(refused);
+            }
+        };
         _editorSurface.CompletionRequested = OnCompletionRequested;
         _editorSurface.HoverRequested = OnHoverRequested;
         _editorSurface.SignatureHelpRequested = OnSignatureHelpRequested;
@@ -5477,7 +5484,7 @@ internal sealed partial class AddInSession : IDisposable
     /// APPLY IS THE ONLY COMPARISON, and this must not grow another. It had one: a guard here that
     /// returned early when the mode, workbook and module all matched what was last written. That
     /// compares our record of the caption against our record of the caption, and the thing it has
-    /// to notice is the HOST rewriting the window underneath us â€” which changes neither.
+    /// to notice is the HOST rewriting the window underneath us — which changes neither.
     ///
     /// Pressing Reset twice was enough. The first press leaves break, the mode changes, the guard
     /// lets it through. The second press does nothing to the execution state and everything to the
@@ -6758,6 +6765,100 @@ internal sealed partial class AddInSession : IDisposable
         {
             Log.Error($"project: a component of kind {kind} could not be inserted", ex);
             _editorSurface?.Notify($"The component could not be inserted: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Removes a component and everything this session was still holding on its behalf.
+    ///
+    /// The COM call is one line; the rest is why this is a method. A component that goes leaves
+    /// four kinds of record behind, and each one that survives is a lie about a module that no
+    /// longer exists: the page's unwritten edits, this session's baseline of what it last wrote,
+    /// the breakpoints recorded against its lines, and the properties panel's target.
+    ///
+    /// The unwritten edits are DISCARDED rather than flushed, and the order matters. Pruning a
+    /// closed document flushes its pending text, which is right for a tab being closed and wrong
+    /// here: the write would land on a component that is already gone, and it reaches WriteModule,
+    /// which complains to the developer about a module they just deleted. So the edits are dropped
+    /// before the removal, not left for the prune that follows it.
+    ///
+    /// A document module is refused rather than attempted. ThisWorkbook and a sheet's code belong
+    /// to the workbook and the host answers Remove on them with a bare HRESULT.
+    ///
+    /// Returns null when the component is gone, and why it is not otherwise. The same shape the
+    /// write and show routes were given this release, and for the same reason: a refusal that only
+    /// reaches the log is a refusal the caller reports as success.
+    /// </summary>
+    private string? RemoveComponent(string component, string? projectName)
+    {
+        if (string.IsNullOrWhiteSpace(component))
+        {
+            return "no module was named";
+        }
+
+        try
+        {
+            var projectId = ProjectIdFromDisplay(projectName);
+            using var doomed = FindComponent(component, projectId, out var foundIn);
+            if (doomed is null)
+            {
+                Log.Warn($"project: nothing named {component} to remove"
+                    + (projectName is null ? string.Empty : $" in {projectName}"));
+                return $"There is no module named {component} to remove"
+                    + (projectName is null ? "." : $" in {projectName}.");
+            }
+
+            // Read back the name the host holds rather than trusting the one the tree sent: the
+            // messages below name what was actually removed, and the editor unifies identifier
+            // case, so the two can differ in spelling.
+            var removed = doomed.GetString("Name") ?? component;
+
+            if (doomed.GetInt32("Type") == DocumentComponent)
+            {
+                Log.Warn($"project: {removed} is a document module and cannot be removed");
+                return $"{removed} belongs to the workbook and cannot be removed.";
+            }
+
+            var owner = DisplayFromProjectId(foundIn ?? projectId);
+
+            // Before the component goes, so the prune that follows finds nothing to write back.
+            _editorSurface?.DiscardEdits(removed, owner);
+
+            using var project = FindProjectByDisplayName(owner) ?? _editor.GetObject("ActiveVBProject");
+            using var components = project?.GetObject("VBComponents");
+            if (components is null)
+            {
+                Log.Warn($"project: {removed} could not be removed, the project would not open its components");
+                return $"{removed} could not be removed: the project would not open its component list.";
+            }
+
+            // Remove takes the COMPONENT, not an index.
+            components.InvokeWithObject("Remove", doomed);
+
+            // The bare-name key as well as the workbook-qualified one: a baseline recorded before
+            // the workbook could be told is keyed without it, and the same fallback AdoptRename
+            // walks for a rename applies to a removal.
+            foreach (var key in new[] { WrittenKey(removed, owner), WrittenKey(removed, null) })
+            {
+                _writtenModules.Remove(key);
+                _breakpoints.Remove(key);
+            }
+
+            if (string.Equals(_propertiesTarget, removed, StringComparison.OrdinalIgnoreCase))
+            {
+                _propertiesTarget = null;
+            }
+
+            Log.Info($"project: removed {removed}" + (owner is null ? string.Empty : $" from {owner}"));
+
+            // The strip, the tree and the analyzer, the same three that an insert has to tell.
+            ComponentsChanged();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"project: {component} could not be removed", ex);
+            return $"{component} could not be removed: {ex.Message}";
         }
     }
 

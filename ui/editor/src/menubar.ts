@@ -20,6 +20,12 @@ export interface MenuItem {
   popup: boolean;
   checked: boolean;
   shortcut?: string | null;
+  /**
+   * A codicon name to draw instead of the caption. Only the entries this product composes carry
+   * one; everything mirrored from the editor is a caption. The caption is still sent when this is
+   * set, and becomes the button's accessible name.
+   */
+  icon?: string | null;
 }
 
 export interface MenubarHandlers {
@@ -160,7 +166,20 @@ export class Menubar {
       button.dataset.index = String(item.index);
       button.setAttribute("role", "menuitem");
       button.setAttribute("aria-haspopup", "true");
-      renderCaption(button, item.caption);
+
+      if (item.icon) {
+        // The glyph carries no meaning to anything that cannot see it, so the caption becomes the
+        // name and the icon is marked decorative — otherwise this is a button called "button".
+        button.classList.add("menu-top-icon");
+        button.setAttribute("aria-label", item.caption);
+        button.title = item.caption;
+        const glyph = document.createElement("span");
+        glyph.className = `codicon codicon-${item.icon}`;
+        glyph.setAttribute("aria-hidden", "true");
+        button.replaceChildren(glyph);
+      } else {
+        renderCaption(button, item.caption);
+      }
 
       // pointerdown rather than click, so the menu opens on press the way native menus do, and
       // the default is prevented so focus stays wherever the developer was working.

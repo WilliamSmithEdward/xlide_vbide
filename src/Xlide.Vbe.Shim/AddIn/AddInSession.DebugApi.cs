@@ -2508,6 +2508,37 @@ internal sealed partial class AddInSession
                     new DebugWindowsReply([.. rows]), DebugJsonContext.Default.DebugWindowsReply);
             }
 
+            case "menus":
+            {
+                /*
+                 * THE EDITOR'S MENUS, WITH THEIR IDS, including the ones the surface suppresses.
+                 *
+                 * The suppression table in VbeMenus is a list of numbers, and until this existed
+                 * the only way to learn a number was to enumerate the bar by hand once and write
+                 * it into a comment. That is how a table of magic numbers goes quietly out of
+                 * date, and it is why removing a menu was a measurement session rather than an
+                 * edit. `suppressed` is this session's own answer about each one, so what the
+                 * table does can be read back rather than inferred.
+                 *
+                 * `path` is the position chain, comma separated; absent means the bar itself.
+                 */
+                request.Query.TryGetValue("path", out var menuPath);
+                var positions = (menuPath ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(part => int.TryParse(part, out var one) ? one : 0)
+                    .Where(one => one > 0)
+                    .ToArray();
+
+                var menuRows = VbeMenus.Describe(_editor, positions)
+                    .Select(row => new DebugMenuRow(
+                        row.Index, row.Id, row.Caption, row.Popup, row.Enabled, row.Suppressed))
+                    .ToArray();
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugMenusReply(string.Join(",", positions), menuRows),
+                    DebugJsonContext.Default.DebugMenusReply);
+            }
+
             case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:
             {
                 // A module's shape, from the analyzer, so a caller can assert on structure rather
@@ -2662,31 +2693,22 @@ internal sealed partial class AddInSession
                                     DebugJsonContext.Default.DebugErrorReply);
                             }
 
-                            using var doomed = FindComponent(componentName, componentOwner, out var removedFrom);
-                            if (doomed is null)
+                            // THE PRODUCT'S OWN REMOVAL, not a second one written here.
+                            //
+                            // This used to be its own COM call: find the component, call Remove,
+                            // republish. That was true of the collection and false of everything
+                            // else — the page's unwritten edits were left to be flushed into a
+                            // module that no longer existed, and this session went on holding a
+                            // baseline and breakpoints for it. A harness removing a component saw
+                            // a different machine state than a developer removing the same one
+                            // from the tree, which is exactly what the api is not allowed to do.
+                            var refused = RemoveComponent(componentName, componentProject);
+                            if (refused is not null)
                             {
                                 return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply($"'{componentName}' is not a component of this project"),
+                                    new DebugErrorReply(refused),
                                     DebugJsonContext.Default.DebugErrorReply);
                             }
-
-                            using var owningProject = FindProjectByDisplayName(
-                                DisplayFromProjectId(removedFrom ?? componentOwner))
-                                ?? _editor.GetObject("ActiveVBProject");
-                            using var holding = owningProject?.GetObject("VBComponents");
-                            if (holding is null)
-                            {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply("the project would not open its component list"),
-                                    DebugJsonContext.Default.DebugErrorReply);
-                            }
-
-                            // Remove takes the COMPONENT, not an index, so it goes through the
-                            // object-argument path rather than the integer one.
-                            holding.InvokeWithObject("Remove", doomed);
-
-                            Log.Info($"component: removed {componentName}");
-                            ComponentsChanged();
 
                             return System.Text.Json.JsonSerializer.Serialize(
                                 new DebugComponentReply(true, componentName, "remove"),

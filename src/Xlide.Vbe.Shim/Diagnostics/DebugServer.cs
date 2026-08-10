@@ -689,6 +689,22 @@ public sealed record DebugWindowRow(
 public sealed record DebugWindowsReply(
     [property: JsonPropertyName("windows")] DebugWindowRow[] Windows);
 
+/// <summary>
+/// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
+/// leaves it out — the difference between the editor's menu and the product's.
+/// </summary>
+public sealed record DebugMenuRow(
+    [property: JsonPropertyName("index")] int Index,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("caption")] string Caption,
+    [property: JsonPropertyName("popup")] bool Popup,
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("suppressed")] bool Suppressed);
+
+public sealed record DebugMenusReply(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("items")] DebugMenuRow[] Items);
+
 /// <summary>What POST command, placement, breakpoint, and immediate answer.</summary>
 public sealed record DebugCommandReply(
     [property: JsonPropertyName("ran")] bool Ran,
@@ -1173,6 +1189,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugStateReply))]
 [JsonSerializable(typeof(DebugWindowRow))]
 [JsonSerializable(typeof(DebugWindowsReply))]
+[JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugLogReply))]
 [JsonSerializable(typeof(DebugMessageRow))]
