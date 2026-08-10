@@ -13,7 +13,7 @@
     <ProductName>xlide_vbide</ProductName>
     <Company>William Smith Edward</Company>
     <Copyright>Copyright (c) 2026 William Smith Edward</Copyright>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
     <RepositoryUrl>https://github.com/WilliamSmithEdward/xlide_vbide</RepositoryUrl>
     <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
   </PropertyGroup>
