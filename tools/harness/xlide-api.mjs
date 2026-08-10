@@ -646,8 +646,25 @@ function clientFor(entry) {
      * Drives the surface through the methods a click reaches.
      *
      * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
-     * `settings`, `sponsors`, `closeDialogs`, `key`, `focusEditor`. Answers {did, detail};
-     * `did: false` means the page declined, which is an answer and not a failure.
+     * `settings`, `sponsors`, `closeDialogs`, `focusEditor`, `search`, `dock`, `bookmark`,
+     * `format`, `undo`, and the language ones: `hover`, `completions`, `signature`, `quickFixes`,
+     * `definition`, `references`, `rename`. `act("actions")` answers the live list, which is the
+     * one that cannot be out of date. Answers {did, detail}; `did: false` means the page declined,
+     * which is an answer and not a failure.
+     *
+     * TWO WAYS TO SEND A KEY, and they are not interchangeable:
+     *
+     *   act("press", { key: "Enter" })     the EDITOR types it. Enter, Tab, Backspace, Delete,
+     *                                      Escape. This is what runs the enter rules, so smart
+     *                                      Enter, auto-indent and comment continuation are only
+     *                                      reachable through here.
+     *   act("key", { code: "KeyW", ctrl }) a synthetic KeyboardEvent at the document, for the
+     *                                      chords this product binds there. Monaco does not act
+     *                                      on synthesised events, so this cannot type.
+     *
+     * `press` arrived on 2026-08-09. Until then `type` was the only way in, and it INSERTS a
+     * string: Monaco applies its enter rules to a newline typed as one character and not to one
+     * arriving inside a longer string, so every Enter behaviour was live-untested.
      *
      * Synthesising events instead is how a working feature gets reported broken: the tab close
      * box arms at pointerdown and fires at pointerup, so `.click()` on it does nothing at all.

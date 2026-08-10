@@ -1040,6 +1040,69 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * `times` presses it more than once, because the interesting cases are the second and third
      * press: level two to level one, level one to the margin, and then the margin holding.
      */
+    /**
+     * Presses a key, as the keyboard would.
+     *
+     * THE GAP THIS CLOSES. `type` inserts a string, and inserting one is not the same as typing
+     * it: Monaco applies its enter rules to a newline TYPED as a single character and not to one
+     * that arrives inside a longer string. So every behaviour that hangs off Enter - auto-indent,
+     * smart Enter's block layout, comment continuation, comment-spacing mirroring - could not be
+     * driven from here at all, and the settings that govern them had no live test. A fix to the
+     * indentation rules on 2026-08-09 had to ship reasoned rather than measured for exactly this.
+     *
+     * `backspace` below is the same idea, added when it was needed and never generalised. It stays
+     * because probes name it, and it now goes through here.
+     *
+     * NOT `key`, WHICH IS A DIFFERENT THING and the reason this is named apart. `key` dispatches a
+     * synthetic KeyboardEvent at the document to exercise the chords this product binds there,
+     * Ctrl+W above all. Monaco does not act on synthesised events, so `key` cannot type, and this
+     * cannot test a chord. Two capabilities, two names, rather than one name that does half of
+     * each depending on the argument.
+     *
+     *   act("press", { key: "Enter" })
+     *   act("press", { key: "Tab", times: 2 })
+     *
+     * Answers the caret and the line it ended on, which is what a caller is checking.
+     */
+    press: (args) => {
+      const editor = workspace.activeEditor();
+      const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));
+      const wanted = String(args.key ?? "");
+
+      // A newline TYPED, one character at a time, which is what makes the enter rules run. The
+      // others are editor commands, because that is how the keybindings reach them.
+      const press: Record<string, () => void> = {
+        Enter: () => editor.trigger("keyboard", "type", { text: "\n" }),
+        Tab: () => editor.trigger("keyboard", "tab", null),
+        Backspace: () => editor.trigger("keyboard", "deleteLeft", null),
+        Delete: () => editor.trigger("keyboard", "deleteRight", null),
+        Escape: () => editor.trigger("keyboard", "cancelSelection", null),
+      };
+
+      const stroke = press[wanted];
+      if (stroke === undefined) {
+        return {
+          did: false,
+          detail: `no key '${wanted}'; this drives ${Object.keys(press).join(", ")}`,
+          data: null,
+        };
+      }
+
+      editor.focus();
+      for (let at = 0; at < times; at += 1) { stroke(); }
+
+      const at = editor.getPosition();
+      return {
+        did: true,
+        detail: `${wanted} ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
+        data: {
+          line: at?.lineNumber ?? null,
+          column: at?.column ?? null,
+          text: at ? editor.getModel()?.getLineContent(at.lineNumber) ?? null : null,
+        },
+      };
+    },
+
     backspace: (args) => {
       const editor = workspace.activeEditor();
       const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));

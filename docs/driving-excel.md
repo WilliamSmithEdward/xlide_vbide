@@ -958,6 +958,30 @@ node tools\harness\format-positions.mjs   # positions, parity, and the Backspace
 `act("backspace", {times})` drives it. The `type` route cannot: it goes through
 `trigger("keyboard", "type")`, which only ever inserts.
 
+### Pressing a key, which is not the same as typing one
+
+```js
+await api.act("press", { key: "Enter" });     // Enter, Tab, Backspace, Delete, Escape
+await api.act("press", { key: "Tab", times: 2 });
+```
+
+**Monaco applies its enter rules to a newline typed as ONE character, and not to one that
+arrives inside a longer string.** So `type("...\r\n")` inserts a line break without running
+any of the behaviour a developer's Enter runs: auto-indent, smart Enter's block layout, the
+closer it writes, comment continuation, comment-spacing mirroring. Every one of those was
+live-untested until `press` existed on 2026-08-09, and a fix to the indentation rules the same
+day had to ship reasoned rather than measured for want of it.
+
+**`press` and `key` are different tools and the names are not decorative.** `press` types into
+the page's editor. `key` dispatches a synthetic `KeyboardEvent` at the document, for the chords
+this product binds there itself, Ctrl+W above all. Monaco does not act on synthesised events,
+so `key` cannot type and `press` cannot test a chord.
+
+And one thing to expect when asserting on what Enter produced: **the editor unifies identifier
+case across a project**, so a loop variable typed `item` comes back `Item`, in the opener as
+well as in the generated `Next`. Compare case-insensitively or the assertion fails on correct
+behaviour.
+
 ---
 
 ## 4. Where the api stops

@@ -263,6 +263,52 @@ if (runnable) try {
     `caret at column ${single.data?.column}, line now ${JSON.stringify(single.data?.text)}`);
 
   /*
+   * ENTER, AND WHAT HANGS OFF IT.
+   *
+   * Untestable until 2026-08-09. `type` inserts a string, and Monaco applies its enter rules only
+   * to a newline typed as ONE character, so nothing here could be driven: auto-indent, smart
+   * Enter's block layout, and the closer it writes were all live-untested. `act("press", {key})`
+   * exists for this, and these are the first things it is pointed at.
+   *
+   * The accented loop variable is deliberate. The indentation rules were made Unicode-aware the
+   * same day, and until this could be pressed the change shipped reasoned rather than measured.
+   * What it proves is the OUTCOME - the block is built and its closer names the loop variable -
+   * rather than which of Monaco's rules and this product's smart Enter did which part.
+   */
+  for (const [what, loopVariable] of [["an ASCII", "item"], ["an accented", "\u00C9l\u00E9ment"]]) {
+    const opener = `    For Each ${loopVariable} In coll`;
+    await api.writeModule(
+      target,
+      ["Option Explicit", "", "Public Sub Go()", opener, "End Sub", ""].join("\r\n"),
+      project.projectId);
+    await wait(1800);
+
+    // The caret is placed through the SURFACE, and the line written rather than typed: `type`
+    // goes through the host's keyboard pipeline while `press` reaches the page's editor, so a
+    // measurement that mixes them presses Enter somewhere other than where it typed.
+    await api.caret(4, { module: target, project: project.projectId, column: opener.length + 1 });
+    await wait(600);
+    await api.act("press", { key: "Enter" });
+    await wait(900);
+
+    const built = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+      .split("\n").map((one) => one.replace("\r", ""));
+
+    const body = built.findIndex((one) => one.trim().length === 0 && one.length > 0);
+    check(`Enter after ${what} For Each indents the body past the opener`,
+      body > 0 && body < built.length && (built[body].length > opener.search(/\S/)),
+      `the lines after it were ${JSON.stringify(built.slice(3, 8))}`);
+
+    // CASE-INSENSITIVELY, because the editor unifies identifier case across a project and will
+    // respell the loop variable if it knows the name: `item` came back as `Item`, in the opener
+    // as well as the closer. That is VBA's doing and it is correct; asserting the spelling the
+    // probe typed would fail on it.
+    check(`and the closer it writes names ${loopVariable}`,
+      built.some((one) => one.trim().toLowerCase() === `next ${loopVariable}`.toLowerCase()),
+      `no "Next ${loopVariable}" in ${JSON.stringify(built.slice(3, 9))}`);
+  }
+
+  /*
    * AND THE FINDING GOES AWAY WHEN THE CODE DOES.
    *
    * The pass used to publish per project and only when that project had something to say, so a
