@@ -356,6 +356,8 @@ await api.menus([900]);     // the composed xlide menu, and the real id behind e
 // The tree's right-click menus, and the one destructive thing on them.
 await api.act("treeMenu", { module: "Helpers" });        // -> detail is the menu, " | " separated
 await api.act("treeMenu", { workbook: "TwinFixture.xlsm" });  // the workbook row's menu instead
+await api.act("treeAdd", { workbook: "TwinFixture.xlsm" });   // the row's green plus: the three kinds
+await api.act("menuBar");                                // the wrench: the editor's own dialogs
 await api.act("chooseMenuItem", { label: "Remove" });    // pointerup, which is what a menu listens for
 await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
 ```

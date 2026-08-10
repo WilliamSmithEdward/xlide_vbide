@@ -111,6 +111,46 @@ for (let rank = 0; rank < sources.length; rank++) {
     wrong ?? `${matched} items`);
 }
 
+/*
+ * AND IT RUNS THE RIGHT ONE.
+ *
+ * Everything above resolves positions; this executes one. Both bands of the arithmetic are driven
+ * through the surface the way a click drives them, and the proof is the host's own line naming the
+ * control id it invoked — not the dialog, which the debug api's guard cancels within a couple of
+ * seconds by design. Polling `dialogs` afterwards finds nothing and reads exactly like an item
+ * that did not run (2026-08-09; the guard's own log line is what settled it).
+ */
+console.log("\nexecuted through the synthetic path");
+
+for (const [label, wanted] of [["Macros", 930], ["Add-In Manager", 943]]) {
+  const since = (await api.log({ max: 1 })).next;
+
+  const opened = await api.act("menuBar");
+  if (!opened.did) {
+    check(`${label} could be reached`, false, opened.detail);
+    continue;
+  }
+
+  const chose = await api.act("chooseMenuItem", { label });
+  await new Promise((settle) => setTimeout(settle, 2500));
+
+  const lines = (await api.log({ since })).lines ?? [];
+  const ran = lines.find((line) => /menu: \[900,\d+\] executed \((\d+)\)/.test(line));
+  const id = ran ? Number(ran.match(/executed \((\d+)\)/)[1]) : 0;
+
+  check(`${label} runs control ${wanted}, not another`, id === wanted,
+    ran ? `${ran.replace(/^.*menu:/, "menu:")}` : `nothing executed (${chose.detail})`);
+
+  // The guard names the dialog it closed, which is the second, independent witness that the
+  // control that ran was the one the menu said it was.
+  const cleared = lines.find((line) => /cleared our dialog/.test(line));
+  check(`${label} opened its own dialog`,
+    cleared !== undefined && new RegExp(label.split(" ")[0], "i").test(cleared),
+    cleared ? cleared.replace(/^.*cleared/, "cleared") : "the guard cleared nothing");
+
+  await api.act("closeDialogs");
+}
+
 console.log("\nwhat left the menus and where it went");
 
 const toolbar = await api.ask(`JSON.stringify(

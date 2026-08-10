@@ -734,6 +734,70 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * Presses a workbook row's plus and reports the menu it opened.
+     *
+     * The plus is hidden until the row is hovered, and CSS :hover cannot be provoked from script,
+     * so a probe reaching for it by pointer has to move a real mouse. It is a real button and the
+     * tree listens for a real click, so this presses it directly: the reveal is a presentation
+     * rule and pressing a control that is styled invisible still runs everything pressing it runs.
+     * Whether it becomes VISIBLE on hover is a separate question and belongs to a probe that can
+     * move a pointer.
+     */
+    treeAdd: (args) => {
+      const workbook = String(args.workbook ?? "");
+      if (!workbook) {
+        return { did: false, detail: "no workbook given" };
+      }
+
+      const plus = [...document.querySelectorAll<HTMLElement>("[data-add-project]")].find((one) =>
+        (one.dataset.addProject ?? "").toLowerCase() === workbook.toLowerCase());
+
+      if (!plus) {
+        return { did: false, detail: `the tree has no row for the workbook ${workbook}` };
+      }
+
+      plus.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+      const labels = [...document.querySelectorAll(".menu-dropdown .menu-item")]
+        .map((one) => (one.textContent ?? "").trim());
+
+      return labels.length > 0
+        ? { did: true, detail: labels.join(" | ") }
+        : { did: false, detail: `the plus on ${workbook} opened no menu` };
+    },
+
+    /**
+     * Opens the surface's own menu — the wrench at the head of the toolbar — and reports it.
+     *
+     * Its items come from the HOST, so unlike every other menu on this surface it is not there the
+     * moment the button is pressed. Awaited rather than slept on, and reported empty rather than
+     * reported as nothing when the host does not answer, because "the menu is empty" and "the menu
+     * never arrived" are different failures.
+     */
+    menuBar: async () => {
+      const button = document.querySelector<HTMLElement>("#menubar .menu-top");
+      if (!button) {
+        return { did: false, detail: "the surface has no menu" };
+      }
+
+      const options = { bubbles: true, cancelable: true };
+      button.dispatchEvent(new PointerEvent("pointerdown", options));
+      button.dispatchEvent(new PointerEvent("pointerup", options));
+
+      const items = () => [...document.querySelectorAll(".menu-dropdown .menu-item")]
+        .map((one) => (one.textContent ?? "").trim());
+
+      for (let waited = 0; items().length === 0 && waited < 3000; waited += 25) {
+        await new Promise((settle) => { setTimeout(settle, 25); });
+      }
+
+      const labels = items();
+      return labels.length > 0
+        ? { did: true, detail: labels.join(" | ") }
+        : { did: false, detail: "the menu opened and the host sent no items in 3s" };
+    },
+
+    /**
      * Chooses an item of the open context menu by its label.
      *
      * On `pointerup`, which is what the menu listens for. A synthesised `click` lands on nothing
