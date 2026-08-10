@@ -124,13 +124,31 @@ internal static class ModuleSyncService
             .ToList();
     }
 
-    /// <summary>Carries out the rows a caller selected, and says what happened to each.</summary>
+    /// <summary>
+    /// Carries out the rows a caller selected, and says what happened to each.
+    ///
+    /// HELD AGAINST THE FOLDER FOR THE WHOLE APPLY. Each file is written atomically, so nobody has
+    /// ever read half a module, and that is a different guarantee from the one needed here: two
+    /// Excels exporting the same project to one folder each work out a plan, and each plan's
+    /// deletions are computed from the modules THAT instance holds. Interleave them and the second
+    /// instance deletes files the first has just written, every step of it individually correct.
+    ///
+    /// The lock is a file in the target folder rather than anything machine-wide, because the
+    /// folder is what is being contended: two instances exporting different projects to different
+    /// folders have nothing to say to each other and should not wait on one another.
+    /// </summary>
     public static SyncApplyResult Apply(
         DispatchObject project,
         SyncPlan plan,
         IReadOnlySet<string> selected,
         WriteModuleText write)
     {
+        using var folderLock = FolderLock.Take(plan.Folder);
+        if (folderLock.HeldByAnother)
+        {
+            return new SyncApplyResult([], [], [], [folderLock.Complaint!]);
+        }
+
         var changed = new List<string>();
         var skipped = new List<string>();
         var removed = new List<string>();

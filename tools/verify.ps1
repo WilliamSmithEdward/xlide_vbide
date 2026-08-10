@@ -117,18 +117,49 @@ Step 'engine executable is current' {
     $newer = @(Get-ChildItem $watched -Recurse -File -Include *.ts, *.mjs, *.js |
         Where-Object { $_.LastWriteTimeUtc -gt $builtAt })
 
-    if ($newer.Count -gt 0) {
-        $names = ($newer | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
-        throw "engine sources are newer than the packaged executable ($names). Run: npm run package --prefix engine"
+    $covers = if ($watched.Count -eq 1) { 'the analyzer checkout was not found' } else { 'analyzer included' }
+
+    if ($newer.Count -eq 0) {
+        return "packaged after every engine source, $covers"
     }
 
-    if ($watched.Count -eq 1) {
-        # Said out loud rather than passed over: the check ran, but half of what it is meant to
-        # watch was not there to watch.
-        return 'packaged after every engine source (the analyzer checkout was not found)'
+    <#
+        PACKAGED, NOT COMPLAINED ABOUT.
+
+        This threw and told the developer to run `npm run package` themselves, which is a gate
+        naming a command it could have run. It fired on four runs where nothing was wrong, and the
+        cost of that is not the reading: it is that a step which is usually noise gets answered by
+        rerunning it, and once it meant the measurements had been taken against an engine older
+        than the analyzer under test.
+
+        Packaging only when something IS newer, rather than on every run: the injection writes a
+        90 MB executable and takes the better part of a minute, which is most of this gate's whole
+        runtime to spend on the common case where nothing changed.
+    #>
+    $names = ($newer | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
+    Write-Host "  $($newer.Count) engine source(s) newer than the executable ($names); packaging" -ForegroundColor Yellow
+
+    # A HOST HOLDS THE EXECUTABLE IT IS RUNNING, and the injection fails with EBUSY behind whatever
+    # is filtering npm's output. Named here rather than left as a copy error two hundred lines up
+    # (2026-08-10: two rounds spent diagnosing a fix that had simply never been built).
+    $holders = @(Get-Process EXCEL, xlide-engine -ErrorAction SilentlyContinue)
+    if ($holders.Count -gt 0) {
+        $who = ($holders | ForEach-Object { "$($_.ProcessName) $($_.Id)" }) -join ', '
+        throw ("the engine is stale and cannot be packaged while it is running ($who holds it). " +
+            'Close the editor and run the gate again.')
     }
 
-    'packaged after every engine source, analyzer included'
+    npm run package --prefix (Join-Path $repoRoot 'engine') 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'packaging the engine failed' }
+
+    # Read back rather than assumed: npm can exit zero having written nothing when the injection
+    # step is the part that failed.
+    $rebuiltAt = (Get-Item $exe).LastWriteTimeUtc
+    if ($rebuiltAt -le $builtAt) {
+        throw 'packaging reported success and the executable did not change'
+    }
+
+    "packaged $($newer.Count) newer source(s) into the executable, $covers"
 }
 
 Step 'no variant is read as an object' {
