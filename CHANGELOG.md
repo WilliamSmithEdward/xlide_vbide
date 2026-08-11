@@ -1,6 +1,29 @@
 # Changelog
 
+## v0.6.2 (2026-08-10)
+
+A tree that stops folding away the only thing in it, and a test harness that stopped guessing.
+
+### Changed
+
+- With a single workbook open, closing the last tab no longer collapses it. Its procedures still
+  fold, because that is the accordion remembering what was being worked on, but the workbook row
+  stays open: folding it leaves a tree of one closed row, and every module in the project behind a
+  click that has one possible answer. Several workbooks still collapse, which is real tidying.
+
+### Internal
+
+- The live suites wait for what they need instead of sleeping through it. A `-Live` pass held 130
+  fixed sleeps totalling 148.8s; eight suites went from 146.9s to 25.2s with the same check counts.
+  `waitFor` and `waitUntilStable` are on the harness client now, where seven hand-rolled copies of
+  the first were heading.
+- Five harness suites imported the client by an absolute `file:///F:/GitHub/...` path, so they ran
+  only on one machine at one directory.
+
 ## Unreleased
+
+> The three entries below shipped in v0.6.0 and this heading was never moved. Versions v0.4.0
+> through v0.6.1 have no sections here at all; the releases on GitHub carry their notes.
 
 The analyzer has been answering more than anything asked it. Three of those answers now reach the
 editor.
