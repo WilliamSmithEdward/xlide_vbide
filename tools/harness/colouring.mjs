@@ -19,7 +19,7 @@
  *
  *   node tools\harness\colouring.mjs
  */
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
@@ -87,9 +87,37 @@ try {
   await api.component("add", { kind: "module", name, project: project.projectId });
   made = true;
   await api.writeModule(name, lines.join("\r\n"), project.projectId);
-  await new Promise((r) => setTimeout(r, 2000));
+
+  // WAITED FOR, NOT SLEPT THROUGH. These were `wait(2000)` and `wait(3000)`, which is 5s of a 5.3s
+  // suite: the checking took 289ms and the rest was two guesses at how long a machine takes. Both
+  // have a condition worth naming, and naming it is also the only way the suite stops being a race
+  // that has not lost yet (driving-excel.md).
+  await waitFor("the module to hold what was written", async () =>
+    ((await api.readModule(name, project.projectId)).text ?? "").includes("End Function"));
+
   await api.pane("open", { module: name, project: project.projectId });
-  await new Promise((r) => setTimeout(r, 3000));
+
+  /*
+   * The tab opening is not the thing; the SEMANTIC TOKENIZER having run over it is, and it is
+   * rebuilt per project from the words the engine sends. Until it has, every span reads as a
+   * plain identifier - which is a colour, so a check racing this one fails saying `call` was
+   * painted `identifier`, and that is exactly what a real defect here looks like.
+   *
+   * WAITED ON THE DECLARATION, NOT ON ANYTHING ASSERTED BELOW. The first version of this waited
+   * for the bare call to be painted as a call, which is precisely what the first check then
+   * asserts - so that check could no longer fail, only turn into a timeout. A readiness wait has
+   * to name a DIFFERENT observable from the one under test or it launders the assertion into the
+   * setup. No check reads the declaration line, and the whole point of this suite is that a
+   * declaration, a bare call and a qualified call go through different rules, so a defect in any
+   * of those still reports as a failed check rather than being waited away.
+   */
+  // Advisory, and deliberately so. A wait that THROWS when the thing never arrives turns nine
+  // readable colour failures into one timeout, which is a worse report of the same breakage: the
+  // sleep it replaced at least let the checks speak. So this gives up quietly and says it did.
+  await waitFor("the tokenizer to paint the module", async () =>
+    (await across("Public Sub Recalculate(ByVal label As String)", "Recalculate")).head === CALL,
+    { budgetMs: 8000 },
+  ).catch(() => console.log("     (the semantic pass never arrived; the colours below say what did)"));
 
   const held = (await api.readModule(name, project.projectId)).text ?? "";
   const accented = held.includes("CalculérName") && held.includes("RécordAccent");

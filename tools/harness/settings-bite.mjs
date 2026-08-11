@@ -15,12 +15,11 @@
  *
  *   node tools\harness\settings-bite.mjs
  */
-import { open } from "./xlide-api.mjs";
+import { open, waitFor, waitUntilStable } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `Bite${process.pid}`;
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let passed = 0;
 const failures = [];
@@ -33,14 +32,32 @@ const live = async () =>
   ((await api.readModule(name, project.projectId, { live: true })).text ?? "")
     .split("\n").map((one) => one.replace("\r", ""));
 
-/** Seeds the module, puts the caret at the end of a line, and presses Enter. */
+/**
+ * Seeds the module, puts the caret at the end of a line, and presses Enter.
+ *
+ * THE SEED WAIT IS WHAT KEEPS THE REST HONEST. This is called six times against the same module,
+ * so at the moment the write goes out the module still holds the PREVIOUS run's result - which
+ * already has the extra line Enter is about to add. Wait only for "a line appeared" and it is
+ * satisfied by the leftovers before the seed has even landed, and the suite compares two settings
+ * by reading the same stale text twice. So the seed is waited for as a whole text first, and only
+ * then does the line count mean anything.
+ */
 async function enterOn(source, line) {
+  const seed = source.join("\n").trim();
+
   await api.writeModule(name, source.join("\r\n"), project.projectId);
-  await wait(1500);
+  await waitFor("the seed to be the module's whole text", async () =>
+    (await live()).join("\n").trim() === seed);
+
   await api.caret(line, { module: name, project: project.projectId, column: source[line - 1].length + 1 });
-  await wait(500);
+  await waitFor("the caret to reach the end of the line Enter is pressed on", async () => {
+    const focus = (await api.ui()).focus;
+    return focus?.line === line && focus?.column === source[line - 1].length + 1;
+  });
+
   await api.act("press", { key: "Enter" });
-  await wait(900);
+  // A line appeared, which is neutral about WHAT was built - that is what the checks compare.
+  await waitFor("Enter to add a line", async () => (await live()).length > source.length);
   return live();
 }
 
@@ -51,9 +68,12 @@ try {
   await api.component("add", { kind: "module", name, project: project.projectId });
   made = true;
   await api.writeModule(name, "Option Explicit\r\n", project.projectId);
-  await wait(1200);
+  await waitFor("the new module to hold its first line", async () =>
+    ((await api.readModule(name, project.projectId)).text ?? "").includes("Option Explicit"));
+
   await api.pane("open", { module: name, project: project.projectId });
-  await wait(2500);
+  await waitFor("the module to be the one on screen", async () =>
+    (await api.ui()).focus.model?.toLowerCase().endsWith(`/${name.toLowerCase()}`));
 
   /*
    * THE OPENER MUST NOT ALREADY HAVE ITS CLOSER. Smart Enter builds a block when there is one to
@@ -90,10 +110,14 @@ try {
   const explorer = {};
   for (const on of [true, false]) {
     await api.settings({ treeFollowsEditor: on });
-    await wait(600);
+    await waitFor(`treeFollowsEditor to read back as ${on}`, async () =>
+      (await api.settings()).treeFollowsEditor === on);
+
     await api.pane("open", { module: name, project: project.projectId });
-    await wait(1500);
-    explorer[String(on)] = JSON.stringify((await api.ui()).explorer);
+    // Settled rather than slept on, and stability is a different question from whether the two
+    // snapshots DIFFER, which is what the check below asks.
+    explorer[String(on)] = JSON.stringify(
+      await waitUntilStable(async () => (await api.ui()).explorer));
   }
 
   check("treeFollowsEditor changes what the explorer shows",

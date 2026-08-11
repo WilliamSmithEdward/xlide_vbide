@@ -787,11 +787,96 @@ await api.until("window.xlideBridge.documents.all().length > 1");
 await api.waitForLog("rename:");
 await api.assert("surfaceReady");
 await api.waitUntilResponsive();
+
+// And on the CLIENT side, for anything the door cannot answer in one call. Not `api.until`,
+// which asks a question IN the page; this polls from out here.
+import { waitFor, wait } from "./xlide-api.mjs";
+await waitFor("the module to hold what was written", async () =>
+  ((await api.readModule(name, project)).text ?? "").includes("End Function"));
 ```
 
 **Every fixed sleep in a probe is a race that has not lost yet.** A `settle(2500)` was right until
 a host round trip joined the path it was waiting on, and then it reported a working feature
 broken - twice in one afternoon (2026-08-07).
+
+It is also where the live gate's time goes. Counted 2026-08-10: **130 fixed sleeps totalling about
+149 seconds**, roughly 127s of it in the suites `-Live` runs, before a single Excel restart. Seven
+suites had grown their own copy of the same poller and fifteen their own `wait`, which is why both
+now live on the client instead.
+
+| suite | was | now |
+| --- | --- | --- |
+| `format-positions.mjs` | 29.9s | **6.0s** |
+| `three-copies.mjs` | 29.2s | **2.8s** |
+| `settings-bite.mjs` | 25.8s | **0.9s** |
+| `module-sync.mjs xlide` | 16.0s | **2.1s** |
+| `module-sync.mjs builtIn` | 15.9s | **2.1s** |
+| `analysis-freshness.mjs` | 15.5s | **7.1s** |
+| `import-guard.mjs` | 9.3s | **3.8s** |
+| `colouring.mjs` | 5.3s | **0.4s** |
+| | 146.9s | **25.2s** |
+
+Each measured against the committed version on the same live session, same check counts, and run
+two or three times over to see whether taking the sleeps out had made them flaky. None of them
+moved by more than 30ms between runs.
+
+Two suites are deliberately only half converted. `import-guard` keeps three sleeps, because they
+sit directly in front of assertions about the module's text and waiting on that text would be
+waiting for the answer. `three-copies` keeps one, for the two steps with no reliable observable.
+
+**Not every wait is a sleep.** Some of the biggest savings here were poll INTERVALS, not settles:
+`analysis-freshness` re-checked its predicate every 1500ms, so every wait cost up to a second and
+a half of pure latency after the thing had already happened. The door answers in well under a
+millisecond, so 200ms is politeness enough.
+
+**And measure before assuming.** The three Excel restarts in a `-Live` pass looked like the
+obvious target and are **3.9s each**, so they are not worth touching. `immediate-watch` looked
+like a target too and is only 3.7s of sleeps inside 21s; the rest is real host work.
+
+> **"There are rows" is not "the rows are the ones you asked for."** Switching the sync dialog to
+> the import direction and then waiting for `.sync-item` to be non-empty is satisfied instantly by
+> the EXPORT rows still on screen, so the check read the wrong plan. It failed on the shared
+> planner and passed on the built-in one purely because the two take different times to answer -
+> a red that was entirely the harness. Wait for the rows to CHANGE, then to settle. This is the
+> third shape the same mistake took in one afternoon: a condition that is already true.
+
+> ### Two rules for replacing a sleep, both paid for on 2026-08-10
+>
+> **Wait on a DIFFERENT observable from the one under test.** The colouring suite's first rewrite
+> waited for the bare call to be painted as a call, which is exactly what its first check then
+> asserts - so that check could no longer fail, only turn into a timeout. It waits on the
+> declaration site now, which no check reads. A readiness wait that names the assertion has
+> laundered the assertion into the setup.
+>
+> **The sleep may be hiding a vacuous pass, so removing it needs more care than deleting it.**
+> `three-copies` polls for the three copies to agree, with the sleep in front. Take the sleep out
+> and the poll runs before the operation has reached any copy, finds them agreeing on the text from
+> BEFORE, and passes having measured nothing. Each step waits for the change to land in ONE copy
+> now, and `agree` still decides about all three.
+>
+> **And some steps have no reliable observable.** Format Module is idempotent, so a wait for "the
+> text changed" times out on a healthy product; undo does not reliably take the typed line back
+> out either. Both were found by writing the wait and watching it fail. Those two keep a bounded
+> settle, named as such - which also exposed something the suite never established: it only ever
+> asked whether the three copies AGREE, so an undo that did nothing at all passed it.
+>
+> **Settling is not the same as having happened.** `waitUntilStable(findingSpot)` after Format
+> Module returns immediately, because for the first few hundred milliseconds the finding sits
+> perfectly still at its OLD position - the analyser has not run again yet. Three quiet polls is
+> satisfied by a thing that has not started. Wait for it to MOVE, then for it to settle.
+
+> ### An ad-hoc script with no `finally` cost three runs and a wrong conclusion
+>
+> Chasing what `undo` does, a throwaway `node -e` wrote the suite's seed into `HelpersExtra` and
+> then died on an unrelated bad predicate, with nothing to put the module back. Every run after
+> that captured the SEED as its `original` and dutifully restored it, so the damage cemented
+> itself, and `format-positions` began failing its retirement check against a module whose
+> `Thing` no longer existed. That was read as a pre-existing product failure for three runs.
+>
+> `testing.md` already says a probe that mutates the fixture must put it back in a `finally`. The
+> rule applies to the throwaway one-liner too, and that is the one it is easy to exempt. Nothing
+> reached disk - `artifacts\fixtures\RenameFixture.xlsm` was never written - so a restart would
+> have fixed it, which is worth remembering before repairing a fixture by hand.
 
 ### Not being stuck behind a modal
 

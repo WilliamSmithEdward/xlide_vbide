@@ -14,7 +14,12 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { open } from "./xlide-api.mjs";
+import { open, wait, waitFor, waitUntilStable } from "./xlide-api.mjs";
+
+/** Every row the sync dialog is drawing, as "name:status" - one string, easy to compare. */
+const SYNC_ROWS = `(() => [...document.querySelectorAll(".sync-item")]
+  .map(r => r.querySelector(".sync-item-name").textContent + ":" + r.querySelector(".sync-chip").textContent)
+  .join(","))()`;
 
 const api = await open();
 let passed = 0;
@@ -54,7 +59,6 @@ const check = (name, got, want = true) => {
 // is really yesterday's leftovers. Written down in docs/disambiguation.md after the freshness
 // suite did exactly this, and done here after it happened again (2026-08-09).
 const probe = `SyncProbe${process.pid}`;
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const stale = `SyncStale${process.pid}`;
 
 const folder = join(tmpdir(), `xlide-sync-${process.pid}`);
@@ -245,18 +249,39 @@ try {
   await api.until(`document.getElementById("sync-card") !== null`, { waitMs: 15000 }).catch(() => {});
   await api.eval(`(() => { document.getElementById("sync-folder").value = ${JSON.stringify(folder)};
     document.getElementById("sync-folder").dispatchEvent(new Event("change")); return "set"; })()`);
-  await new Promise((r) => setTimeout(r, 2500));
-  await api.eval(`(() => document.querySelector(".sync-direction[data-direction=import]").click())()`);
-  await new Promise((r) => setTimeout(r, 3000));
+  // The folder having reached the dialog, and then the plan having been drawn AT ALL. Not that it
+  // drew the right row: that is the check below and it has to stay able to fail.
+  await waitFor("the dialog to take the folder", async () =>
+    String((await api.eval(
+      `(() => document.getElementById("sync-folder").value)()`)).result ?? "").length > 0);
 
-  const dialogRows = await api.eval(`(() => [...document.querySelectorAll(".sync-item")]
-    .map(r => r.querySelector(".sync-item-name").textContent + ":" + r.querySelector(".sync-chip").textContent)
-    .join(","))()`);
+  /*
+   * THE PLAN HAS BEEN REDRAWN FOR THE NEW DIRECTION, which is not the same as there being rows.
+   *
+   * Waiting for `.sync-item` to be non-empty is satisfied instantly by the EXPORT rows still on
+   * screen from a moment ago, and the check below then reads the wrong plan and fails. Measured
+   * exactly that on the shared planner, which takes longer to answer than the built-in one, so
+   * the suite went red on one planner and green on the other for a reason that was purely the
+   * harness (2026-08-10).
+   *
+   * So: what the rows say has to CHANGE, and then stop changing. Neither asks whether the right
+   * row is there - that is the check, and it can still fail.
+   */
+  const rowsBefore = String((await api.eval(SYNC_ROWS)).result ?? "");
+  await api.eval(`(() => document.querySelector(".sync-direction[data-direction=import]").click())()`);
+  await waitFor("the dialog to redraw for the import direction", async () =>
+    String((await api.eval(SYNC_ROWS)).result ?? "") !== rowsBefore);
+  await waitUntilStable(async () => String((await api.eval(SYNC_ROWS)).result ?? ""));
+
+  const dialogRows = await api.eval(SYNC_ROWS);
   check("the dialog drew the same plan the api answers",
     String(dialogRows.result).includes("Helper.bas:update"));
 
   await api.eval(`(() => [...document.querySelectorAll("#sync-foot button")].find(b => b.textContent === "Apply").click())()`);
-  await new Promise((r) => setTimeout(r, 4000));
+  // CHANGED, not changed to the right thing. An apply that wrote the wrong text satisfies this and
+  // still fails the check below, which is the whole point of not waiting for "ByTheDialog" here.
+  await waitFor("the dialog's Apply to reach the module", async () =>
+    (await api.readModule("Helper", project.projectId)).text !== beforeText);
 
   const afterDialog = (await api.readModule("Helper", project.projectId)).text;
   check("the dialog's Apply changed the module", afterDialog.includes("ByTheDialog"));
@@ -265,9 +290,16 @@ try {
 
   // Now put it back and do the identical thing through the route.
   await api.writeModule("Helper", beforeText, project.projectId);
-  await new Promise((r) => setTimeout(r, 1500));
+  // PUT BACK BEFORE THE SECOND IMPORT, waited for rather than assumed. The two applies are being
+  // compared byte for byte, so an import that started from a module still holding the dialog's
+  // result would agree with it for the wrong reason.
+  await waitFor("the module to be back where the dialog found it", async () =>
+    (await api.readModule("Helper", project.projectId)).text === beforeText);
+
   await api.syncApply("import", { folder });
-  await new Promise((r) => setTimeout(r, 1500));
+  await waitFor("the route's apply to reach the module", async () =>
+    (await api.readModule("Helper", project.projectId)).text !== beforeText);
+
   const afterApi = (await api.readModule("Helper", project.projectId)).text;
 
   check("the api's apply changed it the same way", afterApi.includes("ByTheDialog"));
@@ -327,7 +359,12 @@ try {
   await api.component("add", { kind: "module", name: langModule, project: project.projectId });
   made.push(langModule);
   await api.writeModule(langModule, langSource, project.projectId).catch(() => {});
-  await wait(1500);
+  // Tolerant: the write is allowed to be refused, which is what the `.catch` above is for, and
+  // this host drops any character outside its ANSI code page - so "the text came back" is not a
+  // condition that always holds. Waited for when it does, given up on when it does not.
+  await waitFor("the language module to hold something", async () =>
+    ((await api.readModule(langModule, project.projectId)).text ?? "").includes("Option Explicit"))
+    .catch(() => null);
 
   const langHeld = (await api.readModule(langModule, project.projectId)).text ?? "";
   const kept = CANDIDATES.filter(([, text]) => langHeld.includes(text));
@@ -362,6 +399,10 @@ try {
     const beforeImport = readFileSync(refusedPath);
 
     const attempt = await api.syncApply("import", { folder: langFolder, select: "all" });
+    // A SLEEP THAT STAYS, because it is giving the defect time to happen rather than waiting for
+    // a result. `attempt` is already in hand; what the checks below want is a chance for a
+    // half-made module to appear before asserting that none did. Waiting for a condition here
+    // would mean waiting for the bug, and there is nothing to wait for when the product is right.
     await wait(1500);
 
     // `check` compares against an EXPECTED VALUE; it has no detail argument. Passing the detail

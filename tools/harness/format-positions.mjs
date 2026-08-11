@@ -24,10 +24,9 @@
  *   node tools\harness\format-positions.mjs
  */
 
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open, wait, waitFor, waitUntilStable } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /*
  * THE WORKBOOK HOLDING THE TARGET, not whichever one happens to be active.
  *
@@ -94,16 +93,6 @@ function check(what, ok, detail) {
   }
 }
 
-async function until(what, predicate, budgetMs = 25000) {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    const answer = await predicate();
-    if (answer) { return answer; }
-    await wait(250);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
-
 // The offending statement at COLUMN 1, which is the developer's own recipe.
 const SEED = [
   "Option Explicit",
@@ -138,24 +127,48 @@ async function look(label) {
   return { line, column, finding, squiggles };
 }
 
+/**
+ * Where the finding SITS, as a value that can be compared with the one before it.
+ *
+ * Deliberately not whether it is in the right place: that is what the checks decide, and a wait
+ * that asks the same question as the check it precedes cannot fail, only time out.
+ */
+const findingSpot = async () => {
+  const finding = ((await api.problems(target)).findings ?? [])
+    .find((one) => (one.message ?? "").includes("Close"));
+  return finding ? `${finding.line}:${finding.column}` : "(none)";
+};
+
+/** True once no tab anywhere is holding the target. */
+const tabGone = async () =>
+  !(await api.ui()).workspace.groups.some((group) =>
+    group.tabs.some((tab) => tab.module?.toLowerCase() === target.toLowerCase()));
+
 if (runnable) try {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
-  await wait(1500);
+  await waitFor("the tab to go before the module is reseeded", tabGone);
+
   await api.writeModule(target, SEED.join("\r\n"), project.projectId);
-  await wait(2000);
+  await waitFor("the seed to be in the module", async () =>
+    ((await api.readModule(target, project.projectId)).text ?? "").includes("Workbooks.Close n"));
+
   await api.pane("open", { module: target, project: project.projectId });
-  await until(`${target} shown`, async () => {
+  await waitFor(`${target} shown`, async () => {
     const ui = await api.ui();
     return ui.focus.model?.toLowerCase().endsWith(`/${target.toLowerCase()}`) ? ui : null;
   });
 
-  await until("the finding to appear", async () =>
+  await waitFor("the finding to appear", async () =>
     ((await api.problems(target)).findings ?? []).some((one) => (one.message ?? "").includes("Close")));
 
   // LET THE ANALYSER CATCH UP. A finding appearing is not a pass having finished, and formatting
   // into the middle of one is a different experiment from formatting a module it has settled on
   // (the developer, 2026-08-08).
-  await wait(4000);
+  //
+  // Was `wait(4000)`: a guess at how long settling takes, too long on a quiet machine and too
+  // short on a busy one. Settling means the position stops CHANGING, so that is what is waited
+  // for. Whether the position is RIGHT is the check below, and it can still fail.
+  await waitUntilStable(findingSpot);
 
   const before = await look("before the format, the statement at column 1:");
 
@@ -164,8 +177,24 @@ if (runnable) try {
     `word at ${before.line}:${before.column}, finding at ${before.finding?.line}:${before.finding?.column}`);
 
   console.log("  running Format Module");
+  /*
+   * THE FINDING HAS BEEN REPUBLISHED, and only then whether it has stopped moving.
+   *
+   * Stability alone is not enough here and measuring that cost a run: for the first few hundred
+   * milliseconds after the format the finding sits perfectly still at its OLD position, because
+   * the analyser has not run again yet. Three quiet polls is satisfied by that, and the suite then
+   * reported word at 6:15 against finding at 6:11 - which is precisely the symptom this file
+   * exists to catch, arrived at by measuring too early rather than by the product being wrong.
+   *
+   * So: wait for it to move AT ALL, then for it to settle. Neither asks whether it moved to the
+   * right place; that is the check below, and it can still fail. Tolerant, because a finding that
+   * never moves is a real result and belongs in the check rather than in a timeout.
+   */
+  const spotBeforeFormat = await findingSpot();
   await api.act("format");
-  await wait(1500);
+  await waitFor("the finding to be republished after the format",
+    async () => (await findingSpot()) !== spotBeforeFormat).catch(() => null);
+  await waitUntilStable(findingSpot);
 
   const straight = await look("immediately after:");
 
@@ -189,6 +218,11 @@ if (runnable) try {
     `agreeing: ${held.engineContent === held.surfaceContent}`);
 
   // AND IT STAYS RIGHT. The old symptom did not heal, so settling is worth asking about.
+  //
+  // THE ONE SLEEP IN THIS FILE THAT STAYS. Every other one was a guess at how long something
+  // takes and is now a wait for the thing itself; this one is not waiting for anything, it is
+  // letting time pass on purpose, because "the finding is still on the word after four seconds"
+  // is the assertion. Replacing it with a condition would delete the check.
   await wait(4500);
   const settled = await look("four seconds later:");
 
@@ -199,10 +233,10 @@ if (runnable) try {
   // PARITY WITH THE EDITOR UNDERNEATH. A format that leaves the native pane holding different
   // text is not a format that finished, whatever the page shows (the developer, 2026-08-07:
   // full parity with content, for every action that touches the editor surface).
-  const sync = await until("the write-back to reach the native pane", async () => {
+  const sync = await waitFor("the write-back to reach the native pane", async () => {
     const answer = await api.inSync();
     return answer.agreed ? answer : null;
-  }, 20000).catch(async () => api.inSync());
+  }, { budgetMs: 20000 }).catch(async () => api.inSync());
 
   const below = await api.native({ text: true });
 
@@ -237,7 +271,10 @@ if (runnable) try {
   const indentEnds = size + 1;
 
   await api.caret(indented, { module: target, project: project.projectId, column: indentEnds });
-  await wait(600);
+  await waitFor("the caret to reach the end of the indent", async () => {
+    const focus = (await api.ui()).focus;
+    return focus?.line === indented && focus?.column === indentEnds;
+  });
 
   const level = await api.act("backspace");
   check(`Backspace at the end of the indent takes back all ${size} spaces at once`,
@@ -255,7 +292,10 @@ if (runnable) try {
   const afterWord = line.indexOf("Workbooks") + "Workbooks".length + 1;
 
   await api.caret(indented, { module: target, project: project.projectId, column: afterWord });
-  await wait(600);
+  await waitFor("the caret to reach the far side of the word", async () => {
+    const focus = (await api.ui()).focus;
+    return focus?.line === indented && focus?.column === afterWord;
+  });
 
   const single = await api.act("backspace");
   check("Backspace with code before it still deletes one character",
@@ -281,15 +321,24 @@ if (runnable) try {
       target,
       ["Option Explicit", "", "Public Sub Go()", opener, "End Sub", ""].join("\r\n"),
       project.projectId);
-    await wait(1800);
+    await waitFor("the For Each opener to be in the module", async () =>
+      ((await api.readModule(target, project.projectId)).text ?? "").includes("For Each"));
 
     // The caret is placed through the SURFACE, and the line written rather than typed: `type`
     // goes through the host's keyboard pipeline while `press` reaches the page's editor, so a
     // measurement that mixes them presses Enter somewhere other than where it typed.
     await api.caret(4, { module: target, project: project.projectId, column: opener.length + 1 });
-    await wait(600);
+    await waitFor("the caret to reach the end of the opener", async () => {
+      const focus = (await api.ui()).focus;
+      return focus?.line === 4 && focus?.column === opener.length + 1;
+    });
+
     await api.act("press", { key: "Enter" });
-    await wait(900);
+    // Enter builds the block AND writes the closer, so the module gains lines. Waited for by LINE
+    // COUNT rather than by looking for the closer: naming the closer is what the checks below do.
+    await waitFor("Enter to build the block", async () =>
+      ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+        .split(/\r?\n/).length > 6);
 
     const built = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
       .split("\n").map((one) => one.replace("\r", ""));
@@ -329,7 +378,7 @@ if (runnable) try {
    * with the defect deliberately restored, and proved nothing (2026-08-07).
    */
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
-  await wait(1500);
+  await waitFor("the pane to close, which is the case this check is about", tabGone);
 
   /*
    * RESTORED TO THE ORIGINAL, so the WHOLE PROJECT goes clean, which is the only state the defect
@@ -346,13 +395,15 @@ if (runnable) try {
       AMBIGUOUS,
       ambiguousOriginal.replace('Recalculate "ambiguous"', 'Helpers.Recalculate "ambiguous"'),
       project.projectId);
-    await wait(1800);
+    await waitFor("the fixture's permanent error to be qualified away", async () =>
+      ((await api.readModule(AMBIGUOUS, project.projectId)).text ?? "")
+        .includes("Helpers.Recalculate"));
   }
 
-  const retired = await until("every finding to retire", async () => {
+  const retired = await waitFor("every finding to retire", async () => {
     const all = (await api.problems()).findings ?? [];
     return all.length === 0 ? true : null;
-  }, 25000).catch(() => false);
+  }, { budgetMs: 25000 }).catch(() => false);
 
   check("the findings retire once the whole project is clean",
     retired === true,
@@ -362,13 +413,18 @@ if (runnable) try {
       .map((one) => `${one.module} ${one.line}:${one.column}`)));
 } finally {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
-  await wait(1800);
   await api.writeModule(target, original, project.projectId);
-  await wait(1800);
+  // Read back rather than slept on, and never allowed to throw: this is the `finally`, so a
+  // failure here would replace whatever really went wrong with a timeout about the tidying up.
+  await waitFor("the fixture to be back as it was", async () =>
+    ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim())
+    .catch(() => null);
 
   if (ambiguousOriginal.length > 0) {
     await api.writeModule(AMBIGUOUS, ambiguousOriginal, project.projectId);
-    await wait(1200);
+    await waitFor(`${AMBIGUOUS} to be back as it was`, async () =>
+      ((await api.readModule(AMBIGUOUS, project.projectId)).text ?? "").trim()
+        === ambiguousOriginal.trim()).catch(() => null);
   }
 
   const restored = ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim();

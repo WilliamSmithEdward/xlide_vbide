@@ -106,6 +106,76 @@ function describeDeath(rows) {
   return `\n\nWindows says the host died:\n${lines.join("\n")}`;
 }
 
+/** A plain delay. Only ever right for something with no observable condition at all. */
+export const wait = (ms) => new Promise((settle) => setTimeout(settle, ms));
+
+/**
+ * POLL FOR THE THING, DO NOT SLEEP A GUESS.
+ *
+ * Seven suites had grown their own copy of this, identical apart from a default budget, and
+ * fifteen had their own `wait` (2026-08-10). Worse than the duplication is what sat beside it:
+ * 130 fixed sleeps totalling about 149 seconds, which is most of what a live pass spends. A
+ * `wait(3000)` is a guess at how long something takes on the machine that wrote it, and
+ * driving-excel.md is blunt about the other half of the cost - every one of them is a race that
+ * has not lost yet. Two reported a working feature broken in one afternoon (2026-08-07).
+ *
+ * `predicate` returns the answer when it is ready and anything falsy while it is not, so the
+ * value that satisfied the wait is what comes back:
+ *
+ *   const tab = await waitFor("the module to open", async () =>
+ *     (await api.ui()).workspace.groups[0].tabs.find((t) => t.module === name));
+ *
+ * A predicate that throws is treated as not-ready-yet, because "the route is not answering
+ * because the thing is not there" is the normal shape of waiting for it. The last error is put
+ * in the timeout message, or a wait that never comes good says only that it timed out.
+ */
+export async function waitFor(what, predicate, { budgetMs = 20000, pollMs = 100 } = {}) {
+  const deadline = Date.now() + budgetMs;
+  let last = null;
+  let attempts = 0;
+  while (Date.now() < deadline) {
+    attempts += 1;
+    try {
+      const answer = await predicate();
+      if (answer) { return answer; }
+    } catch (failure) {
+      last = failure;
+    }
+    await wait(pollMs);
+  }
+  throw new Error(`timed out after ${budgetMs}ms waiting for ${what} (${attempts} attempts)`
+    + (last ? `; last error: ${last.message}` : ""));
+}
+
+/**
+ * WAITS FOR A THING TO STOP MOVING, which is what most "let it catch up" sleeps really wanted.
+ *
+ * `waitFor` is for something arriving. This is for something SETTLING: an analysis pass can
+ * publish a finding and then publish it again a moment later at a different position, so the
+ * first answer is not the answer (the developer, 2026-08-08, on exactly that). A fixed
+ * `wait(4000)` is the guess that stands in for this, and it is both slower than the settle
+ * usually takes and shorter than it sometimes needs.
+ *
+ * Answers once `read()` has returned the same thing `quiet` times running, compared by JSON. The
+ * value is returned, so this reads as an assignment. On timing out it returns the last value
+ * rather than throwing: a thing that never stops moving is a finding for the checks below to
+ * report, not a reason to abandon the run.
+ */
+export async function waitUntilStable(read, { quiet = 3, pollMs = 120, budgetMs = 15000 } = {}) {
+  const deadline = Date.now() + budgetMs;
+  let last = await read();
+  let same = 1;
+
+  while (Date.now() < deadline) {
+    await wait(pollMs);
+    const now = await read();
+    same = JSON.stringify(now) === JSON.stringify(last) ? same + 1 : 1;
+    last = now;
+    if (same >= quiet) { return last; }
+  }
+  return last;
+}
+
 /** Every instance whose api answers, newest session first. */
 export async function discover() {
   let names;

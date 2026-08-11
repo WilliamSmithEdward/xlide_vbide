@@ -19,7 +19,7 @@
  *   node tools\harness\immediate-watch.mjs
  */
 
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open } from "./xlide-api.mjs";
 
 const api = await open({});
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

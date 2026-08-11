@@ -23,7 +23,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { open } from "./xlide-api.mjs";
+import { open, wait, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
@@ -38,7 +38,6 @@ const check = (what, ok, detail) => {
   else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
 };
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const ORIGINAL = ["Option Explicit", "", "Public Sub Go()", "    Debug.Print \"original\"", "End Sub", ""];
 const FROM_FILE = ["Option Explicit", "", "Public Sub Go()", "    Debug.Print \"from the file\"", "End Sub", ""];
 
@@ -47,9 +46,12 @@ try {
   await api.component("add", { kind: "module", name, project: project.projectId });
   made = true;
   await api.writeModule(name, ORIGINAL.join("\r\n"), project.projectId);
-  await wait(1500);
+  await waitFor("the seed to be in the module", async () =>
+    ((await api.readModule(name, project.projectId)).text ?? "").includes(ORIGINAL[ORIGINAL.length - 2]));
+
   await api.pane("open", { module: name, project: project.projectId });
-  await wait(2500);
+  await waitFor("the module to be the one on screen", async () =>
+    (await api.ui()).focus.model?.toLowerCase().endsWith(`/${name.toLowerCase()}`));
 
   writeFileSync(
     join(folder, `${name}.bas`),
@@ -84,7 +86,9 @@ try {
 
   // RECOVERABLE, which is the half that makes refusing the right answer rather than a dead end.
   await api.pane("close", { module: name, project: project.projectId, answer: "discard" });
-  await wait(1500);
+  await waitFor("the tab to go, which is what makes the second import recoverable", async () =>
+    !(await api.ui()).workspace.groups.some((group) =>
+      group.tabs.some((tab) => tab.module?.toLowerCase() === name.toLowerCase())));
 
   const second = await api.syncApply("import", { folder, select: "all" });
   await wait(1500);

@@ -23,7 +23,7 @@
  *
  * Then restart Excel. The script says so at the end, and means it.
  */
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();

@@ -23,10 +23,9 @@
  *   node tools\harness\three-copies.mjs
  */
 
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open, wait, waitFor } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const target = "HelpersExtra";
 
 // The workbook holding the target, not whichever is active. The fifth suite to need this.
@@ -56,15 +55,47 @@ function check(what, ok, detail) {
   }
 }
 
-async function until(what, predicate, budgetMs = 20000) {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    const answer = await predicate();
-    if (answer) { return answer; }
-    await wait(250);
-  }
-  throw new Error(`timed out waiting for ${what}`);
+/**
+ * THE OPERATION HAS LANDED SOMEWHERE, which is a different question from the three agreeing.
+ *
+ * Each step used to be `wait(2500)` then `agree(...)`, and the sleep was not the belt-and-braces
+ * it looked like. `agree` polls until the copies match, so run before the operation has reached
+ * any of them it finds them matching on the text from BEFORE and passes, having measured nothing
+ * - the same vacuous pass a probe hit on 2026-08-10. The sleep was what made that unlikely rather
+ * than impossible, at 27.6s a run.
+ *
+ * So: wait for the change to appear in ONE copy, then let `agree` decide about all three. The wait
+ * names the surface; the assertion is host-against-surface and engine-against-surface, so nothing
+ * is being waited into being true.
+ */
+async function landed(what, seen) {
+  return waitFor(`${what} to reach the surface`, async () => {
+    const text = (await api.native({ text: true })).surfaceText ?? "";
+    return seen(text) ? text : null;
+  });
 }
+
+/**
+ * THE TWO STEPS WITH NO RELIABLE OBSERVABLE, kept as a bounded settle and named as such.
+ *
+ * Format Module is idempotent, and the line typed above arrives through the keyboard pipeline
+ * already correctly indented, so there is frequently nothing for it to change. Undo does not
+ * reliably take that line back out either. Both were measured on 2026-08-10 by writing the wait
+ * and watching it time out on a healthy product.
+ *
+ * So these two keep a sleep, deliberately, rather than a wait that asserts something untrue. It
+ * is a smaller sleep than the 2000 and 2500 it replaces because `agree` polls for twelve seconds
+ * afterwards and is what actually decides; this only has to outrun the window in which all three
+ * copies still agree on the text from BEFORE the operation.
+ *
+ * What the committed suite never established, and this does not either: what undo is expected to
+ * DO here. It only ever asked whether the three copies agree, so an undo that did nothing at all
+ * passed it. Worth pinning separately.
+ */
+const settle = async (what) => {
+  void what;
+  await wait(900);
+};
 
 /**
  * All three, compared. Settling is allowed for, because a write-back and a didChange are both
@@ -73,7 +104,7 @@ async function until(what, predicate, budgetMs = 20000) {
 async function agree(after, { budgetMs = 12000 } = {}) {
   let last = null;
 
-  const settled = await until(`the three copies to agree after ${after}`, async () => {
+  const settled = await waitFor(`the three copies to agree after ${after}`, async () => {
     const [below, held] = await Promise.all([
       api.native({ text: true }),
       api.engineSource(target, { text: true }),
@@ -89,7 +120,7 @@ async function agree(after, { budgetMs = 12000 } = {}) {
     };
 
     return last.hostVsSurface && (!last.engineHolds || last.engineVsSurface) ? last : null;
-  }, budgetMs).catch(() => null);
+  }, { budgetMs }).catch(() => null);
 
   const state = settled ?? last;
 
@@ -120,18 +151,22 @@ const SEED = [
 ];
 
 const shown = async () => {
-  await until(`${target} shown`, async () => {
+  await waitFor(`${target} shown`, async () => {
     const ui = await api.ui();
     return ui.focus.model?.toLowerCase().endsWith(`/${target.toLowerCase()}`) ? ui : null;
   });
-  await wait(1200);
 };
 
 if (runnable) try {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
-  await wait(1500);
+  await waitFor("the tab to go before the module is reseeded", async () =>
+    !(await api.ui()).workspace.groups.some((group) =>
+      group.tabs.some((tab) => tab.module?.toLowerCase() === target.toLowerCase())));
+
   await api.writeModule(target, SEED.join("\r\n"), project.projectId);
-  await wait(2000);
+  await waitFor("the seed to be in the module", async () =>
+    ((await api.readModule(target, project.projectId)).text ?? "").includes("Public Sub Probe()"));
+
   await api.pane("open", { module: target, project: project.projectId });
   await shown();
 
@@ -143,39 +178,45 @@ if (runnable) try {
     .split(/\r?\n/);
   const at = lines.findIndex((line) => line.includes("n = 1")) + 1;
   await api.caret(at, { module: target, project: project.projectId, column: (lines[at - 1] ?? "").length + 1 });
-  await wait(700);
+  // Load-bearing: `type` goes to wherever the caret IS, so typing before it lands puts the line in
+  // another procedure and the suite reports a disagreement it caused itself.
+  await waitFor("the caret to reach the line about to be typed on", async () =>
+    (await api.ui()).focus?.line === at);
+
   await api.type("\nDim extra As String");
-  await wait(2500);
+  await landed("the typed line", (text) => text.includes("Dim extra"));
   await agree("typing a line");
 
   console.log("\n3. Format Module\n");
   await api.act("format");
-  await wait(2000);
+  await settle("formatting");
   await agree("formatting");
 
   console.log("\n4. undo\n");
   await api.act("undo");
-  await wait(2500);
+  await settle("an undo");
   await agree("an undo");
 
   console.log("\n5. a write from OUTSIDE the surface, into the module on screen\n");
   await api.writeModule(target, [...SEED.slice(0, 5), "    Debug.Print n * 2", ...SEED.slice(6)].join("\r\n"),
     project.projectId);
-  await wait(2500);
+  await landed("the outside write", (text) => text.includes("n * 2"));
   await agree("a write from outside");
 
   console.log("\n6. the same, while the module sits in a BACKGROUND tab\n");
   const other = "Helpers";
   await api.pane("open", { module: other, project: project.projectId });
-  await until(`${other} shown`, async () => {
+  await waitFor(`${other} shown`, async () => {
     const ui = await api.ui();
     return ui.focus.model?.toLowerCase().endsWith(`/${other.toLowerCase()}`) ? ui : null;
   });
-  await wait(1200);
 
   await api.writeModule(target, [...SEED.slice(0, 5), "    Debug.Print n * 3", ...SEED.slice(6)].join("\r\n"),
     project.projectId);
-  await wait(2500);
+  // The tab is in the BACKGROUND, so the surface is not where this shows up first. Waited for in
+  // the workbook instead, which is the copy the write goes to.
+  await waitFor("the background write to reach the workbook", async () =>
+    ((await api.readModule(target, project.projectId)).text ?? "").includes("n * 3"));
 
   // Back to it, which is when a developer would notice.
   await api.act("activate", { module: target, project: project.projectId });
@@ -184,17 +225,20 @@ if (runnable) try {
 
   console.log("\n7. a rename, which rewrites every module that mentions the symbol\n");
   await api.act("rename", { word: "Probe", newName: "Probed" });
-  await wait(3000);
+  await landed("the rename", (text) => text.includes("Probed"));
   await agree("a rename");
 
   await api.undoRename();
-  await wait(2500);
+  await landed("the rename being undone", (text) => !text.includes("Probed"));
   await agree("undoing the rename");
 } finally {
   await api.pane("close", { module: target, project: project.projectId, answer: "discard" });
-  await wait(1800);
   await api.writeModule(target, original, project.projectId);
-  await wait(1500);
+  // Read back rather than slept on, and it must not throw: this is the `finally`, so a failure
+  // here would replace whatever really went wrong with a timeout about the tidying up.
+  await waitFor("the fixture to be back as it was", async () =>
+    ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim())
+    .catch(() => null);
 
   const restored = ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim();
   console.log(`\n${target} restored: ${restored}`);

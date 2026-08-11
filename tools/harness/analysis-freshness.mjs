@@ -53,10 +53,9 @@
  * seconds: the old budget meant the suite was slowest exactly when it was failing.
  */
 
-import { open } from "file:///F:/GitHub/xlide/xlide_vbide/tools/harness/xlide-api.mjs";
+import { open, wait, waitFor } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // UNIQUE PER RUN. These used to be fixed names, and the suite removes its modules at the end,
 // so a run inherited whatever the previous run's modules had left behind under the same names.
@@ -134,17 +133,18 @@ async function settle({ quietFor = 2000, budgetMs = 25_000 } = {}) {
   let lastSeen = -1;
   let quietSince = 0;
 
-  for (let waited = 0; waited < budgetMs; waited += 1000) {
+  const step = 250;
+  for (let waited = 0; waited < budgetMs; waited += step) {
     const calls = (await api.engineCosts()).reduce((sum, row) => sum + row.calls, 0);
     if (calls === lastSeen) {
-      quietSince += 1000;
+      quietSince += step;
       if (quietSince >= quietFor) { return true; }
     } else {
       lastSeen = calls;
       quietSince = 0;
     }
 
-    await wait(1000);
+    await wait(step);
   }
 
   return false;
@@ -153,10 +153,10 @@ async function settle({ quietFor = 2000, budgetMs = 25_000 } = {}) {
 /** Waits for a module's findings to satisfy a predicate, and answers what it last saw. */
 async function awaitFindings(moduleName, predicate, budgetMs = 25_000) {
   let last = [];
-  for (let waited = 0; waited < budgetMs; waited += 1500) {
+  for (let waited = 0; waited < budgetMs; waited += 200) {
     last = await findingsFor(moduleName);
     if (predicate(last)) { return last; }
-    await wait(1500);
+    await wait(200);
   }
   return last;
 }
@@ -194,7 +194,14 @@ if (!project?.projectId) {
 
     if (made.length === 2) {
       await api.writeModule(CALLEE, oneArgument, project.projectId);
-      await wait(1500);
+      // The signature it was just given, read back out of the module. Waited for rather than
+      // slept on: the whole suite is about findings going stale, so starting a measurement
+      // against a module that has not taken the new signature measures the wrong thing.
+      await waitFor("the one-argument signature to be in the module", async () => {
+        const held = (await api.readModule(CALLEE, project.projectId)).text ?? "";
+        return /\bByVal\b[\s\S]*\)/.test(held) && !/,/.test(held.split(/\r?\n/)
+          .find((one) => /Public (Sub|Function)/.test(one)) ?? ",");
+      });
       await api.writeModule(CALLER, CALLER_SOURCE, project.projectId);
 
       // SETTLED, then read. Waiting for "no findings" answers instantly and means nothing: a
@@ -273,7 +280,8 @@ if (!project?.projectId) {
       console.log("     run this against artifacts\\fixtures\\PerfFixture.xlsm for the real figure.");
     } else {
       await api.pane("open", { module: biggest.name, project: project.projectId });
-      await wait(2500);
+      await waitFor("the big module to be the one on screen", async () =>
+        (await api.ui()).focus.model?.toLowerCase().endsWith(`/${biggest.name.toLowerCase()}`));
       await settle();
       const idlePipe = await api.timeFeature("completions", { line: 8, column: 13 }, { n: 10 });
       await api.perf({ reset: true });
@@ -319,9 +327,12 @@ if (!project?.projectId) {
   } finally {
     for (const name of made) {
       await api.component("remove", { name, project: project.projectId });
-      await wait(800);
     }
-    await wait(2000);
+    // Waited for rather than slept on, and never allowed to throw: the check below reports what
+    // was left behind, and a timeout here would replace that report with a stack.
+    await waitFor("the modules it brought to be gone", async () =>
+      (await api.project(project.projectId)).components
+        .every((component) => !made.includes(component.name))).catch(() => null);
 
     const left = (await api.project(project.projectId)).components
       .filter((component) => made.includes(component.name));

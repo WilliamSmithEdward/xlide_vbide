@@ -103,6 +103,13 @@ VBA behind and the next run starts from somewhere new.
 appears while modules are open, so the check passed or failed on whether the fixture happened to
 have a module open. Watch for the specific thing.
 
+**A readiness wait must name a different observable from the check that follows it.** Otherwise the
+check cannot fail, only time out, and the assertion has moved into the setup where nobody counts it.
+Replacing a sleep with `waitFor` is the moment this goes wrong: the obvious condition to wait for is
+usually the thing under test. [driving-excel.md](driving-excel.md) has both cases that caught this
+out, and the third one worth knowing - **a sleep can be the only thing preventing a vacuous pass**,
+so deleting it makes a suite faster and blind at the same time.
+
 **When a faithful reproduction disagrees with you, believe it.** Chasing a reported drag fault on
 2026-08-06, a synthetic `pointerdown`/`pointermove` sequence produced the dim, the compass and its
 five petals, and no drop preview however precisely it aimed. That was written off twice: first as
