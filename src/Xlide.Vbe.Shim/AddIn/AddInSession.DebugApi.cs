@@ -3411,23 +3411,13 @@ internal sealed partial class AddInSession
                             var identity = ProjectReader.Identity(project);
                             var display = WorkbookDisplayName(project);
 
-                            // Components counted rather than listed, and the scratch module left
-                            // out of the count for the same reason it is left out everywhere else:
-                            // it is ours, and a fixture that counts it counts wrong.
+                            // Components counted rather than listed; ForEachRealComponent keeps
+                            // the scratch module out of the count and contains an unreadable
+                            // entry to itself - this copy's hand-rolled walk sat inside the try
+                            // wrapping the whole project, so one bad component dropped the
+                            // entire project from the reply.
                             var components = 0;
-                            using (var list = project.GetObject("VBComponents"))
-                            {
-                                var total = list?.GetInt32("Count") ?? 0;
-                                for (var c = 1; c <= total; c++)
-                                {
-                                    using var component = list!.GetItem(c);
-                                    if (component?.GetString("Name") is { Length: > 0 } name
-                                        && !IsScratchComponent(name))
-                                    {
-                                        components++;
-                                    }
-                                }
-                            }
+                            ForEachRealComponent(project, (_, _) => components++);
 
                             found.Add(new DebugProjectRow(
                                 display ?? identity.Id,
@@ -3475,42 +3465,24 @@ internal sealed partial class AddInSession
                 }
 
                 var rows = new List<DebugComponentRow>();
-                using (var components = project.GetObject("VBComponents"))
+                ForEachRealComponent(project, (component, name) =>
                 {
-                    var count = components?.GetInt32("Count") ?? 0;
-                    for (var i = 1; i <= count; i++)
-                    {
-                        try
-                        {
-                            using var component = components!.GetItem(i);
-                            if (component?.GetString("Name") is not { Length: > 0 } name
-                                || IsScratchComponent(name))
-                            {
-                                continue;
-                            }
+                    var type = component.GetInt32("Type");
+                    using var code = component.GetObject("CodeModule");
 
-                            var type = component.GetInt32("Type");
-                            using var code = component.GetObject("CodeModule");
+                    // A pane exists once the module has been LOOKED at. Reading CodePane
+                    // would create one, which would make asking the question change the
+                    // answer, so this asks the open list instead.
+                    var open = ReadOpenModules()?.Any(pane =>
+                        string.Equals(pane.Name, name, StringComparison.OrdinalIgnoreCase)) ?? false;
 
-                            // A pane exists once the module has been LOOKED at. Reading CodePane
-                            // would create one, which would make asking the question change the
-                            // answer, so this asks the open list instead.
-                            var open = ReadOpenModules()?.Any(pane =>
-                                string.Equals(pane.Name, name, StringComparison.OrdinalIgnoreCase)) ?? false;
-
-                            rows.Add(new DebugComponentRow(
-                                name,
-                                ComponentKind(type),
-                                type,
-                                code?.GetInt32("CountOfLines") ?? 0,
-                                open));
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Verbose($"project: component {i} could not be read ({ex.GetType().Name})");
-                        }
-                    }
-                }
+                    rows.Add(new DebugComponentRow(
+                        name,
+                        ComponentKind(type),
+                        type,
+                        code?.GetInt32("CountOfLines") ?? 0,
+                        open));
+                });
 
                 // The identity of the project THIS REPLY DESCRIBES, read off that project.
                 //

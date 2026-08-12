@@ -899,6 +899,39 @@ internal sealed partial class AddInSession : IDisposable
         string.Equals(name, ImmediateEvaluator.ScratchModule, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Walks a project's components, handing each real one to `take` with its name. Two rules,
+    /// each stated once because they are correctness properties, not conveniences: the
+    /// evaluator's scratch module is skipped - a fixture that counts it counts wrong, and so
+    /// does a tree that lists it - and an entry that cannot be read costs that entry alone,
+    /// never the walk. The walk was hand-rolled three times (twice behind the debug api, once
+    /// in the publish path) with the filter spelled positively in one and negatively in
+    /// another, and the projects route's copy had the containment wrong: its per-component
+    /// read sat inside the try wrapping the whole project, so one unreadable component dropped
+    /// the entire project from the reply (the audit's B18).
+    /// </summary>
+    private static void ForEachRealComponent(DispatchObject project, Action<DispatchObject, string> take)
+    {
+        using var components = project.GetObject("VBComponents");
+        var count = components?.GetInt32("Count") ?? 0;
+
+        for (var i = 1; i <= count; i++)
+        {
+            try
+            {
+                using var component = components!.GetItem(i);
+                if (component?.GetString("Name") is { Length: > 0 } name && !IsScratchComponent(name))
+                {
+                    take(component, name);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose($"components: entry {i} could not be read ({ex.GetType().Name})");
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether the editor is stopped inside the module this product evaluates lines in.
     ///
     /// The one state that is safe to end without asking. A developer stopped at their own
@@ -2643,9 +2676,7 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             using var component = FindComponent(module, projectId, out _);
-            using var code = component?.GetObject("CodeModule");
-            var count = code?.GetInt32("CountOfLines") ?? 0;
-            var source = count > 0 ? code!.GetStringIndexed("Lines", 1, count) : null;
+            var source = component is null ? null : ProjectReader.ReadSource(component);
             return source is null ? [] : ScanModuleMembers(source);
         }
         catch (Exception ex)
@@ -4230,16 +4261,14 @@ internal sealed partial class AddInSession : IDisposable
             try
             {
                 using var component = FindComponent(moduleName, projectId, out var owner);
-                using var code = component?.GetObject("CodeModule");
-                if (code is null)
+                var text = component is null ? null : ProjectReader.ReadSource(component);
+                if (text is null)
                 {
                     Log.Info($"document: {moduleName} could not be found to publish");
                     return;
                 }
 
-                var count = code.GetInt32("CountOfLines");
-                var text = count > 0 ? code.GetStringIndexed("Lines", 1, count) ?? string.Empty : string.Empty;
-                Log.Info($"document: publishing {moduleName}, {count} line(s), without activating it");
+                Log.Info($"document: publishing {moduleName}, {text.Length} char(s), without activating it");
                 surface.Publish(moduleName, DisplayFromProjectId(owner ?? projectId), text);
             }
             catch (Exception ex)
@@ -5043,14 +5072,13 @@ internal sealed partial class AddInSession : IDisposable
             try
             {
                 using var component = FindComponent(module, projectId, out _);
-                using var code = component?.GetObject("CodeModule");
-                if (code is null)
+                var text = component is null ? null : ProjectReader.ReadSource(component);
+                if (text is null)
                 {
                     continue;
                 }
 
-                var count = code.GetInt32("CountOfLines");
-                captured.Add((module, count > 0 ? code.GetStringIndexed("Lines", 1, count) ?? string.Empty : string.Empty));
+                captured.Add((module, text));
             }
             catch (Exception ex)
             {
@@ -5969,17 +5997,9 @@ internal sealed partial class AddInSession : IDisposable
                     continue;
                 }
 
-                var componentCount = components.GetInt32("Count");
-                var members = new List<SurfaceComponent>(componentCount);
-
-                for (var j = 1; j <= componentCount; j++)
-                {
-                    using var component = components.GetItem(j);
-                    if (component?.GetString("Name") is { Length: > 0 } name && !IsScratchComponent(name))
-                    {
-                        members.Add(new SurfaceComponent(name, component.GetInt32("Type")));
-                    }
-                }
+                var members = new List<SurfaceComponent>();
+                ForEachRealComponent(project, (component, name) =>
+                    members.Add(new SurfaceComponent(name, component.GetInt32("Type"))));
 
                 // The cased name against the id, so the title bar can name the workbook on a tab
                 // switch without a COM call. The id is a lowercased path and everything derived
