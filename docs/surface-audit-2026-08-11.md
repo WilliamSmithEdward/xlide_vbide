@@ -17,7 +17,7 @@ one, and the Debug shim republished at page build 291.
 | Settings | done | `syncEngine` dropped by the page's post, and the six keys spelled out five times |
 | Dead code | done | 10 HResult constants, 15 Win32 declarations, `VbeCommands.Describe`, the `setTheme` and `applyEdit` paths, `module/didClose`, the stale README tables, a form feed that made a documented command uncopyable, the missing `TwinFixture` generator |
 | Gate blind spots | done | the driver check counting unrun suites and `console.log`, four suites wired in, engine typecheck before packaging, engine currency on the `-SkipGate` release path, freshness and the two cheap checks in CI |
-| API coverage | open | 18 items, including scoped search and Replace All having no driver at all |
+| API coverage | mostly done | 18 items. Closed: scoped search and Replace All (A6-ish, prior), Properties pane (A5), status bar readouts (A15), the window gestures (A12: `frame` close/show, `pane closeNative`), the references dialog's open form (A16), the sync dialog's read/drive pair (A6), and the immediate/history doc-truth claims (A17). Two remain, and both are the owner's call rather than free extensions: session teardown and revival (A10, medium-risk lifecycle surgery on the OnBeginShutdown/watchdog path) and populating the Watch panel (A18, whose only mechanism moves keystroke synthesis into shim source against the standing no-synthetic-input rule) |
 | Performance | open | 20 items; `dev.ps1` repackaging the engine every run is done, the rest are not |
 | Duplication | open | 13 items |
 
