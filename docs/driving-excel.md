@@ -304,6 +304,7 @@ ui.dialogs;                       // settings, help, sponsors, references, objec
 ui.waiting.documents;             // text asked for and not yet arrived
 ui.focus;                         // model, line, column, and whether the editor has the keyboard
 ui.emptyViewShown;                // a DIFFERENT question from having no tabs
+ui.properties;                    // the Properties panel: component, kind, and every row it draws
 ui.statusNotice;                  // what the status line is saying, "" when it is saying nothing
 ui.search;                        // open, query, scope, matches, current
 ui.bookmarks;                     // the marked lines of the model on screen
@@ -426,6 +427,26 @@ await api.act("search", { query: "Recalculate", scope: "project",
                           replacement: "Recalc", run: "replaceAll" });
 (await api.ui()).search.scopedReplaced;
 ```
+
+**The Properties panel writes real component state**, and it is the shim's only property-write
+path into the object model. It had no route, no act, no snapshot field and no suite until
+2026-08-11 - the last user-visible surface with no api presence in either direction.
+
+```js
+await api.pane("open", { module: "Helpers" });   // opening selects it, as the tree does
+(await api.ui()).properties;                     // { component, kind, round, rows: [...] }
+
+// (Name) RENAMES THE COMPONENT. There is no undo behind this.
+await api.act("editProperty", { name: "(Name)", value: "Support" });
+// -> { did: true, detail: 'Support.(Name) is "Support"' }
+```
+
+It answers the host's outcome rather than the post. The panel's controls set the row as they
+send it, so reading the value back proves only that it was asked for; the act waits for the host
+to republish - which it does whether it applied the write or refused it - before comparing. A
+refusal answers `did: false` with the value the row actually holds and whatever the status line
+said. That distinction is not theoretical: the first version of this act reported
+`set to "not a legal name"` for a name VBA cannot store.
 
 **Boolean arguments take `1/true/yes/on` or `0/false/no/off`**, and anything else is the route's
 default. Worth knowing because it was not true until 2026-08-11: most flags treated everything

@@ -948,6 +948,8 @@ function boot(): void {
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),
     statusNotice: () => shell.currentNotice(),
+    properties: () => shell.propertiesShown(),
+    editProperty: (name, value) => shell.editPropertyByName(name, value),
     openSponsors: () => openSponsorDialog(
       { openExternal: (url) => bridge.openExternal(url) },
       () => workspace.activeEditor().focus()),

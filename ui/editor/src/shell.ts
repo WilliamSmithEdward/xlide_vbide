@@ -193,6 +193,9 @@ export class Shell {
   private propertiesKind = "";
   private properties: ShellProperty[] = [];
 
+  /** Bumped every time the HOST republishes the panel. See setProperties. */
+  private propertiesRound = 0;
+
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
 
@@ -431,6 +434,13 @@ export class Shell {
     this.propertiesComponent = component;
     this.propertiesKind = kind;
     this.properties = properties;
+
+    // Counted so a caller can tell the HOST's answer from the page's own optimistic echo. The
+    // controls set the row as they post the edit, the way every responsive control does, so the
+    // value being what was asked for proves only that it was asked for. This number changes when
+    // the host republishes, which it does whether it applied the edit or refused it.
+    this.propertiesRound += 1;
+
     this.renderProperties();
 
     // A rename that was asked for lands here, when the name field for it actually exists.
@@ -771,6 +781,43 @@ export class Shell {
       this.statusNotice.textContent = "";
       this.noticeTimer = undefined;
     }, 5000);
+  }
+
+  /**
+   * The properties panel as it stands, for the snapshot: the component it is showing, its kind,
+   * and every row with the value the grid is displaying.
+   *
+   * Read from the rows the render draws from, not from the DOM, so it says what the panel means
+   * rather than what a selector happened to find.
+   */
+  propertiesShown(): { component: string; kind: string; round: number; rows: ShellProperty[] } {
+    return {
+      component: this.propertiesComponent,
+      kind: this.propertiesKind,
+      round: this.propertiesRound,
+      rows: this.properties.map((row) => ({ ...row })),
+    };
+  }
+
+  /**
+   * Edits a property THROUGH THE PANEL, which is the only path a developer has to the object
+   * model's own property setter.
+   *
+   * The controls call `handlers.editProperty` on change; so does this, after updating the row the
+   * control would have updated. Answers false for a property this component does not have or one
+   * the grid draws as read-only, because both are states a person cannot produce - there is no
+   * control to touch.
+   */
+  editPropertyByName(name: string, value: string): boolean {
+    const row = this.properties.find((one) => one.name.toLowerCase() === name.toLowerCase());
+    if (!row || !row.writable) {
+      return false;
+    }
+
+    row.value = value;
+    this.handlers.editProperty(this.propertiesComponent, row.name, value);
+    this.renderProperties();
+    return true;
   }
 
   /** What the status line is saying, for the snapshot. Empty when it is showing nothing. */

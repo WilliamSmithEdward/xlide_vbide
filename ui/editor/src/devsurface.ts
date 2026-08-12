@@ -63,6 +63,12 @@ export interface UiSnapshot {
   settings: Record<string, unknown>;
   /** Whether the empty view is up, which is a different thing from having no tabs. */
   emptyViewShown: boolean;
+  /** The Properties panel: the component it is showing, its kind, and every row it draws. */
+  properties: {
+    component: string;
+    kind: string;
+    rows: { name: string; value: string; writable: boolean; boolean: boolean }[];
+  };
   /**
    * What the status line is saying right now, empty when it is saying nothing.
    *
@@ -176,6 +182,15 @@ export interface DevSurfaceParts {
   openSponsors(): void;
   /** What the status line is showing, read from the element the render writes. */
   statusNotice(): string;
+  /**
+   * The Properties panel: what it is showing, and the one way to change a value.
+   *
+   * It writes real component state through the object model's own setter - renaming a module is
+   * the "(Name)" row - and until 2026-08-11 nothing in the api could drive it, read it, or even
+   * name it. It was the only user-visible surface with no presence in either direction.
+   */
+  properties(): { component: string; kind: string; round: number; rows: { name: string; value: string; writable: boolean; boolean: boolean }[] };
+  editProperty(name: string, value: string): boolean;
   /**
    * Changes one setting THROUGH THE PAGE, the way the dialog's own controls do.
    *
@@ -496,6 +511,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focus: editorFocus(),
     settings: { ...currentSettings() } as unknown as Record<string, unknown>,
     emptyViewShown: workspace.emptyViewShown(),
+    properties: parts.properties(),
     statusNotice: parts.statusNotice(),
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
@@ -960,6 +976,84 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     sponsors: () => {
       parts.openSponsors();
       return { did: true, detail: "sponsor dialog opened" };
+    },
+
+    /**
+     * Edits a row of the Properties panel, the way touching its control does.
+     *
+     * **THIS CHANGES REAL COMPONENT STATE.** The panel is a view over the object model's own
+     * property bag, and the host applies the write immediately: `(Name)` renames the component,
+     * and a worksheet's rows are the worksheet's. There is no undo behind it.
+     *
+     * The panel shows whichever component is selected, so `act("selectComponent")` or a click in
+     * the tree comes first; `ui.properties` says which one is up.
+     */
+    editProperty: (args) => {
+      const name = String(args.name ?? "").trim();
+      const value = args.value === undefined ? null : String(args.value);
+
+      if (!name || value === null) {
+        return { did: false, detail: "editProperty needs name and value" };
+      }
+
+      const shown = parts.properties();
+      if (!shown.component) {
+        return { did: false, detail: "no component is selected, so the panel is showing nothing" };
+      }
+
+      if (!parts.editProperty(name, value)) {
+        const writable = shown.rows.filter((row) => row.writable).map((row) => row.name);
+        return {
+          did: false,
+          detail: `${shown.component} has no writable property named ${name}; it offers `
+            + (writable.length > 0 ? writable.join(", ") : "none"),
+        };
+      }
+
+      // AND THE HOST'S ANSWER, not the page's request.
+      //
+      // The controls post the edit and do not wait; the host applies it, and on a refusal - an
+      // illegal identifier, a property the object model will not take - it says so and republishes
+      // the row with the value it still holds. So the panel is right a moment later and an act
+      // that returned here would have reported every refused write as a success. It did, for the
+      // first twenty minutes this existed, and the suite caught it: "set to 'not a legal name'"
+      // for a name VBA cannot hold.
+      // WAITING FOR THE HOST'S REPUBLISH, not for the row to hold what we just put in it. The
+      // control sets the row as it posts, the way a responsive control does, so reading the value
+      // back proves only that we asked. `round` changes when the host answers - applied or
+      // refused, it republishes either way - and only then is the value worth comparing.
+      const asked = shown.round;
+
+      const settled = (): Promise<ActResult> => new Promise((answer) => {
+        const deadline = Date.now() + 2000;
+
+        const look = (): void => {
+          const now = parts.properties();
+          const row = now.rows.find((one) => one.name.toLowerCase() === name.toLowerCase());
+
+          if (now.round !== asked && row?.value === value) {
+            answer({ did: true, detail: `${now.component}.${row.name} is ${JSON.stringify(value)}` });
+            return;
+          }
+
+          if (Date.now() >= deadline) {
+            const said = parts.statusNotice();
+            answer({
+              did: false,
+              detail: `${shown.component}.${name} was refused; it holds `
+                + `${JSON.stringify(row?.value ?? null)}`
+                + (said ? `. The surface said: ${said}` : ""),
+            });
+            return;
+          }
+
+          setTimeout(look, 60);
+        };
+
+        look();
+      });
+
+      return settled();
     },
 
     // Every page dialog closes on Escape, and none of them expose a handle. This is the one
