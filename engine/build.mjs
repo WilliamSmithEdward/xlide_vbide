@@ -59,6 +59,17 @@ writeFileSync(
             output: blobPath,
             disableExperimentalSEAWarning: true,
             useSnapshot: false,
+
+            // MEASURED, AND IT DOES NOTHING HERE (2026-08-11). The obvious reading of a 3.2s engine
+            // start is that V8 is compiling the 2.26 MB bundle on every launch, and `useCodeCache`
+            // is the switch that would cache that compilation into the blob. Six warm runs before:
+            // 190-194ms to the listening line. Six after: 187-192ms. It is noise, and it costs 2 MB
+            // of executable. The cost is not compilation.
+            //
+            // What the 3.2s actually is: reading a 90 MB image off disk while Excel, the VBE and a
+            // WebView2 browser process are all starting at the same time. Standalone the same
+            // launch is 1.27s cold and 190ms warm. Do not re-try this switch without a measurement
+            // showing something changed.
             useCodeCache: false,
         },
         null,

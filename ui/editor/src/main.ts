@@ -947,9 +947,22 @@ function boot(): void {
     },
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),
+    statusNotice: () => shell.currentNotice(),
     openSponsors: () => openSponsorDialog(
       { openExternal: (url) => bridge.openExternal(url) },
       () => workspace.activeEditor().focus()),
+    // The same call every control in the settings dialog makes: the whole settings object with
+    // one field replaced, posted to the host. Not the host's settings route, which is the path
+    // that could never have had this defect.
+    changeSetting: (key, value) => {
+      const settings = currentSettings();
+      if (!Object.hasOwn(settings, key)) {
+        return false;
+      }
+
+      bridge.updateSettings({ ...settings, [key]: value });
+      return true;
+    },
   });
 
   // Once, not per editor: the menu registry is the editor's, and every editor draws from it.

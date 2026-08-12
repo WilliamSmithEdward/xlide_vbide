@@ -1748,3 +1748,48 @@ nothing, which is the signature of a cache.
 moves.** The name was load-bearing and was not in the key, and the memo was cleared on
 `closeProject` and on nothing else, so a reseed alone never cleared it.
 
+
+## 64. The editor was never the slow part, and the log already knew
+
+"xlide is slow to load after ALT+F11", reported 2026-08-11. The instinct after lesson 23 is to
+look at the page again, and the page is innocent: it is measured on every boot and the ready line
+said `ready in 251ms (bundle 172ms, editor 68ms, html 86ms, request 97ms, fetch 100ms, compile+run
+72ms)`. The surface is on screen and usable 574ms after the add-in's first line runs.
+
+The whole complaint is in one other line, 2.8 seconds later:
+
+```
+  +0.001s  OnConnection, mode Startup
+  +0.160s  engine: looking for ...\xlide-engine.exe
+  +0.321s  webview: controller created
+  +0.574s  editor surface: ready in 251ms
+  +3.365s  engine: listening \.\pipe\xlide-...
+  +3.370s  engine: connected
+  +3.401s  ...produced 0 finding(s)
+```
+
+For 2.8 seconds the editor looks finished and has no diagnostics, no completions, no hover and no
+semantic colouring. Nothing is broken and nothing says anything; the developer types into what
+looks like a dead editor. That reads as slow far more than a blank window would, because a blank
+window is obviously still loading.
+
+**What it costs, measured three ways.** Standalone, the engine reaches its listening line in
+1,273ms with a cold file cache and 190ms warm. In the session it takes 3.2s, because a 90 MB Node
+image is being read off disk while Excel, the VBE and a WebView2 browser process are all starting
+at the same moment. The size is the runtime, not our code: the bundle inside it is 2.26 MB.
+
+**A measurement that said no.** `useCodeCache` in the SEA config is the obvious lever - it caches
+V8's compilation of the bundle into the blob - and it does nothing here. Six warm runs before,
+190-194ms; six after, 187-192ms; and the executable grows 2 MB. The comment in `engine/build.mjs`
+now records that, because the next person to read "3.2 second start" will reach for the same
+switch.
+
+**And the bundle is not the lever either.** The page is 3.47 MB and 94% of it is Monaco: 3,339 KB
+against 203 KB of our own source, with Monaco's editor contributions only 685 KB of that. Code
+splitting our six dialogs and the dev surface out of the entry point - the obvious suggestion, and
+one an audit made - would move about 40 KB of 3,500. There is no page-side win here worth having.
+
+Consequence: when something "feels slow", find the moment the developer is actually waiting for
+before optimising anything. Time to first paint and time to a working editor are different
+numbers, and this product had already optimised the first one to 574ms while the second sat at
+3.4 seconds with no instrument pointed at it and no message on screen.

@@ -917,6 +917,16 @@ internal sealed partial class AddInSession
                     && int.TryParse(timeoutText, out var wanted) ? Math.Clamp(wanted, 0, 60000) : 10000;
                 request.Query.TryGetValue("value", out var expected);
 
+                // A NAME THAT IS NOT A CLAIM IS AN ERROR, not a claim that has yet to come true.
+                // Polled like one it took the full timeout and then answered in the same shape a
+                // real failure answers in, so a typo read as the product being broken and cost ten
+                // seconds per occurrence while it did. `bench` and `trip` both refuse an unknown
+                // argument outright; this does the same.
+                if (Array.IndexOf(KnownClaims, claim) < 0)
+                {
+                    return DebugError($"unknown claim {claim}; known claims are {string.Join(", ", KnownClaims)}");
+                }
+
                 var deadline = Environment.TickCount64 + timeout;
                 string? saw = null;
                 var held = false;
@@ -1640,7 +1650,31 @@ internal sealed partial class AddInSession
 
                 var standing = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
                 var command = VbeCommands.ForName("compile");
-                compileSurface.RunOnHostThread(() => ExecuteEditorCommand(command));
+
+                // Whether the command STARTED is a separate question from what it said, and the
+                // two used to collapse into one another: a greyed Compile item ran nothing, no
+                // dialog appeared because nothing had compiled, and the reply said the project
+                // compiled cleanly. The debugger suite reads this as its precondition, so a false
+                // pass here turns every check behind it into a test of the dialog guard.
+                //
+                // The outcome is written on the host thread and read on this one, and the gate is
+                // what orders the two. It is waited on AFTER the watch loop, never before: a
+                // compile error is a modal raised inside the command itself, so the host thread
+                // stays in there until the loop below answers it, and waiting first would be
+                // waiting for the thing the waiting prevents.
+                var started = VbeCommands.CommandRun.No("the host thread did not answer");
+                using var ran = new ManualResetEventSlim(false);
+                compileSurface.RunOnHostThread(() =>
+                {
+                    try
+                    {
+                        started = ExecuteEditorCommand(command);
+                    }
+                    finally
+                    {
+                        ran.Set();
+                    }
+                });
 
                 var said = new List<string>();
                 var settle = Environment.TickCount64 + WaitMilliseconds(request, 6000);
@@ -1667,8 +1701,25 @@ internal sealed partial class AddInSession
                     }
                 }
 
+                // Set on the host thread the moment the command returns, so a wait that succeeds
+                // is also the barrier that makes `started` safe to read here. By now the loop has
+                // answered any modal the command raised, so this is short or already past.
+                var reachedTheHost = ran.Wait(TimeSpan.FromSeconds(2));
+                var startedOk = reachedTheHost && started.Ran;
+
+                // WHAT COMPILED MEANS. No dialog appeared within waitMs, and the command that
+                // would have raised one actually ran. It is not a positive report from the
+                // compiler, because the host has no such report to give: the editor answers a
+                // compile with a modal or with nothing at all. A caller that needs more than
+                // "nothing objected" should read `errors`, and one that needs to know the
+                // question was even asked should read `started`.
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCompileReply(said.Count == 0, [.. said], DisplayFromProjectId(_shownProject) ?? string.Empty),
+                    new DebugCompileReply(
+                        startedOk && said.Count == 0,
+                        [.. said],
+                        DisplayFromProjectId(_shownProject) ?? string.Empty,
+                        startedOk,
+                        reachedTheHost ? started.Detail : "the command never reached the host thread"),
                     DebugJsonContext.Default.DebugCompileReply));
             }
 
@@ -2068,21 +2119,6 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// What to say - and do - when the host thread did not answer.
-    ///
-    /// A bare timeout is the least useful true statement an api can make, and the editor's
-    /// commonest reason for one is a MODAL DIALOG: it owns the host thread until somebody
-    /// answers it, and every route that needs that thread goes dark for as long as it stands
-    /// (twice in one day, a probe left one up and the editor simply stopped). Window
-    /// enumeration needs no host thread, so the door can still see what is in the way.
-    ///
-    /// A dialog that was NOT standing when this request began was raised by this request, and
-    /// answering it is undoing our own mess, so it is dismissed and the request retried once.
-    /// Only a SAFE button is ever pressed: Cancel, then Close, then No. Never OK, Yes, Save,
-    /// Delete, or Run - a dialog nobody read must not be agreed with. A dialog that was
-    /// already standing belongs to the developer and is only reported.
-    /// </summary>
-    /// <summary>
     /// Whether a named claim holds right now, and what was actually seen. Read from the
     /// snapshots the reader thread publishes and from fields the host thread writes, so a
     /// claim can be tested while that thread is busy - which is exactly when a harness is
@@ -2107,6 +2143,31 @@ internal sealed partial class AddInSession
                 return (shown is not null
                     && (expected is null || shown.Equals(expected, StringComparison.OrdinalIgnoreCase)),
                     shown ?? "(none)");
+            }
+
+            // THE HOST'S ANSWER TO THE SAME QUESTION. `shownModule` above asks the surface what it
+            // believes it is showing, which is this session's own record: useful, and not what Run,
+            // Step and ToggleBreakpoint act on. Those act on the native active pane, so a claim
+            // about where a command will land has to read the pane. Named separately rather than
+            // changing what `shownModule` means, because a route that quietly starts answering a
+            // different question breaks every caller that was right about the old one.
+            case "nativeModule":
+            {
+                try
+                {
+                    using var activePane = _editor.GetObject("ActiveCodePane");
+                    using var codeModule = activePane?.GetObject("CodeModule");
+                    using var component = codeModule?.GetObject("Parent");
+                    var active = component?.GetString("Name");
+
+                    return (active is not null
+                        && (expected is null || active.Equals(expected, StringComparison.OrdinalIgnoreCase)),
+                        active ?? "(no active pane)");
+                }
+                catch (Exception ex)
+                {
+                    return (false, $"the active pane could not be read ({ex.GetType().Name})");
+                }
             }
 
             case "noDialogs":
@@ -2149,6 +2210,25 @@ internal sealed partial class AddInSession
                 return (false, $"unknown claim {claim}");
         }
     }
+
+    /// <summary>
+    /// Every claim <see cref="EvaluateClaim"/> answers, so the route can refuse a name it does not
+    /// know instead of waiting for it to come true. One list rather than two: a vocabulary kept in
+    /// the switch and repeated in a guard is a vocabulary that drifts.
+    /// </summary>
+    private static readonly string[] KnownClaims =
+    [
+        "stopped",
+        "running",
+        "surfaceReady",
+        "shownModule",
+        "nativeModule",
+        "noDialogs",
+        "localsHas",
+        "watchHas",
+        "problemFree",
+        "responsive",
+    ];
 
     /// <summary>
     /// An offset far enough back to hold roughly the requested number of lines. A journal
@@ -2236,6 +2316,27 @@ internal sealed partial class AddInSession
         return node;
     }
 
+    /// <summary>
+    /// What to say - and do - when the host thread did not answer.
+    ///
+    /// A bare timeout is the least useful true statement an api can make, and the editor's
+    /// commonest reason for one is a MODAL DIALOG: it owns the host thread until somebody
+    /// answers it, and every route that needs that thread goes dark for as long as it stands
+    /// (twice in one day, a probe left one up and the editor simply stopped). Window
+    /// enumeration needs no host thread, so the door can still see what is in the way.
+    ///
+    /// A dialog that was NOT standing when this request began was raised by this request, and
+    /// answering it is undoing our own mess, so it is dismissed. Only a SAFE button is ever
+    /// pressed: Cancel, then Close, then No. Never OK, Yes, Save, Delete, or Run - a dialog
+    /// nobody read must not be agreed with. A dialog that was already standing belongs to the
+    /// developer and is only reported.
+    ///
+    /// THE REQUEST IS NOT RE-SENT. Dismissing the dialog releases the host thread, and the work
+    /// this request asked for was queued before the dialog appeared, so what happens next is
+    /// that the queued work is given three seconds to finish on its own. Retrying would run it
+    /// twice. This comment said "retried once" for as long as it sat above the wrong method, and
+    /// the reply carried a `retried` field that was the constant false to match.
+    /// </summary>
     private static DebugServer.DebugReply AnswerBlockedRequest(
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
@@ -2255,8 +2356,7 @@ internal sealed partial class AddInSession
                     HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
                     BlockedBy: standing.Length > 0 ? standing[0].Caption : null,
                     Buttons: standing.Length > 0 ? standing[0].Buttons : [],
-                    Dismissed: null,
-                    Retried: false),
+                    Dismissed: null),
                 DebugJsonContext.Default.DebugBlockedReply));
         }
 
@@ -2281,8 +2381,7 @@ internal sealed partial class AddInSession
                     HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
                     BlockedBy: blocking.Caption,
                     Buttons: blocking.Buttons,
-                    Dismissed: pressed,
-                    Retried: false),
+                    Dismissed: pressed),
                 DebugJsonContext.Default.DebugBlockedReply));
     }
 
@@ -2860,7 +2959,17 @@ internal sealed partial class AddInSession
                             target.SetString("Name", newName);
                             var readBack = target.GetString("Name") ?? newName;
                             Log.Info($"component: renamed {componentName} to {readBack}");
-                            ComponentsChanged();
+
+                            // THE SESSION'S OWN ADOPTION, for the reason `remove` above gives.
+                            // Setting the name on the component renames it in the collection and
+                            // nowhere else: the write baseline and the breakpoint record are both
+                            // keyed by module name, so they stayed under the old one and stopped
+                            // describing anything. A breakpoint the developer can see and the
+                            // session can no longer find is the same defect the removal path was
+                            // fixed for. AdoptRename re-keys both, moves the properties target,
+                            // reloads the surface when the shown module is the one that moved,
+                            // and calls ComponentsChanged itself.
+                            AdoptRename(componentName, readBack);
 
                             return System.Text.Json.JsonSerializer.Serialize(
                                 new DebugComponentReply(true, readBack, "rename"),
@@ -2922,10 +3031,16 @@ internal sealed partial class AddInSession
                         // Through the same gate the tab's own X uses, so a module with unwritten
                         // edits gets the question rather than the guillotine - and `action` is how
                         // a caller answers it in advance.
+                        //
+                        // And its answer is the close's answer, for the reason the `open` branch
+                        // above gives: a save that would not save, a revert the module refused,
+                        // and a confirm now standing on screen all left the tab where it was and
+                        // all replied ok.
                         request.Query.TryGetValue("answer", out var closeAnswer);
-                        OnModuleCloseRequested(paneModule, DisplayFromProjectId(paneOwner), closeAnswer);
+                        var closed = OnModuleCloseRequested(paneModule, DisplayFromProjectId(paneOwner), closeAnswer);
                         return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                            new DebugCloseReply(closed.Closed, closed.Detail, closed.Awaiting),
+                            DebugJsonContext.Default.DebugCloseReply);
                     }
 
                     default:
@@ -2940,9 +3055,21 @@ internal sealed partial class AddInSession
                 // The same path the editor's own Undo Rename takes. Here so a probe can prove a
                 // rename is reversible without driving the page, which is the half a rename test
                 // could never assert before.
-                UndoRename(0);
+                //
+                // A DESIGNATED DEVIATION: this reaches the session's undo directly and does NOT go
+                // through the page's "Undo Rename" context-menu action, so it proves the operation
+                // is reversible and not that the menu item works. Drive the menu item itself with
+                // act("editorAction", {id: "xlide.undoRename"}) when that is the question.
+                //
+                // What it restored comes back now. It used to answer ran:true whether it had put
+                // six modules back, stopped halfway with the project in neither state, or found
+                // nothing to undo - and the sentence saying which went to the page under a request
+                // id this route invented, where no caller could read it.
+                var undone = UndoRename(0);
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                    new DebugUndoRenameReply(
+                        undone.Undone, undone.From, undone.To, undone.Modules, undone.Stopped),
+                    DebugJsonContext.Default.DebugUndoRenameReply);
             }
 
             case "breakpoints":
@@ -3194,9 +3321,10 @@ internal sealed partial class AddInSession
                         new DebugErrorReply($"unknown command name {name}"), DebugJsonContext.Default.DebugErrorReply);
                 }
 
-                ExecuteEditorCommand(command);
+                var outcome = ExecuteEditorCommand(command);
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, command), DebugJsonContext.Default.DebugCommandReply);
+                    new DebugCommandReply(outcome.Ran, command, outcome.Detail),
+                    DebugJsonContext.Default.DebugCommandReply);
             }
 
             case "breakpoint"
@@ -3214,7 +3342,17 @@ internal sealed partial class AddInSession
                 // the key does.
                 request.Query.TryGetValue("project", out var project);
                 request.Query.TryGetValue("state", out var wanted);
-                GoTo(module, breakLine, 1, project);
+
+                // A NAVIGATION THAT DID NOT ARRIVE MUST NOT BE TOGGLED OVER. Everything below
+                // reads and writes "the shown module", which the GoTo is what makes correct; when
+                // it finds no pane the shown module is whatever was there before, so the
+                // breakpoint is read from one module and set on another, and the reply names the
+                // line the caller asked for either way.
+                if (GoTo(module, breakLine, 1, project) is { } lost)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(lost), DebugJsonContext.Default.DebugErrorReply);
+                }
 
                 // Read against the module the GoTo above has just made the shown one, in the
                 // workbook it belongs to. Keyed by name alone this read the TWIN's record when
@@ -3234,8 +3372,21 @@ internal sealed partial class AddInSession
                     ToggleBreakpoint(breakLine);
                 }
 
+                // The record as it stands NOW, not the state that was asked for. ToggleBreakpoint
+                // declines a line the editor will not carry one on - a blank line, a declaration -
+                // and the decline reaches the surface as a notice, so answering `wanted` here
+                // reported a breakpoint on lines that have never held one.
+                var nowSet = _editorSurface?.Module is { } afterModule
+                    && BreakpointsFor(afterModule).Contains(breakLine);
+
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(shouldSet, VbeCommands.Command.ToggleBreakpoint), DebugJsonContext.Default.DebugCommandReply);
+                    new DebugCommandReply(
+                        nowSet,
+                        VbeCommands.Command.ToggleBreakpoint,
+                        nowSet == shouldSet
+                            ? (nowSet ? "the breakpoint is set" : "the breakpoint is clear")
+                            : $"the editor would not put a breakpoint on line {breakLine}"),
+                    DebugJsonContext.Default.DebugCommandReply);
             }
 
             case "module" when request.Query.TryGetValue("name", out var moduleName) && moduleName.Length > 0:
@@ -3306,13 +3457,22 @@ internal sealed partial class AddInSession
 
                 if (request.Query.TryGetValue("module", out var caretModule) && caretModule.Length > 0)
                 {
+                    // A navigation that finds no pane leaves the caret in the module already
+                    // shown, and this route answered ok over it. The caller's next act is
+                    // usually Run, Step or a breakpoint, all of which then land somewhere the
+                    // caller did not ask for and believes they did not go.
                     request.Query.TryGetValue("project", out var caretProject);
-                    GoTo(caretModule, caretLine, caretColumn, caretProject);
+                    if (GoTo(caretModule, caretLine, caretColumn, caretProject) is { } lost)
+                    {
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply(lost), DebugJsonContext.Default.DebugErrorReply);
+                    }
                 }
 
                 _editorSurface?.SetCaret(caretLine, caretColumn);
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                    new DebugCommandReply(true, 0, "the caret was set"),
+                    DebugJsonContext.Default.DebugCommandReply);
             }
 
             case "placement":

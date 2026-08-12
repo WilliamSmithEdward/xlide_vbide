@@ -63,6 +63,15 @@ export interface UiSnapshot {
   settings: Record<string, unknown>;
   /** Whether the empty view is up, which is a different thing from having no tabs. */
   emptyViewShown: boolean;
+  /**
+   * What the status line is saying right now, empty when it is saying nothing.
+   *
+   * The status bar was in no snapshot at all, so a whole class of behaviour - an action declined
+   * with an explanation - could be driven and could not be observed. The condition that forced it
+   * is the engine's cold start, which now holds a notice for the seconds before language features
+   * work, and a held notice that fails to clear is exactly the defect nobody would see in a test.
+   */
+  statusNotice: string;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** How many models and documents are alive, since a leak shows here first. */
@@ -154,6 +163,18 @@ export interface DevSurfaceParts {
   referencesAt(position: { line: number; column: number }): Promise<{ word: string; found: unknown[] } | null>;
   openSettings(): void;
   openSponsors(): void;
+  /** What the status line is showing, read from the element the render writes. */
+  statusNotice(): string;
+  /**
+   * Changes one setting THROUGH THE PAGE, the way the dialog's own controls do.
+   *
+   * The `settings` route on the host is a different path and always was a safer one: it reads the
+   * stored settings and replaces one field. The page posts what it believes the whole settings
+   * object to be, which is where a field can go missing - and one did, silently resetting the
+   * chosen sync planner on every unrelated change. Nothing could reach this path, so nothing saw
+   * it. The dialog's handlers call exactly this.
+   */
+  changeSetting(key: string, value: unknown): boolean;
 }
 
 /**
@@ -464,6 +485,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focus: editorFocus(),
     settings: { ...currentSettings() } as unknown as Record<string, unknown>,
     emptyViewShown: workspace.emptyViewShown(),
+    statusNotice: parts.statusNotice(),
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
     search: parts.search.state(),
@@ -900,9 +922,28 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return { did: true, detail: `answered ${wanted}` };
     },
 
-    settings: () => {
-      parts.openSettings();
-      return { did: true, detail: "settings dialog opened" };
+    /**
+     * Opens the settings dialog, or with `key` and `value`, changes one setting through the page.
+     *
+     * Bare, it is the wrench's Settings item. With arguments it is what a control in that dialog
+     * does when the developer touches it, which is a genuinely different path from the `settings`
+     * ROUTE: the route replaces one field of the stored settings on the host side, the page posts
+     * the whole object as it believes it to be. Only the second one can drop a field, and for
+     * months it dropped syncEngine on every change.
+     */
+    settings: (args) => {
+      const key = args.key === undefined ? null : String(args.key);
+      if (key === null) {
+        parts.openSettings();
+        return { did: true, detail: "settings dialog opened" };
+      }
+
+      const raw = String(args.value ?? "");
+      const value = raw === "true" ? true : raw === "false" ? false : Number.isNaN(Number(raw)) ? raw : Number(raw);
+
+      return parts.changeSetting(key, value)
+        ? { did: true, detail: `posted ${key}=${String(value)} the way the dialog does` }
+        : { did: false, detail: `${key} is not a setting; try ${Object.keys(currentSettings()).join(", ")}` };
     },
 
     sponsors: () => {
@@ -1431,6 +1472,35 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       void found.run();
       return { did: true, detail: `ran ${action}` };
+    },
+
+    /**
+     * Any editor action, by the id it is registered under.
+     *
+     * The actions this product adds are the run() bodies of `editor.addAction` calls, and several
+     * of them are reachable ONLY from a context menu or a key: Undo Rename is one, and the door
+     * covered it by calling the shim's undo directly, which proves the operation is reversible and
+     * not that the menu item works. Anything registered can be driven from here, so a feature
+     * whose only surface is an action does not need a route of its own to be tested.
+     *
+     * Awaited when the action answers a promise, for the reason `format` gives: a caller reading
+     * the text straight after an un-awaited run reads what was there before.
+     *
+     * Not every command is an action. Undo and redo are registered as commands, so `getAction`
+     * finds nothing for them - see the note above `undo` for why, and use that action instead.
+     */
+    editorAction: (args) => {
+      const id = String(args.id ?? "").trim();
+      if (!id) {
+        return { did: false, detail: "editorAction needs an id" };
+      }
+
+      const found = workspace.activeEditor().getAction(id);
+      if (!found) {
+        return { did: false, detail: `${id} is not registered on this editor` };
+      }
+
+      return Promise.resolve(found.run()).then(() => ({ did: true, detail: `ran ${id}` }));
     },
   };
 

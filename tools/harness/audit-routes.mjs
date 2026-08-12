@@ -126,6 +126,13 @@ function methodsByRoute(client) {
  * once meant to get round to.
  */
 const NOT_DRIVEN_ON_PURPOSE = {
+  trip:
+    "a measurement, not an assertion. It reports wall clock from asking to observable across the "
+    + "page/host boundary, and the only honest pass/fail for a latency figure is a threshold "
+    + "somebody has to keep true on every machine the gate runs on. Its driver is "
+    + "perf-scaling.mjs, which needs a fourth fixture and exists to be READ rather than to go "
+    + "green. Run it when the surface feels slow: `node tools\\harness\\perf-scaling.mjs`.",
+
   drainfinalizers:
     "a bisecting tool, not an assertion. Run an operation, call it, and if the host dies THAT "
     + "operation leaked a wrapper. As a leak CHECK it is a false-negative machine - measured "
@@ -134,14 +141,39 @@ const NOT_DRIVEN_ON_PURPOSE = {
     + "com-leak.mjs counts instead, which is deterministic. Nothing should call this in a suite.",
 };
 
-const corpus = readdirSync(join(root, "tools/harness"))
+/*
+ * DRIVEN MEANS DRIVEN BY SOMETHING THE GATE RUNS.
+ *
+ * This used to read every file in tools/harness, which answers a different and much easier
+ * question: whether a route is mentioned in a file that exists. Seven suites in that folder are
+ * run by nothing at all, so a route whose only caller was one of them passed this check for as
+ * long as it took somebody to notice - and the whole purpose of the check is that nobody has to.
+ *
+ * The gate script is the list, read rather than restated: anything named in verify.ps1 counts, and
+ * a suite added there starts counting the moment it is added.
+ */
+const gate = read("tools/verify.ps1");
+const runByTheGate = readdirSync(join(root, "tools/harness"))
   .filter((file) => /\.(mjs|ps1)$/.test(file) && file !== "xlide-api.mjs" && file !== "audit-routes.mjs")
+  .filter((file) => gate.includes(file));
+
+const corpus = runByTheGate
   .map((file) => readFileSync(join(root, "tools/harness", file), "utf8"))
   .join("\n");
 
+/*
+ * Receivers that are not the api client. `.log(` matched 203 `console.log(` calls and 5 real ones,
+ * so the `log` route counted as driven by every suite that prints anything - and would have gone
+ * on counting after the last real caller was deleted. The route names here are ordinary words, so
+ * this will keep mattering as the client grows.
+ */
+const NOT_THE_CLIENT = ["console", "JSON", "Math", "Object", "Array", "String", "Number", "Date",
+  "process", "performance", "window", "document"];
+
 const methods = methodsByRoute(client);
 const isDriven = (route) =>
-  [...(methods.get(route) ?? [])].some((method) => new RegExp(`\\.${method}\\s*\\(`).test(corpus))
+  [...(methods.get(route) ?? [])].some((method) =>
+    new RegExp(`(?<!${NOT_THE_CLIENT.join("|")})\\.${method}\\s*\\(`).test(corpus))
   // The PowerShell probes build the URL themselves rather than going through the client.
   || new RegExp(`/${escaped(route)}[?"'\`\\s]`).test(corpus);
 
@@ -172,5 +204,5 @@ if (gaps.length > 0) {
 
 const excused = Object.keys(NOT_DRIVEN_ON_PURPOSE);
 console.log(`ok   all ${routes.length} routes are in both documents and reachable from the client`);
-console.log(`ok   ${routes.length - excused.length} are driven by a probe; ${excused.length} `
-  + `left out on purpose: ${excused.join(", ")}`);
+console.log(`ok   ${routes.length - excused.length} are driven by one of the ${runByTheGate.length} `
+  + `suites the gate runs; ${excused.length} left out on purpose: ${excused.join(", ")}`);

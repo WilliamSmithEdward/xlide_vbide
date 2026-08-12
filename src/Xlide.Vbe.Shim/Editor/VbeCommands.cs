@@ -25,9 +25,11 @@ internal static class VbeCommands
     /// <summary>
     /// Identifiers of the editor commands this drives.
     ///
-    /// These are established by enumerating the editor's own menus, not taken from documentation:
-    /// <see cref="Describe"/> writes each menu item's identifier and caption to the log, and the
-    /// values here are what it reported. Re-run it if a host build ever disagrees.
+    /// These are established by enumerating the editor's own menus, not taken from documentation.
+    /// A `Describe` here used to be the instrument that did it, writing every identifier and
+    /// caption to the log; <see cref="VbeMenus.Describe"/> superseded it and reports suppression
+    /// as well as identity, and the `menus` debug route serves the same reading over the door.
+    /// Re-read them there if a host build ever disagrees with the values below.
     /// </summary>
     public static class Command
     {
@@ -84,10 +86,23 @@ internal static class VbeCommands
         Command.Save;
 
     /// <summary>
+    /// What became of a command. Most callers want <see cref="CommandRun.Ran"/> and nothing else,
+    /// but a script driving the editor through the debug api needs the rest: "this host has no
+    /// such command" and "the item was greyed" are different answers, and a caller handed only
+    /// false cannot tell them apart, nor tell either from an exception.
+    /// </summary>
+    public readonly record struct CommandRun(bool Ran, string Detail)
+    {
+        public static CommandRun Ok(string detail = "executed") => new(true, detail);
+
+        public static CommandRun No(string detail) => new(false, detail);
+    }
+
+    /// <summary>
     /// Executes a command by identifier.
     /// </summary>
-    /// <returns>False when the editor has no such command, or it is currently unavailable.</returns>
-    public static bool Execute(DispatchObject editor, int commandId)
+    /// <returns>Whether it ran, and when it did not, why not.</returns>
+    public static CommandRun Execute(DispatchObject editor, int commandId)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -97,7 +112,7 @@ internal static class VbeCommands
             if (bars is null)
             {
                 Log.Warn("command: the editor exposed no command bars");
-                return false;
+                return CommandRun.No("the editor exposed no command bars");
             }
 
             // The bars are walked rather than searched.
@@ -110,7 +125,7 @@ internal static class VbeCommands
             if (control is null)
             {
                 Log.Info($"command: {commandId} is not present in this host");
-                return false;
+                return CommandRun.No("not present in this host");
             }
 
             // A command that cannot run right now is not a failure worth reporting as one: Break is
@@ -118,17 +133,17 @@ internal static class VbeCommands
             if (!control.GetBool("Enabled"))
             {
                 Log.Info($"command: {commandId} is currently disabled");
-                return false;
+                return CommandRun.No("currently disabled");
             }
 
             control.Invoke("Execute");
             Log.Info($"command: {commandId} executed");
-            return true;
+            return CommandRun.Ok();
         }
         catch (Exception ex)
         {
             Log.Error($"command: {commandId} could not be executed", ex);
-            return false;
+            return CommandRun.No($"raised {ex.GetType().Name}");
         }
     }
 
@@ -311,53 +326,6 @@ internal static class VbeCommands
             VirtualKey.S when control => Command.Save,
             _ => 0,
         };
-    }
-
-    /// <summary>
-    /// Writes every menu item's identifier and caption to the log.
-    ///
-    /// This is how the identifiers above were established, and it is the way to re-establish them
-    /// against a host that disagrees. It is not called during normal operation.
-    /// </summary>
-    public static void Describe(DispatchObject editor)
-    {
-        ArgumentNullException.ThrowIfNull(editor);
-
-        try
-        {
-            using var bars = editor.GetObject("CommandBars");
-            var barCount = bars?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= barCount; i++)
-            {
-                using var bar = bars!.GetItem(i);
-                var name = bar?.GetString("Name");
-                if (bar is null || name is null)
-                {
-                    continue;
-                }
-
-                Log.Info($"command bar {i}: '{name}'");
-
-                using var controls = bar.GetObject("Controls");
-                var controlCount = controls?.GetInt32("Count") ?? 0;
-
-                for (var j = 1; j <= controlCount; j++)
-                {
-                    using var control = controls!.GetItem(j);
-                    if (control is null)
-                    {
-                        continue;
-                    }
-
-                    Log.Info($"    {control.GetInt32("Id")} '{control.GetString("Caption")}'");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("command: the editor's menus could not be enumerated", ex);
-        }
     }
 }
 

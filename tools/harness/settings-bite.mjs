@@ -142,6 +142,31 @@ try {
     !known.includes("formatCanonicalKeywords"),
     `settings answers ${JSON.stringify(known)}. A new one needs a row above, or a reason here.`);
 
+  /*
+   * CHANGING ONE SETTING MUST NOT MOVE ANOTHER, and this is checked through the PAGE.
+   *
+   * Everything above drives `api.settings`, which is the host route: it reads the stored settings
+   * and replaces one field, so it cannot express the defect. The page posts what it believes the
+   * whole settings object to be, and its post was one field short - syncEngine was never in it -
+   * so choosing any other setting reset the developer's sync planner to the shipped default. Two
+   * separate copies of the same six keys, neither referring to the other, and no test that
+   * crossed the two paths.
+   */
+  await api.settings({ syncEngine: "builtIn" });
+  await waitFor("the planner to read back as builtIn", async () =>
+    (await api.settings()).syncEngine === "builtIn");
+
+  const nudged = await api.act("settings", { key: "formatIndentSize", value: 3 });
+  check("one setting can be changed the way the dialog changes it", nudged.did, nudged.detail);
+
+  await waitFor("the indent size to come back as 3", async () =>
+    (await api.settings()).formatIndentSize === 3);
+
+  const after = await api.settings();
+  check("and changing it left the sync planner where the developer put it",
+    after.syncEngine === "builtIn",
+    `syncEngine is ${JSON.stringify(after.syncEngine)} after a page-side change to a different setting`);
+
 } finally {
   await api.settings(restore).catch(() => {});
   if (made) {

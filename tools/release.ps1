@@ -56,6 +56,37 @@ if (-not $SkipGate) {
     if ($LASTEXITCODE -ne 0) { throw 'The gate failed; nothing was uploaded.' }
 }
 
+# ASKED WHETHER THE GATE RAN OR NOT.
+#
+# installer\build.ps1 copies whatever .exe is sitting in engine\dist, and the gate's currency step
+# was the only thing anywhere that checked it was the right one. So -SkipGate, the flag whose whole
+# purpose is a faster re-release, was also the only path that could ship an engine older than the
+# analyzer it was supposedly built from - silently, with a green run and a correct-looking
+# installer. That is precisely the failure the release checklist exists for, and it was reachable
+# by a flag.
+#
+# It REFUSES rather than packaging, which is the difference between this and the gate. A release is
+# the wrong moment to rebuild the thing being shipped: the decision about what goes out was made
+# when the tag was cut, and an installer that quietly contains a newer engine than the one the gate
+# measured is not the artifact anybody approved.
+Write-Host '==> Engine currency' -ForegroundColor Cyan
+$stale = @(& (Join-Path $PSScriptRoot 'Test-EngineCurrent.ps1') -RepoRoot $repoRoot)
+if ($stale.Count -gt 0) {
+    $names = ($stale | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
+    throw ("$($stale.Count) engine source(s) are newer than engine\dist\xlide-engine.exe ($names). " +
+        'The installer copies that executable as it stands, so this release would ship a stale ' +
+        'engine. Close Excel, run `npm run package --prefix engine`, and start again.')
+}
+
+$analyzerCheckout = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+if (Test-Path $analyzerCheckout) {
+    Write-Host '  packaged after every engine source, analyzer included'
+} else {
+    Write-Warning ('the analyzer checkout was not found, so the engine was only checked against ' +
+        'engine\src. The analyzer is bundled INTO the executable, so this is a weaker answer than ' +
+        'it looks.')
+}
+
 Write-Host '==> Installer' -ForegroundColor Cyan
 & (Join-Path $repoRoot 'installer\build.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'The installer build failed; nothing was uploaded.' }

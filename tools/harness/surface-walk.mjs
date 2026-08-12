@@ -18,7 +18,7 @@
  * workbooks' Helpers, said `collision=0`, and was right.
  *
  * Run it against a session with TWO workbooks open, or the interesting half does not exist:
- *   tools\harness\Start-Excel.ps1 -Workbook artifactsixtures\RenameFixture.xlsm,artifactsixtures\TwinFixture.xlsm
+ *   tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm,artifacts\fixtures\TwinFixture.xlsm
  *   node tools\harness\surface-walk.mjs --steps 80 --seed 424242
  */
 

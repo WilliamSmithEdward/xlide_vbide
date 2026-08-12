@@ -147,28 +147,48 @@ if (-not $NoBuild) {
         # engine while the source says otherwise (2026-08-08: a 14x improvement measured as no
         # improvement at all, twice, before the timestamps were read). The staleness assertion
         # below is what makes that impossible to miss again.
-        Push-Location (Join-Path $repoRoot 'engine')
-        try {
-            # esbuild and postject write their progress to STDERR even when they succeed, and
-            # under $ErrorActionPreference = 'Stop' Windows PowerShell turns a native command's
-            # stderr into a terminating error. So the preference is lifted for the call and the
-            # EXIT CODE is what decides, which is the only thing that actually knows.
-            $wasPreference = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                node build.mjs --package
-            } finally {
-                $ErrorActionPreference = $wasPreference
-            }
+        # ONLY WHEN SOMETHING CHANGED.
+        #
+        # The injection writes a 90 MB executable and takes about nine seconds, and this ran it on
+        # every single invocation - including the overwhelmingly common one where the engine had
+        # not been touched at all and the whole point of the run was a one-line change to the shim
+        # or the page. The comparison that makes the skip safe was already here, computed four
+        # lines further down to assert the package had taken; it just ran too late to prevent
+        # anything. The gate has worked this way since 2026-08-10 and this is the same check,
+        # through the same script, so the two cannot drift.
+        $stale = @(& (Join-Path $PSScriptRoot 'Test-EngineCurrent.ps1') -RepoRoot $repoRoot)
 
-            if ($LASTEXITCODE -ne 0) { throw "The engine build failed ($LASTEXITCODE)." }
-        } finally {
-            Pop-Location
+        if ($stale.Count -eq 0) {
+            Write-Host '  engine sources unchanged; keeping the packaged executable'
+        }
+        else {
+            $names = ($stale | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
+            Write-Host "  $($stale.Count) engine source(s) newer than the executable ($names); packaging"
+
+            Push-Location (Join-Path $repoRoot 'engine')
+            try {
+                # esbuild and postject write their progress to STDERR even when they succeed, and
+                # under $ErrorActionPreference = 'Stop' Windows PowerShell turns a native command's
+                # stderr into a terminating error. So the preference is lifted for the call and the
+                # EXIT CODE is what decides, which is the only thing that actually knows.
+                $wasPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    node build.mjs --package
+                } finally {
+                    $ErrorActionPreference = $wasPreference
+                }
+
+                if ($LASTEXITCODE -ne 0) { throw "The engine build failed ($LASTEXITCODE)." }
+            } finally {
+                Pop-Location
+            }
         }
 
-        # The analyzer counts as engine source: it lives in the neighbouring checkout and is
-        # bundled INTO this executable, so a pull over there changes what the add-in runs without
-        # touching a file in this repository. The gate watches both; so does this.
+        # ASSERTED EITHER WAY, because the skip is only as good as the comparison behind it. The
+        # analyzer counts as engine source: it lives in the neighbouring checkout and is bundled
+        # INTO this executable, so a pull over there changes what the add-in runs without touching
+        # a file in this repository. The gate watches both; so does this.
         $engineSources = @(Join-Path $repoRoot 'engine\src')
         $analyzerSources = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
         if (Test-Path $analyzerSources) { $engineSources += $analyzerSources }

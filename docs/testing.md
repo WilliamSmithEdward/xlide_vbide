@@ -7,7 +7,7 @@ most of the value is in probes that drive the real thing rather than tests of th
 
 ## The four kinds, and when each is right
 
-**Unit tests** (`tests/`, 120 of them, none need Excel). Pure logic with a real answer: the split
+**Unit tests** (`tests/`, 245 of them, none need Excel). Pure logic with a real answer: the split
 tree's arithmetic, the lexer against its corpus, registration plans, pixel maths. Fast enough to
 run on every gate. If a thing can be a unit test it should be, and if it cannot, that is usually a
 sign the logic is tangled with the host and worth extracting.
@@ -25,6 +25,15 @@ Needs no Excel, so it runs in the ordinary gate.
 through the debug api. Reach for these when the defect lives in the interaction: window events,
 focus, the host rewriting something underneath the page, a module going away mid-flight. They need
 `tools\dev.ps1 -KeepOpen -Configuration Debug` and Debug builds only.
+
+**Live suites** (`tools\harness\*.mjs`, the same gate). These are most of the live coverage and
+this document did not mention them at all until 2026-08-11, which is worth saying plainly: a
+reader following it would have concluded the PowerShell probes were the whole of `-Live`. They
+drive the same door from node through `xlide-api.mjs`, and they are where the behaviours that
+cost the most are pinned - where a squiggle lands after Format Module, whether the workbook, the
+surface and the analyzer hold the same text after every operation, what the Immediate window
+answers, whether an import refuses to overwrite unwritten edits, and whether the two sync
+planners still decide identically. `verify.ps1` groups them by the fixture each needs.
 
 ## The rule that matters most
 

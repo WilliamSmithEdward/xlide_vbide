@@ -115,6 +115,14 @@ check("HelpersExtra, whose name merely starts the same, was not touched",
 console.log("\nputting it back:");
 const undone = await api.undoRename();
 console.log(`  ${JSON.stringify(undone).slice(0, 200)}`);
+
+// The reply is read now rather than printed. It used to answer a bare true whatever happened, so
+// the only way to learn that an undo had stopped halfway was the two module reads below - which
+// say the text is wrong and cannot say why. `stopped` names the module that refused.
+check("the undo ran to the end", undone.undone === true, undone.stopped ?? JSON.stringify(undone));
+check("and it put back both modules the rename touched",
+  (undone.modules ?? []).length === 2, JSON.stringify(undone.modules));
+
 await wait(3000);
 
 const restored = {

@@ -705,10 +705,19 @@ public sealed record DebugMenusReply(
     [property: JsonPropertyName("path")] string Path,
     [property: JsonPropertyName("items")] DebugMenuRow[] Items);
 
-/// <summary>What POST command, placement, breakpoint, and immediate answer.</summary>
+/// <summary>
+/// What POST command, placement, breakpoint, and immediate answer.
+///
+/// `ran` means the editor ran it, not that the door was asked to. It used to mean the second thing:
+/// the session method that executes a command computed the answer and returned void, so every one
+/// of these replies said true and a script pressing Step Over outside break mode was told it had
+/// stepped. `detail` carries the reason a false came back, because "this host has no such command"
+/// and "the item was greyed" want different responses from a caller.
+/// </summary>
 public sealed record DebugCommandReply(
     [property: JsonPropertyName("ran")] bool Ran,
-    [property: JsonPropertyName("command")] int Command);
+    [property: JsonPropertyName("command")] int Command,
+    [property: JsonPropertyName("detail")] string Detail = "");
 
 /// <summary>A slice of the shim log, from a byte offset the caller advances.</summary>
 public sealed record DebugLogReply(
@@ -740,8 +749,7 @@ public sealed record DebugBlockedReply(
     [property: JsonPropertyName("heartbeatAgeMs")] long HeartbeatAgeMs,
     [property: JsonPropertyName("blockedBy")] string? BlockedBy,
     [property: JsonPropertyName("buttons")] string[] Buttons,
-    [property: JsonPropertyName("dismissed")] string? Dismissed,
-    [property: JsonPropertyName("retried")] bool Retried);
+    [property: JsonPropertyName("dismissed")] string? Dismissed);
 
 /// <summary>
 /// One native dialog standing in the process.
@@ -793,7 +801,33 @@ public sealed record DebugGuardReply(
 public sealed record DebugCompileReply(
     [property: JsonPropertyName("compiled")] bool Compiled,
     [property: JsonPropertyName("errors")] string[] Errors,
-    [property: JsonPropertyName("project")] string Project);
+    [property: JsonPropertyName("project")] string Project,
+    [property: JsonPropertyName("started")] bool Started = true,
+    [property: JsonPropertyName("detail")] string Detail = "");
+
+/// <summary>
+/// What an undo rename restored. `stopped` is the half that matters: an undo can put four modules
+/// back and refuse the fifth, which leaves the project in neither state and is worth more than the
+/// bare true this used to answer.
+/// </summary>
+public sealed record DebugUndoRenameReply(
+    [property: JsonPropertyName("undone")] bool Undone,
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("to")] string? To,
+    [property: JsonPropertyName("modules")] string[] Modules,
+    [property: JsonPropertyName("stopped")] string? Stopped);
+
+/// <summary>
+/// What became of a close the door asked for. Three answers rather than two: the tab went, the tab
+/// stayed and here is why, or the developer is being asked and nothing has happened yet. That last
+/// one is the reason this is not a bare boolean - a confirm standing on screen is neither a success
+/// nor a failure, and a caller that knows which it got can answer the question instead of polling
+/// to find out what happened.
+/// </summary>
+public sealed record DebugCloseReply(
+    [property: JsonPropertyName("closed")] bool Closed,
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("awaiting")] string? Awaiting);
 
 /// <summary>
 /// What became of a component the door was asked to add, rename or remove.
@@ -1205,6 +1239,8 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugWindowsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
+[JsonSerializable(typeof(DebugCloseReply))]
+[JsonSerializable(typeof(DebugUndoRenameReply))]
 [JsonSerializable(typeof(DebugLogReply))]
 [JsonSerializable(typeof(DebugMessageRow))]
 [JsonSerializable(typeof(DebugMessagesReply))]

@@ -283,10 +283,6 @@ export class Dispatcher {
             case 'project/close':
                 return this.closeProject(this.require<{ projectId: string }>(params));
 
-            case 'module/didClose':
-                this.analysis.handle({ kind: 'forget', docKey: this.require<{ documentKey: string }>(params).documentKey });
-                return null;
-
             case 'textDocument/diagnostics':
                 return this.diagnostics(this.require<DiagnosticsParams>(params));
 
@@ -447,14 +443,16 @@ export class Dispatcher {
         // THE ANALYZER'S OWN PER-DOCUMENT STATE, which nothing else here releases.
         //
         // It keeps an incremental parse per document and drops one when it is told that document
-        // closed - `module/didClose`, which this product has never sent, because a module's TAB
-        // closing is not the module leaving the project. So the state survived the WORKBOOK
-        // closing too: every module a session ever analysed stayed held for the life of the
-        // engine, and a developer moving between workbooks all day accumulated all of them
-        // (2026-08-09).
+        // closed. THE PRODUCT NEVER TELLS IT, because a module's TAB closing is not the module
+        // leaving the project - so the state survived the WORKBOOK closing too, and every module a
+        // session ever analysed stayed held for the life of the engine, accumulating all day for a
+        // developer moving between workbooks (2026-08-09).
         //
-        // Released here rather than by starting to send didClose, because this is the point where
-        // the documents are certainly gone, and it needs no cooperation from the shim to be right.
+        // This is where it is released instead: the point where the documents are certainly gone,
+        // and the one that needs no cooperation from the shim to be right. There was a
+        // `module/didClose` method routed here for the other approach, unsent for the whole life
+        // of the engine and removed on 2026-08-11; a method the protocol offers and no client
+        // calls reads as a contract the shim is failing to keep up its end of.
         for (const module of this.seededModules.get(params.projectId) ?? []) {
             this.analysis.handle({ kind: 'forget', docKey: `${params.projectId}/${module.moduleName}` });
         }

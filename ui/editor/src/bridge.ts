@@ -8,8 +8,8 @@ import type { SearchWidget } from "./searchwidget.js";
 import type { ToolbarCommand } from "./toolbar.js";
 import type { Workspace } from "./workspace.js";
 import { takeFormattingMark } from "./format.js";
-import { applySettings, type EditorSettings } from "./settings.js";
-import { THEME_DARK, THEME_LIGHT, type XlideTheme } from "./theme.js";
+import { applySettings, type EditorSettings, type IncomingSettings } from "./settings.js";
+import { type XlideTheme } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
 
 /*
@@ -52,14 +52,12 @@ export type HostMessage =
   | { type: "openDocument"; moduleName: string; project?: string | null; text: string }
   | { type: "clearDocuments" }
   | { type: "syncDocument"; moduleName: string; project?: string | null; text: string }
-  | { type: "notice"; text: string }
+  | { type: "notice"; text: string; sticky?: boolean }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
   | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[] }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
-  | { type: "applyEdit"; revision: number; changes: HostTextChange[] }
-  | { type: "setTheme"; theme: XlideTheme }
   | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
@@ -88,15 +86,7 @@ export type HostMessage =
   | { type: "obTypesResult"; id: number; types: ObType[] }
   | { type: "obMembersResult"; id: number; members: ObMember[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
-  | {
-    type: "setSettings";
-    blockLayout: string;
-    continueCommentOnNewline: boolean;
-    mirrorCommentSpacing: boolean;
-    treeFollowsEditor: boolean;
-    formatIndentSize?: number;
-    syncEngine?: string;
-  };
+  | ({ type: "setSettings" } & IncomingSettings);
 
 /**
  * One library the Object Browser lists: a referenced type library, or an open workbook's
@@ -299,14 +289,12 @@ export type ClientMessage =
   | { type: "close" }
   | { type: "search"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string }
   | { type: "replaceAll"; id: number; query: string; matchCase: boolean; wholeWord: boolean; scope: string; replacement: string }
-  | {
-    type: "updateSettings";
-    blockLayout: string;
-    continueCommentOnNewline: boolean;
-    mirrorCommentSpacing: boolean;
-    treeFollowsEditor: boolean;
-    formatIndentSize: number;
-  }
+  // Spread rather than restated, and that is the whole fix. Written out member by member, this
+  // shape fell one member short of the inbound one - syncEngine - and the compiler had no way to
+  // notice, because neither shape referred to the other or to EditorSettings. The effect was not a
+  // setting that could not be changed but a setting that got RESET: every other change posted a
+  // payload with no syncEngine in it, and the host read the absence as the default.
+  | ({ type: "updateSettings" } & EditorSettings)
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -335,14 +323,6 @@ const SEVERITY: Record<HostSeverity, monaco.MarkerSeverity> = {
   hint: monaco.MarkerSeverity.Hint,
 };
 
-function toMonacoRange(range: HostRange): monaco.IRange {
-  return {
-    startLineNumber: range.startLine,
-    startColumn: range.startColumn,
-    endLineNumber: range.endLine,
-    endColumn: range.endColumn,
-  };
-}
 
 function fromMonacoRange(range: monaco.IRange): HostRange {
   return {
@@ -474,7 +454,6 @@ export class EditorBridge {
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
-  private themePinned = false;
 
   constructor(
     transport: HostTransport,
@@ -543,10 +522,6 @@ export class EditorBridge {
       }),
       editor.onMouseLeave(() => hover.clear()),
     );
-  }
-
-  get isThemePinned(): boolean {
-    return this.themePinned;
   }
 
   start(timings?: BootTimings): void {
@@ -670,14 +645,7 @@ export class EditorBridge {
    * written, and the echo is what the page applies: a choice is real when the file has it.
    */
   updateSettings(settings: EditorSettings): void {
-    this.transport.post({
-      type: "updateSettings",
-      blockLayout: settings.blockLayout,
-      continueCommentOnNewline: settings.continueCommentOnNewline,
-      mirrorCommentSpacing: settings.mirrorCommentSpacing,
-      treeFollowsEditor: settings.treeFollowsEditor,
-      formatIndentSize: settings.formatIndentSize,
-    });
+    this.transport.post({ type: "updateSettings", ...settings });
   }
 
   /**
@@ -1122,7 +1090,7 @@ export class EditorBridge {
         this.syncDocument(message.moduleName, message.project ?? null, message.text);
         return;
       case "notice":
-        this.shell?.notify(message.text);
+        this.shell?.notify(message.text, message.sticky === true);
         return;
       case "editorCommand":
         this.runEditorCommand(message.id);
@@ -1155,13 +1123,6 @@ export class EditorBridge {
         return;
       case "setProjects":
         this.shell?.setProjects(message.projects);
-        return;
-      case "applyEdit":
-        this.applyEdit(message.revision, message.changes);
-        return;
-      case "setTheme":
-        this.themePinned = true;
-        monaco.editor.setTheme(message.theme === THEME_LIGHT ? THEME_LIGHT : THEME_DARK);
         return;
       case "setDiagnostics":
         this.setDiagnostics(message.moduleName, message.project ?? null, message.markers);
@@ -1330,14 +1291,9 @@ export class EditorBridge {
         // arrive on the editor's transport.
         return;
       case "setSettings":
-        applySettings({
-          blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
-          continueCommentOnNewline: message.continueCommentOnNewline,
-          mirrorCommentSpacing: message.mirrorCommentSpacing,
-          treeFollowsEditor: message.treeFollowsEditor !== false,
-          formatIndentSize: message.formatIndentSize ?? 4,
-          syncEngine: message.syncEngine ?? "xlide",
-        });
+        // Handed over whole. Coercing here as well as in applySettings meant two normalisations
+        // of the same six values, and the second one silently decided what a missing field meant.
+        applySettings(message);
         return;
       default: {
         const unknown: never = message;
@@ -1346,10 +1302,14 @@ export class EditorBridge {
     }
   }
 
+  /**
+   * The theme follows the operating system, and nothing overrides it.
+   *
+   * There used to be a pin here for a host-sent `setTheme` to set. Nothing ever sent one - not the
+   * shim, not the page, not a probe - so the flag was read false on every branch that read it, and
+   * the whole path was a protocol the README described and the product did not have.
+   */
   applyOsTheme(theme: XlideTheme): void {
-    if (this.themePinned) {
-      return;
-    }
     monaco.editor.setTheme(theme);
   }
 
@@ -1566,33 +1526,6 @@ export class EditorBridge {
     const model = this.documents.get(moduleName, project);
     if (model && model.getValue() !== text) {
       this.adoptText(model, text);
-    }
-  }
-
-  private applyEdit(revision: number, changes: HostTextChange[]): void {
-    const model = this.model();
-    if (!model) {
-      return;
-    }
-    const operations: monaco.editor.IIdentifiedSingleEditOperation[] = changes.map((change) => ({
-      range: toMonacoRange(change),
-      text: change.text,
-      forceMoveMarkers: true,
-    }));
-
-    this.applyingHostEdit = true;
-    try {
-      // pushEditOperations keeps the change on the undo stack; executeEdits via the editor
-      // would also move the cursor, which the host edit must not do.
-      model.pushEditOperations(null, operations, () => null);
-    } finally {
-      this.applyingHostEdit = false;
-    }
-
-    // The host is the revision authority once it has written to the document.
-    const shown = this.documents.idOf(model);
-    if (shown) {
-      this.revisions.set(docKeyOf(shown.module, shown.project), revision);
     }
   }
 

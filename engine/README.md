@@ -33,7 +33,6 @@ The add-in converts between those and the editor's one-based line and column at 
 | `initialize` | Handshake. Required before analysis. |
 | `project/open` | Replaces everything known about a project: identity, generation, and every module's source. |
 | `project/close` | Forgets a project. |
-| `module/didClose` | Drops per-document incremental state. |
 | `textDocument/diagnostics` | Analyses one module and returns its findings. |
 | `shutdown` | Ends the session. |
 

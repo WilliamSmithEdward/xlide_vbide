@@ -111,7 +111,6 @@ internal struct Msg
 internal static unsafe partial class Win32
 {
     public const int WsChild = unchecked((int)0x40000000);
-    public const int WsVisible = 0x10000000;
     public const int WsClipChildren = 0x02000000;
     public const int WsClipSiblings = 0x04000000;
     public const int WsCaption = 0x00C00000;
@@ -125,22 +124,12 @@ internal static unsafe partial class Win32
     public const int WsOverlappedWindow =
         WsCaption | WsSysMenu | WsThickFrame | WsMinimizeBox | WsMaximizeBox;
 
-    [LibraryImport("user32.dll")]
-    public static partial nint SetParent(nint child, nint parent);
-
-    [LibraryImport("user32.dll")]
-    public static partial nint GetForegroundWindow();
-
     public const uint CsHRedraw = 0x0002;
     public const uint CsVRedraw = 0x0001;
-    public const uint CsDblClks = 0x0008;
 
     public const int GwlpUserData = -21;
 
-    public const uint WmCreate = 0x0001;
-    public const uint WmDestroy = 0x0002;
     public const uint WmSize = 0x0005;
-    public const uint WmSetFocus = 0x0007;
     public const uint WmEraseBackground = 0x0014;
     public const uint WmNcCreate = 0x0081;
     public const uint WmNcDestroy = 0x0082;
@@ -150,8 +139,6 @@ internal static unsafe partial class Win32
     public const uint SwpNoZOrder = 0x0004;
     public const uint SwpNoActivate = 0x0010;
 
-    /// <summary>COLOR_BTNFACE + 1, the value a class background brush takes.</summary>
-    public const nint ColorButtonFace = 16;
 
     /// <summary>IDC_ARROW.</summary>
     public const int IdcArrow = 32512;
@@ -224,10 +211,6 @@ internal static unsafe partial class Win32
 
     /// <summary>Asks a window to close, exactly as its own close box would.</summary>
     public const uint WmClose = 0x0010;
-    public const uint WmSysCommand = 0x0112;
-
-    /// <summary>The system-menu close command, masked to its command bits.</summary>
-    public const nint ScClose = 0xF060;
 
     // Named PostMessageW explicitly: user32 exports only the A and W forms, and an import
     // spelled "PostMessage" throws EntryPointNotFoundException the first time it is called.
@@ -308,6 +291,19 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool InvalidateRect(nint window, Rect* rect, [MarshalAs(UnmanagedType.Bool)] bool erase);
+
+    /// <summary>
+    /// Paints a window's pending update region NOW, by sending WM_PAINT straight to its window
+    /// procedure instead of leaving it in the queue.
+    ///
+    /// The difference matters exactly once, and it is the difference between a loading screen and
+    /// a frozen host. ShowWindow only marks the window for painting; the paint happens when the
+    /// thread next pumps messages. A thread that shows a window and then does half a second of
+    /// synchronous work has shown nothing at all.
+    /// </summary>
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool UpdateWindow(nint window);
 
     [LibraryImport("user32.dll")]
     public static partial int FillRect(nint deviceContext, Rect* rect, nint brush);

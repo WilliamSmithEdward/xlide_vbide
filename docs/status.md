@@ -51,8 +51,8 @@ typecheck, build and tests, the engine language matrix, the headless page probes
 route audit, the Release build, the unit tests, and the Release-carries-no-debug-api check.
 `-Live` adds the suites that need an open editor.
 
-Counts move, so they are given as of this line rather than as standing facts: 237 unit tests,
-50 api routes all documented and driven, 4 headless page probes.
+Counts move, so they are given as of this line rather than as standing facts: 245 unit tests,
+50 api routes all documented and driven, 5 headless page probes.
 
 `tools\page.ps1` is the page loop: typecheck, build, deploy into the running shim, reload, and
 prove the running build is the one just made, in about a second and with no restart.

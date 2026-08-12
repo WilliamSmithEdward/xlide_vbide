@@ -841,6 +841,29 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
+    /// A notice that stays until it is taken away, for a condition rather than an event. Called
+    /// with an empty text to take it away.
+    ///
+    /// The timed notice above cannot say "this is still happening": it clears after five seconds,
+    /// which is either too early or too late for anything whose end it does not know about. The
+    /// case that forced this is the engine, which takes about 3.4 seconds to come up from a cold
+    /// start while the editor sits on screen looking finished and answering nothing (lesson 64).
+    /// </summary>
+    public void Hold(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new NoticeMessage("notice", text, Sticky: true),
+            EditorMessageContext.Default.NoticeMessage));
+    }
+
+    /// <summary>
     /// Runs one of the surface's own commands.
     ///
     /// Used for keys the host would otherwise take. A key claimed at the browser's accelerator hook
@@ -987,10 +1010,20 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetDiagnosticsMessage));
     }
 
+    /// <summary>
+    /// The settings as last sent to the page, which is the closest thing this side has to the
+    /// file's contents. A change message that omits a field means "leave that one alone", and
+    /// without somewhere to leave it alone TO, the only available answer was the shipped default -
+    /// so an omitted field did not fail to change a setting, it reset one.
+    /// </summary>
+    private ProductSettings _settingsAsSent = new();
+
     /// <summary>Sends the developer's settings, for the page's dialog and typing behaviour.</summary>
     public void ShowSettings(ProductSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+
+        _settingsAsSent = settings;
 
         Send("setSettings", JsonSerializer.Serialize(
             new SetSettingsMessage(
@@ -1607,23 +1640,34 @@ internal sealed class EditorSurface : IDisposable
 
                 case "updateSettings":
                 {
+                    // AN ABSENT FIELD MEANS UNCHANGED, not default. Every one of these used to
+                    // fall back to the shipped value, so a page that posted five of the six
+                    // settings did not leave the sixth alone - it overwrote it. That is exactly
+                    // what happened to syncEngine, which the page's own updateSettings never
+                    // included: changing the indent size reset the developer's chosen planner.
+                    // The debug api's settings route already worked this way.
+                    var held = _settingsAsSent;
+
                     var layout = document.RootElement.TryGetProperty("blockLayout", out var layoutValue)
-                        ? layoutValue.GetString() ?? "comfy"
-                        : "comfy";
-                    var continueComment = !document.RootElement.TryGetProperty("continueCommentOnNewline", out var continueValue)
-                        || continueValue.ValueKind is not (JsonValueKind.False);
-                    var mirrorSpacing = !document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
-                        || mirrorValue.ValueKind is not (JsonValueKind.False);
-                    var treeFollows = !document.RootElement.TryGetProperty("treeFollowsEditor", out var treeValue)
-                        || treeValue.ValueKind is not JsonValueKind.False;
+                        ? layoutValue.GetString() ?? held.BlockLayout
+                        : held.BlockLayout;
+                    var continueComment = document.RootElement.TryGetProperty("continueCommentOnNewline", out var continueValue)
+                        ? continueValue.ValueKind is not JsonValueKind.False
+                        : held.ContinueCommentOnNewline;
+                    var mirrorSpacing = document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
+                        ? mirrorValue.ValueKind is not JsonValueKind.False
+                        : held.MirrorCommentSpacing;
+                    var treeFollows = document.RootElement.TryGetProperty("treeFollowsEditor", out var treeValue)
+                        ? treeValue.ValueKind is not JsonValueKind.False
+                        : held.TreeFollowsEditor;
                     var indentSize = document.RootElement.TryGetProperty("formatIndentSize", out var indentValue)
                         && indentValue.TryGetInt32(out var asked)
                         ? asked
-                        : 4;
+                        : held.FormatIndentSize;
                     var syncEngine = document.RootElement.TryGetProperty("syncEngine", out var engineValue)
                         && engineValue.ValueKind == JsonValueKind.String
-                            ? engineValue.GetString() ?? "xlide"
-                            : "xlide";
+                            ? engineValue.GetString() ?? held.SyncEngine
+                            : held.SyncEngine;
 
                     SettingsChangeRequested?.Invoke(new ProductSettings
                     {

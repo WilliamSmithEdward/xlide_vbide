@@ -93,6 +93,20 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/positions.mjs
 
+      # The memo that answers diagnostics from the last analysis when nothing it depends on has
+      # changed, which is what turned a pass over an 82,000-line project from 476ms into 34ms. The
+      # saving is only correct if "nothing it depends on" is exact, and it was not: the project's
+      # procedure signatures ride in a Map, `JSON.stringify` renders a Map as `{}`, and the
+      # fingerprint therefore could not see a signature change at all. Adding a parameter left
+      # every caller un-analysed, with nothing red and nothing slow to notice.
+      #
+      # This test was written for that and then run by nothing - not this job, which listed its
+      # three siblings by name, and not verify.ps1. It needs no Excel and no fixture, so there was
+      # never a reason beyond nobody adding the line.
+      - name: Freshness
+        working-directory: xlide_vbide/engine
+        run: node test/freshness.mjs
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.
@@ -137,6 +151,35 @@ jobs:
       - name: Check the page bundle
         working-directory: ui/editor
         run: npm test
+
+      # THE TWO CHEAPEST CHECKS IN THE LOCAL GATE, and neither ran here until 2026-08-11.
+      #
+      # Both take well under a second and both guard a class of defect that is invisible in review.
+      # The route audit asks whether every debug-api route is documented in both places, reachable
+      # from the client, and driven by a suite the gate actually runs - a question that goes wrong
+      # by one route at a time and is never noticed at the moment it does. The variant guard is the
+      # shape check for the 2026-08-05 crash storm, where a VARIANT declared 16 bytes on an x64
+      # host wrote 8 bytes past its buffer and the symptom was stack-layout roulette.
+      #
+      # They need no Excel and no publish, so they belong in front of the expensive steps.
+      - name: Audit the debug api's routes
+        run: node tools/harness/audit-routes.mjs
+
+      - name: Check that no variant is read as an object
+        shell: pwsh
+        run: |
+          $offenders = Get-ChildItem src -Recurse -Include *.cs |
+              Select-String -Pattern '\.As<\s*object\s*>\s*\(' |
+              Where-Object { $_.Line -notmatch '^\s*(//|\*|/\*)' }
+
+          if ($offenders) {
+              $where = ($offenders | ForEach-Object { "$($_.Filename):$($_.LineNumber)" }) -join ', '
+              throw ("a variant is being read as an object ($where). That builds a COM wrapper " +
+                  'nothing owns and the finalizer thread releases it, which ends Excel. Name the ' +
+                  'variant type and describe it, or take it through ComRuntime.')
+          }
+
+          Write-Host 'no path materialises a wrapper the counter cannot see'
 
       - name: Restore
         run: dotnet restore

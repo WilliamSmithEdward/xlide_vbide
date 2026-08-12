@@ -1008,9 +1008,24 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Called once the host has finished its own startup and the object model is settled.</summary>
     public void HostStartupComplete()
     {
+        // THE ENGINE GOES FIRST, because it is the longest pole in the session by two orders of
+        // magnitude and everything else here is microseconds against it.
+        //
+        // Measured 2026-08-11 on a real ALT+F11: the page is up and usable at 574ms, and the engine
+        // is not connected until 3,370ms - so for 2.8 seconds the editor is on screen with no
+        // diagnostics, no completions and no hover, which is what "xlide is slow to load" actually
+        // describes. The cost is reading a 90 MB Node image off disk while Excel, the VBE and a
+        // WebView2 browser process are all starting at once; standalone the same launch is 1.27s
+        // cold and 190ms warm.
+        //
+        // Nothing below depends on it: Start only spawns the process and returns, and the first
+        // pass runs from the connect callback seconds later, by which time both calls under this
+        // have long finished. So starting it before two COM enumerations rather than after them
+        // costs nothing and takes their duration off a wait the developer is sitting through.
+        StartAnalysis();
+
         ReportOpenProjects();
         TrackCodePanes();
-        StartAnalysis();
 
         // An editor with no panes at all never fires the pane events the surface normally
         // arrives on, and a developer opening a fresh workbook's editor would meet the native
@@ -1070,7 +1085,10 @@ internal sealed partial class AddInSession : IDisposable
                 _editorSurface?.Notify(missing);
             }
         };
-        _editorSurface.NavigateRequested = GoTo;
+        // The page's own navigation shows its failure on screen, so it discards the complaint the
+        // door reads. (A method group cannot bind here now that GoTo answers one.)
+        _editorSurface.NavigateRequested = (component, line, column, project) =>
+            GoTo(component, line, column, project);
         _editorSurface.CommandRequested = RunCommand;
         // The document names its workbook by display name; the write path resolves that to the
         // project identity so a same-named module in another workbook is never the one written.
@@ -1113,7 +1131,10 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
         _editorSurface.PropertyEditRequested = OnPropertyEdit;
         _editorSurface.ComponentSelected = OnComponentSelected;
-        _editorSurface.ModuleCloseRequested = OnModuleCloseRequested;
+        // The tab's X does not read the outcome: it sees its tab go, or sees the question. The
+        // debug api's caller has neither, so the method answers and this discards.
+        _editorSurface.ModuleCloseRequested = (component, project, action) =>
+            OnModuleCloseRequested(component, project, action);
         _editorSurface.ComponentInsertRequested = InsertComponent;
         _editorSurface.ComponentRemoveRequested = (component, project) =>
         {
@@ -1192,6 +1213,16 @@ internal sealed partial class AddInSession : IDisposable
             PublishProperties();
             UpdateDebugState();
 
+            // SAY THAT THE LANGUAGE IS STILL COMING. The surface is usable about 2.8 seconds
+            // before the engine answers anything (lesson 64), and an editor that looks finished
+            // and returns no completions reads as broken. Only when it is genuinely not up yet:
+            // a reload of the page mid-session finds the engine already running and says nothing.
+            if (_analysis is { EngineIsUp: false })
+            {
+                _editorSurface?.Hold("Starting analysis. Problems, completions and hover will "
+                    + "arrive in a moment.");
+            }
+
 #if DEBUG
             InstallConsoleRing();
 #endif
@@ -1202,6 +1233,22 @@ internal sealed partial class AddInSession : IDisposable
         // there is no window event to notice any of it. Without this, the loader keeps covering
         // the window as it was at the first placement, and a band of native chrome outlives it.
         _editorSurface.LoadingPulse = RefreshSurfacePlacement;
+
+        // THE LOADER GOES UP BEFORE THE SLOW PART, which is everything below this line.
+        //
+        // The surface exists by now and its overlay knows how to paint the loading screen, but
+        // nothing had put it on screen yet: placement was first asked for much later, from the
+        // empty-workspace path or from the first pane event. Between here and there the host
+        // thread does the work that costs the visible half-second - hiding the editor's own
+        // windows, floating and ghosting both debug palettes, starting their reader - and it does
+        // all of it without returning to the message loop. So the developer pressed ALT+F11 and
+        // watched the editor's frozen native chrome, which reads as the host having hung.
+        //
+        // Placed and painted here instead, so that time is spent looking at xlide starting.
+        // Placement is re-asserted constantly afterwards - the loader's own pulse, the frame
+        // subclass, every pane event - so a first placement made a moment before the windows
+        // below move is corrected within a tick rather than being load-bearing.
+        RefreshSurfacePlacement();
 
         // Now rather than at start-up. The editor answers that these windows are visible before
         // it has created them, so hiding one then closes something with no window behind it and
@@ -1351,7 +1398,13 @@ internal sealed partial class AddInSession : IDisposable
     /// what the debugger drives. Leaving it where it was would put the two out of step the first
     /// time the user pressed F8.
     /// </summary>
-    private void GoTo(string component, int line, int column, string? projectDisplay = null)
+    /// <returns>
+    /// Null when the caret is where it was asked to be, otherwise what stopped it. A navigation
+    /// that finds no pane leaves the caret in the module that was already shown, and a caller that
+    /// goes on to set a breakpoint or press Run then acts on the wrong module. The developer sees
+    /// that happen; a script told nothing does not.
+    /// </returns>
+    private string? GoTo(string component, int line, int column, string? projectDisplay = null)
     {
         try
         {
@@ -1360,7 +1413,8 @@ internal sealed partial class AddInSession : IDisposable
             if (pane is null)
             {
                 Log.Info($"navigate: no pane for {component}");
-                return;
+                return $"no code pane for '{component}'"
+                    + (projectDisplay is { Length: > 0 } ? $" in {projectDisplay}" : string.Empty);
             }
 
             pane.Invoke("Show");
@@ -1400,10 +1454,12 @@ internal sealed partial class AddInSession : IDisposable
             _editorSurface?.Focus();
 
             Log.Info($"navigate: {component}({line},{column})");
+            return null;
         }
         catch (Exception ex)
         {
             Log.Error($"navigate: could not go to {component}({line},{column})", ex);
+            return $"the navigation to '{component}' raised {ex.GetType().Name}";
         }
     }
 
@@ -1425,6 +1481,20 @@ internal sealed partial class AddInSession : IDisposable
             _analysis.EngineStopped = () => _editorSurface?.Notify(
                 "Analysis has stopped. The problems listed are from the last pass and will not "
                 + "change. Close and reopen the editor to start it again.");
+
+            // AND THE WAIT BEFORE IT EVER STARTS, which is the one the developer actually meets.
+            //
+            // Measured on a real ALT+F11 (lesson 64): the surface is up and usable at 574ms and
+            // the engine is not connected until 3,370ms. For those 2.8 seconds the editor looks
+            // finished and has no diagnostics, no completions and no hover - so a developer types
+            // into what appears to be a working editor and gets nothing back, which reads as
+            // broken rather than as loading. Nothing can make a 90 MB image load faster here; what
+            // it can do is stop pretending.
+            //
+            // Held rather than timed, because the length of the wait is not known in advance, and
+            // taken away by the engine itself rather than by a clock.
+            _analysis.EngineReady = () => _editorSurface?.RunOnHostThread(() =>
+                _editorSurface?.Hold(string.Empty));
 
             // The read of the projects belongs to the thread that owns them. The door is the
             // overlay's action timer, and it answers false while there is no surface to carry
@@ -1719,11 +1789,11 @@ internal sealed partial class AddInSession : IDisposable
     /// two of these is exactly how the toolbar's toggle came to set a breakpoint that was never
     /// drawn: the bookkeeping was on the key path and the button went straight at the command.
     /// </summary>
-    private void ExecuteEditorCommand(int command)
+    private VbeCommands.CommandRun ExecuteEditorCommand(int command)
     {
         if (command == 0)
         {
-            return;
+            return VbeCommands.CommandRun.No("no such command");
         }
 
         // The Object Browser is ours (developer, 2026-08-05): a floating themed window of our
@@ -1732,7 +1802,7 @@ internal sealed partial class AddInSession : IDisposable
         if (command == VbeCommands.Command.ObjectBrowser)
         {
             OpenBrowserPalette();
-            return;
+            return VbeCommands.CommandRun.Ok("the palette was opened");
         }
 
         // The editor runs what the module holds, and acts on its own caret. Both are brought up to
@@ -1748,12 +1818,11 @@ internal sealed partial class AddInSession : IDisposable
         if (command == VbeCommands.Command.ToggleBreakpoint)
         {
             ToggleBreakpoint(_editorSurface?.CaretLine ?? 0);
-            return;
+            return VbeCommands.CommandRun.Ok("the breakpoint was toggled");
         }
 
-
-
-        var ran = VbeCommands.Execute(_editor, command);
+        var outcome = VbeCommands.Execute(_editor, command);
+        var ran = outcome.Ran;
 
         // A refused Call Stack looked broken rather than declined ("won't appear again",
         // 2026-08-05: the break had ended and the native command was disabled). The button
@@ -1801,6 +1870,8 @@ internal sealed partial class AddInSession : IDisposable
         // placement after executing; this route learned the same manners (2026-08-05, the
         // Browser opening invisible under the surface).
         RefreshSurfacePlacement();
+
+        return outcome;
     }
 
     /// <summary>
@@ -2968,7 +3039,7 @@ internal sealed partial class AddInSession : IDisposable
 
             pane.Invoke("SetSelection", line, 1, line, 1);
 
-            if (!VbeCommands.Execute(_editor, VbeCommands.Command.ToggleBreakpoint))
+            if (!VbeCommands.Execute(_editor, VbeCommands.Command.ToggleBreakpoint).Ran)
             {
                 return;
             }
@@ -5027,18 +5098,31 @@ internal sealed partial class AddInSession : IDisposable
     /// component first because that is the only step the host can still refuse; an undo rewrites
     /// the callers first, so the project is never pointing at a name that does not exist.
     /// </summary>
-    private void UndoRename(int requestId)
+    /// <summary>
+    /// What an undo came to, for a caller that is not the page. The page learns all of this from
+    /// ShowRenamed; a script calling the same operation through the door used to be told `ran:
+    /// true` whether the undo restored six modules, restored two and stopped, or found nothing to
+    /// undo at all - and the message explaining which went to a page request id the door invented.
+    /// </summary>
+    internal readonly record struct UndoRenameOutcome(
+        bool Undone,
+        string? From,
+        string? To,
+        string[] Modules,
+        string? Stopped);
+
+    private UndoRenameOutcome UndoRename(int requestId)
     {
         var surface = _editorSurface;
         if (surface is null)
         {
-            return;
+            return new UndoRenameOutcome(false, null, null, [], "the surface is not up");
         }
 
         if (_undoableRename is not { } undo)
         {
             surface.ShowRenamed(requestId, null, null, [], 0, "There is no rename to undo.");
-            return;
+            return new UndoRenameOutcome(false, null, null, [], "There is no rename to undo.");
         }
 
         var display = DisplayFromProjectId(undo.ProjectId);
@@ -5095,6 +5179,8 @@ internal sealed partial class AddInSession : IDisposable
 
         ComponentsChanged();
         surface.ShowRenamed(requestId, undo.NewName, undo.OldName, [.. restored], restored.Count, stopped);
+
+        return new UndoRenameOutcome(stopped is null, undo.NewName, undo.OldName, [.. restored], stopped);
     }
 
     private void ApplyModuleRename(
@@ -6013,9 +6099,23 @@ internal sealed partial class AddInSession : IDisposable
                     continue;
                 }
 
-                var matches = wantedId is not null
-                    ? string.Equals(ProjectReader.Identity(project).Id, wantedId, StringComparison.OrdinalIgnoreCase)
-                    : string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase);
+                // The item is held in a plain local because a match hands it to the caller, so it
+                // cannot be a `using`. That makes the read below the dangerous part: both routes
+                // to a name read a property, an unsaved workbook raises rather than answering, and
+                // the catch outside this loop would swallow the throw with the wrapper still in
+                // hand. Dispose on the way out and let it carry on to that catch.
+                bool matches;
+                try
+                {
+                    matches = wantedId is not null
+                        ? string.Equals(ProjectReader.Identity(project).Id, wantedId, StringComparison.OrdinalIgnoreCase)
+                        : string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase);
+                }
+                catch
+                {
+                    project.Dispose();
+                    throw;
+                }
 
                 if (matches)
                 {
@@ -6469,7 +6569,24 @@ internal sealed partial class AddInSession : IDisposable
     /// fact and can stand on a sibling's changes; a question here offers a revert of THIS module,
     /// so it is only asked when this module's changes can be named - and therefore reverted.
     /// </summary>
-    private void OnModuleCloseRequested(string component, string? projectDisplay, string? action)
+    /// <summary>
+    /// What a close request came to. The tab's X does not read this - it either sees its tab go or
+    /// sees the question appear - but a script driving the same path has neither, and answering it
+    /// a bare true was the same lie the `open` branch beside it was fixed for. `Awaiting` is the
+    /// third answer that matters: a confirm on screen is not a close and not a failure, and a
+    /// caller told which one it got can answer the question instead of guessing.
+    /// </summary>
+    internal readonly record struct CloseOutcome(bool Closed, string Detail, string? Awaiting)
+    {
+        public static CloseOutcome Went(string detail = "closed") => new(true, detail, null);
+
+        public static CloseOutcome Stayed(string detail) => new(false, detail, null);
+
+        public static CloseOutcome Asking(string question) =>
+            new(false, "the developer was asked before closing", question);
+    }
+
+    private CloseOutcome OnModuleCloseRequested(string component, string? projectDisplay, string? action)
     {
         var display = projectDisplay is { Length: > 0 }
             ? projectDisplay
@@ -6487,15 +6604,20 @@ internal sealed partial class AddInSession : IDisposable
                     // Closing on a failed save would lose the very thing the developer asked
                     // to keep. The tab stays; the log says why.
                     Log.Warn($"close: {display ?? "the workbook"} would not save; {component}'s tab stays");
-                    return;
+                    return CloseOutcome.Stayed($"{display ?? "the workbook"} would not save");
                 }
 
                 CloseModule(component, projectDisplay);
-                return;
+                return CloseOutcome.Went("saved and closed");
             }
 
             case "discard":
             {
+                // A refused revert still closes the tab, so this is not a failure to report as
+                // one - but it is the difference between "the edits are gone" and "the edits are
+                // still in the module", which a caller cannot see from a closed tab.
+                string? revertRefused = null;
+
                 if (display is not null
                     && _savedBaselines.TryGetValue(BaselineKey(display, component), out var baseline))
                 {
@@ -6510,6 +6632,7 @@ internal sealed partial class AddInSession : IDisposable
                         is { } refused)
                     {
                         _editorSurface?.Notify($"The saved text could not be put back: {refused}");
+                        revertRefused = refused;
                     }
 
                     // The surface may still show the abandoned text. The close below replaces
@@ -6537,7 +6660,9 @@ internal sealed partial class AddInSession : IDisposable
                 }
 
                 CloseModule(component, projectDisplay);
-                return;
+                return revertRefused is null
+                    ? CloseOutcome.Went("discarded and closed")
+                    : CloseOutcome.Went($"closed, but the saved text could not be put back: {revertRefused}");
             }
 
             default:
@@ -6546,11 +6671,11 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     Log.Verbose($"close: {component} differs from {display}'s saved text; asking");
                     _editorSurface?.ConfirmClose(component, projectDisplay);
-                    return;
+                    return CloseOutcome.Asking("confirm");
                 }
 
                 CloseModule(component, projectDisplay);
-                return;
+                return CloseOutcome.Went();
             }
         }
     }
@@ -6997,13 +7122,32 @@ internal sealed partial class AddInSession : IDisposable
             for (var j = 1; j <= componentCount; j++)
             {
                 var candidate = components.GetItem(j);
-                if (candidate?.GetString("Name") == component)
+                if (candidate is null)
+                {
+                    continue;
+                }
+
+                // A plain local, because a match hands the component to the caller. The name read
+                // is the part that can raise, and nothing here catches: the throw would leave the
+                // finalizer thread to release the wrapper, which is not a release at all.
+                string? name;
+                try
+                {
+                    name = candidate.GetString("Name");
+                }
+                catch
+                {
+                    candidate.Dispose();
+                    throw;
+                }
+
+                if (name == component)
                 {
                     foundProject = identity;
                     return candidate;
                 }
 
-                candidate?.Dispose();
+                candidate.Dispose();
             }
         }
 
@@ -7653,6 +7797,16 @@ internal sealed partial class AddInSession : IDisposable
 
         _codePanes?.Dispose();
         _codePanes = null;
+
+        // The application reference is held between reads, so by the time a session stops there is
+        // almost always one in hand: WorkbookSaved takes it on every poll tick. Until now it was
+        // released only by the two catch blocks that drop a stale one, which is enough when the
+        // process is dying and nothing when it is not - a watchdog revival and a non-shutdown
+        // disconnection both stop a session inside a living Excel, and the wrapper left behind is
+        // released by the finalizer thread instead. That is the FailFast this codebase has already
+        // paid for: see DispatchObject.Dispose.
+        _hostApp?.Dispose();
+        _hostApp = null;
 
         // The window is the host's, and an add-in that unloads should leave its title bar saying
         // what it said before. After the tracker, so nothing is left to put our name back on.

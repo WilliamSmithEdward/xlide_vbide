@@ -118,7 +118,24 @@ internal sealed class WebView2Surface : IDisposable
             return false;
         }
 
-        var handler = new ExecuteScriptCompletedHandler(completed);
+        // Rooted until it fires, then un-rooted BY firing. The handler has to survive the round
+        // trip because nothing else holds it and a collected one would be a callback into freed
+        // memory, but "until it fires" was only ever half-implemented: the list grew by one entry
+        // per script and the method that drains it had no caller, so every eval left a handler and
+        // the COM wrapper CreateCallback made for it alive for the life of the surface.
+        ExecuteScriptCompletedHandler? handler = null;
+        handler = new ExecuteScriptCompletedHandler((code, json) =>
+        {
+            try
+            {
+                completed(code, json);
+            }
+            finally
+            {
+                ForgetScriptHandler(handler!);
+            }
+        });
+
         var callback = CreateCallback(handler, WebViewIid.ExecuteScriptCompletedHandler);
         if (callback == 0)
         {
@@ -127,10 +144,16 @@ internal sealed class WebView2Surface : IDisposable
 
         try
         {
-            // The handler is rooted until it fires: nothing else holds it, and a collected
-            // one would be a callback into freed memory.
             _pendingScripts.Add(handler);
-            return view.Target.ExecuteScript(javaScript, callback) >= 0;
+
+            // A refused call never completes, so it never un-roots itself either.
+            var ran = view.Target.ExecuteScript(javaScript, callback) >= 0;
+            if (!ran)
+            {
+                ForgetScriptHandler(handler);
+            }
+
+            return ran;
         }
         finally
         {
@@ -138,6 +161,10 @@ internal sealed class WebView2Surface : IDisposable
         }
     }
 
+    /// <summary>
+    /// Handlers for script calls still in flight. Touched only on the host thread: ExecuteScript
+    /// requires its caller to be there already, and the browser answers on the same thread.
+    /// </summary>
     private readonly List<object> _pendingScripts = [];
 
     internal void ForgetScriptHandler(object handler) => _pendingScripts.Remove(handler);
@@ -995,6 +1022,12 @@ internal sealed class WebView2Surface : IDisposable
         _navigationHandler = null;
         _messageHandler = null;
         _acceleratorHandler = null;
+
+#if DEBUG
+        // A surface torn down with script calls in flight will never see them complete, so the
+        // handlers that would have un-rooted themselves go here with the rest.
+        _pendingScripts.Clear();
+#endif
     }
 }
 

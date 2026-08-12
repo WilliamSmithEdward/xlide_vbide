@@ -45,14 +45,21 @@ export function currentSettings(): EditorSettings {
   return current;
 }
 
+/**
+ * Settings as they arrive from the host: JSON off a wire, so every field may be missing and none
+ * of them can be trusted to be in range. This is the ONE place that turns that into an
+ * EditorSettings, which is why the message types carry this shape rather than restating the keys.
+ */
+export type IncomingSettings = Partial<EditorSettings>;
+
 /** Adopts settings the host sent, and tells everyone who asked to hear about it. */
-export function applySettings(next: EditorSettings): void {
+export function applySettings(next: IncomingSettings): void {
   current = {
     blockLayout: next.blockLayout === "compact" ? "compact" : "comfy",
     continueCommentOnNewline: next.continueCommentOnNewline !== false,
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
-    formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize) || 4)),
+    formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
   };
 

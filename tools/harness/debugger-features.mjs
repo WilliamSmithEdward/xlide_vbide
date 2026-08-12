@@ -72,7 +72,13 @@ try {
   await parity("with Runner shown");
 
   // It has to compile, or every command below is really a test of the dialog guard.
+  //
+  // `started` is checked first and separately. "No dialog appeared" was the whole of this
+  // precondition until 2026-08-11, and a Compile item that was greyed raised no dialog either -
+  // so the one check protecting the suite passed hardest in the case it exists to catch.
   const compiled = await api.compile();
+  check("the compile command actually ran", compiled.started !== false,
+    JSON.stringify(compiled).slice(0, 200));
   check("the fixture compiles", compiled.compiled !== false,
     JSON.stringify(compiled).slice(0, 200));
 

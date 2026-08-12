@@ -41,36 +41,28 @@ point.
 
 `Range` below means `{ startLine, startColumn, endLine, endColumn }`.
 
-### Host to page
+### The message kinds
 
-| type             | payload                                        | effect                                                                             |
-| ---------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `loadDocument`   | `moduleName: string`, `text: string`           | Swaps in a model at `xlide:/<moduleName>`, resets revision to 0. No echo.           |
-| `applyEdit`      | `revision: number`, `changes: (Range & {text})[]` | Applies the changes in order, then adopts `revision`. No echo.                   |
-| `setTheme`       | `theme: "xlide-dark" \| "xlide-light"`         | Sets the theme and pins it, so `prefers-color-scheme` no longer overrides it.       |
-| `setDiagnostics` | `markers: (Range & {severity, message, code?})[]` | Replaces all markers for owner `xlide`.                                         |
-| `setCurrentLine` | `line: number \| null`                         | Yellow whole-line highlight plus a gutter arrow. `null` clears it.                  |
-| `setBreakpoints` | `lines: number[]`                              | Replaces the red dots in the glyph margin.                                          |
-| `revealLine`     | `line: number`                                 | Scrolls the line into view if it is outside the viewport.                            |
+**The unions in `src/bridge.ts` are the list.** `HostMessage` is what arrives from the shim and
+`ClientMessage` is what goes back; both are discriminated on `type`, and the page's dispatch
+switch is exhaustive over them, so a kind that exists is a kind the compiler has already checked.
 
-`severity` is `"error" | "warning" | "info" | "hint"`.
+There were two tables here instead, and they are gone rather than corrected. They described seven
+of the several dozen kinds that exist, which is the kind of coverage that reads as completeness;
+one of the seven, `loadDocument`, has never existed in this repository at all, and two more
+(`applyEdit` and `setTheme`) were paths the page implemented and nothing ever sent, removed on
+2026-08-11. A hand-kept list of a moving protocol earns its place only if something makes it
+agree with the code, and nothing did.
 
-### Page to host
-
-| type                        | payload                                                | when                                                        |
-| --------------------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
-| `ready`                     | none                                                   | Once, after the editor and the bridge are wired.             |
-| `contentChanged`            | `revision: number`, `changes: (Range & {text})[]`, `fullText: string` | After any local edit.                     |
-| `selectionChanged`          | `startLine, startColumn, endLine, endColumn`           | On every cursor or selection change.                        |
-| `breakpointToggleRequested` | `line: number`                                         | Glyph margin click. The page does not toggle anything itself. |
+`Range` payloads are `{ startLine, startColumn, endLine, endColumn }` and `severity` is
+`"error" | "warning" | "info" | "hint"`.
 
 ### Revision and echo suppression
 
 The page keeps a revision counter. It increments on every locally originated edit and the new
-value rides along on `contentChanged`. While a host `applyEdit` or `loadDocument` is being
-written into the model the counter is frozen and `contentChanged` is not emitted, so a host
-edit never echoes back as a user edit. After `applyEdit` the page adopts the host's `revision`:
-the host is the authority once it has written to the document. `loadDocument` resets it to 0.
+value rides along on `contentChanged`. While the host's text is being written into the model the
+counter is frozen and `contentChanged` is not emitted, so a host write never echoes back as a
+user edit.
 
 `contentChanged.changes` is passed through in Monaco's order, which is bottom-up so that the
 earlier ranges stay valid while the later ones are applied. Apply them in the order given.

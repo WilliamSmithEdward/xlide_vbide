@@ -207,7 +207,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
-| `undoRename` | `undoRename()` | puts the last rename back, across every module it touched |
+| `undoRename` | `undoRename()` | puts the last rename back, across every module it touched. Answers `{undone, from, to, modules, stopped}` - read `stopped`, because an undo can restore four modules and be refused the fifth, which leaves the project in neither state. It is the SHIM's undo, not the context-menu item; drive the item with `act("editorAction", {id: "xlide.undoRename"})` |
 | `breakpoints` | `breakpoints()` / `breakpointsIn(project)` | what is set, per module AND workbook, and the mode |
 | `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
@@ -297,6 +297,7 @@ ui.dialogs;                       // settings, help, sponsors, references, objec
 ui.waiting.documents;             // text asked for and not yet arrived
 ui.focus;                         // model, line, column, and whether the editor has the keyboard
 ui.emptyViewShown;                // a DIFFERENT question from having no tabs
+ui.statusNotice;                  // what the status line is saying, "" when it is saying nothing
 ui.search;                        // open, query, scope, matches, current
 ui.bookmarks;                     // the marked lines of the model on screen
 ui.longTasks;                     // main-thread stalls over 50ms, worst first
@@ -378,6 +379,12 @@ await api.act("answerRemoveConfirm", { answer: "remove" });   // or "cancel"
 // AND every mention of it; that one is the bare setter and leaves the mentions behind.
 await api.act("renameModule", { module: "Helpers", newName: "Support" });
 // -> renamed Helpers to Support: 4 mention(s) in 2 module(s) [Runner, Consumer]
+
+// ANY EDITOR ACTION, by the id it is registered under. Several features are only an addAction
+// reachable from a context menu or a key, and this is how the menu item itself gets driven
+// rather than the shim underneath it.
+await api.act("editorAction", { id: "xlide.undoRename" });   // the Undo Rename context-menu item
+// -> ran xlide.undoRename
 ```
 
 > **`treeMenu` needs the row to exist**, and a collapsed workbook has no component rows at all, so
@@ -394,6 +401,14 @@ await api.act("renameModule", { module: "Helpers", newName: "Support" });
 `act` answers `{did, detail}`. **`did: false` is an answer, not a failure** - closing a tab when
 nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop
 distinguishing it from a broken door.
+
+**`ui.statusNotice` is where a declined action explains itself**, and it is worth asserting on:
+the whole point of a decline is that the developer is told why, and until 2026-08-11 the status
+bar was in no snapshot, so every one of those explanations was untestable. Two kinds of notice go
+there. Most clear themselves after five seconds. A HELD one stays until the condition ends - the
+only one today is the engine's cold start, which holds "Starting analysis..." from the moment the
+surface is usable until the engine connects, about 2.8 seconds later (lesson 64). A held notice
+that never clears is a real defect and this field is how a suite would catch it.
 
 > **Closing a module with unsaved changes does not close it.** The host asks the page to confirm,
 > and a Save / Don't Save / Cancel box stands until something answers. `closeActive` reports
@@ -615,7 +630,9 @@ non-zero for anything else, and announces it if one of them starts working.
 ### Walking the surface at random
 
 ```bash
-tools\harness\Start-Excel.ps1 -Workbook artifactsixtures\RenameFixture.xlsm,artifactsixtures\TwinFixture.xlsm
+tools\New-RenameFixture.ps1 -Quiet                 # if artifacts\fixtures is empty
+tools\New-TwinFixture.ps1 -Quiet                   # the second workbook, and the point of it
+tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\RenameFixture.xlsm,artifacts\fixtures\TwinFixture.xlsm
 node tools\harness\surface-walk.mjs --steps 80 --seed 424242
 ```
 
@@ -623,6 +640,13 @@ Picks each action from a deterministic stream and re-checks every invariant afte
 a failure replays from the seed it prints. **Start Excel with two workbooks** - `-Workbook` takes
 a list, and they land in one process, which is one session and one door. Half of what this checks
 does not exist with a single workbook open.
+
+`artifacts\` is not in the repository, so on a fresh clone both fixtures have to be built first.
+`TwinFixture.xlsm` had no generator at all until 2026-08-11 and existed only on the machine it was
+first made on: this command, and four examples elsewhere in this document, named a file nobody
+else could produce. Its modules collide with `RenameFixture.xlsm`'s by name and differ by body,
+which is what makes a mix-up visible - two identical twins would let every check pass while
+reading the wrong workbook.
 
 Two details are load-bearing, and both were added after the walk lied about a clean run:
 
@@ -1009,7 +1033,19 @@ Switch it with the setting, from the api or from the Settings dialog:
 ```js
 await api.settings({ syncEngine: "builtIn" });
 (await api.settings()).syncEngine;
+
+// THE OTHER PATH, and it is not the same one. This is what a control in the Settings dialog does:
+// the page posts the whole settings object with one field changed, where the route above replaces
+// one field of what the host already holds.
+await api.act("settings", { key: "formatIndentSize", value: 3 });
 ```
+
+**Test settings through BOTH paths.** They are genuinely different code, and only the page's can
+lose a field: the route reads the stored settings and edits one, the page sends six values it
+assembled itself. Its assembly was one short until 2026-08-11 - `syncEngine` was missing from
+`bridge.updateSettings`, and the host read the absence as the shipped default - so changing the
+indent size from the dialog quietly reset the developer's chosen planner. Every settings test at
+the time went through the route, where the defect cannot occur.
 
 **The fallback is silent, and this is why the plan reports its planner.** If the shared planner
 cannot be reached the built-in one answers and the request succeeds, because a developer pressing Export
@@ -1210,6 +1246,12 @@ Excel's object model is used, and the rest goes through the door.
 | **Build a fixture** | `api.component("add"/"rename"/"remove")` + `api.writeModule()` | **not needed** |
 | **Read a module back** | `api.readModule(name)` - the real object model, read from inside | **not needed** |
 | Compile and read the errors | `api.compile()` | not needed |
+
+**Read `started` on a compile before you trust `compiled`.** The editor has no positive report to
+give: it answers a compile with a modal or with nothing at all, so `compiled` means "no dialog
+appeared, and the command that would have raised one actually ran". Until 2026-08-11 it meant only
+the first half, and a greyed Compile item therefore reported a clean project - which matters
+because `debugger-features.mjs` uses this as the precondition for everything after it.
 
 Building a fixture through the door:
 

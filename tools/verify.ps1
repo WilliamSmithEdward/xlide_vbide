@@ -100,24 +100,16 @@ Step 'engine executable is current' {
     # That happened on 2026-08-06, and the only reason it surfaced was a live session's log. This
     # step is the cheap version of that log: if any engine source is newer than the executable, the
     # executable is stale, and no amount of green elsewhere means anything.
+    # Asked through the shared check, so the release path cannot answer this differently - it used
+    # to answer it not at all when run with -SkipGate.
     $engineRoot = Join-Path $repoRoot 'engine'
     $exe = Join-Path $engineRoot 'dist\xlide-engine.exe'
-    if (-not (Test-Path $exe)) { throw 'engine\dist\xlide-engine.exe has never been packaged; run npm run package in engine\' }
+    $builtAt = if (Test-Path $exe) { (Get-Item $exe).LastWriteTimeUtc } else { [datetime]::MinValue }
 
-    $builtAt = (Get-Item $exe).LastWriteTimeUtc
+    $newer = @(& (Join-Path $PSScriptRoot 'Test-EngineCurrent.ps1') -RepoRoot $repoRoot)
 
-    # The ANALYZER counts as engine source. It lives in the neighbouring checkout and is bundled
-    # INTO this executable, so a pull over there changes what the add-in runs without touching a
-    # single file in this repository. Watching engine\src alone would call that stale executable
-    # current, which is the one answer this step exists to never give.
-    $watched = @(Join-Path $engineRoot 'src')
-    $analyzer = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
-    if (Test-Path $analyzer) { $watched += $analyzer }
-
-    $newer = @(Get-ChildItem $watched -Recurse -File -Include *.ts, *.mjs, *.js |
-        Where-Object { $_.LastWriteTimeUtc -gt $builtAt })
-
-    $covers = if ($watched.Count -eq 1) { 'the analyzer checkout was not found' } else { 'analyzer included' }
+    $analyzerPath = Join-Path (Split-Path -Parent $repoRoot) 'xlide_vscode\src'
+    $covers = if (Test-Path $analyzerPath) { 'analyzer included' } else { 'the analyzer checkout was not found' }
 
     if ($newer.Count -eq 0) {
         return "packaged after every engine source, $covers"
@@ -138,6 +130,22 @@ Step 'engine executable is current' {
     #>
     $names = ($newer | Select-Object -First 4 | ForEach-Object { $_.Name }) -join ', '
     Write-Host "  $($newer.Count) engine source(s) newer than the executable ($names); packaging" -ForegroundColor Yellow
+
+    # TYPECHECKED BEFORE IT IS PACKAGED, because this gate ships the result.
+    #
+    # The page is typechecked here and the solution is compiled here; the engine was the one layer
+    # that went into the installer without either. esbuild strips types and does not check them, so
+    # a type error in engine\src bundled cleanly, packaged cleanly, and passed every step of this
+    # gate - and the language matrix below only exercises the paths it happens to call. CI does run
+    # `check-types`, which means the local gate could ship an installer that CI would then refuse.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        npm run check-types 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the engine does not typecheck; it will not be packaged' }
+    }
+    finally {
+        Pop-Location
+    }
 
     # A HOST HOLDS THE EXECUTABLE IT IS RUNNING, and the injection fails with EBUSY behind whatever
     # is filtering npm's output. Named here rather than left as a copy error two hundred lines up
@@ -417,14 +425,32 @@ if ($Live) {
             # import-guard runs FIRST on this fixture, before the sync suites open and close
             # anything: it needs a module on the surface with edits pending, and that precondition
             # stops holding once the surface has been worked over (2026-08-09).
+            # THE DEBUGGER SUITES RUN HERE, and until 2026-08-11 they ran nowhere. Both need a
+            # project that COMPILES, which is this fixture and no other: debugger-features drives
+            # run, break, reset, stepping and breakpoints, and step-into-features covers the one
+            # direction nothing else does - the HOST moving on its own and the surface following,
+            # which is what a developer meets when Step Into crosses into a module the page was
+            # not showing. write-rollback is here for its own reason: it is the only thing that
+            # drives the `mark` route, and a refused write that half-lands is the defect that
+            # costs a developer their module's previous text.
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
-                                     'module-sync.mjs xlide', 'module-sync.mjs builtIn')
+                                     'module-sync.mjs xlide', 'module-sync.mjs builtIn',
+                                     'debugger-features.mjs', 'step-into-features.mjs',
+                                     'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
+            # rename-features runs here for the fixture it was built against, and it is NOT
+            # covered by three-copies.mjs beside it, which was the reason given for leaving it
+            # out. That suite asks one question - do the workbook, the surface and the analyzer
+            # hold the same text - across eight operations, one of which happens to be a rename.
+            # A rename that wrongly rewrote Rival's own Recalculate would leave all three copies
+            # in perfect agreement and pass. This is the suite that asks whether the rename
+            # touched the right things and left the wrong ones alone, which is the whole of what
+            # rename has to get right.
             'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
-                                     'settings-bite.mjs')
+                                     'settings-bite.mjs', 'rename-features.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

@@ -85,6 +85,16 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// </summary>
     public Action? EngineStopped { get; set; }
 
+    /// <summary>
+    /// Raised when the engine finishes coming up. The session uses it to take away the notice it
+    /// put there while the wait was on; nothing else should depend on it, because a session whose
+    /// engine never starts never raises it.
+    /// </summary>
+    public Action? EngineReady { get; set; }
+
+    /// <summary>Whether the engine is up, for a caller deciding what to tell the developer.</summary>
+    public bool EngineIsUp => _engine is { IsRunning: true };
+
     /*
      * ONE ANALYSIS PER DOCUMENT VERSION, and where it is actually enforced.
      *
@@ -238,6 +248,7 @@ internal sealed class AnalysisService : IAsyncDisposable
                 // it has died - which would greet a developer with "analysis has stopped" as the
                 // editor opened.
                 _engineHasBeenUp = true;
+                EngineReady?.Invoke();
 
                 // Through the gate, but NOT through Reanalyse: that returns early unless the
                 // client already reports itself running, and the first pass is the one pass

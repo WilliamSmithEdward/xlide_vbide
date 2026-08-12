@@ -744,12 +744,26 @@ export class Shell {
    * a modal reply to a click the developer has already moved on from is worse than the silence it
    * replaces. It clears itself, so nothing has to be dismissed.
    */
-  notify(text: string): void {
+  notify(text: string, sticky = false): void {
+    // Any new notice replaces whatever was there, including a sticky one, so a held condition
+    // never outlives a later message about something else.
+    if (this.noticeTimer !== undefined) {
+      clearTimeout(this.noticeTimer);
+      this.noticeTimer = undefined;
+    }
+
+    // A sticky notice with nothing to say is how a held condition ends.
+    if (sticky && text === "") {
+      this.statusNotice.classList.remove("visible");
+      this.statusNotice.textContent = "";
+      return;
+    }
+
     this.statusNotice.textContent = text;
     this.statusNotice.classList.add("visible");
 
-    if (this.noticeTimer !== undefined) {
-      clearTimeout(this.noticeTimer);
+    if (sticky) {
+      return;
     }
 
     this.noticeTimer = setTimeout(() => {
@@ -757,6 +771,13 @@ export class Shell {
       this.statusNotice.textContent = "";
       this.noticeTimer = undefined;
     }, 5000);
+  }
+
+  /** What the status line is saying, for the snapshot. Empty when it is showing nothing. */
+  currentNotice(): string {
+    return this.statusNotice.classList.contains("visible")
+      ? this.statusNotice.textContent ?? ""
+      : "";
   }
 
   /**

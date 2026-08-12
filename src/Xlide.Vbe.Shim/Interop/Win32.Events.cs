@@ -31,7 +31,6 @@ internal static unsafe partial class Win32
     /// </summary>
     public const uint WinEventOutOfContext = 0x0000;
 
-    public const uint GaParent = 1;
     public const uint GaRoot = 2;
 
     [LibraryImport("user32.dll", SetLastError = true)]
@@ -67,8 +66,6 @@ internal static unsafe partial class Win32
     /// <summary>IMAGE_ICON, and the flags for reading one out of a file at a given size.</summary>
     public const uint ImageIcon = 1;
     public const uint LrLoadFromFile = 0x0010;
-    public const uint LrDefaultSize = 0x0040;
-
     [LibraryImport("user32.dll", EntryPoint = "LoadImageW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial nint LoadImage(nint instance, string name, uint type, int cx, int cy, uint load);
 
@@ -196,14 +193,6 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool EnumWindows(nint callback, nint parameter);
-
-    /// <summary>GWL_STYLE.</summary>
-    public const int GwlStyle = -16;
-
-    public const long WsMaximize = 0x01000000;
-
-    /// <summary>WM_MDIRESTORE, sent to the MDI client naming the child to restore.</summary>
-    public const uint WmMdiRestore = 0x0223;
 
     [LibraryImport("user32.dll", EntryPoint = "SendMessageW")]
     public static partial nint SendMessage(nint window, uint message, nint wParam, nint lParam);

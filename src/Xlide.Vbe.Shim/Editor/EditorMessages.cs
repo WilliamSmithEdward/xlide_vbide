@@ -39,11 +39,6 @@ public sealed record SetDiagnosticsMessage(
     [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("markers")] EditorMarker[] Markers);
 
-/// <summary>Chooses the surface's theme.</summary>
-public sealed record SetThemeMessage(
-    [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("theme")] string Theme);
-
 /// <summary>Scrolls a line into view without moving the caret.</summary>
 public sealed record RevealLineMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -235,10 +230,18 @@ public sealed record EditorCommandMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("id")] string Id);
 
-/// <summary>Something the developer should be told, shown briefly and not dwelt on.</summary>
+/// <summary>
+/// Something the developer should be told, shown briefly and not dwelt on.
+///
+/// `sticky` is for the other kind: a condition that lasts an unknown length of time and ends when
+/// something happens rather than when a timer expires. A five second notice cannot describe a wait
+/// - it either vanishes while the wait continues or lingers after it ends. An empty text with
+/// sticky set clears the line.
+/// </summary>
 public sealed record NoticeMessage(
     [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("text")] string Text);
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("sticky")] bool Sticky = false);
 
 /// <summary>One line of output for the Immediate panel.</summary>
 public sealed record ImmediateResultMessage(
@@ -519,7 +522,6 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(OpenDocumentMessage))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
-[JsonSerializable(typeof(SetThemeMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]
 [JsonSerializable(typeof(SetCaretMessage))]
 [JsonSerializable(typeof(SetModulesMessage))]

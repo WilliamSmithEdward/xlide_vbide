@@ -353,6 +353,25 @@ internal sealed unsafe class OverlayWindow : IDisposable
         {
             _shown = true;
             Win32.ShowWindow(_handle, Win32.SwShowNoActivate);
+
+            // PAINTED NOW, not when the queue is next pumped.
+            //
+            // ShowWindow marks the window for painting and returns; the WM_PAINT waits in the
+            // queue for the thread to come back to its message loop. This thread does not come
+            // back for a while - it is the host thread, and the session's own start-up is holding
+            // it: the immediate reader's UIA walk, both ghost palettes, the project enumeration,
+            // the code-pane pass. So the loader was shown and never drawn, and what the developer
+            // saw for that half second was the editor's own frozen chrome, which reads as the host
+            // having hung rather than as xlide starting.
+            //
+            // One synchronous WM_PAINT costs the wordmark and a rounded rectangle. The pulse still
+            // will not animate while the thread is busy - its timer is queued like anything else -
+            // but a still loading screen and a frozen application are not the same message.
+            Win32.UpdateWindow(_handle);
+
+            // Logged because "when did the developer first see anything" is the question this
+            // whole path exists to answer, and it was not answerable from the log before.
+            Log.Info($"overlay: shown and painted, {(_loading ? "loader" : "surface")}");
         }
     }
 

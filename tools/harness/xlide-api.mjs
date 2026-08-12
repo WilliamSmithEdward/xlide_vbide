@@ -456,6 +456,11 @@ function clientFor(entry) {
      * The menu command alone cannot answer: a compile error is a modal, so running it and waiting
      * hangs the thread that raised it. This starts the compile, reads whatever dialog it raises
      * from the outside, and clears it.
+     *
+     * CHECK `started` BEFORE `compiled`. There is no positive report to be had - the editor
+     * answers a compile with a modal or with silence - so `compiled` means "nothing objected AND
+     * the command ran". Without the second half a greyed Compile item read as a clean project,
+     * which is the shape of precondition failure that makes everything after it vacuous.
      */
     compile: ({ waitMs = 6000 } = {}) =>
       call(`compile${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),
@@ -501,6 +506,12 @@ function clientFor(entry) {
      * `answer` ("save" or "discard") settles it in advance.
      *
      *   await api.pane("close", { module: "Consumer", answer: "discard" });
+     *
+     * A CLOSE ANSWERS `{closed, detail, awaiting}` and not a bare ok. Three things left the tab
+     * where it was while replying success: a save the workbook refused, a discard whose revert
+     * write the module refused, and a confirm now standing on screen. That last one is
+     * `awaiting: "confirm"`, which is neither a failure nor a close - answer it with
+     * `act("answerCloseConfirm", { answer })` rather than polling to find out what happened.
      */
     pane: (action, { module, project, answer } = {}) =>
       call(`pane${query({ action, module, project, answer })}`, { method: "POST" }),
@@ -730,8 +741,9 @@ function clientFor(entry) {
      *
      * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
      * `treeMenu`, `chooseMenuItem`, `answerRemoveConfirm`, `settings`, `sponsors`, `closeDialogs`,
-     * `focusEditor`, `search`, `dock`, `bookmark`, `format`, `undo`, and the language ones:
-     * `hover`, `completions`, `signature`, `quickFixes`, `definition`, `references`, `rename`.
+     * `focusEditor`, `search`, `dock`, `bookmark`, `format`, `undo`, `editorAction`, and the
+     * language ones: `hover`, `completions`, `signature`, `quickFixes`, `definition`,
+     * `references`, `rename`.
      * `act("actions")` answers the live list, which is the one that cannot be out of date. Answers
      * {did, detail}; `did: false` means the page declined, which is an answer and not a failure.
      *
