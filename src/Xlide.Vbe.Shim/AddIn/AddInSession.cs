@@ -1418,7 +1418,17 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
+            // A NAMED workbook that resolves to nothing is refused here rather than dropped to
+            // null, because null means "whichever holds this module" - so a caret or a breakpoint
+            // aimed at a misspelt workbook would land in another one that happens to have a module
+            // of the same name, which is the case this argument exists to prevent.
             var projectId = ProjectIdFromDisplay(projectDisplay);
+            if (projectId is null && projectDisplay is { Length: > 0 })
+            {
+                Log.Info($"navigate: no workbook answers to '{projectDisplay}'");
+                return $"no open workbook answers to '{projectDisplay}'";
+            }
+
             using var pane = FindCodePane(component, projectId);
             if (pane is null)
             {
@@ -6132,6 +6142,39 @@ internal sealed partial class AddInSession : IDisposable
             }
         }
 
+        /*
+         * AN IDENTITY NAMES A PROJECT TOO, and this product hands identities out.
+         *
+         * `projects` answers a projectId that is the workbook's full path and `projectHolding`
+         * returns it to a caller, so the answer to "which workbook holds this module" was an
+         * argument this could not match: not a shown name, not a file name. Every caller then took
+         * its own fallback - the shown project, or the ACTIVE one - and answered confidently about
+         * a workbook nobody asked about. With two workbooks each holding a Helpers that is simply
+         * the wrong module, silently (measured 2026-08-11).
+         *
+         * Nine call sites resolve names through here, several of them `?? ActiveVBProject`, so
+         * this is the place to understand every spelling rather than each caller.
+         */
+        if (wantedId is null)
+        {
+            foreach (var id in _projectNames.Keys)
+            {
+                if (string.Equals(id, displayName, StringComparison.OrdinalIgnoreCase))
+                {
+                    wantedId = id;
+                    break;
+                }
+            }
+        }
+
+        // A path nothing has been shown under yet still names a workbook by its file name, which
+        // is what an unnumbered display is.
+        var byFileName = wantedId is null
+            && (displayName.Contains('\\', StringComparison.Ordinal)
+                || displayName.Contains('/', StringComparison.Ordinal))
+                ? Path.GetFileName(displayName)
+                : null;
+
         try
         {
             using var projects = _editor.GetObject("VBProjects");
@@ -6155,7 +6198,9 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     matches = wantedId is not null
                         ? string.Equals(ProjectReader.Identity(project).Id, wantedId, StringComparison.OrdinalIgnoreCase)
-                        : string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase);
+                        : string.Equals(WorkbookDisplayName(project), displayName, StringComparison.OrdinalIgnoreCase)
+                            || (byFileName is not null
+                                && string.Equals(WorkbookDisplayName(project), byFileName, StringComparison.OrdinalIgnoreCase));
                 }
                 catch
                 {
@@ -7278,21 +7323,10 @@ internal sealed partial class AddInSession : IDisposable
             }
         }
 
+        // Which understands a path and an identity as well as a shown name, so there is nothing
+        // left to try here.
         using var project = FindProjectByDisplayName(display);
-        if (project is not null)
-        {
-            return ProjectReader.Identity(project).Id;
-        }
-
-        // A path that named no project by its whole self may still name one by its file name,
-        // which is what the tree shows and what an identity is built from.
-        if (display.Contains('\\', StringComparison.Ordinal) || display.Contains('/', StringComparison.Ordinal))
-        {
-            using var byFileName = FindProjectByDisplayName(Path.GetFileName(display));
-            return byFileName is null ? null : ProjectReader.Identity(byFileName).Id;
-        }
-
-        return null;
+        return project is null ? null : ProjectReader.Identity(project).Id;
     }
 
     /// <summary>

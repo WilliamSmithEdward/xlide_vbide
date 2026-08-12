@@ -463,7 +463,17 @@ workbook's copy and `pane open` opened the wrong module and answered `ran: true`
 to answer "which workbook holds this" produced an argument the routes could not take.
 
 Since 2026-08-11 all three forms resolve - display name, full path, and COM identity - so anything
-the api hands you can be handed back. **The field names are still inconsistent** and are left that
+the api hands you can be handed back, and **a named workbook that resolves to nothing is now an
+error** rather than a different workbook. Six routes used to end in `?? _shownProject` or
+`?? ActiveVBProject`, so a misspelling was answered confidently about whatever was in front:
+
+```js
+await api.readModule("Helpers", "NoSuchBook.xlsm");
+// -> throws: no open workbook answers to 'NoSuchBook.xlsm'. Open: RenameFixture.xlsm, TwinFixture.xlsm
+```
+
+Omitting `project` still means "the one on screen", which is the right default and the common case.
+Only a name that was given and did not land is refused. **The field names are still inconsistent** and are left that
 way deliberately, because renaming a field breaks every caller that was right about the old one.
 Prefer `api.project().projectId` for the single-workbook case and pass `projects()[n].project` when
 you mean a specific workbook by name.

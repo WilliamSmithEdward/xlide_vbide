@@ -66,6 +66,41 @@ internal sealed partial class AddInSession
         };
     }
 
+    /// <summary>
+    /// The project a request named, or null when it named none.
+    ///
+    /// A NAMED PROJECT THAT DOES NOT RESOLVE IS AN ERROR, and this is the whole point of the
+    /// method. Every route used to write `ProjectIdFromDisplay(asked) ?? _shownProject` or
+    /// `FindProjectByDisplayName(asked) ?? ActiveVBProject`, so a value that matched nothing
+    /// silently became a different workbook - and with two workbooks each holding a Helpers, the
+    /// caller got the wrong module and no indication of it. Naming a workbook and being answered
+    /// about another is worse than being refused, because a refusal can be read.
+    ///
+    /// An ABSENT argument is not an error: "the one on screen" is a reasonable default and most
+    /// callers have exactly one workbook open. Only a name that was given and did not land.
+    /// </summary>
+    private string? ResolveNamedProject(string? asked, out string? complaint)
+    {
+        complaint = null;
+
+        if (string.IsNullOrEmpty(asked))
+        {
+            return null;
+        }
+
+        if (ProjectIdFromDisplay(asked) is { } resolved)
+        {
+            return resolved;
+        }
+
+        var open = _projectNames.Values.Where(name => name.Length > 0).Distinct().ToArray();
+        complaint = $"no open workbook answers to '{asked}'"
+            + (open.Length > 0 ? $". Open: {string.Join(", ", open)}" : "; none are open")
+            + ". A display name, a full path or a project identity all resolve.";
+
+        return null;
+    }
+
     /// <summary>A request's wait budget, clamped to something a stuck page cannot outlast.</summary>
     private static int WaitMilliseconds(DebugServer.DebugRequest request, int fallback)
     {
@@ -2807,11 +2842,18 @@ internal sealed partial class AddInSession
 
                 request.Query.TryGetValue("project", out var outlineProject);
 
+                var outlineOwner = ResolveNamedProject(outlineProject, out var outlineUnknown);
+                if (outlineUnknown is not null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(outlineUnknown), DebugJsonContext.Default.DebugErrorReply);
+                }
+
                 try
                 {
                     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
                     var answered = outlineAnalysis
-                        .OutlineAsync(outlineModule, ProjectIdFromDisplay(outlineProject), source: null, deadline.Token)
+                        .OutlineAsync(outlineModule, outlineOwner, source: null, deadline.Token)
                         .GetAwaiter().GetResult();
 
                     if (answered is null)
@@ -2849,7 +2891,13 @@ internal sealed partial class AddInSession
                 // the door, and the setting can stay off (2026-08-07).
                 request.Query.TryGetValue("name", out var componentName);
                 request.Query.TryGetValue("project", out var componentProject);
-                var componentOwner = ProjectIdFromDisplay(componentProject) ?? _shownProject;
+                var componentOwner = ResolveNamedProject(componentProject, out var componentUnknown)
+                    ?? _shownProject;
+                if (componentUnknown is not null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(componentUnknown), DebugJsonContext.Default.DebugErrorReply);
+                }
 
                 try
                 {
@@ -3037,7 +3085,12 @@ internal sealed partial class AddInSession
                 // of the thing. Four defects in the strip this week were found that way and each
                 // one needed the reach rewritten (2026-08-07).
                 request.Query.TryGetValue("project", out var paneProject);
-                var paneOwner = ProjectIdFromDisplay(paneProject) ?? _shownProject;
+                var paneOwner = ResolveNamedProject(paneProject, out var paneUnknown) ?? _shownProject;
+                if (paneUnknown is not null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(paneUnknown), DebugJsonContext.Default.DebugErrorReply);
+                }
 
                 switch (paneAction)
                 {
@@ -3258,6 +3311,17 @@ internal sealed partial class AddInSession
                 // the add-in already is.
                 request.Query.TryGetValue("project", out var wantedProject);
 
+                // A NAMED workbook that does not resolve is refused rather than answered about the
+                // active one. This route is how a fixture asks "what is in this workbook", twice,
+                // and answering about a different one is how a fixture check passes against the
+                // wrong project.
+                if (ResolveNamedProject(wantedProject, out var projectUnknown) is null
+                    && projectUnknown is not null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(projectUnknown), DebugJsonContext.Default.DebugErrorReply);
+                }
+
                 using var project = FindProjectByDisplayName(wantedProject)
                     ?? _editor.GetObject("ActiveVBProject");
 
@@ -3427,7 +3491,12 @@ internal sealed partial class AddInSession
             case "module" when request.Query.TryGetValue("name", out var moduleName) && moduleName.Length > 0:
             {
                 request.Query.TryGetValue("project", out var projectDisplay);
-                var projectId = ProjectIdFromDisplay(projectDisplay);
+                var projectId = ResolveNamedProject(projectDisplay, out var moduleUnknown);
+                if (moduleUnknown is not null)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply(moduleUnknown), DebugJsonContext.Default.DebugErrorReply);
+                }
 
                 if (request.Body.Length > 0)
                 {

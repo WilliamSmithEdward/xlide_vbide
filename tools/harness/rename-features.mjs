@@ -45,6 +45,27 @@ async function until(what, predicate, budgetMs = 15000) {
 
 const textOf = async (module) => (await api.readModule(module, project.projectId)).text ?? "";
 
+/*
+ * THE FIXTURE, NAMED, BEFORE ANYTHING IS ASSERTED.
+ *
+ * `api.project()` answers about the workbook on screen, and with a second workbook open that may
+ * not be this suite's. Without this the first read threw "no module named Consumer" from eight
+ * frames down and took the process with it, which reads as a broken product rather than as the
+ * wrong workbook being in front - and the modules this suite renames are the ones another
+ * workbook is most likely to also have.
+ */
+for (const needed of ["Helpers", "Consumer", "Watcher", "Rival", "HelpersExtra"]) {
+  const held = await api.readModule(needed, project.projectId).catch(() => ({ text: null }));
+  if (held.text === null) {
+    // Thrown rather than process.exit: exiting from here with the client's socket still open
+    // trips a libuv assertion, which buries the one line worth reading under a crash.
+    throw new Error(
+      `this suite needs RenameFixture.xlsm, and ${project.projectId} has no ${needed}. `
+      + "Open it and run this again:\n"
+      + "  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\RenameFixture.xlsm");
+  }
+}
+
 /**
  * The native pane, the surface and the page all naming the same module.
  *
