@@ -450,7 +450,8 @@ if ($Live) {
             # touched the right things and left the wrong ones alone, which is the whole of what
             # rename has to get right.
             'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
-                                     'settings-bite.mjs', 'rename-features.mjs')
+                                     'settings-bite.mjs', 'rename-features.mjs',
+                                     'search-features.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

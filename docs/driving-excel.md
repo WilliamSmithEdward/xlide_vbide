@@ -304,7 +304,8 @@ ui.longTasks;                     // main-thread stalls over 50ms, worst first
 
 await api.act("closeActive");
 await api.act("answerCloseConfirm", { answer: "discard" });   // the unsaved-changes box
-await api.act("search", { query: "Recalculate", scope: "project" });
+await api.act("search", { query: "Recalculate", scope: "project", run: "findAll" });
+ui.search.scopedMatches;          // the project/workbook answer. `matches` is MODULE SCOPE ONLY
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("format");                        // Format Module; {selection: true} for the selection
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
@@ -401,6 +402,31 @@ await api.act("editorAction", { id: "xlide.undoRename" });   // the Undo Rename 
 `act` answers `{did, detail}`. **`did: false` is an answer, not a failure** - closing a tab when
 nothing is open, expanding a workbook that is not there. Scripts that treat it as a throw stop
 distinguishing it from a broken door.
+
+**Searching outside module scope takes two steps, because it does for a person too.** Typing
+raises an `input` event and the only handler for it searches when the scope is `module`; every
+other scope waits for Find All or Enter. So `act("search", {query, scope: "project"})` types and
+searches nothing, and `run` is the press:
+
+```js
+await api.act("search", { query: "Recalculate", scope: "project", run: "findAll" });
+await api.waitFor("the project search to answer", async () =>
+  (await api.ui()).search.scopedMatches >= 0);          // -1 until the host answers
+
+// Replace All rewrites text across every module of the project. Nothing could trigger it before
+// 2026-08-11, which made it the least-covered destructive operation in the product.
+await api.act("search", { query: "Recalculate", scope: "project",
+                          replacement: "Recalc", run: "replaceAll" });
+(await api.ui()).search.scopedReplaced;
+```
+
+**Read the right count.** `search.matches` and `search.current` come from the live decorations in
+the current model, which is a different engine from the host search the other scopes use - they
+are 0 and -1 whenever the scope is not `module`, however many matches the panel is showing.
+`scopedMatches` is the other scopes' answer, and it is -1 before the host has replied, which is a
+different state from having found nothing. A probe that read `matches` after a project search saw
+zero and agreed with an action that had searched nothing: the driver and the observer failed in
+the same direction, which is the one shape of gap a passing test cannot distinguish from success.
 
 **`ui.statusNotice` is where a declined action explains itself**, and it is worth asserting on:
 the whole point of a decline is that the developer is told why, and until 2026-08-11 the status

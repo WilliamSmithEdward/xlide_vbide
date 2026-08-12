@@ -1793,3 +1793,44 @@ Consequence: when something "feels slow", find the moment the developer is actua
 before optimising anything. Time to first paint and time to a working editor are different
 numbers, and this product had already optimised the first one to 574ms while the second sat at
 3.4 seconds with no instrument pointed at it and no message on screen.
+
+## 65. Two correct lines that disabled each other, and the same bug twice
+
+Project-scope Replace All rewrote every module in the workbook and left the editor showing the
+text from before it. The workbook had `MarkerDone`; the surface, and the engine's live copy read
+back through the door, still had `Marker`. The developer is looking at a module that no longer
+exists, and the next keystroke writes the stale text back over the replacement.
+
+This had been fixed before. On 2026-08-04 the symptom was reported as "replace is not working",
+and the fix was to call `ResyncFromModule()` immediately after the rewrite rather than waiting for
+a pane event. That call is still there, with its comment still explaining why.
+
+What broke it was a later change that is also correct. `ReplaceMatches` writes each module through
+`CodeModule.ReplaceLine`, then updates two things that would otherwise hold pre-replace text: the
+engine's live copy, and `_writtenModules` - the baseline the dirty-dot comparison reads. Both
+adoptions are right.
+
+But `ResyncFromModule` decides whether a module changed *outside* the surface by comparing the
+module against that same baseline:
+
+```csharp
+if (_writtenModules.TryGetValue(key, out var baseline) && baseline == stored) { continue; }
+```
+
+So the line that told the dirty dot the truth told the resync there was nothing to do. Every
+module the replace had just rewritten was skipped, by the guard, on the grounds that we already
+knew about it - which was true, and which is not the same as the surface knowing about it. Neither
+change is wrong on its own and neither mentions the other; they are about forty lines apart.
+
+The fix is to stop inferring. `ReplaceMatches` already holds the new text and already knows which
+modules it touched, so it syncs the surface itself, in the same block, next to the two adoptions
+it was already doing.
+
+Consequence: **a "has this changed behind our back?" heuristic cannot be the delivery mechanism
+for a change we made ourselves.** When a code path knows exactly what it changed, tell the other
+copies directly; leave the heuristic for the macro, the import and the host's own reformatting it
+was written for. And when a symptom returns, look for the guard that used to fire - this one had
+been fixed once and re-broke without either commit being incorrect, which no amount of care at
+review time would have caught. What caught it was `search-features.mjs`, written the same day,
+because the feature had no coverage of any kind: it went red on the shipped build and green on the
+fix.

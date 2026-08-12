@@ -2920,8 +2920,26 @@ internal sealed partial class AddInSession : IDisposable
                 if (inModule > 0 && component is not null
                     && ProjectReader.ReadSource(component) is { } adopted)
                 {
-                    _writtenModules[WrittenKey(group.Key.Module, DisplayFromProjectId(group.Key.ProjectId))] = adopted;
+                    var display = DisplayFromProjectId(group.Key.ProjectId);
+                    _writtenModules[WrittenKey(group.Key.Module, display)] = adopted;
                     _analysis?.NotifyLiveText(group.Key.Module, adopted, null, group.Key.ProjectId);
+
+                    // AND THE SURFACE, which is the copy the developer is looking at.
+                    //
+                    // It cannot be left to the ResyncFromModule call that follows this, and the
+                    // reason is the line above. That resync asks "has the module changed since we
+                    // last wrote it?" by comparing the module against `_writtenModules` - so
+                    // updating the baseline here, which the dirty dot needs, tells the resync that
+                    // nothing changed outside the surface and it skips every module this just
+                    // rewrote. The two lines disabled each other: the workbook held the
+                    // replacement, the editor went on showing the text from before it, and the
+                    // next keystroke would have written the stale text back over the replacement.
+                    //
+                    // Measured 2026-08-11 by the new search suite. This is the second time this
+                    // exact symptom has been fixed - "replace is not working", 2026-08-04, which
+                    // is what added the resync - and it came back because the fix depended on a
+                    // heuristic that a later, unrelated, correct change made blind.
+                    _editorSurface?.Sync(group.Key.Module, display, adopted);
                 }
             }
             catch (Exception ex)

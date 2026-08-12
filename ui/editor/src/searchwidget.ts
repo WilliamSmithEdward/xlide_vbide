@@ -91,6 +91,15 @@ export class SearchWidget {
   /** The scoped search whose answer is awaited; older answers are ignored. */
   private pendingSearchId = 0;
 
+  /**
+   * The last answer to a scoped search, as the host reported it.
+   *
+   * The module-scope engine below keeps `matches` and `current`; a project or workbook search is
+   * answered by the host and its result lived only in the rows this panel drew. So the two fields
+   * a reader would naturally check were 0 and -1 for every scope but one.
+   */
+  private scopedResult: { matches: number; truncated: boolean; replaced: number } | null = null;
+
   constructor(editorOf: () => monaco.editor.IStandaloneCodeEditor, handlers: SearchWidgetHandlers) {
     this.editorOf = editorOf;
     this.handlers = handlers;
@@ -201,6 +210,14 @@ export class SearchWidget {
     }
 
     this.pendingSearchId = id;
+
+    // KEPT, not only drawn. `matches` and `current` below describe the module-scope engine and
+    // are structurally 0 and -1 for every other scope, so a probe reading them after a project
+    // search saw "no matches" whatever the panel had just rendered - and a driver that searched
+    // nothing looked identical to one that found nothing. Taken from the arguments rather than
+    // from the rows, so it is the answer the panel was given and not a re-reading of the DOM.
+    this.scopedResult = { matches: matches.length, truncated, replaced };
+
     this.results.replaceChildren();
     this.results.hidden = false;
 
@@ -462,6 +479,9 @@ export class SearchWidget {
     matches: number;
     current: number;
     replaceShown: boolean;
+    scopedMatches: number;
+    scopedTruncated: boolean;
+    scopedReplaced: number;
   } {
     return {
       open: this.isOpen,
@@ -470,9 +490,18 @@ export class SearchWidget {
       scope: this.scopeSelect.value,
       matchCase: this.caseButton.getAttribute("aria-pressed") === "true",
       wholeWord: this.wordButton.getAttribute("aria-pressed") === "true",
+      // MODULE SCOPE ONLY, and the names now say so by having siblings. These two come from the
+      // live decorations in the current model, which is a different engine from the host search
+      // the other scopes use - so they are 0 and -1 whenever the scope is not "module", however
+      // many matches the panel is showing.
       matches: this.matches.length,
       current: this.current,
       replaceShown: !this.replaceRow.hidden,
+      // The other scopes' answer, as the host reported it. -1 for "nothing has been asked yet",
+      // which is a different state from a search that found nothing.
+      scopedMatches: this.scopedResult?.matches ?? -1,
+      scopedTruncated: this.scopedResult?.truncated ?? false,
+      scopedReplaced: this.scopedResult?.replaced ?? 0,
     };
   }
 
@@ -482,8 +511,14 @@ export class SearchWidget {
       this.open(options?.scope ? { scope: options.scope } : undefined);
     }
 
-    if (options?.scope) {
+    if (options?.scope && this.scopeSelect.value !== options.scope) {
+      // Set AND announced. `change` does not fire for a value assigned in script, and everything
+      // that reacts to a scope change hangs off that event: clearing the previous scope's
+      // decorations, emptying its match table, re-running the search under the new one. Assigning
+      // alone left the select reading "project" over a live module-scope result - the same
+      // mistake the toggle buttons below are pressed rather than set to avoid, one control over.
       this.scopeSelect.value = options.scope;
+      this.scopeSelect.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     // The toggles are pressed through their buttons, because pressing them is what runs the
@@ -503,9 +538,67 @@ export class SearchWidget {
     this.findInput.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
+  /**
+   * The buttons, as methods, for a driver that has no pointer.
+   *
+   * `find` above raises an `input` event, and the only handler for that searches when the scope is
+   * "module" - so typing a query under any other scope types it and searches nothing. That is the
+   * behaviour a person sees too: they type, then press Find All or Enter. These are those presses,
+   * going through the same methods the click listeners call rather than round a second path.
+   *
+   * Replace All is the reason this matters most. It rewrites text across every module of a
+   * project, it is the most destructive thing on this surface, and until 2026-08-11 nothing could
+   * trigger it except a person with a mouse.
+   */
+  runFindAll(): void {
+    if (this.scope() === "module") {
+      this.moduleResultsOpen = true;
+      this.showModuleResults();
+      return;
+    }
+
+    this.runScoped(false);
+  }
+
+  /**
+   * Types into the replace box and reveals it, which is what a developer does before replacing.
+   * The row is hidden until the expander is pressed, and a replace against a hidden box would be
+   * a state no person can reach.
+   */
+  setReplacement(text: string): void {
+    if (this.replaceRow.hidden) {
+      this.setReplaceShown(true);
+    }
+
+    this.replaceInput.value = text;
+    this.replaceInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  runReplaceAll(): void {
+    this.replaceAllRun();
+  }
+
+  runReplaceCurrent(): void {
+    this.replaceCurrent();
+  }
+
+  goToNextMatch(): void {
+    this.next();
+  }
+
+  goToPreviousMatch(): void {
+    this.previous();
+  }
+
   open(options?: { scope?: string; withReplace?: boolean }): void {
-    if (options?.scope) {
+    if (options?.scope && this.scopeSelect.value !== options.scope) {
+      // Set AND announced. `change` does not fire for a value assigned in script, and everything
+      // that reacts to a scope change hangs off that event: clearing the previous scope's
+      // decorations, emptying its match table, re-running the search under the new one. Assigning
+      // alone left the select reading "project" over a live module-scope result - the same
+      // mistake the toggle buttons below are pressed rather than set to avoid, one control over.
       this.scopeSelect.value = options.scope;
+      this.scopeSelect.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     // A selected run of text is what the developer wants found; multi-line selections
@@ -561,6 +654,9 @@ export class SearchWidget {
   }
 
   private scopeChanged(): void {
+    // A result belongs to the scope it was asked in.
+    this.scopedResult = null;
+
     if (this.scope() === "module") {
       this.moduleResultsOpen = false;
       this.results.hidden = true;
@@ -584,6 +680,11 @@ export class SearchWidget {
     const { matchCase, wholeWord } = this.options();
     this.results.hidden = false;
     this.results.replaceChildren(this.note("Searching..."));
+
+    // Cleared as the question goes out, so "asked and not yet answered" reads as -1 rather than
+    // as the previous query's count. A caller polling for the answer needs those to differ.
+    this.scopedResult = null;
+
     this.pendingSearchId = replace
       ? this.handlers.replaceAll(query, matchCase, wholeWord, this.scope(), this.replaceInput.value)
       : this.handlers.search(query, matchCase, wholeWord, this.scope());

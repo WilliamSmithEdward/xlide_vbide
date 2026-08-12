@@ -131,6 +131,17 @@ export interface DevSurfaceParts {
     find(query: string, options?: { scope?: string; matchCase?: boolean; wholeWord?: boolean }): void;
     open(options?: { scope?: string; withReplace?: boolean }): void;
     close(): void;
+    /**
+     * The panel's buttons. `find` types a query and raises `input`, whose only handler searches
+     * when the scope is "module" - so under any other scope it types and searches nothing, which
+     * is what a person sees too before they press Find All. These are those presses.
+     */
+    runFindAll(): void;
+    setReplacement(text: string): void;
+    runReplaceAll(): void;
+    runReplaceCurrent(): void;
+    goToNextMatch(): void;
+    goToPreviousMatch(): void;
   };
   bookmarks: { marksOn(model: monaco.editor.ITextModel): number[] };
   panes: {
@@ -999,7 +1010,44 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         matchCase: flag(args.matchCase, false),
         wholeWord: flag(args.wholeWord, false),
       });
-      return { did: true, detail: `searching for ${JSON.stringify(query)}` };
+
+      // TYPING IS NOT SEARCHING outside module scope, and this used to stop here and answer as
+      // though it were. `find` raises an `input` event; the only handler for it searches when the
+      // scope is "module" and does nothing otherwise. So a project search typed a query, searched
+      // nothing, and answered did:true - and the field a probe would then check, `matches`, is
+      // structurally 0 for every non-module scope, so the two agreed and the feature looked fine.
+      //
+      // `run` is the press that follows the typing, and it is the same method the button's own
+      // click listener calls. Without it, Replace All - a text rewrite across every module of a
+      // project, and the most destructive thing on this surface - could not be triggered at all.
+      if (args.replacement !== undefined) {
+        parts.search.setReplacement(String(args.replacement));
+      }
+
+      const run = args.run === undefined ? null : String(args.run).toLowerCase();
+      if (run === null) {
+        return { did: true, detail: `typed ${JSON.stringify(query)}; nothing was run` };
+      }
+
+      const press: Record<string, () => void> = {
+        find: () => parts.search.runFindAll(),
+        findall: () => parts.search.runFindAll(),
+        next: () => parts.search.goToNextMatch(),
+        previous: () => parts.search.goToPreviousMatch(),
+        replace: () => parts.search.runReplaceCurrent(),
+        replaceall: () => parts.search.runReplaceAll(),
+      };
+
+      const pressed = press[run];
+      if (!pressed) {
+        return {
+          did: false,
+          detail: `run must be findAll, next, previous, replace or replaceAll; got ${run}`,
+        };
+      }
+
+      pressed();
+      return { did: true, detail: `${run} for ${JSON.stringify(query)}` };
     },
 
     /*
