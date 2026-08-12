@@ -120,8 +120,17 @@ console.log(`  ${JSON.stringify(undone).slice(0, 200)}`);
 // the only way to learn that an undo had stopped halfway was the two module reads below - which
 // say the text is wrong and cannot say why. `stopped` names the module that refused.
 check("the undo ran to the end", undone.undone === true, undone.stopped ?? JSON.stringify(undone));
-check("and it put back both modules the rename touched",
-  (undone.modules ?? []).length === 2, JSON.stringify(undone.modules));
+
+// NAMED, not counted. This asserted a count of two and the rename touches three: Helpers declares
+// the procedure, Consumer qualifies it, and Watcher names it as well - Watcher exists precisely
+// because a rename has to update the tab being looked at as well as the ones that are not. A count
+// is the wrong assertion for a cross-module operation anyway: it passes for the right number of
+// wrong modules, and it says nothing about WHICH the rename reached, which is the whole question.
+const putBack = [...(undone.modules ?? [])].sort();
+check("and it put back every module the rename touched",
+  JSON.stringify(putBack) === JSON.stringify(["Consumer", "Helpers", "Watcher"]),
+  `${JSON.stringify(undone.modules)} - expected Helpers (the declaration), Consumer (a qualified `
+  + "call) and Watcher (a call in the module left open on purpose)");
 
 await wait(3000);
 

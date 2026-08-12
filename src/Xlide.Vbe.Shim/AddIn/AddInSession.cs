@@ -7244,6 +7244,32 @@ internal sealed partial class AddInSession : IDisposable
          * so reversing it answers exactly what the surface meant. Only then fall through to
          * matching a project's own name, which is what an unnumbered display is.
          */
+        /*
+         * AN IDENTITY IS ACCEPTED TOO, because this product hands them out and then would not
+         * take them back.
+         *
+         * `projects` answers a `projectId` that is the workbook's full path, and `projectHolding`
+         * on the client passes that straight to a caller - so the one route built to answer "which
+         * workbook holds this module" produced an argument every route taking a `project` refused.
+         * Refused SILENTLY: an unmatched name resolves to null, the caller falls back to whichever
+         * workbook answers first, and with two workbooks each holding a Helpers the answer is the
+         * wrong one. Measured 2026-08-11 with both fixtures open: `readModule("Helpers", twin.projectId)`
+         * returned RenameFixture's copy, and `pane open` with the same argument opened the wrong
+         * workbook's module and reported ran:true.
+         *
+         * That is the "a name is not an identity across workbooks" defect the two-workbook case
+         * exists to catch, living in the identity plumbing itself. `project` (singular) confuses it
+         * further by answering `projectId` as the DISPLAY name, which is why every suite works: they
+         * all pass that one.
+         */
+        foreach (var id in _projectNames.Keys)
+        {
+            if (string.Equals(id, display, StringComparison.OrdinalIgnoreCase))
+            {
+                return id;
+            }
+        }
+
         foreach (var (id, shown) in _projectNames)
         {
             if (string.Equals(shown, display, StringComparison.OrdinalIgnoreCase))
@@ -7253,7 +7279,20 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         using var project = FindProjectByDisplayName(display);
-        return project is null ? null : ProjectReader.Identity(project).Id;
+        if (project is not null)
+        {
+            return ProjectReader.Identity(project).Id;
+        }
+
+        // A path that named no project by its whole self may still name one by its file name,
+        // which is what the tree shows and what an identity is built from.
+        if (display.Contains('\\', StringComparison.Ordinal) || display.Contains('/', StringComparison.Ordinal))
+        {
+            using var byFileName = FindProjectByDisplayName(Path.GetFileName(display));
+            return byFileName is null ? null : ProjectReader.Identity(byFileName).Id;
+        }
+
+        return null;
     }
 
     /// <summary>

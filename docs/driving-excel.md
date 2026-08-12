@@ -448,6 +448,30 @@ refusal answers `did: false` with the value the row actually holds and whatever 
 said. That distinction is not theoretical: the first version of this act reported
 `set to "not a legal name"` for a name VBA cannot store.
 
+**`projectId` means two different things, and one of them used to be silently wrong.**
+
+```js
+await api.project();            // { project: "VBAProject", projectId: "RenameFixture.xlsm" }   <- a DISPLAY name
+(await api.projects()).projects;  // [{ project: "RenameFixture.xlsm", projectId: "f:\\...\\renamefixture.xlsm" }]  <- a PATH
+await api.projectHolding("Helpers");  // the projects() shape, so its projectId is a PATH too
+```
+
+Every route taking a `project` argument used to accept only the display name. An unmatched value
+resolves to null and the caller falls back to whichever workbook answers first, so with two
+workbooks each holding a `Helpers`, `readModule("Helpers", twin.projectId)` returned the OTHER
+workbook's copy and `pane open` opened the wrong module and answered `ran: true`. The route built
+to answer "which workbook holds this" produced an argument the routes could not take.
+
+Since 2026-08-11 all three forms resolve - display name, full path, and COM identity - so anything
+the api hands you can be handed back. **The field names are still inconsistent** and are left that
+way deliberately, because renaming a field breaks every caller that was right about the old one.
+Prefer `api.project().projectId` for the single-workbook case and pass `projects()[n].project` when
+you mean a specific workbook by name.
+
+**This is not covered by the gate.** Every live suite opens one workbook, and with one workbook
+open the wrong-workbook fallback is indistinguishable from the right answer. `surface-walk.mjs` is
+the two-workbook probe and it is not in the gate either.
+
 **Boolean arguments take `1/true/yes/on` or `0/false/no/off`**, and anything else is the route's
 default. Worth knowing because it was not true until 2026-08-11: most flags treated everything
 except the literal `0` as true, so `api.perf({ reset: false })` would have cleared the counters if
