@@ -1969,3 +1969,31 @@ else on this door.
 Consequence: any operation whose success destroys the channel that would report it has to report
 first. And "it is alive" is not "it is the same thing that was alive" - when the point is that
 something was torn down and rebuilt, the test has to see the seam, not just a pulse on either side.
+
+## 70. The demo diverged from the host, and the divergence looked like a feature bug
+
+Dragging an OPEN module's tree row onto a split zone split the editor and left the tab where it
+was: the new group stood empty, the module unmoved. The drop code found no tab to move, because it
+matched the dragged row's document against the open tabs by (module, workbook) - the identity two
+same-named modules in two workbooks are told apart by - and found nothing. Every arrow pointed at
+the move logic.
+
+The move logic was right. The demo transport was lying. Its tree said Module1 lived in Book1.xlsm,
+and its setModules left the project out, so the open tab carried project:null. (module,
+"Book1.xlsm") and (module, null) are not the same document, correctly, so the tab could not be
+recognised as the thing the row named. The real host always carries the project per open module;
+the demo, which exists so the page runs in a plain browser, had drifted from it on exactly the
+field the two-workbook work made load-bearing.
+
+The tell was there to read before any of the drop code was suspected: the tab's project was null
+and the tree row's workbook was a name, in the same snapshot. A fixture that answers two different
+identities for one document is describing a world the product never runs in, and a probe against
+it tests that world.
+
+Consequence: when a headless probe fails and the code it exercises looks correct, check what the
+fixture is actually saying before the feature - a demo or a fixture that has drifted from the host
+tests an artifact, and the drift hides on the fields nobody looked at until a new feature depended
+on them. The fix is to make the fixture faithful (the demo now sends the project and reopens a
+closed module on activate, both as the host does), not to teach the product to tolerate the
+fixture's lie - tolerating it here would have meant matching documents by name alone, which is the
+exact defect the workbook identity was introduced to kill.
