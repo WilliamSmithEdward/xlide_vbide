@@ -333,6 +333,57 @@ function fromMonacoRange(range: monaco.IRange): HostRange {
   };
 }
 
+/**
+ * One pending host round trip's bookkeeping: allocate an id, arm the timeout that resolves the
+ * fallback, remember the resolver, and settle or expire exactly once.
+ *
+ * This table was hand-copied ten times across the bridge - ten maps, ten counters, twelve
+ * request bodies and ten resolve blocks all carrying the same eight lines - and a missed
+ * clearTimeout or a wrong map in one copy is a leaked timer or a promise that resolves empty
+ * after the budget, both of which read as a slow host rather than a bug (the audit's B15).
+ * The timeout and the fallback stay per-call on purpose: 2s for the keystroke-riding asks, 8s
+ * where the host thread legitimately stalls while a large module is shown, 30s for renames,
+ * 120s for a sync that can include a person choosing a folder. Those budgets are deliberate
+ * and must not collapse into one constant.
+ *
+ * The fallback is a function so every expiry resolves a FRESH value - the rename fallback is
+ * an object a caller could hold onto, and sharing one instance across timeouts would let one
+ * caller's reading leak into another's.
+ */
+class RequestTable<T> {
+  private readonly waiting = new Map<number, {
+    resolve: (value: T) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  private nextId = 1;
+
+  /** Sends one request via `post`, which receives the allocated id to put on the wire. */
+  ask(fallback: () => T, timeoutMs: number, post: (id: number) => void): Promise<T> {
+    const id = this.nextId++;
+
+    return new Promise<T>((resolve) => {
+      const timer = setTimeout(() => {
+        this.waiting.delete(id);
+        resolve(fallback());
+      }, timeoutMs);
+
+      this.waiting.set(id, { resolve, timer });
+      post(id);
+    });
+  }
+
+  /** Settles one id with its answer. An id already expired changes nothing, by design. */
+  settle(id: number, value: T): void {
+    const waiter = this.waiting.get(id);
+    if (waiter) {
+      this.waiting.delete(id);
+      clearTimeout(waiter.timer);
+      waiter.resolve(value);
+    }
+  }
+}
+
 export class EditorBridge {
   private readonly transport: HostTransport;
 
@@ -381,76 +432,18 @@ export class EditorBridge {
   /** The document the host says is active - the one its native active pane shows. */
   private hostActive: DocumentId | null = null;
 
-  /** Completion requests awaiting their answers, by request identifier. */
-  private readonly pendingCompletions = new Map<number, {
-    resolve: (items: HostCompletionItem[]) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Hover requests awaiting their answers, by request identifier. */
-  private readonly pendingHovers = new Map<number, {
-    resolve: (hover: HostHoverPayload | null) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Call-tip requests awaiting their answers, by request identifier. */
-  private readonly pendingSignatures = new Map<number, {
-    resolve: (signature: HostSignatureInfo | null) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Canonical-case requests awaiting their answers, by request identifier. */
-  private readonly pendingCanonicalCases = new Map<number, {
-    resolve: (edits: HostTextEdit[]) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Quick-fix requests awaiting their answers, by request identifier. */
-  private readonly pendingCodeActions = new Map<number, {
-    resolve: (actions: HostCodeAction[]) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Colouring requests awaiting their answers, by request identifier. */
-  private readonly pendingSemanticTokens = new Map<number, {
-    resolve: (tokens: HostSemanticToken[] | null) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Navigation requests awaiting their answers, by request identifier. */
-  private readonly pendingNavigations = new Map<number, {
-    resolve: (locations: HostLocation[]) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Rename requests awaiting their answers, by request identifier. */
-  private readonly pendingRenames = new Map<number, {
-    resolve: (answer: HostRenameAnswer) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Outline requests awaiting their answers, by request identifier. */
-  private readonly pendingOutlines = new Map<number, {
-    resolve: (procedures: HostProcedure[] | null) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  /** Import/export requests awaiting their answers, by request identifier. */
-  private readonly pendingSyncs = new Map<number, {
-    resolve: (answer: unknown) => void;
-    timer: ReturnType<typeof setTimeout>;
-  }>();
-
-  private nextSyncId = 1;
-  private nextCompletionId = 1;
-  private nextHoverId = 1;
-  private nextSignatureId = 1;
-  private nextCanonicalCaseId = 1;
-  private nextCodeActionId = 1;
-  private nextSemanticTokensId = 1;
-  private nextNavigationId = 1;
-  private nextRenameId = 1;
-  private nextOutlineId = 1;
+  // One pending-request table per host round trip; the three rename methods share one, the
+  // way they always shared a counter. Budgets and fallbacks live at the call sites.
+  private readonly pendingCompletions = new RequestTable<HostCompletionItem[]>();
+  private readonly pendingHovers = new RequestTable<HostHoverPayload | null>();
+  private readonly pendingSignatures = new RequestTable<HostSignatureInfo | null>();
+  private readonly pendingCanonicalCases = new RequestTable<HostTextEdit[]>();
+  private readonly pendingCodeActions = new RequestTable<HostCodeAction[]>();
+  private readonly pendingSemanticTokens = new RequestTable<HostSemanticToken[] | null>();
+  private readonly pendingNavigations = new RequestTable<HostLocation[]>();
+  private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
+  private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
+  private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -676,17 +669,8 @@ export class EditorBridge {
    * error anybody should see.
    */
   requestCompletions(offset: number): Promise<HostCompletionItem[]> {
-    const id = this.nextCompletionId++;
-
-    return new Promise<HostCompletionItem[]>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingCompletions.delete(id);
-        resolve([]);
-      }, 2000);
-
-      this.pendingCompletions.set(id, { resolve, timer });
-      this.transport.post({ type: "completion", id, offset });
-    });
+    return this.pendingCompletions.ask(() => [], 2000, (id) =>
+      this.transport.post({ type: "completion", id, offset }));
   }
 
   /**
@@ -694,17 +678,8 @@ export class EditorBridge {
    * the host is slow or gone: a hover that fails is a tooltip that does not appear, not an error.
    */
   requestHover(offset: number): Promise<HostHoverPayload | null> {
-    const id = this.nextHoverId++;
-
-    return new Promise<HostHoverPayload | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingHovers.delete(id);
-        resolve(null);
-      }, 2000);
-
-      this.pendingHovers.set(id, { resolve, timer });
-      this.transport.post({ type: "hover", id, offset });
-    });
+    return this.pendingHovers.ask(() => null, 2000, (id) =>
+      this.transport.post({ type: "hover", id, offset }));
   }
 
   /**
@@ -712,17 +687,8 @@ export class EditorBridge {
    * fails is a tip that does not show.
    */
   requestSignatureHelp(offset: number): Promise<HostSignatureInfo | null> {
-    const id = this.nextSignatureId++;
-
-    return new Promise<HostSignatureInfo | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingSignatures.delete(id);
-        resolve(null);
-      }, 2000);
-
-      this.pendingSignatures.set(id, { resolve, timer });
-      this.transport.post({ type: "signatureHelp", id, offset });
-    });
+    return this.pendingSignatures.ask(() => null, 2000, (id) =>
+      this.transport.post({ type: "signatureHelp", id, offset }));
   }
 
   /**
@@ -730,17 +696,8 @@ export class EditorBridge {
    * fails is a lightbulb that does not appear, which is what an unfixable line looks like anyway.
    */
   requestCodeActions(start: number, end: number): Promise<HostCodeAction[]> {
-    const id = this.nextCodeActionId++;
-
-    return new Promise<HostCodeAction[]>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingCodeActions.delete(id);
-        resolve([]);
-      }, 2000);
-
-      this.pendingCodeActions.set(id, { resolve, timer });
-      this.transport.post({ type: "codeAction", id, start, end });
-    });
+    return this.pendingCodeActions.ask(() => [], 2000, (id) =>
+      this.transport.post({ type: "codeAction", id, start, end }));
   }
 
   /**
@@ -752,15 +709,7 @@ export class EditorBridge {
     end: number,
     options: { single?: boolean; completeHeader?: boolean } = {},
   ): Promise<HostTextEdit[]> {
-    const id = this.nextCanonicalCaseId++;
-
-    return new Promise<HostTextEdit[]>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingCanonicalCases.delete(id);
-        resolve([]);
-      }, 2000);
-
-      this.pendingCanonicalCases.set(id, { resolve, timer });
+    return this.pendingCanonicalCases.ask(() => [], 2000, (id) =>
       this.transport.post({
         type: "canonicalCase",
         id,
@@ -768,8 +717,7 @@ export class EditorBridge {
         end,
         ...(options.single ? { single: true } : {}),
         ...(options.completeHeader ? { completeHeader: true } : {}),
-      });
-    });
+      }));
   }
 
   /**
@@ -790,36 +738,17 @@ export class EditorBridge {
    * something the dialog says, not something that throws.
    */
   requestSync(args: Record<string, string>, body = ""): Promise<Record<string, unknown>> {
-    const id = this.nextSyncId++;
-
-    return new Promise<Record<string, unknown>>((resolve) => {
-      // Long, because it covers reading every module of a project and, for a browse, a developer
-      // deciding where to put them.
-      const timer = setTimeout(() => {
-        this.pendingSyncs.delete(id);
-        resolve({ error: "the host did not answer in time" });
-      }, 120000);
-
-      this.pendingSyncs.set(id, {
-        resolve: (answer) => resolve(answer as Record<string, unknown>),
-        timer,
-      });
-      this.transport.post({ type: "sync", id, body, ...args });
-    });
+    // The budget is long because it covers reading every module of a project and, for a
+    // browse, a developer deciding where to put them.
+    return this.pendingSyncs.ask(
+      () => ({ error: "the host did not answer in time" }),
+      120000,
+      (id) => this.transport.post({ type: "sync", id, body, ...args }));
   }
 
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
-    const id = this.nextOutlineId++;
-
-    return new Promise<HostProcedure[] | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingOutlines.delete(id);
-        resolve(null);
-      }, 8000);
-
-      this.pendingOutlines.set(id, { resolve, timer });
-      this.transport.post({ type: "outline", id, module, ...(project ? { project } : {}) });
-    });
+    return this.pendingOutlines.ask(() => null, 8000, (id) =>
+      this.transport.post({ type: "outline", id, module, ...(project ? { project } : {}) }));
   }
 
   /**
@@ -832,19 +761,10 @@ export class EditorBridge {
     references: boolean,
     includeDeclaration = true,
   ): Promise<HostLocation[]> {
-    const id = this.nextNavigationId++;
-
-    return new Promise<HostLocation[]>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingNavigations.delete(id);
-        resolve([]);
-      }, 8000);
-
-      this.pendingNavigations.set(id, { resolve, timer });
+    return this.pendingNavigations.ask(() => [], 8000, (id) =>
       this.transport.post(references
         ? { type: "references", id, offset, includeDeclaration }
-        : { type: "definition", id, offset });
-    });
+        : { type: "definition", id, offset }));
   }
 
   /**
@@ -862,45 +782,24 @@ export class EditorBridge {
    * and leave every other one renamed - a half-renamed project, which is worse than no undo.
    */
   requestRenameUndo(): Promise<HostRenameAnswer> {
-    const id = this.nextRenameId++;
-
-    return new Promise<HostRenameAnswer>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingRenames.delete(id);
-        resolve({ modules: [], replaced: 0, refused: "The undo timed out, so nothing changed." });
-      }, 30000);
-
-      this.pendingRenames.set(id, { resolve, timer });
-      this.transport.post({ type: "undoRename", id });
-    });
+    return this.pendingRenames.ask(
+      () => ({ modules: [], replaced: 0, refused: "The undo timed out, so nothing changed." }),
+      30000,
+      (id) => this.transport.post({ type: "undoRename", id }));
   }
 
   requestModuleRename(module: string, project: string | null, newName: string): Promise<HostRenameAnswer> {
-    const id = this.nextRenameId++;
-
-    return new Promise<HostRenameAnswer>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingRenames.delete(id);
-        resolve({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." });
-      }, 30000);
-
-      this.pendingRenames.set(id, { resolve, timer });
-      this.transport.post({ type: "renameModule", id, module, newName, ...(project ? { project } : {}) });
-    });
+    return this.pendingRenames.ask(
+      () => ({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." }),
+      30000,
+      (id) => this.transport.post({ type: "renameModule", id, module, newName, ...(project ? { project } : {}) }));
   }
 
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
-    const id = this.nextRenameId++;
-
-    return new Promise<HostRenameAnswer>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingRenames.delete(id);
-        resolve({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." });
-      }, 30000);
-
-      this.pendingRenames.set(id, { resolve, timer });
-      this.transport.post({ type: "rename", id, offset, newName });
-    });
+    return this.pendingRenames.ask(
+      () => ({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." }),
+      30000,
+      (id) => this.transport.post({ type: "rename", id, offset, newName }));
   }
 
   /**
@@ -1016,22 +915,13 @@ export class EditorBridge {
       return Promise.resolve(null);
     }
 
-    const id = this.nextSemanticTokensId++;
-
-    return new Promise<HostSemanticToken[] | null>((resolve) => {
-      const timer = setTimeout(() => {
-        this.pendingSemanticTokens.delete(id);
-        resolve(null);
-      }, 8000);
-
-      this.pendingSemanticTokens.set(id, { resolve, timer });
+    return this.pendingSemanticTokens.ask(() => null, 8000, (id) =>
       this.transport.post({
         type: "semanticTokens",
         id,
         module: shown.module,
         ...(shown.project ? { project: shown.project } : {}),
-      });
-    });
+      }));
   }
 
   /** True while a host edit is being written into the model, so listeners can tell it from typing. */
@@ -1158,106 +1048,49 @@ export class EditorBridge {
       case "setProperties":
         this.shell?.setProperties(message.component, message.kind, message.properties);
         return;
-      case "completionResult": {
-        const waiter = this.pendingCompletions.get(message.id);
-        if (waiter) {
-          this.pendingCompletions.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.items);
-        }
+      case "completionResult":
+        this.pendingCompletions.settle(message.id, message.items);
         return;
-      }
-      case "hoverResult": {
-        const waiter = this.pendingHovers.get(message.id);
-        if (waiter) {
-          this.pendingHovers.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.hover);
-        }
+      case "hoverResult":
+        this.pendingHovers.settle(message.id, message.hover);
         return;
-      }
-      case "signatureHelpResult": {
-        const waiter = this.pendingSignatures.get(message.id);
-        if (waiter) {
-          this.pendingSignatures.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.signature);
-        }
+      case "signatureHelpResult":
+        this.pendingSignatures.settle(message.id, message.signature);
         return;
-      }
-      case "canonicalCaseResult": {
-        const waiter = this.pendingCanonicalCases.get(message.id);
-        if (waiter) {
-          this.pendingCanonicalCases.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.edits);
-        }
+      case "canonicalCaseResult":
+        this.pendingCanonicalCases.settle(message.id, message.edits);
         return;
-      }
-      case "codeActionResult": {
-        const waiter = this.pendingCodeActions.get(message.id);
-        if (waiter) {
-          this.pendingCodeActions.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.actions);
-        }
+      case "codeActionResult":
+        this.pendingCodeActions.settle(message.id, message.actions);
         return;
-      }
-      case "renameResult": {
-        const waiter = this.pendingRenames.get(message.id);
-        if (waiter) {
-          this.pendingRenames.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve({
-            modules: message.modules,
-            replaced: message.replaced,
-            refused: message.refused ?? null,
-          });
-        }
+      case "renameResult":
+        this.pendingRenames.settle(message.id, {
+          modules: message.modules,
+          replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
         return;
-      }
-      case "navigationResult": {
-        const waiter = this.pendingNavigations.get(message.id);
-        if (waiter) {
-          this.pendingNavigations.delete(message.id);
-          clearTimeout(waiter.timer);
-          waiter.resolve(message.locations);
-        }
+      case "navigationResult":
+        this.pendingNavigations.settle(message.id, message.locations);
         return;
-      }
-      case "semanticTokensResult": {
-        const waiter = this.pendingSemanticTokens.get(message.id);
-        if (waiter) {
-          this.pendingSemanticTokens.delete(message.id);
-          clearTimeout(waiter.timer);
-          // A failed answer is a shrug, not a statement of colourlessness.
-          waiter.resolve(message.failed ? null : message.tokens);
-        }
+      case "semanticTokensResult":
+        // A failed answer is a shrug, not a statement of colourlessness.
+        this.pendingSemanticTokens.settle(message.id, message.failed ? null : message.tokens);
         return;
-      }
       case "syncResult": {
-        const waiter = this.pendingSyncs.get(message.id);
-        if (waiter) {
-          this.pendingSyncs.delete(message.id);
-          clearTimeout(waiter.timer);
-          try {
-            waiter.resolve(JSON.parse(message.json));
-          } catch {
-            waiter.resolve({ error: "the host's answer could not be read" });
-          }
+        let answer: Record<string, unknown>;
+        try {
+          answer = JSON.parse(message.json) as Record<string, unknown>;
+        } catch {
+          answer = { error: "the host's answer could not be read" };
         }
+        this.pendingSyncs.settle(message.id, answer);
         return;
       }
-      case "outlineResult": {
-        const waiter = this.pendingOutlines.get(message.id);
-        if (waiter) {
-          this.pendingOutlines.delete(message.id);
-          clearTimeout(waiter.timer);
-          // A failed answer is a shrug, not a statement of emptiness.
-          waiter.resolve(message.failed ? null : message.procedures);
-        }
+      case "outlineResult":
+        // A failed answer is a shrug, not a statement of emptiness.
+        this.pendingOutlines.settle(message.id, message.failed ? null : message.procedures);
         return;
-      }
       case "setLanguageFacts":
         updateVbaLanguageFacts(message.types, message.procedures);
         return;
