@@ -64,7 +64,7 @@ caller can hold both at once.
 | `perf` | GET | `reset=1` | recent raw placement and marshal durations, **and the analyzer's cost per method**: calls, time spent QUEUED behind another call, time spent ON the pipe, median, p95, and the individual calls over 120ms. The engine serves one request at a time, so a diagnostics pass over a large module delays every keystroke's completion behind it and a combined figure blames completions. `reset=1` forgets the engine figures first, so an experiment measures what it provokes |
 | `journal` | GET | `lines` | one capture of a whole moment: state, dialogs, counters, recent log, recent page traffic |
 | `drainfinalizers` | GET | | Forces a collection and WAITS for the finalizers, so a leaked COM wrapper fails NOW instead of minutes later in a stack that names nothing about what created it. A wrapper nothing disposed is released by the finalizer thread, and for the editor's objects that is an access violation the runtime cannot throw: it FailFasts and ends Excel. Run an operation, call this, and if it does not answer, THAT operation left a wrapper behind. It is a BISECTING tool, not a health check: the last route that tried to be both reported a clean bill of health with 8,734 wrappers pending, because it measured the heap rather than the outcome. The count still comes from `stats.comWrappersLive` |
-| `history` | GET | | every request this door has served, a script that replays them, and **`routeCosts`**: each route's count, total and worst time, slowest total first. The door is the instrument every other measurement is taken through, so a route that has quietly become slow makes everything look slow |
+| `history` | GET | | the last 300 STATE-CHANGING requests this door has served (the polled routes - history, log, journal, state, dialogs - are left out, or they would be the whole transcript), a script that replays them, and **`routeCosts`**: each route's count, total and worst time, slowest total first. `routeCosts` counts every route including the polled ones, because the door is the instrument every other measurement is taken through and a route that has quietly become slow makes everything look slow |
 | `assert` | POST | `that`, `value`, `timeoutMs` | states an expectation and waits for it, answering with what was actually seen |
 | `messages` | GET | `last` | recent page traffic both directions, per surface |
 | `problems` | GET | `module` | the analyzer's current findings. **Not the same thing as the squiggles.** These are the analyzer's findings for the project as last analysed; the underline a developer sees also comes from the LIVE analysis of unwritten text, which this does not carry. Measured 2026-08-08: an undeclared variable showed an error underline on screen while this answered an empty list. To check a squiggle, ask `ui` with `word` or `line`+`column` and read `at.squiggles`, which is monaco's markers - exactly what draws the underline |
@@ -106,7 +106,7 @@ caller can hold both at once.
 | `command` | POST | `name`, `keep` | runs an editor command by name (`VbeCommands.ForName`). `keep=1` exempts any dialog it opens from the guard below. **`ran` is the editor's answer, not the door's**: it used to be the constant true, because the session method that executes a command computed the answer and returned void, so pressing Step Over outside break mode was reported as a step. `detail` says why a false came back - `not present in this host`, `currently disabled`, or the exception's name - because those want different responses from a caller |
 | `caret` | POST | `line`, `column`, `module`, `project` | puts the caret there, navigating first when a module is named. **A navigation that finds no pane is an `error` now**, not an ok: it left the caret in the module already shown, and a caller's next Run, Step or breakpoint then landed there instead |
 | `breakpoint` | POST | `module`, `line`, `project`, `state=on\|off` | goes to the line and sets, clears, or toggles a breakpoint. `ran` is the record READ BACK after the toggle, so a line the editor will not carry one on answers false and says so; it used to answer the state that was asked for. A navigation that did not arrive answers `error` rather than toggling against whichever module was already shown |
-| `immediate` | POST | `text` | evaluates a line in the Immediate window and answers WHAT IT CAME TO: the result text and whether it failed. It used to answer `{ran: true}` without waiting, so a caller learned that an evaluation had been ASKED FOR and nothing else, and what the expression evaluated to went only to the page. That is the reason this panel had a route and no suite: nothing could read what it said. The same rule the rest of this door follows, where `closeActive` reports whether the tab actually closed and `compile` answers errors as data. WITHOUT `text` it reads instead, answering the whole window as it stands. `ran: false` means the evaluation did not finish inside the ten second wait; the line still went in |
+| `immediate` | POST | `text`, `waitMs` | evaluates a line in the Immediate window and answers WHAT IT CAME TO: the result text and whether it failed. It used to answer `{ran: true}` without waiting, so a caller learned that an evaluation had been ASKED FOR and nothing else, and what the expression evaluated to went only to the page. That is the reason this panel had a route and no suite: nothing could read what it said. The same rule the rest of this door follows, where `closeActive` reports whether the tab actually closed and `compile` answers errors as data. WITHOUT `text` it reads instead, answering the whole window as it stands. `ran: false` means the evaluation did not finish inside `waitMs` (default 15000); the line still went in |
 | `placement` | POST | | forces a placement pass |
 
 ### Awaiting, rather than sleeping
@@ -214,8 +214,14 @@ Two arguments deserve their reasons.
 clears what the first call set, which cost a live run its breakpoint during this api's own
 verification. Without the argument it still toggles, the way the key does.
 
-`immediate` only SCHEDULES. A statement that hits a breakpoint does not return until the
-developer continues, so an api that waited for it would jam its own connection.
+`immediate` RUNS the line and answers what it came to, waiting up to `waitMs` (default 15000)
+for the value or the line's own error - not scheduling it and returning, which is what an
+earlier version did and this document went on describing after the behaviour changed
+(2026-08-07). The wait is on the DOOR's thread, not the host's, precisely so a line that raises
+a Compile-error box does not jam the connection: the door notices the box, reads its words as
+the answer, and clears it. The one thing it cannot outwait is a line that stops at a REAL
+breakpoint and sits there until the developer continues; that is the debugger working, and the
+scratch-break recovery above is only for the editor's own error box.
 
 ## Reading a break
 
@@ -332,9 +338,10 @@ the same shape a real failure answers in, which reads as the product being broke
 traffic in ONE request. Evidence gathered request by request describes several different
 moments, and the interesting one is usually the one that has already passed.
 
-`history` hands back every request the door has served, plus a runnable script of them. After
-an investigation by hand, the useful sequence is normally reconstructed from a scrollback and
-gets a step wrong; this turns a bug found by hand into a probe by copying.
+`history` hands back the door's last 300 state-changing requests - the poll routes are left out
+so they do not drown the transcript - plus a runnable script of them. After an investigation by
+hand, the useful sequence is normally reconstructed from a scrollback and gets a step wrong; this
+turns a bug found by hand into a probe by copying.
 
 ## A note on the heartbeat
 

@@ -561,9 +561,10 @@ internal sealed partial class AddInSession
     /// Answers one debug-door request. Arrives on a pool thread. Routes that read files,
     /// ring buffers, or the reader thread's published snapshots answer right here; routes
     /// that read the session or drive the editor cross to the host thread and wait with a
-    /// deadline. The immediate route only schedules - a statement that hits a breakpoint
-    /// does not return until the developer continues, and an api that waited on it would
-    /// jam.
+    /// deadline. The immediate route runs the line on the host thread and waits for its
+    /// result HERE, on the door's thread, so a Compile-error box it raises does not jam the
+    /// wait; the one thing no deadline outlasts is a line that stops at a real breakpoint,
+    /// which is the debugger working.
     /// </summary>
     private DebugServer.DebugReply AnswerDebugRequest(DebugServer.DebugRequest request)
     {
