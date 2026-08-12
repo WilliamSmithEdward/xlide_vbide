@@ -28,6 +28,7 @@ import type { EditorBridge } from "./bridge.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
+import { syncDialogProbe } from "./syncdialog.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
 interface DialogSnapshot {
@@ -87,6 +88,21 @@ export interface UiSnapshot {
    */
   statusPosition: string;
   statusModule: string;
+  /**
+   * The sync dialog while it is open, null otherwise: direction, folder, mode, busy, the
+   * status sentence, and every row with its tick. Before this the dialog's rows could only be
+   * read by querySelector from a harness file, which is a test of the selector as much as of
+   * the dialog - and the one thing that catches the api and the dialog disagreeing about an
+   * import is comparing exactly this against the sync route's plan.
+   */
+  sync: {
+    direction: string;
+    folder: string;
+    mode: string;
+    busy: boolean;
+    status: string;
+    rows: { file: string; status: string; detail: string; ticked: boolean; actionable: boolean }[];
+  } | null;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** How many models and documents are alive, since a leak shows here first. */
@@ -532,6 +548,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     statusNotice: parts.statusNotice(),
     statusPosition: parts.statusPosition(),
     statusModule: parts.statusModule(),
+    sync: syncDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
     search: parts.search.state(),
@@ -1022,6 +1039,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
 
       return parts.pressToolbar(wanted);
+    },
+
+    /**
+     * Drives the OPEN sync dialog through its own controls: `{press}` clicks a named button
+     * (apply, close, all, none, export, import), `{tick, on}` a row's checkbox by file name,
+     * `{folder}` types the path through the input's own change event. `ui.sync` is the read
+     * side. Before this pair, driving the dialog meant querySelector against its private DOM
+     * from a harness file, which tests the selector as much as the dialog.
+     */
+    syncDialog: (args) => {
+      const dialog = syncDialogProbe();
+      if (!dialog) {
+        return { did: false, detail: 'the sync dialog is not open; act("toolbar", {command: "openSync"}) summons it' };
+      }
+
+      if (args.press !== undefined) {
+        const control = String(args.press);
+        return dialog.press(control)
+          ? { did: true, detail: `${control} pressed` }
+          : { did: false, detail: `no control named ${control}; use apply, close, all, none, export or import` };
+      }
+
+      if (args.tick !== undefined) {
+        const file = String(args.tick);
+        const on = args.on !== false && args.on !== "false";
+        return dialog.tick(file, on)
+          ? { did: true, detail: `${file} ${on ? "ticked" : "unticked"}` }
+          : { did: false, detail: `no row named ${file}` };
+      }
+
+      if (args.folder !== undefined) {
+        dialog.setFolder(String(args.folder));
+        return { did: true, detail: "folder set through the input's own change" };
+      }
+
+      return { did: false, detail: "nothing asked; pass press, tick (with on), or folder" };
     },
 
     /**

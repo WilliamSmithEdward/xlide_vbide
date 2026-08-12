@@ -52,6 +52,34 @@ interface SyncPlan {
 /** How the host is reached. One function, because there is only one kind of request. */
 export type SyncRequest = (args: Record<string, string>, body?: string) => Promise<Record<string, unknown>>;
 
+/**
+ * The OPEN dialog, readable and drivable for the dev surface. Everything a driver does goes
+ * through the dialog's own controls - the checkbox's change, the button's click, the input's
+ * change event - so a driven Apply is the developer's Apply, which is the property module-sync
+ * exists to prove and used to reach by document.querySelector from eight files away.
+ */
+export interface SyncDialogProbe {
+  state(): {
+    direction: string;
+    folder: string;
+    mode: string;
+    busy: boolean;
+    status: string;
+    rows: { file: string; status: string; detail: string; ticked: boolean; actionable: boolean }[];
+  };
+  /** Presses a named control: apply, close, all, none, export, import. False when unknown. */
+  press(control: string): boolean;
+  /** Ticks or unticks a row by file name, through its checkbox. False when no such row. */
+  tick(file: string, on: boolean): boolean;
+  /** Types a folder path, through the input's own change event. */
+  setFolder(path: string): void;
+}
+
+let liveDialog: SyncDialogProbe | null = null;
+
+/** The open dialog's probe, or null when none is open. */
+export const syncDialogProbe = (): SyncDialogProbe | null => liveDialog;
+
 /** The word each status is drawn with, and the tone it is drawn in. */
 const STATUS_TONE: Record<string, { label: string; tone: string }> = {
   "will-create": { label: "new", tone: "create" },
@@ -745,6 +773,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   };
 
   function dismiss(): void {
+    liveDialog = null;
     backdrop.remove();
     document.removeEventListener("keydown", onKey, true);
     closed();
@@ -759,6 +788,57 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
 
   document.addEventListener("keydown", onKey, true);
   document.body.appendChild(backdrop);
+
+  // Registered for the dev surface the moment the controls exist, cleared by dismiss. Every
+  // probe action lands on a control's own handler, so what a driver does IS what a click does.
+  liveDialog = {
+    state: () => ({
+      direction,
+      folder: folderInput.value,
+      mode: modeSelect.value,
+      busy,
+      status: status.textContent ?? "",
+      rows: (plan?.items ?? []).map((item) => ({
+        file: item.file,
+        status: item.status,
+        detail: item.detail,
+        ticked: ticked.has(item.id),
+        actionable: actionable(item),
+      })),
+    }),
+    press: (control) => {
+      const button = control === "apply" ? apply
+        : control === "close" ? close
+        : control === "all" ? selectAll
+        : control === "none" ? selectNone
+        : control === "export" ? exportButton
+        : control === "import" ? importButton
+        : null;
+      button?.click();
+      return button !== null;
+    },
+    tick: (file, on) => {
+      const item = (plan?.items ?? []).find((one) => one.file === file);
+      if (!item) {
+        return false;
+      }
+
+      const box = list.querySelector<HTMLInputElement>(`[data-id="${CSS.escape(item.id)}"] .sync-tick`);
+      if (!box) {
+        return false;
+      }
+
+      if (box.checked !== on) {
+        box.click();
+      }
+
+      return true;
+    },
+    setFolder: (path) => {
+      folderInput.value = path;
+      folderInput.dispatchEvent(new Event("change"));
+    },
+  };
 
   drawDirection();
   drawList();

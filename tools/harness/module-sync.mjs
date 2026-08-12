@@ -16,11 +16,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { open, wait, waitFor, waitUntilStable } from "./xlide-api.mjs";
 
-/** Every row the sync dialog is drawing, as "name:status" - one string, easy to compare. */
-const SYNC_ROWS = `(() => [...document.querySelectorAll(".sync-item")]
-  .map(r => r.querySelector(".sync-item-name").textContent + ":" + r.querySelector(".sync-chip").textContent)
-  .join(","))()`;
-
 const api = await open();
 let passed = 0;
 let failed = 0;
@@ -274,19 +269,22 @@ try {
   if (!opened.did) {
     throw new Error(`the sync dialog could not be opened from the toolbar: ${opened.detail}`);
   }
-  await api.until(`document.getElementById("sync-card") !== null`, { waitMs: 15000 }).catch(() => {});
-  await api.eval(`(() => { document.getElementById("sync-folder").value = ${JSON.stringify(folder)};
-    document.getElementById("sync-folder").dispatchEvent(new Event("change")); return "set"; })()`);
+
+  // Read and driven through ui.sync and act("syncDialog") now, not through querySelector: the
+  // dialog reports its own rows from the fields its render reads, and every action below lands
+  // on a control's own handler. The selectors this replaces were a test of themselves - a
+  // renamed class would have read as a broken dialog (2026-08-12).
+  await waitFor("the dialog to be open and readable", async () => (await api.ui()).sync !== null);
+  await api.act("syncDialog", { folder });
   // The folder having reached the dialog, and then the plan having been drawn AT ALL. Not that it
   // drew the right row: that is the check below and it has to stay able to fail.
   await waitFor("the dialog to take the folder", async () =>
-    String((await api.eval(
-      `(() => document.getElementById("sync-folder").value)()`)).result ?? "").length > 0);
+    ((await api.ui()).sync?.folder ?? "").length > 0);
 
   /*
    * THE PLAN HAS BEEN REDRAWN FOR THE NEW DIRECTION, which is not the same as there being rows.
    *
-   * Waiting for `.sync-item` to be non-empty is satisfied instantly by the EXPORT rows still on
+   * Waiting for rows to be non-empty is satisfied instantly by the EXPORT rows still on
    * screen from a moment ago, and the check below then reads the wrong plan and fails. Measured
    * exactly that on the shared planner, which takes longer to answer than the built-in one, so
    * the suite went red on one planner and green on the other for a reason that was purely the
@@ -295,17 +293,24 @@ try {
    * So: what the rows say has to CHANGE, and then stop changing. Neither asks whether the right
    * row is there - that is the check, and it can still fail.
    */
-  const rowsBefore = String((await api.eval(SYNC_ROWS)).result ?? "");
-  await api.eval(`(() => document.querySelector(".sync-direction[data-direction=import]").click())()`);
+  const rowsOf = async () => {
+    const sync = (await api.ui()).sync;
+    return (sync?.rows ?? []).map((row) => `${row.file}:${row.status}`).join(",");
+  };
+  const rowsBefore = await rowsOf();
+  await api.act("syncDialog", { press: "import" });
   await waitFor("the dialog to redraw for the import direction", async () =>
-    String((await api.eval(SYNC_ROWS)).result ?? "") !== rowsBefore);
-  await waitUntilStable(async () => String((await api.eval(SYNC_ROWS)).result ?? ""));
+    (await rowsOf()) !== rowsBefore);
+  await waitUntilStable(rowsOf);
 
-  const dialogRows = await api.eval(SYNC_ROWS);
-  check("the dialog drew the same plan the api answers",
-    String(dialogRows.result).includes("Helper.bas:update"));
+  // The RAW status, the same vocabulary the sync route's plan speaks - the chip's display word
+  // was the old comparison, one translation away from the thing being compared.
+  const planDrawn = await rowsOf();
+  check("the dialog drew the same plan the api answers", planDrawn.includes("Helper.bas:will-update"));
+  if (!planDrawn.includes("Helper.bas:will-update")) { console.log(`       drawn: ${planDrawn}`); }
 
-  await api.eval(`(() => [...document.querySelectorAll("#sync-foot button")].find(b => b.textContent === "Apply").click())()`);
+  const applied = await api.act("syncDialog", { press: "apply" });
+  if (!applied.did) { throw new Error(`Apply could not be pressed: ${applied.detail}`); }
   // CHANGED, not changed to the right thing. An apply that wrote the wrong text satisfies this and
   // still fails the check below, which is the whole point of not waiting for "ByTheDialog" here.
   await waitFor("the dialog's Apply to reach the module", async () =>
@@ -314,7 +319,7 @@ try {
   const afterDialog = (await api.readModule("Helper", project.projectId)).text;
   check("the dialog's Apply changed the module", afterDialog.includes("ByTheDialog"));
 
-  await api.eval(`(() => document.getElementById("sync-close").click())()`);
+  await api.act("syncDialog", { press: "close" });
 
   // Now put it back and do the identical thing through the route.
   await api.writeModule("Helper", beforeText, project.projectId);

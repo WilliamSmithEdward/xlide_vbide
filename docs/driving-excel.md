@@ -302,6 +302,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
+| Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }`; read it back on `ui.sync` |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
 | Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
@@ -338,6 +339,9 @@ ui.statusPosition;                // the bar's caret readout, "Ln 4, Col 7" - th
                                   // answer to where a Run would land, so hold it to the native caret
 ui.statusModule;                  // the bar's module name
 ui.search;                        // open, query, scope, matches, current
+ui.sync;                          // the sync dialog while open, null otherwise: direction, folder,
+                                  // mode, busy, status, and every row with its tick - the statuses
+                                  // in the same vocabulary the sync route's plan speaks
 ui.bookmarks;                     // the marked lines of the model on screen
 ui.longTasks;                     // main-thread stalls over 50ms, worst first
 
