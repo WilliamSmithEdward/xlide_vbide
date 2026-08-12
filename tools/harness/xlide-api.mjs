@@ -532,6 +532,16 @@ function clientFor(entry) {
     frame: (action) => call(`frame${query({ action })}`, { method: "POST" }),
 
     /**
+     * The session lifecycle. "cancelledShutdown" runs the real OnBeginShutdown without a
+     * process exit, so the session stops and the watchdog revives it - the exact path a
+     * developer meets when they cancel Excel's save prompt. This reply arrives BEFORE the
+     * teardown (it must, or it would ride the DebugServer that Stop disposes); AFTER it, this
+     * client's port goes dead. Reconnect with a fresh discover()/open({pid}) once the revived
+     * session has rewritten the discovery file with a new port and startedAt.
+     */
+    session: (action) => call(`session${query({ action })}`, { method: "POST" }),
+
+    /**
      * The developer's settings - read them, or change ONE without restating the rest.
      *
      * The page's own update takes the whole object, so changing one thing from a harness meant
@@ -1191,6 +1201,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
       case "palette": return api.paletteHide();
       case "frame": return api.frame(rest[0] ?? "show");
+      case "session": return api.session(rest[0] ?? "cancelledShutdown");
       case "eval": return api.eval(rest.join(" "));
       case "ui": return api.ui();
       // node xlide-api.mjs act closeActive / act expandWorkbook workbook TwinFixture.xlsm

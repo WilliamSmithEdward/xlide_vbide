@@ -7,9 +7,14 @@
  * its own invocation cannot be asserted on, so nobody tried. It answers the outcome now, and this
  * is the suite that became possible.
  *
- * The Watch panel is read-only from here by design: watches are added through the editor's own
- * dialogs, and this drives them the way a developer does, through the commands those dialogs hang
- * off. What is asserted is what the panel HOLDS, because that is the half a developer reads.
+ * The Watch panel is read-only from here by design, and it is a DESIGNATED EXCEPTION, not an
+ * oversight: a watch enters only through the editor's Add Watch dialog, the VBE object model has
+ * no Watches collection to add one from inside, and typing into the native modal is synthetic
+ * input this product does not do from a route (it tests the synthesizer, not the feature). So the
+ * value-tracking half - putting a row in and watching it change - is proven by Test-WatchPanel.ps1
+ * out of gate, which needs the VBA project trust setting. Here the panel's rows are only READ, and
+ * addWatch is driven the way a developer reaches the dialog, through the command it hangs off, then
+ * cancelled. What is asserted is what the panel HOLDS, because that is the half a developer reads.
  *
  * Run against DebugFixture.xlsm, the only fixture that compiles. Evaluating in a project that
  * does not compile raises a modal instead of answering, which tests the dialog guard rather than

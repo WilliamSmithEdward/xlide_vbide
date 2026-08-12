@@ -1938,3 +1938,34 @@ Consequence: a fixture is an input, and a suite may write into the session but n
 file. The instant a run can alter what the next run starts from, every green after the first is
 suspect, because the suite is no longer testing the fixture - it is testing what the previous run
 left behind.
+
+## 69. A route that tears down its own session has to answer before it does
+
+The one lifecycle a test could never reach was a shutdown begun and cancelled: OnBeginShutdown
+stops the session, then Excel asks about unsaved changes, and Cancel abandons the whole thing with
+no callback. The add-in is a corpse in a living host, and the watchdog is the only thing left to
+notice and revive it. It shipped once, guarded by code nothing exercised, because reaching it meant
+closing Excel by hand and pressing Cancel.
+
+A debug route can drive it - call the same OnBeginShutdown the host calls, without a real exit, and
+the watchdog reads the standing frame as a cancellation and revives. But OnBeginShutdown's first
+act is Stop(), and Stop() disposes the DebugServer that is serving the request that triggered it.
+Triggered inline, the teardown kills the connection before the reply is written, so the client sees
+a dropped socket rather than an answer, and a suite cannot tell "it worked" from "it died".
+
+The shape that works is respond first, tear down after: write the reply, let it flush, and only
+then post the teardown - to the host thread, where OnBeginShutdown must run. A short delay on a
+pool thread buys the flush; the host-thread post is what the whole rest of the door already uses.
+The reply says, in effect, "this port is about to die; reconnect."
+
+And the revival needs a witness that cannot be faked by nothing happening. "The session answers
+again" is satisfied by a session that never went away. The proof it cycled is a NEW session: the
+discovery file carries a startedAt and a port, both written afresh every time a DebugServer starts,
+and only a revival starts one. Assert the startedAt moved, then wait for the fresh session to seed
+- because a session seconds old is still starting its engine, and asking it a host-thread question
+too early times out, which is the same "not ready YET" that reads as a false failure everywhere
+else on this door.
+
+Consequence: any operation whose success destroys the channel that would report it has to report
+first. And "it is alive" is not "it is the same thing that was alive" - when the point is that
+something was torn down and rebuilt, the test has to see the seam, not just a pulse on either side.

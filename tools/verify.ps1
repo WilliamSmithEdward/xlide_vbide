@@ -644,12 +644,21 @@ if ($Deep) {
         Their path into a tier is routes: frame visibility, and something that can populate a
         watch. Until then they are hand-run documentation of what the api cannot yet do.
     #>
-    Step 'deep: completion menus and signature help' {
+    Step 'deep: completion menus, signature help, and the shutdown revival' {
         # The dot menu is the feature a developer touches most, and nothing in -Live asks it
         # anything: its receivers (a project class, a UDT, an enum, the host's type libraries)
         # exist only in LanguageFixture. Tolerates the two upstream analyzer defects filed as
         # xlide_vscode#11, and announces the day they start passing.
-        (Invoke-SuiteGroup 'LanguageFixture.xlsm' @('language-features.mjs')) -join '; '
+        #
+        # session-lifecycle runs LAST and alone in its session for a reason of its own: it
+        # drives a cancelled shutdown - OnBeginShutdown without a process exit - and proves the
+        # watchdog revives the session, which is the 2026-08-02 field failure (the add-in came
+        # back dead inside a living Excel) and had no test because reaching it meant closing
+        # Excel by hand and pressing Cancel. It costs ~30s: a teardown, two 1500ms watchdog
+        # ticks, and the revived session reseeding. That is depth, not speed, so it earns the
+        # -Deep tier rather than the per-commit gate. It leaves a healthy session behind, but
+        # a fresh one on a new port, so nothing may share its session after it - last is right.
+        (Invoke-SuiteGroup 'LanguageFixture.xlsm' @('language-features.mjs', 'session-lifecycle.mjs')) -join '; '
     }
 
     Step 'deep: non-ASCII round trip, then the randomized walk' {

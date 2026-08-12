@@ -950,6 +950,46 @@ internal sealed partial class AddInSession
                     DebugJsonContext.Default.DebugDrainReply));
             }
 
+            case "session" when request.Query.TryGetValue("action", out var sessionAction):
+            {
+                // The one lifecycle a developer meets and no test could reach: a shutdown begun
+                // and then cancelled. OnBeginShutdown stops the session before the host's save
+                // prompt appears, and pressing Cancel there leaves the host running with the
+                // add-in a corpse - the field failure of 2026-08-02. The watchdog is the guard,
+                // and until now it could only be exercised by closing Excel by hand.
+                if (sessionAction != "cancelledShutdown")
+                {
+                    return DebugError($"unknown action {sessionAction}; use cancelledShutdown");
+                }
+
+                var surface = _editorSurface;
+                if (surface is null)
+                {
+                    return DebugError("the surface is not up; there is nothing to tear down");
+                }
+
+                // RESPOND FIRST, TEAR DOWN AFTER, and the order is the whole trick. Triggering
+                // the shutdown inline would run Stop(), which disposes the very DebugServer
+                // writing this reply, so the client would see a dropped connection instead of an
+                // answer. The reply goes out here; a short pool-thread delay lets it flush, and
+                // only then is BeginSimulatedShutdown posted to the HOST thread, where it must
+                // run. The editor frame stays standing, so the watchdog reads a cancelled
+                // shutdown and revives the session - a fresh DebugServer on a fresh port with a
+                // fresh startedAt, rewritten into the discovery file, which is how the client
+                // reconnects. See lessons on the shutdown watchdog.
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    await System.Threading.Tasks.Task.Delay(400);
+                    surface.RunOnHostThread(() => XlideAddIn.Current?.BeginSimulatedShutdown());
+                });
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugCommandReply(true, 0,
+                        "the session will stop and revive; reconnect by re-reading "
+                        + "debug-api-<pid>.json, whose port and startedAt the revived session rewrites"),
+                    DebugJsonContext.Default.DebugCommandReply));
+            }
+
             case "history":
             {
                 // The session as a script. After a live investigation the useful sequence is

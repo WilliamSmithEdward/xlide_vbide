@@ -228,6 +228,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok. `closeNative` closes the HOST's pane window through the editor's own pane list - the host-originated direction, no unwritten-edits question, because the native close box asks none |
 | `palette` | `paletteHide()` | puts the Object Browser palette away the way its close box does: hidden, state intact. The summons is `command("objectBrowser")`, which never meant toggle |
 | `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
+| `session` | `session("cancelledShutdown")` | a shutdown begun and cancelled, so the watchdog revives the session (the 2026-08-02 dead-add-in field failure). The reply beats the teardown; after it this port is dead, so re-`discover()` for the revived session's new port and `startedAt`. `session-lifecycle.mjs` drives it in the `-Deep` gate |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched. Answers `{undone, from, to, modules, stopped}` - read `stopped`, because an undo can restore four modules and be refused the fifth, which leaves the project in neither state. It is the SHIM's undo, not the context-menu item; drive the item with `act("editorAction", {id: "xlide.undoRename"})` |
@@ -307,6 +308,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
 | Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
 | Bring the editor window back | `frame("show")` |
+| Drive a cancelled shutdown and watch the session revive | `session("cancelledShutdown")`, then re-`discover()` for the revived port |
 | Run script in the page | `ask(script)` - see the trap below |
 | Reload the page and wait for it | `reload()` |
 | Put the arrangement back | `resetLayout()` |
