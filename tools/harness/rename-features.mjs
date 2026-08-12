@@ -23,7 +23,6 @@ import { open } from "./xlide-api.mjs";
 
 const api = await open({});
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const project = await api.project();
 
 const broken = [];
 let checks = 0;
@@ -43,28 +42,33 @@ async function until(what, predicate, budgetMs = 15000) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-const textOf = async (module) => (await api.readModule(module, project.projectId)).text ?? "";
-
 /*
- * THE FIXTURE, NAMED, BEFORE ANYTHING IS ASSERTED.
+ * THE WORKBOOK THAT HOLDS THE FIXTURE, FOUND, not the one in front.
  *
- * `api.project()` answers about the workbook on screen, and with a second workbook open that may
- * not be this suite's. Without this the first read threw "no module named Consumer" from eight
- * frames down and took the process with it, which reads as a broken product rather than as the
- * wrong workbook being in front - and the modules this suite renames are the ones another
- * workbook is most likely to also have.
+ * `api.project()` answers about the workbook on screen, and with two open - which is the state
+ * the gate runs this in, beside TwinFixture - which is in front is a coin-flip Excel decides
+ * when it opens two files on one command line. The old guard trusted project() and THREW when
+ * it lost the flip ("TwinFixture has no Consumer"), which turned an ordering accident into a
+ * red suite. Asking every open project which one holds these modules removes the flip: the one
+ * that has Consumer, Watcher and Rival is this suite's, whichever is on screen.
  */
-for (const needed of ["Helpers", "Consumer", "Watcher", "Rival", "HelpersExtra"]) {
-  const held = await api.readModule(needed, project.projectId).catch(() => ({ text: null }));
-  if (held.text === null) {
-    // Thrown rather than process.exit: exiting from here with the client's socket still open
-    // trips a libuv assertion, which buries the one line worth reading under a crash.
-    throw new Error(
-      `this suite needs RenameFixture.xlsm, and ${project.projectId} has no ${needed}. `
-      + "Open it and run this again:\n"
-      + "  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\RenameFixture.xlsm");
-  }
+const NEEDED = ["Helpers", "Consumer", "Watcher", "Rival", "HelpersExtra"];
+let project = null;
+for (const candidate of (await api.projects()).projects) {
+  const held = await Promise.all(NEEDED.map((name) =>
+    api.readModule(name, candidate.projectId).then((m) => m.text != null).catch(() => false)));
+  if (held.every(Boolean)) { project = candidate; break; }
 }
+if (project === null) {
+  // Thrown rather than process.exit: exiting with the client's socket still open trips a libuv
+  // assertion, which buries the one line worth reading under a crash.
+  throw new Error(
+    "this suite needs RenameFixture.xlsm open, and no workbook holds its modules "
+    + `(${NEEDED.join(", ")}). Open it and run this again:\n`
+    + "  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\fixtures\\RenameFixture.xlsm");
+}
+
+const textOf = async (module) => (await api.readModule(module, project.projectId)).text ?? "";
 
 /**
  * The native pane, the surface and the page all naming the same module.
@@ -169,6 +173,36 @@ const definition = await api.act("definition", { word: "Recalculate" });
 console.log(`  ${JSON.stringify(definition).slice(0, 260)}`);
 check("definition resolves from a call site", definition.did, definition.detail);
 await parity("after resolving a definition");
+
+console.log("\nfind all references, as a list and as the dialog:");
+const refList = await api.act("references", { word: "Recalculate" });
+console.log(`  ${JSON.stringify(refList).slice(0, 200)}`);
+// The list crosses modules the way the declaration does: the qualified call in Consumer, the
+// call in Watcher, and the declaration in Helpers are all uses of this symbol.
+check("references lists the symbol's uses across modules",
+  refList.did && Array.isArray(refList.data) && refList.data.length >= 2,
+  `${(refList.data ?? []).length} reference(s)`);
+
+// The DATA form leaves nothing on screen; the dialog is the feature, and this is what the
+// audit's A16 was about - the act stopped one step short of the thing it is named for.
+const dialogsBeforeOpen = (await api.ui()).dialogs.map((d) => d.id);
+check("the data form leaves no dialog standing",
+  !dialogsBeforeOpen.some((id) => /references/i.test(id)), dialogsBeforeOpen.join(","));
+
+const refOpen = await api.act("references", { word: "Recalculate", open: 1 });
+console.log(`  ${JSON.stringify(refOpen).slice(0, 200)}`);
+check("references open=1 reports it opened the dialog", refOpen.did, refOpen.detail);
+const dialogsAfterOpen = await until("the references dialog to stand", async () => {
+  const open = (await api.ui()).dialogs.map((d) => d.id);
+  return open.some((id) => /references/i.test(id)) ? open : null;
+}).catch(() => []);
+check("and ui.dialogs sees the references dialog on screen",
+  dialogsAfterOpen.some((id) => /references/i.test(id)), dialogsAfterOpen.join(","));
+
+await api.act("closeDialogs");
+await until("the dialog to be gone again", async () =>
+  !(await api.ui()).dialogs.some((d) => /references/i.test(d.id))).catch(() => {});
+await parity("after the references dialog");
 
 console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
 for (const one of broken) { console.log("  ! " + one); }

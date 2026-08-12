@@ -199,18 +199,31 @@ async function showReferences(
     return;
   }
 
+  await showReferencesAt(bridge, model, position);
+}
+
+/**
+ * Opens the references dialog for one position, which is the FEATURE - the dialog renders a
+ * module with no tab open, which monaco's own peek cannot. The menu entry (Shift+F12) and the
+ * `references` act's open form both come here, through the same referencesAt lookup, so the two
+ * cannot list a different set. Answers whether a dialog was opened.
+ */
+async function showReferencesAt(
+  bridge: EditorBridge,
+  model: monaco.editor.ITextModel,
+  position: monaco.Position,
+): Promise<boolean> {
   const answer = await referencesAt(bridge, model, position);
   if (!answer) {
-    return;
+    return false;
   }
 
-  const word = { word: answer.word };
-  const found = answer.found;
-
-  openReferencesDialog(word?.word ?? "this symbol", found, {
+  openReferencesDialog(answer.word || "this symbol", answer.found, {
     navigate: (module, line, column, workbook) =>
       bridge.navigate(module, line, column, false, workbook ?? undefined),
   });
+
+  return true;
 }
 
 /** A range of nothing, which is what a refused rename has to carry alongside its reason. */
@@ -944,6 +957,11 @@ function boot(): void {
       const editor = workspace.activeEditor();
       const model = editor.getModel();
       return model ? referencesAt(bridge, model, new monaco.Position(line, column)) : null;
+    },
+    openReferences: async ({ line, column }) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      return model ? showReferencesAt(bridge, model, new monaco.Position(line, column)) : false;
     },
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),

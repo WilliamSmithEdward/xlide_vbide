@@ -361,6 +361,9 @@ await api.act("hover", { word: "Recalculate" });
 await api.act("completions", { line: 7, column: 12 });
 await api.act("quickFixes", { word: "Recalcualte" });
 await api.act("definition", { word: "Recalculate" });   // where F12 would go, caret unmoved
+await api.act("references", { word: "Recalculate" });   // the list Find All References would show
+await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the dialog standing,
+                                                //   as Shift+F12 does; ui.dialogs then sees it
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
 await api.undoRename();                                 // and puts it back
 await api.at("Recalculate");                    // colour as painted, and the markers on it

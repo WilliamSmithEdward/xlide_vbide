@@ -203,6 +203,12 @@ export interface DevSurfaceParts {
    * the menu entry calls, which is this one.
    */
   referencesAt(position: { line: number; column: number }): Promise<{ word: string; found: unknown[] } | null>;
+  /**
+   * Opens the references DIALOG at a position - the same one Shift+F12 opens, through the same
+   * lookup referencesAt uses. Answers whether a dialog was opened. The dialog's rendering is the
+   * feature (it draws a module with no tab open), so a data-only lookup does not exercise it.
+   */
+  openReferences(position: { line: number; column: number }): Promise<boolean>;
   openSettings(): void;
   openSponsors(): void;
   /** What the status line is showing, read from the element the render writes. */
@@ -1400,11 +1406,21 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       const where = positionFrom(args);
       if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
 
-      const answer = await parts.referencesAt({
-        line: where.position.lineNumber,
-        column: where.position.column,
-      });
+      const at = { line: where.position.lineNumber, column: where.position.column };
 
+      // open=1 LEAVES THE DIALOG STANDING, which is what Shift+F12 does and what the data-only
+      // default does not: the dialog's rendering is the feature (it draws a module with no tab
+      // open, which monaco's peek cannot), so a lookup that returns rows and shows nothing
+      // exercises everything except the thing the feature exists for. Both forms share one
+      // referencesAt lookup, so the dialog cannot list a set the data form would not.
+      if (flag(args.open, false)) {
+        const opened = await parts.openReferences(at);
+        return opened
+          ? { did: true, detail: `the references dialog is open at ${at.line}:${at.column}` }
+          : { did: false, detail: "the editor would not answer here; the host-active module is another" };
+      }
+
+      const answer = await parts.referencesAt(at);
       if (!answer) {
         return { did: false, detail: "the editor would not answer here; the host-active module is another" };
       }
