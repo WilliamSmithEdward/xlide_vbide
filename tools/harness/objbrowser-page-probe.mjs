@@ -45,8 +45,19 @@ const DRIVE = `(async () => {
     !!document.getElementById('objbrowser-splitter')
       && !!detailRow('signature') && !!detailRow('context') && !!detailRow('description'));
 
+  // Typing settles before the panes rebuild (the search debounces at 150ms, like the find
+  // widget), so a query's effect is polled for rather than read on the next line.
+  const settled = async (condition) => {
+    for (let waited = 0; waited < 3000; waited += 100) {
+      if (condition()) { return true; }
+      await sleep(100);
+    }
+    return condition();
+  };
+
   // Group: filters the left pane by name and leaves the members pane alone.
   type('module');
+  await settled(() => names('modules').join(',') === 'Module1');
   check('Group filters the types pane', names('modules').join(',') === 'Module1', names('modules').join(','));
   check('Group leaves the members pane alone', rows('members').length === 0);
 
@@ -61,9 +72,11 @@ const DRIVE = `(async () => {
   // Object: filters the selected type's members and leaves the list alone.
   mode('object');
   type('');
+  await settled(() => names('modules').length === 2);
   clickRow('modules', 'Module1');
   for (let waited = 0; rows('members').length < 2 && waited < 5000; waited += 100) await sleep(100);
   type('gr');
+  await settled(() => names('members').join(',') === 'Greet');
   check('Object filters the selected types members', names('members').join(',') === 'Greet',
     names('members').join(','));
   check('Object leaves the types pane alone', names('modules').length === 2);
@@ -80,6 +93,7 @@ const DRIVE = `(async () => {
 
   // Description: a library member that carries one shows it in the third row.
   type('');
+  await settled(() => names('members').length >= 2);
   picker().selectedIndex = 1;
   picker().dispatchEvent(new Event('change', { bubbles: true }));
   for (let waited = 0; names('modules').length < 3 && waited < 5000; waited += 100) await sleep(100);

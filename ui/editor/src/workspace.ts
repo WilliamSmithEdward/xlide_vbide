@@ -28,6 +28,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
 import { resizeAt } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
+import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
 
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
@@ -855,7 +856,6 @@ export class Workspace {
       cells.forEach((cell, cellIndex) => {
         cell.style.flex = `${node.sizes[cellIndex] ?? 1} 1 0`;
       });
-      this.handlers.layoutChanged();
     };
 
     splitter.addEventListener("pointerdown", (event) => {
@@ -865,6 +865,7 @@ export class Workspace {
 
       event.preventDefault();
       splitter.setPointerCapture(event.pointerId);
+      beginLiveDrag();
 
       let last = node.direction === "row" ? event.clientX : event.clientY;
       const move = (moved: PointerEvent): void => {
@@ -877,6 +878,7 @@ export class Workspace {
         splitter.removeEventListener("pointermove", move);
         splitter.removeEventListener("pointerup", end);
         splitter.removeEventListener("pointercancel", end);
+        endLiveDrag(() => this.handlers.layoutChanged());
       };
 
       splitter.addEventListener("pointermove", move);
@@ -891,6 +893,7 @@ export class Workspace {
       if (step !== 0) {
         event.preventDefault();
         apply(step);
+        this.handlers.layoutChanged();
       }
     });
 

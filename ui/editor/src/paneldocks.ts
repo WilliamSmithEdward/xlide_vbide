@@ -27,6 +27,7 @@ import {
   type TreeSplit,
 } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
+import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
 
 export type DockSide = "left" | "right" | "top" | "bottom";
 
@@ -817,11 +818,13 @@ export class PanelDocks {
     const splitter = this.dockSplitters[side];
     const horizontal = side === "top" || side === "bottom";
 
+    // Geometry only: automaticLayout's observer tracks the editors during a drag, and the one
+    // settling layout runs at the drag's end (see livedrag.ts). The keyboard path below lays
+    // out immediately - a discrete step deserves its frame.
     const apply = (delta: number): void => {
       const grow = side === "left" || side === "top" ? delta : -delta;
       this.sizes[side] = Math.max(MIN_PANE, Math.min(900, this.sizes[side] + grow));
       this.dockElements[side].style.setProperty("--dock-size", `${this.sizes[side]}px`);
-      this.handlers.layoutChanged();
     };
 
     splitter.addEventListener("pointerdown", (event) => {
@@ -831,6 +834,7 @@ export class PanelDocks {
 
       event.preventDefault();
       splitter.setPointerCapture(event.pointerId);
+      beginLiveDrag();
       let last = horizontal ? event.clientY : event.clientX;
 
       const move = (moved: PointerEvent): void => {
@@ -843,6 +847,7 @@ export class PanelDocks {
         splitter.removeEventListener("pointermove", move);
         splitter.removeEventListener("pointerup", end);
         splitter.removeEventListener("pointercancel", end);
+        endLiveDrag(() => this.handlers.layoutChanged());
         this.persist();
       };
 
@@ -858,6 +863,7 @@ export class PanelDocks {
       if (step !== 0) {
         event.preventDefault();
         apply(step);
+        this.handlers.layoutChanged();
         this.persist();
       }
     });
@@ -886,7 +892,6 @@ export class PanelDocks {
       cells.forEach((cell, cellIndex) => {
         cell.style.flex = `${node.sizes[cellIndex] ?? 1} 1 0`;
       });
-      this.handlers.layoutChanged();
     };
 
     splitter.addEventListener("pointerdown", (event) => {
@@ -896,6 +901,7 @@ export class PanelDocks {
 
       event.preventDefault();
       splitter.setPointerCapture(event.pointerId);
+      beginLiveDrag();
       let last = node.direction === "row" ? event.clientX : event.clientY;
 
       const move = (moved: PointerEvent): void => {
@@ -908,6 +914,7 @@ export class PanelDocks {
         splitter.removeEventListener("pointermove", move);
         splitter.removeEventListener("pointerup", end);
         splitter.removeEventListener("pointercancel", end);
+        endLiveDrag(() => this.handlers.layoutChanged());
         this.persist();
       };
 
@@ -923,6 +930,7 @@ export class PanelDocks {
       if (step !== 0) {
         event.preventDefault();
         apply(step);
+        this.handlers.layoutChanged();
         this.persist();
       }
     });

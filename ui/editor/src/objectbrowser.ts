@@ -461,7 +461,10 @@ export function bootObjectBrowserPage(): void {
 
     // Object mode leaves this pane alone. Group mode filters it by name; All mode also
     // keeps a type whose loaded members match, so the other pane has something to show.
-    for (const type of [...types].sort(byName)) {
+    // Already sorted: the list is sorted ONCE where it arrives (adoptScope), not per render -
+    // per render meant per keystroke of the search box, a copy and sort of the whole library
+    // for every character typed (the audit's C17, 2026-08-12).
+    for (const type of types) {
       if (wanted.length > 0 && mode !== "object" && !type.name.toLowerCase().includes(wanted)) {
         if (mode === "group") {
           continue;
@@ -517,7 +520,8 @@ export function bootObjectBrowserPage(): void {
     if (!typesOf.has(next.name)) {
       void host.types(next.name).then((rows) => {
         if (rows && scope === next) {
-          typesOf.set(next.name, rows);
+          // Sorted here, once, so every render just walks it.
+          typesOf.set(next.name, [...rows].sort(byName));
           renderTypes();
           renderMembers();
         }
@@ -535,9 +539,16 @@ export function bootObjectBrowserPage(): void {
     }
   });
 
+  // Settled, not per keystroke: both panes rebuild on the query, and rebuilding them for
+  // every character of a word being typed is churn the reader never sees as rows - the same
+  // 150ms the find widget already waits (searchwidget.ts, its refind timer).
+  let searchSettled: number | undefined;
   search.addEventListener("input", () => {
-    renderTypes();
-    renderMembers();
+    window.clearTimeout(searchSettled);
+    searchSettled = window.setTimeout(() => {
+      renderTypes();
+      renderMembers();
+    }, 150);
   });
 
   scopePick.addEventListener("change", () => {
