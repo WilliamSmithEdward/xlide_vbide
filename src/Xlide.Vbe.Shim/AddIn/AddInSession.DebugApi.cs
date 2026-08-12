@@ -31,8 +31,115 @@ internal sealed partial class AddInSession
     private DebugServer? _debugServer;
 
     private static DebugServer.DebugReply DebugError(string error) =>
-        DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-            new DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply));
+        DebugServer.DebugReply.Json(HostError(error));
+
+    /// <summary>
+    /// The error reply as the ON-HOST switch answers it: the serialized string, because
+    /// AnswerDebugRequestOnHost returns strings and the dispatch wraps them. This existing
+    /// as a name is what stops the serializer call being spelled out at every refusal -
+    /// it was spelled out twenty-eight times (the audit's B13). DebugError above is the
+    /// pool-side wrapping of the same convention.
+    /// </summary>
+    private static string HostError(string error) =>
+        System.Text.Json.JsonSerializer.Serialize(
+            new DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply);
+
+    /// <summary>The bare "it ran" the on-host action routes answer when the act itself is the
+    /// whole story. Anything with an outcome to report builds its reply by hand.</summary>
+    private static string HostOk(string detail = "") =>
+        System.Text.Json.JsonSerializer.Serialize(
+            new DebugCommandReply(true, 0, detail), DebugJsonContext.Default.DebugCommandReply);
+
+    /// <summary>Shapes a page script's answer the one way every eval-style route answers it:
+    /// the script's error verbatim, or the answer with its result unwrapped for the caller.</summary>
+    private static DebugServer.DebugReply PageReply(
+        (bool Answered, int ErrorCode, string Result, string? Error) ran) =>
+        ran.Error is { } error
+            ? DebugError(error)
+            : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                new DebugEvalReply(ran.Answered, ran.ErrorCode, ran.Result, Unwrap(ran.Result)),
+                DebugJsonContext.Default.DebugEvalReply));
+
+    /// <summary>
+    /// Polls until the page's bridge answers, for the routes that just tore the page down and
+    /// must not report on the page that is going away. Ready is the page's own word for it: a
+    /// page part way through booting can run script and still have no bridge.
+    /// </summary>
+    private bool WaitForWorkspace(long budgetMs)
+    {
+        var began = Environment.TickCount64;
+        while (Environment.TickCount64 - began < budgetMs)
+        {
+            Thread.Sleep(150);
+            var probe = RunPageScript("!!(window.xlideBridge && window.xlideBridge.workspace)", null, 1500);
+            if (probe.Error is null && probe.Result.Trim() == "true")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Min, median, p95 and max over the samples - the one quantile convention, so the
+    /// bench and trip routes cannot come to mean two different things by p95.</summary>
+    private static DebugServer.DebugReply BenchReply(string what, List<double> samples, string detail)
+    {
+        var ordered = samples.OrderBy(one => one).ToArray();
+        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+            new DebugBenchReply(
+                what,
+                ordered.Length,
+                ordered[0],
+                ordered[ordered.Length / 2],
+                ordered[Math.Min(ordered.Length - 1, (int)(ordered.Length * 0.95))],
+                ordered[^1],
+                [.. samples],
+                detail),
+            DebugJsonContext.Default.DebugBenchReply));
+    }
+
+    /// <summary>
+    /// One crossing to the host thread: queues the work, waits the standard three seconds, and
+    /// samples the crossing for the stats route. Every marshaled request doubles as a probe of
+    /// host responsiveness - INCLUDING the journal's nested state read, whose hand-rolled copy
+    /// of this scaffold was the one crossing the perf route could not see (the audit's B13).
+    /// The caller owns disposal, because the dispatch's blocked path keeps waiting on Done
+    /// after dismissing the dialog that owned the thread.
+    /// </summary>
+    private readonly record struct HostCrossing(bool Answered, ManualResetEventSlim Done) : IDisposable
+    {
+        public void Dispose() => Done.Dispose();
+    }
+
+    private static HostCrossing CrossToHost(EditorSurface host, Action work)
+    {
+        var done = new ManualResetEventSlim(false);
+        var began = Environment.TickCount64;
+        try
+        {
+            host.RunOnHostThread(() =>
+            {
+                try
+                {
+                    work();
+                }
+                finally
+                {
+                    done.Set();
+                }
+            });
+        }
+        catch
+        {
+            done.Dispose();
+            throw;
+        }
+
+        var answered = done.Wait(TimeSpan.FromSeconds(3));
+        PerfCounters.Marshal(Environment.TickCount64 - began);
+        return new HostCrossing(answered, done);
+    }
 
     /// <summary>
     /// A boolean query argument, read one way.
@@ -247,9 +354,7 @@ internal sealed partial class AddInSession
 
             if (parsed.RootElement.TryGetProperty("error", out var error))
             {
-                return (false, System.Text.Json.JsonSerializer.Serialize(
-                    new DebugErrorReply(error.GetString() ?? "the script failed"),
-                    DebugJsonContext.Default.DebugErrorReply));
+                return (false, HostError(error.GetString() ?? "the script failed"));
             }
 
             return (false, parsed.RootElement.TryGetProperty("value", out var value)
@@ -1080,8 +1185,7 @@ internal sealed partial class AddInSession
                 string? sessionState = null;
                 if (_editorSurface is { } journalHost)
                 {
-                    using var ready = new ManualResetEventSlim(false);
-                    journalHost.RunOnHostThread(() =>
+                    using var stateCrossing = CrossToHost(journalHost, () =>
                     {
                         try
                         {
@@ -1092,13 +1196,9 @@ internal sealed partial class AddInSession
                         {
                             sessionState = $"{{\"error\":\"{ex.GetType().Name}\"}}";
                         }
-                        finally
-                        {
-                            ready.Set();
-                        }
                     });
 
-                    if (!ready.Wait(TimeSpan.FromSeconds(3)))
+                    if (!stateCrossing.Answered)
                     {
                         sessionState = null;
                     }
@@ -1176,11 +1276,7 @@ internal sealed partial class AddInSession
                     : $"null, null, {System.Text.Json.Nodes.JsonValue.Create(atWord)!.ToJsonString()}";
 
                 var ui = RunPageScript($"window.xlideUi.state({arguments})", null, WaitMilliseconds(request, 5000));
-                return ui.Error is { } uiError
-                    ? DebugError(uiError)
-                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                        new DebugEvalReply(ui.Answered, ui.ErrorCode, ui.Result, Unwrap(ui.Result)),
-                        DebugJsonContext.Default.DebugEvalReply));
+                return PageReply(ui);
             }
 
             case "act" when request.Query.TryGetValue("do", out var actionName) && actionName.Length > 0:
@@ -1206,11 +1302,7 @@ internal sealed partial class AddInSession
                     null,
                     WaitMilliseconds(request, 8000));
 
-                return act.Error is { } actError
-                    ? DebugError(actError)
-                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                        new DebugEvalReply(act.Answered, act.ErrorCode, act.Result, Unwrap(act.Result)),
-                        DebugJsonContext.Default.DebugEvalReply));
+                return PageReply(act);
             }
 
             case "eval" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
@@ -1225,11 +1317,7 @@ internal sealed partial class AddInSession
                 request.Query.TryGetValue("surface", out var which);
 
                 var run = RunPageScript(script, which, WaitMilliseconds(request, 5000));
-                return run.Error is { } evalError
-                    ? DebugError(evalError)
-                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                        new DebugEvalReply(run.Answered, run.ErrorCode, run.Result, Unwrap(run.Result)),
-                        DebugJsonContext.Default.DebugEvalReply));
+                return PageReply(run);
             }
 
             case "await" when request.Body.Length > 0 || request.Query.ContainsKey("script"):
@@ -1532,18 +1620,7 @@ internal sealed partial class AddInSession
                     return DebugError($"the benchmark ran nothing: {detail}");
                 }
 
-                var ordered = samples.OrderBy(one => one).ToArray();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugBenchReply(
-                        what,
-                        ordered.Length,
-                        ordered[0],
-                        ordered[ordered.Length / 2],
-                        ordered[Math.Min(ordered.Length - 1, (int)(ordered.Length * 0.95))],
-                        ordered[^1],
-                        [.. samples],
-                        detail),
-                    DebugJsonContext.Default.DebugBenchReply));
+                return BenchReply(what, samples, detail);
             }
 
             case "trip" when request.Query.TryGetValue("what", out var tripWhat) && tripWhat.Length > 0:
@@ -1622,18 +1699,7 @@ internal sealed partial class AddInSession
                             + "perf().marshalMs, which every api request already samples from the far side");
                 }
 
-                var tripOrdered = tripSamples.OrderBy(one => one).ToArray();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugBenchReply(
-                        tripWhat,
-                        tripOrdered.Length,
-                        tripOrdered[0],
-                        tripOrdered[tripOrdered.Length / 2],
-                        tripOrdered[Math.Min(tripOrdered.Length - 1, (int)(tripOrdered.Length * 0.95))],
-                        tripOrdered[^1],
-                        [.. tripSamples],
-                        tripDetail),
-                    DebugJsonContext.Default.DebugBenchReply));
+                return BenchReply(tripWhat, tripSamples, tripDetail);
             }
 
             case "layout" when Flag(request, "reset"):
@@ -1653,18 +1719,7 @@ internal sealed partial class AddInSession
 
                 _ = RunPageScript(reset, null, 3000);
 
-                var back = Environment.TickCount64;
-                var restored = false;
-                while (Environment.TickCount64 - back < WaitMilliseconds(request, 20000))
-                {
-                    Thread.Sleep(150);
-                    var probe = RunPageScript("!!(window.xlideBridge && window.xlideBridge.workspace)", null, 1500);
-                    if (probe.Error is null && probe.Result.Trim() == "true")
-                    {
-                        restored = true;
-                        break;
-                    }
-                }
+                var restored = WaitForWorkspace(WaitMilliseconds(request, 20000));
 
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugCommandReply(restored, 0), DebugJsonContext.Default.DebugCommandReply));
@@ -1697,20 +1752,10 @@ internal sealed partial class AddInSession
                 var startedAt = Environment.TickCount64;
                 _ = RunPageScript("location.reload()", null, 2000);
 
-                // Ready is the PAGE's own word for it, not a script answering: a page part
-                // way through booting can run script and still have no bridge.
+                // The budget runs from before the reload was posted, so the wait gets what is
+                // left of it rather than a fresh allowance.
                 var reloadBudget = WaitMilliseconds(request, 20000);
-                var ready = false;
-                while (Environment.TickCount64 - startedAt < reloadBudget)
-                {
-                    Thread.Sleep(150);
-                    var probe = RunPageScript("!!(window.xlideBridge && window.xlideBridge.workspace)", null, 1500);
-                    if (probe.Error is null && probe.Result.Trim() == "true")
-                    {
-                        ready = true;
-                        break;
-                    }
-                }
+                var ready = WaitForWorkspace(reloadBudget - (Environment.TickCount64 - startedAt));
 
                 var stamp = reloadHost.PageBuildStamp ?? "(none reported)";
                 var bundle = BundleBuiltUtc();
@@ -1890,11 +1935,7 @@ internal sealed partial class AddInSession
                     """;
 
                 var typed = RunPageScript(script, null, WaitMilliseconds(request, 8000));
-                return typed.Error is { } typeError
-                    ? DebugError(typeError)
-                    : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                        new DebugEvalReply(typed.Answered, typed.ErrorCode, typed.Result, Unwrap(typed.Result)),
-                        DebugJsonContext.Default.DebugEvalReply));
+                return PageReply(typed);
             }
 
             case "mark" when request.Query.TryGetValue("text", out var marker) && marker.Length > 0:
@@ -2023,10 +2064,10 @@ internal sealed partial class AddInSession
         // hang. See the timeout path below.
         var standingBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
 
+        // The crossing samples PerfCounters.Marshal itself: every marshaled request doubles as
+        // a probe of the host thread's responsiveness, and the stats route serves the sample.
         string? answer = null;
-        using var done = new ManualResetEventSlim(false);
-        var marshalStarted = Environment.TickCount64;
-        host.RunOnHostThread(() =>
+        using var crossing = CrossToHost(host, () =>
         {
             try
             {
@@ -2034,20 +2075,9 @@ internal sealed partial class AddInSession
             }
             catch (Exception ex)
             {
-                answer = System.Text.Json.JsonSerializer.Serialize(
-                    new DebugErrorReply($"{ex.GetType().Name}: {ex.Message}"), DebugJsonContext.Default.DebugErrorReply);
-            }
-            finally
-            {
-                done.Set();
+                answer = HostError($"{ex.GetType().Name}: {ex.Message}");
             }
         });
-
-        var answered = done.Wait(TimeSpan.FromSeconds(3));
-
-        // Every marshaled request doubles as a probe of the host thread's responsiveness;
-        // the stats route serves what this line measures.
-        PerfCounters.Marshal(Environment.TickCount64 - marshalStarted);
 
         // Whatever appeared while this request ran, the door raised - and the dangerous case
         // is the one that ANSWERS successfully and leaves a modal standing behind it: Run
@@ -2061,14 +2091,14 @@ internal sealed partial class AddInSession
         // (2026-08-06).
         RememberRaisedDialogs(standingBefore, keep: request.Query.ContainsKey("keep"));
 
-        if (answered && answer is not null)
+        if (crossing.Answered && answer is not null)
         {
             return DebugServer.DebugReply.Json(answer);
         }
 
         // A request that asked to keep what it opens is not rescued from it: opening a modal
         // was the point, and the caller dismisses it when finished.
-        return AnswerBlockedRequest(standingBefore, done, () => answer, request.Query.ContainsKey("keep"));
+        return AnswerBlockedRequest(standingBefore, crossing.Done, () => answer, request.Query.ContainsKey("keep"));
     }
 
     /// <summary>
@@ -2712,9 +2742,7 @@ internal sealed partial class AddInSession
                 }
                 catch (Exception ex)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"the engine's copy could not be read ({ex.GetType().Name})"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError($"the engine's copy could not be read ({ex.GetType().Name})");
                 }
             }
 
@@ -2883,9 +2911,7 @@ internal sealed partial class AddInSession
                 // a second set of bugs.
                 if (_analysis is not { } outlineAnalysis)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply("the analysis engine is not up"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError("the analysis engine is not up");
                 }
 
                 request.Query.TryGetValue("project", out var outlineProject);
@@ -2893,8 +2919,7 @@ internal sealed partial class AddInSession
                 var outlineOwner = ResolveNamedProject(outlineProject, out var outlineUnknown);
                 if (outlineUnknown is not null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(outlineUnknown), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(outlineUnknown);
                 }
 
                 try
@@ -2906,9 +2931,7 @@ internal sealed partial class AddInSession
 
                     if (answered is null)
                     {
-                        return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply($"'{outlineModule}' could not be outlined"),
-                            DebugJsonContext.Default.DebugErrorReply);
+                        return HostError($"'{outlineModule}' could not be outlined");
                     }
 
                     return System.Text.Json.JsonSerializer.Serialize(
@@ -2919,9 +2942,7 @@ internal sealed partial class AddInSession
                 }
                 catch (Exception ex)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"outline failed: {ex.Message.Trim()}"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError($"outline failed: {ex.Message.Trim()}");
                 }
             }
 
@@ -2943,8 +2964,7 @@ internal sealed partial class AddInSession
                     ?? _shownProject;
                 if (componentUnknown is not null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(componentUnknown), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(componentUnknown);
                 }
 
                 try
@@ -2974,11 +2994,8 @@ internal sealed partial class AddInSession
 
                             if (kind == 0)
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply(
-                                        $"kind '{kindText}' is not one of 1/module/standard, "
-                                        + "2/class, 3/form"),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError(
+                                    $"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
                             }
 
                             using var project = FindProjectByDisplayName(componentProject)
@@ -2987,9 +3004,7 @@ internal sealed partial class AddInSession
                             using var added = components?.CallObject("Add", kind);
                             if (added is null)
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply("the project would not add a component"),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError("the project would not add a component");
                             }
 
                             // Named here rather than left as Module1, because a fixture is its
@@ -3012,10 +3027,8 @@ internal sealed partial class AddInSession
                                     try { components?.InvokeWithObject("Remove", added); }
                                     catch (Exception undo) { Log.Warn($"component: could not undo the add ({undo.GetType().Name})"); }
 
-                                    return System.Text.Json.JsonSerializer.Serialize(
-                                        new DebugErrorReply(
-                                            $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})"),
-                                        DebugJsonContext.Default.DebugErrorReply);
+                                    return HostError(
+                                        $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})");
                                 }
                             }
 
@@ -3038,9 +3051,7 @@ internal sealed partial class AddInSession
                         {
                             if (componentName is not { Length: > 0 })
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply("remove needs a name"),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError("remove needs a name");
                             }
 
                             // THE PRODUCT'S OWN REMOVAL, not a second one written here.
@@ -3055,9 +3066,7 @@ internal sealed partial class AddInSession
                             var refused = RemoveComponent(componentName, componentProject);
                             if (refused is not null)
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply(refused),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError(refused);
                             }
 
                             return System.Text.Json.JsonSerializer.Serialize(
@@ -3074,17 +3083,13 @@ internal sealed partial class AddInSession
                                 || !request.Query.TryGetValue("newName", out var newName)
                                 || newName.Length == 0)
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply("rename needs name and newName"),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError("rename needs name and newName");
                             }
 
                             using var target = FindComponent(componentName, componentOwner, out _);
                             if (target is null)
                             {
-                                return System.Text.Json.JsonSerializer.Serialize(
-                                    new DebugErrorReply($"'{componentName}' is not a component of this project"),
-                                    DebugJsonContext.Default.DebugErrorReply);
+                                return HostError($"'{componentName}' is not a component of this project");
                             }
 
                             target.SetString("Name", newName);
@@ -3108,17 +3113,13 @@ internal sealed partial class AddInSession
                         }
 
                         default:
-                            return System.Text.Json.JsonSerializer.Serialize(
-                                new DebugErrorReply($"unknown action {componentAction}; use add, remove or rename"),
-                                DebugJsonContext.Default.DebugErrorReply);
+                            return HostError($"unknown action {componentAction}; use add, remove or rename");
                     }
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"component: {componentAction} failed", ex);
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"{componentAction} failed: {ex.Message.Trim()}"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError($"{componentAction} failed: {ex.Message.Trim()}");
                 }
             }
 
@@ -3136,8 +3137,7 @@ internal sealed partial class AddInSession
                 var paneOwner = ResolveNamedProject(paneProject, out var paneUnknown) ?? _shownProject;
                 if (paneUnknown is not null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(paneUnknown), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(paneUnknown);
                 }
 
                 switch (paneAction)
@@ -3156,11 +3156,7 @@ internal sealed partial class AddInSession
                         // replied ok, which is the same lie the write route told about a module
                         // that is not there (2026-08-09).
                         var showed = ShowModule(paneModule, DisplayFromProjectId(paneOwner));
-                        return showed is null
-                            ? System.Text.Json.JsonSerializer.Serialize(
-                                new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply)
-                            : System.Text.Json.JsonSerializer.Serialize(
-                                new DebugErrorReply(showed), DebugJsonContext.Default.DebugErrorReply);
+                        return showed is null ? HostOk() : HostError(showed);
 
                     case "close":
                     {
@@ -3205,9 +3201,7 @@ internal sealed partial class AddInSession
                     }
 
                     default:
-                        return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply($"unknown action {paneAction}; use open, close or closeNative"),
-                            DebugJsonContext.Default.DebugErrorReply);
+                        return HostError($"unknown action {paneAction}; use open, close or closeNative");
                 }
             }
 
@@ -3221,9 +3215,7 @@ internal sealed partial class AddInSession
                 // intact, and the next summons presents the same page.
                 if (paletteAction != "hide")
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"unknown action {paletteAction}; use hide (objectBrowser is the summons)"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError($"unknown action {paletteAction}; use hide (objectBrowser is the summons)");
                 }
 
                 if (_browserPalette is not { } paletteToHide)
@@ -3250,9 +3242,7 @@ internal sealed partial class AddInSession
                 // sending window messages from OUTSIDE the process could exercise it.
                 if (_frame == 0)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply("the session has no editor frame to act on"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError("the session has no editor frame to act on");
                 }
 
                 switch (frameAction)
@@ -3289,9 +3279,7 @@ internal sealed partial class AddInSession
                     }
 
                     default:
-                        return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply($"unknown action {frameAction}; use close or show"),
-                            DebugJsonContext.Default.DebugErrorReply);
+                        return HostError($"unknown action {frameAction}; use close or show");
                 }
             }
 
@@ -3475,8 +3463,7 @@ internal sealed partial class AddInSession
                 if (ResolveNamedProject(wantedProject, out var projectUnknown) is null
                     && projectUnknown is not null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(projectUnknown), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(projectUnknown);
                 }
 
                 using var project = FindProjectByDisplayName(wantedProject)
@@ -3484,9 +3471,7 @@ internal sealed partial class AddInSession
 
                 if (project is null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply("no VBA project is active"),
-                        DebugJsonContext.Default.DebugErrorReply);
+                    return HostError("no VBA project is active");
                 }
 
                 var rows = new List<DebugComponentRow>();
@@ -3573,8 +3558,7 @@ internal sealed partial class AddInSession
                 var command = VbeCommands.ForName(name);
                 if (command == 0)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"unknown command name {name}"), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError($"unknown command name {name}");
                 }
 
                 var outcome = ExecuteEditorCommand(command);
@@ -3606,8 +3590,7 @@ internal sealed partial class AddInSession
                 // line the caller asked for either way.
                 if (GoTo(module, breakLine, 1, project) is { } lost)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(lost), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(lost);
                 }
 
                 // Read against the module the GoTo above has just made the shown one, in the
@@ -3651,8 +3634,7 @@ internal sealed partial class AddInSession
                 var projectId = ResolveNamedProject(projectDisplay, out var moduleUnknown);
                 if (moduleUnknown is not null)
                 {
-                    return System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply(moduleUnknown), DebugJsonContext.Default.DebugErrorReply);
+                    return HostError(moduleUnknown);
                 }
 
                 if (request.Body.Length > 0)
@@ -3668,11 +3650,7 @@ internal sealed partial class AddInSession
                     // it by reading the line count back, which is the right instinct and should not
                     // have been necessary (2026-08-09).
                     var complaint = WriteModule(moduleName, request.Body, projectId, hostRewrite: true);
-                    return complaint is null
-                        ? System.Text.Json.JsonSerializer.Serialize(
-                            new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply)
-                        : System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply(complaint), DebugJsonContext.Default.DebugErrorReply);
+                    return complaint is null ? HostOk() : HostError(complaint);
                 }
 
                 // live=1 reads the SURFACE's copy rather than the workbook's.
@@ -3686,9 +3664,7 @@ internal sealed partial class AddInSession
                 {
                     var live = _editorSurface?.TextOf(moduleName, DisplayFromProjectId(projectId));
                     return live is null
-                        ? System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply($"the surface holds no text for {moduleName}"),
-                            DebugJsonContext.Default.DebugErrorReply)
+                        ? HostError($"the surface holds no text for {moduleName}")
                         : System.Text.Json.JsonSerializer.Serialize(
                             new DebugModuleReply(moduleName, DisplayFromProjectId(projectId), live),
                             DebugJsonContext.Default.DebugModuleReply);
@@ -3697,8 +3673,7 @@ internal sealed partial class AddInSession
                 using var found = FindComponent(moduleName, projectId, out var foundProject);
                 var source = found is null ? null : ProjectReader.ReadSource(found);
                 return source is null
-                    ? System.Text.Json.JsonSerializer.Serialize(
-                        new DebugErrorReply($"no module named {moduleName}"), DebugJsonContext.Default.DebugErrorReply)
+                    ? HostError($"no module named {moduleName}")
                     : System.Text.Json.JsonSerializer.Serialize(
                         new DebugModuleReply(moduleName, DisplayFromProjectId(foundProject), source),
                         DebugJsonContext.Default.DebugModuleReply);
@@ -3725,21 +3700,17 @@ internal sealed partial class AddInSession
                     request.Query.TryGetValue("project", out var caretProject);
                     if (GoTo(caretModule, caretLine, caretColumn, caretProject) is { } lost)
                     {
-                        return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply(lost), DebugJsonContext.Default.DebugErrorReply);
+                        return HostError(lost);
                     }
                 }
 
                 _editorSurface?.SetCaret(caretLine, caretColumn);
-                return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, 0, "the caret was set"),
-                    DebugJsonContext.Default.DebugCommandReply);
+                return HostOk("the caret was set");
             }
 
             case "placement":
                 RefreshSurfacePlacement();
-                return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugCommandReply(true, 0), DebugJsonContext.Default.DebugCommandReply);
+                return HostOk();
 
             default:
                 /*
@@ -3756,13 +3727,11 @@ internal sealed partial class AddInSession
                  * what it is nearly always going to be: a route name is copied from the docs and
                  * an argument is computed.
                  */
-                return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugErrorReply(
-                        $"no route '{request.Route}' accepted this request. Either there is no such "
-                        + "route, or there is and its required arguments were missing or rejected: "
-                        + "many routes are guarded on theirs. "
-                        + $"Given: {(request.Query.Count == 0 ? "(no arguments)" : string.Join(", ", request.Query.Select(pair => $"{pair.Key}={pair.Value}")))}"),
-                    DebugJsonContext.Default.DebugErrorReply);
+                return HostError(
+                    $"no route '{request.Route}' accepted this request. Either there is no such "
+                    + "route, or there is and its required arguments were missing or rejected: "
+                    + "many routes are guarded on theirs. "
+                    + $"Given: {(request.Query.Count == 0 ? "(no arguments)" : string.Join(", ", request.Query.Select(pair => $"{pair.Key}={pair.Value}")))}");
         }
     }
 #endif
