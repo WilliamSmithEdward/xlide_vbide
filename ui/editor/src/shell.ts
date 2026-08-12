@@ -820,6 +820,62 @@ export class Shell {
     return true;
   }
 
+  /**
+   * Presses a toolbar button by its command id, through the button's own click.
+   *
+   * THE STRIP IS THE PRODUCT'S COMMAND SURFACE and nothing could reach it. Thirty commands live
+   * there - the Object Browser, the sync dialog, the Panes menu, Help, the indent and fold
+   * cluster - and the only way in was to find the element by its data-command attribute and click
+   * it, which three harness files do. A test that finds its own button keeps passing after the
+   * button is renamed, removed, or left out of the build because its editor action was not
+   * bundled, because it never went through the dispatch that would have noticed.
+   *
+   * Clicked rather than dispatched to the handler directly: the click listener is the path, and
+   * a disabled button swallows a click exactly as it does for a person, which is the behaviour
+   * the needsBreak commands rely on.
+   */
+  pressToolbarCommand(id: string): { did: boolean; detail: string } {
+    const wanted = id.trim().toLowerCase();
+    const buttons = [...this.toolbarRoot.querySelectorAll<HTMLButtonElement>("button[data-command]")];
+    const button = buttons.find((one) => (one.dataset.command ?? "").toLowerCase() === wanted);
+
+    if (!button) {
+      const drawn = buttons.map((one) => one.dataset.command).filter(Boolean);
+      return {
+        did: false,
+        detail: `the toolbar has no ${id}. A command whose editor action was not bundled is left `
+          + `out of the strip rather than drawn dead. It is showing: ${drawn.join(", ")}`,
+      };
+    }
+
+    if (button.disabled) {
+      return {
+        did: false,
+        detail: `${id} is on the strip and disabled`
+          + (button.dataset.needsBreak === "1" ? "; it needs break mode" : ""),
+      };
+    }
+
+    button.click();
+    return { did: true, detail: `pressed ${id}` };
+  }
+
+  /**
+   * The commands the strip is drawing, and whether each can be pressed.
+   *
+   * A command missing from this list is a command whose editor action was not bundled: those are
+   * left out and named in the console rather than drawn dead, so the list is the honest answer to
+   * "what can this build actually do" - which menu-bar.mjs was scraping the DOM for.
+   */
+  toolbarCommandsShown(): { id: string; label: string; disabled: boolean }[] {
+    return [...this.toolbarRoot.querySelectorAll<HTMLButtonElement>("button[data-command]")]
+      .map((button) => ({
+        id: button.dataset.command ?? "",
+        label: button.title,
+        disabled: button.disabled,
+      }));
+  }
+
   /** What the status line is saying, for the snapshot. Empty when it is showing nothing. */
   currentNotice(): string {
     return this.statusNotice.classList.contains("visible")

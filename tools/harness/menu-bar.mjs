@@ -153,8 +153,12 @@ for (const [label, wanted] of [["Macros", 930], ["Add-In Manager", 943]]) {
 
 console.log("\nwhat left the menus and where it went");
 
-const toolbar = await api.ask(`JSON.stringify(
-  [...document.querySelectorAll('#toolbar [data-command]')].map((one) => one.dataset.command))`);
+// Asked of the act rather than scraped, so the answer is the strip's own list of what it drew.
+// A command left out because its editor action was not bundled is absent from both, which is the
+// point; a selector sweep would also have missed a renamed container or a restructured row and
+// reported every command gone.
+const strip = await api.act("toolbar");
+const toolbar = (strip.data?.commands ?? []).map((one) => one.id);
 
 for (const command of ["run", "break", "reset", "designMode", "save", "openSync"]) {
   check(`${command} is on the toolbar`, toolbar.includes(command));

@@ -182,6 +182,10 @@ export interface DevSurfaceParts {
   openSponsors(): void;
   /** What the status line is showing, read from the element the render writes. */
   statusNotice(): string;
+  /** Presses a toolbar command by id, through the button's own click. */
+  pressToolbar(id: string): { did: boolean; detail: string };
+  /** Every command the strip is currently drawing, and whether each is pressable. */
+  toolbarCommands(): { id: string; label: string; disabled: boolean }[];
   /**
    * The Properties panel: what it is showing, and the one way to change a value.
    *
@@ -976,6 +980,33 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     sponsors: () => {
       parts.openSponsors();
       return { did: true, detail: "sponsor dialog opened" };
+    },
+
+    /**
+     * Presses a toolbar command by id: `act("toolbar", {command: "openSync"})`.
+     *
+     * The strip is where thirty commands live and nothing could reach any of them. `press` is a
+     * keyboard key and the shim's `command` route is the NATIVE editor's command by name, so the
+     * only way to the Object Browser, the sync dialog, the Panes menu or Help was to find the
+     * element by its data-command attribute and click it - which three harness files did, and
+     * which keeps passing after the button is renamed, disabled, or left out of the build.
+     *
+     * With no argument it answers the strip's contents instead, which is the other half of the
+     * same question: a command that is not there cannot be pressed, and menu-bar.mjs was reading
+     * the DOM to find that out.
+     */
+    toolbar: (args) => {
+      const wanted = args.command === undefined ? null : String(args.command);
+      if (wanted === null) {
+        const shown = parts.toolbarCommands();
+        return {
+          did: true,
+          detail: `${shown.length} command(s) on the strip`,
+          data: { commands: shown },
+        };
+      }
+
+      return parts.pressToolbar(wanted);
     },
 
     /**

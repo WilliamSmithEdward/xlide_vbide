@@ -245,7 +245,16 @@ try {
   writeFileSync(join(folder, "Helper.bas"), edited, "utf8");
 
   // Through the dialog: open it, switch to import, tick nothing extra, press Apply.
-  await api.eval(`(() => document.querySelector("button[data-command=openSync]").click())()`);
+  //
+  // The open goes through the toolbar act rather than a selector now. Finding the button and
+  // clicking it kept passing whatever happened to the button - renamed, disabled, or left out of
+  // the build because its editor action was not bundled - because it never went through the
+  // dispatch that would have noticed. The act presses the button the strip drew and says which
+  // commands it is drawing when there is no such one.
+  const opened = await api.act("toolbar", { command: "openSync" });
+  if (!opened.did) {
+    throw new Error(`the sync dialog could not be opened from the toolbar: ${opened.detail}`);
+  }
   await api.until(`document.getElementById("sync-card") !== null`, { waitMs: 15000 }).catch(() => {});
   await api.eval(`(() => { document.getElementById("sync-folder").value = ${JSON.stringify(folder)};
     document.getElementById("sync-folder").dispatchEvent(new Event("change")); return "set"; })()`);
