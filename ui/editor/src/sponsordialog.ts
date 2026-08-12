@@ -10,6 +10,8 @@
  * is something unexpected, should not leave anyone with no way to reach the page.
  */
 
+import { openModal } from "./modal.js";
+
 interface SponsorLink {
   label: string;
   detail: string;
@@ -63,14 +65,12 @@ export function openSponsorDialog(handlers: SponsorHandlers, closed?: () => void
     return;
   }
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "sponsor-backdrop";
-
-  const card = document.createElement("div");
-  card.id = "sponsor-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "Support xlide");
+  const { card, dismiss } = openModal({
+    backdropId: "sponsor-backdrop",
+    cardId: "sponsor-card",
+    label: "Support xlide",
+    closed,
+  });
 
   const head = document.createElement("div");
   head.id = "sponsor-head";
@@ -163,30 +163,6 @@ export function openSponsorDialog(handlers: SponsorHandlers, closed?: () => void
   thanks.textContent = "Nothing here is ever required. Thank you for using it either way.";
 
   card.append(head, blurb, list, thanks);
-  backdrop.appendChild(card);
-  document.body.appendChild(backdrop);
-
-  const dismiss = (): void => {
-    document.removeEventListener("keydown", onKey, true);
-    backdrop.remove();
-    closed?.();
-  };
-
-  function onKey(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  }
-
   close.addEventListener("click", () => dismiss());
-  backdrop.addEventListener("mousedown", (event) => {
-    if (event.target === backdrop) {
-      dismiss();
-    }
-  });
-
-  document.addEventListener("keydown", onKey, true);
   card.querySelector<HTMLElement>(".sponsor-open")?.focus();
 }

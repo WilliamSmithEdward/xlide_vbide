@@ -12,13 +12,14 @@
  */
 
 import type { HostLocation } from "./bridge.js";
+import { openModal } from "./modal.js";
 
 /** What the dialog needs of the world: where to go when a row is picked. */
 export interface ReferencesHandlers {
   navigate(module: string, line: number, column: number, workbook: string | null): void;
 }
 
-let open: HTMLElement | null = null;
+let open: { dismiss: () => void } | null = null;
 
 /**
  * Shows the references to one symbol, grouped by the module they are in.
@@ -33,14 +34,15 @@ export function openReferencesDialog(
 ): void {
   closeReferencesDialog();
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "references-backdrop";
-
-  const dialog = document.createElement("div");
-  dialog.id = "references-card";
-  dialog.setAttribute("role", "dialog");
-  dialog.setAttribute("aria-modal", "true");
-  dialog.setAttribute("aria-label", `References to ${symbol}`);
+  const { card: dialog, dismiss } = openModal({
+    backdropId: "references-backdrop",
+    cardId: "references-card",
+    label: `References to ${symbol}`,
+    closed: () => {
+      open = null;
+    },
+  });
+  open = { dismiss };
 
   const header = document.createElement("div");
   header.id = "references-head";
@@ -128,18 +130,6 @@ export function openReferencesDialog(
   }
 
   dialog.append(header, body);
-  backdrop.appendChild(dialog);
-  document.body.appendChild(backdrop);
-  open = backdrop;
-
-  // Clicking the page outside the dialog dismisses it; clicking inside must not.
-  backdrop.addEventListener("mousedown", (event) => {
-    if (event.target === backdrop) {
-      closeReferencesDialog();
-    }
-  });
-
-  document.addEventListener("keydown", onKey, true);
 
   // Focus the first row so the keyboard can walk the list immediately, and Escape has somewhere
   // to be heard from.
@@ -147,19 +137,5 @@ export function openReferencesDialog(
 }
 
 export function closeReferencesDialog(): void {
-  if (!open) {
-    return;
-  }
-
-  document.removeEventListener("keydown", onKey, true);
-  open.remove();
-  open = null;
-}
-
-function onKey(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    event.stopPropagation();
-    closeReferencesDialog();
-  }
+  open?.dismiss();
 }

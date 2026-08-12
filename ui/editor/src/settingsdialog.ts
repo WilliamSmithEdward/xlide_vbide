@@ -5,6 +5,7 @@
  */
 
 import { currentSettings, onSettingsApplied, type EditorSettings } from "./settings.js";
+import { openModal } from "./modal.js";
 
 /** The rows, spelled the way the companion editor's own settings describe themselves. */
 const OPTIONS = [
@@ -198,14 +199,19 @@ export function openSettingsDialog(
     return;
   }
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "settings-backdrop";
+  // The listener is unhooked in `closed`, which the modal runs however the card goes - the
+  // close button, Escape, or the backdrop.
+  let stopListening = (): void => {};
 
-  const card = document.createElement("div");
-  card.id = "settings-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "Settings");
+  const { card, dismiss } = openModal({
+    backdropId: "settings-backdrop",
+    cardId: "settings-card",
+    label: "Settings",
+    closed: () => {
+      stopListening();
+      closed();
+    },
+  });
 
   const head = document.createElement("div");
   head.id = "settings-head";
@@ -403,32 +409,8 @@ export function openSettingsDialog(
 
   const refresh = (): void => refreshers.forEach((apply) => apply());
   refresh();
-  const stopListening = onSettingsApplied(refresh);
-
-  const dismiss = (): void => {
-    stopListening();
-    document.removeEventListener("keydown", onKey, true);
-    backdrop.remove();
-    closed();
-  };
-
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  };
+  stopListening = onSettingsApplied(refresh);
 
   close.addEventListener("click", dismiss);
-  backdrop.addEventListener("click", (event) => {
-    if (event.target === backdrop) {
-      dismiss();
-    }
-  });
-  document.addEventListener("keydown", onKey, true);
-
-  backdrop.appendChild(card);
-  document.body.appendChild(backdrop);
   (card.querySelector("select, input") as HTMLElement | null)?.focus();
 }

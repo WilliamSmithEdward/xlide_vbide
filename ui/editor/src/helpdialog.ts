@@ -6,6 +6,8 @@
  * asking go and read a registry key.
  */
 
+import { openModal } from "./modal.js";
+
 declare const __XLIDE_BUILD__: string;
 declare const __XLIDE_VERSION__: string;
 declare const __XLIDE_BUILD_NUMBER__: number;
@@ -80,14 +82,12 @@ export function openHelpDialog(closed?: () => void): void {
     return;
   }
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "help-backdrop";
-
-  const card = document.createElement("div");
-  card.id = "help-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "About xlide");
+  const { card, dismiss } = openModal({
+    backdropId: "help-backdrop",
+    cardId: "help-card",
+    label: "About xlide",
+    closed,
+  });
 
   const head = document.createElement("div");
   head.id = "help-head";
@@ -189,30 +189,6 @@ export function openHelpDialog(closed?: () => void): void {
   foot.append(repo, copy);
 
   card.append(head, blurb, facts, keysTitle, keys, foot);
-  backdrop.appendChild(card);
-  document.body.appendChild(backdrop);
-
-  const dismiss = () => {
-    document.removeEventListener("keydown", onKey, true);
-    backdrop.remove();
-    closed?.();
-  };
-
-  function onKey(event: KeyboardEvent): void {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  }
-
   close.addEventListener("click", dismiss);
-  backdrop.addEventListener("mousedown", (event) => {
-    if (event.target === backdrop) dismiss();
-  });
-
-  // Captured, because Monaco answers Escape too and would otherwise swallow it first.
-  document.addEventListener("keydown", onKey, true);
-
   close.focus();
 }

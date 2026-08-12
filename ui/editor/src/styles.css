@@ -1212,13 +1212,9 @@ body.live-resize .minimap {
 /* The About dialog. Same card as settings, so the surface has one kind of modal rather than a
    collection of them. */
 
+/* The scaffold rides .modal-backdrop / .modal-card; below the dialogs sit at 90 so the
+   remove confirm at 95 can stand over any of them. */
 #help-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding-top: 12vh;
   z-index: 90;
 }
@@ -1228,13 +1224,7 @@ body.live-resize .minimap {
      repository, and a card sized for the prose made the only fact anyone opens this for the one
      thing that wrapped. */
   width: 560px;
-  max-width: calc(100vw - 40px);
   padding-bottom: 4px;
-  background: var(--vscode-editorWidget-background, #252526);
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  font-size: 13px;
 }
 
 #help-head {
@@ -1383,25 +1373,13 @@ body.live-resize .minimap {
 /* Support xlide. Shares the About card's frame — same width, same head, same copy button — because
    it is the same kind of thing: one card, a few facts, and a way to take an address away with you. */
 #sponsor-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding-top: 12vh;
   z-index: 90;
 }
 
 #sponsor-card {
   width: 460px;
-  max-width: calc(100vw - 40px);
   padding-bottom: 4px;
-  background: var(--vscode-editorWidget-background, #252526);
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  font-size: 13px;
 }
 
 #sponsor-head {
@@ -1683,12 +1661,6 @@ body.live-resize .minimap {
 /* The settings dialog: a small modal card, one row per choice, saved as choices change. */
 
 #settings-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding-top: 12vh;
   z-index: 90;
 }
@@ -1722,12 +1694,6 @@ body.live-resize .minimap {
 
 #settings-card {
   width: 460px;
-  max-width: calc(100vw - 40px);
-  background: var(--vscode-editorWidget-background, #252526);
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  font-size: 13px;
 }
 
 #settings-head {
@@ -1910,15 +1876,20 @@ body.live-resize .minimap {
   z-index: 95;
 }
 
+/* The chrome every modal card shares; width and padding stay with each dialog's own id rule,
+   because a confirm, a settings sheet and a 960px sync planner are not one size. */
 .modal-card {
-  width: 420px;
   max-width: calc(100vw - 40px);
   background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-editorWidget-border, #454545);
   border-radius: 6px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  padding: 16px;
   font-size: 13px;
+}
+
+#remove-confirm-card {
+  width: 420px;
+  padding: 16px;
 }
 
 .modal-title {
@@ -2821,26 +2792,15 @@ body.objbrowser-page #objbrowser-card {
 /* Where a symbol is used. The scrim and card match the About dialog's, because two modals that
    are nearly the same shape read as a mistake rather than a family. */
 #references-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding-top: 10vh;
   z-index: 90;
 }
 
 #references-card {
   width: 720px;
-  max-width: calc(100vw - 40px);
   display: flex;
   flex-direction: column;
   max-height: 70vh;
-  background: var(--vscode-editorWidget-background, #252526);
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
 }
 
 #references-head {
@@ -2945,12 +2905,6 @@ body.objbrowser-page #objbrowser-card {
    --------------------------------------------------------------------------------------------- */
 
 #sync-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
   padding-top: 6vh;
   z-index: 90;
 }
@@ -2959,14 +2913,8 @@ body.objbrowser-page #objbrowser-card {
   display: flex;
   flex-direction: column;
   width: 960px;
-  max-width: calc(100vw - 40px);
   height: 640px;
   max-height: calc(100vh - 6vh - 24px);
-  background: var(--vscode-editorWidget-background, #252526);
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
-  border-radius: 6px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  font-size: 13px;
 }
 
 #sync-head {

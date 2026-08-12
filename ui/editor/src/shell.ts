@@ -12,6 +12,7 @@
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
+import { openModal } from "./modal.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
 import type { PaneVisibilityControl } from "./settingsdialog.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
@@ -934,16 +935,28 @@ export class Shell {
 
     this.askedCloseConfirm = asked;
 
-    const backdrop = document.createElement("div");
-    backdrop.id = "close-confirm-backdrop";
-    backdrop.className = "modal-backdrop";
+    let action: "save" | "discard" | null = null;
 
-    const card = document.createElement("div");
-    card.id = "close-confirm-card";
-    card.className = "modal-card";
-    card.setAttribute("role", "alertdialog");
-    card.setAttribute("aria-modal", "true");
-    card.setAttribute("aria-label", "Unsaved changes");
+    const { card, dismiss } = openModal({
+      backdropId: "close-confirm-backdrop",
+      cardId: "close-confirm-card",
+      label: "Unsaved changes",
+      role: "alertdialog",
+      closed: () => {
+        this.askedCloseConfirm = null;
+
+        if (action) {
+          this.handlers.closeModule(asked.name, asked.project ?? undefined, action);
+        }
+
+        if (this.closeConfirms.length > 0) {
+          this.showNextCloseConfirm();
+        } else {
+          // The question took focus; the editor is where it belongs afterwards.
+          this.handlers.menuClosed();
+        }
+      },
+    });
 
     const title = document.createElement("div");
     title.id = "close-confirm-title";
@@ -959,31 +972,19 @@ export class Shell {
     buttons.id = "close-confirm-buttons";
     buttons.className = "modal-buttons";
 
-    const resolve = (action: "save" | "discard" | null): void => {
-      this.askedCloseConfirm = null;
-      document.removeEventListener("keydown", onKey, true);
-      backdrop.remove();
-
-      if (action) {
-        this.handlers.closeModule(asked.name, asked.project ?? undefined, action);
-      }
-
-      if (this.closeConfirms.length > 0) {
-        this.showNextCloseConfirm();
-      } else {
-        // The question took focus; the editor is where it belongs afterwards.
-        this.handlers.menuClosed();
-      }
+    const resolve = (chosen: "save" | "discard" | null): void => {
+      action = chosen;
+      dismiss();
     };
 
-    const button = (label: string, action: "save" | "discard" | null, primary = false): HTMLButtonElement => {
+    const button = (label: string, chosen: "save" | "discard" | null, primary = false): HTMLButtonElement => {
       const control = document.createElement("button");
       control.type = "button";
       control.className = primary
         ? "close-confirm-button modal-button primary"
         : "close-confirm-button modal-button";
       control.textContent = label;
-      control.addEventListener("click", () => resolve(action));
+      control.addEventListener("click", () => resolve(chosen));
       buttons.appendChild(control);
       return control;
     };
@@ -992,26 +993,7 @@ export class Shell {
     button("Don't Save", "discard");
     button("Cancel", null);
 
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        resolve(null);
-      }
-    };
-
-    // A click beside the card is a Cancel: the safe answer for a gesture that was not one
-    // of the three, and the same dismissal the settings card gives.
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) {
-        resolve(null);
-      }
-    });
-    document.addEventListener("keydown", onKey, true);
-
     card.append(title, detail, buttons);
-    backdrop.appendChild(card);
-    document.body.appendChild(backdrop);
     save.focus();
   }
 
@@ -1088,16 +1070,22 @@ export class Shell {
       return;
     }
 
-    const backdrop = document.createElement("div");
-    backdrop.id = "remove-confirm-backdrop";
-    backdrop.className = "modal-backdrop";
+    let removing = false;
 
-    const card = document.createElement("div");
-    card.id = "remove-confirm-card";
-    card.className = "modal-card";
-    card.setAttribute("role", "alertdialog");
-    card.setAttribute("aria-modal", "true");
-    card.setAttribute("aria-label", "Remove component");
+    const { card, dismiss } = openModal({
+      backdropId: "remove-confirm-backdrop",
+      cardId: "remove-confirm-card",
+      label: "Remove component",
+      role: "alertdialog",
+      closed: () => {
+        if (removing) {
+          this.handlers.removeComponent(name, workbook);
+        }
+
+        // The question took focus; the editor is where it belongs afterwards.
+        this.handlers.menuClosed();
+      },
+    });
 
     const title = document.createElement("div");
     title.id = "remove-confirm-title";
@@ -1115,24 +1103,17 @@ export class Shell {
     buttons.id = "remove-confirm-buttons";
     buttons.className = "modal-buttons";
 
-    const resolve = (removing: boolean): void => {
-      document.removeEventListener("keydown", onKey, true);
-      backdrop.remove();
-
-      if (removing) {
-        this.handlers.removeComponent(name, workbook);
-      }
-
-      // The question took focus; the editor is where it belongs afterwards.
-      this.handlers.menuClosed();
+    const resolve = (remove: boolean): void => {
+      removing = remove;
+      dismiss();
     };
 
-    const button = (label: string, removing: boolean, danger = false): HTMLButtonElement => {
+    const button = (label: string, remove: boolean, danger = false): HTMLButtonElement => {
       const control = document.createElement("button");
       control.type = "button";
       control.className = danger ? "modal-button danger" : "modal-button";
       control.textContent = label;
-      control.addEventListener("click", () => resolve(removing));
+      control.addEventListener("click", () => resolve(remove));
       buttons.appendChild(control);
       return control;
     };
@@ -1140,24 +1121,7 @@ export class Shell {
     button("Remove", true, true);
     const cancel = button("Cancel", false);
 
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        resolve(false);
-      }
-    };
-
-    backdrop.addEventListener("click", (event) => {
-      if (event.target === backdrop) {
-        resolve(false);
-      }
-    });
-    document.addEventListener("keydown", onKey, true);
-
     card.append(title, detail, buttons);
-    backdrop.appendChild(card);
-    document.body.appendChild(backdrop);
     cancel.focus();
   }
 

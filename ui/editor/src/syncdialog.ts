@@ -12,6 +12,8 @@
  * project exactly where the api would have left it. That is the whole reason the dialog is thin.
  */
 
+import { openModal } from "./modal.js";
+
 interface SyncDiffLine {
   leftNumber: number | null;
   rightNumber: number | null;
@@ -111,14 +113,15 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   let wanted = false;
   const ticked = new Set<string>();
 
-  const backdrop = document.createElement("div");
-  backdrop.id = "sync-backdrop";
-
-  const card = document.createElement("div");
-  card.id = "sync-card";
-  card.setAttribute("role", "dialog");
-  card.setAttribute("aria-modal", "true");
-  card.setAttribute("aria-label", "Import and export modules");
+  const { card, dismiss } = openModal({
+    backdropId: "sync-backdrop",
+    cardId: "sync-card",
+    label: "Import and export modules",
+    closed: () => {
+      liveDialog = null;
+      closed();
+    },
+  });
 
   // ---- head -------------------------------------------------------------------------------
   const head = document.createElement("div");
@@ -411,7 +414,6 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   foot.append(status, cancel, apply);
 
   card.append(head, directions, folderRow, modeRow, body, foot);
-  backdrop.appendChild(card);
 
   // ---- behaviour --------------------------------------------------------------------------
   const actionable = (item: SyncItem): boolean =>
@@ -764,30 +766,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     say(failed.length > 0 ? `${summary}: ${failed.join("; ")}` : summary, failed.length > 0 ? "error" : "good");
   }
 
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      dismiss();
-    }
-  };
-
-  function dismiss(): void {
-    liveDialog = null;
-    backdrop.remove();
-    document.removeEventListener("keydown", onKey, true);
-    closed();
-  }
-
   close.addEventListener("click", () => dismiss());
-  backdrop.addEventListener("pointerdown", (event) => {
-    if (event.target === backdrop) {
-      dismiss();
-    }
-  });
-
-  document.addEventListener("keydown", onKey, true);
-  document.body.appendChild(backdrop);
 
   // Registered for the dev surface the moment the controls exist, cleared by dismiss. Every
   // probe action lands on a control's own handler, so what a driver does IS what a click does.
