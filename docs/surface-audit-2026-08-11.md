@@ -72,6 +72,17 @@ placed:
   model, and the machine runs with that trust OFF. Their path into a tier is A12-shaped routes
   (frame visibility, native pane close) and something that can populate a watch.
 
+  Later the same day, two of those routes arrived: `pane?action=closeNative` (the host-originated
+  close of a hidden pane, through the editor's own pane list) and `frame?action=close|show` (the
+  developer's X click posted through the pump, and the window brought back), with
+  `palette?action=hide` beside them and `state.frameVisible` to observe by. `window-routes.mjs`
+  drives all three in the -Live gate's DebugFixture group, holding the follow contracts too - the
+  palette going down with the frame, staying away on its return, the hidden pane's tab leaving
+  the strip with the shown module unstolen. Test-CloseHiddenPane.ps1 is deleted, its whole
+  subject now api-driven and gate-run with trust off. Still waiting on routes: a way to populate
+  a watch (Test-WatchPanel), the setLocals push assertion (Test-GhostLocalsPanel), and
+  Test-ObjectBrowser's icon and full-restart residue.
+
 The two-workbook hole is closed at both tiers: the -Live gate's second group now opens
 RenameFixture AND TwinFixture in one session (zero extra launches; all six suites proven green in
 the double session before the widening), with rename-boundary.mjs new and last in the group - a

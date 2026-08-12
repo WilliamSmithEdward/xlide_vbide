@@ -225,7 +225,9 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
-| `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok |
+| `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok. `closeNative` closes the HOST's pane window through the editor's own pane list - the host-originated direction, no unwritten-edits question, because the native close box asks none |
+| `palette` | `paletteHide()` | puts the Object Browser palette away the way its close box does: hidden, state intact. The summons is `command("objectBrowser")`, which never meant toggle |
+| `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
 | `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched. Answers `{undone, from, to, modules, stopped}` - read `stopped`, because an undo can restore four modules and be refused the fifth, which leaves the project in neither state. It is the SHIM's undo, not the context-menu item; drive the item with `act("editorAction", {id: "xlide.undoRename"})` |
@@ -300,9 +302,21 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
+| Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
+| Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
+| Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
+| Bring the editor window back | `frame("show")` |
 | Run script in the page | `ask(script)` - see the trap below |
 | Reload the page and wait for it | `reload()` |
 | Put the arrangement back | `resetLayout()` |
+
+> **The window routes are posted where the gesture is posted.** `frame("close")` answers before
+> the pump delivers SC_CLOSE, so its reply says posted and the outcome is read off
+> `state().frameVisible` - the same rule as every posted effect on this door. `frame("show")`
+> and `paletteHide()` are synchronous and their replies are the outcome. The follow contracts
+> ride along: closing the frame takes a visible palette down with it, and showing the frame
+> does NOT bring the palette back - it returns only when summoned. `window-routes.mjs` in the
+> gate holds all three to that.
 
 ### The surface, asked and driven
 
@@ -1393,6 +1407,12 @@ editor refuses outright - `Circle` belongs to the Excel object library - is repo
 > macro or automation running as you can rewrite the VBA of any open workbook. That is the
 > mechanism of the self-replicating macro virus, and it is why the setting exists at all. Turn it
 > on for a session that needs it, and turn it back off.
+
+The list of things that USED to need it keeps shrinking. On 2026-08-12 three left at once: the
+host-originated close of a hidden pane (`pane?action=closeNative`), and hiding and reshowing the
+editor window (`frame?action=close|show`) - each previously reachable only through
+`Application.VBE` or window messages from outside, each now a route the gate drives with trust
+off. What remains behind the setting is below.
 
 **Reaching the project from outside the add-in.** `Workbook.VBProject` and `Application.VBE`, from
 a script rather than from inside:

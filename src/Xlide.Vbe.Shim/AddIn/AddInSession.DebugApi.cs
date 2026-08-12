@@ -2488,6 +2488,7 @@ internal sealed partial class AddInSession
                         EngineUp: _analysis?.IsReady == true,
                         Frame: $"0x{_frame:X}",
                         FrameCaption: HostChrome.CaptionOf(_frame),
+                        FrameVisible: _frame != 0 && Win32.IsWindowVisible(_frame),
                         FrameRect: $"{frameRect.Left},{frameRect.Top},{frameRect.Right},{frameRect.Bottom}",
                         DocumentArea: $"0x{_documentArea:X}",
                         DocumentAreaRect: $"{documentsRect.Left},{documentsRect.Top},{documentsRect.Right},{documentsRect.Bottom}",
@@ -3131,9 +3132,118 @@ internal sealed partial class AddInSession
                             DebugJsonContext.Default.DebugCloseReply);
                     }
 
+                    case "closeNative":
+                    {
+                        // The OTHER direction: the host's own pane window closing, which is what
+                        // a developer's click on the native child's close box produces - and the
+                        // direction the 2026-08-04 dead-tab defect lived in, because a HIDDEN
+                        // pane's close fires no Changed and the strip kept its tab. Until this
+                        // existed that path could only be produced through Application.VBE from
+                        // outside, which project trust gates; in here the pane list is ours.
+                        //
+                        // A DESIGNATED DEVIATION from `close` above, and the deviation is the
+                        // subject: the native close box asks no unwritten-edits question - that
+                        // question belongs to the page's tab X - so none is asked here. The tab
+                        // disappears because the tracker notices the window go, not because this
+                        // route told the page anything.
+                        var went = CloseThroughObjectModel(paneModule, paneOwner);
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugCloseReply(
+                                went,
+                                went
+                                    ? "the pane's window was closed through the editor's own pane list"
+                                    : $"no pane of {paneModule} exists to close",
+                                null),
+                            DebugJsonContext.Default.DebugCloseReply);
+                    }
+
                     default:
                         return System.Text.Json.JsonSerializer.Serialize(
-                            new DebugErrorReply($"unknown action {paneAction}; use open or close"),
+                            new DebugErrorReply($"unknown action {paneAction}; use open, close or closeNative"),
+                            DebugJsonContext.Default.DebugErrorReply);
+                }
+            }
+
+            case "palette" when request.Query.TryGetValue("action", out var paletteAction):
+            {
+                // The palette's lifecycle, drivable. Summoning it always had a door (the
+                // objectBrowser command, which means SUMMON and not toggle); putting it away had
+                // none, so every probe that opened it either left it standing in front of the
+                // next probe or reached for a window message from outside (2026-08-12). Hiding
+                // is what the palette's own close box does - its WM_CLOSE handler hides, state
+                // intact, and the next summons presents the same page.
+                if (paletteAction != "hide")
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply($"unknown action {paletteAction}; use hide (objectBrowser is the summons)"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+
+                if (_browserPalette is not { } paletteToHide)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugVisibilityReply(false, "no palette exists; nothing to hide", false),
+                        DebugJsonContext.Default.DebugVisibilityReply);
+                }
+
+                paletteToHide.Hide();
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugVisibilityReply(
+                        true,
+                        "hidden, state intact; the objectBrowser command presents it again",
+                        Win32.IsWindowVisible(paletteToHide.Handle)),
+                    DebugJsonContext.Default.DebugVisibilityReply);
+            }
+
+            case "frame" when request.Query.TryGetValue("action", out var frameAction):
+            {
+                // The editor window itself, drivable: the one pair of gestures every developer
+                // makes daily and no route could produce - closing the editor and bringing it
+                // back. Closing shipped a crash once (lesson 27), and until now only a probe
+                // sending window messages from OUTSIDE the process could exercise it.
+                if (_frame == 0)
+                {
+                    return System.Text.Json.JsonSerializer.Serialize(
+                        new DebugErrorReply("the session has no editor frame to act on"),
+                        DebugJsonContext.Default.DebugErrorReply);
+                }
+
+                switch (frameAction)
+                {
+                    case "close":
+                        // POSTED, not sent, and that is the design: SC_CLOSE delivered by the
+                        // pump after this body returns is byte-for-byte the developer's X click,
+                        // and the editor runs its whole close path - the hide, the palette
+                        // follow, the placement retreat - outside this request. So `visible`
+                        // still reads true in this reply; the outcome is observed on
+                        // state.frameVisible, the rule every posted effect on this door lives by.
+                        Win32.PostMessage(_frame, Win32.WmSysCommand, Win32.ScClose, 0);
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugVisibilityReply(
+                                true,
+                                "SC_CLOSE posted; observe state.frameVisible for the outcome",
+                                Win32.IsWindowVisible(_frame)),
+                            DebugJsonContext.Default.DebugVisibilityReply);
+
+                    case "show":
+                    {
+                        // The same end state Excel's own Developer > Visual Basic button reaches:
+                        // the editor's main window made visible. Synchronous, so the answer here
+                        // IS the outcome.
+                        using var mainWindow = _editor.GetObject("MainWindow");
+                        mainWindow?.SetBool("Visible", true);
+                        var showing = Win32.IsWindowVisible(_frame);
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugVisibilityReply(
+                                showing,
+                                showing ? "the editor window is on screen" : "MainWindow was told to show and the frame still reads hidden",
+                                showing),
+                            DebugJsonContext.Default.DebugVisibilityReply);
+                    }
+
+                    default:
+                        return System.Text.Json.JsonSerializer.Serialize(
+                            new DebugErrorReply($"unknown action {frameAction}; use close or show"),
                             DebugJsonContext.Default.DebugErrorReply);
                 }
             }

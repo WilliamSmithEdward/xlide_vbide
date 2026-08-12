@@ -671,6 +671,13 @@ public sealed record DebugStateReply(
     /// underneath us, and nothing here could see it happen until this was added.
     /// </summary>
     [property: JsonPropertyName("frameCaption")] string? FrameCaption,
+    /// <summary>
+    /// Whether the editor window is on screen, read off the window itself. The frame HANDLE was
+    /// always here; whether the developer could see it was not, and closing the editor is the
+    /// one gesture whose effect the door could not observe (frame?action=close posts the close
+    /// and answers before the pump delivers it, so THIS is where its outcome is read).
+    /// </summary>
+    [property: JsonPropertyName("frameVisible")] bool FrameVisible,
     [property: JsonPropertyName("frameRect")] string FrameRect,
     [property: JsonPropertyName("documentArea")] string DocumentArea,
     [property: JsonPropertyName("documentAreaRect")] string DocumentAreaRect,
@@ -678,6 +685,17 @@ public sealed record DebugStateReply(
     [property: JsonPropertyName("paletteVisible")] bool PaletteVisible,
     [property: JsonPropertyName("surfaceReady")] bool SurfaceReady,
     [property: JsonPropertyName("devtoolsPort")] int DevToolsPort);
+
+/// <summary>
+/// What a window action came to: whether the action itself TOOK, and what the window's
+/// visibility reads now. For a posted close, `did` means posted and `visible` still reads true
+/// at answer time - the pump has not delivered yet - so a caller polls `state.frameVisible`,
+/// which is the same rule every posted effect on this door lives by.
+/// </summary>
+public sealed record DebugVisibilityReply(
+    [property: JsonPropertyName("did")] bool Did,
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("visible")] bool Visible);
 
 /// <summary>One native editor window, as GET windows lists them.</summary>
 public sealed record DebugWindowRow(
@@ -1234,6 +1252,7 @@ public sealed record DebugStatsReply(
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DebugStateReply))]
+[JsonSerializable(typeof(DebugVisibilityReply))]
 [JsonSerializable(typeof(DebugWindowRow))]
 [JsonSerializable(typeof(DebugWindowsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]

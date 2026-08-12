@@ -43,7 +43,8 @@ const check = (name, ok, detail) => checks.push({ name, ok: !!ok, detail: detail
 const sleep = (ms) => new Promise((settle) => setTimeout(settle, ms));
 
 async function api(route) {
-  const reply = await fetch(`${apiBase}/${route}`, { method: route.startsWith("command") ? "POST" : "GET" });
+  const posts = route.startsWith("command") || route.startsWith("palette");
+  const reply = await fetch(`${apiBase}/${route}`, { method: posts ? "POST" : "GET" });
   return reply.json();
 }
 
@@ -212,6 +213,13 @@ try {
     windows.windows.every((row) => row.type !== 2 || row.visible === false));
 
   socket.close();
+
+  // LEFT AS FOUND: hidden, the way the palette's own close box leaves it. This probe used to
+  // walk away with the palette standing in front and the editor navigated - survivable only
+  // because it ran last among the probes; putting it away is also this file driving the
+  // palette route it is the reference client for (2026-08-12).
+  await api("palette?action=hide");
+
   const pass = checks.every((one) => one.ok);
   // RESULT first, JSON last: the gate greps the RESULT line, and Test-ObjectBrowser.ps1
   // parses the LAST line as JSON. Both readers get theirs.

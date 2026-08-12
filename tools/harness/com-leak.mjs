@@ -301,6 +301,26 @@ await repeat("opening and closing a pane", 0, async () => {
   await wait(400);
 }, changing);
 
+// The host-originated direction: closeNative walks the editor's pane list per call, which is
+// COM per pane, and the wrappers must all come home (route new 2026-08-12).
+await repeat("closing a pane's native window", 0, async () => {
+  await api.pane("open", { module: sample, project: project.projectId });
+  await wait(400);
+  await api.pane("closeNative", { module: sample, project: project.projectId });
+  await wait(400);
+}, changing);
+
+// frame show reads MainWindow off the editor per call; frame close is a posted window message
+// and takes nothing, but the close path it triggers runs the placement retreat and the palette
+// follow, so the whole cycle is what has to come back to its resting count (route new
+// 2026-08-12).
+await repeat("closing the editor and reopening it", 0, async () => {
+  await api.frame("close");
+  await wait(600);
+  await api.frame("show");
+  await wait(600);
+}, changing);
+
 await repeat("setting and clearing a breakpoint", 0, async () => {
   await api.breakpoint(sample, 1, { project: project.projectId, state: "on" });
   await wait(250);

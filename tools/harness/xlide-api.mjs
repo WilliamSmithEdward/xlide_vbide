@@ -517,6 +517,21 @@ function clientFor(entry) {
       call(`pane${query({ action, module, project, answer })}`, { method: "POST" }),
 
     /**
+     * Puts the Object Browser palette away, the way its own close box does: hidden with its
+     * state intact, so the next summons (the objectBrowser command) presents the same page.
+     * Answers { did, detail, visible }; did is false when no palette exists yet.
+     */
+    paletteHide: () => call(`palette${query({ action: "hide" })}`, { method: "POST" }),
+
+    /**
+     * The editor window itself: "close" posts the developer's own X click (SC_CLOSE through
+     * the pump), so the reply comes back BEFORE the window goes - poll state().frameVisible
+     * for the outcome, like every posted effect on this door. "show" is synchronous and its
+     * reply is the outcome.
+     */
+    frame: (action) => call(`frame${query({ action })}`, { method: "POST" }),
+
+    /**
      * The developer's settings - read them, or change ONE without restating the rest.
      *
      * The page's own update takes the whole object, so changing one thing from a harness meant
@@ -1174,6 +1189,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "engine": return api.engineCosts({ reset: rest[0] === "reset" });
       case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
+      case "palette": return api.paletteHide();
+      case "frame": return api.frame(rest[0] ?? "show");
       case "eval": return api.eval(rest.join(" "));
       case "ui": return api.ui();
       // node xlide-api.mjs act closeActive / act expandWorkbook workbook TwinFixture.xlsm

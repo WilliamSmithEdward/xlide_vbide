@@ -212,6 +212,15 @@ internal static unsafe partial class Win32
     /// <summary>Asks a window to close, exactly as its own close box would.</summary>
     public const uint WmClose = 0x0010;
 
+    /// <summary>
+    /// A system command, of which <see cref="ScClose"/> is the one the title bar's close box
+    /// sends. Posted to the editor frame it is the developer's own X click, delivered by the
+    /// pump so the editor runs its whole close path - not a hide, which would skip it.
+    /// </summary>
+    public const uint WmSysCommand = 0x0112;
+
+    public const nint ScClose = 0xF060;
+
     // Named PostMessageW explicitly: user32 exports only the A and W forms, and an import
     // spelled "PostMessage" throws EntryPointNotFoundException the first time it is called.
     // This one sat unexercised in the pane-close fallback until the dialog watch called it
