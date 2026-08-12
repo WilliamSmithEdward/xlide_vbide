@@ -133,7 +133,24 @@ async function repeat(what, allowance, body, howMany = rounds) {
   // minute in settling alone. Every operation above is awaited, so this covers what continues
   // AFTER the answer rather than the answer itself.
   await wait(500);
-  const after = await held();
+  let after = await held();
+  let settled = "";
+
+  // GROWTH IS RECOUNTED BEFORE IT IS CALLED A LEAK. The count is sampled at an instant, and the
+  // session has background work of its own - an analysis pass, the placement poll - that takes a
+  // wrapper and gives it back within its tick. A sample landing inside such a tick reads +1, and
+  // on a session seconds old that is exactly when this sweep runs: the documents row failed a
+  // gate on it while the sweep's own end-of-run reconciliation showed every wrapper released
+  // (2026-08-12). One settle and one recount separates the two shapes, because a real leak is
+  // still there a second later and a mid-tick hold is not. The allowance itself does not move.
+  if (after.wrappers - before.wrappers > allowance) {
+    await wait(1000);
+    const recount = await held();
+    if (recount.wrappers < after.wrappers) {
+      after = recount;
+      settled = ", settled after a recount";
+    }
+  }
 
   // Against howMany, not the file's default. The state-changing rows run fewer rounds, and
   // dividing by the default understated their per-round figure fourfold while the line above
@@ -147,7 +164,7 @@ async function repeat(what, allowance, body, howMany = rounds) {
 
   console.log(`\n  ${what}: ${howMany} rounds, wrappers ${before.wrappers} -> ${after.wrappers} `
     + `(${perRound} per round), handles ${handles >= 0 ? "+" : ""}${handles}, `
-    + `managed ${kb >= 0 ? "+" : ""}${kb}KB`);
+    + `managed ${kb >= 0 ? "+" : ""}${kb}KB${settled}`);
 
   check(`${what} gives back the wrappers it takes`,
     grew <= allowance,

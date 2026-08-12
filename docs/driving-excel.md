@@ -858,7 +858,10 @@ node tools\harness\write-rollback.mjs
 be provoked on demand: a module pushed past the editor's identifier budget leaves the whole VBE
 answering "Insufficient memory to continue the execution of the program" to every attempt to add a
 component, for the rest of the session. Removing the offending module does not give the memory
-back. This is why the probe is not in the gate.
+back. This is why the gate runs the probe LAST in its DebugFixture group and nowhere else: the
+next thing the gate does is relaunch Excel fresh for the second group, which is the restart the
+probe demands. Wired mid-group once, it left every suite behind it unable to add a module
+(2026-08-12).
 
 The line ceiling is the limit everyone knows and not the one that bites. Measured 2026-08-09:
 

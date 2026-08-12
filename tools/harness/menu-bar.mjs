@@ -21,10 +21,11 @@
 import { open } from "./xlide-api.mjs";
 
 const api = await open({});
+let passed = 0;
 let broken = 0;
 const check = (what, ok, detail) => {
   console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
-  if (!ok) { broken += 1; }
+  if (ok) { passed += 1; } else { broken += 1; }
 };
 
 /** The synthetic menu's position. Mirrors XlideMenuPosition in VbeMenus.cs. */
@@ -164,5 +165,8 @@ for (const command of ["run", "break", "reset", "designMode", "save", "openSync"
   check(`${command} is on the toolbar`, toolbar.includes(command));
 }
 
-console.log(`\n${broken} broken`);
+// The one verdict spelling the gate parses. Four suites said "checks, broken" instead, and the
+// gate read the first of them as reporting no verdict at all - so the live half died there on
+// every run since they were wired in (2026-08-12).
+console.log(`\n${passed} passed, ${broken} failed`);
 process.exit(broken === 0 ? 0 : 1);

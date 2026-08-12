@@ -86,8 +86,14 @@ if (-not $existing) {
     Start-Sleep -Milliseconds 1500
 }
 
+# READ FROM A MODULE THE FIXTURE GUARANTEES, not the one this probe just made. A freshly added
+# CleanModule is EMPTY, so asking it for non-empty text is a check that can only pass against a
+# fixture already poisoned by an earlier run's residue - which is exactly what it did: it went
+# green all week against a saved-over DebugFixture.xlsm and went red the first time the gate ran
+# against a pristine one (2026-08-12). Runner ships in the fixture with a body, from
+# New-DebugFixture.ps1, so an empty answer here means the reader, not the weather.
 Check 'module reads through the session reader' {
-    (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text.Length -gt 0
+    (Invoke-RestMethod "$api/module?name=Runner" -TimeoutSec 8).text.Length -gt 0
 }
 
 # A KIND ASKED FOR BY NAME IS THE KIND YOU GET.
@@ -335,11 +341,16 @@ Check 'log waits for an event instead of sleeping for it' {
     # are early in a fresh session and are not after two suites have run against it - so it
     # passed all day and then failed on a run where nothing had changed but the order
     # (2026-08-06). A probe should assert what it is testing, not the weather.
+    # showNextStatement, NOT save. Any command writes the "command: " line this check waits on,
+    # and in design mode this one is disabled, so pressing it does nothing at all. The old
+    # choice was save, which SAVED THE WORKBOOK - with this probe's CleanModule and runner text
+    # in it - so every gate run quietly rewrote DebugFixture.xlsm on disk, and later checks
+    # inherited residue the fixture generator never wrote (2026-08-12).
     $since = (Invoke-RestMethod "$api/log?max=1" -TimeoutSec 8).next
     $job = Start-Job -ArgumentList $api {
         param($api)
         Start-Sleep 2
-        Invoke-RestMethod "$api/command?name=save" -Method Post -TimeoutSec 10
+        Invoke-RestMethod "$api/command?name=showNextStatement" -Method Post -TimeoutSec 10
     }
 
     $clock = [Diagnostics.Stopwatch]::StartNew()

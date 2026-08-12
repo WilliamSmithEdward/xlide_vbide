@@ -11,13 +11,19 @@
  * instead of swallowing it. This proves both, against the real editor, which is the only place the
  * refusal exists.
  *
- * WHY THIS IS NOT IN THE GATE, and it is not a matter of taste. The only refusal cheap enough to
- * provoke on demand is a module pushed past the editor's identifier budget, and that leaves the
- * WHOLE VBE unable to add a component - "Insufficient memory to continue the execution of the
- * program" - for the rest of the session. Removing the module does not give the memory back.
- * Nothing else refuses: a 200,000-character line is accepted and silently broken into 197, a
- * 60,000-character constant into 60, a null character is taken as text, and 20,001 lines of
- * procedures go in without complaint. So this costs an Excel restart, every time, by construction.
+ * WHAT RUNNING THIS COSTS THE SESSION, and it is not a matter of taste. The only refusal cheap
+ * enough to provoke on demand is a module pushed past the editor's identifier budget, and that
+ * leaves the WHOLE VBE unable to add a component - "Insufficient memory to continue the
+ * execution of the program" - for the rest of the session. Removing the module does not give the
+ * memory back. Nothing else refuses: a 200,000-character line is accepted and silently broken
+ * into 197, a 60,000-character constant into 60, a null character is taken as text, and 20,001
+ * lines of procedures go in without complaint. So this costs an Excel restart, every time, by
+ * construction.
+ *
+ * That is why the gate runs it LAST in its fixture group and nowhere else: the group's session
+ * is discarded by a fresh relaunch immediately after, which is the restart this suite demands.
+ * For one run it sat mid-group instead, and every suite after it met a session that refused
+ * every add (2026-08-12). Anywhere else it runs:
  *
  *   node tools\harness\write-rollback.mjs
  *

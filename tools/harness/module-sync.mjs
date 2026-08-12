@@ -67,6 +67,9 @@ mkdirSync(folder, { recursive: true });
 
 const project = (await api.projects()).projects[0];
 const made = [];
+// The one FIXTURE module this suite edits (section 5 imports a Helper.bas with a sub appended),
+// held so the cleanup can put it back. `made` cannot cover it: Helper is not added, only changed.
+let helperOriginal = null;
 
 const cleanUp = async () => {
   for (const name of made) {
@@ -76,6 +79,21 @@ const cleanUp = async () => {
       // Said out loud. A cleanup that fails silently leaves a module behind, and the next run
       // reads it as "unchanged" and blames the product.
       console.log(`     WARNING: ${name} could not be removed (${error.message})`);
+    }
+  }
+
+  // Helper goes back as found. Left dirty it holds a ByTheDialog sub, which one run gets away
+  // with - a spare sub still compiles - and the second run in the same session stacks another,
+  // at which point the PROJECT stops compiling ("Ambiguous name detected") and the failure lands
+  // on whichever suite next asks for a compile. The gate runs this suite twice, once per
+  // planner, and that is exactly how it surfaced (2026-08-12).
+  if (helperOriginal !== null) {
+    try {
+      await api.writeModule("Helper", helperOriginal, project.projectId);
+      await waitFor("Helper to be back as found", async () =>
+        (await api.readModule("Helper", project.projectId)).text === helperOriginal);
+    } catch (error) {
+      console.log(`     WARNING: Helper was left holding this run's import (${error.message})`);
     }
   }
 
@@ -240,6 +258,7 @@ try {
   // The same change, applied twice: once by driving the dialog's own controls, once through the
   // route. If these two ever diverge, one of them has grown its own idea of what an import is.
   const beforeText = (await api.readModule("Helper", project.projectId)).text;
+  helperOriginal = beforeText;
 
   const edited = `${readFileSync(join(folder, "Helper.bas"), "utf8").trimEnd()}\r\n\r\nPublic Sub ByTheDialog()\r\nEnd Sub\r\n`;
   writeFileSync(join(folder, "Helper.bas"), edited, "utf8");

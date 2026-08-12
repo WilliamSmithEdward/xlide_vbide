@@ -109,6 +109,12 @@ try {
   check("a property the component does not have is refused by name",
     !nonsense.did && /no writable property/i.test(nonsense.detail ?? ""),
     JSON.stringify(nonsense));
+} catch (error) {
+  // A throw is a verdict, not an accident. Without this, a precondition failing at the first
+  // await - the add refused, the session gone - fell straight to the finally below, which
+  // printed "0 passed, 0 failed": a summary the gate reads as green, for a run that checked
+  // nothing (2026-08-12). The throw becomes a named failure so the count cannot lie.
+  check("the suite ran to its last check", false, error.message);
 } finally {
   await api.pane("close", { module: currentName, project: project.projectId, answer: "discard" })
     .catch(() => {});

@@ -1881,3 +1881,60 @@ to the seeded one, which is staler and true.
 
 Consequence: when a loop is linear in the size of the thing per item, ask what the largest number
 of items is, not what the usual number is. The usual number here was one.
+
+
+## 67. The gate that was assembled and never fired
+
+The live gate failed three of fifteen steps on a routine baseline run, and the first failure was
+the interesting one: `menu-bar.mjs reported no verdict`. The suite was fine. It printed `0 broken`
+as its summary, and the gate parses `N passed, M failed`; four of the sixteen wired suites spoke
+the first convention and the runner reads only the second, so every live run since the wiring had
+died at the first offender. debugger-features, step-into-features and rename-features were queued
+behind it with the same defect, each ready to block the run the moment the one before it was fixed.
+
+Nothing about this was hidden. The gate failed loudly, every time, for anyone who ran it. What had
+not happened was the running: each suite had been validated individually while it was being built,
+wiring it into the plan was a text edit to verify.ps1, and the live half is expensive enough that
+nobody paid for it again just to watch known-green suites pass. So the gate's shape changed four
+times without the gate itself ever completing in its new shape, and "wired into the gate" was true
+in the diff and false in every way that matters.
+
+The wall hid more than spelling. Behind the four verdicts sat a wiring that contradicted the
+wired suite's own header: write-rollback.mjs documented, in so many words, why it was not in the
+gate - the refusal it provokes leaves the whole VBE unable to add a component until Excel
+restarts - and it had been wired into the middle of a fixture group anyway. The first time the
+gate got that far, every suite behind it met a session that refused every add, and the first of
+them died before its opening check and printed `0 passed, 0 failed`, a summary the gate's
+`, 0 failed` match read as green. One dead step, three defects stacked in it: the verdict
+spelling, a wiring that accepted none of the suite's stated terms, and a vacuous summary parsed
+as a pass.
+
+Consequence: wiring a suite into a gate is a change to the gate, and the only validation that
+exercises it is running that tier to green before calling it done. A suite passing standalone
+validates the suite; only the gate run validates the wiring - the verdict line, the fixture
+grouping, the ordering, the parser, and the terms the suite's own header sets. And a
+machine-parsed convention held by sixteen files wants exactly one spelling.
+
+## 68. The probe that could only pass against its own residue
+
+`Test-DebugApi.ps1` adds an empty module named CleanModule when the fixture lacks one, then asserts
+that reading it back answers non-empty text. On a pristine fixture that check is structurally
+impossible: the module it just created has nothing in it. It passed all week anyway, and the reason
+it passed is the second defect: a later check needed some command that writes a `command:` log line
+in order to time the log route's wait, and the command it happened to pick was `save`. By that
+point the probe had added CleanModule and written a runner into it, so every gate run quietly saved
+the probe's scratch into DebugFixture.xlsm on disk, and the next run found CleanModule already
+there, full of yesterday's residue, and read it back happily.
+
+Two mechanisms, one lesson each. The assertion: a check whose precondition is supplied by a
+previous run is a test of history, not of the product - it went red the first time it met the
+fixture its generator actually writes. The side effect: when a check needs "any" action and the
+choice is arbitrary, the choice is still load-bearing; of the twenty-odd commands that would have
+written that log line, exactly one persists state to disk, and that is the one it used. The fix
+reads Runner, which the generator guarantees a body for, and presses showNextStatement, which is
+disabled in design mode and still logs - an action chosen because it does nothing.
+
+Consequence: a fixture is an input, and a suite may write into the session but never into the
+file. The instant a run can alter what the next run starts from, every green after the first is
+suspect, because the suite is no longer testing the fixture - it is testing what the previous run
+left behind.

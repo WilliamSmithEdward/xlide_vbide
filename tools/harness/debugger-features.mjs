@@ -178,7 +178,7 @@ try {
   console.log(`\n  left break mode: ${!(await stopped())}`);
 }
 
-console.log(`\n${checks} checks, ${broken.length} broken`);
+console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
 for (const one of broken) { console.log("  ! " + one); }
 
 process.exit(broken.length === 0 ? 0 : 1);

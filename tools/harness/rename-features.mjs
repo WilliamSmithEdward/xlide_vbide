@@ -170,7 +170,7 @@ console.log(`  ${JSON.stringify(definition).slice(0, 260)}`);
 check("definition resolves from a call site", definition.did, definition.detail);
 await parity("after resolving a definition");
 
-console.log(`\n${checks} checks, ${broken.length} broken`);
+console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
 for (const one of broken) { console.log("  ! " + one); }
 
 process.exit(broken.length === 0 ? 0 : 1);
