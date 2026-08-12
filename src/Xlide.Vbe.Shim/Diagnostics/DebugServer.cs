@@ -462,10 +462,6 @@ internal static partial class DebugCapture
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetWindowRect(nint window, out Rect rect);
-
-    [LibraryImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool PrintWindow(nint window, nint dc, uint flags);
 
     [LibraryImport("gdi32.dll")]
@@ -476,22 +472,25 @@ internal static partial class DebugCapture
     private static partial bool DeleteDC(nint dc);
 
     [LibraryImport("gdi32.dll")]
-    private static partial nint SelectObject(nint dc, nint gdiObject);
-
-    [LibraryImport("gdi32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool DeleteObject(nint gdiObject);
-
-    [LibraryImport("gdi32.dll")]
     private static unsafe partial nint CreateDIBSection(nint dc, BitmapInfo* info, uint usage, out nint bits, nint section, uint offset);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct Rect
+    /// <summary>
+    /// A window's bounds through Interop's own import, which takes a pointer where this file used
+    /// to declare a second one taking `out`.
+    ///
+    /// Four declarations here duplicated Interop/Win32 exactly - GetWindowRect, SelectObject,
+    /// DeleteObject and the Rect struct itself, field for field. Two declarations of one native
+    /// function are not a style question: they are two places to get a calling convention or a
+    /// struct layout wrong, in the file whose subject is what happens when you do (the 16-byte
+    /// VARIANT on x64 cost a day of crashes). The six imports left below are genuinely this
+    /// file's own, because nothing else in the shim captures a window.
+    /// </summary>
+    private static unsafe bool ReadWindowRect(nint window, out Interop.Rect rect)
     {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
+        Interop.Rect read = default;
+        var ok = Interop.Win32.GetWindowRect(window, &read);
+        rect = read;
+        return ok;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -513,7 +512,7 @@ internal static partial class DebugCapture
     /// <summary>The window as a BMP file's bytes, or null when it would not render.</summary>
     public static unsafe byte[]? CaptureBmp(nint window)
     {
-        if (window == 0 || !GetWindowRect(window, out var rect))
+        if (window == 0 || !ReadWindowRect(window, out var rect))
         {
             return null;
         }
@@ -548,7 +547,7 @@ internal static partial class DebugCapture
                 return null;
             }
 
-            previous = SelectObject(memory, bitmap);
+            previous = Interop.Win32.SelectObject(memory, bitmap);
             if (!PrintWindow(window, memory, 0x2))
             {
                 return null;
@@ -578,12 +577,12 @@ internal static partial class DebugCapture
         {
             if (previous != 0)
             {
-                SelectObject(memory, previous);
+                Interop.Win32.SelectObject(memory, previous);
             }
 
             if (bitmap != 0)
             {
-                DeleteObject(bitmap);
+                Interop.Win32.DeleteObject(bitmap);
             }
 
             DeleteDC(memory);

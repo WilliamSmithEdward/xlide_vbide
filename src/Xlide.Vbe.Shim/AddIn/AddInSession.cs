@@ -1996,7 +1996,12 @@ internal sealed partial class AddInSession : IDisposable
                 //
                 // Only on this path. The diff path already knows the lines it is about to remove
                 // and puts them back itself, so it pays nothing.
-                var wasHolding = ProjectReader.ReadSource(found);
+                //
+                // And the import path has already read it, at the top, for the all-or-nothing
+                // check - the same component, with nothing written in between, so the second read
+                // could only ever return the same text. Import is the slow path and this is the
+                // largest single read in it.
+                var wasHolding = wasHoldingBefore ?? ProjectReader.ReadSource(found);
 
                 var existing = module.GetInt32("CountOfLines");
                 if (existing > 0)

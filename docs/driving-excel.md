@@ -131,16 +131,23 @@ about a minute an iteration.**
 
 | Changed | What is needed | Why |
 | --- | --- | --- |
-| `ui/editor/**` | `tools\Update-Page.ps1` | The bundle is served over loopback from a folder on disk, read per request. Copy and reload. **No restart.** |
+| `ui/editor/**` | `tools\page.ps1` | The bundle is served over loopback from a folder on disk, read per request. Copy and reload. **No restart.** |
 | `src/Xlide.Vbe.Shim/**` | close Excel, `dotnet publish`, restart | A host holds an add-in library open for its lifetime. Nothing can replace a file Excel is holding. |
 | `engine/**` | `npm run package`, then restart | The add-in runs `engine\dist\xlide-engine.exe`. `npm run build` writes only the bundle, which nothing at runtime reads. |
 
 ```bash
-tools\Update-Page.ps1
+tools\page.ps1
 ```
 
-builds, copies into the published shim's `ui\editor\dist`, and reloads every live editor -
-reporting the build stamp each is now running. `-NoBuild` copies what the gate just built.
+typechecks, builds, copies into the published shim's `ui\editor\dist`, and reloads every live
+editor - reporting the build stamp each is now running, which is what proves the running page is
+the one just made. `-NoTypecheck` skips the check; `-NoDeploy` builds without touching the
+publish tree.
+
+There were two of these until 2026-08-11, and this guide pointed at the wrong one.
+`Update-Page.ps1` computed the same publish path, did the same copy and called the same reload
+script, without the typecheck or the build-stamp proof. Two scripts for one loop means the one
+nobody runs is the one that rots.
 
 > Excel holds **both** the shim DLL and the engine executable. `npm run package` fails with a
 > copyfile error while Excel is running, and the gate's `engine executable is current` step then
@@ -419,6 +426,11 @@ await api.act("search", { query: "Recalculate", scope: "project",
                           replacement: "Recalc", run: "replaceAll" });
 (await api.ui()).search.scopedReplaced;
 ```
+
+**Boolean arguments take `1/true/yes/on` or `0/false/no/off`**, and anything else is the route's
+default. Worth knowing because it was not true until 2026-08-11: most flags treated everything
+except the literal `0` as true, so `api.perf({ reset: false })` would have cleared the counters if
+the client had ever passed the word.
 
 **Read the right count.** `search.matches` and `search.current` come from the live decorations in
 the current model, which is a different engine from the host search the other scopes use - they

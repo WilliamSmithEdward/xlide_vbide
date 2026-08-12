@@ -701,7 +701,7 @@ function clientFor(entry) {
     /**
      * Reloads the page and waits for it to come back, answering with the bundle it is now
      * running. A page change needs no republish and no restart - the bundle is served from a
-     * folder on disk - so this plus a copy is the whole page loop. See tools\Update-Page.ps1.
+     * folder on disk - so this plus a copy is the whole page loop. See tools\page.ps1.
      */
     reload: ({ waitMs = 20000 } = {}) =>
       call(`reload${query({ waitMs })}`, { method: "POST", timeout: waitMs + 10000 }),

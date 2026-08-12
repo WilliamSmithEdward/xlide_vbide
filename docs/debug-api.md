@@ -43,6 +43,14 @@ Read routes are GET, acting routes are POST. Everything answers JSON except `cap
 Routes that touch the session cross to the host thread with a three second deadline and
 answer `{"error":"the host thread did not answer in time"}` rather than hanging.
 
+**Boolean arguments read the same way everywhere.** `1`, `true`, `yes` and `on` are true;
+`0`, `false`, `no` and `off` are false; anything else, and anything absent, is the route's own
+default. There were two rules until 2026-08-11 and they disagreed about the same text: six sites
+took anything that was not the literal `0` as true, so **`perf?reset=false` cleared the counters**
+and `native?text=no` asked for the text, while two other sites accepted only an affirmative word,
+so `module?live=1` worked and `module?live=yes` did not. Both readings are defensible and no
+caller can hold both at once.
+
 | Route | Method | Arguments | Answers |
 | --- | --- | --- | --- |
 | `state` | GET | | shown module and project, debug mode, unwritten edits, engine up, frame and document-area handles and rects, **the frame's caption as the title bar actually reads it**, palette open and visible, surface ready, DevTools port. `frameCaption` is read off the window, not out of the session's record of what it last wrote there, and that is the only reason it is worth having: the host rewrites that window underneath the add-in. Pressing Reset a second time does it, and the caption sat saying "Microsoft Visual Basic for Applications" with nothing able to observe it (2026-08-09). `engineUp` means the engine is ANSWERING, not that the session got as far as constructing the service that talks to it. It was the second thing until 2026-08-08, which made it true from start-up to shutdown whatever the engine did: killing the engine process left this reporting `true` while the editor drew squiggles from the last pass that had run. It is now false BEFORE the engine connects too, which is a real state a launcher should wait through rather than report |

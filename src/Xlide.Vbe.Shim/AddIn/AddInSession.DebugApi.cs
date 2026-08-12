@@ -34,6 +34,38 @@ internal sealed partial class AddInSession
         DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
             new DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply));
 
+    /// <summary>
+    /// A boolean query argument, read one way.
+    ///
+    /// THERE WERE TWO RULES IN THIS FILE and they disagreed about the same text. Six sites took
+    /// anything that was not the literal "0" as true, so `reset=false` cleared the counters and
+    /// `text=no` asked for the text. Two sites wanted an affirmative word, so `live=1` worked and
+    /// `live=yes` did not, depending which route you were calling. Both readings are defensible
+    /// and a caller cannot hold both, which is what makes it a defect rather than a preference.
+    ///
+    /// Absent, or a word neither list knows, answers the fallback: a route's default is the
+    /// route's business, and a typo must not silently mean the opposite of what it looks like.
+    /// </summary>
+    private static bool Flag(DebugServer.DebugRequest request, string name, bool fallback = false)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!request.Query.TryGetValue(name, out var value))
+        {
+            return fallback;
+        }
+
+        return value.ToLowerInvariant() switch
+        {
+            "1" or "true" or "yes" or "on" => true,
+            "0" or "false" or "no" or "off" => false,
+
+            // Present and unreadable. "reset=maybe" is a caller who believes they asked for
+            // something, and the honest answer is the route's default rather than a guess.
+            _ => fallback,
+        };
+    }
+
     /// <summary>A request's wait budget, clamped to something a stuck page cannot outlast.</summary>
     private static int WaitMilliseconds(DebugServer.DebugRequest request, int fallback)
     {
@@ -1021,7 +1053,7 @@ internal sealed partial class AddInSession
                 // reset=1 forgets the analyzer figures, so an experiment measures what it
                 // provokes rather than everything since the editor opened. Session start is
                 // the wrong window for "is THIS change slow".
-                if (request.Query.TryGetValue("reset", out var perfReset) && perfReset != "0")
+                if (Flag(request, "reset"))
                 {
                     EngineCounters.Reset();
                 }
@@ -1238,7 +1270,7 @@ internal sealed partial class AddInSession
                 // walk every stylesheet, keep the rules this element matches - is this
                 // route (2026-08-06).
                 request.Query.TryGetValue("styles", out var wanted);
-                var withRules = request.Query.TryGetValue("rules", out var rulesFlag) && rulesFlag != "0";
+                var withRules = Flag(request, "rules");
                 var cap = request.Query.TryGetValue("max", out var maxText) && int.TryParse(maxText, out var asked)
                     ? Math.Clamp(asked, 1, 50)
                     : 10;
@@ -1522,7 +1554,7 @@ internal sealed partial class AddInSession
                     DebugJsonContext.Default.DebugBenchReply));
             }
 
-            case "layout" when request.Query.TryGetValue("reset", out var resetFlag) && resetFlag != "0":
+            case "layout" when Flag(request, "reset"):
             {
                 // Putting the arrangement back. A probe that drags panes about is testing
                 // the right thing and leaving the wrong thing behind: the layout is
@@ -1810,9 +1842,12 @@ internal sealed partial class AddInSession
             {
                 // No host thread here either: turning the guard on is exactly what a caller does
                 // when the host thread has already stopped answering.
-                if (request.Query.TryGetValue("on", out var wanted))
+                if (request.Query.ContainsKey("on"))
                 {
-                    _guardEverything = wanted is "1" or "true" or "yes" or "on";
+                    // The fallback is what it already is, so an unreadable value leaves the guard
+                    // alone rather than turning it off - this one governs whether dialogs are
+                    // dismissed, and guessing "off" from a typo is the expensive direction.
+                    _guardEverything = Flag(request, "on", _guardEverything);
                     Log.Info($"debug api: the dialog guard is {(_guardEverything ? "on" : "off")}");
                 }
 
@@ -2565,7 +2600,7 @@ internal sealed partial class AddInSession
                 // so a squiggle drawn in the wrong place is always the same question: does this
                 // match the surface? A finding was seen six columns out after a format and there
                 // was no way to ask which side had drifted.
-                var wantEngineText = request.Query.TryGetValue("text", out var engineText) && engineText != "0";
+                var wantEngineText = Flag(request, "text");
                 var surface = _editorSurface?.TextOf(engineModule, DisplayFromProjectId(_shownProject));
 
                 try
@@ -2657,7 +2692,7 @@ internal sealed partial class AddInSession
                 }
 
                 var surfaceText = _editorSurface?.Text;
-                var wantText = request.Query.TryGetValue("text", out var wantsText) && wantsText != "0";
+                var wantText = Flag(request, "text");
 
                 // EVERY open pane, each with the host's content and the surface's side by side.
                 //
@@ -3106,10 +3141,10 @@ internal sealed partial class AddInSession
 
                 if (request.Query.Count > 0)
                 {
+                    // The current value is the fallback, which is what "name what you want
+                    // changed and everything else stands" means when a value cannot be read.
                     bool Flag(string name, bool current) =>
-                        request.Query.TryGetValue(name, out var asked)
-                            ? asked is "1" or "true" or "yes" or "on"
-                            : current;
+                        AddInSession.Flag(request, name, current);
 
                     settings = new ProductSettings
                     {
@@ -3421,7 +3456,7 @@ internal sealed partial class AddInSession
                 // Enter, comment continuation and auto-indent all produce text that only exists in
                 // the editor until it is written. Without this there was no way to read what
                 // typing produced, so those features could only be checked by eye (2026-08-08).
-                if (request.Query.TryGetValue("live", out var liveFlag) && liveFlag != "0")
+                if (Flag(request, "live"))
                 {
                     var live = _editorSurface?.TextOf(moduleName, DisplayFromProjectId(projectId));
                     return live is null

@@ -111,8 +111,41 @@ internal sealed class EngineClient : IAsyncDisposable
         _writer = new StreamWriter(_pipe, new UTF8Encoding(false)) { AutoFlush = true };
         _reader = new StreamReader(_pipe, new UTF8Encoding(false));
 
-        await CallAsync("initialize", new Dictionary<string, object>(), cancellation).ConfigureAwait(false);
+        // THE HANDSHAKE IS READ, not merely performed.
+        //
+        // The engine answers `{engine, protocol}` and this discarded it, which made the exchange a
+        // liveness check and nothing more. The two sides are built from separate trees - the
+        // analyzer comes out of the neighbouring checkout - and the failure mode of a mismatch is
+        // not a crash but a method answered wrongly or refused as unknown, hours later, with
+        // nothing pointing here. A number that costs one comparison is worth reading.
+        //
+        // Logged rather than fatal. The shim is the newer half in practice and refusing to start
+        // would turn a warning into a dead editor; the line is what turns "hover stopped working"
+        // into one grep. Bump ExpectedEngineProtocol on the shim side and `protocol` in
+        // engine/src/dispatcher.ts together whenever a method or a shape changes.
+        var hello = await CallAsync("initialize", new Dictionary<string, object>(), cancellation)
+            .ConfigureAwait(false);
+
+        var spoken = hello is { } greeting
+            && greeting.TryGetProperty("protocol", out var protocol)
+            && protocol.TryGetInt32(out var version)
+                ? version
+                : -1;
+
+        if (spoken != ExpectedEngineProtocol)
+        {
+            Log.Warn($"engine: speaks protocol {(spoken < 0 ? "(none reported)" : spoken.ToString())}"
+                + $" and this build expects {ExpectedEngineProtocol}. The executable at"
+                + $" {_executablePath} may be older than the shim; repackage it with"
+                + " `npm run package --prefix engine`.");
+        }
     }
+
+    /// <summary>
+    /// The engine protocol this build of the shim is written against, answered by `initialize`.
+    /// Raise it here and in engine/src/dispatcher.ts together when a method or a shape changes.
+    /// </summary>
+    private const int ExpectedEngineProtocol = 1;
 
     /// <summary>Reads a child stream to the log so it cannot fill its buffer and block the child.</summary>
     private static void DrainAsync(StreamReader stream, string label) =>
