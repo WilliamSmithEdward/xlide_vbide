@@ -1834,3 +1834,50 @@ been fixed once and re-broke without either commit being incorrect, which no amo
 review time would have caught. What caught it was `search-features.mjs`, written the same day,
 because the feature had no coverage of any kind: it went red on the shipped build and green on the
 fix.
+
+## 66. The loop that was fine for a keystroke and quadratic for a Replace All
+
+An audit said a keystroke in a large module reallocated the module's whole text on the host thread.
+It was wrong about the keystroke - one keystroke carries one edit, and one copy of a module is what
+applying an edit costs - and right that the loop was a defect, for a gesture nobody had thought
+about.
+
+The page stops sending `fullText` above 64,000 characters, so past that gate the shim and the
+engine each rebuild their copy from the edits alone. Both did it the obvious way:
+
+```csharp
+foreach (var edit in edits) { updated = string.Concat(updated.AsSpan(0, edit.Start), edit.Text, updated.AsSpan(edit.End)); }
+```
+
+One edit, one copy: fine. But a module-scope **Replace All** is ONE change event carrying every
+match, capped at 10,000 by the page's `findMatches`, applied as a single `executeEdits`. So the
+loop runs thousands of times and each turn copies the entire module.
+
+Measured on the two algorithms side by side, same input, output asserted identical:
+
+```
+ 10000 edits   0.25 MB   per-edit    697ms   single-pass  1ms    697x
+ 60000 edits   1.53 MB   per-edit  13354ms   single-pass  4ms   3339x
+```
+
+Thirteen seconds. In the engine that is its only thread, so diagnostics, completions and hover
+stop for the duration; in the shim it is inside a synchronous handler on the thread that draws
+Excel. Live, after the fix, a 10,000-match replace over a 1.49 MB module reached the workbook in
+249ms with the worst host-thread round trip at 89ms.
+
+The fix is to stop pretending the edits are independent. They all address the same original text
+and arrive strictly descending and non-overlapping - which the per-edit loop already depended on to
+be correct at all - so the finished length can be computed up front and the result written once,
+back to front.
+
+**The tempting version of this fix is dangerous, and that is the part worth remembering.** The
+obvious tidy-up is to validate the ordering and return null when it does not hold. In the shim,
+null means "leave the document alone": the caller skips the whole adopt block, the length
+cross-check never runs, `doc.Text` keeps its old value, and the next `Show` compares stale against
+stale and finds them equal - after which every offset the page sends addresses text the shim no
+longer has. So the shim keeps the old splice as a fallback for sets it will not vouch for, and only
+the fast path is new. The engine can afford to be strict, because dropping its live copy falls back
+to the seeded one, which is staler and true.
+
+Consequence: when a loop is linear in the size of the thing per item, ask what the largest number
+of items is, not what the usual number is. The usual number here was one.

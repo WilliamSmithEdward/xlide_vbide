@@ -2075,26 +2075,12 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>
-    /// Applies bottom-up edits from the tail forward, so every earlier offset still means what
-    /// it meant. Null when an edit is out of bounds.
+    /// Applies bottom-up edits, through Core's own implementation so the arithmetic has unit
+    /// tests. It is pure string work with a real answer, which is exactly the kind of thing that
+    /// should not be sitting in a file that needs a host to exercise it.
     /// </summary>
-    private static string? ApplyEdits(string text, EngineTextEdit[] edits)
-    {
-        var updated = text;
-
-        foreach (var edit in edits)
-        {
-            if (edit.Start < 0 || edit.End < edit.Start || edit.End > updated.Length)
-            {
-                return null;
-            }
-
-            updated = string.Concat(updated.AsSpan(0, edit.Start), edit.Text, updated.AsSpan(edit.End));
-        }
-
-        return updated;
-    }
-
+    private static string? ApplyEdits(string text, EngineTextEdit[] edits) =>
+        Core.Editor.TextEdits.Apply(text, edits);
     /// <summary>
     /// The position chain in a menu message, or null when it is malformed. Positions are one-based
     /// because the editor's collections are.

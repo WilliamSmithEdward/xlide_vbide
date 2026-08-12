@@ -824,20 +824,42 @@ export class Dispatcher {
             return null;
         }
 
-        let text = current;
+        // ONE PASS, ONE JOIN, for the reason the shim's own splice was rewritten (Core's
+        // TextEdits.Apply): a keystroke carries one edit and a module-scope Replace All carries
+        // every match in a SINGLE change, up to the page's cap of ten thousand. Rebuilding the
+        // whole string per edit made that quadratic on the one thread this process has, so a
+        // replace across a large module stalled diagnostics, completions and hover for as long as
+        // it took - and the page only stops sending full text, and therefore only relies on this
+        // path at all, once a module is over 64,000 characters.
+        //
+        // The edits are strictly descending and non-overlapping, which the per-edit loop already
+        // depended on to be correct. Walked in that order, collecting the pieces back to front.
+        const pieces: string[] = [];
+        let read = current.length;
+
         for (const edit of params.edits) {
-            if (edit.start < 0 || edit.end < edit.start || edit.end > text.length) {
+            if (edit.start < 0 || edit.end < edit.start || edit.end > current.length || edit.end > read) {
                 // A range that does not fit the text held here means the stream desynchronised;
                 // holding a mangled copy would answer wrongly forever. Falling back to the
                 // seeded copy answers staler but true, until the next full push.
+                //
+                // Out of ORDER counts as desynchronised too, and did before: the old loop applied
+                // such a set against text that had already shifted underneath it, so what it
+                // stored was neither the old text nor the new one. Dropping the live copy is what
+                // it did for every other malformed set and is the honest answer for this one.
                 this.liveSources.delete(key);
                 return null;
             }
 
-            text = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+            pieces.push(current.slice(edit.end, read));
+            pieces.push(edit.text);
+            read = edit.start;
         }
 
-        this.liveSources.set(key, text);
+        pieces.push(current.slice(0, read));
+        pieces.reverse();
+
+        this.liveSources.set(key, pieces.join(''));
         return null;
     }
 
