@@ -315,13 +315,32 @@ Step 'solution build (Release)' {
 }
 
 Step 'unit tests' {
-    $out = dotnet test $solution -c Release --no-build --nologo -v q 2>&1
+    # THROUGH THE SIGNED HOST, not the generated exe. `dotnet test` has xUnit v3's adapter
+    # launch Xlide.Vbe.Core.Tests.exe, and that launch is what Smart App Control judges - a
+    # fresh hash with no reputation on every rebuild. On 2026-08-12 it started blocking the
+    # exe in BOTH configurations ("An Application Control policy has blocked this file"),
+    # turning this step red on code that had passed hours earlier byte for byte. A v3 test
+    # assembly also runs as `dotnet exec <dll>` inside dotnet.exe, which is Microsoft-signed,
+    # so no unsigned process is launched and the per-build lottery ends. The machine's policy
+    # is the developer's choice and stays; CI keeps plain `dotnet test`, because runners have
+    # no such policy and the standard tooling is worth keeping where it works.
+    $testsDll = Join-Path $repoRoot 'artifacts\bin\Xlide.Vbe.Core.Tests\release\Xlide.Vbe.Core.Tests.dll'
+    if (-not (Test-Path $testsDll)) { throw "no test assembly at $testsDll; the build step above writes it" }
+
+    $out = dotnet exec $testsDll 2>&1
     $out | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'unit tests failed' }
-    $passed = ($out | Select-String 'Passed:\s+(\d+)' -AllMatches).Matches |
-        ForEach-Object { [int] $_.Groups[1].Value } |
-        Measure-Object -Sum
-    "$($passed.Sum) passed"
+
+    $summary = $out | Select-String 'Total:\s*(\d+), Errors:\s*(\d+), Failed:\s*(\d+)' | Select-Object -Last 1
+    if (-not $summary) { throw 'the test run reported no summary' }
+    $total = [int] $summary.Matches[0].Groups[1].Value
+    $errors = [int] $summary.Matches[0].Groups[2].Value
+    $failed = [int] $summary.Matches[0].Groups[3].Value
+    if ($total -eq 0 -or $errors -ne 0 -or $failed -ne 0) {
+        throw "unit tests: $total total, $errors errors, $failed failed"
+    }
+
+    "$total passed"
 }
 
 Step 'Release carries no debug api' {

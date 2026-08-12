@@ -133,11 +133,15 @@ if ($Unregister) {
 
 if (-not $NoBuild) {
     Invoke-Step 'Test' {
-        # Debug deliberately, whatever the publish configuration: Smart App Control (observed
-        # ON 2026-08-02) blocks freshly built unsigned RELEASE test assemblies from running
-        # (0x800711C7, surfacing as xUnit's "did not return valid JSON"), while Debug ones and
-        # the NativeAOT shim itself load fine. The gate is about correctness, not codegen.
-        dotnet test (Join-Path $repoRoot 'tests\Xlide.Vbe.Core.Tests') -c Debug --nologo
+        # THROUGH THE SIGNED HOST. Smart App Control (ON since 2026-08-02) judges the
+        # generated test EXE per build - a fresh hash with no reputation every time - and
+        # what began as Release-only blocking (0x800711C7) reached Debug on 2026-08-12.
+        # Running the assembly as `dotnet exec <dll>` keeps every launched process
+        # Microsoft-signed, which ends the lottery in both configurations. Debug still,
+        # because this loop is about correctness, not codegen.
+        dotnet build (Join-Path $repoRoot 'tests\Xlide.Vbe.Core.Tests') -c Debug --nologo -v q
+        if ($LASTEXITCODE -ne 0) { throw 'the test project would not build' }
+        dotnet exec (Join-Path $repoRoot 'artifacts\bin\Xlide.Vbe.Core.Tests\debug\Xlide.Vbe.Core.Tests.dll')
     }
 
     Invoke-Step 'Build the engine (bundle, then executable)' {
