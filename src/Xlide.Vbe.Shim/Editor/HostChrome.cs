@@ -197,12 +197,12 @@ internal sealed class HostChrome : IDisposable
     /// </summary>
     public static string? CaptionOf(nint window) => window == 0 ? null : ReadCaption(window);
 
-    private static unsafe string? ReadCaption(nint window)
+    private static string? ReadCaption(nint window)
     {
-        const int Capacity = 512;
-        var buffer = stackalloc char[Capacity];
-        var length = Win32.GetWindowText(window, buffer, Capacity);
-        return length > 0 ? new string(buffer, 0, length) : null;
+        // Through Interop's one reader; the null-for-empty convention is this file's own,
+        // because CaptionOf's callers branch on "the window has no caption to speak of".
+        var text = Win32.ReadWindowText(window);
+        return text.Length > 0 ? text : null;
     }
 
     public void Dispose()

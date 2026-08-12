@@ -177,7 +177,7 @@ internal sealed class CodePaneTracker : IDisposable
              * and invalidating on every one of those would re-read the component list several
              * times a second to notice nothing.
              */
-            if (IsEditorClass(ReadClassName(windowEvent.Window)))
+            if (IsEditorClass(Win32.ReadClassName(windowEvent.Window)))
             {
                 _openComponents = null;
             }
@@ -188,7 +188,7 @@ internal sealed class CodePaneTracker : IDisposable
             return;
         }
 
-        var className = ReadClassName(windowEvent.Window);
+        var className = Win32.ReadClassName(windowEvent.Window);
 
         // Moves are logged only for the editor's own windows. The hook hears the whole
         // process, and resizing the HOST streams thousands of move events for its own
@@ -353,7 +353,7 @@ internal sealed class CodePaneTracker : IDisposable
 
             foreach (var window in found)
             {
-                var caption = ReadWindowText(window);
+                var caption = Win32.ReadWindowText(window);
                 if (CodePaneCaption.IsKnownNonCodePane(caption))
                 {
                     continue;
@@ -732,7 +732,7 @@ internal sealed class CodePaneTracker : IDisposable
         Win32.GetWindowThreadProcessId(window, out var owner);
         if (owner == Win32.GetCurrentProcessId()
             && _captionWanted is { } wanted
-            && ReadWindowText(window) == wanted)
+            && Win32.ReadWindowText(window) == wanted)
         {
             _captionFound = window;
             return 0;
@@ -767,7 +767,7 @@ internal sealed class CodePaneTracker : IDisposable
     [UnmanagedCallersOnly]
     private static int OnClassCandidate(nint window, nint parameter)
     {
-        if (_classWanted is { } wanted && ReadClassName(window) == wanted)
+        if (_classWanted is { } wanted && Win32.ReadClassName(window) == wanted)
         {
             _classFound.Add(window);
         }
@@ -782,8 +782,8 @@ internal sealed class CodePaneTracker : IDisposable
     private static int OnCaptionCandidate(nint window, nint parameter)
     {
         if (_captionWanted is { } wanted
-            && (parameter == 0 || ReadClassName(window) == PaneClass)
-            && ReadWindowText(window) == wanted)
+            && (parameter == 0 || Win32.ReadClassName(window) == PaneClass)
+            && Win32.ReadWindowText(window) == wanted)
         {
             _captionFound = window;
             return 0;
@@ -795,7 +795,7 @@ internal sealed class CodePaneTracker : IDisposable
     [UnmanagedCallersOnly]
     private static int OnVisiblePane(nint window, nint parameter)
     {
-        if (_visible is not null && Win32.IsWindowVisible(window) && ReadClassName(window) == PaneClass)
+        if (_visible is not null && Win32.IsWindowVisible(window) && Win32.ReadClassName(window) == PaneClass)
         {
             _visible.Add(window);
         }
@@ -839,7 +839,7 @@ internal sealed class CodePaneTracker : IDisposable
         try
         {
             var tracker = _enumerating;
-            if (tracker is not null && ReadClassName(window) == PaneClass)
+            if (tracker is not null && Win32.ReadClassName(window) == PaneClass)
             {
                 tracker._candidates.Add(window);
             }
@@ -868,7 +868,7 @@ internal sealed class CodePaneTracker : IDisposable
             if (Win32.IsWindow(pane.Window))
             {
                 var root = Win32.GetAncestor(pane.Window, Win32.GaRoot);
-                if (root != 0 && ReadClassName(root) == FrameClass)
+                if (root != 0 && Win32.ReadClassName(root) == FrameClass)
                 {
                     return root;
                 }
@@ -897,7 +897,7 @@ internal sealed class CodePaneTracker : IDisposable
                 continue;
             }
 
-            if (ReadClassName(window) == FrameClass)
+            if (Win32.ReadClassName(window) == FrameClass)
             {
                 found = window;
                 break;
@@ -907,21 +907,6 @@ internal sealed class CodePaneTracker : IDisposable
         return (nint)found;
     }
 
-    private static unsafe string ReadClassName(nint window)
-    {
-        const int capacity = 64;
-        var buffer = stackalloc char[capacity];
-        var length = Win32.GetClassName(window, buffer, capacity);
-        return length <= 0 ? string.Empty : new string(buffer, 0, length);
-    }
-
-    private static unsafe string ReadWindowText(nint window)
-    {
-        const int capacity = 256;
-        var buffer = stackalloc char[capacity];
-        var length = Win32.GetWindowText(window, buffer, capacity);
-        return length <= 0 ? string.Empty : new string(buffer, 0, length);
-    }
 
     /// <summary>
     /// The pane's client area in screen coordinates: the part that shows text, without the pane's

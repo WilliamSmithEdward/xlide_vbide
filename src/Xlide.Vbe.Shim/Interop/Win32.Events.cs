@@ -59,6 +59,33 @@ internal static unsafe partial class Win32
     [LibraryImport("user32.dll", EntryPoint = "GetWindowTextW")]
     public static partial int GetWindowText(nint window, char* buffer, int capacity);
 
+    /// <summary>
+    /// A window's class name, read into a bounded stack buffer. One definition beside the
+    /// import it wraps: three files carried their own copy with three capacities and two
+    /// empty conventions (the audit's B27). Empty means unreadable as much as unnamed; a
+    /// caller that cares about the difference has none to draw on here either way.
+    /// </summary>
+    public static string ReadClassName(nint window)
+    {
+        const int capacity = 64;
+        var buffer = stackalloc char[capacity];
+        var length = GetClassName(window, buffer, capacity);
+        return length <= 0 ? string.Empty : new string(buffer, 0, length);
+    }
+
+    /// <summary>
+    /// A window's text, empty when it has none or will not say. 512 is the reconciled
+    /// capacity: the dialog and pane readers asked for 256 while the title-bar reader asked
+    /// for 512, and the largest is the one that costs nothing to grant everywhere.
+    /// </summary>
+    public static string ReadWindowText(nint window)
+    {
+        const int capacity = 512;
+        var buffer = stackalloc char[capacity];
+        var length = GetWindowText(window, buffer, capacity);
+        return length <= 0 ? string.Empty : new string(buffer, 0, length);
+    }
+
     [LibraryImport("user32.dll", EntryPoint = "SetWindowTextW", StringMarshalling = StringMarshalling.Utf16)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool SetWindowText(nint window, string text);

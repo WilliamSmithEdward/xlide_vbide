@@ -60,10 +60,10 @@ internal static unsafe class DialogWatch
 
             foreach (var child in ChildrenOf(dialog))
             {
-                var kind = ReadClass(child);
+                var kind = Win32.ReadClassName(child);
 
                 if (kind.Equals("Button", StringComparison.OrdinalIgnoreCase)
-                    && Plain(ReadText(child)) is { Length: > 0 } caption
+                    && Plain(Win32.ReadWindowText(child)) is { Length: > 0 } caption
                     && buttons.Count < 16)
                 {
                     buttons.Add(caption);
@@ -76,7 +76,7 @@ internal static unsafe class DialogWatch
                 // and a harness that only reads captions learns nothing about what went wrong
                 // (2026-08-07).
                 if (kind.Equals("Static", StringComparison.OrdinalIgnoreCase)
-                    && ReadText(child) is { Length: > 0 } line
+                    && Win32.ReadWindowText(child) is { Length: > 0 } line
                     && said.Count < 8)
                 {
                     said.Add(line.Trim());
@@ -85,7 +85,7 @@ internal static unsafe class DialogWatch
 
             rows.Add(new DialogRow(
                 $"0x{dialog:X}",
-                ReadText(dialog),
+                Win32.ReadWindowText(dialog),
                 string.Join(" ", said).Trim(),
                 [.. buttons],
                 Win32.IsWindowEnabled(dialog)));
@@ -133,7 +133,7 @@ internal static unsafe class DialogWatch
     {
         foreach (var dialog in TopLevelDialogs())
         {
-            var title = ReadText(dialog);
+            var title = Win32.ReadWindowText(dialog);
             if (caption is { Length: > 0 }
                 && !title.Contains(caption, StringComparison.OrdinalIgnoreCase))
             {
@@ -142,12 +142,12 @@ internal static unsafe class DialogWatch
 
             foreach (var child in ChildrenOf(dialog))
             {
-                if (!ReadClass(child).Equals("Button", StringComparison.OrdinalIgnoreCase))
+                if (!Win32.ReadClassName(child).Equals("Button", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                if (Plain(ReadText(child)).Equals(Plain(button), StringComparison.OrdinalIgnoreCase))
+                if (Plain(Win32.ReadWindowText(child)).Equals(Plain(button), StringComparison.OrdinalIgnoreCase))
                 {
                     Log.Info($"dialog watch: answering \"{title}\" with \"{button}\"");
                     Win32.PostMessage(child, BmClick, 0, 0);
@@ -194,7 +194,7 @@ internal static unsafe class DialogWatch
         Win32.GetWindowThreadProcessId(window, &owner);
         if (owner == Win32.GetCurrentProcessId()
             && Win32.IsWindowVisible(window)
-            && ReadClass(window) == DialogClass)
+            && Win32.ReadClassName(window) == DialogClass)
         {
             Collected.Add(window);
         }
@@ -212,20 +212,5 @@ internal static unsafe class DialogWatch
     private static string Plain(string text) =>
         text.Replace("&", string.Empty, StringComparison.Ordinal).Trim();
 
-    private static string ReadText(nint window)
-    {
-        const int capacity = 256;
-        var buffer = stackalloc char[capacity];
-        var length = Win32.GetWindowText(window, buffer, capacity);
-        return length <= 0 ? string.Empty : new string(buffer, 0, length);
-    }
-
-    private static string ReadClass(nint window)
-    {
-        const int capacity = 64;
-        var buffer = stackalloc char[capacity];
-        var length = Win32.GetClassName(window, buffer, capacity);
-        return length <= 0 ? string.Empty : new string(buffer, 0, length);
-    }
 }
 #endif
