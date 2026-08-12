@@ -1882,6 +1882,18 @@ export function demoTransport(): HostTransport {
   const dirtyModules = new Set(openModules);
   let activeModule: string | null = openModules[0] ?? null;
 
+  // Every module the demo can show, by name, so activating one that is closed can re-open it
+  // with its text - which is what the host does, and what a drag of a closed module's tree row
+  // onto the editor relies on.
+  const moduleTexts: Record<string, string> = { Module1: DEMO_MODULE, Module2: DEMO_MODULE_2 };
+
+  // The demo's two modules both live in Book1.xlsm, which is what the tree says - so setModules
+  // must say it too. The host always carries the project per open module; without it here the
+  // tabs read project:null while the tree row reads Book1.xlsm, and the two cannot be recognised
+  // as the same document. A tree-row drag of an OPEN module then found no tab to move (found
+  // 2026-08-12 while building the drag targets, where the demo's own inconsistency masqueraded
+  // as a feature bug).
+  const DEMO_WORKBOOK = "Book1.xlsm";
   const sendModules = (): void => {
     if (activeModule !== null && !openModules.includes(activeModule)) {
       activeModule = openModules[0] ?? null;
@@ -1890,7 +1902,9 @@ export function demoTransport(): HostTransport {
     send({
       type: "setModules",
       modules: [...openModules],
+      projects: openModules.map(() => DEMO_WORKBOOK),
       active: activeModule,
+      activeProject: activeModule === null ? null : DEMO_WORKBOOK,
       dirty: openModules.map((name) => dirtyModules.has(name)),
     });
   };
@@ -1954,8 +1968,8 @@ export function demoTransport(): HostTransport {
     post(message) {
       console.log("[xlide demo] page -> host", message);
       if (message.type === "ready") {
-        send({ type: "openDocument", moduleName: "Module1", text: DEMO_MODULE });
-        send({ type: "openDocument", moduleName: "Module2", text: DEMO_MODULE_2 });
+        send({ type: "openDocument", moduleName: "Module1", project: DEMO_WORKBOOK, text: DEMO_MODULE });
+        send({ type: "openDocument", moduleName: "Module2", project: DEMO_WORKBOOK, text: DEMO_MODULE_2 });
         sendModules();
         send({
           type: "setSettings",
@@ -2011,7 +2025,22 @@ export function demoTransport(): HostTransport {
         });
       }
       if (message.type === "activateModule") {
-        activeModule = message.moduleName;
+        // Activating a CLOSED module opens it, the way the host does - it re-enters the open
+        // list and its text is (re)sent - so a drag of a closed module's tree row lands a tab
+        // that has content. A module the demo does not know is ignored rather than opened blank.
+        if (!openModules.includes(message.moduleName) && moduleTexts[message.moduleName]) {
+          openModules.push(message.moduleName);
+          send({
+            type: "openDocument",
+            moduleName: message.moduleName,
+            project: DEMO_WORKBOOK,
+            text: moduleTexts[message.moduleName]!,
+          });
+        }
+
+        if (openModules.includes(message.moduleName)) {
+          activeModule = message.moduleName;
+        }
         sendModules();
       }
       if (message.type === "closeModule") {

@@ -532,11 +532,24 @@ export class Workspace {
       }
     }
 
-    // Add new tabs to the active group, in the host's order among themselves.
+    // Add new tabs to the active group, in the host's order among themselves - unless a drop
+    // already chose where one of them goes, in which case the placement hint says the group
+    // and the index, and is spent on the tab it named.
     const held = new Set(this.groups.flatMap((group) => group.tabs.map((tab) => docKeyOf(tab.id.module, tab.id.project))));
     open.forEach((id, index) => {
       if (!held.has(docKeyOf(id.module, id.project))) {
-        this.activeGroup.tabs.push({ id, dirty: dirty[index] ?? false });
+        const hint = this.placement !== null
+          && this.placement.key === docKeyOf(id.module, id.project)
+          && this.groups.includes(this.placement.group)
+          ? this.placement
+          : null;
+
+        if (hint) {
+          hint.group.tabs.splice(Math.min(hint.index, hint.group.tabs.length), 0, { id, dirty: dirty[index] ?? false });
+          this.placement = null;
+        } else {
+          this.activeGroup.tabs.push({ id, dirty: dirty[index] ?? false });
+        }
       }
     });
 
@@ -935,12 +948,19 @@ export class Workspace {
 
   /** Removes dissolved groups from the tree and merges single-child splits away. */
   private dissolveEmptyGroups(): void {
-    const empty = this.groups.filter((group) => group.tabs.length === 0);
+    // A group standing empty FOR a placement is not empty, it is early: a tree drop on a split
+    // zone carves the group before the host round trip delivers the tab, and any publish in
+    // between would dissolve it and strand the hint. Same for a group whose pending document
+    // is still on its way.
+    const spared = (group: EditorGroup): boolean =>
+      group === this.placement?.group || group.pending !== null;
+
+    const empty = this.groups.filter((group) => group.tabs.length === 0 && !spared(group));
     if (empty.length === 0 || this.groups.length === 1) {
       return;
     }
 
-    const keep = this.groups.filter((group) => group.tabs.length > 0);
+    const keep = this.groups.filter((group) => group.tabs.length > 0 || spared(group));
     const survivors = keep.length > 0 ? keep : [this.groups[0]!];
 
     const prune = (node: LayoutNode): LayoutNode | null => {
@@ -1055,6 +1075,210 @@ export class Workspace {
     this.handlers.activate(id);
     this.announceActive();
     target.editor.focus();
+  }
+
+  /* ------------------------------------------------------------------ drop targeting */
+
+  /**
+   * The one bar that says where a strip drop would land. Owned here rather than per drag,
+   * because at most one drag exists at a time and the bar must outlive no drag.
+   */
+  private dropIndicator: HTMLElement | null = null;
+
+  /**
+   * Where the NEXT arriving tab of one named document goes, one shot. A tree row dropped on
+   * the workspace names a module that may have no tab yet: opening is a host round trip, and
+   * when the publish finally carries the new tab, this is how it lands in the group and at
+   * the index the drop chose instead of being appended to whatever group is active.
+   */
+  private placement: { key: string; group: EditorGroup; index: number } | null = null;
+
+  /**
+   * Where a pointer mid-drag would land, with the furniture that says so.
+   *
+   * Over a strip, the landing is an insertion index. The SOURCE strip shows it by live
+   * reorder - the dragged tab element itself moves as the pointer crosses its neighbours'
+   * midpoints, so the feedback is the reorder. Every other strip shows an INSERTION BAR at
+   * the index, and the bar is what makes another group's strip read as a target at all: the
+   * cross-strip move worked for a week before anyone could see it, so every cross-group move
+   * went the long way through the compass centre instead (the developer, 2026-08-12).
+   *
+   * Over a group body, the compass names the outcome: centre joins that group's tabs, an
+   * edge splits it. A group is offered only the zones it can honour - `zonesFor` is the
+   * caller's answer, because what is honourable depends on what is being dragged.
+   */
+  private landingAt(
+    during: PointerEvent,
+    compass: DragCompass,
+    source: { strip: HTMLElement; tab: HTMLElement; group: EditorGroup } | null,
+    zonesFor: (candidate: EditorGroup) => DropZone[],
+  ): { strip: EditorGroup; index: number } | { group: EditorGroup; zone: DropZone } | null {
+    for (const candidate of this.groups) {
+      const bounds = candidate.strip.getBoundingClientRect();
+      if (during.clientY >= bounds.top && during.clientY <= bounds.bottom
+        && during.clientX >= bounds.left && during.clientX <= bounds.right) {
+        compass.clear();
+
+        if (source && candidate === source.group) {
+          this.clearDropIndicator();
+          const after = this.tabAfter(source.strip, during.clientX, source.tab);
+          if (after === null) {
+            source.strip.appendChild(source.tab);
+          } else if (after !== source.tab) {
+            source.strip.insertBefore(source.tab, after);
+          }
+          return { strip: candidate, index: -1 };
+        }
+
+        const after = this.tabAfter(candidate.strip, during.clientX, null);
+        const index = after === null
+          ? candidate.tabs.length
+          : [...candidate.strip.querySelectorAll<HTMLElement>(".tab")].indexOf(after);
+        this.showDropIndicator(candidate.strip, after);
+        return { strip: candidate, index };
+      }
+    }
+
+    this.clearDropIndicator();
+
+    for (const candidate of this.groups) {
+      const bounds = candidate.body.getBoundingClientRect();
+      if (during.clientX >= bounds.left && during.clientX <= bounds.right
+        && during.clientY >= bounds.top && during.clientY <= bounds.bottom) {
+        const zone = compass.over(bounds, during.clientX, during.clientY, zonesFor(candidate));
+        compass.preview(zone ? zoneRect(bounds, zone) : null, zone === "center" ? "join" : "new");
+        return zone ? { group: candidate, zone } : null;
+      }
+    }
+
+    compass.clear();
+    return null;
+  }
+
+  private showDropIndicator(strip: HTMLElement, before: HTMLElement | null): void {
+    if (!this.dropIndicator) {
+      this.dropIndicator = document.createElement("div");
+      this.dropIndicator.className = "tab-drop-indicator";
+    }
+
+    if (before) {
+      strip.insertBefore(this.dropIndicator, before);
+    } else {
+      strip.appendChild(this.dropIndicator);
+    }
+  }
+
+  private clearDropIndicator(): void {
+    this.dropIndicator?.remove();
+  }
+
+  /**
+   * A drag that BRINGS a document, from outside the strips: the tree's module and procedure
+   * rows. Same targets, same furniture, same landings as a tab drag - a strip takes it at an
+   * index, a body's compass joins or splits - but the thing dragged is a name, not a tab, so
+   * a ghost chip follows the pointer where a tab drag moves the tab itself.
+   *
+   * On release the document's tab is MOVED there when one exists, and otherwise the landing
+   * becomes a one-shot placement for the tab the host is about to deliver; either way `open`
+   * runs after - the same open the row's own click performs, which for a procedure row is the
+   * navigate that carries its line. The gesture and the click end in the same state, which is
+   * the property everything on this surface is held to.
+   */
+  beginDocumentDrag(
+    id: DocumentId,
+    label: string,
+    start: PointerEvent,
+    hooks: { open: () => void; became?: () => void },
+  ): void {
+    if (start.button !== 0) {
+      return;
+    }
+
+    const startX = start.clientX;
+    const startY = start.clientY;
+    let moved = false;
+    let drop: { strip: EditorGroup; index: number } | { group: EditorGroup; zone: DropZone } | null = null;
+    let ghost: HTMLElement | null = null;
+    const compass = new DragCompass();
+
+    const move = (during: PointerEvent): void => {
+      if (!moved && Math.abs(during.clientX - startX) < 5 && Math.abs(during.clientY - startY) < 5) {
+        return;
+      }
+
+      if (!moved) {
+        moved = true;
+        hooks.became?.();
+        ghost = document.createElement("div");
+        ghost.className = "drag-ghost";
+        ghost.textContent = label;
+        document.body.appendChild(ghost);
+        compass.begin(() => {
+          drop = null;
+          end();
+        });
+      }
+
+      if (ghost) {
+        ghost.style.left = `${during.clientX + 12}px`;
+        ghost.style.top = `${during.clientY + 12}px`;
+      }
+
+      // Every zone is honourable for a document that arrives from outside, except the one
+      // no-op: the sole tab of a group re-joining its own group.
+      const holder = this.groups.find((group) => group.holds(id));
+      drop = this.landingAt(during, compass, null, (candidate) =>
+        holder === candidate && candidate.tabs.length === 1 ? ["center"] : ALL_ZONES);
+    };
+
+    const end = (): void => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+      compass.end();
+      this.clearDropIndicator();
+      ghost?.remove();
+      ghost = null;
+
+      if (!moved) {
+        return;
+      }
+
+      const landing = drop;
+      drop = null;
+      if (!landing) {
+        return;
+      }
+
+      let target: EditorGroup;
+      let index: number;
+      if ("strip" in landing) {
+        target = landing.strip;
+        index = landing.index === -1 ? target.tabs.length : landing.index;
+      } else if (landing.zone === "center") {
+        target = landing.group;
+        index = landing.group.tabs.length;
+      } else {
+        target = this.splitLeaf(landing.group, landing.zone);
+        index = 0;
+      }
+
+      const holder = this.groups.find((group) => group.holds(id));
+      if (holder) {
+        this.moveTab(id, holder, { group: target, index });
+      } else {
+        this.placement = { key: docKeyOf(id.module, id.project), group: target, index };
+        target.pending = id;
+        this.activeGroup = target;
+        this.markActiveGroup();
+      }
+
+      hooks.open();
+    };
+
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   }
 
   /* ------------------------------------------------------------------ strip wiring */
@@ -1223,59 +1447,15 @@ export class Workspace {
           }
         }
 
-        drop = null;
-
-        // Over a strip - this one or another group's - the drag is a reorder/move-at-index.
-        // No compass there: the strip already shows exactly where the tab would sit.
-        for (const candidate of this.groups) {
-          const bounds = candidate.strip.getBoundingClientRect();
-          if (during.clientY >= bounds.top && during.clientY <= bounds.bottom
-            && during.clientX >= bounds.left && during.clientX <= bounds.right) {
-            compass.clear();
-
-            if (candidate === group) {
-              const after = this.tabAfter(strip, during.clientX, tab);
-              if (after === null) {
-                strip.appendChild(tab);
-              } else if (after !== tab) {
-                strip.insertBefore(tab, after);
-              }
-              drop = { strip: candidate, index: -1 };
-            } else {
-              const after = this.tabAfter(candidate.strip, during.clientX, null);
-              const index = after === null
-                ? candidate.tabs.length
-                : [...candidate.strip.querySelectorAll<HTMLElement>(".tab")].indexOf(after);
-              drop = { strip: candidate, index };
-            }
-            return;
-          }
-        }
-
-        // Over a group body, the compass names the outcome: centre joins that group's tabs,
-        // an edge splits it.
-        //
         // A group is offered only what it can honour. Over the tab's OWN group, centre is
         // where it already is, and a split is impossible when it is the only tab - the tab
         // would leave the group and dissolve it, which is the same picture one splitter
         // wider. Showing a zone that does nothing is a promise the drop cannot keep, and it
         // reads as a bug from outside (developer, 2026-08-06).
-        for (const candidate of this.groups) {
-          const bounds = candidate.body.getBoundingClientRect();
-          if (during.clientX >= bounds.left && during.clientX <= bounds.right
-            && during.clientY >= bounds.top && during.clientY <= bounds.bottom) {
-            const allowed = candidate !== group ? ALL_ZONES
-              : group.tabs.length > 1 ? EDGE_ZONES
-              : [];
-
-            const zone = compass.over(bounds, during.clientX, during.clientY, allowed);
-            drop = zone ? { group: candidate, zone } : null;
-            compass.preview(zone ? zoneRect(bounds, zone) : null, zone === "center" ? "join" : "new");
-            return;
-          }
-        }
-
-        compass.clear();
+        drop = this.landingAt(during, compass, { strip, tab, group }, (candidate) =>
+          candidate !== group ? ALL_ZONES
+            : group.tabs.length > 1 ? EDGE_ZONES
+            : []);
       };
 
       const end = (): void => {
@@ -1284,6 +1464,7 @@ export class Workspace {
         window.removeEventListener("pointercancel", end);
         tab.classList.remove("dragging");
         compass.end();
+        this.clearDropIndicator();
 
         if (!moved) {
           return;

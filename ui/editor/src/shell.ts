@@ -43,6 +43,11 @@ export interface ShellHandlers {
   activateModule(name: string, workbook?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
   navigate(module: string, line: number, column: number, selectLine?: boolean, workbook?: string): void;
+  /**
+   * A tree row is being dragged toward the editor: a module, or a procedure with its line.
+   * The workspace runs the gesture; `became` says the press turned into a real drag.
+   */
+  dragFromTree(payload: { module: string; workbook?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
   /** The panel was shown or hidden, so the editor has to re-measure. */
   layoutChanged(): void;
   /** A toolbar command was chosen. */
@@ -212,6 +217,7 @@ export class Shell {
       projectAdd: (project, x, y) => showContextMenu(x, y, this.newComponentItems(project)),
       outline: (module, workbook) => handlers.requestOutline(module, workbook),
       openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
+      dragRow: (payload, start, became) => handlers.dragFromTree(payload, start, became),
       trace: (text) => handlers.trace(text),
     });
 

@@ -477,6 +477,20 @@ function boot(): void {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
+    // The drop ends in the same state the row's own click ends in - the module's activate, or
+    // the procedure's navigate with its line - with only the PLACEMENT added: the workspace
+    // remembers the group and index the drop chose and the arriving tab lands there.
+    dragFromTree: (payload, start, became) =>
+      workspace.beginDocumentDrag(
+        { module: payload.module, project: payload.workbook ?? null },
+        payload.member ? `${payload.module} - ${payload.member}` : payload.module,
+        start,
+        {
+          became,
+          open: payload.line === undefined
+            ? () => bridge.activateModule(payload.module, payload.workbook)
+            : () => bridge.navigate(payload.module, payload.line!, 1, true, payload.workbook),
+        }),
     layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
     command: (command) => {
       // The settings dialog is the page's own, not a Monaco action and not the host's.

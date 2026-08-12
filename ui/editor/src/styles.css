@@ -414,6 +414,31 @@ body {
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* Where a strip drop would land. The source strip shows the insertion by live reorder; every
+   other strip shows this bar, which is what makes it read as a target at all. */
+.tab-drop-indicator {
+  flex: 0 0 2px;
+  align-self: stretch;
+  min-height: 28px;
+  background: var(--vscode-focusBorder, #0078d4);
+  pointer-events: none;
+}
+
+/* The chip that follows a tree-row drag: the thing dragged is a name, not a tab, so the name
+   rides with the pointer where a tab drag moves the tab itself. */
+.drag-ghost {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  padding: 3px 10px;
+  border: 1px solid var(--vscode-focusBorder, #0078d4);
+  border-radius: 3px;
+  background: var(--vscode-editorWidget-background, #252526);
+  color: var(--vscode-foreground, #cccccc);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 /* A closed hand for the whole page while a drag is live. Every element is named because Monaco
    sets cursors of its own on the lines it draws, and an I-beam under a dimmed page with a compass
    trailing the pointer is the surface saying two different things at once. Forced for the same

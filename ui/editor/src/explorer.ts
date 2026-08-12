@@ -109,6 +109,12 @@ export interface ExplorerHandlers {
   outline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A procedure was picked: go to its line in its module, in its workbook. */
   openProcedure(module: string, line: number, workbook?: string): void;
+  /**
+   * A row is being dragged toward the editor: a module, or a procedure carrying its line.
+   * `became` fires if the press turns into a real drag, so the click it would otherwise be
+   * can be swallowed - a drag that ALSO clicked would unfold the accordion mid-gesture.
+   */
+  dragRow(payload: { module: string; workbook?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
   /** A line for the host's log, for the defects only the log's data cadence explains. */
   trace?(text: string): void;
 }
@@ -152,13 +158,54 @@ export class Explorer {
 
   private firstProjectsSeen = false;
 
+  /** True from a row drag until the click it would otherwise become has been swallowed. */
+  private dragConsumedClick = false;
+
   constructor(root: HTMLElement, handlers: ExplorerHandlers) {
     this.root = root;
     this.handlers = handlers;
 
+    // A row can be DRAGGED to the editor: a module row opens where it lands, a procedure row
+    // opens and goes to its line. The press only becomes a drag past the movement threshold,
+    // so ordinary clicks are untouched; when it does, the click it would still produce is
+    // swallowed below, or the gesture would also unfold the accordion on its way out.
+    this.root.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+
+      const target = event.target as HTMLElement;
+      if (target.closest("[data-toggle]") || target.closest("[data-add-project]")) {
+        return;
+      }
+
+      const procedure = this.procedureAt(event);
+      // The ghost chip wears the member's name as the row spells it; the row is in hand.
+      const spelled = (target.closest("[data-proc-module]")?.textContent ?? "").trim();
+      const component = procedure ? null : this.componentAt(event);
+      const workbook = this.workbookOf(event);
+      const payload = procedure
+        ? { ...procedure, ...(spelled ? { member: spelled } : {}) }
+        : component
+          ? { module: component, ...(workbook ? { workbook } : {}) }
+          : null;
+
+      if (payload) {
+        this.handlers.dragRow(payload, event, () => {
+          this.dragConsumedClick = true;
+        });
+      }
+    });
+
     // One listener for the whole tree. The tree is rebuilt whenever the project changes, and
     // per-item listeners would have to be torn down with it.
     this.root.addEventListener("click", (event) => {
+      // A click that was really the tail of a drag has already had its effect at the drop.
+      if (this.dragConsumedClick) {
+        this.dragConsumedClick = false;
+        return;
+      }
+
       // The chevron toggles and does nothing else, so unfolding is never also an open.
       const toggle = (event.target as HTMLElement).closest("[data-toggle]") as HTMLElement | null;
       if (toggle?.dataset.toggle) {
