@@ -2332,6 +2332,14 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Whether execution was stopped last time it was looked at.</summary>
     private bool _inBreak;
 
+    /// <summary>
+    /// The stop the surface caret was last moved to, as "module:line". The debug poll runs the
+    /// stop path every 150ms for as long as the break lasts, and the caret may only follow a
+    /// stop ONCE - a caret re-set per tick would take the caret back from the developer the
+    /// moment they clicked anywhere else mid-break.
+    /// </summary>
+    private string? _lastStopFollowed;
+
     /// <summary>Project modes, as the editor numbers them.</summary>
     private const int BreakMode = 1;
     private const int DesignMode = 2;
@@ -3687,6 +3695,7 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     _inBreak = false;
                     _editorSurface?.ShowCurrentLine(null);
+                    _lastStopFollowed = null;
 
                     // Forgotten at exit so the NEXT break starts empty: the readings outlive
                     // the break otherwise, and the previous break's variables are exactly
@@ -3738,7 +3747,25 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             _editorSurface?.ShowCurrentLine(line);
-            _editorSurface?.Reveal(line);
+
+            // THE CARET FOLLOWS THE STOP, once per stop. The host put its own caret on the
+            // stopped statement - the native pane reads line 18 while stopped there - and the
+            // native editor, like every reference debugger, moves the caret to each stop. The
+            // surface only scrolled, so its caret (and the status bar reading it) stayed
+            // wherever the developer last clicked: a bar saying "Ln 9" over a stop at 18 is
+            // misdirection about where a Step acts, found by the first suite that asked the
+            // bar (2026-08-12). Once per stop and not per tick, so the developer's mid-break
+            // clicks are not fought; a step to a NEW line is a new stop and follows again.
+            var stopKey = $"{name}:{line}";
+            if (stopKey != _lastStopFollowed)
+            {
+                _lastStopFollowed = stopKey;
+                _editorSurface?.SetCaret(line, Math.Max(1, selection[1]));
+            }
+            else
+            {
+                _editorSurface?.Reveal(line);
+            }
 
             if (!_inBreak)
             {

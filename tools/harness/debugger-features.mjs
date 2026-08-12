@@ -115,6 +115,17 @@ try {
     check("the NATIVE caret is on the stopped line",
       below.caretLine === stopLine, `${below.caretLine}, wanted ${stopLine}`);
 
+    // The STATUS BAR's claim against the native truth. The bar's caret readout is the one
+    // place the developer sees where a Run would land, so a bar that drifts from the caret
+    // the host acts on is misdirection - and until the snapshot carried these two fields the
+    // bar could be driven all day and never asked (2026-08-12).
+    const bar = await api.ui();
+    check("the status bar reads the stopped line the native caret is on",
+      (bar.statusPosition ?? "").startsWith(`Ln ${stopLine},`),
+      `the bar says "${bar.statusPosition}", the native caret is on line ${below.caretLine}`);
+    check("and names the module the stop is in",
+      (bar.statusModule ?? "").toLowerCase().includes("runner"), bar.statusModule);
+
     await parity("while stopped");
 
     const locals = await api.locals();

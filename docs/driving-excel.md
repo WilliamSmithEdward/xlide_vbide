@@ -334,6 +334,9 @@ ui.focus;                         // model, line, column, and whether the editor
 ui.emptyViewShown;                // a DIFFERENT question from having no tabs
 ui.properties;                    // the Properties panel: component, kind, and every row it draws
 ui.statusNotice;                  // what the status line is saying, "" when it is saying nothing
+ui.statusPosition;                // the bar's caret readout, "Ln 4, Col 7" - the developer's own
+                                  // answer to where a Run would land, so hold it to the native caret
+ui.statusModule;                  // the bar's module name
 ui.search;                        // open, query, scope, matches, current
 ui.bookmarks;                     // the marked lines of the model on screen
 ui.longTasks;                     // main-thread stalls over 50ms, worst first

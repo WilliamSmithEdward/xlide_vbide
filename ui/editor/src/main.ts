@@ -948,6 +948,8 @@ function boot(): void {
     panes: shell.paneVisibility(),
     openSettings: () => bridge.openSettings?.(),
     statusNotice: () => shell.currentNotice(),
+    statusPosition: () => shell.currentPosition(),
+    statusModule: () => shell.currentModule(),
     pressToolbar: (id) => shell.pressToolbarCommand(id),
     toolbarCommands: () => shell.toolbarCommandsShown(),
     properties: () => shell.propertiesShown(),

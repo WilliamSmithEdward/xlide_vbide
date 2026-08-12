@@ -884,6 +884,19 @@ export class Shell {
   }
 
   /**
+   * The status bar's caret readout and module name, for the snapshot - read from the elements
+   * the render writes, not from any record of what was last computed, because the readout the
+   * developer trusts about where a Run will land is the one on screen.
+   */
+  currentPosition(): string {
+    return this.statusPosition.textContent ?? "";
+  }
+
+  currentModule(): string {
+    return this.statusModule.textContent ?? "";
+  }
+
+  /**
    * The host is holding a tab close because the module has unsaved changes. Ask, and answer
    * the close with the choice: Save writes the workbook and closes, Don't Save puts the
    * module back to its saved text and closes, Cancel leaves everything as it is. Questions

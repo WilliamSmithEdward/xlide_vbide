@@ -78,6 +78,15 @@ export interface UiSnapshot {
    * work, and a held notice that fails to clear is exactly the defect nobody would see in a test.
    */
   statusNotice: string;
+  /**
+   * The status bar's other two readouts, read from the elements the render writes: the caret
+   * position ("Ln 4, Col 7") and the module name. They complete what statusNotice started - the
+   * caret readout is the one place the developer SEES where a Run would land, so a readout that
+   * drifts from the native caret is the misdirection debugger-features exists to catch, and
+   * until these were here it could drive the caret and never ask what the bar claimed.
+   */
+  statusPosition: string;
+  statusModule: string;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
   /** How many models and documents are alive, since a leak shows here first. */
@@ -182,6 +191,10 @@ export interface DevSurfaceParts {
   openSponsors(): void;
   /** What the status line is showing, read from the element the render writes. */
   statusNotice(): string;
+  /** The status bar's caret readout ("Ln 4, Col 7"), read the same way. */
+  statusPosition(): string;
+  /** The status bar's module name, read the same way. */
+  statusModule(): string;
   /** Presses a toolbar command by id, through the button's own click. */
   pressToolbar(id: string): { did: boolean; detail: string };
   /** Every command the strip is currently drawing, and whether each is pressable. */
@@ -517,6 +530,8 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     emptyViewShown: workspace.emptyViewShown(),
     properties: parts.properties(),
     statusNotice: parts.statusNotice(),
+    statusPosition: parts.statusPosition(),
+    statusModule: parts.statusModule(),
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
     search: parts.search.state(),
