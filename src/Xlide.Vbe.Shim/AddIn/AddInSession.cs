@@ -4511,15 +4511,33 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// Answers a completion request from the surface.
+    /// The one shape of an engine round trip made from a surface request handler: capture the
+    /// module and its live text on the host thread, answer empty when the session cannot ask,
+    /// resolve OFF the host thread under the standard three-second deadline - these ride on
+    /// keystrokes, and the developer must never wait for one - log the outcome either way, and
+    /// marshal the reply back, because the browser may only be spoken to from the thread that
+    /// owns it. A request that fails answers empty rather than never: the editor is left
+    /// waiting on nothing.
     ///
-    /// The module name and its live text are captured here, on the host thread; the engine round
-    /// trip happens off it, because completions ride on every keystroke and the developer must
-    /// never wait for one; and the answer is marshalled back, because the browser may only be
-    /// spoken to from the thread that owns it. A request that fails answers empty rather than
-    /// never: the editor is left waiting on nothing.
+    /// Seven handlers were this block copied out with only the ask, the projection, the empty
+    /// value and the log verb changing, and the shared policy had already drifted at the edges:
+    /// code actions' guard skipped the source it does not use, and four of the seven logged
+    /// only non-empty answers, so a feature answering empty was indistinguishable from one
+    /// never asked (the audit's B14). Every request logs now, the verbose-dev rule.
+    ///
+    /// `ask` runs on a pool thread and answers the reply's whole value, empty included, so the
+    /// helper holds no null convention of its own. `reply` always runs on the host thread, with
+    /// `empty` when the ask threw. `locus` is the position part of the log line ("@120",
+    /// "@3..9"), and `describe` names the answer for it. Closed generic instantiations only,
+    /// so ahead-of-time compilation is unaffected.
     /// </summary>
-    private void OnCompletionRequested(int requestId, int offset)
+    private void AnswerFromEngine<T>(
+        string verb,
+        string locus,
+        T empty,
+        Func<AnalysisService, string, string, CancellationToken, Task<T>> ask,
+        Action<EditorSurface, T> reply,
+        Func<T, string> describe)
     {
         var surface = _editorSurface;
         var module = surface?.Module;
@@ -4527,135 +4545,95 @@ internal sealed partial class AddInSession : IDisposable
 
         if (surface is null || module is null || source is null || _analysis is not { } analysis)
         {
-            _editorSurface?.ShowCompletions(requestId, []);
+            if (_editorSurface is { } idle)
+            {
+                reply(idle, empty);
+            }
+
             return;
         }
 
         _ = Task.Run(async () =>
         {
-            SurfaceCompletionItem[] items = [];
+            var value = empty;
 
             try
             {
                 using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.CompleteAsync(module, source, offset, deadline.Token)
-                    .ConfigureAwait(false);
-
-                if (answered is not null)
-                {
-                    items = [.. answered.Select(item => new SurfaceCompletionItem(
-                        item.Label,
-                        item.Kind,
-                        item.Detail,
-                        item.Documentation,
-                        item.InsertText,
-                        item.FilterText,
-                        item.SortText))];
-                }
-
-                Log.Info($"completion: {module}@{offset} -> {items.Length} item(s)");
+                value = await ask(analysis, module, source, deadline.Token).ConfigureAwait(false);
+                Log.Info($"{verb}: {module}{locus} -> {describe(value)}");
             }
             catch (Exception ex)
             {
-                Log.Info($"completion: {module}@{offset} failed ({ex.GetType().Name})");
+                Log.Info($"{verb}: {module}{locus} failed ({ex.GetType().Name})");
             }
 
-            surface.RunOnHostThread(() => surface.ShowCompletions(requestId, items));
+            surface.RunOnHostThread(() => reply(surface, value));
         });
     }
 
-    /// <summary>
-    /// Answers a hover request from the surface, the same way a completion is answered: capture
-    /// on the host thread, resolve off it, marshal the answer back. A request that fails answers
-    /// empty rather than never.
-    /// </summary>
-    private void OnHoverRequested(int requestId, int offset)
-    {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
-
-        if (surface is null || module is null || source is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowHover(requestId, null);
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            SurfaceHoverPayload? payload = null;
-
-            try
+    /// <summary>Answers a completion request from the surface.</summary>
+    private void OnCompletionRequested(int requestId, int offset) =>
+        AnswerFromEngine<SurfaceCompletionItem[]>(
+            "completion",
+            $"@{offset}",
+            [],
+            async (analysis, module, source, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.HoverAsync(module, source, offset, deadline.Token)
+                var answered = await analysis.CompleteAsync(module, source, offset, token)
                     .ConfigureAwait(false);
+                return answered is null ? [] : [.. answered.Select(item => new SurfaceCompletionItem(
+                    item.Label,
+                    item.Kind,
+                    item.Detail,
+                    item.Documentation,
+                    item.InsertText,
+                    item.FilterText,
+                    item.SortText))];
+            },
+            (surface, items) => surface.ShowCompletions(requestId, items),
+            items => $"{items.Length} item(s)");
 
-                if (answered is not null)
-                {
-                    payload = new SurfaceHoverPayload(
-                        answered.Signature,
-                        answered.Details,
-                        answered.Documentation,
-                        answered.Span.Start,
-                        answered.Span.End);
-                }
-
-                Log.Info($"hover: {module}@{offset} -> {(payload is null ? "nothing" : payload.Signature)}");
-            }
-            catch (Exception ex)
+    /// <summary>Answers a hover request from the surface, the same way a completion is.</summary>
+    private void OnHoverRequested(int requestId, int offset) =>
+        AnswerFromEngine<SurfaceHoverPayload?>(
+            "hover",
+            $"@{offset}",
+            null,
+            async (analysis, module, source, token) =>
             {
-                Log.Info($"hover: {module}@{offset} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowHover(requestId, payload));
-        });
-    }
+                var answered = await analysis.HoverAsync(module, source, offset, token)
+                    .ConfigureAwait(false);
+                return answered is null ? null : new SurfaceHoverPayload(
+                    answered.Signature,
+                    answered.Details,
+                    answered.Documentation,
+                    answered.Span.Start,
+                    answered.Span.End);
+            },
+            (surface, payload) => surface.ShowHover(requestId, payload),
+            payload => payload is null ? "nothing" : payload.Signature);
 
     /// <summary>Answers a call-tip request from the surface, the same way a hover is answered.</summary>
-    private void OnSignatureHelpRequested(int requestId, int offset)
-    {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
-
-        if (surface is null || module is null || source is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowSignatureHelp(requestId, null);
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            SurfaceSignatureInfo? payload = null;
-
-            try
+    private void OnSignatureHelpRequested(int requestId, int offset) =>
+        AnswerFromEngine<SurfaceSignatureInfo?>(
+            "signature",
+            $"@{offset}",
+            null,
+            async (analysis, module, source, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.SignatureHelpAsync(module, source, offset, deadline.Token)
+                var answered = await analysis.SignatureHelpAsync(module, source, offset, token)
                     .ConfigureAwait(false);
-
-                if (answered is not null)
-                {
-                    payload = new SurfaceSignatureInfo(
-                        answered.Label,
-                        [.. answered.Parameters.Select(parameter =>
-                            new SurfaceSignatureParameter(parameter.Label, parameter.Documentation))],
-                        answered.ActiveParameter,
-                        answered.Documentation,
-                        answered.Details);
-                }
-
-                Log.Info($"signature: {module}@{offset} -> {(payload is null ? "nothing" : payload.Label)}");
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"signature: {module}@{offset} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowSignatureHelp(requestId, payload));
-        });
-    }
+                return answered is null ? null : new SurfaceSignatureInfo(
+                    answered.Label,
+                    [.. answered.Parameters.Select(parameter =>
+                        new SurfaceSignatureParameter(parameter.Label, parameter.Documentation))],
+                    answered.ActiveParameter,
+                    answered.Documentation,
+                    answered.Details);
+            },
+            (surface, payload) => surface.ShowSignatureHelp(requestId, payload),
+            payload => payload is null ? "nothing" : payload.Label);
 
     /// <summary>
     /// Answers a Smart Enter request from the surface: what the Enter that just went in should
@@ -4664,141 +4642,68 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private void OnSmartEnterRequested(int requestId, int offset)
     {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
-
-        if (surface is null || module is null || source is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowSmartEnter(requestId, [], null);
-            return;
-        }
-
         // Captured on the host thread, before the hop: the developer's typing choices decide
         // what Enter leaves behind, and reading them off the session from a background task
         // would race a settings change.
         var typing = _settings;
 
-        _ = Task.Run(async () =>
-        {
-            SurfaceTextEdit[] edits = [];
-            int? caret = null;
-
-            try
+        AnswerFromEngine<(SurfaceTextEdit[] Edits, int? Caret)>(
+            "smartEnter",
+            $"@{offset}",
+            ([], null),
+            async (analysis, module, source, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.SmartEnterAsync(module, source, offset, typing, deadline.Token)
+                var answered = await analysis.SmartEnterAsync(module, source, offset, typing, token)
                     .ConfigureAwait(false);
-
-                if (answered is not null)
-                {
-                    edits = [.. answered.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
-                    caret = answered.Caret;
-                }
-
-                if (edits.Length > 0)
-                {
-                    Log.Info($"smartEnter: {module}@{offset} -> {edits.Length} edit(s)");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"smartEnter: {module}@{offset} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowSmartEnter(requestId, edits, caret));
-        });
+                return answered is null
+                    ? ([], null)
+                    : ([.. answered.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))],
+                        answered.Caret);
+            },
+            (surface, value) => surface.ShowSmartEnter(requestId, value.Edits, value.Caret),
+            value => $"{value.Edits.Length} edit(s)");
     }
 
     /// <summary>
     /// Answers a canonical-case request from the surface: the case corrections for a span,
     /// resolved from the same project facts completion uses.
     /// </summary>
-    private void OnCanonicalCaseRequested(int requestId, int start, int end, bool single, bool completeHeader)
-    {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
-
-        if (surface is null || module is null || source is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowCanonicalCase(requestId, []);
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            SurfaceTextEdit[] edits = [];
-
-            try
+    private void OnCanonicalCaseRequested(int requestId, int start, int end, bool single, bool completeHeader) =>
+        AnswerFromEngine<SurfaceTextEdit[]>(
+            "canonicalCase",
+            $"@{start}..{end}",
+            [],
+            async (analysis, module, source, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.CanonicalCaseAsync(module, source, start, end, single, completeHeader, deadline.Token)
+                var answered = await analysis
+                    .CanonicalCaseAsync(module, source, start, end, single, completeHeader, token)
                     .ConfigureAwait(false);
-
-                if (answered is not null)
-                {
-                    edits = [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
-                }
-
-                if (edits.Length > 0)
-                {
-                    Log.Info($"canonicalCase: {module}@{start}..{end} -> {edits.Length} edit(s)");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"canonicalCase: {module}@{start}..{end} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowCanonicalCase(requestId, edits));
-        });
-    }
+                return answered is null
+                    ? []
+                    : [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
+            },
+            (surface, edits) => surface.ShowCanonicalCase(requestId, edits),
+            edits => $"{edits.Length} edit(s)");
 
     /// <summary>
     /// Answers a loop-sync request from the surface: the paired iterator rename, when the edit
     /// at the offset touched one side of a For/Next pair.
     /// </summary>
-    private void OnLoopSyncRequested(int requestId, int offset)
-    {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-        var source = surface?.Text;
-
-        if (surface is null || module is null || source is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowLoopSync(requestId, []);
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            SurfaceTextEdit[] edits = [];
-
-            try
+    private void OnLoopSyncRequested(int requestId, int offset) =>
+        AnswerFromEngine<SurfaceTextEdit[]>(
+            "loopSync",
+            $"@{offset}",
+            [],
+            async (analysis, module, source, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.LoopSyncAsync(module, source, offset, deadline.Token)
+                var answered = await analysis.LoopSyncAsync(module, source, offset, token)
                     .ConfigureAwait(false);
-
-                if (answered is not null)
-                {
-                    edits = [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
-                }
-
-                if (edits.Length > 0)
-                {
-                    Log.Info($"loopSync: {module}@{offset} -> {edits.Length} edit(s)");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"loopSync: {module}@{offset} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowLoopSync(requestId, edits));
-        });
-    }
+                return answered is null
+                    ? []
+                    : [.. answered.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))];
+            },
+            (surface, edits) => surface.ShowLoopSync(requestId, edits),
+            edits => $"{edits.Length} edit(s)");
 
     /// <summary>
     /// Answers a quick-fix request from the surface: what can be fixed over a span, and the edits
@@ -4806,48 +4711,25 @@ internal sealed partial class AddInSession : IDisposable
     /// reason - a lightbulb that does not appear is what the developer already sees when there is
     /// nothing to fix.
     /// </summary>
-    private void OnCodeActionsRequested(int requestId, int start, int end)
-    {
-        var surface = _editorSurface;
-        var module = surface?.Module;
-
-        if (surface is null || module is null || _analysis is not { } analysis)
-        {
-            _editorSurface?.ShowCodeActions(requestId, []);
-            return;
-        }
-
-        _ = Task.Run(async () =>
-        {
-            SurfaceCodeAction[] actions = [];
-
-            try
+    private void OnCodeActionsRequested(int requestId, int start, int end) =>
+        AnswerFromEngine<SurfaceCodeAction[]>(
+            "codeAction",
+            $"@{start}..{end}",
+            [],
+            async (analysis, module, _, token) =>
             {
-                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                var answered = await analysis.CodeActionsAsync(module, start, end, deadline.Token)
+                var answered = await analysis.CodeActionsAsync(module, start, end, token)
                     .ConfigureAwait(false);
-
-                actions = [.. answered.Select(action => new SurfaceCodeAction(
+                return [.. answered.Select(action => new SurfaceCodeAction(
                     action.Title,
                     action.IsPreferred ?? false,
                     action.Code,
                     action.Span.Start,
                     action.Span.End,
                     [.. action.Edits.Select(edit => new SurfaceTextEdit(edit.Start, edit.End, edit.Text))]))];
-
-                if (actions.Length > 0)
-                {
-                    Log.Info($"codeAction: {module}@{start}..{end} -> {actions.Length} fix(es)");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Info($"codeAction: {module}@{start}..{end} failed ({ex.GetType().Name})");
-            }
-
-            surface.RunOnHostThread(() => surface.ShowCodeActions(requestId, actions));
-        });
-    }
+            },
+            (surface, actions) => surface.ShowCodeActions(requestId, actions),
+            actions => $"{actions.Length} fix(es)");
 
     /// <summary>
     /// Answers an outline request from the surface: a module's procedures for its tree node.
