@@ -306,40 +306,26 @@ export class PanelDocks {
     const known = new Set([...this.seats.keys()].filter((name) => !this.closed.has(name)));
     const placed = new Set<string>();
 
-    const prune = (node: Node | null): Node | null => {
+    // Two jobs, kept apart: THIS walk only filters each group's tabs down to panes that exist
+    // and have not been claimed by an earlier group. The collapse of what that empties - a
+    // groupless split, a one-child split, sizes that must partition one again - is docktree's
+    // prune, the tested copy. A second implementation of that arithmetic lived here as a local
+    // `prune` shadowing the import, so a reader following the name landed on the wrong
+    // function and the real one's tests covered none of this (the audit's B29).
+    const filterTabs = (node: Node | null): Node | null => {
       if (!node) {
         return null;
       }
       if (node.kind === "group") {
         const tabs = node.tabs.filter((tab) => known.has(tab) && !placed.has(tab));
         tabs.forEach((tab) => placed.add(tab));
-        if (tabs.length === 0) {
-          return null;
-        }
-        return { kind: "group", tabs, active: tabs.includes(node.active) ? node.active : tabs[0]! };
+        return { kind: "group", tabs, active: tabs.includes(node.active) ? node.active : tabs[0] ?? "" };
       }
-
-      const children: Node[] = [];
-      const sizes: number[] = [];
-      node.children.forEach((child, index) => {
-        const kept = prune(child);
-        if (kept) {
-          children.push(kept);
-          sizes.push(node.sizes[index] ?? 1);
-        }
-      });
-      if (children.length === 0) {
-        return null;
-      }
-      if (children.length === 1) {
-        return children[0]!;
-      }
-      const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
-      return { kind: "split", direction: node.direction, children, sizes: sizes.map((s) => s / total) };
+      return { ...node, children: node.children.map((child) => filterTabs(child)!) };
     };
 
     for (const side of ["left", "right", "top", "bottom"] as DockSide[]) {
-      this.layout[side] = prune(this.layout[side]);
+      this.layout[side] = prune(filterTabs(this.layout[side]));
     }
 
     // A pane the stored layout forgot still exists somewhere: the bottom, joining its kin.
