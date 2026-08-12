@@ -1271,6 +1271,16 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>True while the surface is up over an editor that has no panes anywhere.</summary>
     private bool _watchingEmpty;
 
+    /// <summary>
+    /// Whether the editor's own window is on screen, as placement last saw it. Defaults true so a
+    /// session that has not placed anything yet behaves as it always did.
+    ///
+    /// The polling tiers consult it: an editor whose window has been closed needs nothing watched,
+    /// and `_watchingEmpty` alone does not notice, because it is a fact about the workspace and
+    /// survives the window that was showing it.
+    /// </summary>
+    private bool _frameVisible = true;
+
     /// <summary>The language facts last pushed to the page, so unchanged ones are not re-sent.</summary>
     private string? _lastLanguageFactsKey;
 
@@ -3794,10 +3804,23 @@ internal sealed partial class AddInSession : IDisposable
          * over about a tenth of a second, only after a close, and then the interval goes back.
          * Nothing else polls harder and nothing polls harder for longer.
          */
+        // THE EMPTY-WORKSPACE TIER NEEDS A WINDOW TO BE EMPTY IN.
+        //
+        // `_watchingEmpty` says the editor has no panes, which stays true after its window closes:
+        // the frame-hide path hides the surface and returns, and the two places that clear the
+        // flag both need a pane to do it. So opening Alt+F11 on a workbook with nothing open, then
+        // closing the editor and going back to the grid, left the whole project-and-component walk
+        // running once a second on Excel's own UI thread for the rest of the session, publishing a
+        // tree to a page nobody can see.
+        //
+        // Gated here rather than by clearing the flag, because the flag is a fact about the
+        // WORKSPACE and this is a fact about the WINDOW. Read from the record placement keeps
+        // rather than asked of the window: this runs from several places and the answer only
+        // changes when placement notices it change, which is where UpdatePolling is called from.
         var interval = _resyncPanePolls > 0 ? ClosingPollMilliseconds
             : _pollsRemaining > 0 ? DebugPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
-            : _watchingEmpty ? EmptyWorkspacePollMilliseconds
+            : _watchingEmpty && _frameVisible ? EmptyWorkspacePollMilliseconds
             : 0;
 
         _editorSurface?.Poll(interval);
@@ -7465,7 +7488,19 @@ internal sealed partial class AddInSession : IDisposable
         // object-model pass of that day is the police pass of this one). A hidden
         // frame needs nothing covered; the surface hides with it, and the show event that
         // brings the frame back re-derives everything.
-        if (!Win32.IsWindowVisible(_frame))
+        // THE ONE PLACE THAT NOTICES THE EDITOR'S WINDOW COMING AND GOING, so it is where the
+        // polling decision is re-taken. Only on the change: UpdatePolling restarts the timer, and
+        // placement runs on every window event, every loader pulse and every pane follow - calling
+        // it each time would reset a 1,000ms timer far more often than once a second and the tick
+        // would never arrive at all.
+        var frameVisible = Win32.IsWindowVisible(_frame);
+        if (frameVisible != _frameVisible)
+        {
+            _frameVisible = frameVisible;
+            UpdatePolling();
+        }
+
+        if (!frameVisible)
         {
             Log.Verbose("placement: the frame is not visible, hiding the surface with it");
             _editorSurface.Follow(default, visible: false);
