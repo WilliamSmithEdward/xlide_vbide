@@ -20,6 +20,8 @@ import {
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
 import type { ModulePayload } from './protocol';
 
+type SharedProjectIndex = ReturnType<typeof buildLiveVbaProjectIndex>;
+
 const WORKBOOK = 'Excel.Workbook';
 const WORKSHEET = 'Excel.Worksheet';
 const CHART = 'Excel.Chart';
@@ -66,6 +68,55 @@ export interface AssembledContext {
  * per-keystroke cost of a completion from indexing the whole project into scanning one module.
  */
 const contextCache = new WeakMap<readonly ModulePayload[], Map<string, AssembledContext>>();
+
+/*
+ * ONE PROJECT INDEX PER SEED, shared by every module's context build.
+ *
+ * The index used to be rebuilt inside buildContext, once per MODULE per seed, and the analyzer's
+ * parse cache holds eight entries - so past eight modules each rebuild evicted every entry as it
+ * walked and the NEXT module's build re-parsed the project from scratch. Measured on a twelve
+ * 500-line-module project: the first completion in each module cost a median 11ms against 2.6ms
+ * warm, 161ms for the first walk across the modules, and every reseed - every write-back that
+ * changed text - made all of it cold again (2026-08-12, the audit's C13).
+ *
+ * Sharing is sound because the per-module builds were near-identical by construction: the
+ * override buildContext passed carried the SEEDED source on purpose ("a cache must not embalm
+ * whichever keystroke happened to build it"), so the only per-module difference was the current
+ * module's own kind spelling - and a module's own contribution is excluded from its own external
+ * context anyway (externalProjectProcedures is the point). The per-module HALF of the work,
+ * projectEditorSymbolContextForModule, still runs per module below.
+ *
+ * `null` is remembered too: an index that will not build should not be re-attempted per module,
+ * and the conservative empty surfaces are the same answer the old catch produced.
+ *
+ * The dispatcher's fingerprint index is deliberately NOT taken from here: it builds with
+ * ignoreInvalidModules OFF so a project holding one unparseable module reads as "unknown, never
+ * reused" rather than as a fingerprint over the valid remainder, and that difference is
+ * load-bearing for freshness.
+ */
+const projectIndexCache = new WeakMap<readonly ModulePayload[], SharedProjectIndex | null>();
+
+function sharedProjectIndex(seeded: readonly ModulePayload[]): SharedProjectIndex | null {
+    if (projectIndexCache.has(seeded)) {
+        return projectIndexCache.get(seeded) ?? null;
+    }
+
+    let built: SharedProjectIndex | null = null;
+    try {
+        const inputs: VbaProjectModuleInput[] = seeded.map((module) => ({
+            moduleName: module.moduleName,
+            source: module.source,
+            type: module.type ?? 'standard',
+            documentType: module.documentType as EventHandlerDocumentType | undefined,
+        }));
+        built = buildLiveVbaProjectIndex(inputs);
+    } catch {
+        built = null;
+    }
+
+    projectIndexCache.set(seeded, built);
+    return built;
+}
 
 export function assembleContext(
     seeded: readonly ModulePayload[],
@@ -126,27 +177,18 @@ function buildContext(
         meProjectType: meProjectTypeFor(current),
     };
 
-    // Project facts. A project that will not index still answers: members of host receivers and
-    // keywords need no index at all.
+    // Project facts, from the ONE index this seed carries (see sharedProjectIndex above); only
+    // the per-module symbol view is derived here. A project that will not index still answers:
+    // members of host receivers and keywords need no index at all.
     try {
-        const inputs: VbaProjectModuleInput[] = entries.map((entry) => ({
-            moduleName: entry.name,
-            source: entry.source,
-            type: entry.type,
-            documentType: entry.documentType,
-        }));
-
-        const project = buildLiveVbaProjectIndex(inputs, {
-            moduleName: current.name,
-            moduleKind: context.moduleKind,
-            source: current.source,
-        });
-
-        const symbols = projectEditorSymbolContextForModule(project, current.name);
-        context.projectClassMembers = symbols.analysisOptions.projectClassMembers;
-        context.projectTypes = symbols.analysisOptions.projectTypes;
-        context.projectProcedures = symbols.externalProjectProcedures;
-        context.projectSymbols = symbols.externalProjectSymbols;
+        const project = sharedProjectIndex(seeded);
+        if (project) {
+            const symbols = projectEditorSymbolContextForModule(project, current.name);
+            context.projectClassMembers = symbols.analysisOptions.projectClassMembers;
+            context.projectTypes = symbols.analysisOptions.projectTypes;
+            context.projectProcedures = symbols.externalProjectProcedures;
+            context.projectSymbols = symbols.externalProjectSymbols;
+        }
     } catch {
         // Conservative surfaces beat none.
     }
