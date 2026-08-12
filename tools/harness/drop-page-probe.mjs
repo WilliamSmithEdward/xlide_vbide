@@ -271,5 +271,35 @@ await runPageProbe({
       ok: JSON.stringify(placed) === JSON.stringify([["Module2", "Module1"]]),
       detail: JSON.stringify(placed),
     });
+
+    /* ---- ONE click still means one click, right after a drag ---- */
+
+    // The drag above ended over the strip, outside the tree, and that is the trap: the click a
+    // drag would produce is swallowed by a flag, and a drag that ends outside the tree produces
+    // NO click there to swallow - so a flag cleared by the click it swallows stays armed, and
+    // the NEXT honest click is the one that gets eaten. The developer's report was exactly
+    // this: "clicking the workbook row sometimes takes two clicks" (2026-08-12).
+    const workbookRow = await inPage(`(() => {
+      const row = [...document.querySelectorAll("#sidebar-tree .tree-workbook[data-project]")]
+        .find((one) => (one.dataset.project ?? "").includes("Book1"));
+      if (!row) { return null; }
+      const r = row.getBoundingClientRect();
+      const visibleComponents = document.querySelectorAll('#sidebar-tree [data-component]').length;
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, visibleComponents };
+    })()`);
+
+    verdict.checks.push({ name: "the tree offers Book1's workbook row", ok: !!workbookRow, detail: null });
+    if (!workbookRow) { return; }
+
+    await mouse("mousePressed", workbookRow.x, workbookRow.y, { buttons: 1, clickCount: 1 });
+    await mouse("mouseReleased", workbookRow.x, workbookRow.y, { clickCount: 1 });
+    await settle();
+    const afterOneClick = await inPage("document.querySelectorAll('#sidebar-tree [data-component]').length");
+
+    verdict.checks.push({
+      name: "ONE click on the workbook row right after a drag toggles it",
+      ok: afterOneClick !== workbookRow.visibleComponents,
+      detail: `component rows ${workbookRow.visibleComponents} -> ${afterOneClick}; unchanged means the click was eaten by a drag's leftover flag`,
+    });
   },
 });

@@ -112,7 +112,9 @@ export interface ExplorerHandlers {
   /**
    * A row is being dragged toward the editor: a module, or a procedure carrying its line.
    * `became` fires if the press turns into a real drag, so the click it would otherwise be
-   * can be swallowed - a drag that ALSO clicked would unfold the accordion mid-gesture.
+   * can be swallowed - a drag that ALSO clicked would unfold the accordion mid-gesture. The
+   * flag it sets is reset on the next pointerdown, not on a timer, so a drag ending outside
+   * the tree cannot leave a click eaten later.
    */
   dragRow(payload: { module: string; workbook?: string; line?: number; member?: string }, start: PointerEvent, became: () => void): void;
   /** A line for the host's log, for the defects only the log's data cadence explains. */
@@ -174,6 +176,14 @@ export class Explorer {
         return;
       }
 
+      // EVERY fresh press starts with a clean slate. This is the whole click-suppression: a
+      // drag sets the flag, the click that drag produces consumes it - and if the drag ended
+      // OUTSIDE the tree there is no such click, so the flag would linger and eat the next
+      // honest press. Clearing it here, deterministically, at the start of the very gesture
+      // that would be eaten, is what a timer could only race ("clicking the workbook row
+      // sometimes takes two clicks", 2026-08-12).
+      this.dragConsumedClick = false;
+
       const target = event.target as HTMLElement;
       if (target.closest("[data-toggle]") || target.closest("[data-add-project]")) {
         return;
@@ -191,6 +201,9 @@ export class Explorer {
           : null;
 
       if (payload) {
+        // The click this press will produce, if the press becomes a drag, is swallowed below.
+        // The flag is RESET by the next pointerdown (above), not by a timer, so a drag that
+        // ends outside the tree cannot leave it armed for the next click.
         this.handlers.dragRow(payload, event, () => {
           this.dragConsumedClick = true;
         });
