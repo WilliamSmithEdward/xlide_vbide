@@ -9,10 +9,23 @@
 #
 # Run tools\dev.ps1 -KeepOpen first, then this.
 # Dev-harness script: uses Application.VBE per decision 10's harness exception.
+#
+# NOT IN THE GATE, and on a trust-off machine it cannot be: the host-originated close of a
+# HIDDEN pane exists only as a window operation on a CodePane reached through the VBA object
+# model, which "Trust access to the VBA project object model" gates. The gate's machine runs
+# with that trust OFF (so does everything api-driven, by design). The way this suite joins a
+# gate is a pane?action=closeNative route on the debug api - audit item A12 - which would make
+# the host-originated close drivable with no trust at all.
 $ErrorActionPreference = 'Continue'
 
 $app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
 $vbe = $app.VBE
+if ($null -eq $vbe) {
+    Write-Output ('RESULT: FAIL - Application.VBE answered null, which is what "Trust access to '
+        + 'the VBA project object model" being OFF looks like. This probe needs it ON; nothing '
+        + 'api-driven does.')
+    exit 1
+}
 
 # Both modules open as panes, CleanModule active (BrokenModule's pane hidden behind it).
 foreach ($name in @('BrokenModule', 'CleanModule')) {

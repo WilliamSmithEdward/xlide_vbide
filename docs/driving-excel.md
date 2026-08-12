@@ -183,6 +183,20 @@ before a commit touching the editor surface, COM or the engine, and whenever a c
 suspected. A manual check you keep repeating is the signal it has earned a suite, which is how all
 four of the current ones arrived.
 
+The gate has three tiers, and a suite's cost decides its tier (2026-08-12):
+
+```bash
+tools\verify.ps1            # headless, ~40s: builds, tests, probes, seams. Every commit.
+tools\verify.ps1 -Live      # + two Excel sessions, ~5 min. Commits touching editor, COM, engine.
+tools\verify.ps1 -Deep      # + completion content, non-ASCII round trip, the randomized
+                            #   two-workbook walk. Before a release.
+```
+
+The -Live second session opens RenameFixture AND TwinFixture together: two workbooks holding
+same-named modules is the state the cross-workbook defect class lives in, and it costs no extra
+launch. rename-boundary.mjs runs there - the one question a single workbook cannot ask, whether
+a rename crosses modules and stops at the workbook, byte for byte, through rename and undo.
+
 ### Every route, and how to call it
 
 The reasoning behind each route is in [debug-api.md](debug-api.md); this is the mapping from route
@@ -1182,8 +1196,8 @@ Browse button uses, and it does not answer until somebody closes it. A harness s
 Two tests, because there are two different exposures and only one of them is ours.
 
 ```bash
-node engine\test\language.mjs          # headless, a gate step, 18 scripts
-tools\harness\Test-Language.ps1        # live, needs a running host
+node engine\test\language.mjs                    # headless, a gate step, 18 scripts
+node tools\harness\language-live-probe.mjs       # live, needs a running host; a -Deep gate step
 ```
 
 **The engine matrix is about OFFSETS.** The companion product decodes the workbook's VBA streams

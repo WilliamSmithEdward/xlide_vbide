@@ -4,13 +4,39 @@
 // open). No pixel coordinates, no posted mouse messages - which is what finally lets this
 // probe double-click a member and pin the navigate leg that synthetic input never could.
 //
-// Usage: node objbrowser-live-probe.mjs --api http://127.0.0.1:PORT/TOKEN [--cdp 9333]
-// Prints a JSON verdict {pass, checks} on stdout; exits nonzero when any check fails.
-// Invoked by Test-ObjectBrowser.ps1 against the Excel it launched.
+// Usage: node objbrowser-live-probe.mjs [--api http://127.0.0.1:PORT/TOKEN] [--cdp PORT]
+// With neither flag it resolves both doors from the newest live session's discovery file,
+// which is how the gate runs it - ports are per-process, so a hardcoded default is a
+// stale one by the second session. Prints "RESULT: PASS/FAIL" and then a JSON verdict
+// {pass, checks} as the LAST line (Test-ObjectBrowser.ps1 reads the last line as JSON;
+// the gate greps for the RESULT). Exits nonzero when any check fails.
+
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** The newest discovery file whose process is still alive: the session to probe. */
+function discoverDoors() {
+  const home = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
+  const sessions = [];
+  for (const name of readdirSync(home)) {
+    if (!/^debug-api-\d+\.json$/.test(name)) { continue; }
+    try {
+      const found = JSON.parse(readFileSync(join(home, name), "utf8"));
+      process.kill(found.pid, 0);
+      sessions.push(found);
+    } catch { /* dead pid or unreadable file: not a session */ }
+  }
+  sessions.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
+  if (sessions.length === 0) { throw new Error("no live session's discovery file to resolve the doors from"); }
+  return sessions[0];
+}
 
 const args = process.argv.slice(2);
-const apiBase = args[args.indexOf("--api") + 1];
-const cdpPort = args.includes("--cdp") ? Number(args[args.indexOf("--cdp") + 1]) : 9333;
+const doors = args.includes("--api") && args.includes("--cdp") ? null : discoverDoors();
+const apiBase = args.includes("--api")
+  ? args[args.indexOf("--api") + 1]
+  : `http://127.0.0.1:${doors.port}/${doors.token}`;
+const cdpPort = args.includes("--cdp") ? Number(args[args.indexOf("--cdp") + 1]) : doors.devtoolsPort;
 
 const checks = [];
 const check = (name, ok, detail) => checks.push({ name, ok: !!ok, detail: detail ?? null });
@@ -86,10 +112,20 @@ try {
     throw new Error("--api http://127.0.0.1:PORT/TOKEN is required");
   }
 
-  // The native truth before anything is driven: surface up, palette absent.
+  // The native truth before anything is driven: surface up, and no palette SHOWING. In a
+  // virgin session the stronger claim holds too - none exists, because it is created by the
+  // summons rather than at boot - but this probe shares the gate's session with Test-DebugApi,
+  // whose eval check summons a palette and toggles it hidden again. A pre-existing hidden
+  // palette is that probe leaving state as found, not a defect; one left VISIBLE would be.
   let state = await api("state");
   check("the debug api answers with a ready surface", state.surfaceReady === true);
-  check("no palette exists before the summons", state.paletteOpen === false);
+  check("no palette is showing before the summons",
+    state.paletteOpen === false || state.paletteVisible === false,
+    state.paletteOpen === false
+      ? "none exists"
+      : state.paletteVisible === false
+        ? "one exists from an earlier probe, hidden as found"
+        : "one is STANDING VISIBLE: whatever summoned it did not put it away");
 
   // One socket serves every target in the shared browser cluster.
   const versionReply = await (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).json();
@@ -134,8 +170,8 @@ try {
     for (let waited = 0; rows('modules').length < 2 && waited < 10000; waited += 200) await sleep(200);
     const modules = names('modules');
 
-    const target = rows('modules').find((row) => row.querySelector('.objbrowser-name').textContent === 'CleanModule');
-    if (!target) { return { libraries, modules, failed: 'no CleanModule row' }; }
+    const target = rows('modules').find((row) => row.querySelector('.objbrowser-name').textContent === 'Runner');
+    if (!target) { return { libraries, modules, failed: 'no Runner row' }; }
     target.click();
     for (let waited = 0; rows('members').length < 1 && waited < 10000; waited += 200) await sleep(200);
     const members = names('members');
@@ -150,8 +186,11 @@ try {
     Array.isArray(driven.libraries) && driven.libraries.length >= 2
       && driven.libraries[0].includes("(project)"),
     (driven.libraries ?? []).join("|"));
+  // Runner, not CleanModule: Runner is what New-DebugFixture.ps1 actually writes, where
+  // CleanModule only existed as another probe's leftovers saved into the fixture - a
+  // dependency on residue that the fixture-pristinity fix removed (2026-08-12).
   check("the project scope lists the workbook's real modules",
-    Array.isArray(driven.modules) && driven.modules.includes("CleanModule"),
+    Array.isArray(driven.modules) && driven.modules.includes("Runner"),
     (driven.modules ?? []).join(","));
   check("a module's members come from its own code",
     Array.isArray(driven.members) && driven.members.length >= 1 && !driven.failed,
@@ -161,7 +200,7 @@ try {
   let navigated = false;
   for (let waited = 0; waited < 10000; waited += 250) {
     state = await api("state");
-    if (state.shownModule === "CleanModule") { navigated = true; break; }
+    if (state.shownModule === "Runner") { navigated = true; break; }
     await sleep(250);
   }
   check("double-clicking a member navigates the editor to its module",
@@ -173,10 +212,15 @@ try {
     windows.windows.every((row) => row.type !== 2 || row.visible === false));
 
   socket.close();
-  console.log(JSON.stringify({ pass: checks.every((one) => one.ok), checks }));
-  process.exit(checks.every((one) => one.ok) ? 0 : 1);
+  const pass = checks.every((one) => one.ok);
+  // RESULT first, JSON last: the gate greps the RESULT line, and Test-ObjectBrowser.ps1
+  // parses the LAST line as JSON. Both readers get theirs.
+  console.log(`RESULT: ${pass ? "PASS" : "FAIL"} - ${checks.filter((one) => one.ok).length} of ${checks.length} checks`);
+  console.log(JSON.stringify({ pass, checks }));
+  process.exit(pass ? 0 : 1);
 } catch (failure) {
   checks.push({ name: "probe ran", ok: false, detail: String(failure.message ?? failure) });
+  console.log(`RESULT: FAIL - ${String(failure.message ?? failure)}`);
   console.log(JSON.stringify({ pass: false, checks }));
   process.exit(1);
 }

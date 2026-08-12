@@ -493,8 +493,52 @@ Check 'eval reaches the palette page as well as the editor' {
     Invoke-RestMethod "$api/command?name=objectBrowser" -Method Post -TimeoutSec 10 | Out-Null
     Start-Sleep -Seconds 2
     $answer = Invoke-RestMethod "$api/eval?surface=palette" -Method Post -Body 'document.title' -TimeoutSec 15
-    Invoke-RestMethod "$api/command?name=objectBrowser" -Method Post -TimeoutSec 10 | Out-Null
-    $answer.answered -and $answer.result -match 'Object Browser'
+
+    # LEFT AS FOUND, which a second objectBrowser press does not do: that command means
+    # "summon", not "toggle", so the old second press left the palette standing in front for
+    # the rest of the session - and objbrowser-live-probe, later in this same session, rightly
+    # failed on a palette already showing before its summons (2026-08-12). WM_CLOSE is the
+    # developer's own X-click, and the palette's close handler HIDES by design, state intact.
+    # Found by ENUMERATION, not FindWindow: FindWindowW answered zero for this exact window
+    # while EnumWindows listed it visible in the same breath, so the close silently no-opped
+    # on the first version of this cleanup. Enumeration is also what every sibling probe uses.
+    Add-Type -Namespace XlideProbe -Name Palette -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+[DllImport("user32.dll")] public static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int m);
+[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+public delegate bool EnumProc(IntPtr h, IntPtr l);
+public static IntPtr PaletteOf(int processId)
+{
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((h, l) =>
+    {
+        int owner;
+        GetWindowThreadProcessId(h, out owner);
+        if (owner != processId) { return true; }
+        var name = new System.Text.StringBuilder(128);
+        GetClassNameW(h, name, 128);
+        if (name.ToString() == "XlidePalette") { found = h; return false; }
+        return true;
+    }, IntPtr.Zero);
+    return found;
+}
+'@
+    $excelPid = (Get-Process EXCEL | Select-Object -First 1).Id
+    $palette = [XlideProbe.Palette]::PaletteOf($excelPid)
+    $putAway = $false
+    if ($palette -ne [IntPtr]::Zero) {
+        [void] [XlideProbe.Palette]::SendMessage($palette, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+        # Read back through the door, so a close that stops working is THIS check going red
+        # rather than a mystery in whichever probe meets the leftovers next.
+        $deadline = (Get-Date).AddSeconds(5)
+        do {
+            Start-Sleep -Milliseconds 250
+            $putAway = -not (Invoke-RestMethod "$api/state" -TimeoutSec 8).paletteVisible
+        } while (-not $putAway -and (Get-Date) -lt $deadline)
+    }
+
+    $answer.answered -and $answer.result -match 'Object Browser' -and $putAway
 }
 
 Check 'a page exception reaches the shim log' {

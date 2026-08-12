@@ -42,7 +42,6 @@ const pick = (list) => list[Math.floor(random() * list.length)];
 
 const api = await open({});
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-const project = await api.project();
 const first = await api.ui();
 const workbooks = first.explorer.workbooks.map((b) => b.name);
 
@@ -282,12 +281,22 @@ for (let step = 1; step <= STEPS; step++) {
 await api.act("closeDialogs");
 await api.resetLayout();
 
-console.log(`\n${checks} checks over ${STEPS} steps, ${broken.length} broken`);
 console.log("states reached: " + Object.entries(reached).map(([k, n]) => `${k}=${n}`).join("  "));
 const never = Object.entries(reached).filter(([, n]) => n === 0).map(([k]) => k);
 if (never.length > 0) {
   console.log(`  NEVER REACHED (so any check about them passed vacuously): ${never.join(", ")}`);
 }
+
+// A WALK THAT NEVER MET TWO WORKBOOKS PROVED NOTHING. This suite exists for the cross-workbook
+// state; run against one workbook it exits happily with every collision check unexercised,
+// which is the vacuous pass its own header warns about - and it was the suite's actual state
+// for as long as nothing ran it. Vacuity is a failure now, not a footnote.
+if (reached.twoWorkbooksOpen === 0 || reached.collision === 0) {
+  broken.push("the walk never held two workbooks' tabs with colliding names, so its whole reason "
+    + "to exist went unexercised. Open RenameFixture.xlsm and TwinFixture.xlsm together "
+    + "(Start-Excel.ps1 takes both).");
+}
+
 const seen = new Set();
 for (const one of broken) {
   const shape = one.replace(/^step \d+ \([^)]*\): /, "").replace(/#\d+/g, "#N").replace(/ -- .*/, "");
@@ -296,6 +305,13 @@ for (const one of broken) {
   console.log(`  ! ${one}`);
 }
 if (broken.length > 0) {
-  console.log(`\n  replay with: node stress.mjs --seed ${SEED} --steps ${STEPS}`);
+  // This file's own name, not the one it had before a rename: the replay hint said
+  // "node stress.mjs" for as long as nothing red enough existed to make anyone paste it.
+  console.log(`\n  replay with: node tools\\harness\\surface-walk.mjs --seed ${SEED} --steps ${STEPS}`);
   console.log(`  sequence: ${history.join(" -> ")}`);
 }
+
+// The gate's verdict spelling, and an exit code to match: this printed a "checks, broken"
+// summary and always exited 0, so a wrapper reading either was told nothing (2026-08-12).
+console.log(`\n${checks - broken.length} passed, ${broken.length} failed (${checks} checks over ${STEPS} steps)`);
+process.exit(broken.length === 0 ? 0 : 1);

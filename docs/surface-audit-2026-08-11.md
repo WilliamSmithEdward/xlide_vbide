@@ -36,6 +36,48 @@ dropped:
   fixture and exists to be read rather than to go green. It is excused by name in
   `audit-routes.mjs` with that reason, which is the pattern already there for `drainfinalizers`.
 
+## Addendum, 2026-08-12: the orphaned suites, and a correction to the row above
+
+The "Gate blind spots: done" row was overstated, and the overstatement is worth recording: four
+suites were wired into the live gate on 2026-08-11 and the live gate was never then run to green.
+It could not have been - four wired suites printed "N checks, M broken" where the runner parses
+"N passed, M failed", so every -Live run died at the first of them. Running it for real on
+2026-08-12 surfaced, one layer at a time: the verdict mismatch (menu-bar, debugger-features,
+step-into-features, rename-features); Test-DebugApi's reader check passing only against its own
+saved residue, and the save that put that residue into DebugFixture.xlsm on disk; module-sync
+leaving a ByTheDialog sub in the fixture's Helpers, which one run gets away with and the gate's
+two planner runs stack into "Ambiguous name detected"; write-rollback wired mid-group against its
+own header's stated terms, wedging every suite behind it; and a vacuous "0 passed, 0 failed"
+being read as green. All fixed; lessons 67 and 68. The -Live gate passes 17 steps.
+
+The 14 suites nothing ran were then triaged by eight readers (cost grounded line by line) and
+placed:
+
+- **Headless gate**: Test-CloseConfirm.ps1, whose engine leg (engine-live-probe.mjs) is the only
+  didChange coverage over the engine pipe anywhere; its page leg moved out of the probes list
+  rather than launching Edge twice. Net headless cost under a second.
+- **-Live, sharing already-open sessions**: objbrowser-live-probe.mjs (the palette's only live
+  coverage; self-resolves both doors from the discovery file, targets Runner, 9 checks),
+  Test-ResizeFollow.ps1 (the only thing that resizes the host window; pane closes moved from
+  Application.VBE to the pane route, so no project trust), Test-CloseVbe.ps1 (lesson 27's crash
+  class; reopen via ExecuteMso, runs as the live half's final step by construction).
+- **-Deep, the new pre-release tier**: language-features.mjs on LanguageFixture (tolerating the
+  two xlide_vscode#11 upstream defects by name), language-live-probe.mjs and surface-walk.mjs
+  --steps 80 sharing one RenameFixture + TwinFixture session. The walk now fails on vacuity,
+  exits nonzero, and its replay hint names this file rather than a file that does not exist.
+- **Kept manual**: perf-scaling.mjs (asserts nothing; the instrument is for reading).
+- **Deleted**: Test-Language.ps1 (a zero-check wrapper around language-live-probe.mjs).
+- **Blocked on routes, hand-run until then**: Test-CloseHiddenPane.ps1, Test-GhostLocalsPanel.ps1,
+  Test-WatchPanel.ps1 and Test-ObjectBrowser.ps1's lifecycle trio all need the VBA project object
+  model, and the machine runs with that trust OFF. Their path into a tier is A12-shaped routes
+  (frame visibility, native pane close) and something that can populate a watch.
+
+The two-workbook hole is closed at both tiers: the -Live gate's second group now opens
+RenameFixture AND TwinFixture in one session (zero extra launches; all six suites proven green in
+the double session before the widening), with rename-boundary.mjs new and last in the group - a
+rename must cross modules and stop at the workbook, byte for byte, through the rename and its
+undo. The randomized cross-workbook walk runs in -Deep.
+
 ## How it was produced, and what that is worth
 
 Twelve read-only agents surveyed the surface in parallel, one per area. Every finding was then

@@ -29,9 +29,16 @@ param(
     # Also run the standing probes against an already-open editor.
     [switch] $Live,
 
+    # The pre-release tier: everything -Live runs, then the suites that earn depth rather than
+    # speed - a third fixture launch, half a minute of deliberate settle sleeps, a randomized
+    # walk. Run before a release, not before a commit.
+    [switch] $Deep,
+
     # Skip the ahead-of-time Release publish.
     [switch] $Quick
 )
+
+if ($Deep) { $Live = $true }
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Continue'
@@ -366,12 +373,48 @@ if ($Live) {
         per suite: two launches, not six.
     #>
     function Use-Fixture([string] $fixture) {
-        & (Join-Path $repoRoot 'tools\harness\Start-Excel.ps1') `
-            -Workbook (Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $fixture)) -Fresh | Out-Host
+        # A name may join several workbooks with ' + ': they open on one command line into ONE
+        # Excel, which is what makes them one session and one door - the state the
+        # cross-workbook defect class lives in, and the state no gate session had until
+        # 2026-08-12 (two of that week's defects lived exactly there).
+        $books = @($fixture -split ' \+ ' | ForEach-Object {
+            Join-Path $repoRoot (Join-Path 'artifacts\fixtures' $_.Trim())
+        })
+        & (Join-Path $repoRoot 'tools\harness\Start-Excel.ps1') -Workbook $books -Fresh | Out-Host
 
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw "Excel did not start on $fixture" }
         return $excel
+    }
+
+    # One fixture group: a fresh launch, then each node suite, each held to the ONE verdict
+    # spelling. A suite may name arguments after its file, which is how module-sync says which
+    # planner a run is about and the walk names its step count.
+    function Invoke-SuiteGroup([string] $fixture, [string[]] $suites) {
+        Use-Fixture $fixture | Out-Null
+        $ran = @()
+        foreach ($suite in $suites) {
+            $parts = $suite -split ' '
+            $answer = node (Join-Path $repoRoot "tools\harness\$($parts[0])") @($parts | Select-Object -Skip 1) 2>&1
+            $answer | Out-Host
+
+            $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
+            if (-not $verdict) { throw "$suite reported no verdict" }
+            # "0 passed, 0 failed" is not a verdict either: it is what a suite prints when it
+            # died before its first check, and reading it as green is how a run that checked
+            # NOTHING passed a gate (2026-08-12, properties-pane refused at its first add).
+            if ("$verdict" -match '^\s*0 passed, 0 failed') { throw "$suite ran zero checks, which is not a pass" }
+            if ("$verdict" -notmatch ', 0 failed') {
+                # The failing checks by name: at the end of a run the one line that matters has
+                # usually scrolled away.
+                $broken = @($answer | Select-String '^\s*FAIL' | ForEach-Object { $_.Line.Trim() })
+                $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
+                throw "$suite did not pass$named"
+            }
+
+            $ran += "$suite $("$verdict".Trim())"
+        }
+        return $ran
     }
 
     Step 'live probes' {
@@ -398,14 +441,22 @@ if ($Live) {
             if (-not $ready) { throw 'the session never became healthy enough to probe' }
         }
 
-        # Test-ResizeFollow runs LAST of these: it closes every pane and leaves the frame
-        # resized, and the next step's fresh relaunch is what puts that back. It is the only
-        # thing anywhere that RESIZES the host window, so the twice-shipped placement chain
-        # (frame -> overlay -> Chromium child) is exercised by it alone; in-page geometry
-        # checks cannot see a browser child holding a stale size (triaged 2026-08-12).
-        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1', 'Test-ResizeFollow.ps1') {
-            $answer = powershell -NoProfile -ExecutionPolicy Bypass `
-                -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
+        # The tail of this list is ORDERED, not alphabetical. objbrowser-live-probe asserts no
+        # palette exists before its summons and leaves one open behind it, so it runs after
+        # everything that would mind and before Test-ResizeFollow - which runs LAST because it
+        # closes every pane and leaves the frame resized, and the next step's fresh relaunch is
+        # what puts that back. ResizeFollow is the only thing anywhere that RESIZES the host
+        # window, so the twice-shipped placement chain (frame -> overlay -> Chromium child) is
+        # exercised by it alone; the palette probe is the only live coverage the Object Browser
+        # has - its summons, real-data panes, member navigation, and the native browser staying
+        # retired (both triaged 2026-08-12).
+        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1', 'objbrowser-live-probe.mjs', 'Test-ResizeFollow.ps1') {
+            $answer = if ($probe.EndsWith('.mjs')) {
+                node (Join-Path $repoRoot "tools\harness\$probe") 2>&1
+            } else {
+                powershell -NoProfile -ExecutionPolicy Bypass `
+                    -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
+            }
             $answer | Out-Host
             $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
             if ("$verdict" -notmatch 'PASS') {
@@ -487,36 +538,23 @@ if ($Live) {
             # in perfect agreement and pass. This is the suite that asks whether the rename
             # touched the right things and left the wrong ones alone, which is the whole of what
             # rename has to get right.
-            'RenameFixture.xlsm' = @('format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
+            #
+            # THE TWIN IS OPEN ON PURPOSE. This whole group runs with TwinFixture beside the
+            # rename fixture, because two workbooks holding same-named modules is the state
+            # three defect classes have lived in and no gate session ever had - every one of
+            # those defects was found by hand. Opening both costs zero extra launches, all six
+            # suites were proven green in the double session before the widening (2026-08-12),
+            # and rename-boundary.mjs runs last: the one question only two workbooks can ask,
+            # whether a rename crosses modules and STOPS at the workbook, byte for byte,
+            # through the rename and its undo.
+            'RenameFixture.xlsm + TwinFixture.xlsm' = @(
+                                     'format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
                                      'settings-bite.mjs', 'rename-features.mjs',
-                                     'search-features.mjs')
+                                     'search-features.mjs', 'rename-boundary.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {
-          Use-Fixture $fixture | Out-Null
-          foreach ($suite in $plan[$fixture]) {
-            # A suite may name arguments after its file, which is how module-sync says which
-            # planner this run is about.
-            $parts = $suite -split ' '
-            $answer = node (Join-Path $repoRoot "tools\harness\$($parts[0])") @($parts | Select-Object -Skip 1) 2>&1
-            $answer | Out-Host
-
-            $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
-            if (-not $verdict) { throw "$suite reported no verdict" }
-            # "0 passed, 0 failed" is not a verdict either: it is what a suite prints when it
-            # died before its first check, and reading it as green is how a run that checked
-            # NOTHING passed a gate (2026-08-12, properties-pane refused at its first add).
-            if ("$verdict" -match '^\s*0 passed, 0 failed') { throw "$suite ran zero checks, which is not a pass" }
-            if ("$verdict" -notmatch ', 0 failed') {
-                # The failing checks by name, for the same reason the probes above name theirs:
-                # at the end of a run the one line that matters has usually scrolled away.
-                $broken = @($answer | Select-String '^\s*FAIL' | ForEach-Object { $_.Line.Trim() })
-                $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
-                throw "$suite did not pass$named"
-            }
-
-            $ran += "$suite $("$verdict".Trim())"
-          }
+          $ran += Invoke-SuiteGroup $fixture $plan[$fixture]
         }
 
         $ran -join '; '
@@ -548,10 +586,11 @@ if ($Live) {
         "$verdict".Trim()
     }
 
-    # THE VERY LAST LIVE STEP, by construction: what this guards is Excel DYING when the
-    # developer closes the editor window (lesson 27, shipped once), so a regression takes the
-    # session with it and nothing can be scheduled behind it. Three SC_CLOSE and reopen cycles;
-    # ~10 seconds on the session the sweep above leaves open.
+    # THE LAST STEP OF THE LIVE HALF, by construction: what this guards is Excel DYING when
+    # the developer closes the editor window (lesson 27, shipped once), so a regression takes
+    # the session with it and nothing may SHARE a session behind it. Three SC_CLOSE and reopen
+    # cycles; ~10 seconds on the session the sweep above leaves open. The -Deep phase after
+    # this is safe because every deep group relaunches fresh.
     Step 'closing the editor leaves Excel standing' {
         $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $excel) { throw 'no Excel to close the editor of; the live half should have left one open' }
@@ -562,6 +601,40 @@ if ($Live) {
         $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
         if ("$verdict" -notmatch 'PASS') { throw 'Test-CloseVbe.ps1 did not pass' }
         'three close and reopen cycles, Excel standing'
+    }
+}
+
+if ($Deep) {
+    <#
+        THE PRE-RELEASE TIER. Everything here earns depth rather than speed, which is why it is
+        not in -Live: a third fixture launch for the completion questions, half a minute of
+        deliberate settle sleeps in the non-ASCII round trip, and a randomized walk whose whole
+        value is the action orders nobody scripts. Run it before a release; a commit does not
+        owe it (triaged 2026-08-12, one agent per suite, cost grounded line by line).
+
+        Three triaged suites are NOT here although they are unique cover - Test-ObjectBrowser's
+        window-lifecycle trio, Test-GhostLocalsPanel's setLocals push, Test-WatchPanel's
+        populated Watch panel - because all three reach through the VBA project object model,
+        and this machine runs with that trust OFF, as does everything api-driven by design.
+        Their path into a tier is routes: frame visibility, and something that can populate a
+        watch. Until then they are hand-run documentation of what the api cannot yet do.
+    #>
+    Step 'deep: completion menus and signature help' {
+        # The dot menu is the feature a developer touches most, and nothing in -Live asks it
+        # anything: its receivers (a project class, a UDT, an enum, the host's type libraries)
+        # exist only in LanguageFixture. Tolerates the two upstream analyzer defects filed as
+        # xlide_vscode#11, and announces the day they start passing.
+        (Invoke-SuiteGroup 'LanguageFixture.xlsm' @('language-features.mjs')) -join '; '
+    }
+
+    Step 'deep: non-ASCII round trip, then the randomized walk' {
+        # language-live-probe writes 14 scripts through COM, the door, the page and the outline
+        # (23s of settles by construction); surface-walk runs last because it churns the whole
+        # workspace and ends with resetLayout - the two-workbook session it needs is the same
+        # one, opened once. The walk fails on vacuity now: a run that never held both
+        # workbooks' colliding tabs is a run that proved nothing.
+        (Invoke-SuiteGroup 'RenameFixture.xlsm + TwinFixture.xlsm' @(
+            'language-live-probe.mjs', 'surface-walk.mjs --steps 80')) -join '; '
     }
 }
 
