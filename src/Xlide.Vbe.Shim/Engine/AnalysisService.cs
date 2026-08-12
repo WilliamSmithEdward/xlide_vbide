@@ -805,7 +805,22 @@ internal sealed class AnalysisService : IAsyncDisposable
         {
             try
             {
+#if DEBUG
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var snapshots = ProjectReader.ReadAll(_editor, generation);
+                clock.Stop();
+                long chars = 0;
+                var components = 0;
+                foreach (var snapshot in snapshots)
+                {
+                    components += snapshot.Modules.Length;
+                    foreach (var module in snapshot.Modules) { chars += module.Source.Length; }
+                }
+                PerfCounters.HostRead(clock.ElapsedMilliseconds, chars, components, 0);
+                read.TrySetResult(snapshots);
+#else
                 read.TrySetResult(ProjectReader.ReadAll(_editor, generation));
+#endif
             }
             catch (Exception ex)
             {

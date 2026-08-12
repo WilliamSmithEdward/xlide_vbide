@@ -805,7 +805,16 @@ await api.perf({ reset: true });        // forget, then provoke the slowness
 console.table(await api.engineCosts()); // ranked by total time spent
 (await api.ui()).longTasks;             // main-thread stalls over 50ms, worst first
 (await api.history()).routeCosts;       // the door's own cost, per route
+(await api.perf()).hostReadMs;          // host-thread COM reads of module source, recent ms
 ```
+
+**`hostReadMs` is the tab-switch and analysis-pass cost** the surface audit's C7 and C8 name:
+every analysis pass, and every pane follow, reads module source over COM on the host thread.
+`hostReadCharsLast` and `hostReadFullTransfersLast` size the last read. Measured on the perf
+fixture (81,795 lines, 1.88 MB, 7 components) a full read is ~36ms - dominated by the text
+transfer, which is why the prescribed line-count skip was not taken: it cannot avoid the transfer
+soundly, and for the resync it would MISS the very out-of-surface edits that read exists to catch.
+The counter stays so a read that balloons is seen, not felt.
 
 **`engineCosts()` is the one to reach for first.** Every language feature goes down one pipe -
 completions, hover, signature help, diagnostics, navigation, rename, semantic tokens, outline -

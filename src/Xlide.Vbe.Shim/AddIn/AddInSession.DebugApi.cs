@@ -1135,6 +1135,8 @@ internal sealed partial class AddInSession
                 }
 
                 var (engineMethods, engineSlowest, engineWindow) = EngineCounters.Snapshot();
+                var (hostReadCount, hostReadChars, hostReadFull, hostReadSkipped, hostReadSamples) = PerfCounters.HostReadSnapshot();
+                _ = hostReadCount;
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugPerfReply(
                         placementSamples,
@@ -1142,7 +1144,11 @@ internal sealed partial class AddInSession
                         PerfCounters.HeartbeatAgeMs,
                         engineMethods,
                         engineSlowest,
-                        engineWindow),
+                        engineWindow,
+                        hostReadSamples,
+                        hostReadChars,
+                        hostReadFull,
+                        hostReadSkipped),
                     DebugJsonContext.Default.DebugPerfReply));
             }
 

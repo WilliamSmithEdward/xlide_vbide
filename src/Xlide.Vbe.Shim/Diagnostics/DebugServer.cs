@@ -1098,7 +1098,17 @@ public sealed record DebugPerfReply(
     /// <summary>Individual analyzer calls over the slow threshold, newest first: the tail.</summary>
     [property: JsonPropertyName("engineSlowest")] EngineSlowCall[] EngineSlowest,
     /// <summary>How long the engine figures cover, since they can be reset per experiment.</summary>
-    [property: JsonPropertyName("engineWindowMs")] long EngineWindowMs);
+    [property: JsonPropertyName("engineWindowMs")] long EngineWindowMs,
+    /// <summary>
+    /// The host-thread reads of module source over COM, timed: the tab-switch and analysis-pass
+    /// cost of C7/C8. `hostReadMs` is the recent durations; `charsLast`/`fullTransfersLast` are
+    /// the size and component count of the last read; `skippedTotal` counts components a
+    /// pre-check let through without transferring their text (0 until that skip exists).
+    /// </summary>
+    [property: JsonPropertyName("hostReadMs")] long[] HostReadMs,
+    [property: JsonPropertyName("hostReadCharsLast")] long HostReadCharsLast,
+    [property: JsonPropertyName("hostReadFullTransfersLast")] long HostReadFullTransfersLast,
+    [property: JsonPropertyName("hostReadSkippedTotal")] long HostReadSkippedTotal);
 
 /// <summary>
 /// What a script run in the page answered with.

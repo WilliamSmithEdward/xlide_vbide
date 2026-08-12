@@ -59,6 +59,38 @@ internal static class PerfCounters
         Sample(MarshalSamples, ref _marshalCursor, milliseconds);
     }
 
+    private static long _hostReadCount;
+    private static long _hostReadCharsLast;
+    private static long _hostReadFullLast;
+    private static long _hostReadSkipped;
+
+    /// <summary>
+    /// One host-thread read of module source over COM, timed - the cost behind a tab switch
+    /// (ResyncFromModule) and every analysis pass (ProjectReader.ReadAll), which the audit's C7
+    /// and C8 both name. `chars` is how much text crossed; `fullTransfers` and `skipped` count
+    /// how many components pulled their whole Lines string versus how many a count+CountOfLines
+    /// pre-check let through untouched, so a skip that stops working shows as the transfers
+    /// climbing back up rather than as a stall nobody attributes.
+    /// </summary>
+    public static void HostRead(long milliseconds, long chars, int fullTransfers, int skipped)
+    {
+        Interlocked.Increment(ref _hostReadCount);
+        Interlocked.Exchange(ref _hostReadCharsLast, chars);
+        Interlocked.Exchange(ref _hostReadFullLast, fullTransfers);
+        Interlocked.Add(ref _hostReadSkipped, skipped);
+        Sample(HostReadSamples, ref _hostReadCursor, milliseconds);
+    }
+
+    public static (long Count, long CharsLast, long FullTransfersLast, long SkippedTotal, long[] Samples) HostReadSnapshot()
+    {
+        lock (SampleGate)
+        {
+            return (Interlocked.Read(ref _hostReadCount), Interlocked.Read(ref _hostReadCharsLast),
+                Interlocked.Read(ref _hostReadFullLast), Interlocked.Read(ref _hostReadSkipped),
+                Ordered(HostReadSamples, _hostReadCursor));
+        }
+    }
+
     /// <summary>One window event heard from the hook, whether or not it led anywhere.</summary>
     public static void WindowEvent() => Interlocked.Increment(ref _windowEvents);
 
@@ -134,8 +166,10 @@ internal static class PerfCounters
     private const int SampleCount = 64;
     private static readonly long[] PlacementSamples = new long[SampleCount];
     private static readonly long[] MarshalSamples = new long[SampleCount];
+    private static readonly long[] HostReadSamples = new long[SampleCount];
     private static int _placementCursor;
     private static int _marshalCursor;
+    private static int _hostReadCursor;
     private static readonly Lock SampleGate = new();
 
     private static void Sample(long[] ring, ref int cursor, long value)
