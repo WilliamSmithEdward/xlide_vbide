@@ -25,6 +25,7 @@ import {
 import { lexerStrippedLine, lexerStrippedLines } from "xlide-spec/analyzer/lexer/strippedLines";
 import { smartTabShouldIndentLine } from "xlide-spec/vbaSmartTab";
 import type { EditorBridge, HostTextEdit } from "./bridge.js";
+import { wholeTextOf } from "./documents.js";
 import { currentSettings } from "./settings.js";
 
 /** How long a touched line rests before its recase pass, the extension's own figure. */
@@ -288,7 +289,7 @@ class TypingAutomation {
       // Not a block: a whole-line comment continues, then a With-member line, in the
       // extension's order. The helpers index lines from zero.
       const settings = currentSettings();
-      const source = model.getValue();
+      const source = wholeTextOf(model);
       const continuation = settings.continueCommentOnNewline
         ? commentContinuationText(source, openerLineNumber - 1, settings.mirrorCommentSpacing)
         : undefined;
@@ -301,7 +302,7 @@ class TypingAutomation {
       return;
     }
 
-    const source = model.getValue();
+    const source = wholeTextOf(model);
     const strippedLines = lexerStrippedLines(source);
     strippedLines[openerLineNumber - 1] = lexerStrippedLine(normalized);
     const closedAhead = isSmartBlockClosedAhead(strippedLines, openerLineNumber - 1, opener);
@@ -487,7 +488,7 @@ class TypingAutomation {
     const column = Math.min(change.range.startColumn + change.text.length, model.getLineMaxColumn(line));
     const offset = model.getOffsetAt({ lineNumber: line, column });
 
-    const edit = resolveLoopIteratorSyncEdit(model.getValue(), offset);
+    const edit = resolveLoopIteratorSyncEdit(wholeTextOf(model), offset);
     if (!edit) {
       return;
     }

@@ -1,5 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
+import { DocumentStore, docKeyOf, wholeTextOf, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
 import { setInstallPath } from "./helpdialog.js";
 import type { MenuItem } from "./menubar.js";
@@ -1567,7 +1567,9 @@ export class EditorBridge {
       ...(takeFormattingMark(model) ? { source: "format" as const } : {}),
     };
     if (fullLength < 64_000) {
-      message.fullText = model.getValue();
+      // Through the one-slot memo: typing's helpers flatten the same version on the same
+      // keystroke, and this is the first of those asks, so the later ones ride this build.
+      message.fullText = wholeTextOf(model);
     }
 
     this.transport.post(message);

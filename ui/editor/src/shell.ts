@@ -1216,7 +1216,28 @@ export class Shell {
     this.handlers.renameModule(name, workbook, trimmed);
   }
 
+  /** What the panel was last built from, so an identical publish does not rebuild it. */
+  private lastPanelKey: string | null = null;
+
   private renderPanel(): void {
+    // This rebuilds the whole list with replaceChildren, and its callers fire it far more often
+    // than the set changes: the active-line hold republishes on every line the caret enters or
+    // leaves while typing, and most of those publishes carry the same findings. A rebuild that
+    // changes nothing visible still destroys the row the developer had focused or was reaching
+    // to click - so, like setProblemCounts one hop below, it returns on an unchanged key. The
+    // key carries everything the render reads: every field of every finding, in order and in
+    // raw casing since the rows display them raw, and the severity filters, since a toggle must
+    // still redraw. Skipping setProblemCounts on the way out is safe because equal findings
+    // yield equal counts, which its own guard would have swallowed.
+    const key = JSON.stringify([
+      this.severityFilters,
+      this.findings.map((f) => [f.severity, f.project ?? "", f.module, f.line, f.column, f.code ?? "", f.message]),
+    ]);
+    if (key === this.lastPanelKey) {
+      return;
+    }
+    this.lastPanelKey = key;
+
     // The toggles always carry the full counts - a filtered-out severity still says how many it
     // is hiding, which is what makes toggling it back on an informed act.
     const totals: Record<SeverityGroup, number> = { errors: 0, warnings: 0, messages: 0 };

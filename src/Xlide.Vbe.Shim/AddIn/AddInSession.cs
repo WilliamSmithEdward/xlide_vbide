@@ -1162,20 +1162,25 @@ internal sealed partial class AddInSession : IDisposable
         // The active-line hold: typing on a line hides the verdicts about it, and the caret
         // settling anywhere else brings them back. Both handlers run on the host thread, and
         // both republish only when the hold actually changed - a keystroke on an already-held
-        // line and a caret resting where it was cost nothing.
+        // line and a caret resting where it was cost nothing. When it did change, the markers
+        // that can differ belong to the module released and the module now held, so only those
+        // are re-sent; the previously held name is read before the mutation because that is the
+        // one Begin overwrites and Release erases.
         _editorSurface.LineTyped = line =>
         {
+            var previouslyHeld = _activeLineHold.Module;
             if (_editorSurface?.Module is { } typedModule && _activeLineHold.Begin(typedModule, line))
             {
-                PublishMarkersToSurface();
+                PublishMarkersToSurface(previouslyHeld, typedModule);
                 PublishFindingsToSurface();
             }
         };
         _editorSurface.CaretLineSettled = line =>
         {
+            var previouslyHeld = _activeLineHold.Module;
             if (_activeLineHold.Release(_editorSurface?.Module, line))
             {
-                PublishMarkersToSurface();
+                PublishMarkersToSurface(previouslyHeld);
                 PublishFindingsToSurface();
             }
         };
@@ -7362,8 +7367,14 @@ internal sealed partial class AddInSession : IDisposable
     /// Findings arrive for whole projects and the surface holds one model per open module
     /// (decision 12), so they are filtered per document. A document with none is sent an empty
     /// set rather than skipped: that is what clears squiggles the user has just fixed.
+    ///
+    /// The active-line hold call sites name the modules their hold change touched. A hold hides
+    /// findings by module name, so beginning or releasing one can alter the markers of the held
+    /// and released modules only - every other open document's set is provably identical to what
+    /// it already shows, and re-sending those sets on every line the caret enters while typing
+    /// was the audit's C12. No names means what it always meant: publish to every document.
     /// </summary>
-    private void PublishMarkersToSurface()
+    private void PublishMarkersToSurface(params string?[] touchedModules)
     {
         var surface = _editorSurface;
         if (surface is null)
@@ -7373,6 +7384,13 @@ internal sealed partial class AddInSession : IDisposable
 
         foreach (var (module, project) in surface.OpenDocuments)
         {
+            if (touchedModules.Length > 0
+                && !touchedModules.Any(touched => touched is not null
+                    && string.Equals(touched, module, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
             var markers = _findings
                 .Where(f => string.Equals(f.Module, module, StringComparison.OrdinalIgnoreCase)
                     && (f.Project is null || project is null
