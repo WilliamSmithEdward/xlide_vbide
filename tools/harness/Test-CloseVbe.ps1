@@ -2,9 +2,17 @@
 #
 # Guards the 2026-08-04 crash (lesson 27): the frame-hide event drove object-model calls
 # into the editor's own close handling, and Excel died with VBE7/ntdll/shim faulting by
-# turn. Run tools\dev.ps1 -KeepOpen first, then this. Expected: excel alive=True on all
-# six lines, frame visibility alternating False/True.
-# Closes via WM_SYSCOMMAND SC_CLOSE, reopens via the object model, and checks each cycle.
+# turn. Runs against whatever editor session is open. Expected: excel alive=True on all
+# six lines, frame visibility alternating False/True - and enforced, not just printed.
+#
+# Closes via WM_SYSCOMMAND SC_CLOSE, the same message the developer's click on the X
+# sends; that window message IS the subject, so it cannot go through the api. The reopen
+# is Excel executing its own ribbon button (ExecuteMso), which needs no VBA project
+# trust - the same trick Start-Excel.ps1 uses, for the same reason.
+#
+# THE GATE RUNS THIS LAST, after everything else in the live half, because what it guards
+# is Excel dying: a regression here takes the session with it by design, and nothing may
+# be scheduled behind it.
 $ErrorActionPreference = 'Continue'
 
 Add-Type -Namespace Xlide -Name Close -MemberDefinition @'
@@ -32,14 +40,25 @@ public static IntPtr FrameOf(int processId)
 }
 '@
 
-$app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-$vbe = $app.VBE
-$processId = (Get-Process EXCEL | Select-Object -First 1).Id
+$excelProcess = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $excelProcess) { Write-Output 'RESULT: FAIL - no Excel is running'; exit 1 }
+$processId = $excelProcess.Id
+
+try {
+    $app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
+} catch {
+    Write-Output "RESULT: FAIL - Excel $processId is not reachable through the running object table"; exit 1
+}
 Write-Output "excel $processId"
 
+$broken = 0
 for ($cycle = 1; $cycle -le 3; $cycle++) {
     $frame = [Xlide.Close]::FrameOf($processId)
-    if ($frame -eq [IntPtr]::Zero) { Write-Output "cycle ${cycle}: NO FRAME"; break }
+    if ($frame -eq [IntPtr]::Zero) {
+        Write-Output "cycle ${cycle}: NO FRAME"
+        $broken += 1
+        break
+    }
 
     # SC_CLOSE, the same as the developer clicking the X.
     [void] [Xlide.Close]::SendMessage($frame, 0x0112, [IntPtr]0xF060, [IntPtr]::Zero)
@@ -48,14 +67,22 @@ for ($cycle = 1; $cycle -le 3; $cycle++) {
     $alive = $null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)
     $visible = [Xlide.Close]::IsWindowVisible($frame)
     Write-Output "cycle ${cycle}: closed -> excel alive=$alive, frame visible=$visible"
-    if (-not $alive) { break }
+    if (-not $alive) { $broken += 1; break }
+    if ($visible) { $broken += 1 }
 
-    $vbe.MainWindow.Visible = $true
+    # The reopen: Excel pressing its own Developer > Visual Basic button.
+    $app.CommandBars.ExecuteMso('VisualBasic')
     Start-Sleep -Milliseconds 1500
     $alive = $null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)
     $visible = [Xlide.Close]::IsWindowVisible($frame)
     Write-Output "cycle ${cycle}: reopened -> excel alive=$alive, frame visible=$visible"
-    if (-not $alive) { break }
+    if (-not $alive) { $broken += 1; break }
+    if (-not $visible) { $broken += 1 }
 }
 
-Write-Output 'done'
+if ($broken -eq 0) {
+    Write-Output 'RESULT: PASS - three close and reopen cycles, Excel standing after each'
+    exit 0
+}
+Write-Output "RESULT: FAIL - $broken expectation(s) broke across the cycles; a dead host here is lesson 27 returned"
+exit 1

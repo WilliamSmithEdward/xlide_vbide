@@ -4,7 +4,8 @@
 // didChange the host now sends after a revert (or a Replace All) is what makes the
 // Problems pane follow the text. Walks the BUILT engine (engine/dist/engine.cjs) through
 // exactly that story over its own named pipe and prints a JSON verdict {pass, checks};
-// exits nonzero when any check fails. Invoked by Test-CloseConfirm.ps1.
+// exits nonzero when any check fails. Invoked by Test-CloseConfirm.ps1, which the gate runs
+// headless on every commit; "live" in the name means the engine's live COPY, not live Excel.
 
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";

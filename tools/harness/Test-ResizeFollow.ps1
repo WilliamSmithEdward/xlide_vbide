@@ -6,10 +6,15 @@
 # only on WM_SIZE delivery, and a raced resize left the page laid out for a width the
 # window no longer had - its minimap and scrollbar fell off the right edge. Placement now
 # asserts the browser bounds every pass, so the Chromium child must match the overlay
-# after every resize here. Run tools\dev.ps1 -KeepOpen first, then this. Expected:
-# MATCH on every line (measured DPI-aware; without UseRealPixels a scaling artifact reads
-# as a one-pixel mismatch that is not real).
+# after every resize here. Runs against whatever editor session is open (the gate runs it
+# last among the live probes, where the next step's fresh relaunch clears the resize it
+# leaves behind). Expected: MATCH on every line (measured DPI-aware; without
+# UseRealPixels a scaling artifact reads as a one-pixel mismatch that is not real).
 # Resizes the VBE frame twice per state and compares frame client, overlay, and browser.
+#
+# Nothing here needs VBA project trust: the panes are closed through the debug api's own
+# pane route (the door the product is moving everything to), and the measuring core is
+# Win32, which is the subject - the whole point is what the native windows are doing.
 $ErrorActionPreference = 'Continue'
 
 Add-Type -Namespace Xlide -Name Rsz -MemberDefinition @'
@@ -56,12 +61,24 @@ public static IntPtr FrameOf(int processId)
 '@
 
 [Xlide.Rsz]::UseRealPixels()
-$app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
-$vbe = $app.VBE
-$processId = (Get-Process EXCEL | Select-Object -First 1).Id
-$frame = [Xlide.Rsz]::FrameOf($processId)
+
+$excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $excel) { Write-Output 'RESULT: FAIL - no Excel is running'; exit 1 }
+
+$discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
+if (-not (Test-Path $discovery)) { Write-Output "RESULT: FAIL - no discovery file for Excel $($excel.Id)"; exit 1 }
+
+$d = Get-Content $discovery -Raw | ConvertFrom-Json
+$api = "http://127.0.0.1:$($d.port)/$($d.token)"
+
+$frame = [Xlide.Rsz]::FrameOf($excel.Id)
 $overlay = [Xlide.Rsz]::FindChild($frame, 'XlideEditorOverlay')
 Write-Output "frame $frame overlay $overlay"
+if ($frame -eq [IntPtr]::Zero -or $overlay -eq [IntPtr]::Zero) {
+    Write-Output 'RESULT: FAIL - no editor frame or overlay to measure'; exit 1
+}
+
+$script:mismatches = 0
 
 function Report([string]$title) {
     $client = New-Object Xlide.Rsz+RECT
@@ -84,6 +101,7 @@ function Report([string]$title) {
     }
 
     $match = if ($ow -eq $cw -and $oh -eq $ch -and $bw -eq $cw -and $bh -eq $ch) { 'MATCH' } else { 'MISMATCH' }
+    if ($match -ne 'MATCH') { $script:mismatches += 1 }
     Write-Output "$title -- client ${cw}x${ch} overlay ${ow}x${oh} browser ${bw}x${bh} -> $match"
 }
 
@@ -92,16 +110,21 @@ function Resize([int]$w, [int]$h) {
     Start-Sleep -Milliseconds 1200
 }
 
-Write-Output '--- state: panes open (harness scratch shows CleanModule)'
+Write-Output '--- state: as found (panes open when any are)'
 Report 'before'
 Resize 900 700
 Report 'after 900x700'
 Resize 1400 900
 Report 'after 1400x900'
 
+# The empty-workspace state, reached through the door: every open tab is closed by the pane
+# route, discarding rather than asking, so a dirty module cannot leave a confirm standing in
+# front of the measurements.
 Write-Output '--- state: all panes closed'
-foreach ($window in $vbe.Windows) {
-    if ($window.Type -eq 0) { try { $window.Close() } catch {} }
+$open = (Invoke-RestMethod "$api/documents" -TimeoutSec 8).documents
+foreach ($doc in @($open)) {
+    $query = "pane?action=close&module=$([Uri]::EscapeDataString("$($doc.module)"))&project=$([Uri]::EscapeDataString("$($doc.project)"))&answer=discard"
+    try { Invoke-RestMethod "$api/$query" -Method Post -TimeoutSec 10 | Out-Null } catch {}
 }
 Start-Sleep -Milliseconds 1500
 Report 'closed, before'
@@ -109,4 +132,10 @@ Resize 1000 800
 Report 'closed, after 1000x800'
 Resize 1500 1000
 Report 'closed, after 1500x1000'
-Write-Output 'done'
+
+if ($script:mismatches -eq 0) {
+    Write-Output 'RESULT: PASS - overlay and browser follow the frame in both states'
+    exit 0
+}
+Write-Output "RESULT: FAIL - $($script:mismatches) measurement(s) mismatched; the overlay or the browser is not following the frame"
+exit 1

@@ -76,7 +76,8 @@ Test-Seam 'a revert drops the findings it invalidated (stale problems)' (Join-Pa
 # same gate.
 #
 # The check asserted the old shape for every commit since, and failed for every one of them,
-# unnoticed because this probe is not in the gate (2026-08-08).
+# unnoticed because this probe was not in the gate then (2026-08-08). It is now: verify.ps1 runs
+# this file headless on every gate run, so a seam that goes stale goes red the same day.
 Test-Seam 'Ctrl+W is answered by the page, and its close lands in the same gate' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
     'The closing keys are handled above, as SURFACE commands',
     'OnModuleCloseRequested\(paneModule')

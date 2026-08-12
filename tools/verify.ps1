@@ -252,12 +252,36 @@ Step 'engine language matrix' {
 }
 
 Step 'page probes (headless)' {
-    $probes = 'close-confirm-page-probe.mjs', 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs'
+    # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
+    # which drives the same file as one of its three legs. Listing it here too would launch
+    # Edge twice for the same answer.
+    $probes = 'objbrowser-page-probe.mjs', 'tree-page-probe.mjs', 'boot-error-page-probe.mjs', 'sole-workbook-page-probe.mjs'
     foreach ($probe in $probes) {
         $answer = node (Join-Path $repoRoot "tools\harness\$probe") 2>&1 | Select-Object -Last 1
         if ($answer -notmatch '"pass":true') { throw "$probe did not pass" }
     }
-    'close-confirm, object browser, tree rows, boot failure, sole workbook'
+    'object browser, tree rows, boot failure, sole workbook'
+}
+
+# THE CLOSE-CONFIRM WRAPPER, which needs no Excel: seam greps across the page, the shim and the
+# PUBLISHED bundle (the stale-deploy tripwire), the page's modal flow headless, and the engine's
+# live-copy contract over its own pipe. Two of its three legs ran NOWHERE before this step: the
+# seams - one of which asserted a shape that had been deliberately removed and failed on every
+# commit for weeks, unnoticed, precisely because nothing ran it - and engine-live-probe.mjs, the
+# only suite anywhere that sends didChange over the engine pipe. That is the contract that keeps
+# the Problems pane following a revert, and the nearest live suite passed with the fix disabled,
+# so this is the one discriminating check for it (triaged 2026-08-12).
+Step 'close confirm, seams to engine' {
+    $answer = powershell -NoProfile -ExecutionPolicy Bypass `
+        -File (Join-Path $repoRoot 'tools\harness\Test-CloseConfirm.ps1') 2>&1
+    $answer | Where-Object { $_ -match 'FAIL|skip' } | ForEach-Object { Write-Host "  $_" }
+    $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
+    if ("$verdict" -notmatch 'PASS') {
+        $broken = @($answer | Select-String 'FAIL' | ForEach-Object { $_.Line.Trim() })
+        $named = if ($broken.Count -gt 0) { ': ' + ($broken -join '; ') } else { '' }
+        throw "Test-CloseConfirm.ps1 did not pass$named"
+    }
+    'seams, page modal flow, engine live-copy contract'
 }
 
 # A route table is complete on the day it is written and quietly is not, six routes later. This
@@ -374,7 +398,12 @@ if ($Live) {
             if (-not $ready) { throw 'the session never became healthy enough to probe' }
         }
 
-        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1') {
+        # Test-ResizeFollow runs LAST of these: it closes every pane and leaves the frame
+        # resized, and the next step's fresh relaunch is what puts that back. It is the only
+        # thing anywhere that RESIZES the host window, so the twice-shipped placement chain
+        # (frame -> overlay -> Chromium child) is exercised by it alone; in-page geometry
+        # checks cannot see a browser child holding a stale size (triaged 2026-08-12).
+        foreach ($probe in 'Test-DebugApi.ps1', 'Test-SplitWorkspace.ps1', 'Test-DiscardProblems.ps1', 'Test-Churn.ps1', 'Test-ResizeFollow.ps1') {
             $answer = powershell -NoProfile -ExecutionPolicy Bypass `
                 -File (Join-Path $repoRoot "tools\harness\$probe") 2>&1
             $answer | Out-Host
@@ -433,11 +462,20 @@ if ($Live) {
             # not showing. write-rollback is here for its own reason: it is the only thing that
             # drives the `mark` route, and a refused write that half-lands is the defect that
             # costs a developer their module's previous text.
+            # write-rollback runs LAST IN THIS GROUP, and that is a hard constraint, not an
+            # ordering preference. The only refusal it can provoke on demand pushes the editor
+            # past its identifier budget, after which the WHOLE VBE refuses to add a component
+            # ("Insufficient memory") until Excel restarts - the suite's own header says so, and
+            # for one run it sat wired mid-group anyway, where it wedged every suite after it;
+            # properties-pane died at its first add and printed the vacuous verdict the guard
+            # below now refuses (2026-08-12). Last here costs nothing: the next thing that
+            # happens is the RenameFixture group's fresh relaunch, which is the restart the
+            # suite demands.
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
-                                     'write-rollback.mjs', 'properties-pane.mjs')
+                                     'properties-pane.mjs', 'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
@@ -465,6 +503,10 @@ if ($Live) {
 
             $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
             if (-not $verdict) { throw "$suite reported no verdict" }
+            # "0 passed, 0 failed" is not a verdict either: it is what a suite prints when it
+            # died before its first check, and reading it as green is how a run that checked
+            # NOTHING passed a gate (2026-08-12, properties-pane refused at its first add).
+            if ("$verdict" -match '^\s*0 passed, 0 failed') { throw "$suite ran zero checks, which is not a pass" }
             if ("$verdict" -notmatch ', 0 failed') {
                 # The failing checks by name, for the same reason the probes above name theirs:
                 # at the end of a run the one line that matters has usually scrolled away.
@@ -504,6 +546,22 @@ if ($Live) {
         }
 
         "$verdict".Trim()
+    }
+
+    # THE VERY LAST LIVE STEP, by construction: what this guards is Excel DYING when the
+    # developer closes the editor window (lesson 27, shipped once), so a regression takes the
+    # session with it and nothing can be scheduled behind it. Three SC_CLOSE and reopen cycles;
+    # ~10 seconds on the session the sweep above leaves open.
+    Step 'closing the editor leaves Excel standing' {
+        $excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $excel) { throw 'no Excel to close the editor of; the live half should have left one open' }
+
+        $answer = powershell -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $repoRoot 'tools\harness\Test-CloseVbe.ps1') 2>&1
+        $answer | Out-Host
+        $verdict = $answer | Select-String 'RESULT: (PASS|FAIL)' | Select-Object -Last 1
+        if ("$verdict" -notmatch 'PASS') { throw 'Test-CloseVbe.ps1 did not pass' }
+        'three close and reopen cycles, Excel standing'
     }
 }
 
