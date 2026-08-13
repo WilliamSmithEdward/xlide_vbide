@@ -1159,6 +1159,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ExternalOpenRequested = OpenExternal;
         _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
+        _editorSurface.FormMarkupRequested = PublishFormMarkup;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
@@ -4246,6 +4247,42 @@ internal sealed partial class AddInSession : IDisposable
     /// definition, previewing a reference) had nothing to draw. Answered without touching which
     /// pane is active, because being taken to what you asked to look at is the whole complaint.
     /// </summary>
+    /// <summary>
+    /// The markup tab's text: the form walked into the markup layer's language, or the reason
+    /// it could not be. Same conversion rule as PublishDocument below, same thread rule.
+    /// </summary>
+    private void PublishFormMarkup(string moduleName, string? projectDisplay)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out var owner);
+                if (component is null)
+                {
+                    surface.PublishFormMarkup(moduleName, projectDisplay, null, $"no component named {moduleName}");
+                    return;
+                }
+
+                var markup = FormDesignService.MarkupOf(component, moduleName, out var reason);
+                Log.Info($"form markup: publishing {moduleName}, {(markup?.Length ?? 0)} char(s){(reason is null ? "" : $" ({reason})")}");
+                surface.PublishFormMarkup(moduleName, DisplayFromProjectId(owner ?? projectId), markup, reason);
+            }
+            catch (Exception ex)
+            {
+                Log.Verbose($"form markup: {moduleName} could not be published ({ex.GetType().Name})");
+                surface.PublishFormMarkup(moduleName, projectDisplay, null, "the form could not be read");
+            }
+        });
+    }
+
     private void PublishDocument(string moduleName, string? projectDisplay)
     {
         if (_editorSurface is not { } surface)

@@ -148,6 +148,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page wants a module's text without being taken to it.</summary>
     public Action<string, string?>? DocumentRequested { get; set; }
 
+    /// <summary>Raised when the page wants a form's design as markup, for the markup tab.</summary>
+    public Action<string, string?>? FormMarkupRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -714,6 +717,19 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new OpenDocumentMessage("openDocument", moduleName, project, text),
             EditorMessageContext.Default.OpenDocumentMessage));
+    }
+
+    /// <summary>The markup answer, straight through: the page holds the document, not this side.</summary>
+    public void PublishFormMarkup(string moduleName, string? project, string? markup, string? reason)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new FormMarkupMessage("formMarkup", moduleName, project, markup, reason),
+            EditorMessageContext.Default.FormMarkupMessage));
     }
 
     private void PostSyncDocument(string moduleName, string? project, string text)
@@ -1585,6 +1601,19 @@ internal sealed class EditorSurface : IDisposable
                             documentAsked,
                             document.RootElement.TryGetProperty("project", out var documentOwner)
                                 ? documentOwner.GetString()
+                                : null);
+                    }
+
+                    break;
+
+                case "requestFormMarkup":
+                    if (document.RootElement.TryGetProperty("module", out var markupModule)
+                        && markupModule.GetString() is { Length: > 0 } markupAsked)
+                    {
+                        FormMarkupRequested?.Invoke(
+                            markupAsked,
+                            document.RootElement.TryGetProperty("project", out var markupOwner)
+                                ? markupOwner.GetString()
                                 : null);
                     }
 

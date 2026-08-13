@@ -15,6 +15,18 @@ public sealed record OpenDocumentMessage(
     [property: JsonPropertyName("text")] string Text);
 
 /// <summary>
+/// A form's design as markup text, answering the page's requestFormMarkup. `markup` null means
+/// the form could not be projected and `reason` says why - the tab shows the reason rather
+/// than an empty document pretending to be a form.
+/// </summary>
+public sealed record FormMarkupMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("markup")] string? Markup,
+    [property: JsonPropertyName("reason")] string? Reason);
+
+/// <summary>
 /// Tells the surface there is nothing to show: every pane is closed. The surface drops every
 /// model and stays on screen with its empty workspace rather than yielding the frame back to
 /// the native editor.
@@ -520,6 +532,7 @@ public sealed record SetLanguageFactsMessage(
 /// </summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(OpenDocumentMessage))]
+[JsonSerializable(typeof(FormMarkupMessage))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]
