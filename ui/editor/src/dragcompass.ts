@@ -21,13 +21,13 @@
  * Reordering is a horizontal gesture, and a hand making one drifts vertically: with a
  * strip's exact rectangle as the target, a couple of pixels of drift mid-drag dropped the
  * pointer into the compass and the reorder turned into a split offer (the developer,
- * 2026-08-12). The band roughly triples a strip's catch height. It exists only inside the
- * drags' landing tests, so it costs nothing outside a drag; strips are tested before
- * bodies, so inside the band the insertion wins over the compass zones the band overlaps -
- * that trade, a sliver of the neighbouring split zones for a reorder that survives drift,
- * is the point.
+ * 2026-08-12). The band roughly quadruples a strip's catch height - it began at 24 and was
+ * doubled the same day, by feel. It exists only inside the drags' landing tests, so it
+ * costs nothing outside a drag; strips are tested before bodies, so inside the band the
+ * insertion wins over the compass zones the band overlaps - that trade, a slice of the
+ * neighbouring split zones for a reorder that survives drift, is the point.
  */
-export const STRIP_DRAG_REACH = 24;
+export const STRIP_DRAG_REACH = 48;
 
 /** The five places a drop can land on a region: its tabs, or one of its four edges. */
 export type DropZone = "center" | "left" | "right" | "top" | "bottom";

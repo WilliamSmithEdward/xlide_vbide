@@ -94,9 +94,9 @@ await runPageProbe({
       { name: "the dragged tab wears its outline", ok: midFlight.draggedOutline === "solid 1px", detail: midFlight.draggedOutline });
 
     // The reach band: a hand mid-reorder drifts vertically, and the strip's exact rectangle
-    // used to drop the gesture into the compass over a few pixels. Sixteen below and twelve
-    // above are both inside the band, so the insertion must hold at both and the compass must
-    // stay down (the developer, 2026-08-12).
+    // used to drop the gesture into the compass over a few pixels. Forty below and thirty-six
+    // above sit inside the doubled band and OUTSIDE the original 24 - so these hold the
+    // doubling itself, not just the band's existence (the developer, 2026-08-12, twice).
     const drifted = async (label, x, y) => {
       await mouse("mouseMoved", x, y, { buttons: 1 });
       await settle();
@@ -116,8 +116,8 @@ await runPageProbe({
       });
     };
 
-    await drifted("below", to.x, before.targetStrip.y + before.targetStrip.h + 16);
-    await drifted("above", to.x, before.targetStrip.y - 12);
+    await drifted("below", to.x, before.targetStrip.y + before.targetStrip.h + 40);
+    await drifted("above", to.x, before.targetStrip.y - 36);
 
     await mouse("mouseMoved", to.x, to.y, { buttons: 1 });
     await settle();
@@ -349,9 +349,10 @@ await runPageProbe({
       return {
         order: tabs.map((one) => one.dataset.panel),
         grab: { x: grab.x + grab.width / 2, y: grab.y + grab.height / 2 },
-        // Twelve pixels ABOVE the strip: over the editor area, whose compass would take the
-        // drag without the band. Only the band makes this point a reorder.
-        drop: { x: first.x + 4, y: box.y - 12 },
+        // Thirty-six pixels ABOVE the strip - outside the original 24 - over the editor
+        // area, whose compass would take the drag without the doubled band. Only the band
+        // makes this point a reorder.
+        drop: { x: first.x + 4, y: box.y - 36 },
       };
     })()`);
 
