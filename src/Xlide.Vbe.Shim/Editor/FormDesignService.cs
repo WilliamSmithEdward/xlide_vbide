@@ -77,6 +77,43 @@ internal static class FormDesignService
     }
 
     /// <summary>
+    /// The controls as the analyzer's implicit members: name plus the type completion resolves
+    /// it as. The standard toolbox spells as MSForms - the model the analyzer promoted for
+    /// exactly this (xlide_vscode#17) - and a type outside the table passes through raw, which
+    /// upstream takes unchanged rather than guessing at. Null when there is nothing to say.
+    /// </summary>
+    public static Xlide.Vbe.Core.Engine.EngineImplicitMember[]? ControlMembers(DispatchObject component)
+    {
+        if (component.GetInt32("Type") != 3)
+        {
+            return null;
+        }
+
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return null;
+        }
+
+        var rows = new List<ControlSpec>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Walk(designer, null, rows, seen, 0);
+        if (rows.Count == 0)
+        {
+            return null;
+        }
+
+        return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
+            row.Name,
+            IsToolboxType(row.Type) ? $"MSForms.{row.Type}" : row.Type))];
+    }
+
+    private static bool IsToolboxType(string type) => type is "Label" or "TextBox" or "ComboBox"
+        or "ListBox" or "CheckBox" or "OptionButton" or "ToggleButton" or "Frame"
+        or "CommandButton" or "TabStrip" or "MultiPage" or "Page" or "ScrollBar"
+        or "SpinButton" or "Image";
+
+    /// <summary>
     /// The walk knows each control's container because it is standing in it, so the narrow
     /// rows carry exact parents without a COM read per control. Recursion plus the dedupe
     /// makes flat and hierarchical collections the same world, as the debug walk's does.

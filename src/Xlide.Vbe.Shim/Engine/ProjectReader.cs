@@ -179,7 +179,17 @@ internal static class ProjectReader
                     continue;
                 }
 
-                modules.Add(new EngineModule(moduleName, source, TypeName(component.GetInt32("Type"))));
+                var componentType = component.GetInt32("Type");
+
+                // A form's controls ride the seed as implicit members: declared by the designer
+                // where the analyzer cannot see, supplied by the one side that can. This is the
+                // read the analyzer's #17 fix exists to receive, and it costs a designer walk
+                // only for form components, on the host thread this reader already owns.
+                var members = componentType == 3
+                    ? Editor.FormDesignService.ControlMembers(component)
+                    : null;
+
+                modules.Add(new EngineModule(moduleName, source, TypeName(componentType), members));
             }
 
             var (id, displayName) = Identity(project);

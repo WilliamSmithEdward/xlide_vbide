@@ -51,6 +51,14 @@ export interface ModulePayload {
     type?: string;
     /** For document modules, which document kind, so event handlers resolve. */
     documentType?: string;
+    /**
+     * For userform modules, the controls: members the text never declares, read off the
+     * designer by the host. Name plus the type completion resolves it as - MSForms.ComboBox
+     * and friends - which is the shape the analyzer's implicitMembers option takes
+     * (xlide_vscode#17). The host supplies them because a CodeModule's text carries no .frm
+     * header for the analyzer to parse them from.
+     */
+    implicitMembers?: { name: string; type: string }[];
 }
 
 /** project/open: replaces everything the engine knows about a project. */

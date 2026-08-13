@@ -40,9 +40,9 @@ if (-not [System.IO.Path]::IsPathRooted($Path)) {
 $StandardModule = 1
 $ClassModule = 2
 
-# No `Dim x As New <class>` anywhere here: the analyzer wrongly flags member access on one as
-# object-variable-not-set (xlide_vscode#16), and the hero shot's problems panel must read zero.
-# Explicit Set ... = New is what the code means anyway.
+# No `Dim x As New <class>` anywhere here. The analyzer used to flag member access on one as
+# object-variable-not-set - fixed upstream in xlide_vscode#16 (v3.6.0) - and the explicit
+# Set ... = New stays because it is what the code means anyway.
 $modules = [ordered]@{}
 
 $modules['Reporting'] = @{ Kind = $StandardModule; Code = @'

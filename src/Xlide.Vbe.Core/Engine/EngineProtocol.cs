@@ -7,6 +7,17 @@ namespace Xlide.Vbe.Core.Engine;
 public sealed record EngineModule(
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("type")] string Type,
+    /// <summary>
+    /// Members the module's text never declares but the host knows are there: a UserForm's
+    /// controls, name and type each, read off the designer. The analyzer resolves them and
+    /// completion offers their types' members (xlide_vscode#17); absent for every other kind.
+    /// </summary>
+    [property: JsonPropertyName("implicitMembers")] EngineImplicitMember[]? ImplicitMembers = null);
+
+/// <summary>One implicit member: the control's name, and the type completion resolves it as.</summary>
+public sealed record EngineImplicitMember(
+    [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("type")] string Type);
 
 /// <summary>A finding, with a span in character offsets into the module source.</summary>
@@ -199,6 +210,8 @@ public sealed record EngineProjectOpened(
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(EngineModule))]
 [JsonSerializable(typeof(EngineModule[]))]
+[JsonSerializable(typeof(EngineImplicitMember))]
+[JsonSerializable(typeof(EngineImplicitMember[]))]
 [JsonSerializable(typeof(EngineDiagnostic))]
 [JsonSerializable(typeof(EngineDiagnostics))]
 [JsonSerializable(typeof(EngineSpan))]

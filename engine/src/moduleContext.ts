@@ -51,6 +51,8 @@ export interface AssembledContext {
     codeNameList: string[];
     meType?: string;
     meProjectType?: string;
+    /** A form's controls, host-supplied: the analyzer's implicit members (xlide_vscode#17). */
+    implicitMembers?: readonly { name: string; type: string }[];
     projectClassMembers?: MemberCompletionContext['projectClassMembers'];
     projectProcedures?: IdentifierCompletionContext['projectProcedures'];
     projectSymbols?: IdentifierCompletionContext['projectSymbols'];
@@ -175,6 +177,10 @@ function buildContext(
         codeNameList: entries.filter((entry) => entry.type === 'document').map((entry) => entry.name),
         meType: meTypeFor(current),
         meProjectType: meProjectTypeFor(current),
+        // From the SEEDED module, like every cross-module fact here: the designer facts ride
+        // the seed, and a control set that changes without a reseed lags the same way the rest
+        // of the project's facts do.
+        implicitMembers: seededImplicitMembersOf(seeded, request.moduleName),
     };
 
     // Project facts, from the ONE index this seed carries (see sharedProjectIndex above); only
@@ -249,4 +255,13 @@ function seededSourceOf(seeded: readonly ModulePayload[], moduleName: string): s
 
 function seededDocumentTypeOf(seeded: readonly ModulePayload[], moduleName: string): string | undefined {
     return seeded.find((module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.documentType;
+}
+
+function seededImplicitMembersOf(
+    seeded: readonly ModulePayload[],
+    moduleName: string,
+): readonly { name: string; type: string }[] | undefined {
+    const members = seeded.find(
+        (module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.implicitMembers;
+    return members && members.length > 0 ? members : undefined;
 }

@@ -4260,10 +4260,12 @@ internal sealed partial class AddInSession : IDisposable
     /// declared by the designer where no analyzer can see - and this side can see the designer.
     /// The first real code-behind opened in the editor wore five of these (2026-08-13).
     ///
-    /// Filed upstream as xlide_vscode#17: implicit members per module is the real fix, because
-    /// it also gives the members their types for completion and hover. This filter retires when
-    /// it lands. HOST THREAD ONLY - it walks designers - and it walks one only for a form
-    /// module that actually carries undeclared findings, so the common pass pays nothing.
+    /// xlide_vscode#17 landed the real mechanism (v3.6.0): implicitMembers on the analysis
+    /// options, which COMPLETION now receives through the seed. Diagnostics cannot yet: they
+    /// ride the analyzer's worker protocol, whose seed and analyze messages carry no members
+    /// field - so this filter holds that one line until the protocol grows one, and retires
+    /// then. HOST THREAD ONLY - it walks designers - and it walks one only for a form module
+    /// that actually carries undeclared findings, so the common pass pays nothing.
     /// </summary>
     private IReadOnlyList<Finding> WithoutFormControlGhosts(IReadOnlyList<Finding> findings)
     {

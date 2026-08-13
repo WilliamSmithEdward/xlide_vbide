@@ -42,6 +42,9 @@ export function completionsFor(
         meType: ctx.meType,
         meProjectType: ctx.meProjectType,
         projectClassMembers: ctx.projectClassMembers,
+        // A form's controls, so `RegionPick.` answers with the ComboBox's members rather than
+        // nothing (xlide_vscode#17); the host supplied them with the seed.
+        implicitMembers: ctx.implicitMembers,
     });
 
     if (members.length > 0) {
