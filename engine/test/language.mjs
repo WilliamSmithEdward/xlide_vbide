@@ -24,87 +24,10 @@
 //   node test/language.mjs --exe
 
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import net from 'node:net';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { reporter, startEngine } from './harness.mjs';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const dist = join(here, '..', 'dist');
-const useExe = process.argv.includes('--exe');
-
-const pipeName = `xlide-engine-language-${process.pid}`;
-const command = useExe ? join(dist, 'xlide-engine.exe') : process.execPath;
-const args = useExe ? ['--pipe', pipeName] : [join(dist, 'engine.cjs'), '--pipe', pipeName];
-
-const engine = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-engine.stderr.on('data', (chunk) => process.stderr.write(`engine stderr: ${chunk}`));
-
-const listening = new Promise((resolve, reject) => {
-    let seen = '';
-    engine.stdout.on('data', (chunk) => {
-        seen += chunk.toString();
-        if (seen.includes('listening')) { resolve(); }
-    });
-    engine.on('exit', (code) => reject(new Error(`engine exited early with code ${code}`)));
-    setTimeout(() => reject(new Error('engine did not report listening within 30s')), 30_000);
-});
-
-await listening;
-
-const socket = net.connect(`\\\\.\\pipe\\${pipeName}`);
-await new Promise((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-});
-
-let nextId = 1;
-const pending = new Map();
-let inbox = '';
-
-socket.on('data', (chunk) => {
-    inbox += chunk.toString('utf8');
-    let newline = inbox.indexOf('\n');
-    while (newline >= 0) {
-        const line = inbox.slice(0, newline).trim();
-        inbox = inbox.slice(newline + 1);
-        newline = inbox.indexOf('\n');
-        if (!line) { continue; }
-
-        const message = JSON.parse(line);
-        const waiter = pending.get(message.id);
-        if (waiter) {
-            pending.delete(message.id);
-            if (message.error) { waiter.reject(new Error(`${message.error.code}: ${message.error.message}`)); }
-            else { waiter.resolve(message.result); }
-        }
-    }
-});
-
-function call(method, params) {
-    const id = nextId++;
-    return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        socket.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
-        setTimeout(() => {
-            if (pending.delete(id)) { reject(new Error(`${method} timed out`)); }
-        }, 30_000);
-    });
-}
-
-let passed = 0;
-const failures = [];
-
-function check(what, body) {
-    try {
-        body();
-        passed++;
-        console.log(`ok   ${what}`);
-    } catch (error) {
-        failures.push(`${what}: ${error.message}`);
-        console.log(`FAIL ${what}\n     ${error.message}`);
-    }
-}
+const { call, stop } = await startEngine('language');
+const { check, done } = reporter();
 
 /*
  * One native-language sample per script, taken from xlide_vscode's matrix so the two products
@@ -462,9 +385,5 @@ check('precomposed and decomposed are not the same text', () => {
         'and they must be the same word, or the case being guarded is not this one');
 });
 
-console.log(`\n${passed} passed, ${failures.length} failed`);
-for (const failure of failures) { console.log(`  ! ${failure}`); }
-
-socket.end();
-engine.kill();
-process.exit(failures.length === 0 ? 0 : 1);
+stop();
+process.exit(done());
