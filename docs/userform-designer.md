@@ -232,12 +232,28 @@ the host-owns-membership invariant survives.
   **The language features closed the loop 2026-08-13, same day, across three upstream
   rounds** (xlide_vscode v3.6.0 and the two follow-ups, all wired here the hour they landed):
   a form's controls ride every seed as implicit members - name plus `MSForms.<kind>` - so
-  completion answers a control's own type (57 ComboBox members on `RegionPick.`, per-control
-  not shared), diagnostics resolve the controls where the finding is made (the one-day
-  shim-side filter retired with a note about what it over-swallowed), hover answers the
-  control and its members with the MSForms signature, the call tip carries parameters, and
-  `Me.` composes controls plus code plus the form surface. Semantic call-colouring remains
-  open upstream (#19's comment carries the paint table). Two more paid-for facts:
+  completion answers a control's own type (per-control, not shared), diagnostics resolve the
+  controls where the finding is made (the one-day shim-side filter retired with a note about
+  what it over-swallowed), hover answers the control and its members with the MSForms
+  signature, the call tip carries parameters, and `Me.` composes controls plus code plus the
+  form surface.
+
+  **The fourth round closed the colouring, 2026-08-13 evening** (xlide_vscode#20, landed
+  v3.8.0 with a same-day audit fixing `Me.Hide`-without-meType and the With-block leading
+  dot): a RESOLVED method call on a control paints `function` - the same `dcdcaa` yellow
+  `Len` gets - while a property read and an unresolved member stay untouched. Three seams
+  carried it and each is pinned at its own level: the engine spreads the analyzer's third
+  collector (`engine/test/forms.mjs` holds the acceptance table headlessly, a gate and CI
+  step so the unpinned analyzer checkout cannot move under it silently), the page's semantic
+  legend gained `function` APPENDED so existing token indices keep their meaning (the page
+  smoke test now asserts the legend and the theme rule together, because the provider drops
+  unknown types silently), and the live paint is measured, not assumed: `AddItem`, `SetFocus`
+  and `Hide` render mtk13 `rgb(220,220,170)`, byte-identical to `Len`, while `Value` stays
+  identifier blue. The same drop merged `MSForms.Control` - the base every placed control
+  extends - into every control class, so `NameBox.` now completes and hovers `SetFocus`,
+  `Left`, `Visible` (in no per-control dump; three suite rows pin it), and the `_`-prefixed
+  dispatch internals are filtered the way the VBE's own list hides them (`Me.` reads 70
+  members now, not 85). Two more paid-for facts:
 
   - A form NAME burns for the whole session once used - added, removed, or refused - and a
     workbook that loads holding a name burns it the moment that form is removed. Fixture

@@ -84,6 +84,15 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/language.mjs
 
+      # A form's controls are declared by the DESIGNER, not the text: the host seeds them and
+      # the analyzer treats them as declared (xlide_vscode#17..#20). The call-colouring table
+      # is exact - a resolved method call paints `function`, a property or an unresolved member
+      # paints nothing - and because the checkout beside this one is unpinned, this is the job
+      # that notices the analyzer's main moving under that table.
+      - name: Forms
+        working-directory: xlide_vbide/engine
+        run: node test/forms.mjs
+
       # A finding's position against the text it was actually measured in. The engine chooses
       # between its live copy of a module and the seeded one whenever a request carries no source,
       # and that choice is invisible to the caller -- which converted offsets against whatever

@@ -9,7 +9,8 @@
     "check-types": "tsc --noEmit",
     "build": "node build.mjs",
     "package": "node build.mjs --package",
-    "test": "node test/smoke.mjs && node test/language.mjs && node test/positions.mjs && node test/freshness.mjs",
+    "test": "node test/smoke.mjs && node test/language.mjs && node test/forms.mjs && node test/positions.mjs && node test/freshness.mjs",
+    "test:forms": "node test/forms.mjs",
     "test:freshness": "node test/freshness.mjs",
     "test:positions": "node test/positions.mjs",
     "test:language": "node test/language.mjs"

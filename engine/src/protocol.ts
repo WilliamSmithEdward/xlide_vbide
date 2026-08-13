@@ -490,7 +490,8 @@ export interface RenameModuleParams {
 
 /**
  * textDocument/semanticTokens: the analysed colouring of a whole module - which identifiers name
- * types, which kind of type each names, and which are host globals nothing has shadowed. Same
+ * types, which kind of type each names, which are host globals nothing has shadowed, and which
+ * are resolved method calls on a form's designer-declared controls (xlide_vscode#20). Same
  * liveness rule as completion.
  */
 export interface SemanticTokensParams {

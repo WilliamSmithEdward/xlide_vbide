@@ -6,10 +6,16 @@
 // a class from an enum from a user-defined type, or tell a host global from a local that shadows
 // its name - those need the analysis, and this is where it comes from.
 //
-// Two collectors, the same pair the extension uses: type references resolved against the project's
-// own types, and host globals that no declaration in the module has shadowed.
+// Three collectors, the same set the extension uses: type references resolved against the project's
+// own types, host globals that no declaration in the module has shadowed, and resolved method calls
+// on a form's designer-declared controls (xlide_vscode#20) - `RegionPick.AddItem` paints the way
+// `Len` does, while a property read or an unresolved member stays untouched.
 
-import { collectHostGlobalTokens, resolveTypeSemanticTokens } from '../../../xlide_vscode/src/analyzer';
+import {
+    collectHostGlobalTokens,
+    collectImplicitMemberMethodTokens,
+    resolveTypeSemanticTokens,
+} from '../../../xlide_vscode/src/analyzer';
 import { assembleContext } from './moduleContext';
 import type { ModulePayload, SemanticTokenPayload, SemanticTokensParams } from './protocol';
 
@@ -22,6 +28,12 @@ export function semanticTokensFor(
     const tokens = [
         ...resolveTypeSemanticTokens(params.source, { projectTypes: ctx.projectTypes }),
         ...collectHostGlobalTokens(params.source),
+        // The collector guards meType itself - only an MSForms.* type engages it - so a
+        // worksheet's Excel.Worksheet passes through as an early return, not a special case here.
+        ...collectImplicitMemberMethodTokens(params.source, {
+            implicitMembers: ctx.implicitMembers,
+            meType: ctx.meType,
+        }),
     ];
 
     // Sorted by position, because the surface encodes them as deltas from the token before and

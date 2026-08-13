@@ -166,6 +166,17 @@ try {
     checkMembers.includes("Value") && !checkMembers.includes("AddItem"),
     `${checkMembers.length} member(s)`);
 
+  // Line 11 is `        NameBox.SetFocus`; column 17 sits after the dot. SetFocus is in no
+  // per-control dump - it lives on MSForms.Control, the base every placed control extends,
+  // and the analyzer merges that base into each control class (xlide_vscode#20's side find).
+  // Before the merge this list had no SetFocus, no Visible, no Left.
+  const textMembers = ((await api.act("completions", { line: 11, column: 17 })).data ?? [])
+    .map((item) => item.label ?? item.insertText);
+  check("a control offers its Control base class: SetFocus and Visible on a TextBox",
+    textMembers.includes("SetFocus") && textMembers.includes("Visible")
+    && !textMembers.includes("AddItem"),
+    `${textMembers.length} member(s)`);
+
   await waitFor("the code-behind to analyse clean", async () =>
     ((await api.problems(form)).findings ?? [])
       .every((finding) => finding.code !== "undeclared-variable"), { budgetMs: 20000 });
@@ -178,6 +189,8 @@ try {
   check("a control answers hover", controlHover.did === true, controlHover.detail);
   const memberHover = await api.act("hover", { word: "AddItem" });
   check("and so does its member", memberHover.did === true, memberHover.detail);
+  const baseHover = await api.act("hover", { word: "SetFocus" });
+  check("and so does a member of the Control base", baseHover.did === true, baseHover.detail);
 
   // FORM_CODE line 14 is `    Me.Hide`; column 8 sits after the dot. Me composes the
   // controls, the form surface (Show rides the analyzer's own VBA-wrapper table, not

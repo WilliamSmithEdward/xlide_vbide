@@ -270,6 +270,20 @@ Step 'engine language matrix' {
     '18 scripts through open, diagnose, outline, definition and rename'
 }
 
+Step 'engine form language' {
+    # A form's controls are declared by the DESIGNER, not the text: the host seeds them and the
+    # engine passes them through to the analyzer (xlide_vscode#17..#20). The middle link of that
+    # chain is this repo's, and this holds it headlessly - the call-colouring acceptance table,
+    # the Control base-class merge, and the meType gate - so a break fails a commit rather than
+    # a live run.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        node test/forms.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the engine form suite failed' }
+    } finally { Pop-Location }
+    'the #20 acceptance table and the Control base merge, over the pipe'
+}
+
 Step 'page probes (headless)' {
     # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
     # which drives the same file as one of its three legs. Listing it here too would launch

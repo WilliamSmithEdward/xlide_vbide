@@ -110,7 +110,9 @@ const scriptMs = performance.now();
  * crosses to the editor, so the order is a contract with the theme rather than a preference:
  * theme.ts colours a token by matching its type and modifiers against its rule scopes.
  */
-const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable"];
+// `function` is appended rather than sorted in: an index into this list is the wire format,
+// so appending is what keeps every already-painted token meaning what it meant.
+const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable", "function"];
 
 /** `defaultLibrary` marks a host-injected global - Application, ThisWorkbook, ActiveSheet. */
 const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
@@ -866,8 +868,9 @@ function boot(): void {
 
   // Semantic colouring, over the grammar rather than instead of it. The grammar already paints
   // the project's words from the lists project/open hands it; what it cannot do is tell a class
-  // from an enum from a user-defined type, or tell a host global from a local that shadows its
-  // name. Those need the analysis, and this is where it arrives.
+  // from an enum from a user-defined type, tell a host global from a local that shadows its
+  // name, or know that a form's designer declares controls whose method calls should paint as
+  // calls (xlide_vscode#20). Those need the analysis, and this is where it arrives.
   monaco.languages.registerDocumentSemanticTokensProvider(VBA_LANGUAGE_ID, {
     getLegend: () => ({ tokenTypes: SEMANTIC_TOKEN_TYPES, tokenModifiers: SEMANTIC_TOKEN_MODIFIERS }),
     provideDocumentSemanticTokens: async (model) => {

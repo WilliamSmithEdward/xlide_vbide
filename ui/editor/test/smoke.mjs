@@ -48,6 +48,20 @@ check("bundle contains the xlide-dark theme and the vba language id", async () =
   assert.ok(bundle.includes("vba"), 'bundle does not contain "vba"');
 });
 
+check("the semantic legend carries every type the engine emits, function appended last", async () => {
+  // The provider drops any token whose type is not in this list, silently - so an engine that
+  // starts emitting a type the page never learned paints nothing and fails nowhere. `function`
+  // is the call colouring (xlide_vscode#20), appended so existing indices keep their meaning,
+  // and the theme must map it or the legend entry paints the default foreground.
+  const bundle = await readFile(path.join(dist, "editor.js"), "utf8");
+  assert.ok(
+    bundle.includes('["class","enum","struct","type","variable","function"]')
+    || bundle.includes('["class", "enum", "struct", "type", "variable", "function"]'),
+    "the bundled legend is not the five known types plus function, in that order");
+  assert.match(bundle, /token:\s*"function",\s*foreground:\s*"dcdcaa"/i,
+    'the theme does not map semantic "function" to the call yellow');
+});
+
 check("codicon font shipped and referenced relatively from the stylesheet", async () => {
   assert.ok(await fileExists(path.join(dist, "codicon.ttf")), "dist/codicon.ttf is missing");
   const css = await readFile(path.join(dist, "editor.css"), "utf8");
