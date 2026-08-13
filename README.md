@@ -8,7 +8,7 @@
 ***(Yes! This is really the VBA Editor in Excel)***
 
 The Visual Basic Editor has looked the same since 1998. One module on screen at a time, a find
-dialog that covers the code you are searching, no completion worth the name, and no idea that
+dialog that covers the code you are searching, less than helpful (or missing) completions, and no idea that
 anything is wrong until you press F5 and it stops. xlide replaces that surface with Monaco, the
 editor behind VS Code, running inside the VBE itself. Your workbooks stay where they are, your
 macros run the way they always did, and F5, F8, and break mode behave exactly as before.
