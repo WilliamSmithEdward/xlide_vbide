@@ -27,7 +27,7 @@ import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
 import { resizeAt } from "./docktree.js";
-import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
+import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
 
 export interface WorkspaceHandlers {
@@ -1116,9 +1116,12 @@ export class Workspace {
     source: { strip: HTMLElement; tab: HTMLElement; group: EditorGroup } | null,
     zonesFor: (candidate: EditorGroup) => DropZone[],
   ): { strip: EditorGroup; index: number } | { group: EditorGroup; zone: DropZone } | null {
+    // Each strip catches the drag through its reach band, not just its own rectangle, so a
+    // reorder survives the vertical drift a real hand makes (see STRIP_DRAG_REACH).
     for (const candidate of this.groups) {
       const bounds = candidate.strip.getBoundingClientRect();
-      if (during.clientY >= bounds.top && during.clientY <= bounds.bottom
+      if (during.clientY >= bounds.top - STRIP_DRAG_REACH
+        && during.clientY <= bounds.bottom + STRIP_DRAG_REACH
         && during.clientX >= bounds.left && during.clientX <= bounds.right) {
         compass.clear();
 

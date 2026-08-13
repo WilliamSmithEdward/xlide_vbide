@@ -26,7 +26,7 @@ import {
   type TreeNode,
   type TreeSplit,
 } from "./docktree.js";
-import { ALL_ZONES, DragCompass, EDGE_ZONES, zoneRect, type DropZone } from "./dragcompass.js";
+import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
 
 export type DockSide = "left" | "right" | "top" | "bottom";
@@ -586,8 +586,15 @@ export class PanelDocks {
 
       const hovered = overlapping[0];
 
+      // Every strip first, each through its reach band rather than its own rectangle, so a
+      // reorder survives the vertical drift a real hand makes (see STRIP_DRAG_REACH) - and
+      // strips beat bodies, so inside the band the reorder wins over the compass zones the
+      // band overlaps.
       for (const host of this.groupHosts) {
-        if (inside(host.strip.getBoundingClientRect())) {
+        const stripBox = host.strip.getBoundingClientRect();
+        if (during.clientX >= stripBox.left && during.clientX <= stripBox.right
+          && during.clientY >= stripBox.top - STRIP_DRAG_REACH
+          && during.clientY <= stripBox.bottom + STRIP_DRAG_REACH) {
           const index = this.tabIndexAt(host.strip, during.clientX, name);
           target = { kind: "strip", side: host.side, path: host.path, index };
 
@@ -605,25 +612,26 @@ export class PanelDocks {
           compass.clear();
           return;
         }
+      }
 
-        // Only the group the pointer is actually over, which is the smallest body containing
-        // it rather than the first one that happens to.
-        if (hovered && hovered.host === host) {
-          const box = hovered.box;
+      // Only the group the pointer is actually over, which is the smallest body containing
+      // it rather than the first one that happens to.
+      if (hovered) {
+        const host = hovered.host;
+        const box = hovered.box;
 
-          // Only what the group can honour: over the pane's OWN group, centre is where it
-          // already is, and a split is impossible when it is the only tab there - a zone
-          // that does nothing is a promise the drop cannot keep.
-          const allowed = host.group !== from ? ALL_ZONES
-            : from.tabs.length > 1 ? EDGE_ZONES
-            : [];
+        // Only what the group can honour: over the pane's OWN group, centre is where it
+        // already is, and a split is impossible when it is the only tab there - a zone
+        // that does nothing is a promise the drop cannot keep.
+        const allowed = host.group !== from ? ALL_ZONES
+          : from.tabs.length > 1 ? EDGE_ZONES
+          : [];
 
-          const zone = compass.over(box, during.clientX, during.clientY, allowed);
-          target = zone ? { kind: "group", side: host.side, path: host.path, zone } : null;
-          // The centre joins this group's tabs; an edge carves a new group beside it.
-          compass.preview(zone ? zoneRect(box, zone) : null, zone === "center" ? "join" : "new");
-          return;
-        }
+        const zone = compass.over(box, during.clientX, during.clientY, allowed);
+        target = zone ? { kind: "group", side: host.side, path: host.path, zone } : null;
+        // The centre joins this group's tabs; an edge carves a new group beside it.
+        compass.preview(zone ? zoneRect(box, zone) : null, zone === "center" ? "join" : "new");
+        return;
       }
 
       // Over the editor itself: the compass's edges begin a section on that side. Measured

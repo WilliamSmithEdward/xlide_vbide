@@ -87,6 +87,34 @@ await runPageProbe({
       { name: "at the index the drop would use", ok: midFlight.barIsLast, detail: null },
       { name: "and no compass stands - the strip is its own target", ok: !midFlight.compassShowing, detail: null });
 
+    // The reach band: a hand mid-reorder drifts vertically, and the strip's exact rectangle
+    // used to drop the gesture into the compass over a few pixels. Sixteen below and twelve
+    // above are both inside the band, so the insertion must hold at both and the compass must
+    // stay down (the developer, 2026-08-12).
+    const drifted = async (label, x, y) => {
+      await mouse("mouseMoved", x, y, { buttons: 1 });
+      await settle();
+      const held = await inPage(`(() => {
+        const bar = document.querySelector(".tab-drop-indicator");
+        const strips = [...document.querySelectorAll(".group-tabs")];
+        const compass = document.querySelector(".drop-compass");
+        return {
+          barInTargetStrip: !!bar && bar.isConnected && bar.parentElement === strips[1],
+          compassShowing: !!compass && !compass.hidden,
+        };
+      })()`);
+      verdict.checks.push({
+        name: `drifting ${label} the strip keeps the insertion and holds the compass down`,
+        ok: held.barInTargetStrip && !held.compassShowing,
+        detail: JSON.stringify(held),
+      });
+    };
+
+    await drifted("below", to.x, before.targetStrip.y + before.targetStrip.h + 16);
+    await drifted("above", to.x, before.targetStrip.y - 12);
+
+    await mouse("mouseMoved", to.x, to.y, { buttons: 1 });
+    await settle();
     await mouse("mouseReleased", to.x, to.y, { clickCount: 1 });
     await settle();
 
@@ -301,5 +329,51 @@ await runPageProbe({
       ok: afterOneClick !== workbookRow.visibleComponents,
       detail: `component rows ${workbookRow.visibleComponents} -> ${afterOneClick}; unchanged means the click was eaten by a drag's leftover flag`,
     });
+
+    /* ---- the pane strips share the reach band: a reorder released ABOVE the strip lands ---- */
+
+    const pane = await inPage(`(() => {
+      const strip = [...document.querySelectorAll(".dock-tabs")]
+        .find((one) => one.querySelectorAll(".panel-tab").length >= 4);
+      if (!strip) { return null; }
+      const tabs = [...strip.querySelectorAll(".panel-tab")];
+      const grab = tabs[1].getBoundingClientRect();
+      const first = tabs[0].getBoundingClientRect();
+      const box = strip.getBoundingClientRect();
+      return {
+        order: tabs.map((one) => one.dataset.panel),
+        grab: { x: grab.x + grab.width / 2, y: grab.y + grab.height / 2 },
+        // Twelve pixels ABOVE the strip: over the editor area, whose compass would take the
+        // drag without the band. Only the band makes this point a reorder.
+        drop: { x: first.x + 4, y: box.y - 12 },
+      };
+    })()`);
+
+    verdict.checks.push({ name: "a dock strip with four pane tabs stands", ok: !!pane, detail: JSON.stringify(pane?.order ?? null) });
+    if (!pane) { return; }
+
+    await mouse("mousePressed", pane.grab.x, pane.grab.y, { buttons: 1, clickCount: 1 });
+    await mouse("mouseMoved", pane.grab.x - 12, pane.grab.y, { buttons: 1 });
+    await mouse("mouseMoved", pane.drop.x, pane.drop.y, { buttons: 1 });
+    await settle();
+
+    const paneMidFlight = await inPage(`(() => {
+      const compass = document.querySelector(".drop-compass");
+      return { compassShowing: !!compass && !compass.hidden };
+    })()`);
+
+    await mouse("mouseReleased", pane.drop.x, pane.drop.y, { clickCount: 1 });
+    await settle();
+
+    const paneOrder = await inPage(`(() => {
+      const strip = [...document.querySelectorAll(".dock-tabs")]
+        .find((one) => one.querySelectorAll(".panel-tab").length >= 4);
+      return strip ? [...strip.querySelectorAll(".panel-tab")].map((one) => one.dataset.panel) : null;
+    })()`);
+
+    const wanted = [pane.order[1], pane.order[0], ...pane.order.slice(2)];
+    verdict.checks.push(
+      { name: "drifting above the dock strip keeps the pane reorder and holds the compass down", ok: !paneMidFlight.compassShowing, detail: JSON.stringify(paneMidFlight) },
+      { name: "and releasing there lands the pane tab at the dragged index", ok: JSON.stringify(paneOrder) === JSON.stringify(wanted), detail: JSON.stringify({ was: pane.order, now: paneOrder, wanted }) });
   },
 });
