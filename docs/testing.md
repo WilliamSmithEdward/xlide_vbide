@@ -7,7 +7,7 @@ most of the value is in probes that drive the real thing rather than tests of th
 
 ## The four kinds, and when each is right
 
-**Unit tests** (`tests/`, 245 of them, none need Excel). Pure logic with a real answer: the split
+**Unit tests** (`tests/`, 259 of them, none need Excel). Pure logic with a real answer: the split
 tree's arithmetic, the lexer against its corpus, registration plans, pixel maths. Fast enough to
 run on every gate. If a thing can be a unit test it should be, and if it cannot, that is usually a
 sign the logic is tangled with the host and worth extracting.
@@ -23,8 +23,10 @@ Needs no Excel, so it runs in the ordinary gate.
 
 **Live probes** (`tools\harness\Test-*.ps1`, gated behind `verify.ps1 -Live`). Drive a real editor
 through the debug api. Reach for these when the defect lives in the interaction: window events,
-focus, the host rewriting something underneath the page, a module going away mid-flight. They need
-`tools\dev.ps1 -KeepOpen -Configuration Debug` and Debug builds only.
+focus, the host rewriting something underneath the page, a module going away mid-flight. The gate
+launches its own Excel per fixture; run one by hand against a `tools\dev.ps1 -KeepOpen
+-Configuration Debug` session. Debug builds only, and they find their session through
+`Get-XlideApi` (tools\harness\XlideApi.psm1), never by taking the first Excel.
 
 **Live suites** (`tools\harness\*.mjs`, the same gate). These are most of the live coverage and
 this document did not mention them at all until 2026-08-11, which is worth saying plainly: a
@@ -140,9 +142,10 @@ to its starting value is a far better detector than a heap figure nobody can int
 ## Running them
 
 ```powershell
-tools\verify.ps1                  # the whole local gate, about twenty seconds
-tools\verify.ps1 -Live            # plus the standing probes, against an open editor
-tools\dev.ps1 -KeepOpen -Configuration Debug   # what -Live needs first
+tools\verify.ps1                  # the headless gate, under a minute
+tools\verify.ps1 -Live            # plus the live suites; launches its own Excel, twice
+tools\verify.ps1 -Deep            # the pre-release tier: two more Excel sessions on top of -Live
+tools\dev.ps1 -KeepOpen -Configuration Debug   # a session to run a single probe against by hand
 ```
 
 The gate waits for the session to be healthy before probing rather than sleeping a guess: a session
