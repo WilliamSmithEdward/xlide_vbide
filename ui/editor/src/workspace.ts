@@ -26,7 +26,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
-import { resizeAt } from "./docktree.js";
+import { groupHolding, prune, resizeAt, splitBeside, type TreeGroup, type TreeNode, type TreeSplit } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
 import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
 
@@ -49,20 +49,20 @@ const KEYBOARD_STEP = 24;
 /** No group may be squeezed below this many pixels on its split axis. */
 const MIN_GROUP_SIZE = 120;
 
-type LayoutNode = SplitNode | LeafNode;
+/**
+ * The editor area's split tree IS docktree's tree, with an EditorGroup as the payload - the
+ * tested algebra, not a third transcription of it. A leaf is a TreeGroup holding exactly one
+ * EditorGroup (the group manages its own tabs internally), which is what lets prune and
+ * splitBeside apply unchanged: this file re-implemented both, and its absorb had already
+ * diverged by not renormalising sizes (the audit's B29). The DOM element each split renders
+ * into is NOT on the node - it is created fresh by every buildDom pass and handed to the
+ * splitters directly, which is what the old element field actually was.
+ */
+type LayoutNode = TreeNode<EditorGroup>;
 
-interface SplitNode {
-  kind: "split";
-  direction: "row" | "column";
-  children: LayoutNode[];
-  /** Fractions summing to 1, one per child. */
-  sizes: number[];
-  element: HTMLElement;
-}
-
-interface LeafNode {
-  kind: "leaf";
-  group: EditorGroup;
+/** The leaf shape: one editor group riding docktree's group node. */
+function leafOf(group: EditorGroup): TreeGroup<EditorGroup> {
+  return { kind: "group", tabs: [group], active: group };
 }
 
 /** One tab as a group holds it. */
@@ -439,7 +439,7 @@ export class Workspace {
     const first = new EditorGroup(this);
     this.groups = [first];
     this.activeGroup = first;
-    this.layout = { kind: "leaf", group: first };
+    this.layout = leafOf(first);
     this.render();
 
     // Empty until the host says otherwise: the first publish decides.
@@ -810,18 +810,17 @@ export class Workspace {
   }
 
   private buildDom(node: LayoutNode): HTMLElement {
-    if (node.kind === "leaf") {
-      return node.group.root;
+    if (node.kind === "group") {
+      return node.tabs[0]!.root;
     }
 
     const container = document.createElement("div");
     // split-row, not row: the Problems panel's generic .row rule would reach a bare class.
     container.className = `group-split split-${node.direction}`;
-    node.element = container;
 
     node.children.forEach((child, index) => {
       if (index > 0) {
-        container.appendChild(this.buildSplitter(node, index));
+        container.appendChild(this.buildSplitter(node, index, container));
       }
 
       const cell = document.createElement("div");
@@ -834,8 +833,13 @@ export class Workspace {
     return container;
   }
 
-  /** The draggable divider before child `index` of a split. Keyboard-operable, like every splitter here. */
-  private buildSplitter(node: SplitNode, index: number): HTMLElement {
+  /**
+   * The draggable divider before child `index` of a split. Keyboard-operable, like every
+   * splitter here. The container it measures is the div its own render pass built - handed
+   * in rather than kept on the node, because the tree is docktree's pure shape now and the
+   * element never outlived a render anyway.
+   */
+  private buildSplitter(node: TreeSplit<EditorGroup>, index: number, container: HTMLElement): HTMLElement {
     const splitter = document.createElement("div");
     splitter.className = `group-splitter split-${node.direction}`;
     splitter.setAttribute("role", "separator");
@@ -843,7 +847,6 @@ export class Workspace {
     splitter.tabIndex = 0;
 
     const apply = (deltaPixels: number): void => {
-      const container = node.element;
       const total = node.direction === "row" ? container.clientWidth : container.clientHeight;
       if (total <= 0) {
         return;
@@ -905,46 +908,15 @@ export class Workspace {
     const fresh = new EditorGroup(this);
     this.groups.push(fresh);
 
-    const direction: "row" | "column" = zone === "left" || zone === "right" ? "row" : "column";
-    const first = zone === "left" || zone === "top";
+    // docktree's own split-and-absorb - the tested copy, and the one that renormalises the
+    // absorbed sizes. The transcription this replaces did not, which was the audit's B29:
+    // arithmetically a no-op while sizes partition one, and a latent wrong the first time
+    // they do not.
+    const target = groupHolding(this.layout, of);
+    if (target) {
+      this.layout = splitBeside(this.layout, target, zone, leafOf(fresh)) ?? leafOf(fresh);
+    }
 
-    const replace = (node: LayoutNode): LayoutNode => {
-      if (node.kind === "leaf") {
-        if (node.group !== of) {
-          return node;
-        }
-
-        const leaf: LayoutNode = { kind: "leaf", group: fresh };
-        return {
-          kind: "split",
-          direction,
-          children: first ? [leaf, node] : [node, leaf],
-          sizes: [0.5, 0.5],
-          element: document.createElement("div"),
-        };
-      }
-
-      // A split in the same direction absorbs the new group as a sibling, the way the
-      // studio's grid does, instead of nesting a two-deep tree of the same axis.
-      const children = node.children.map(replace);
-      const flattened: LayoutNode[] = [];
-      const sizes: number[] = [];
-      children.forEach((child, index) => {
-        if (child.kind === "split" && child.direction === node.direction) {
-          for (let inner = 0; inner < child.children.length; inner++) {
-            flattened.push(child.children[inner]!);
-            sizes.push((node.sizes[index] ?? 1) * (child.sizes[inner] ?? 1));
-          }
-        } else {
-          flattened.push(child);
-          sizes.push(node.sizes[index] ?? 1);
-        }
-      });
-
-      return { ...node, children: flattened, sizes };
-    };
-
-    this.layout = replace(this.layout);
     this.render();
     return fresh;
   }
@@ -966,33 +938,20 @@ export class Workspace {
     const keep = this.groups.filter((group) => group.tabs.length > 0 || spared(group));
     const survivors = keep.length > 0 ? keep : [this.groups[0]!];
 
-    const prune = (node: LayoutNode): LayoutNode | null => {
-      if (node.kind === "leaf") {
-        return survivors.includes(node.group) ? node : null;
+    // Two jobs, kept apart the way paneldocks keeps them: THIS walk only empties the leaves
+    // whose group did not survive; the collapse of what that leaves behind - a groupless
+    // split, a one-child split, sizes repartitioned to one - is docktree's prune, the tested
+    // copy. The transcription this replaces was the third of the audit's B29.
+    const filterLeaves = (node: LayoutNode): LayoutNode => {
+      if (node.kind === "group") {
+        const tabs = node.tabs.filter((group) => survivors.includes(group));
+        return { kind: "group", tabs, active: tabs[0] ?? node.active };
       }
 
-      const children: LayoutNode[] = [];
-      const sizes: number[] = [];
-      node.children.forEach((child, index) => {
-        const kept = prune(child);
-        if (kept) {
-          children.push(kept);
-          sizes.push(node.sizes[index] ?? 1);
-        }
-      });
-
-      if (children.length === 0) {
-        return null;
-      }
-      if (children.length === 1) {
-        return children[0]!;
-      }
-
-      const total = sizes.reduce((sum, size) => sum + size, 0) || 1;
-      return { ...node, children, sizes: sizes.map((size) => size / total) };
+      return { ...node, children: node.children.map((child) => filterLeaves(child)) };
     };
 
-    this.layout = prune(this.layout) ?? { kind: "leaf", group: survivors[0]! };
+    this.layout = prune(filterLeaves(this.layout)) ?? leafOf(survivors[0]!);
 
     for (const group of this.groups) {
       if (!survivors.includes(group)) {
