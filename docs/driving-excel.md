@@ -1327,6 +1327,32 @@ case across a project**, so a loop variable typed `item` comes back `Item`, in t
 well as in the generated `Next`. Compare case-insensitively or the assertion fails on correct
 behaviour.
 
+### The README's pictures
+
+The screenshots and the tour GIF at the top of the README are staged through this same door,
+so they reshoot in about a minute when the surface changes rather than rotting as the one
+artifact nobody can reproduce:
+
+```bash
+tools\New-ShowcaseFixture.ps1          # QuarterlyReport.xlsm, shaped to be LOOKED at; leaves Excel open
+node tools\tour\capture-tour.mjs       # stages each scene, captures the frame, writes assets\images\tour-*.png
+node tools\tour\make-tour-gif.mjs      # the stills -> assets\images\tour.gif, no ffmpeg involved
+```
+
+`capture-tour.mjs` positions the frame at an exact size first (PrintWindow captures at whatever
+the window is), names code rather than coordinates (case-insensitively - the recasing trap
+above applies to needles too), and verifies focus landed before every shot, because a busy
+session's host echoes can yank the active editor after a navigation.
+
+One staging lesson is not written anywhere else: **a widget that takes DOM focus cannot be
+shot from a script.** The quick-fix menu grabs focus when it opens, the grab fails in a window
+that does not hold OS focus - which a scripted shoot's never does - and the menu dismisses
+itself within a few hundred ms of `until()` seeing it. The suggest widget and the sticky
+keyboard hover take no focus and stand for as long as the capture needs. Stage those.
+
+The diagnostics scene adds its module of deliberate findings through the api and removes it
+after, never saving, so the committed workbook keeps compiling for the debugger scene.
+
 ---
 
 ## 4. Where the api stops
