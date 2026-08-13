@@ -52,6 +52,31 @@ internal static class FormDesignService
     }
 
     /// <summary>
+    /// Every control name on a form, pages included - the set the diagnostics filter holds
+    /// undeclared-variable findings against, because the controls are members of the form's
+    /// class declared where no analyzer can see (xlide_vscode#17). Null when the component is
+    /// not a form or will not open its designer.
+    /// </summary>
+    public static HashSet<string>? ControlNames(DispatchObject component)
+    {
+        if (component.GetInt32("Type") != 3)
+        {
+            return null;
+        }
+
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return null;
+        }
+
+        var rows = new List<ControlSpec>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Walk(designer, null, rows, seen, 0);
+        return seen;
+    }
+
+    /// <summary>
     /// The walk knows each control's container because it is standing in it, so the narrow
     /// rows carry exact parents without a COM read per control. Recursion plus the dedupe
     /// makes flat and hierarchical collections the same world, as the debug walk's does.
