@@ -1108,7 +1108,14 @@ public sealed record DebugPerfReply(
     [property: JsonPropertyName("hostReadMs")] long[] HostReadMs,
     [property: JsonPropertyName("hostReadCharsLast")] long HostReadCharsLast,
     [property: JsonPropertyName("hostReadFullTransfersLast")] long HostReadFullTransfersLast,
-    [property: JsonPropertyName("hostReadSkippedTotal")] long HostReadSkippedTotal);
+    [property: JsonPropertyName("hostReadSkippedTotal")] long HostReadSkippedTotal,
+    /// <summary>
+    /// PublishModules passes, timed in MICROSECONDS because the unchanged pass sits under a
+    /// millisecond: the per-tick cost of the pane walk and the per-workbook Saved reads that
+    /// run before the change-key can say nothing changed (the audit's B23).
+    /// </summary>
+    [property: JsonPropertyName("publishUs")] long[] PublishUs,
+    [property: JsonPropertyName("publishCount")] long PublishCount);
 
 /// <summary>
 /// What a script run in the page answered with.

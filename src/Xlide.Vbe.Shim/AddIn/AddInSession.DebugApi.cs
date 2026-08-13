@@ -686,6 +686,25 @@ internal sealed partial class AddInSession
         // blocked. What is standing is the only evidence that something is standing.
         ClearDialogsWeRaised();
 
+        // THE HOST-FREE ROUTES ANSWER THEIR OWN REFUSALS. assert and dismiss exist precisely so
+        // a caller can get an answer while a modal owns the host thread - and their argument
+        // guards sat on their switch cases, so a call with a missing argument fell out of the
+        // switch and was marshalled to the very thread these routes exist to avoid: dismiss
+        // with no button, made while a dialog stood, timed out instead of saying "button?".
+        // The refusal happens here, before the switch, on the pool thread (the audit's B19).
+        // guard needs no twin: its case carries no argument guard, so it always answers.
+        if (request.Route == "assert"
+            && !(request.Query.TryGetValue("that", out var assertClaim) && assertClaim.Length > 0))
+        {
+            return DebugError($"assert needs that=<claim>; known claims are {string.Join(", ", KnownClaims)}");
+        }
+
+        if (request.Route == "dismiss"
+            && !(request.Query.TryGetValue("button", out var dismissButton) && dismissButton.Length > 0))
+        {
+            return DebugError("dismiss needs button=<label>, and takes caption=<title> to pick between dialogs");
+        }
+
         switch (request.Route)
         {
             case "log":
@@ -1237,6 +1256,7 @@ internal sealed partial class AddInSession
                 var (engineMethods, engineSlowest, engineWindow) = EngineCounters.Snapshot();
                 var (hostReadCount, hostReadChars, hostReadFull, hostReadSkipped, hostReadSamples) = PerfCounters.HostReadSnapshot();
                 _ = hostReadCount;
+                var (publishCount, publishSamples) = PerfCounters.PublishSnapshot();
                 return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugPerfReply(
                         placementSamples,
@@ -1248,7 +1268,9 @@ internal sealed partial class AddInSession
                         hostReadSamples,
                         hostReadChars,
                         hostReadFull,
-                        hostReadSkipped),
+                        hostReadSkipped,
+                        publishSamples,
+                        publishCount),
                     DebugJsonContext.Default.DebugPerfReply));
             }
 

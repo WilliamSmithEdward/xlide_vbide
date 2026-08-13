@@ -818,7 +818,15 @@ console.table(await api.engineCosts()); // ranked by total time spent
 (await api.ui()).longTasks;             // main-thread stalls over 50ms, worst first
 (await api.history()).routeCosts;       // the door's own cost, per route
 (await api.perf()).hostReadMs;          // host-thread COM reads of module source, recent ms
+(await api.perf()).publishUs;           // one PublishModules pass, recent MICROseconds
 ```
+
+**`publishUs` is the per-tick strip cost** the audit's B23 said was asserted rather than
+measured: PublishModules runs on every poll tick, and its change-key - which is what makes an
+unchanged strip send nothing - is built after the pane walk and the per-workbook Saved reads,
+because the key contains the dirty flags those reads produce. Microseconds, because the
+unchanged pass sits under a millisecond and the ring drops zeros; `publishCount` beside it says
+how many passes the samples cover.
 
 **`hostReadMs` is the tab-switch and analysis-pass cost** the surface audit's C7 and C8 name:
 every analysis pass, and every pane follow, reads module source over COM on the host thread.

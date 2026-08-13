@@ -91,6 +91,32 @@ internal static class PerfCounters
         }
     }
 
+    /// <summary>
+    /// One PublishModules pass, timed in MICROSECONDS - the unchanged pass is expected to sit
+    /// under a millisecond, and a ring that drops zeros would erase exactly the samples that
+    /// answer the question. It runs on every poll tick, and its unchanged cost was asserted in
+    /// a comment - "a read" - rather than measured, which understated it by an order of
+    /// magnitude structurally: the change-key that makes an unchanged strip send nothing is
+    /// built AFTER the pane walk and the per-workbook Saved reads, because the key contains
+    /// the dirty flags those reads produce (the audit's B23). This stamp is what turns that
+    /// structural claim into a number a tuning session can trust.
+    /// </summary>
+    public static void Publish(long microseconds)
+    {
+        Interlocked.Increment(ref _publishCount);
+        Sample(PublishSamples, ref _publishCursor, microseconds);
+    }
+
+    public static (long Count, long[] Samples) PublishSnapshot()
+    {
+        lock (SampleGate)
+        {
+            return (Interlocked.Read(ref _publishCount), Ordered(PublishSamples, _publishCursor));
+        }
+    }
+
+    private static long _publishCount;
+
     /// <summary>One window event heard from the hook, whether or not it led anywhere.</summary>
     public static void WindowEvent() => Interlocked.Increment(ref _windowEvents);
 
@@ -167,9 +193,11 @@ internal static class PerfCounters
     private static readonly long[] PlacementSamples = new long[SampleCount];
     private static readonly long[] MarshalSamples = new long[SampleCount];
     private static readonly long[] HostReadSamples = new long[SampleCount];
+    private static readonly long[] PublishSamples = new long[SampleCount];
     private static int _placementCursor;
     private static int _marshalCursor;
     private static int _hostReadCursor;
+    private static int _publishCursor;
     private static readonly Lock SampleGate = new();
 
     private static void Sample(long[] ring, ref int cursor, long value)

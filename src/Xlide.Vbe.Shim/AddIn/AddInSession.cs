@@ -4119,8 +4119,10 @@ internal sealed partial class AddInSession : IDisposable
 
         // Every tick, not only the resync ones: a save made on the host's side of the fence -
         // Excel's own Ctrl+S, an autosave - flips the dirty flags with no event we hear, and
-        // the dots must follow. The change-key inside makes an unchanged strip cost a read
-        // and no message.
+        // the dots must follow. The change-key inside makes an unchanged strip send NO MESSAGE,
+        // but the work before the key is not "a read": the pane walk is several invokes per
+        // open pane and the dirty flags cost a Workbooks find per distinct workbook, every
+        // tick, because the key contains those flags. perf().publishUs is the measured cost.
         PublishModules();
 
         UpdateDebugState();
@@ -5605,6 +5607,26 @@ internal sealed partial class AddInSession : IDisposable
 
     private void PublishModules()
     {
+#if DEBUG
+        // Timed because this runs on every poll tick and its cost was asserted rather than
+        // measured (the audit's B23). Microseconds, because the unchanged pass sits under a
+        // millisecond and the sample ring drops zeros; perf().publishUs serves the figures.
+        var publishTimer = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            PublishModulesCore();
+        }
+        finally
+        {
+            PerfCounters.Publish(publishTimer.Elapsed.Ticks / 10);
+        }
+#else
+        PublishModulesCore();
+#endif
+    }
+
+    private void PublishModulesCore()
+    {
         var surface = _editorSurface;
         if (surface is null)
         {
@@ -5758,6 +5780,40 @@ internal sealed partial class AddInSession : IDisposable
         (display + "\0" + module).ToLowerInvariant();
 
     /// <summary>
+    /// The application's workbook wearing this display name, through the trust-free route, or
+    /// null when the application or the name cannot be found. One walk, shared by the Saved
+    /// read and the save itself: the two were the same Workbooks/Count/GetItem/match-on-Name
+    /// loop written twice, differing only in what they did on the match (the audit's B23).
+    /// Ownership transfers - the caller disposes; exceptions propagate to the callers, whose
+    /// recoveries differ on purpose.
+    /// </summary>
+    private DispatchObject? FindWorkbookByDisplay(string display)
+    {
+        _hostApp ??= HostApplication.Find();
+        if (_hostApp is null)
+        {
+            return null;
+        }
+
+        using var books = _hostApp.GetObject("Workbooks");
+        var count = books?.GetInt32("Count") ?? 0;
+
+        for (var i = 1; i <= count; i++)
+        {
+            var book = books!.GetItem(i);
+            if (book is not null
+                && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
+            {
+                return book;
+            }
+
+            book?.Dispose();
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// A workbook's Saved flag, by display name, through the same trust-free application route
     /// the evaluator uses. Null when it cannot be read - a missing dot is a small wrong, a
     /// lying dot is a large one, so unknown must never invent one.
@@ -5766,24 +5822,8 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
-            _hostApp ??= HostApplication.Find();
-            if (_hostApp is null)
-            {
-                return null;
-            }
-
-            using var books = _hostApp.GetObject("Workbooks");
-            var count = books?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= count; i++)
-            {
-                using var book = books!.GetItem(i);
-                if (book is not null
-                    && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
-                {
-                    return book.GetBool("Saved");
-                }
-            }
+            using var book = FindWorkbookByDisplay(display);
+            return book?.GetBool("Saved");
         }
         catch (Exception)
         {
@@ -6730,28 +6770,16 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
-            _hostApp ??= HostApplication.Find();
-            if (_hostApp is null)
+            using var book = FindWorkbookByDisplay(display);
+            if (book is null)
             {
+                Log.Warn($"close: {display} is not among the application's workbooks");
                 return false;
             }
 
-            using var books = _hostApp.GetObject("Workbooks");
-            var count = books?.GetInt32("Count") ?? 0;
-
-            for (var i = 1; i <= count; i++)
-            {
-                using var book = books!.GetItem(i);
-                if (book is not null
-                    && string.Equals(book.GetString("Name"), display, StringComparison.OrdinalIgnoreCase))
-                {
-                    book.Invoke("Save");
-                    Log.Info($"close: saved {display}");
-                    return true;
-                }
-            }
-
-            Log.Warn($"close: {display} is not among the application's workbooks");
+            book.Invoke("Save");
+            Log.Info($"close: saved {display}");
+            return true;
         }
         catch (Exception ex)
         {
