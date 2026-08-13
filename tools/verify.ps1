@@ -441,12 +441,13 @@ if ($Live) {
 
         # A session that has only just launched is still seeding: the engine is starting, the
         # first analysis pass has not run, and the ghost readers may not be attached. Probes
-        # that assert a healthy session then fail on the truth that it is not healthy YET  - 
+        # that assert a healthy session then fail on the truth that it is not healthy YET  -
         # which is a real answer to the wrong question (2026-08-06, on a release gate).
-        $discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-        if (Test-Path $discovery) {
-            $api = (Get-Content $discovery -Raw | ConvertFrom-Json)
-            $door = "http://127.0.0.1:$($api.port)/$($api.token)"
+        Import-Module (Join-Path $repoRoot 'tools\harness\XlideApi.psm1') -Force
+        $found = $null
+        try { $found = Get-XlideApi -ProcessId $excel.Id -TimeoutSeconds 10 } catch { }
+        if ($found) {
+            $door = $found.Base
             $ready = $false
             $deadline = (Get-Date).AddSeconds(30)
             do {

@@ -28,15 +28,16 @@ function Check([string] $name, [scriptblock] $test) {
     }
 }
 
-$excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $excel) { Write-Output 'RESULT: FAIL - no Excel is running'; return }
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+try {
+    $found = Get-XlideApi
+} catch {
+    Write-Output "RESULT: FAIL - $($_.Exception.Message)"
+    return
+}
 
-$discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-if (-not (Test-Path $discovery)) { Write-Output "RESULT: FAIL - no discovery file for Excel $($excel.Id)"; return }
-
-$d = Get-Content $discovery -Raw | ConvertFrom-Json
-$api = "http://127.0.0.1:$($d.port)/$($d.token)"
-Write-Output "api: $api (pid $($d.pid))"
+$api = $found.Base
+Write-Output "api: $api (pid $($found.Pid))"
 
 function Page([string] $script) {
     $r = Invoke-RestMethod "$api/eval" -Method Post -Body $script -TimeoutSec 30
@@ -77,7 +78,7 @@ Add-Type -Namespace Xlide -Name Gui -MemberDefinition @'
 
 function Get-HostStats {
     $s = Invoke-RestMethod "$api/stats" -TimeoutSec 10
-    $handle = (Get-Process -Id $excel.Id).Handle
+    $handle = (Get-Process -Id $found.Pid).Handle
     [pscustomobject] @{
         ManagedMb = [Math]::Round($s.managedMemoryBytes / 1MB, 1)
         WorkingMb = [Math]::Round($s.workingSetBytes / 1MB, 1)

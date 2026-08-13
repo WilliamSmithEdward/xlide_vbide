@@ -112,6 +112,18 @@ const api = await open({ workbook: "RenameFixture.xlsm" });   // or { pid }, or 
 A discovery file **outlives a killed Excel**, so `discover()` proves liveness by asking each one
 for `state` before returning it.
 
+PowerShell scripts find the door the same way, through `tools\harness\XlideApi.psm1` - never by
+taking the first Excel `Get-Process` answers, which with two Excels open drives the wrong one:
+
+```powershell
+Import-Module tools\harness\XlideApi.psm1 -Force
+$found = Get-XlideApi                  # the one live session; -ProcessId pins, -TimeoutSeconds waits
+Invoke-RestMethod "$($found.Base)/state"
+```
+
+`Find-XlideApi` is `discover()` (every live session, newest first, never throws); `Get-XlideApi`
+is `open()` (exactly one, or a refusal naming the candidates).
+
 ### Then ask whether it is healthy
 
 ```bash

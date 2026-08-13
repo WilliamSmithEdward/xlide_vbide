@@ -14,17 +14,16 @@ function Check([string] $name, [scriptblock] $test) {
     }
 }
 
-$excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $excel) { Write-Output 'RESULT: FAIL - no Excel is running'; return }
-
-$discoveryPath = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-if (-not (Test-Path $discoveryPath)) {
-    Write-Output "RESULT: FAIL - no discovery file for Excel $($excel.Id) (Release build, or the editor was never opened)"
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+try {
+    $found = Get-XlideApi
+} catch {
+    Write-Output "RESULT: FAIL - $($_.Exception.Message)"
     return
 }
 
-$d = Get-Content $discoveryPath | ConvertFrom-Json
-$api = "http://127.0.0.1:$($d.port)/$($d.token)"
+$d = [pscustomobject] @{ pid = $found.Pid; port = $found.Port; token = $found.Token; devtoolsPort = $found.DevtoolsPort; api = $found.Schema }
+$api = $found.Base
 Write-Output "api: $api (pid $($d.pid), devtools $($d.devtoolsPort))"
 
 Check 'discovery carries a schema, port, token, and devtools port' {

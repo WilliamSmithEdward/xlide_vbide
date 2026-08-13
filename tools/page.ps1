@@ -61,32 +61,18 @@ function Write-Step([string] $text) {
 }
 
 # The api of whichever session is running, or null when none is. Never guesses between two
-# Excels: a page deployed into the wrong session is a confusing hour.
+# Excels: a page deployed into the wrong session is a confusing hour. Find-XlideApi is the
+# module's discover(): every live session, proven by /state, never a guess.
 function Get-LiveApi {
-    $excels = @(Get-Process EXCEL -ErrorAction SilentlyContinue)
-    $found = @()
-
-    foreach ($excel in $excels) {
-        $discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-        if (-not (Test-Path $discovery)) { continue }
-
-        try {
-            $d = Get-Content $discovery -Raw | ConvertFrom-Json
-            $api = "http://127.0.0.1:$($d.port)/$($d.token)"
-            # A discovery file outlives a killed Excel, so answering is the only proof of life.
-            $state = Invoke-RestMethod "$api/state" -TimeoutSec 3
-            if ($state) { $found += [pscustomobject] @{ Pid = $excel.Id; Api = $api } }
-        } catch {
-            # A session that will not answer is not a session.
-        }
-    }
+    Import-Module (Join-Path $PSScriptRoot 'harness\XlideApi.psm1') -Force
+    $found = @(Find-XlideApi)
 
     if ($found.Count -eq 0) { return $null }
     if ($found.Count -gt 1) {
         throw "More than one xlide session is answering (pids $($found.Pid -join ', ')). Close one, or deploy by hand."
     }
 
-    return $found[0]
+    return [pscustomobject] @{ Pid = $found[0].Pid; Api = $found[0].Base }
 }
 
 function Invoke-PageBuild {

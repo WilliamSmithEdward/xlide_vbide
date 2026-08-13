@@ -178,14 +178,17 @@ try {
 
     $excel.VBE.MainWindow.Visible = $true
 
-    # The dev door announces itself in a per-process discovery file; its presence IS the
-    # session being up, and its contents are how everything below asks and acts.
-    $discoveryPath = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($process.Id).json"
-    while (-not (Test-Path $discoveryPath) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 200 }
-    if (-not (Test-Path $discoveryPath)) { throw 'no debug api discovery file; is this a Debug publish?' }
-
-    $discovery = Get-Content $discoveryPath -Raw | ConvertFrom-Json
-    $api = "http://127.0.0.1:$($discovery.port)/$($discovery.token)"
+    # The dev door announces itself in a per-process discovery file; Get-XlideApi waits for
+    # THIS Excel's door and proves it answers, and its coordinates are how everything below
+    # asks and acts.
+    Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+    $remaining = [int][math]::Max(1, ($deadline - (Get-Date)).TotalSeconds)
+    try {
+        $discovery = Get-XlideApi -ProcessId $process.Id -TimeoutSeconds $remaining
+    } catch {
+        throw 'no live debug api for the launched Excel; is this a Debug publish?'
+    }
+    $api = $discovery.Base
 
     $state = $null
     while ((Get-Date) -lt $deadline) {
@@ -196,7 +199,7 @@ try {
 
     # The whole in-page story - summon by real click, real libraries, members from real
     # code, and the double-click navigate - runs in the node probe over the two doors.
-    Invoke-NodeProbe 'live' 'objbrowser-live-probe.mjs' @('--api', $api, '--cdp', "$($discovery.devtoolsPort)")
+    Invoke-NodeProbe 'live' 'objbrowser-live-probe.mjs' @('--api', $api, '--cdp', "$($discovery.DevtoolsPort)")
 
     # The icon is a window property, not a page's; Win32 answers for it.
     $palette = [XlideObTest.Native]::TopLevel($process.Id, 'XlidePalette')

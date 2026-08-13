@@ -62,16 +62,17 @@ public static IntPtr FrameOf(int processId)
 
 [Xlide.Rsz]::UseRealPixels()
 
-$excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $excel) { Write-Output 'RESULT: FAIL - no Excel is running'; exit 1 }
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+try {
+    $found = Get-XlideApi
+} catch {
+    Write-Output "RESULT: FAIL - $($_.Exception.Message)"
+    exit 1
+}
 
-$discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-if (-not (Test-Path $discovery)) { Write-Output "RESULT: FAIL - no discovery file for Excel $($excel.Id)"; exit 1 }
+$api = $found.Base
 
-$d = Get-Content $discovery -Raw | ConvertFrom-Json
-$api = "http://127.0.0.1:$($d.port)/$($d.token)"
-
-$frame = [Xlide.Rsz]::FrameOf($excel.Id)
+$frame = [Xlide.Rsz]::FrameOf($found.Pid)
 $overlay = [Xlide.Rsz]::FindChild($frame, 'XlideEditorOverlay')
 Write-Output "frame $frame overlay $overlay"
 if ($frame -eq [IntPtr]::Zero -or $overlay -eq [IntPtr]::Zero) {

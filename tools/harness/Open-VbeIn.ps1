@@ -99,15 +99,12 @@ $excel.CommandBars.ExecuteMso('VisualBasic')
 Write-Host "Opened the editor in Excel $ProcessId."
 
 # The add-in loads with the VBE, so the door appears a moment after this returns rather than with
-# it. Waited for here so a caller can drive immediately instead of sleeping and hoping.
-$discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$ProcessId.json"
-$doorDeadline = (Get-Date).AddSeconds($TimeoutSeconds)
-while (-not (Test-Path $discovery) -and (Get-Date) -lt $doorDeadline) {
-    Start-Sleep -Milliseconds 200
-}
-
-if (Test-Path $discovery) {
-    Write-Host "The add-in is up in $ProcessId; its door is at $discovery."
-} else {
+# it. Waited for here so a caller can drive immediately instead of sleeping and hoping - and
+# proven live, not just present on disk, which a stale file from a killed Excel also is.
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+try {
+    $found = Get-XlideApi -ProcessId $ProcessId -TimeoutSeconds $TimeoutSeconds
+    Write-Host "The add-in is up in $ProcessId; its door is at $($found.Base)."
+} catch {
     Write-Host "The editor opened but no door appeared for $ProcessId. Debug build? Registered?" -ForegroundColor Yellow
 }

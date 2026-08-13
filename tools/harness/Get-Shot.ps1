@@ -41,14 +41,9 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$excel = Get-Process EXCEL -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $excel) { throw 'No Excel is running.' }
-
-$discovery = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"
-if (-not (Test-Path $discovery)) { throw "No debug api for Excel $($excel.Id); is this a Debug build?" }
-
-$d = Get-Content $discovery -Raw | ConvertFrom-Json
-$api = "http://127.0.0.1:$($d.port)/$($d.token)"
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+$found = Get-XlideApi
+$api = $found.Base
 
 $query = "window=$Window"
 if ($Selector) {
