@@ -1007,8 +1007,11 @@ export class Dispatcher {
             // sends them); the seeded copy answers otherwise, so a form is analysable without
             // a per-request supply. The .frm header fallback below both is dead for Excel
             // forms, which is why one of these two must carry it.
+            // A standalone analysis names no project, and standalone modules have no designer.
             implicitMembers: params.implicitMembers
-                ?? seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
+                ?? (params.projectId === undefined
+                    ? undefined
+                    : seededMembersOf(this.seededModules.get(params.projectId), params.moduleName)),
             severityOverrides: params.severityOverrides,
             activeIncompleteExpressionOffset: params.activeIncompleteExpressionOffset,
         };

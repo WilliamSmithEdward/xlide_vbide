@@ -219,6 +219,18 @@ Step 'page typecheck' {
     'clean'
 }
 
+# CI runs this and the local gate did not, so a dispatcher type error passed the whole local
+# ladder - bundling does not typecheck - and failed only on the push (2026-08-13). The gate
+# covers what CI covers, or the gate's PASS is a claim about a different build.
+Step 'engine typecheck' {
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        npm run check-types 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the engine does not typecheck' }
+    } finally { Pop-Location }
+    'clean'
+}
+
 Step 'page build' {
     Push-Location $pageRoot
     try {
