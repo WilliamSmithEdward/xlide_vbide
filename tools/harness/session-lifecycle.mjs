@@ -16,16 +16,9 @@
  * Run against any live session, ALONE (it tears the session down and back up):
  *   node tools\harness\session-lifecycle.mjs
  */
-import { discover } from "./xlide-api.mjs";
+import { discover, reporter, wait } from "./xlide-api.mjs";
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-
-let passed = 0;
-const broken = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { broken.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
 
 const sole = async () => {
   const all = await discover();
@@ -104,6 +97,4 @@ if (revived) {
   console.log(`     (the teardown window was observed: ${revived.sawDown})`);
 }
 
-console.log(`\n${passed} passed, ${broken.length} failed`);
-for (const one of broken) { console.log(`  ! ${one}`); }
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());

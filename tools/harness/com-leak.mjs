@@ -29,10 +29,9 @@
  *   node tools\harness\com-leak.mjs 40      # more rounds, for a slower leak
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rounds = Math.max(4, Number(process.argv[2] ?? 12) || 12);
 const project = await api.project();
 

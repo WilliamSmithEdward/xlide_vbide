@@ -58,7 +58,11 @@ exit 0
 
 $app = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application')
 $vbe = $app.VBE
-$excelId = (Get-Process EXCEL | Select-Object -First 1).Id
+
+# The session's own pid, proven live - the first Excel Get-Process answers is the wrong one
+# whenever two are open, and this suite reads that session's log.
+Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
+$excelId = (Get-XlideApi).Pid
 
 $log = Get-ChildItem "$env:LOCALAPPDATA\xlide_vbide\logs" -Filter "shim-*-$excelId.log" |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1

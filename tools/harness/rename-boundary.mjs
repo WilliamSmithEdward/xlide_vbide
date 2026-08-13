@@ -14,16 +14,11 @@
  * Every assertion on the twin is BYTE-IDENTICAL text, not a token search: the defect this guards
  * does not announce itself, it just edits.
  */
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, reporter, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 
-let passed = 0;
-const broken = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { broken.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
 
 const projects = (await api.projects()).projects;
 const rename = projects.find((p) => /RenameFixture/i.test(p.project));
@@ -33,9 +28,8 @@ const twin = projects.find((p) => /TwinFixture/i.test(p.project));
 // launcher opened both fixtures, so a missing twin means the wiring broke, and reporting it as
 // a skip is how a boundary check stops existing without anyone deciding that.
 if (!rename || !twin) {
-  console.log(`FAIL both fixtures must be open; saw ${projects.map((p) => p.project).join(", ")}`);
-  console.log("\n0 passed, 1 failed");
-  process.exit(1);
+  check("both fixtures must be open", false, `saw ${projects.map((p) => p.project).join(", ")}`);
+  process.exit(done());
 }
 
 const read = async (module, project) =>
@@ -84,5 +78,4 @@ check("the undo restored the declaration workbook byte for byte",
 check("and the twin is still byte-identical, through rename AND undo",
   (await read("Helpers", twin.projectId)) === before.twinHelpers);
 
-console.log(`\n${passed} passed, ${broken.length} failed`);
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());

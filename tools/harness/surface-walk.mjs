@@ -22,7 +22,7 @@
  *   node tools\harness\surface-walk.mjs --steps 80 --seed 424242
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const seedArg = process.argv.indexOf("--seed");
 const SEED = seedArg >= 0 ? Number(process.argv[seedArg + 1]) : 20260807;
@@ -41,7 +41,6 @@ function random() {
 const pick = (list) => list[Math.floor(random() * list.length)];
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const first = await api.ui();
 const workbooks = first.explorer.workbooks.map((b) => b.name);
 

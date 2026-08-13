@@ -15,13 +15,12 @@
  * and this reports what this machine does instead of pretending otherwise.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const moduleArg = process.argv.indexOf("--module");
 const target = moduleArg >= 0 ? process.argv[moduleArg + 1] : "HelpersExtra";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // The same samples the engine matrix uses, which are the companion product's samples.
 const LANGUAGES = [

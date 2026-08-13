@@ -21,19 +21,14 @@
  *
  *   node tools\harness\search-features.mjs
  */
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, reporter, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `Seek${process.pid}`;
 const TOKEN = `Zzq${process.pid}Marker`;
 
-let passed = 0;
-const failures = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
 
 // Three occurrences, so a replace count has something to be wrong about.
 const SOURCE = [
@@ -153,8 +148,5 @@ try {
     await api.component("remove", { name, project: project.projectId }).catch(() => {});
   }
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const one of failures) { console.log(`  ${one}`); }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

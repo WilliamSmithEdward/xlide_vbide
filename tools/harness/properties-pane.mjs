@@ -15,18 +15,13 @@
  *
  *   node tools\harness\properties-pane.mjs
  */
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, reporter, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `Props${process.pid}`;
 
-let passed = 0;
-const failures = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
 
 const panel = async () => (await api.ui()).properties;
 
@@ -124,8 +119,5 @@ try {
     await api.component("remove", { name, project: project.projectId }).catch(() => {});
   }
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const one of failures) { console.log(`  ${one}`); }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

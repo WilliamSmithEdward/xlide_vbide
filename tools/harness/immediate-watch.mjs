@@ -24,10 +24,9 @@
  *   node tools\harness\immediate-watch.mjs
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /*
  * THE WORKBOOK THAT COMPILES, located rather than assumed.
  *

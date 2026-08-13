@@ -14,17 +14,12 @@
  * Runs against the DebugFixture session the live probes share, after objbrowser-live-probe
  * (which leaves a palette existing, hidden) and before Test-ResizeFollow.
  */
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, reporter, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 
-let passed = 0;
-const broken = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { broken.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
 
 const state = () => api.state();
 
@@ -112,6 +107,4 @@ try {
     console.log(`     WARNING: ${scratch} could not be removed (${error.message})`));
 }
 
-console.log(`\n${passed} passed, ${broken.length} failed`);
-for (const one of broken) { console.log(`  ! ${one}`); }
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());

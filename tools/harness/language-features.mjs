@@ -19,10 +19,9 @@
  * Asked through the provider monaco calls, so the answer is the menu the developer would see.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // THE WORKBOOK HOLDING `Uses`, not whichever one happens to be active.
 //

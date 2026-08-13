@@ -18,10 +18,9 @@
  * reads.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const project = await api.project();
 
 async function until(what, predicate, budgetMs = 30000) {
