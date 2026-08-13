@@ -1,5 +1,9 @@
 # xlide
 
+[![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/xlide_vbide)](https://github.com/WilliamSmithEdward/xlide_vbide/releases/latest)
+[![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ROneCOne)](LICENSE)
+[![Microsoft 365 Excel on Windows x64](https://img.shields.io/badge/Excel-Microsoft_365_Windows_x64-217346)](README.md)
+
 The Visual Basic Editor has looked the same since 1998. One module on screen at a time, a find
 dialog that covers the code you are searching, no completion worth the name, and no idea that
 anything is wrong until you press F5 and it stops. xlide replaces that surface with Monaco, the
