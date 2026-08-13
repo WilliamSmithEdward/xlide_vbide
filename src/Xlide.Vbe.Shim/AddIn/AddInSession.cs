@@ -1606,12 +1606,9 @@ internal sealed partial class AddInSession : IDisposable
 
                 // This callback arrives on the engine's reader thread, and the browser refuses
                 // any other thread than its own. Without the hop, every mid-typing refresh dies
-                // with UI_E_WRONG_THREAD and the panel goes stale until a module switch. The
-                // form-control filter rides inside the hop for the same reason in the other
-                // direction: it reads designers, and COM belongs to the host thread.
+                // with UI_E_WRONG_THREAD and the panel goes stale until a module switch.
                 _editorSurface?.RunOnHostThread(() =>
                 {
-                    _findings = WithoutFormControlGhosts(_findings);
                     PublishMarkersToSurface();
                     PublishFindingsToSurface();
                 });
@@ -4242,95 +4239,18 @@ internal sealed partial class AddInSession : IDisposable
         Log.Info("external: opened a sponsorship address");
     }
 
-    /// <summary>
-    /// Gives the page a module's text without activating it.
-    ///
-    /// The page holds a module's text once it has been ACTIVATED, so a workspace opened onto eight
-    /// modules holds one - and anything that draws a module it is not showing (peeking a
-    /// definition, previewing a reference) had nothing to draw. Answered without touching which
-    /// pane is active, because being taken to what you asked to look at is the whole complaint.
-    /// </summary>
+    /*
+     * The undeclared-variable filter that stood here (2026-08-13, one day) is gone on purpose:
+     * the analyzer's worker carries host-supplied designer members now (xlide_vscode#18), so a
+     * control resolves where the finding is MADE rather than being swallowed after. Worth
+     * remembering why the filter could not stay: it also swallowed a genuinely undeclared name
+     * that happened to match a control, which the analyzer now reports truthfully.
+     */
+
     /// <summary>
     /// The markup tab's text: the form walked into the markup layer's language, or the reason
     /// it could not be. Same conversion rule as PublishDocument below, same thread rule.
     /// </summary>
-    /// <summary>
-    /// Drops the one class of finding the analyzer cannot help getting wrong on a form: an
-    /// undeclared-variable naming a CONTROL. The controls are members of the form's class,
-    /// declared by the designer where no analyzer can see - and this side can see the designer.
-    /// The first real code-behind opened in the editor wore five of these (2026-08-13).
-    ///
-    /// xlide_vscode#17 landed the real mechanism (v3.6.0): implicitMembers on the analysis
-    /// options, which COMPLETION now receives through the seed. Diagnostics cannot yet: they
-    /// ride the analyzer's worker protocol, whose seed and analyze messages carry no members
-    /// field - so this filter holds that one line until the protocol grows one, and retires
-    /// then. HOST THREAD ONLY - it walks designers - and it walks one only for a form module
-    /// that actually carries undeclared findings, so the common pass pays nothing.
-    /// </summary>
-    private IReadOnlyList<Finding> WithoutFormControlGhosts(IReadOnlyList<Finding> findings)
-    {
-        List<Finding>? kept = null;
-        Dictionary<string, HashSet<string>?>? controlsByModule = null;
-
-        for (var index = 0; index < findings.Count; index++)
-        {
-            var finding = findings[index];
-            var ghost = false;
-
-            if (string.Equals(finding.Code, "undeclared-variable", StringComparison.OrdinalIgnoreCase)
-                && QuotedName(finding.Message) is { } name)
-            {
-                controlsByModule ??= new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
-                var key = $"{finding.Project}|{finding.Module}";
-                if (!controlsByModule.TryGetValue(key, out var controls))
-                {
-                    controls = FormControlNames(finding.Module, finding.Project);
-                    controlsByModule[key] = controls;
-                }
-
-                ghost = controls?.Contains(name) == true;
-            }
-
-            if (ghost)
-            {
-                kept ??= [.. findings.Take(index)];
-            }
-            else
-            {
-                kept?.Add(finding);
-            }
-        }
-
-        return kept ?? findings;
-    }
-
-    private HashSet<string>? FormControlNames(string module, string? projectId)
-    {
-        try
-        {
-            using var component = FindComponent(module, projectId, out _);
-            return component is null ? null : FormDesignService.ControlNames(component);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>The name inside the message's first quoted pair, which is how the analyzer
-    /// spells the identifier it is complaining about.</summary>
-    private static string? QuotedName(string message)
-    {
-        var first = message.IndexOf('\'');
-        if (first < 0)
-        {
-            return null;
-        }
-
-        var second = message.IndexOf('\'', first + 1);
-        return second > first + 1 ? message[(first + 1)..second] : null;
-    }
-
     private void PublishFormMarkup(string moduleName, string? projectDisplay)
     {
         if (_editorSurface is not { } surface)
@@ -4363,6 +4283,14 @@ internal sealed partial class AddInSession : IDisposable
         });
     }
 
+    /// <summary>
+    /// Gives the page a module's text without activating it.
+    ///
+    /// The page holds a module's text once it has been ACTIVATED, so a workspace opened onto eight
+    /// modules holds one - and anything that draws a module it is not showing (peeking a
+    /// definition, previewing a reference) had nothing to draw. Answered without touching which
+    /// pane is active, because being taken to what you asked to look at is the whole complaint.
+    /// </summary>
     private void PublishDocument(string moduleName, string? projectDisplay)
     {
         if (_editorSurface is not { } surface)
@@ -5541,8 +5469,7 @@ internal sealed partial class AddInSession : IDisposable
                         return;
                     }
 
-                    _findings = WithoutFormControlGhosts(
-                        [.. _findings.Where(finding => !SameHome(finding)), .. findings]);
+                    _findings = [.. _findings.Where(finding => !SameHome(finding)), .. findings];
                     PublishMarkersToSurface();
                     PublishFindingsToSurface();
                 });

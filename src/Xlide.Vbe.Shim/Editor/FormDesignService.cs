@@ -48,32 +48,8 @@ internal static class FormDesignService
             [],
             controls);
 
+        KeepDesignerDown(component);
         return FormMarkup.Print(spec);
-    }
-
-    /// <summary>
-    /// Every control name on a form, pages included - the set the diagnostics filter holds
-    /// undeclared-variable findings against, because the controls are members of the form's
-    /// class declared where no analyzer can see (xlide_vscode#17). Null when the component is
-    /// not a form or will not open its designer.
-    /// </summary>
-    public static HashSet<string>? ControlNames(DispatchObject component)
-    {
-        if (component.GetInt32("Type") != 3)
-        {
-            return null;
-        }
-
-        using var designer = component.GetObject("Designer");
-        if (designer is null)
-        {
-            return null;
-        }
-
-        var rows = new List<ControlSpec>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, rows, seen, 0);
-        return seen;
     }
 
     /// <summary>
@@ -103,9 +79,33 @@ internal static class FormDesignService
             return null;
         }
 
+        KeepDesignerDown(component);
         return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
             row.Name,
             IsToolboxType(row.Type) ? $"MSForms.{row.Type}" : row.Type))];
+    }
+
+    /// <summary>
+    /// Touching a Designer materialises its window, and a workbook saved while one existed
+    /// RESTORES it on open - which is how the native Toolbox appeared floating over the
+    /// surface the first time a saved form's project was walked (2026-08-13). The designer
+    /// surface is the canvas milestone's; until it lands, a designer window this side wakes
+    /// goes back down, and the Toolbox follows it.
+    /// </summary>
+    private static void KeepDesignerDown(DispatchObject component)
+    {
+        try
+        {
+            using var window = component.CallObject("DesignerWindow");
+            if (window is not null && window.GetBool("Visible"))
+            {
+                window.SetBool("Visible", false);
+            }
+        }
+        catch
+        {
+            // A designer without a window has nothing to put down.
+        }
     }
 
     private static bool IsToolboxType(string type) => type is "Label" or "TextBox" or "ComboBox"

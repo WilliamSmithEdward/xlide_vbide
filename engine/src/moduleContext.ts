@@ -204,7 +204,18 @@ function buildContext(
 
 /** Maps a document module to the host type that `Me` denotes inside it. */
 function meTypeFor(entry: ModuleEntry | undefined): string | undefined {
-    if (!entry || entry.type !== 'document') {
+    if (!entry) {
+        return undefined;
+    }
+
+    // A form's Me is the form: MSForms.UserForm plus the controls and the module's own code,
+    // which the analyzer composes once BOTH me fields are set (the vbide issue #2 wiring
+    // note). The controls alone are not enough.
+    if (entry.type === 'userform') {
+        return 'MSForms.UserForm';
+    }
+
+    if (entry.type !== 'document') {
         return undefined;
     }
     switch (documentTypeFor(entry)) {

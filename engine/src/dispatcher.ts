@@ -165,6 +165,15 @@ function crossModuleFingerprint(
 /** The analyse request, narrowed: the only worker request this engine keeps hold of. */
 type AnalyzeRequest = Extract<AnalysisWorkerRequest, { kind: 'analyze' }>;
 
+/** The seeded module's designer members, for the analyze requests built here. */
+function seededMembersOf(
+    seeded: readonly ModulePayload[] | undefined,
+    moduleName: string,
+): { name: string; type: string }[] | undefined {
+    return seeded?.find(
+        (module) => module.moduleName.toLowerCase() === moduleName.toLowerCase())?.implicitMembers;
+}
+
 /** Thrown to answer a request with a JSON-RPC error rather than a result. */
 export class RpcError extends Error {
     constructor(
@@ -395,6 +404,10 @@ export class Dispatcher {
                 source: module.source,
                 type: module.type,
                 documentType: module.documentType,
+                // A form's controls, host-read: the worker resolves them (request -> seed ->
+                // header parse) and the header parse is dead for Excel forms, so the seed is
+                // what keeps every form analysable without a per-request supply.
+                implicitMembers: module.implicitMembers,
             })),
         });
 
@@ -742,6 +755,7 @@ export class Dispatcher {
             moduleType: params.moduleType ?? memo?.request.moduleType,
             moduleKind: moduleKindFromType(params.moduleType ?? memo?.request.moduleType),
             documentType: params.documentType ?? memo?.request.documentType,
+            implicitMembers: seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
             // Inherited rather than sent: a fix must be offered under the same rules that drew
             // the squiggle, and the last analysis of this module is what drew it.
             severityOverrides: memo?.request.severityOverrides,
@@ -989,6 +1003,12 @@ export class Dispatcher {
             // reported as an error. The extension's own client always sends both.
             moduleKind: moduleKindFromType(params.moduleType),
             documentType: params.documentType,
+            // The request's own members win at the worker (live designer truth when the host
+            // sends them); the seeded copy answers otherwise, so a form is analysable without
+            // a per-request supply. The .frm header fallback below both is dead for Excel
+            // forms, which is why one of these two must carry it.
+            implicitMembers: params.implicitMembers
+                ?? seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
             severityOverrides: params.severityOverrides,
             activeIncompleteExpressionOffset: params.activeIncompleteExpressionOffset,
         };

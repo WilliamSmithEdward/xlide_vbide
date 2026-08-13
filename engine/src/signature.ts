@@ -18,6 +18,8 @@ export function signatureHelpFor(
         codeNames: ctx.codeNames,
         meType: ctx.meType,
         meProjectType: ctx.meProjectType,
+        // A control member's call tip carries the MSForms signature (xlide_vscode#19).
+        implicitMembers: ctx.implicitMembers,
         projectClassMembers: ctx.projectClassMembers,
         moduleName: ctx.current.name,
         projectProcedures: ctx.projectProcedures,

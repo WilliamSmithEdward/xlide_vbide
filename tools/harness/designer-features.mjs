@@ -170,9 +170,22 @@ try {
     ((await api.problems(form)).findings ?? [])
       .every((finding) => finding.code !== "undeclared-variable"), { budgetMs: 20000 });
   const codeBehind = (await api.problems(form)).findings ?? [];
-  check("no control reference reads as undeclared",
+  check("no control reference reads as undeclared - the analyzer's own resolution, no filter",
     codeBehind.every((finding) => finding.code !== "undeclared-variable"),
     JSON.stringify(codeBehind.map((finding) => finding.code)));
+
+  const controlHover = await api.act("hover", { word: "RegionPick" });
+  check("a control answers hover", controlHover.did === true, controlHover.detail);
+  const memberHover = await api.act("hover", { word: "AddItem" });
+  check("and so does its member", memberHover.did === true, memberHover.detail);
+
+  // FORM_CODE line 14 is `    Me.Hide`; column 8 sits after the dot. Me composes the
+  // controls, the form surface (Show rides the analyzer's own VBA-wrapper table, not
+  // MSForms), and the module's code - the three sources xlide_vscode#18's canary names.
+  const meItems = ((await api.act("completions", { line: 14, column: 8 })).data ?? [])
+    .map((item) => item.label ?? item.insertText);
+  check("Me. offers the controls and the form surface",
+    meItems.includes("RegionPick") && meItems.includes("Show"), `${meItems.length} member(s)`);
 
   // ---- the form as text ----
 

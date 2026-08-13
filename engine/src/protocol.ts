@@ -83,6 +83,12 @@ export interface DiagnosticsParams {
     moduleName: string;
     moduleType?: string;
     documentType?: string;
+    /**
+     * Optional live designer members for THIS analysis, overriding the seeded copy at the
+     * worker - for a host that wants findings against the designer as it stands right now
+     * rather than as it stood at the last reseed. Omitted, the seeded members answer.
+     */
+    implicitMembers?: { name: string; type: string }[];
     /** Per-rule severity overrides keyed by diagnostic code. */
     severityOverrides?: Record<string, string>;
     /**

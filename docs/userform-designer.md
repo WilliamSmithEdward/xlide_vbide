@@ -228,6 +228,24 @@ the host-owns-membership invariant survives.
     scaled-long representation was handled.
   - Capture of a designer window is NOT done: the window is born hidden and spike 6 owns
     making one visible at all.
+
+  **The language features closed the loop 2026-08-13, same day, across three upstream
+  rounds** (xlide_vscode v3.6.0 and the two follow-ups, all wired here the hour they landed):
+  a form's controls ride every seed as implicit members - name plus `MSForms.<kind>` - so
+  completion answers a control's own type (57 ComboBox members on `RegionPick.`, per-control
+  not shared), diagnostics resolve the controls where the finding is made (the one-day
+  shim-side filter retired with a note about what it over-swallowed), hover answers the
+  control and its members with the MSForms signature, the call tip carries parameters, and
+  `Me.` composes controls plus code plus the form surface. Semantic call-colouring remains
+  open upstream (#19's comment carries the paint table). Two more paid-for facts:
+
+  - A form NAME burns for the whole session once used - added, removed, or refused - and a
+    workbook that loads holding a name burns it the moment that form is removed. Fixture
+    machinery uses fresh names per attempt and never removes a form it did not create.
+  - Touching `VBComponent.Designer` MATERIALISES the designer window, a save while one
+    exists makes the workbook RESTORE it on open, and the native Toolbox floats up beside
+    any live designer. The walks put the window back down (`KeepDesignerDown`), which is
+    also what keeps the Toolbox away until the canvas milestone wants it.
 - **M2 - the form as text.** The markup language (model, parser, printer in Core, unit-tested
   without Excel), the generate and apply routes over the M1 primitives, and then the
   developer-facing half: the tree's form row expanding to code-behind and markup, the markup

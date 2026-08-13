@@ -20,6 +20,9 @@ export function hoverFor(
         meProjectType: ctx.meProjectType,
         moduleName: ctx.current.name,
         moduleKind: ctx.moduleKind,
+        // A form's controls, so hovering RegionPick answers its control-hood and type, and
+        // hovering a member answers the MSForms signature (xlide_vscode#19).
+        implicitMembers: ctx.implicitMembers,
         projectClassMembers: ctx.projectClassMembers,
         projectTypes: ctx.projectTypes,
         projectProcedures: ctx.projectProcedures,
