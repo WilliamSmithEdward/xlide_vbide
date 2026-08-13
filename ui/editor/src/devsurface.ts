@@ -696,6 +696,15 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * A tab click goes through `selectTab`, which shows it page-locally AND asks the host to
      * activate the native pane behind it. That is the state a developer's click leaves, so it is
      * the state this must leave too.
+     *
+     * The name is resolved against the open tabs the way every other act resolves one:
+     * case-insensitively, project optional. `pickTab` takes an exact identity - as it should,
+     * a tab IS its identity - but until 2026-08-13 this act passed the caller's bare name
+     * straight through, so `activate` with no project missed every tab whose project was set
+     * and answered did:false about a tab that was on screen. A tab click needs no project, so
+     * the act must not either. A name two workbooks both hold falls to the shown project's
+     * tab; with no tab there it is refused by name rather than resolved to whichever workbook
+     * answers first, which is the same refusal the routes give an unmatched workbook.
      */
     activate: (args) => {
       const module = String(args.module ?? "");
@@ -706,7 +715,34 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: "no module given" };
       }
 
-      workspace.pickTab({ module, project });
+      const wantedModule = module.toLowerCase();
+      const wantedProject = project === null ? null : project.toLowerCase();
+      const open = workspace.snapshot().groups.flatMap((group) => group.tabs);
+      const matches = open.filter((tab) => tab.module.toLowerCase() === wantedModule
+        && (wantedProject === null || (tab.project ?? "").toLowerCase() === wantedProject));
+
+      if (matches.length === 0) {
+        const strip = open.map((tab) => tab.label).join(", ");
+        return {
+          did: false,
+          detail: `no open tab answers to ${module}${project === null ? "" : ` in ${project}`}; open: ${strip.length > 0 ? strip : "nothing"}`,
+        };
+      }
+
+      let picked = matches[0]!;
+      if (matches.length > 1) {
+        const shownProject = (workspace.activeDocument()?.project ?? "").toLowerCase();
+        const inShown = matches.find((tab) => (tab.project ?? "").toLowerCase() === shownProject);
+        if (!inShown) {
+          return {
+            did: false,
+            detail: `${matches.length} workbooks hold an open ${module} and none is the shown project's; pass project`,
+          };
+        }
+        picked = inShown;
+      }
+
+      workspace.pickTab({ module: picked.module, project: picked.project });
 
       /*
        * AWAITED, because the outcome is not synchronous the first time.
@@ -718,21 +754,28 @@ export function installDevSurface(parts: DevSurfaceParts): void {
        * already held it (2026-08-07).
        *
        * The same shape `closeActive` and `format` use: report what actually happened, having
-       * waited for it to happen.
+       * waited for it to happen. The whole identity is compared, not the name: with the same
+       * name open from two workbooks, a name-only check would call the wrong workbook's tab
+       * success.
        */
-      const showing = () => workspace.activeEditor().getModel()?.uri.path.split("/").pop() ?? null;
-      const wanted = module.toLowerCase();
+      const landed = () => {
+        const active = workspace.activeDocument();
+        return active !== null
+          && active.module.toLowerCase() === picked.module.toLowerCase()
+          && (active.project ?? "").toLowerCase() === (picked.project ?? "").toLowerCase();
+      };
 
       return (async () => {
         const deadline = Date.now() + 4000;
         while (Date.now() < deadline) {
-          if ((showing() ?? "").toLowerCase() === wanted) {
-            return { did: true, detail: `showing ${module}` };
+          if (landed()) {
+            return { did: true, detail: `showing ${picked.module}` };
           }
           await new Promise((resolve) => setTimeout(resolve, 60));
         }
 
-        return { did: false, detail: `asked for ${module}; the page is showing ${showing() ?? "nothing"}` };
+        const active = workspace.activeDocument();
+        return { did: false, detail: `asked for ${module}; the page is showing ${active?.module ?? "nothing"}` };
       })();
     },
 

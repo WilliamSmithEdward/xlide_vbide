@@ -171,11 +171,11 @@ async function sizeFrame(api) {
  * Puts a module on screen with the caret at a named piece of its code, and does not return
  * until the page AND the host agree that is where things stand.
  *
- * Two lessons are folded in. `act("activate")` needs the full tab identity - a bare module
- * name misses and answers did:false - so the project rides along everywhere here. And a busy
- * session has host echoes in flight (a pane open, a tree selection) that can land AFTER a
- * navigation and yank the active editor back, so the outcome is verified and retried rather
- * than trusted.
+ * Two habits are folded in. The project rides along on every call - not because activate
+ * needs it any more (it resolves a bare name since 2026-08-13), but because a script that
+ * names its workbook keeps working the day a second one is open. And a busy session has host
+ * echoes in flight (a pane open, a tree selection) that can land AFTER a navigation and yank
+ * the active editor back, so the outcome is verified and retried rather than trusted.
  */
 async function show(api, module, needle) {
   const text = (await api.readModule(module, WORKBOOK)).text;
