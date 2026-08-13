@@ -11,19 +11,12 @@
  * debugger the realistic driver of this direction, and the only one worth testing.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, reporter, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const project = await api.project();
 
-const broken = [];
-let checks = 0;
-const check = (what, ok, detail) => {
-  checks++;
-  console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
-  if (!ok) { broken.push(what); }
-};
+const { check, done } = reporter();
 
 async function until(what, predicate, budgetMs = 25000) {
   const deadline = Date.now() + budgetMs;
@@ -137,7 +130,4 @@ try {
   console.log(`\n  left break mode: ${!(await stopped())}`);
 }
 
-console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
-for (const one of broken) { console.log("  ! " + one); }
-
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());

@@ -19,18 +19,14 @@
  *
  *   node tools\harness\colouring.mjs
  */
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, reporter, scratchModule, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `Colour${process.pid}`;
 
-let passed = 0;
-const failures = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
+const scratch = scratchModule(api, project.projectId, name);
 
 const CALL = "rgb(220, 220, 170)";
 const PLAIN = "rgb(156, 220, 254)";
@@ -193,12 +189,8 @@ try {
   }
 } finally {
   if (made) {
-    await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
-    await api.component("remove", { name, project: project.projectId }).catch(() => {});
+    await scratch.dispose();
   }
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const one of failures) { console.log(`  ${one}`); }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

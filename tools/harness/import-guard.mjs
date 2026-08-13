@@ -23,7 +23,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { open, wait, waitFor } from "./xlide-api.mjs";
+import { open, reporter, scratchModule, wait, waitFor } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
@@ -31,12 +31,8 @@ const name = `Guard${process.pid}`;
 const folder = join(tmpdir(), `xlide-import-guard-${process.pid}`);
 mkdirSync(folder, { recursive: true });
 
-let passed = 0;
-const failures = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
+const scratch = scratchModule(api, project.projectId, name);
 
 const ORIGINAL = ["Option Explicit", "", "Public Sub Go()", "    Debug.Print \"original\"", "End Sub", ""];
 const FROM_FILE = ["Option Explicit", "", "Public Sub Go()", "    Debug.Print \"from the file\"", "End Sub", ""];
@@ -99,14 +95,10 @@ try {
   check("and the module now holds the file's text", imported.includes("from the file"));
 } finally {
   if (made) {
-    await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
-    await api.component("remove", { name, project: project.projectId }).catch(() => {});
+    await scratch.dispose();
   }
 
   rmSync(folder, { recursive: true, force: true });
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const one of failures) { console.log(`  ${one}`); }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

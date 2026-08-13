@@ -29,7 +29,7 @@
  *
  * Then restart Excel. The script says so at the end, and means it.
  */
-import { open } from "./xlide-api.mjs";
+import { open, reporter } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
@@ -59,12 +59,7 @@ async function settle(budgetMs = 180_000) {
   return last;
 }
 
-const passed = [];
-const failed = [];
-const check = (what, ok, detail) => {
-  (ok ? passed : failed).push(what);
-  console.log(`${ok ? "ok  " : "FAIL"} ${what}${ok || !detail ? "" : `\n     ${detail}`}`);
-};
+const { check, done } = reporter();
 
 /** The shape the perf fixture uses, which the editor takes to 65,000 lines without complaint. */
 const working = (procedures) => {
@@ -131,8 +126,7 @@ try {
     await api.component("remove", { name, project: project.projectId }).catch(() => {});
   }
 
-  console.log(`\n${passed.length} passed, ${failed.length} failed`);
+  process.exitCode = done();
   console.log("\nRESTART EXCEL NOW. The editor has been pushed past its identifier budget and will");
   console.log("refuse to add a component until it is restarted. That is what provoking this costs.");
-  process.exitCode = failed.length === 0 ? 0 : 1;
 }

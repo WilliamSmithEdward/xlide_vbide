@@ -110,6 +110,55 @@ function describeDeath(rows) {
 export const wait = (ms) => new Promise((settle) => setTimeout(settle, ms));
 
 /**
+ * The reporter every live suite prints through. check(what, ok, detail) logs one line and
+ * counts it; done() prints the verdict, lists the failures, and answers the exit code.
+ *
+ * The verdict line is the ONE spelling the gate parses - "N passed, M failed". Four suites
+ * once said "checks, broken" instead, and the gate read the first of them as reporting no
+ * verdict at all, so the live half died there on every run since they were wired in
+ * (2026-08-12). Nine suites then carried their own copy of this reporter, which is nine
+ * places for that lesson to un-learn itself; it lives here now (the audit's B24).
+ */
+export function reporter() {
+  let passed = 0;
+  const failures = [];
+
+  const check = (what, ok, detail) => {
+    console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
+    if (ok) {
+      passed += 1;
+    } else {
+      failures.push(`${what}${detail ? ` (${detail})` : ""}`);
+    }
+  };
+
+  const done = () => {
+    console.log(`\n${passed} passed, ${failures.length} failed`);
+    for (const one of failures) {
+      console.log(`  ${one}`);
+    }
+    return failures.length === 0 ? 0 : 1;
+  };
+
+  return { check, done };
+}
+
+/**
+ * A module created for one suite's run, taken away however the run ends: its pane closed with
+ * the edits discarded, then the component removed, both tolerantly - a teardown must not turn
+ * a finding into a crash, and half of it must run even when the other half cannot. Three
+ * suites carried this pair inline in their finally blocks.
+ */
+export function scratchModule(api, projectId, name) {
+  return {
+    async dispose() {
+      await api.pane("close", { module: name, project: projectId, answer: "discard" }).catch(() => {});
+      await api.component("remove", { name, project: projectId }).catch(() => {});
+    },
+  };
+}
+
+/**
  * POLL FOR THE THING, DO NOT SLEEP A GUESS.
  *
  * Seven suites had grown their own copy of this, identical apart from a default budget, and

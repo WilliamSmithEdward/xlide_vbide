@@ -19,18 +19,11 @@
  * Every case puts the workbook back with undoRename, and checks that it went back.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, reporter, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const broken = [];
-let checks = 0;
-const check = (what, ok, detail) => {
-  checks++;
-  console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
-  if (!ok) { broken.push(what); }
-};
+const { check, done } = reporter();
 
 async function until(what, predicate, budgetMs = 15000) {
   const deadline = Date.now() + budgetMs;
@@ -77,10 +70,9 @@ const textOf = async (module) => (await api.readModule(module, project.projectId
  * that the page is consistent; what a Run acts on is the pane underneath.
  */
 async function parity(after) {
-  checks++;
   const sync = await api.inSync();
-  console.log(`  ${sync.agreed ? "ok  " : "FAIL"} native parity ${after.padEnd(28)} native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
-  if (!sync.agreed) { broken.push(`native parity ${after}`); }
+  check(`native parity ${after.padEnd(28)}`, sync.agreed,
+    `native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
 }
 
 async function showing(module) {
@@ -204,7 +196,4 @@ await until("the dialog to be gone again", async () =>
   !(await api.ui()).dialogs.some((d) => /references/i.test(d.id))).catch(() => {});
 await parity("after the references dialog");
 
-console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
-for (const one of broken) { console.log("  ! " + one); }
-
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());

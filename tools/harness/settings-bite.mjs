@@ -15,18 +15,14 @@
  *
  *   node tools\harness\settings-bite.mjs
  */
-import { open, waitFor, waitUntilStable } from "./xlide-api.mjs";
+import { open, reporter, scratchModule, waitFor, waitUntilStable } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `Bite${process.pid}`;
 
-let passed = 0;
-const failures = [];
-const check = (what, ok, detail) => {
-  if (ok) { passed += 1; console.log(`ok   ${what}`); }
-  else { failures.push(what); console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`); }
-};
+const { check, done } = reporter();
+const scratch = scratchModule(api, project.projectId, name);
 
 const live = async () =>
   ((await api.readModule(name, project.projectId, { live: true })).text ?? "")
@@ -170,12 +166,8 @@ try {
 } finally {
   await api.settings(restore).catch(() => {});
   if (made) {
-    await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
-    await api.component("remove", { name, project: project.projectId }).catch(() => {});
+    await scratch.dispose();
   }
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const one of failures) { console.log(`  ${one}`); }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

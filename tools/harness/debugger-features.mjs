@@ -14,19 +14,12 @@
  * blocks everything a later test does and the next reader has no idea why.
  */
 
-import { open } from "./xlide-api.mjs";
+import { open, reporter, wait } from "./xlide-api.mjs";
 
 const api = await open({});
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const project = await api.project();
 
-const broken = [];
-let checks = 0;
-const check = (what, ok, detail) => {
-  checks++;
-  console.log(`  ${ok ? "ok  " : "FAIL"} ${what}${detail ? "  -- " + detail : ""}`);
-  if (!ok) { broken.push(what); }
-};
+const { check, done } = reporter();
 
 async function until(what, predicate, budgetMs = 20000) {
   const deadline = Date.now() + budgetMs;
@@ -40,10 +33,9 @@ async function until(what, predicate, budgetMs = 20000) {
 
 /** Native, surface and page naming the same module: the definition of tested here. */
 async function parity(after) {
-  checks++;
   const sync = await api.inSync();
-  console.log(`  ${sync.agreed ? "ok  " : "FAIL"} native parity ${after.padEnd(26)} native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
-  if (!sync.agreed) { broken.push(`native parity ${after}`); }
+  check(`native parity ${after.padEnd(26)}`, sync.agreed,
+    `native=${sync.nativeModule} surface=${sync.surfaceModule} page=${sync.pageModule}`);
   return sync;
 }
 
@@ -189,7 +181,4 @@ try {
   console.log(`\n  left break mode: ${!(await stopped())}`);
 }
 
-console.log(`\n${checks - broken.length} passed, ${broken.length} failed`);
-for (const one of broken) { console.log("  ! " + one); }
-
-process.exit(broken.length === 0 ? 0 : 1);
+process.exit(done());
