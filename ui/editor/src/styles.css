@@ -254,9 +254,12 @@ body {
   overflow: hidden;
 }
 
-/* A dragged pane's title fades; the zone preview does the talking. */
+/* A dragged pane's title fades and wears the same outline the editor's dragged tab does -
+   the fade says "in flight", the outline says WHICH; the zone preview does the rest. */
 .panel-tab.dragging {
   opacity: 0.45;
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
 }
 
 /* A pane title, in whichever section it has been dragged to. */
@@ -1655,7 +1658,14 @@ body.live-resize .minimap {
 }
 
 .tab.dragging {
+  /* The fade says "in flight"; the outline says WHICH. Faded alone, the dragged tab was the
+     least visible thing on the strip the moment the pointer left it behind, and with several
+     tabs of similar names nothing said which one was moving (the developer, 2026-08-12).
+     Inset, because the strip clips at its edges and an outline on the boundary would lose
+     its top and bottom lines. */
   opacity: 0.55;
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
 }
 
 /* The settings dialog: a small modal card, one row per choice, saved as choices change. */

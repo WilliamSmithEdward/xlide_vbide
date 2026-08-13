@@ -74,18 +74,24 @@ await runPageProbe({
       const bar = document.querySelector(".tab-drop-indicator");
       const strips = [...document.querySelectorAll(".group-tabs")];
       const compass = document.querySelector(".drop-compass");
+      const dragged = document.querySelector(".tab.dragging");
+      const worn = dragged ? getComputedStyle(dragged) : null;
       return {
         barShowing: !!bar && bar.isConnected,
         barInTargetStrip: !!bar && bar.parentElement === strips[1],
         barIsLast: !!bar && bar.parentElement !== null && bar.parentElement.lastElementChild === bar,
         compassShowing: !!compass && !compass.hidden,
+        draggedOutline: worn ? worn.outlineStyle + " " + worn.outlineWidth : null,
       };
     })()`);
 
     verdict.checks.push(
       { name: "mid-drag, the insertion bar shows on the target strip", ok: midFlight.barShowing && midFlight.barInTargetStrip, detail: JSON.stringify(midFlight) },
       { name: "at the index the drop would use", ok: midFlight.barIsLast, detail: null },
-      { name: "and no compass stands - the strip is its own target", ok: !midFlight.compassShowing, detail: null });
+      { name: "and no compass stands - the strip is its own target", ok: !midFlight.compassShowing, detail: null },
+      // Computed, not class presence: the class was always there while the outline was not,
+      // and a check that stops at the class passes without a single painted pixel.
+      { name: "the dragged tab wears its outline", ok: midFlight.draggedOutline === "solid 1px", detail: midFlight.draggedOutline });
 
     // The reach band: a hand mid-reorder drifts vertically, and the strip's exact rectangle
     // used to drop the gesture into the compass over a few pixels. Sixteen below and twelve
@@ -359,7 +365,12 @@ await runPageProbe({
 
     const paneMidFlight = await inPage(`(() => {
       const compass = document.querySelector(".drop-compass");
-      return { compassShowing: !!compass && !compass.hidden };
+      const dragged = document.querySelector(".panel-tab.dragging");
+      const worn = dragged ? getComputedStyle(dragged) : null;
+      return {
+        compassShowing: !!compass && !compass.hidden,
+        draggedOutline: worn ? worn.outlineStyle + " " + worn.outlineWidth : null,
+      };
     })()`);
 
     await mouse("mouseReleased", pane.drop.x, pane.drop.y, { clickCount: 1 });
@@ -374,6 +385,7 @@ await runPageProbe({
     const wanted = [pane.order[1], pane.order[0], ...pane.order.slice(2)];
     verdict.checks.push(
       { name: "drifting above the dock strip keeps the pane reorder and holds the compass down", ok: !paneMidFlight.compassShowing, detail: JSON.stringify(paneMidFlight) },
+      { name: "the dragged pane tab wears the same outline", ok: paneMidFlight.draggedOutline === "solid 1px", detail: paneMidFlight.draggedOutline },
       { name: "and releasing there lands the pane tab at the dragged index", ok: JSON.stringify(paneOrder) === JSON.stringify(wanted), detail: JSON.stringify({ was: pane.order, now: paneOrder, wanted }) });
   },
 });
