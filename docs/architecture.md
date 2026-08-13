@@ -172,6 +172,10 @@ appearance detail (fonts, pictures, borders) to render a faithful preview. Where
 readable but not renderable, the canvas shows the control's real bounds and identity rather than
 an approximation that lies.
 
+[userform-designer.md](userform-designer.md) carries this from strategy to ground: what the
+component plumbing already does (measured 2026-08-13), the full spike list with instruments,
+the milestone order, and the page-side architecture question a non-monaco tab raises.
+
 ## 7. Debugging
 
 Breakpoints, stepping, and break state are not exposed as methods on the VBE object model. They

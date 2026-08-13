@@ -37,7 +37,9 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 - **Not signed.** The installer carries no code signature, so Windows warns before running it.
   Signing and update plumbing are the next release-engineering milestone (decision 8).
-- **The debugger and the UserForm designer** are the two large remaining milestones.
+- **The debugger and the UserForm designer** are the two large remaining milestones. The
+  designer's ground truth and its path - what already works, the spikes, the milestones - is
+  [userform-designer.md](userform-designer.md).
 - **Require Variable Declaration** left with the native Options dialog and has no equivalent in
   xlide's settings. A real gap, recorded where the suppression is.
 - **The native pane's rendering is unobserved.** Parity compares text, so a pane that draws wrong
