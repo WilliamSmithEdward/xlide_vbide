@@ -5,6 +5,7 @@
 [![Microsoft 365 Excel on Windows x64](https://img.shields.io/badge/Excel-Microsoft_365_Windows_x64-217346)](README.md)
 
 ![The xlide surface inside the VBE: editing side by side, completion from the analyzer, diagnostics with quick fixes, and break mode with live locals](assets/images/tour.gif)
+***(Yes! This is really the VBA Editor in Excel)***
 
 The Visual Basic Editor has looked the same since 1998. One module on screen at a time, a find
 dialog that covers the code you are searching, no completion worth the name, and no idea that
