@@ -120,6 +120,83 @@ would - same signature, same casing, same placement - and jump the caret there. 
 spike 1 and the code surface that already works, nothing else; it may well ship before any
 canvas does, and it alone converts forms from "edit the code blind" to "authorable".
 
+## The form as text: the markup layer
+
+Decided 2026-08-13, at the owner's direction, and it reshapes the milestone order below: a
+markup language of xlide's own that DESCRIBES a form - generate it from an existing design,
+regenerate a design from it - sitting strictly ABOVE the real form as a higher layer of
+abstraction. Nothing about it may disturb a developer without xlide: the MSForms model keeps
+writing `.frm` and `.frx`, the workbook stores nothing new, and the markup exists only as a
+live projection this product computes and applies.
+
+Why it comes before the canvas: the workspace already IS a text editor. A form projected into
+text is immediately editable with everything monaco has - diff, undo, search, copy a Frame
+between forms - which makes the markup the first working design surface, with zero rendering
+fidelity at stake. The canvas, when it lands, becomes a RENDERER of the same projection rather
+than a rival editing model.
+
+### The shape
+
+```
+' EntryForm, as xlide projects it. Edits here apply back through the designer model.
+Form EntryForm "Quarter Entry" size 360x320
+  Label NameLabel "Customer" at 12,14 size 66x16
+  TextBox NameBox at 84,12 size 120x20
+  Frame Options "Freight" at 12,112 size 92x66
+    OptionButton PickGround "Ground" at 8,14 size 76x16
+    OptionButton PickAir "Air" at 8,34 size 76x16
+  MultiPage Wizard at 12,188 size 192x86
+    Page Page1 "Page1"
+      CheckBox Agree "Agreed" at 8,8 size 100x16
+    Page Page2 "Page2"
+  CommandButton OkButton "Start" at 262,250 size 72x24
+    Font.Size = 12
+    Font.Bold = True
+```
+
+The dialect is VBA's, deliberately: apostrophe comments, `True`/`False`, doubled quotes inside
+strings, `&H8000000F&` where a colour is spelled. A header line is
+`Type Name ["Caption"] [at left,top] [size width x height]` - identity and the universals
+inline, because every visual control has them - and anything else is an indented
+`Path = value` line, one level of dotting reaching a font. Indentation is containment: a
+Frame's children sit under it, a MultiPage's Pages under it, a Page's controls under the Page.
+Geometry is points, as the designer measures.
+
+### The rules that make it honest
+
+- **Projection, not source.** Generated FROM the designer walk, applied TO the model through
+  the M1 primitives. The model writes the binary; byte-compatibility is inherited, not
+  re-earned.
+- **The control list is total; the property list is not.** Every control appears, so a line
+  deleted is a control removed and a line added is a control created - that is what makes the
+  document a design surface rather than a patch. Properties are the opposite: an unspoken
+  property is NEVER touched on apply, so the narrow printed vocabulary cannot erase state it
+  does not represent.
+- **Apply is a diff, keyed by name.** Match by control name: present-only-in-markup adds,
+  present-only-in-model removes, matched controls take their header geometry and property
+  lines through `set`. A changed type or container is a remove-and-add, which is also the
+  truth of what it means. Renaming in markup is therefore remove-plus-add of a fresh control -
+  the refactoring rename stays the designer's own gesture.
+- **Third-party controls stay honest.** They print under their raw type name; applying can
+  move and set them, but creating one needs a `ProgId = "..."` line, because a name the
+  toolbox table does not know cannot be conjured.
+- **Deterministic printing.** Model order, canonical formatting, so a regeneration diffs
+  cleanly against the last one and against source control if the markup is ever exported.
+- **A parse error applies nothing.** The whole document parses first, errors carry line
+  numbers and names, and a failed apply reports exactly which operations landed before the
+  refusal - the M1 primitives' own add-or-nothing guarantees bound the blast radius until the
+  transaction log (the inspector milestone) makes apply atomic.
+
+### Where it lives for the developer
+
+Expanding a form in the tree stops showing an empty row: it shows the CODE-BEHIND and the
+FORM MARKUP as its two faces, each opening as a tab. The markup document is a page-side
+monaco document with its own small language (tokens, folding, later completion for control
+kinds and properties); its text is computed by the shim and refreshed the way module text is,
+with the developer's unapplied edits holding the document the way unwritten code does. The
+membership stays the shim's - a virtual document, since no native pane exists behind it - so
+the host-owns-membership invariant survives.
+
 ## Milestones
 
 - **M1 - observability.** The `designer` read route, the form fixture, the suites, and
@@ -151,14 +228,26 @@ canvas does, and it alone converts forms from "edit the code blind" to "authorab
     scaled-long representation was handled.
   - Capture of a designer window is NOT done: the window is born hidden and spike 6 owns
     making one visible at all.
-- **M2 - the honest canvas.** Read-only design view in the workspace: real bounds, real
-  captions, honest placeholders; selection; double-click writes the event stub. (Spikes 3
-  and 6, and the one-tab decision.)
-- **M3 - the inspector.** Selection flows into the Properties panel; property writes go
+- **M2 - the form as text.** The markup language (model, parser, printer in Core, unit-tested
+  without Excel), the generate and apply routes over the M1 primitives, and then the
+  developer-facing half: the tree's form row expanding to code-behind and markup, the markup
+  tab with its own language, edits applying back. The first working design surface.
+
+  **The language and the routes landed 2026-08-13, the same day as M1.** `FormMarkup` in Core
+  parses and prints the dialect with 20 unit tests behind it; `designer?format=markup`
+  projects the live walk; `applyMarkup` diffs an edited document back - proven live by the
+  suite: idempotent on the form's own text, a line added materialises a placed captioned
+  control, re-applying the original removes it, and a document that does not parse applies
+  nothing with its line named. What remains of M2 is the developer-facing half: the tree's two
+  faces and the markup tab.
+- **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
+  bounds, real captions, honest placeholders; selection; double-click writes the event stub.
+  (Spikes 3 and 6.)
+- **M4 - the inspector.** Selection flows into the Properties panel; property writes go
   through the model; the transaction log starts recording. (Spike 7.)
-- **M4 - direct manipulation.** Move, resize, nudge, add from a toolbox, delete, align and
+- **M5 - direct manipulation.** Move, resize, nudge, add from a toolbox, delete, align and
   distribute, undo over the transaction log. (Spike 2 in full.)
-- **M5 - the finishing set.** Tab order, z-order, zoom, snapping and guides - and the
+- **M6 - the finishing set.** Tab order, z-order, zoom, snapping and guides - and the
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.
 

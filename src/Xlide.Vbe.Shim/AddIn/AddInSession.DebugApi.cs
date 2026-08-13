@@ -2982,11 +2982,21 @@ internal sealed partial class AddInSession
 
                 if (!request.Query.TryGetValue("action", out var designerAction) || designerAction.Length == 0)
                 {
-                    return DesignerRead(designerModule, designerProject);
+                    // format=markup answers the same walk projected through Core's printer:
+                    // the form as text, in the markup layer's dialect.
+                    return request.Query.TryGetValue("format", out var designerFormat)
+                        && string.Equals(designerFormat, "markup", StringComparison.OrdinalIgnoreCase)
+                        ? DesignerMarkup(designerModule, designerProject)
+                        : DesignerRead(designerModule, designerProject);
                 }
 
                 switch (designerAction)
                 {
+                    case "applyMarkup":
+                        return request.Body.Length > 0
+                            ? DesignerApplyMarkup(designerModule, designerProject, request.Body)
+                            : HostError("applyMarkup takes the markup document as the request body");
+
                     case "add":
                     {
                         request.Query.TryGetValue("type", out var addType);

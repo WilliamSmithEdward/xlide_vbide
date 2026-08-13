@@ -237,7 +237,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
-| `designer` | `designer(module, project)` / `designerEdit(action, args)` | a UserForm's design as data - every control with its type, container and geometry - and the three mutations that build one: `add` (by toolbox name or ProgID, into the form or a named Frame/Page), `remove`, `set` (answers what the property reads back; `Font.Size` dotting reaches the font; the form's own Width/Height go through the component's Properties). The M1 instrument of [userform-designer.md](userform-designer.md); `form-plan.mjs` + `designer-features.mjs` build and verify a whole form with it |
+| `designer` | `designer(module, project)` / `designerEdit(action, args)` / `designerMarkup(module, project)` / `applyMarkup(module, text, project)` | a UserForm's design as data - every control with its type, container and geometry - and the three mutations that build one: `add` (by toolbox name or ProgID, into the form or a named Frame/Page), `remove`, `set` (answers what the property reads back; `Font.Size` dotting reaches the font; the form's own Width/Height go through the component's Properties). `designerMarkup` answers the same form as TEXT in the markup layer's language, and `applyMarkup` applies an edited document back as a name-keyed diff. The M1 and M2 instruments of [userform-designer.md](userform-designer.md); `form-plan.mjs` + `designer-features.mjs` build and verify a whole form with them |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok. `closeNative` closes the HOST's pane window through the editor's own pane list - the host-originated direction, no unwritten-edits question, because the native close box asks none |
 | `palette` | `paletteHide()` | puts the Object Browser palette away the way its close box does: hidden, state intact. The summons is `command("objectBrowser")`, which never meant toggle |
 | `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
@@ -1336,10 +1336,17 @@ object model with project trust OFF. Day to day it drives like everything else h
 
 ```bash
 node tools\harness\xlide-api.mjs designer EntryForm
+node tools\harness\xlide-api.mjs designer EntryForm markup
 node tools\harness\xlide-api.mjs designer EntryForm add commandButton OkButton left 126 top 200
 node tools\harness\xlide-api.mjs designer EntryForm set name OkButton property Caption value Start as text
 node tools\harness\xlide-api.mjs designer EntryForm remove name OkButton
 ```
+
+`markup` prints the form in the markup layer's language - the text the markup tab will hold -
+and `applyMarkup(module, text, project)` on the client applies an edited document back as a
+name-keyed diff: add a control by adding a line, remove one by deleting its line, and nothing
+the text does not speak of is touched. A document that does not parse applies nothing, with
+the line named.
 
 `tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
 children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.

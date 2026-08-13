@@ -52,6 +52,17 @@ internal sealed partial class AddInSession
             return HostError($"{module} has no designer to read");
         }
 
+        var (form, rows) = CollectDesigner(component, designer);
+
+        return JsonSerializer.Serialize(
+            new DebugDesignerReply(module, DisplayFromProjectId(foundProject), form, [.. rows]),
+            DebugJsonContext.Default.DebugDesignerReply);
+    }
+
+    /// <summary>One walk, shared by the JSON read, the markup projection, and the apply diff.</summary>
+    private static (DebugDesignerForm Form, List<DebugDesignerControl> Rows) CollectDesigner(
+        DispatchObject component, DispatchObject designer)
+    {
         // Width and Height are not the designer's: they live on the component's own Properties
         // collection, the one the native Properties window edits. InsideWidth and InsideHeight
         // ARE the designer's, and the pair differs by the frame chrome.
@@ -68,11 +79,253 @@ internal sealed partial class AddInSession
         var rows = new List<DebugDesignerControl>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         WalkDesignerControls(designer, rows, seen, 0);
+        return (form, rows);
+    }
+
+    /// <summary>
+    /// The form as markup: the same walk, projected through Core's printer. The print
+    /// vocabulary is deliberately narrow - identity, containment, geometry, caption - per
+    /// docs/userform-designer.md: an unspoken property is one an apply can never erase.
+    /// </summary>
+    private string DesignerMarkup(string module, string? projectDisplay)
+    {
+        var projectId = ResolveNamedProject(projectDisplay, out var complaint);
+        if (complaint is not null)
+        {
+            return HostError(complaint);
+        }
+
+        using var component = FindComponent(module, projectId, out var foundProject);
+        if (component is null || component.GetInt32("Type") != 3)
+        {
+            return HostError($"{module} is not a UserForm of this project");
+        }
+
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return HostError($"{module} has no designer");
+        }
+
+        var (form, rows) = CollectDesigner(component, designer);
+        var markup = Xlide.Vbe.Core.Forms.FormMarkup.Print(MarkupSpecOf(module, form, rows));
 
         return JsonSerializer.Serialize(
-            new DebugDesignerReply(module, DisplayFromProjectId(foundProject), form, [.. rows]),
-            DebugJsonContext.Default.DebugDesignerReply);
+            new DebugDesignerMarkupReply(module, DisplayFromProjectId(foundProject), markup),
+            DebugJsonContext.Default.DebugDesignerMarkupReply);
     }
+
+    private static Xlide.Vbe.Core.Forms.FormSpec MarkupSpecOf(
+        string module, DebugDesignerForm form, List<DebugDesignerControl> rows) => new(
+            module,
+            form.Caption,
+            form.Width,
+            form.Height,
+            [],
+            [.. rows.Select(row => new Xlide.Vbe.Core.Forms.ControlSpec(
+                row.Type, row.Name, row.Caption,
+                row.Left, row.Top, row.Width, row.Height,
+                row.Parent, []))]);
+
+    /// <summary>
+    /// Applies a markup document to the live form as a NAME-KEYED DIFF: controls only in the
+    /// markup are added, controls only in the model are removed, matched controls take their
+    /// header geometry, caption and property lines. A changed type or container is a
+    /// remove-and-add, which is also the truth of what it means. A document that does not
+    /// parse applies NOTHING; a refusal partway reports exactly what landed first.
+    /// </summary>
+    private string DesignerApplyMarkup(string module, string? projectDisplay, string body)
+    {
+        var projectId = ResolveNamedProject(projectDisplay, out var complaint);
+        if (complaint is not null)
+        {
+            return HostError(complaint);
+        }
+
+        using var component = FindComponent(module, projectId, out _);
+        if (component is null || component.GetInt32("Type") != 3)
+        {
+            return HostError($"{module} is not a UserForm of this project");
+        }
+
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return HostError($"{module} has no designer");
+        }
+
+        Xlide.Vbe.Core.Forms.FormSpec wanted;
+        try
+        {
+            wanted = Xlide.Vbe.Core.Forms.FormMarkup.Parse(body);
+        }
+        catch (Xlide.Vbe.Core.Forms.FormMarkupException refused)
+        {
+            return HostError($"the markup did not parse, so nothing was applied: {refused.Message}");
+        }
+
+        var (_, current) = CollectDesigner(component, designer);
+        var currentByName = current.ToDictionary(row => row.Name, StringComparer.OrdinalIgnoreCase);
+        var wantedByName = wanted.Controls.ToDictionary(spec => spec.Name, StringComparer.OrdinalIgnoreCase);
+
+        var added = new List<string>();
+        var removed = new List<string>();
+        var setCount = 0;
+        var notes = new List<string>();
+
+        try
+        {
+            // The form's own header and properties first: caption, size, property lines.
+            if (wanted.Caption is { } formCaption)
+            {
+                SetCore(component, designer, null, "Caption", formCaption, "text");
+                setCount++;
+            }
+
+            if (wanted.Width is { } formWidth)
+            {
+                SetCore(component, designer, null, "Width", FormatNumber(formWidth), "number");
+                setCount++;
+            }
+
+            if (wanted.Height is { } formHeight)
+            {
+                SetCore(component, designer, null, "Height", FormatNumber(formHeight), "number");
+                setCount++;
+            }
+
+            foreach (var property in wanted.Properties)
+            {
+                SetCore(component, designer, null, property.Path, property.Value, KindWord(property.Kind));
+                setCount++;
+            }
+
+            // Removals before additions, so a name moving container or kind frees itself first.
+            // Pages are the MultiPage's own; the diff neither creates nor removes one (a page
+            // set that disagrees is reported rather than half-applied).
+            foreach (var row in current)
+            {
+                var isPage = string.Equals(row.Type, "Page", StringComparison.OrdinalIgnoreCase);
+                var match = wantedByName.TryGetValue(row.Name, out var spec) ? spec : null;
+                var stays = match is not null
+                    && string.Equals(match.Type, row.Type, StringComparison.OrdinalIgnoreCase)
+                    && SameParent(match, row, module);
+
+                if (isPage)
+                {
+                    if (match is null)
+                    {
+                        notes.Add($"{row.Name}: pages belong to their MultiPage; the diff does not remove one");
+                    }
+
+                    continue;
+                }
+
+                if (!stays)
+                {
+                    if (RemoveControlCore(designer, row.Name))
+                    {
+                        removed.Add(row.Name);
+                    }
+                }
+            }
+
+            // Additions and updates, in document order so containers exist before their children.
+            foreach (var spec in wanted.Controls)
+            {
+                var isPage = string.Equals(spec.Type, "Page", StringComparison.OrdinalIgnoreCase);
+                var match = currentByName.TryGetValue(spec.Name, out var row) ? row : null;
+                var survived = match is not null
+                    && string.Equals(match.Type, spec.Type, StringComparison.OrdinalIgnoreCase)
+                    && SameParent(spec, match, module)
+                    && !removed.Contains(match.Name);
+
+                if (isPage && match is null)
+                {
+                    notes.Add($"{spec.Name}: pages belong to their MultiPage; the diff does not add one");
+                    continue;
+                }
+
+                if (!isPage && !survived)
+                {
+                    var progId = ProgIdFor(spec.Type)
+                        ?? spec.Properties.FirstOrDefault(p => string.Equals(p.Path, "ProgId", StringComparison.OrdinalIgnoreCase))?.Value;
+                    if (progId is null)
+                    {
+                        notes.Add($"{spec.Name}: '{spec.Type}' is not a toolbox kind and no ProgId line names one, so it was not added");
+                        continue;
+                    }
+
+                    using var owner = spec.Parent is { Length: > 0 }
+                        ? FindContainerControls(designer, spec.Parent, 0)
+                        : designer.GetObject("Controls");
+                    if (owner is null)
+                    {
+                        notes.Add($"{spec.Name}: no container named {spec.Parent}, so it was not added");
+                        continue;
+                    }
+
+                    AddControlCore(owner, progId, spec.Name, spec.Left, spec.Top, spec.Width, spec.Height);
+                    added.Add(spec.Name);
+                }
+                else if (survived || isPage)
+                {
+                    if (spec.Left is { } left) { SetCore(component, designer, spec.Name, "Left", FormatNumber(left), "number"); setCount++; }
+                    if (spec.Top is { } top) { SetCore(component, designer, spec.Name, "Top", FormatNumber(top), "number"); setCount++; }
+                    if (spec.Width is { } width) { SetCore(component, designer, spec.Name, "Width", FormatNumber(width), "number"); setCount++; }
+                    if (spec.Height is { } height) { SetCore(component, designer, spec.Name, "Height", FormatNumber(height), "number"); setCount++; }
+                }
+
+                if (spec.Caption is { } caption)
+                {
+                    SetCore(component, designer, spec.Name, "Caption", caption, "text");
+                    setCount++;
+                }
+
+                foreach (var property in spec.Properties)
+                {
+                    if (string.Equals(property.Path, "ProgId", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    SetCore(component, designer, spec.Name, property.Path, property.Value, KindWord(property.Kind));
+                    setCount++;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"designer: apply to {module} stopped partway ({ex.GetType().Name})");
+            return JsonSerializer.Serialize(
+                new DebugDesignerApplyReply(false, [.. added], [.. removed], setCount,
+                    $"stopped at: {ex.Message.Trim()}. What is listed here landed before the refusal.",
+                    [.. notes]),
+                DebugJsonContext.Default.DebugDesignerApplyReply);
+        }
+
+        Log.Info($"designer: markup applied to {module}: +{added.Count} -{removed.Count} set {setCount}");
+        return JsonSerializer.Serialize(
+            new DebugDesignerApplyReply(true, [.. added], [.. removed], setCount, null, [.. notes]),
+            DebugJsonContext.Default.DebugDesignerApplyReply);
+    }
+
+    private static bool SameParent(Xlide.Vbe.Core.Forms.ControlSpec spec, DebugDesignerControl row, string module)
+    {
+        var specParent = spec.Parent ?? module;
+        var rowParent = row.Parent ?? module;
+        return string.Equals(specParent, rowParent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatNumber(double value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string KindWord(Xlide.Vbe.Core.Forms.PropertyValueKind kind) => kind switch
+    {
+        Xlide.Vbe.Core.Forms.PropertyValueKind.Text => "text",
+        Xlide.Vbe.Core.Forms.PropertyValueKind.Flag => "flag",
+        _ => "number",
+    };
 
     /// <summary>
     /// Adds a control through the designer model - the same call the native toolbox makes - and
@@ -121,6 +374,30 @@ internal sealed partial class AddInSession
                 : $"{module}'s designer has no controls collection");
         }
 
+        try
+        {
+            var (actualName, actualType) = AddControlCore(owner, progId, name, left, top, width, height);
+            Log.Info($"designer: added {actualType} '{actualName}' to {module}{(parent is { Length: > 0 } ? $" in {parent}" : "")}");
+            return JsonSerializer.Serialize(
+                new DebugDesignerEditReply(true, "add", actualName, actualType,
+                    $"added to {(parent is { Length: > 0 } ? parent : module)}"),
+                DebugJsonContext.Default.DebugDesignerEditReply);
+        }
+        catch (Exception ex)
+        {
+            return HostError(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// The add itself, against a resolved Controls collection: the control asked for, placed -
+    /// or nothing, because an add that cannot then take its geometry is taken back out. Shared
+    /// by the route and the markup apply, which is why it throws rather than answering.
+    /// </summary>
+    private static (string Name, string Type) AddControlCore(
+        DispatchObject owner, string progId, string? name,
+        double? left, double? top, double? width, double? height)
+    {
         DispatchObject? added;
         try
         {
@@ -128,12 +405,12 @@ internal sealed partial class AddInSession
         }
         catch (Exception ex)
         {
-            return HostError($"the designer refused to add a {progId} ({ex.Message.Trim()})");
+            throw new InvalidOperationException($"the designer refused to add a {progId} ({ex.Message.Trim()})");
         }
 
         if (added is null)
         {
-            return HostError($"the designer answered nothing for a {progId}");
+            throw new InvalidOperationException($"the designer answered nothing for a {progId}");
         }
 
         using (added)
@@ -151,15 +428,11 @@ internal sealed partial class AddInSession
                 try { owner.Invoke("Remove", actualName); }
                 catch (Exception undo) { Log.Warn($"designer: could not undo the add ({undo.GetType().Name})"); }
 
-                return HostError($"'{actualName}' would not take its geometry, so nothing was added ({ex.Message.Trim()})");
+                throw new InvalidOperationException(
+                    $"'{actualName}' would not take its geometry, so nothing was added ({ex.Message.Trim()})");
             }
 
-            var actualType = FriendlyControlType(added.TypeName() ?? type);
-            Log.Info($"designer: added {actualType} '{actualName}' to {module}{(parent is { Length: > 0 } ? $" in {parent}" : "")}");
-            return JsonSerializer.Serialize(
-                new DebugDesignerEditReply(true, "add", actualName, actualType,
-                    $"added to {(parent is { Length: > 0 } ? parent : module)}"),
-                DebugJsonContext.Default.DebugDesignerEditReply);
+            return (actualName, FriendlyControlType(added.TypeName() ?? progId));
         }
     }
 
@@ -188,10 +461,28 @@ internal sealed partial class AddInSession
             return HostError($"{module} has no designer");
         }
 
+        if (!RemoveControlCore(designer, name))
+        {
+            return HostError($"no control named {name} on {module}");
+        }
+
+        Log.Info($"designer: removed '{name}' from {module}");
+        return JsonSerializer.Serialize(
+            new DebugDesignerEditReply(true, "remove", name, null, $"removed from {module}"),
+            DebugJsonContext.Default.DebugDesignerEditReply);
+    }
+
+    /// <summary>
+    /// The remove itself: through the collection that owns the control. False when no control
+    /// carries the name - which for the markup diff is an answer, not a failure, because a
+    /// child leaves with its removed container. Shared by the route and the apply.
+    /// </summary>
+    private static bool RemoveControlCore(DispatchObject designer, string name)
+    {
         using var owner = FindOwnerControls(designer, name, 0);
         if (owner is null)
         {
-            return HostError($"no control named {name} on {module}");
+            return false;
         }
 
         try
@@ -200,13 +491,10 @@ internal sealed partial class AddInSession
         }
         catch (Exception ex)
         {
-            return HostError($"the designer refused to remove {name} ({ex.Message.Trim()})");
+            throw new InvalidOperationException($"the designer refused to remove {name} ({ex.Message.Trim()})");
         }
 
-        Log.Info($"designer: removed '{name}' from {module}");
-        return JsonSerializer.Serialize(
-            new DebugDesignerEditReply(true, "remove", name, null, $"removed from {module}"),
-            DebugJsonContext.Default.DebugDesignerEditReply);
+        return true;
     }
 
     /// <summary>
@@ -236,14 +524,39 @@ internal sealed partial class AddInSession
             return HostError($"{module} has no designer");
         }
 
+        var targetLabel = name is { Length: > 0 } ? name : module;
+        try
+        {
+            var display = SetCore(component, designer, name, property, value, asKind);
+            return JsonSerializer.Serialize(
+                new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {display}"),
+                DebugJsonContext.Default.DebugDesignerEditReply);
+        }
+        catch (Exception ex)
+        {
+            return HostError($"{targetLabel}.{property} refused the write ({ex.Message.Trim()})");
+        }
+    }
+
+    /// <summary>
+    /// The write itself, answering what the property READS BACK. No control name targets the
+    /// form; one level of dotting reaches an object-valued member; a form property the
+    /// designer does not carry - Width, Height - falls through to the component's Properties
+    /// collection, which is what the native Properties window writes. Controls never take that
+    /// path; their surface is the designer's. Shared by the route and the markup apply, which
+    /// is why it throws rather than answering.
+    /// </summary>
+    private static string SetCore(
+        DispatchObject component, DispatchObject designer,
+        string? name, string property, string value, string? asKind)
+    {
         using var found = name is { Length: > 0 } ? FindControlNamed(designer, name, 0) : null;
         if (name is { Length: > 0 } && found is null)
         {
-            return HostError($"no control named {name} on {module}");
+            throw new InvalidOperationException($"no control named {name}");
         }
 
         var target = found ?? designer;
-        var targetLabel = name is { Length: > 0 } ? name : module;
 
         var head = property;
         string? tail = null;
@@ -254,52 +567,37 @@ internal sealed partial class AddInSession
             tail = property[(dot + 1)..];
         }
 
-        try
+        if (tail is null && found is null && target.GetDispId(property) == DispId.Unknown)
         {
-            // A form property the designer does not carry - Width, Height - lives on the
-            // component's Properties collection instead, which is what the native Properties
-            // window writes. Controls never take this path; their surface is the designer's.
-            if (tail is null && found is null && target.GetDispId(property) == DispId.Unknown)
+            using var properties = component.GetObject("Properties");
+            using var row = properties?.CallObject("Item", property);
+            if (row is null)
             {
-                using var properties = component.GetObject("Properties");
-                using var row = properties?.CallObject("Item", property);
-                if (row is null)
-                {
-                    return HostError($"{module} has no property named {property}, on the designer or the component");
-                }
-
-                WriteDesignerProperty(row, "Value", value, asKind);
-                var (_, rowDisplay) = row.ReadProperty("Value");
-                return JsonSerializer.Serialize(
-                    new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {rowDisplay}"),
-                    DebugJsonContext.Default.DebugDesignerEditReply);
+                throw new InvalidOperationException(
+                    $"no property named {property}, on the designer or the component");
             }
 
-            if (tail is null)
-            {
-                WriteDesignerProperty(target, property, value, asKind);
-                var (_, display) = target.ReadProperty(property);
-                return JsonSerializer.Serialize(
-                    new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {display}"),
-                    DebugJsonContext.Default.DebugDesignerEditReply);
-            }
-
-            using var inner = target.GetObject(head);
-            if (inner is null)
-            {
-                return HostError($"{targetLabel}.{head} is not an object, so {property} cannot be reached");
-            }
-
-            WriteDesignerProperty(inner, tail, value, asKind);
-            var (_, innerDisplay) = inner.ReadProperty(tail);
-            return JsonSerializer.Serialize(
-                new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {innerDisplay}"),
-                DebugJsonContext.Default.DebugDesignerEditReply);
+            WriteDesignerProperty(row, "Value", value, asKind);
+            var (_, rowDisplay) = row.ReadProperty("Value");
+            return rowDisplay;
         }
-        catch (Exception ex)
+
+        if (tail is null)
         {
-            return HostError($"{targetLabel}.{property} refused the write ({ex.Message.Trim()})");
+            WriteDesignerProperty(target, property, value, asKind);
+            var (_, display) = target.ReadProperty(property);
+            return display;
         }
+
+        using var inner = target.GetObject(head);
+        if (inner is null)
+        {
+            throw new InvalidOperationException($"{head} is not an object, so {property} cannot be reached");
+        }
+
+        WriteDesignerProperty(inner, tail, value, asKind);
+        var (_, innerDisplay) = inner.ReadProperty(tail);
+        return innerDisplay;
     }
 
     /// <summary>

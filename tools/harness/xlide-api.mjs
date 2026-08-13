@@ -583,6 +583,25 @@ function clientFor(entry) {
         { method: "POST" }),
 
     /**
+     * The form as markup text: the same walk `designer` answers, projected through the form
+     * markup language (docs/userform-designer.md, the markup layer). What the markup tab will
+     * hold, and what a diff against source control would carry.
+     */
+    designerMarkup: (module, project) =>
+      call(`designer${query({ module, project, format: "markup" })}`).then((answer) => answer.markup),
+
+    /**
+     * Applies a markup document to the live form as a NAME-KEYED DIFF: controls only in the
+     * markup are added, controls only in the model are removed, matched controls take their
+     * header geometry, caption and property lines - and an unspoken property is never
+     * touched. A document that does not parse applies NOTHING and the refusal carries the
+     * line. Answers {ok, added, removed, set, detail, notes}; `notes` lists the rows the diff
+     * deliberately left alone (pages, unknown kinds without a ProgId line).
+     */
+    applyMarkup: (module, markup, project) =>
+      call(`designer${query({ module, project, action: "applyMarkup" })}`, { method: "POST", body: markup }),
+
+    /**
      * Opens or closes a module's code pane - a TAB, as the strip draws it.
      *
      * `caret` opens one on the way to a line; this is how one goes away. A close goes through the
@@ -1301,9 +1320,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "syncSettings": return api.syncSettings({ folder: rest[0], exportMode: rest[1], importMode: rest[2] });
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
       // designer EntryForm                        the control tree
+      // designer EntryForm markup                 the same form as markup text
       // designer EntryForm add commandButton OkButton     and the other mutations by pairs:
       // designer EntryForm set name OkButton property Caption value Start as text
-      case "designer": return rest.length <= 1
+      case "designer": {
+        if (rest[1] === "markup") {
+          console.log(await api.designerMarkup(rest[0], rest[2]));
+          process.exit(0);
+        }
+
+        return rest.length <= 1
         ? api.designer(rest[0])
         : api.designerEdit(rest[1], rest[1] === "add"
           ? { module: rest[0], type: rest[2], name: rest[3], ...Object.fromEntries(
@@ -1312,6 +1338,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
           : { module: rest[0], ...Object.fromEntries(
             rest.slice(2).reduce((pairs, value, at, all) =>
               at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])) });
+      }
+
       default: throw new Error(`unknown route ${route}`);
     }
   })();

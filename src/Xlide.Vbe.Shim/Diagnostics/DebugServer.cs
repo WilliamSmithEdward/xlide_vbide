@@ -1276,6 +1276,25 @@ public sealed record DebugDesignerEditReply(
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("detail")] string? Detail);
 
+/// <summary>The form as markup: the same walk the JSON read makes, projected through Core's printer.</summary>
+public sealed record DebugDesignerMarkupReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("markup")] string Markup);
+
+/// <summary>
+/// What a markup apply came to. `ok` false means it stopped partway: what is listed landed
+/// before the refusal, `detail` says where it stopped, and `notes` carries the rows the diff
+/// deliberately would not touch (pages, unknown kinds without a ProgId).
+/// </summary>
+public sealed record DebugDesignerApplyReply(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("added")] string[] Added,
+    [property: JsonPropertyName("removed")] string[] Removed,
+    [property: JsonPropertyName("set")] int Set,
+    [property: JsonPropertyName("detail")] string? Detail,
+    [property: JsonPropertyName("notes")] string[] Notes);
+
 /// <summary>The counters behind the regression classes this product has lived through.</summary>
 public sealed record DebugStatsReply(
     [property: JsonPropertyName("uptimeSeconds")] long UptimeSeconds,
@@ -1345,6 +1364,8 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDesignerControl[]))]
 [JsonSerializable(typeof(DebugDesignerFont))]
 [JsonSerializable(typeof(DebugDesignerEditReply))]
+[JsonSerializable(typeof(DebugDesignerMarkupReply))]
+[JsonSerializable(typeof(DebugDesignerApplyReply))]
 [JsonSerializable(typeof(DebugStatsReply))]
 [JsonSerializable(typeof(DebugErrorReply))]
 [JsonSerializable(typeof(DebugBlockedReply))]

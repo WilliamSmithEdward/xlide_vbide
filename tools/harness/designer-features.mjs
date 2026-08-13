@@ -116,6 +116,48 @@ try {
     nested.ok === true && !afterNested.controls.some((control) => control.name === "PickAir")
     && afterNested.controls.some((control) => control.name === "PickGround"));
 
+  // ---- the form as text ----
+
+  const markup = await api.designerMarkup(FORM_MODULE, project);
+  check("the markup opens with the form line",
+    markup.startsWith(`Form ${FORM_MODULE} "`), markup.split("\n")[0]);
+  check("a nested control prints inside its container",
+    /\r?\n  Frame Options "Freight" at 12,112 size 92x66\r?\n    OptionButton PickGround/.test(markup),
+    markup.slice(0, 400));
+  check("a page prints under its MultiPage, a control under the page",
+    /\r?\n  MultiPage Wizard[^\r\n]*\r?\n    Page Page1 "Page1"\r?\n      CheckBox Agree/.test(markup));
+
+  const idempotent = await api.applyMarkup(FORM_MODULE, markup, project);
+  check("applying the form's own markup adds and removes nothing",
+    idempotent.ok === true && idempotent.added.length === 0 && idempotent.removed.length === 0,
+    JSON.stringify({ added: idempotent.added, removed: idempotent.removed, set: idempotent.set }));
+
+  const withButton = `${markup.trimEnd()}\r\n  CommandButton MarkupBtn "Go" at 8,282 size 60x20\r\n`;
+  const applied = await api.applyMarkup(FORM_MODULE, withButton, project);
+  check("a line added to the document adds the control",
+    applied.ok === true && applied.added.includes("MarkupBtn"), JSON.stringify(applied));
+
+  const afterMarkup = await api.designer(FORM_MODULE, project);
+  const btn = afterMarkup.controls.find((control) => control.name === "MarkupBtn");
+  check("and it reads back placed, captioned, the kind the line said",
+    btn !== undefined && btn.type === "CommandButton" && btn.caption === "Go"
+    && near(btn.left, 8) && near(btn.top, 282),
+    JSON.stringify(btn ?? null));
+
+  const backAgain = await api.applyMarkup(FORM_MODULE, markup, project);
+  check("re-applying the original document removes it again",
+    backAgain.ok === true && backAgain.removed.includes("MarkupBtn"), JSON.stringify(backAgain));
+
+  const refusedMarkup = await api.applyMarkup(FORM_MODULE, "Form X\n  Label L at banana\n", project)
+    .catch((why) => why.message);
+  check("a document that does not parse applies nothing, naming the line",
+    /did not parse/.test(String(refusedMarkup)) && /line 2/.test(String(refusedMarkup)),
+    String(refusedMarkup));
+  const untouched = await api.designer(FORM_MODULE, project);
+  check("and the form is untouched by it",
+    untouched.controls.length === afterMarkup.controls.length - 1,
+    `${untouched.controls.length} controls vs ${afterMarkup.controls.length} with the probe button`);
+
   // ---- refusals are answers ----
 
   const missing = await api.designer("NoSuchForm", project).catch((why) => why.message);
