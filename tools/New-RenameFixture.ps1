@@ -48,8 +48,6 @@ if (-not $Path) {
     $Path = Join-Path $fixtures 'RenameFixture.xlsm'
 }
 
-if (Test-Path $Path) { Remove-Item $Path -Force }
-
 # Component types, as VBComponents.Add takes them.
 $StandardModule = 1
 $ClassModule = 2
@@ -205,55 +203,8 @@ End Sub
 #      the add-in and therefore what opens the door.
 #   3. The components, through the door.
 
-$harness = Join-Path $PSScriptRoot 'harness'
-$client = Join-Path $harness 'xlide-api.mjs'
-
-Write-Host '1. Making an empty macro workbook.'
-$maker = New-Object -ComObject Excel.Application
-$maker.Visible = $false
-$maker.DisplayAlerts = $false
-try {
-    $blank = $maker.Workbooks.Add()
-    # 52 is xlOpenXMLWorkbookMacroEnabled: a workbook that cannot hold macros is no fixture.
-    $blank.SaveAs($Path, 52)
-    $blank.Close($false)
-}
-finally {
-    try { $maker.Quit() } catch { }
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($maker) | Out-Null
-}
-
-Write-Host '2. Opening it with the editor, which is what loads the add-in.'
-& (Join-Path $harness 'Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
-
-# The module texts go to node as JSON, so that quoting, CRLFs and VBA's own doubled quotes cross
-# once rather than being escaped through two shells.
-$plan = @{
-    modules = @(
-        foreach ($name in $modules.Keys) {
-            @{ name = $name; kind = $modules[$name].Kind; code = $modules[$name].Code }
-        }
-    )
-    sheetCode = $sheetCode
-    openAtEnd = 'Watcher'
-}
-
-# Written WITHOUT a byte-order mark. In PowerShell 5.1 `-Encoding utf8` means "UTF-8 with a BOM",
-# and JSON.parse refuses one - naming a character that does not appear to be in the file.
-$planPath = Join-Path ([System.IO.Path]::GetTempPath()) "xlide-fixture-$PID.json"
-[System.IO.File]::WriteAllText(
-    $planPath,
-    ($plan | ConvertTo-Json -Depth 5),
-    (New-Object System.Text.UTF8Encoding $false))
-
-Write-Host '3. Writing the components through the debug api.'
-try {
-    & node (Join-Path $harness 'build-fixture.mjs') $planPath | Write-Host
-    if ($LASTEXITCODE -ne 0) { throw 'the fixture could not be built through the api' }
-}
-finally {
-    Remove-Item $planPath -ErrorAction SilentlyContinue
-}
+. (Join-Path $PSScriptRoot 'FixtureDriver.ps1')
+Invoke-FixtureBuild -Path $Path -Modules $modules -SheetCode $sheetCode -OpenAtEnd 'Watcher'
 
 Write-Host ''
 Write-Host "Fixture written to $Path"

@@ -46,9 +46,6 @@ if (-not [System.IO.Path]::IsPathRooted($Path)) {
     $Path = Join-Path $repoRoot $Path
 }
 
-New-Item -ItemType Directory -Force (Split-Path -Parent $Path) | Out-Null
-if (Test-Path $Path) { Remove-Item $Path -Force }
-
 $StandardModule = 1
 $ClassModule = 2
 
@@ -188,52 +185,8 @@ Option Explicit
 # can make an empty macro workbook, only an ordinarily-started Excel loads the add-in, and only
 # the add-in's door can add components without the trust setting.
 
-$harness = Join-Path $PSScriptRoot 'harness'
-
-Write-Host '1. Making an empty macro workbook.'
-$maker = New-Object -ComObject Excel.Application
-$maker.Visible = $false
-$maker.DisplayAlerts = $false
-try {
-    $blank = $maker.Workbooks.Add()
-    # 52 is xlOpenXMLWorkbookMacroEnabled.
-    $blank.SaveAs($Path, 52)
-    $blank.Close($false)
-}
-finally {
-    try { $maker.Quit() } catch { }
-    [System.Runtime.InteropServices.Marshal]::ReleaseComObject($maker) | Out-Null
-}
-
-Write-Host '2. Opening it with the editor, which is what loads the add-in.'
-& (Join-Path $harness 'Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
-
-$plan = @{
-    modules = @(
-        foreach ($name in $modules.Keys) {
-            @{ name = $name; kind = $modules[$name].Kind; code = $modules[$name].Code }
-        }
-    )
-    sheetCode = $sheetCode
-    openAtEnd = 'Uses'
-}
-
-# WITHOUT a byte-order mark: PowerShell 5.1's `-Encoding utf8` writes one and JSON.parse refuses
-# it, naming a character that does not appear to be in the file.
-$planPath = Join-Path ([System.IO.Path]::GetTempPath()) "xlide-language-fixture-$PID.json"
-[System.IO.File]::WriteAllText(
-    $planPath,
-    ($plan | ConvertTo-Json -Depth 5),
-    (New-Object System.Text.UTF8Encoding $false))
-
-Write-Host '3. Writing the components through the debug api.'
-try {
-    & node (Join-Path $harness 'build-fixture.mjs') $planPath | Write-Host
-    if ($LASTEXITCODE -ne 0) { throw 'the fixture could not be built through the api' }
-}
-finally {
-    Remove-Item $planPath -ErrorAction SilentlyContinue
-}
+. (Join-Path $PSScriptRoot 'FixtureDriver.ps1')
+Invoke-FixtureBuild -Path $Path -Modules $modules -SheetCode $sheetCode -OpenAtEnd 'Uses'
 
 if (-not $Quiet) {
     Write-Host ''
