@@ -237,6 +237,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
+| `designer` | `designer(module, project)` / `designerEdit(action, args)` | a UserForm's design as data - every control with its type, container and geometry - and the three mutations that build one: `add` (by toolbox name or ProgID, into the form or a named Frame/Page), `remove`, `set` (answers what the property reads back; `Font.Size` dotting reaches the font; the form's own Width/Height go through the component's Properties). The M1 instrument of [userform-designer.md](userform-designer.md); `form-plan.mjs` + `designer-features.mjs` build and verify a whole form with it |
 | `pane` | `pane(action, {module, project, answer})` | open or close a module's tab; an open that finds no such module throws rather than answering ok. `closeNative` closes the HOST's pane window through the editor's own pane list - the host-originated direction, no unwritten-edits question, because the native close box asks none |
 | `palette` | `paletteHide()` | puts the Object Browser palette away the way its close box does: hidden, state intact. The summons is `command("objectBrowser")`, which never meant toggle |
 | `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
@@ -1326,6 +1327,28 @@ And one thing to expect when asserting on what Enter produced: **the editor unif
 case across a project**, so a loop variable typed `item` comes back `Item`, in the opener as
 well as in the generated `Next`. Compare case-insensitively or the assertion fails on correct
 behaviour.
+
+### The form designer, driven
+
+The designer route is [userform-designer.md](userform-designer.md)'s M1 landing: a UserForm's
+whole design as data, and the mutations that build one, all through the MSForms designer
+object model with project trust OFF. Day to day it drives like everything else here:
+
+```bash
+node tools\harness\xlide-api.mjs designer EntryForm
+node tools\harness\xlide-api.mjs designer EntryForm add commandButton OkButton left 126 top 200
+node tools\harness\xlide-api.mjs designer EntryForm set name OkButton property Caption value Start as text
+node tools\harness\xlide-api.mjs designer EntryForm remove name OkButton
+```
+
+`tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
+children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.
+Its declaration is `tools\harness\form-plan.mjs`, shared verbatim with `designer-features.mjs`
+so the fixture and the suite's expectations cannot drift. Two readings worth knowing before
+staging anything: the model adds controls with EMPTY captions (the native toolbox gesture is
+what writes "Label1"), and the extenders name themselves by internal interface - the route
+maps `IMdcText` to TextBox and friends, and passes a name it does not know through untouched,
+so a third-party control stays honestly itself.
 
 ### The README's pictures
 

@@ -125,6 +125,32 @@ canvas does, and it alone converts forms from "edit the code blind" to "authorab
 - **M1 - observability.** The `designer` read route, the form fixture, the suites, and
   `capture` learning to shoot a designer window so parity claims have pictures. No UI.
   (Spikes 1, 4, 5, and the trust probe.)
+
+  **Landed 2026-08-13, the day this document was written.** The `designer` route reads a
+  form whole and mutates it (add by ProgID, remove through the owning collection, set with
+  read-back); `New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame
+  with children, a control on a MultiPage page - from `form-plan.mjs`, the one declaration
+  `designer-features.mjs` then verifies a read against, 87 checks green; the com-leak sweep
+  grew a build-read-remove row; and the whole of it ran with project trust OFF, which
+  converts that claim from assumed to measured. Spike 1 is answered and spike 4 is MOOT
+  rather than answered: the walk recurses into containers and dedupes by name, so it is
+  correct whether the runtime's collections are flat or hierarchical, and nothing yet needed
+  to know which. Facts paid for on the way, kept here because they are documented nowhere
+  else:
+
+  - The extenders name themselves by INTERNAL INTERFACE - `IMdcText`, `IOptionFrame`,
+    `ILabelControl` - and the route maps the fifteen standard ones to their toolbox names. A
+    name outside the table passes through untouched.
+  - `Controls.Add` produces controls with EMPTY captions; "Label1" is the native toolbox
+    GESTURE's doing, not the model's.
+  - The form's own Width and Height are not on the designer object. They live on the
+    component's Properties collection - the native Properties window's source - and the
+    route reads and writes them there.
+  - A font's Size is VT_CY on the wire, and both generic variant readers in DispatchObject
+    lacked the case: it read as null and printed as the literal text "VT_CY" until the raw
+    scaled-long representation was handled.
+  - Capture of a designer window is NOT done: the window is born hidden and spike 6 owns
+    making one visible at all.
 - **M2 - the honest canvas.** Read-only design view in the workspace: real bounds, real
   captions, honest placeholders; selection; double-click writes the event stub. (Spikes 3
   and 6, and the one-tab decision.)

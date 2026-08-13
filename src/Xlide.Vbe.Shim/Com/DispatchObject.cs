@@ -156,6 +156,74 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Reads a property as a double.
+    ///
+    /// The forms designer measures in points and answers VT_R4, which none of the integer readers
+    /// accept; the currency case is for the older automation objects that store sizes that way.
+    /// </summary>
+    public double GetDouble(string name)
+    {
+        using var value = GetProperty(name);
+        return value.VarType switch
+        {
+            VarEnum.VT_R4 => value.As<float>(),
+            VarEnum.VT_R8 => value.As<double>(),
+            VarEnum.VT_I4 or VarEnum.VT_INT => value.As<int>(),
+            VarEnum.VT_I2 => value.As<short>(),
+
+            // Currency is a scaled long on the wire, and the generic reader will not touch it:
+            // a font's Size is VT_CY and read null until this case read the raw representation.
+            VarEnum.VT_CY => value.GetRawDataRef<long>() / 10000d,
+            VarEnum.VT_DECIMAL => (double)value.As<decimal>(),
+            VarEnum.VT_EMPTY or VarEnum.VT_NULL => 0,
+            _ => throw new InvalidOperationException(
+                $"'{name}' is a {value.VarType} and cannot be read as a double."),
+        };
+    }
+
+    /// <summary>
+    /// The coclass name the object's type info carries - "CommandButton", "Frame" - or null when
+    /// the object declines to describe itself.
+    ///
+    /// This is how a designer control names its kind. The collection hands out extender objects
+    /// that aggregate the real control, and the type info answers for the real one while the
+    /// properties arrive through the same dispatch - so the name here is the name a developer
+    /// would use, not the extender's.
+    /// </summary>
+    public string? TypeName()
+    {
+        ObjectDisposedException.ThrowIf(_dispatch is null, this);
+
+        if (_dispatch.GetTypeInfo(0, 0, out var infoPointer) < 0 || infoPointer == 0)
+        {
+            return null;
+        }
+
+        using var info = ComHandle<Interop.ITypeInfo>.Own(infoPointer);
+        if (info is null)
+        {
+            return null;
+        }
+
+        // MEMBERID_NIL: the documentation of the type itself rather than of one member.
+        if (info.Target.GetDocumentation(-1, out var name, out var documentation, out _, out var helpFile) < 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return name == 0 ? null : Marshal.PtrToStringBSTR(name);
+        }
+        finally
+        {
+            if (name != 0) { Marshal.FreeBSTR(name); }
+            if (documentation != 0) { Marshal.FreeBSTR(documentation); }
+            if (helpFile != 0) { Marshal.FreeBSTR(helpFile); }
+        }
+    }
+
+    /// <summary>
     /// Reads a property that takes two numbers and returns text. This is how a code module hands
     /// over a range of lines, which is the only way to read a module's source in one call rather
     /// than one call per line.
@@ -245,6 +313,44 @@ internal sealed unsafe class DispatchObject : IDisposable
         return FromVariant(result);
     }
 
+    /// <summary>Calls a method with one string argument and returns another automation object.</summary>
+    public DispatchObject? CallObject(string name, string argument)
+    {
+        ArgumentNullException.ThrowIfNull(argument);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var value = ComVariant.Create(argument);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [value]);
+        return FromVariant(result);
+    }
+
+    /// <summary>
+    /// Calls a method with two string arguments and returns another automation object, which is
+    /// how a designer's controls collection is asked to add a control: a ProgID and a name in,
+    /// the new control out.
+    /// </summary>
+    public DispatchObject? CallObject(string name, string first, string second)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var a = ComVariant.Create(first);
+        using var b = ComVariant.Create(second);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [a, b]);
+        return FromVariant(result);
+    }
+
     /// <summary>
     /// Calls a method with one string argument and renders whatever it returns as text.
     ///
@@ -276,6 +382,11 @@ internal sealed unsafe class DispatchObject : IDisposable
         VarEnum.VT_I4 or VarEnum.VT_INT => value.As<int>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_R4 => value.As<float>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_R8 => value.As<double>().ToString(CultureInfo.InvariantCulture),
+
+        // Currency is a scaled long on the wire; the generic reader throws on it, and this
+        // rendered as the literal text "VT_CY" - which is what a font's Size printed as.
+        VarEnum.VT_CY => (value.GetRawDataRef<long>() / 10000m).ToString(CultureInfo.InvariantCulture),
+        VarEnum.VT_DECIMAL => value.As<decimal>().ToString(CultureInfo.InvariantCulture),
         VarEnum.VT_DATE => value.As<DateTime>().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
         VarEnum.VT_BSTR => VariantToString(value) ?? string.Empty,
         VarEnum.VT_DISPATCH or VarEnum.VT_UNKNOWN => "[object]",

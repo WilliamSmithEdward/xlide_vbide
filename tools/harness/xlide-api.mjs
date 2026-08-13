@@ -548,6 +548,41 @@ function clientFor(entry) {
       call(`component${query({ action, kind, name, newName, project })}`, { method: "POST" }),
 
     /**
+     * A UserForm's design as data: the form's own look, then every control with its identity,
+     * geometry (points), container (`parent` names the Frame or Page that holds it), and the
+     * first ring of appearance. A property a control does not carry is null, never guessed.
+     *
+     *   const design = await api.designer("EntryForm");
+     *   design.form.insideWidth;               // the canvas area, in points
+     *   design.controls.find(c => c.name === "OkButton").caption;
+     */
+    designer: (module, project) => call(`designer${query({ module, project })}`),
+
+    /**
+     * Mutates a form through the MSForms designer object model - the same model the native
+     * toolbox calls, which is what keeps a form built here byte-compatible with one built by
+     * hand. The three actions are what a form fixture is made of:
+     *
+     *   await api.designerEdit("add", { module: "EntryForm", type: "commandButton",
+     *                                   name: "OkButton", left: 126, top: 200, width: 72, height: 24 });
+     *   await api.designerEdit("add", { module: "EntryForm", type: "optionButton",
+     *                                   name: "PickA", parent: "Options" });   // into a Frame or a Page
+     *   await api.designerEdit("set", { module: "EntryForm", name: "OkButton",
+     *                                   property: "Caption", value: "Start", as: "text" });
+     *   await api.designerEdit("set", { module: "EntryForm", property: "Caption", value: "Entry" });  // the form
+     *   await api.designerEdit("remove", { module: "EntryForm", name: "OkButton" });
+     *
+     * `type` is a toolbox name (commandButton, label, textBox, comboBox, listBox, checkBox,
+     * optionButton, toggleButton, frame, tabStrip, multiPage, scrollBar, spinButton, image) or
+     * any full ProgID. `set` answers what the property READS BACK, and one level of dotting
+     * reaches an object-valued property's member: `property: "Font.Bold"`. `as` (text, number,
+     * flag) overrides the value heuristic - a caption of "123" wants as=text.
+     */
+    designerEdit: (action, { module, project, type, name, parent, left, top, width, height, property, value, as } = {}) =>
+      call(`designer${query({ action, module, project, type, name, parent, left, top, width, height, property, value, as })}`,
+        { method: "POST" }),
+
+    /**
      * Opens or closes a module's code pane - a TAB, as the strip draws it.
      *
      * `caret` opens one on the way to a line; this is how one goes away. A close goes through the
@@ -1265,6 +1300,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "syncApply": return api.syncApply(rest[0] ?? "export", { folder: rest[1], mode: rest[2], select: rest[3] ?? "checked" });
       case "syncSettings": return api.syncSettings({ folder: rest[0], exportMode: rest[1], importMode: rest[2] });
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
+      // designer EntryForm                        the control tree
+      // designer EntryForm add commandButton OkButton     and the other mutations by pairs:
+      // designer EntryForm set name OkButton property Caption value Start as text
+      case "designer": return rest.length <= 1
+        ? api.designer(rest[0])
+        : api.designerEdit(rest[1], rest[1] === "add"
+          ? { module: rest[0], type: rest[2], name: rest[3], ...Object.fromEntries(
+            rest.slice(4).reduce((pairs, value, at, all) =>
+              at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])) }
+          : { module: rest[0], ...Object.fromEntries(
+            rest.slice(2).reduce((pairs, value, at, all) =>
+              at % 2 === 0 ? [...pairs, [value, all[at + 1]]] : pairs, [])) });
       default: throw new Error(`unknown route ${route}`);
     }
   })();

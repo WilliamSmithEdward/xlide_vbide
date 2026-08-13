@@ -1222,6 +1222,60 @@ public sealed record DebugModuleReply(
     [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("text")] string Text);
 
+/// <summary>
+/// A UserForm's design: the form's own look, then every control with its identity, geometry
+/// and the first ring of appearance. A property a control does not carry is null rather than
+/// guessed, which is the difference between an honest canvas and an approximation that lies.
+/// </summary>
+public sealed record DebugDesignerReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("form")] DebugDesignerForm Form,
+    [property: JsonPropertyName("controls")] DebugDesignerControl[] Controls);
+
+public sealed record DebugDesignerForm(
+    [property: JsonPropertyName("caption")] string? Caption,
+    [property: JsonPropertyName("width")] double? Width,
+    [property: JsonPropertyName("height")] double? Height,
+    [property: JsonPropertyName("insideWidth")] double? InsideWidth,
+    [property: JsonPropertyName("insideHeight")] double? InsideHeight,
+    [property: JsonPropertyName("backColor")] int? BackColor,
+    [property: JsonPropertyName("foreColor")] int? ForeColor,
+    [property: JsonPropertyName("zoom")] int? Zoom);
+
+public sealed record DebugDesignerControl(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("parent")] string? Parent,
+    [property: JsonPropertyName("left")] double? Left,
+    [property: JsonPropertyName("top")] double? Top,
+    [property: JsonPropertyName("width")] double? Width,
+    [property: JsonPropertyName("height")] double? Height,
+    [property: JsonPropertyName("tabIndex")] int? TabIndex,
+    [property: JsonPropertyName("visible")] bool? Visible,
+    [property: JsonPropertyName("enabled")] bool? Enabled,
+    [property: JsonPropertyName("caption")] string? Caption,
+    [property: JsonPropertyName("foreColor")] int? ForeColor,
+    [property: JsonPropertyName("backColor")] int? BackColor,
+    [property: JsonPropertyName("borderStyle")] int? BorderStyle,
+    [property: JsonPropertyName("specialEffect")] int? SpecialEffect,
+    [property: JsonPropertyName("groupName")] string? GroupName,
+    [property: JsonPropertyName("font")] DebugDesignerFont? Font);
+
+public sealed record DebugDesignerFont(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("size")] double? Size,
+    [property: JsonPropertyName("bold")] bool? Bold,
+    [property: JsonPropertyName("italic")] bool? Italic);
+
+/// <summary>What a designer edit came to, with the name the designer actually assigned.</summary>
+public sealed record DebugDesignerEditReply(
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("action")] string Action,
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("detail")] string? Detail);
+
 /// <summary>The counters behind the regression classes this product has lived through.</summary>
 public sealed record DebugStatsReply(
     [property: JsonPropertyName("uptimeSeconds")] long UptimeSeconds,
@@ -1285,6 +1339,12 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugProblemsReply))]
 [JsonSerializable(typeof(DebugDrainReply))]
 [JsonSerializable(typeof(DebugModuleReply))]
+[JsonSerializable(typeof(DebugDesignerReply))]
+[JsonSerializable(typeof(DebugDesignerForm))]
+[JsonSerializable(typeof(DebugDesignerControl))]
+[JsonSerializable(typeof(DebugDesignerControl[]))]
+[JsonSerializable(typeof(DebugDesignerFont))]
+[JsonSerializable(typeof(DebugDesignerEditReply))]
 [JsonSerializable(typeof(DebugStatsReply))]
 [JsonSerializable(typeof(DebugErrorReply))]
 [JsonSerializable(typeof(DebugBlockedReply))]

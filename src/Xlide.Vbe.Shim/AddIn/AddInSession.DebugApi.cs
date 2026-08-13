@@ -2971,6 +2971,62 @@ internal sealed partial class AddInSession
             case "sync":
                 return HandleSync(request.Query, request.Body);
 
+            case "designer" when request.Query.TryGetValue("module", out var designerModule) && designerModule.Length > 0:
+            {
+                // A UserForm's design, read and mutated through the MSForms designer object
+                // model - docs/userform-designer.md's M1 instrument. No action reads; add,
+                // remove and set are the three mutations a form fixture is made of, and they
+                // go through the same model the native toolbox calls, which is what keeps a
+                // form built here byte-compatible with one built by hand.
+                request.Query.TryGetValue("project", out var designerProject);
+
+                if (!request.Query.TryGetValue("action", out var designerAction) || designerAction.Length == 0)
+                {
+                    return DesignerRead(designerModule, designerProject);
+                }
+
+                switch (designerAction)
+                {
+                    case "add":
+                    {
+                        request.Query.TryGetValue("type", out var addType);
+                        if (addType is not { Length: > 0 })
+                        {
+                            return HostError("add needs type=<control kind or ProgID>");
+                        }
+
+                        request.Query.TryGetValue("name", out var addName);
+                        request.Query.TryGetValue("parent", out var addParent);
+                        request.Query.TryGetValue("left", out var addLeft);
+                        request.Query.TryGetValue("top", out var addTop);
+                        request.Query.TryGetValue("width", out var addWidth);
+                        request.Query.TryGetValue("height", out var addHeight);
+                        return DesignerAdd(designerModule, designerProject, addType, addName, addParent,
+                            DesignerNumber(addLeft), DesignerNumber(addTop),
+                            DesignerNumber(addWidth), DesignerNumber(addHeight));
+                    }
+
+                    case "remove":
+                        return request.Query.TryGetValue("name", out var removeName) && removeName.Length > 0
+                            ? DesignerRemove(designerModule, designerProject, removeName)
+                            : HostError("remove needs name=<control>");
+
+                    case "set":
+                    {
+                        request.Query.TryGetValue("name", out var setName);
+                        request.Query.TryGetValue("property", out var setProperty);
+                        request.Query.TryGetValue("value", out var setValue);
+                        request.Query.TryGetValue("as", out var setAs);
+                        return setProperty is { Length: > 0 } && setValue is not null
+                            ? DesignerSet(designerModule, designerProject, setName, setProperty, setValue, setAs)
+                            : HostError("set needs property= and value=; name= targets a control, omitted targets the form");
+                    }
+
+                    default:
+                        return HostError($"designer action '{designerAction}' is not add, remove or set");
+                }
+            }
+
             case "component" when request.Query.TryGetValue("action", out var componentAction):
             {
                 // Adding, renaming and removing components, from INSIDE.

@@ -15,26 +15,17 @@
 
 Set-StrictMode -Version Latest
 
-function Invoke-FixtureBuild {
+# The first two phases on their own: the empty macro workbook only Excel can make, opened by
+# the launcher that loads the add-in. The form fixture needs exactly these and then a different
+# third phase, and copying them is how the driver's own lesson (the audit's B24) gets unlearned.
+function Invoke-FixtureLaunch {
     [CmdletBinding()]
     param(
-        # Where the .xlsm lands. Already resolved to a full path by the caller.
-        [Parameter(Mandatory)] [string] $Path,
-
-        # Ordered name -> @{ Kind = <vbext kind number>; Code = <module text> }.
-        [Parameter(Mandatory)] [System.Collections.IDictionary] $Modules,
-
-        # The Sheet1 document module's text.
-        [Parameter(Mandatory)] [string] $SheetCode,
-
-        # The module left showing when the build finishes.
-        [Parameter(Mandatory)] [string] $OpenAtEnd
+        [Parameter(Mandatory)] [string] $Path
     )
 
     New-Item -ItemType Directory -Force (Split-Path -Parent $Path) | Out-Null
     if (Test-Path $Path) { Remove-Item $Path -Force }
-
-    $harness = Join-Path $PSScriptRoot 'harness'
 
     Write-Host '1. Making an empty macro workbook.'
     $maker = New-Object -ComObject Excel.Application
@@ -51,7 +42,28 @@ function Invoke-FixtureBuild {
     }
 
     Write-Host '2. Opening it with the editor, which is what loads the add-in.'
-    & (Join-Path $harness 'Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
+    & (Join-Path $PSScriptRoot 'harness\Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
+}
+
+function Invoke-FixtureBuild {
+    [CmdletBinding()]
+    param(
+        # Where the .xlsm lands. Already resolved to a full path by the caller.
+        [Parameter(Mandatory)] [string] $Path,
+
+        # Ordered name -> @{ Kind = <vbext kind number>; Code = <module text> }.
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $Modules,
+
+        # The Sheet1 document module's text.
+        [Parameter(Mandatory)] [string] $SheetCode,
+
+        # The module left showing when the build finishes.
+        [Parameter(Mandatory)] [string] $OpenAtEnd
+    )
+
+    $harness = Join-Path $PSScriptRoot 'harness'
+
+    Invoke-FixtureLaunch -Path $Path
 
     # The module texts go to node as JSON, so that quoting, CRLFs and VBA's own doubled quotes
     # cross once rather than being escaped through two shells.

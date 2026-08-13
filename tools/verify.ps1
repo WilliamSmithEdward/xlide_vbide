@@ -547,12 +547,16 @@ if ($Live) {
             # the frame and staying away on its return, the hidden pane's tab leaving the
             # strip. It adds a component, so it runs before write-rollback like everything
             # that needs the session able to add.
+            # designer-features builds a whole UserForm through the designer routes, verifies
+            # the read against the plan that built it, round-trips the mutations, and removes
+            # the component - so it adds components and runs before write-rollback like
+            # everything that needs the session able to add.
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
-                                     'write-rollback.mjs')
+                                     'designer-features.mjs', 'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.

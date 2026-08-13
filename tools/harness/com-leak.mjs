@@ -30,6 +30,7 @@
  */
 
 import { open, wait } from "./xlide-api.mjs";
+import { buildForm } from "./form-plan.mjs";
 
 const api = await open({});
 const rounds = Math.max(4, Number(process.argv[2] ?? 12) || 12);
@@ -338,6 +339,24 @@ await repeat("renaming a component and back", 0, async () => {
   await wait(600);
   await api.component("rename", { name: `${sample}Tmp`, newName: sample, project: project.projectId });
   await wait(600);
+}, changing);
+
+// The designer routes walk a form's whole control graph - every control, its font, its
+// parent, its container's pages - which is more wrappers per round than anything else on this
+// door, and every one must come home. The round builds the plan's form, reads it whole, and
+// removes it, so the fixture comes back formless (routes new 2026-08-13).
+//
+// A FRESH NAME EVERY ROUND, not the plan's. A form name can be refused for the rest of the
+// session - observed the day this row was written, cause unestablished, recorded in
+// form-plan.mjs - and this sweep runs late in a session other suites have already worked
+// over. The name is not what this row measures; the wrappers are.
+let leakFormRound = 0;
+await repeat("building, reading and removing a form", 0, async () => {
+  const name = `LeakForm${++leakFormRound}`;
+  await buildForm(api, project.projectId, name);
+  await api.designer(name, project.projectId);
+  await api.component("remove", { name, project: project.projectId });
+  await wait(400);
 }, changing);
 
 await repeat("changing a setting", 0, async () => {
