@@ -662,6 +662,15 @@ if ($Deep) {
         (Invoke-SuiteGroup 'LanguageFixture.xlsm' @('language-features.mjs', 'session-lifecycle.mjs')) -join '; '
     }
 
+    Step 'deep: the reconstruction branch, both sides of 64k' {
+        # Nothing in any tier typed into a module past 64,000 characters, so the host path
+        # that REBUILDS its shadow text from the ranges alone - the one whose drift would
+        # make the write-back write a corrupted module into the workbook - ran close to
+        # never, and neither branch of the threshold had a test (the audit's C14). Its own
+        # session: the suite seeds two ~60KB modules and churns them.
+        (Invoke-SuiteGroup 'DebugFixture.xlsm' @('reconstruct-branch.mjs')) -join '; '
+    }
+
     Step 'deep: non-ASCII round trip, then the randomized walk' {
         # language-live-probe writes 14 scripts through COM, the door, the page and the outline
         # (23s of settles by construction); surface-walk runs last because it churns the whole
