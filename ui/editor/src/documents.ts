@@ -37,34 +37,6 @@ interface Entry {
   model: monaco.editor.ITextModel;
 }
 
-/**
- * The last whole-document flatten, one slot. Monaco stores text as a piece tree, so getValue()
- * is an O(document) build - and one keystroke asks for it more than once: the bridge ships the
- * full text of a small module with every change, and typing's helpers (loop-iterator sync on a
- * For/Next line, smart Enter in its microtask) each flatten the same version again. The listeners
- * all run before the next edit can bump the version, so one slot is enough to make the second and
- * third asks free; across keystrokes the version moves and the slot honestly refills. Cleared on
- * dispose so a closed module's text is not kept alive by the memo.
- */
-let flattened: { model: monaco.editor.ITextModel; version: number; text: string } | null = null;
-
-/** The model's full text at its current version, flattened at most once per version. */
-export function wholeTextOf(model: monaco.editor.ITextModel): string {
-  const version = model.getVersionId();
-  if (flattened?.model === model && flattened.version === version) {
-    return flattened.text;
-  }
-
-  const text = model.getValue();
-  flattened = { model, version, text };
-  return text;
-}
-
-function forgetFlattenOf(model: monaco.editor.ITextModel): void {
-  if (flattened?.model === model) {
-    flattened = null;
-  }
-}
 
 export class DocumentStore {
   private readonly entries = new Map<string, Entry>();
@@ -134,7 +106,6 @@ export class DocumentStore {
         closed.push(entry.id);
         this.entries.delete(key);
         this.onModelClosing?.(entry.id, entry.model);
-        forgetFlattenOf(entry.model);
         entry.model.dispose();
       }
     }
@@ -147,7 +118,6 @@ export class DocumentStore {
     for (const entry of [...this.entries.values()]) {
       this.entries.delete(docKeyOf(entry.id.module, entry.id.project));
       this.onModelClosing?.(entry.id, entry.model);
-      forgetFlattenOf(entry.model);
       entry.model.dispose();
     }
   }

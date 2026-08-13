@@ -1,18 +1,14 @@
 /*
- * The 64,000-character threshold, exercised from BOTH sides for the first time.
+ * The reconstruction path - the only path, held at both of the old threshold's sides.
  *
- * Below it, every keystroke's contentChanged carries the full document and the host prefers
- * that; above it, the message carries only the ranges and the host RECONSTRUCTS its shadow
- * text by applying them. Typical VBA modules sit far below the ceiling, so the reconstruction
- * branch - the one whose drift would make the write-back write a corrupted module into the
- * workbook - ran close to never, and no test anywhere exercised either branch (the audit's
- * C14). This is that test, plus the measurement C14 asked for: the same typing against a
- * module just under and a module just over, timed.
- *
- * The branch taken is PROVEN, not assumed from arithmetic: the message tap holds the page's
- * own contentChanged, and the under module's must carry fullText while the over module's must
- * not. Without that pin, a mis-sized fixture would pass both phases through the fullText path
- * and this suite would guard nothing.
+ * Every keystroke's contentChanged carries the ranges alone, and the host REBUILDS its shadow
+ * text by applying them; the write-back writes that rebuilt text into the workbook, so drift
+ * here corrupts modules. Small modules used to ship their whole text as well and the host
+ * preferred that copy, which left the rebuild exercised only above 64,000 characters, where
+ * nothing tested it (the audit's C14). The copy was dropped on 2026-08-12 once this suite
+ * existed and the measurement favoured the rebuild (88ms against 68ms for the same typing) -
+ * so this now pins the one path at a small size and a large one, and pins that the whole-text
+ * copy STAYS gone: the tap's contentChanged must carry no fullText on either side.
  *
  * Runs in the -Deep tier, in its own session:
  *   node tools\harness\reconstruct-branch.mjs
@@ -67,8 +63,10 @@ async function drive(label, name, targetChars) {
   await waitFor(`${name}'s seed to reach the surface`, async () =>
     comparable((await api.readModule(name, project.projectId, { live: true })).text) === comparable(seeded));
 
+  // The old threshold's two sides, kept as the size spread: proof at one scale is not proof
+  // at the other, and these sizes are the ones the dropped copy used to split between.
   const length = (await api.readModule(name, project.projectId, { live: true })).text.length;
-  check(`${label}: the module sits on the intended side of 64,000`,
+  check(`${label}: the module sits on the intended side of the old 64,000 line`,
     label === "under" ? length < 64_000 : length > 64_000,
     `${length} chars`);
 
@@ -78,10 +76,9 @@ async function drive(label, name, targetChars) {
   await api.type(marker);
   const typedMs = Date.now() - began;
 
-  // The newest contentChanged for THIS module says which branch the host took. The tap
-  // truncates rows at 2048 characters, which is fine here BY FIELD ORDER: the message puts
-  // type, module, revision and the (one-keystroke) changes ahead of fullText, so the KEY
-  // '"fullText"' sits inside the kept head even when its 60KB value is cut.
+  // The newest contentChanged for THIS module proves the whole-text copy stays gone. A
+  // reintroduced fullText would sit inside the tap row's kept head by field order, even
+  // though rows truncate at 2048 characters, so absence here is meaningful.
   const tap = await api.messages(200);
   const changes = (tap.messages ?? [])
     .filter((one) => (one.text ?? "").includes('"contentChanged"')
@@ -89,8 +86,8 @@ async function drive(label, name, targetChars) {
   const newest = changes[changes.length - 1];
   const carried = newest ? (newest.text ?? "").includes('"fullText"') : null;
 
-  check(`${label}: the change crossed the wire ${label === "under" ? "WITH" : "WITHOUT"} fullText`,
-    label === "under" ? carried === true : carried === false,
+  check(`${label}: the change crossed the wire as ranges alone, no fullText`,
+    carried === false,
     newest ? `fullText ${carried ? "present" : "absent"} in the newest contentChanged` : "no contentChanged seen in the tap");
 
   // The typed text reaches the workbook through the debounced write-back - through the
@@ -118,10 +115,10 @@ try {
   const underMs = await drive("under", `Under${process.pid}`, 60_000);
   const overMs = await drive("over", `Over${process.pid}`, 68_000);
 
-  // The measurement C14 called for, reported rather than asserted: machines vary, and the
-  // decision this feeds - move the threshold, or drop fullText now that the reconstruction
-  // branch is tested - is a person's call made from these numbers.
-  console.log(`\n  the same typing: ${underMs}ms under the threshold (fullText), ${overMs}ms over it (reconstruction)`);
+  // Reported rather than asserted, as a drift watch: both sizes ride the same path now, so
+  // these should sit close together - the 88-against-68 gap was the whole-text copy's cost,
+  // and it went with the copy.
+  console.log(`\n  the same typing, one path: ${underMs}ms at the small size, ${overMs}ms at the large`);
 } finally {
   await under.dispose();
   await over.dispose();

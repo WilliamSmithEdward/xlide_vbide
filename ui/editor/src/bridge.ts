@@ -1,5 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import { DocumentStore, docKeyOf, wholeTextOf, type DocumentId } from "./documents.js";
+import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
 import { setInstallPath } from "./helpdialog.js";
 import type { MenuItem } from "./menubar.js";
@@ -253,7 +253,7 @@ export type ClientMessage =
    * the host holds findings back about a line being typed, and a format that moves a single
    * line is indistinguishable from a keystroke by shape alone.
    */
-  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; fullText?: string; source?: "format" }
+  | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; source?: "format" }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string; project?: string }
@@ -1378,34 +1378,30 @@ export class EditorBridge {
       text: change.text,
     }));
 
-    // A small module travels whole, which is simplest. A large one travels as its changes:
-    // building and shipping the full text per keystroke is what typing latency is made of,
-    // and the host reconstructs the same text from the ranges. The length rides along so a
-    // divergence would be seen the moment it happened rather than believed impossible. The
-    // message names its document (decision 12): the edit belongs to the module it changed,
-    // whichever editor made it.
+    // The changes are the message, for every module at every size; the host rebuilds its
+    // shadow by applying them. Small modules used to ship their whole text as well and the
+    // host preferred that copy, which quietly inverted the coverage: the rebuild - the path
+    // whose drift would corrupt the write-back - ran only above 64,000 characters, where
+    // nothing tested it, while every keystroke paid an O(document) build, serialize and
+    // parse for information the ranges already carry (the audit's C14, measured 2026-08-12:
+    // 88ms against 68ms for the same typing). The length rides along so a divergence is
+    // seen the moment it happens rather than believed impossible. The message names its
+    // document (decision 12): the edit belongs to the module it changed, whichever editor
+    // made it.
     // WHERE THE CHANGE CAME FROM, when it was not the keyboard. The host holds back findings
     // about a line while it is being typed, and tells typing from anything else by the shape of
     // the change: one line, no newline. A format that moves a single line has that shape, and
     // running one made the squiggle on that line vanish until the caret was moved off it. The
     // editor's change event carries no source, so the formatter marks its own edit.
-    const fullLength = model.getValueLength();
-    const message: Extract<ClientMessage, { type: "contentChanged" }> = {
+    this.transport.post({
       type: "contentChanged",
       moduleName: id.module,
       ...(id.project === null ? {} : { project: id.project }),
       revision,
       changes,
-      fullLength,
+      fullLength: model.getValueLength(),
       ...(takeFormattingMark(model) ? { source: "format" as const } : {}),
-    };
-    if (fullLength < 64_000) {
-      // Through the one-slot memo: typing's helpers flatten the same version on the same
-      // keystroke, and this is the first of those asks, so the later ones ride this build.
-      message.fullText = wholeTextOf(model);
-    }
-
-    this.transport.post(message);
+    });
   }
 
   private onSelectionChanged(selection: monaco.Selection): void {

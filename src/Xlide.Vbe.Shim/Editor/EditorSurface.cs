@@ -1406,16 +1406,18 @@ internal sealed class EditorSurface : IDisposable
 
                     if (editedDoc is not null)
                     {
-                        // A small module arrives whole; a large one arrives as its changes and
-                        // is reconstructed here, because building and shipping the full text of
-                        // a large module per keystroke is what typing latency is made of.
-                        var updated = document.RootElement.TryGetProperty("fullText", out var text)
-                            ? text.GetString()
-                            : null;
-
+                        // The changes ARE the message: the shadow is rebuilt by applying them,
+                        // for every module at every size. Small modules shipped their whole
+                        // text for years and this branch preferred that copy, which quietly
+                        // inverted the coverage - the rebuild, the path whose drift would
+                        // corrupt the write-back, ran only above 64,000 characters, where
+                        // nothing tested it (the audit's C14, measured 2026-08-12: the whole-
+                        // text copy also cost more than the rebuild it bypassed). Now every
+                        // keystroke exercises the one path, the parity suites watch it
+                        // continuously, and fullLength below stays as the tripwire.
                         EngineTextEdit[]? parsedEdits = null;
-                        if (updated is null
-                            && document.RootElement.TryGetProperty("changes", out var changeSet)
+                        string? updated = null;
+                        if (document.RootElement.TryGetProperty("changes", out var changeSet)
                             && changeSet.ValueKind == JsonValueKind.Array)
                         {
                             parsedEdits = ParseChanges(editedDoc.Text, changeSet);
@@ -1487,10 +1489,11 @@ internal sealed class EditorSurface : IDisposable
                                 : LiveAnalysisDelayMilliseconds);
 
                             // The engine mirrors this text and answers requests from its copy,
-                            // so the change stream continues to it - small edits for a large
-                            // module, the whole text for a small one - ordered ahead of any
-                            // request about the text it makes.
-                            LiveTextPushed?.Invoke(editedDoc.Module, parsedEdits is null ? updated : null, parsedEdits);
+                            // so the change stream continues to it as the same edits the shadow
+                            // was rebuilt from, ordered ahead of any request about the text it
+                            // makes. An `updated` here always came from parsedEdits, so the
+                            // whole-text argument is never needed.
+                            LiveTextPushed?.Invoke(editedDoc.Module, null, parsedEdits);
 
                             // Read from the raw change set rather than the parsed edits, because
                             // small modules skip the parse and this must fire for them too.
