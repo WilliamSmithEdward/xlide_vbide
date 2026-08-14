@@ -105,7 +105,33 @@ export class DesignerView {
 
   private readonly markupHost: HTMLElement;
   private readonly markupHalf: HTMLElement;
+  private readonly splitter: HTMLElement;
   private readonly canvasScroll: HTMLElement;
+
+  /** Stacked shows the form ABOVE the document, the design-surface convention; side-by-side
+   * is the wide-monitor alternative a double-click on the divider reaches. */
+  private orientation: "stacked" | "beside" = "stacked";
+
+  /** One half at a time can leave: the divider's chevrons hide the document or the form and
+   * bring them back, and the divider itself stays as the way home. */
+  private collapsed: "markup" | "canvas" | null = null;
+  private readonly hideMarkupButton: HTMLElement;
+  private readonly hideCanvasButton: HTMLElement;
+
+  private setCollapsed(which: "markup" | "canvas" | null): void {
+    this.collapsed = which;
+    this.root.classList.toggle("hide-markup", which === "markup");
+    this.root.classList.toggle("hide-canvas", which === "canvas");
+    this.refreshCollapseTitles();
+    this.layout();
+  }
+
+  private refreshCollapseTitles(): void {
+    this.hideMarkupButton.title = this.collapsed === "markup" ? "Show the document" : "Hide the document";
+    this.hideMarkupButton.setAttribute("aria-label", this.hideMarkupButton.title);
+    this.hideCanvasButton.title = this.collapsed === "canvas" ? "Show the form" : "Hide the form";
+    this.hideCanvasButton.setAttribute("aria-label", this.hideCanvasButton.title);
+  }
   private readonly notice: HTMLElement;
   private readonly errorStrip: HTMLElement;
   private readonly editor: monaco.editor.IStandaloneCodeEditor;
@@ -136,9 +162,39 @@ export class DesignerView {
     const splitter = document.createElement("div");
     splitter.className = "designer-splitter";
     splitter.setAttribute("role", "separator");
-    splitter.setAttribute("aria-orientation", "vertical");
-    splitter.setAttribute("aria-label", "Resize markup and form");
+    splitter.setAttribute("aria-label", "Resize markup and form; double-click to switch the split");
+    splitter.title = "Drag to resize; double-click to switch between stacked and side-by-side";
     splitter.tabIndex = 0;
+
+    const grip = document.createElement("div");
+    grip.className = "designer-splitter-grip";
+    splitter.appendChild(grip);
+
+    // The halves hide one at a time from the divider itself: a full-width canvas while
+    // arranging, a full-width document while writing, one click each way.
+    const hideMarkup = document.createElement("button");
+    hideMarkup.type = "button";
+    hideMarkup.className = "designer-collapse designer-collapse-markup";
+    hideMarkup.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.setCollapsed(this.collapsed === "markup" ? null : "markup");
+    });
+    hideMarkup.addEventListener("dblclick", (event) => event.stopPropagation());
+    hideMarkup.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+    const hideCanvas = document.createElement("button");
+    hideCanvas.type = "button";
+    hideCanvas.className = "designer-collapse designer-collapse-canvas";
+    hideCanvas.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.setCollapsed(this.collapsed === "canvas" ? null : "canvas");
+    });
+    hideCanvas.addEventListener("dblclick", (event) => event.stopPropagation());
+    hideCanvas.addEventListener("pointerdown", (event) => event.stopPropagation());
+
+    splitter.append(hideMarkup, hideCanvas);
+    this.hideMarkupButton = hideMarkup;
+    this.hideCanvasButton = hideCanvas;
 
     const canvasHalf = document.createElement("div");
     canvasHalf.className = "designer-canvas-half";
@@ -164,6 +220,7 @@ export class DesignerView {
     this.markupHalf.append(this.markupHost, this.errorStrip);
 
     this.root.append(this.markupHalf, splitter, canvasHalf);
+    this.splitter = splitter;
 
     registerMarkupLanguage();
     this.model = monaco.editor.createModel("", FORM_MARKUP_LANGUAGE,
@@ -202,6 +259,12 @@ export class DesignerView {
     this.unwatch = deps.watch((payload) => this.update(payload));
     this.unwatchApplied = deps.watchApplied((outcome) => this.onApplied(outcome));
     this.request = deps.request;
+
+    // LAST, because it lays the editor out and the editor must exist: the first version ran
+    // this beside the DOM build and the constructor died reaching for an editor not yet
+    // created - a designer tab that stood in the strip and mounted nothing.
+    this.setOrientation("stacked");
+    this.refreshCollapseTitles();
   }
 
   private readonly request: () => void;
@@ -487,19 +550,36 @@ export class DesignerView {
     return box;
   }
 
+  /** Applies an orientation: the class drives the CSS (axis, order, grip), the aria and the
+   * markup half's basis follow, and any dragged size is let go so the new axis starts even. */
+  private setOrientation(orientation: "stacked" | "beside"): void {
+    this.orientation = orientation;
+    this.root.classList.toggle("stacked", orientation === "stacked");
+    this.splitter.setAttribute("aria-orientation", orientation === "stacked" ? "horizontal" : "vertical");
+    this.markupHalf.style.flex = "";
+    this.layout();
+  }
+
   private installSplitter(splitter: HTMLElement): void {
-    let startX = 0;
-    let startWidth = 0;
+    let start = 0;
+    let startSize = 0;
 
     const onMove = (event: PointerEvent) => {
-      const width = Math.max(160, startWidth + (event.clientX - startX));
-      this.markupHalf.style.flex = `0 0 ${width}px`;
+      if (this.orientation === "beside") {
+        const width = Math.max(160, startSize + (event.clientX - start));
+        this.markupHalf.style.flex = `0 0 ${width}px`;
+      } else {
+        // The markup sits BELOW the divider when stacked: dragging down shrinks it.
+        const height = Math.max(80, startSize - (event.clientY - start));
+        this.markupHalf.style.flex = `0 0 ${height}px`;
+      }
       this.layout();
     };
 
     splitter.addEventListener("pointerdown", (event) => {
-      startX = event.clientX;
-      startWidth = this.markupHalf.getBoundingClientRect().width;
+      const box = this.markupHalf.getBoundingClientRect();
+      start = this.orientation === "beside" ? event.clientX : event.clientY;
+      startSize = this.orientation === "beside" ? box.width : box.height;
       splitter.setPointerCapture(event.pointerId);
       splitter.addEventListener("pointermove", onMove);
       const done = () => {
@@ -511,14 +591,29 @@ export class DesignerView {
       splitter.addEventListener("pointercancel", done);
     });
 
+    // The switch: a double-click on the divider flips the split. No extra chrome to learn,
+    // and the tooltip says so for anyone hovering the grip.
+    splitter.addEventListener("dblclick", () => {
+      this.setOrientation(this.orientation === "stacked" ? "beside" : "stacked");
+    });
+
     splitter.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.setOrientation(this.orientation === "stacked" ? "beside" : "stacked");
+        return;
+      }
+
+      const grow = this.orientation === "beside" ? "ArrowRight" : "ArrowUp";
+      const shrink = this.orientation === "beside" ? "ArrowLeft" : "ArrowDown";
+      if (event.key !== grow && event.key !== shrink) {
         return;
       }
       event.preventDefault();
-      const width = this.markupHalf.getBoundingClientRect().width
-        + (event.key === "ArrowRight" ? 24 : -24);
-      this.markupHalf.style.flex = `0 0 ${Math.max(160, width)}px`;
+      const box = this.markupHalf.getBoundingClientRect();
+      const size = (this.orientation === "beside" ? box.width : box.height)
+        + (event.key === grow ? 24 : -24);
+      this.markupHalf.style.flex = `0 0 ${Math.max(this.orientation === "beside" ? 160 : 80, size)}px`;
       this.layout();
     });
   }
