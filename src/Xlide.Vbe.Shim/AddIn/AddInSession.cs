@@ -3454,10 +3454,20 @@ internal sealed partial class AddInSession : IDisposable
 
             if (renamed is not null && !string.Equals(renamed, component, StringComparison.OrdinalIgnoreCase))
             {
+                // A designer tab is keyed by the module's name, and the rename just retired
+                // that key: the tab closes rather than standing as a corpse the strip cannot
+                // activate. Re-opening under the new name is one click; a tab that LOOKS
+                // alive and answers nothing is worse than the click. Following the rename
+                // with the tab is the liveness milestone's, with the rest of the rename
+                // adoption (docs/userform-designer.md).
+                CloseDesignerTab(component, null);
                 AdoptRename(component, renamed);
             }
             else
             {
+                // The Properties panel joins the liveness funnel: a form-level edit made
+                // there reaches an open designer tab the way the api routes' edits do.
+                RefreshDesignerTabFor(component);
                 PublishProperties();
             }
         }
