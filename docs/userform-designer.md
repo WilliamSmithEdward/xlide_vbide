@@ -320,6 +320,21 @@ the host-owns-membership invariant survives.
   form (independently confirmed by the designer read), removing it on re-apply, and refusing
   a bad document by line while touching nothing. The paint was verified by capture: markup
   document beside the rendered form, Frame and MultiPage nesting correct.
+
+  **The markup language service, the owner's ask (2026-08-13 evening), in landing order:**
+
+  1. *Highlighting and auto-indent* - a Monarch grammar on the page, standard token names so
+     the existing themes colour it without edits, and enter-rules that indent under a
+     container line. Page-local, no host involvement.
+  2. *Linting, red squiggles* - and the design decision is WHERE it comes from: Core's
+     parser is the one grammar, so the diagnostics must be a TOLERANT PARSE on the host
+     side (collect every line's refusal rather than throwing at the first, plus the
+     semantic checks an apply would trip over: a duplicate name, a parent that is not a
+     container, a type outside the toolbox with no ProgId line), carried over the bridge
+     and set as markers on the markup model. Never a second page-side grammar - that is
+     the drift the analyzer/tokenizer split teaches against.
+  3. *Completions and hover* - control types, `at`/`size` scaffolding, known property
+     paths per control kind; needs the language service shape of (2) to answer from.
 - **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
   bounds, real captions, honest placeholders; selection; double-click writes the event stub.
   (Spikes 3 and 6.)

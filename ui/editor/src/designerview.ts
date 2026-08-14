@@ -24,6 +24,63 @@ import type { DocumentId } from "./documents.js";
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
 const PT = 4 / 3;
 
+/** The markup's own language id, for the tab's document. */
+const FORM_MARKUP_LANGUAGE = "xlide-form";
+
+/**
+ * The markup's grammar, once per page. STANDARD token names on purpose - keyword, type,
+ * string, number, identifier - so the existing themes colour it with no theme edits; and a
+ * page-side grammar is for PAINT ONLY. The language's truth is Core's parser: linting will
+ * be a tolerant parse host-side (docs/userform-designer.md, the language service), never a
+ * second grammar here that can drift.
+ */
+let markupLanguageRegistered = false;
+function registerMarkupLanguage(): void {
+  if (markupLanguageRegistered) {
+    return;
+  }
+  markupLanguageRegistered = true;
+
+  monaco.languages.register({ id: FORM_MARKUP_LANGUAGE });
+
+  monaco.languages.setMonarchTokensProvider(FORM_MARKUP_LANGUAGE, {
+    // The toolbox kinds plus the two structural words; a type outside this list still reads
+    // as an identifier, which is honest - the apply treats it as foreign too.
+    controlKinds: [
+      "Form", "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton",
+      "ToggleButton", "Frame", "CommandButton", "TabStrip", "MultiPage", "Page",
+      "ScrollBar", "SpinButton", "Image",
+    ],
+    tokenizer: {
+      root: [
+        [/"(?:[^"]|"")*"/, "string"],
+        [/\b(?:at|size)\b/, "keyword"],
+        // The size pair is ONE value - "360x320.25" - or its x paints as an identifier.
+        [/-?\d+(?:\.\d+)?x-?\d+(?:\.\d+)?/, "number"],
+        [/-?\d+(?:\.\d+)?/, "number"],
+        [/[A-Za-z_][\w.]*(?=\s*=)/, "attribute.name"],
+        [/[A-Za-z_][\w.]*/, {
+          cases: {
+            "@controlKinds": "type",
+            "@default": "identifier",
+          },
+        }],
+        [/[x,=]/, "delimiter"],
+      ],
+    },
+  });
+
+  monaco.languages.setLanguageConfiguration(FORM_MARKUP_LANGUAGE, {
+    // A container line opens a level, the way the printer indents its children.
+    onEnterRules: [{
+      beforeText: /^\s*(?:Frame|MultiPage|Page)\b.*$/,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    }],
+    brackets: [],
+    autoClosingPairs: [{ open: '"', close: '"' }],
+  });
+}
+
 /** The frame's caption strip eats this much of its client area's top, approximately - an
  * honest inset rather than a measured one, until the canvas milestone measures it. */
 const FRAME_INSET_TOP = 10 * PT;
@@ -108,7 +165,8 @@ export class DesignerView {
 
     this.root.append(this.markupHalf, splitter, canvasHalf);
 
-    this.model = monaco.editor.createModel("", "plaintext",
+    registerMarkupLanguage();
+    this.model = monaco.editor.createModel("", FORM_MARKUP_LANGUAGE,
       monaco.Uri.parse(`xlide-form:/${encodeURIComponent((id.project ?? "").toLowerCase())}/${encodeURIComponent(id.module)}`));
     this.editor = monaco.editor.create(this.markupHost, {
       model: this.model,
