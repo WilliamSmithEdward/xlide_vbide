@@ -53,34 +53,38 @@ internal static partial class FormDesignService
         Walk(designer, null, rows, seen, 0);
         var controls = rows.Select(row => row.Spec).ToList();
 
-        // The form's own properties, as the native Properties window holds them - which is
-        // what links the markup's lines to that panel: same source, same value. Printed only
-        // when NOT the default, because the dialect's rule is that an unspoken property is
-        // one an apply can never erase - so a document without the line leaves a custom
-        // colour standing, and printing defaults on every form would bury the real choices.
+        // The form's own properties, from the component's Properties collection FIRST - the
+        // native Properties window's slot, and the one the real surface paints; the designer
+        // dispatch holds a copy that reads back happily without ever reaching the form frame
+        // (measured 2026-08-14). Printed only when NOT the default, because the dialect's
+        // rule is that an unspoken property is one an apply can never erase - so a document
+        // without the line leaves a custom colour standing, and printing defaults on every
+        // form would bury the real choices.
         var properties = new List<PropertySpec>();
-        if (TryInt(designer, "BackColor") is { } backColor && backColor != DefaultFormBackColor)
+        if ((PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor")) is { } backColor
+            && backColor != DefaultFormBackColor)
         {
             properties.Add(new PropertySpec("BackColor", backColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
         }
 
-        if (TryInt(designer, "ForeColor") is { } foreColor && foreColor != DefaultFormForeColor)
+        if ((PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor")) is { } foreColor
+            && foreColor != DefaultFormForeColor)
         {
             properties.Add(new PropertySpec("ForeColor", foreColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
         }
 
         var spec = new FormSpec(
             module,
-            TryText(designer, "Caption"),
-            TryNumber(designer, "Width") ?? PropertyNumber(component, "Width"),
-            TryNumber(designer, "Height") ?? PropertyNumber(component, "Height"),
+            PropertyText(component, "Caption") ?? TryText(designer, "Caption"),
+            PropertyNumber(component, "Width") ?? TryNumber(designer, "Width"),
+            PropertyNumber(component, "Height") ?? TryNumber(designer, "Height"),
             properties,
             controls);
 
         KeepDesignerDown(component);
         lastWalkRows = rows;
-        lastWalkFormBack = TryInt(designer, "BackColor");
-        lastWalkFormFore = TryInt(designer, "ForeColor");
+        lastWalkFormBack = PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor");
+        lastWalkFormFore = PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor");
         lastWalkFormInsideWidth = TryNumber(designer, "InsideWidth");
         lastWalkFormInsideHeight = TryNumber(designer, "InsideHeight");
         return spec;
@@ -226,7 +230,8 @@ internal static partial class FormDesignService
         bool? FontBold,
         bool? FontItalic,
         int? BackColor,
-        int? ForeColor);
+        int? ForeColor,
+        IReadOnlyList<string>? Tabs);
 
     private static void Walk(
         DispatchObject container, string? parentName, List<DesignRow> rows, HashSet<string> seen, int depth)
@@ -307,13 +312,39 @@ internal static partial class FormDesignService
             // A control whose font will not answer renders in the form's own.
         }
 
+        // A TabStrip's tabs are NOT controls - unlike a MultiPage's pages - so the canvas
+        // cannot learn them from child rows. Their captions ride the row instead.
+        List<string>? tabs = null;
+        if (spec.Type == "TabStrip")
+        {
+            try
+            {
+                using var strip = control.GetDispId("Tabs") != DispId.Unknown ? control.GetObject("Tabs") : null;
+                var count = strip?.GetInt32("Count") ?? 0;
+                for (var index = 0; index < count; index++)
+                {
+                    using var tab = strip!.GetItem(index);
+                    var caption = tab is null ? null : TryText(tab, "Caption");
+                    if (caption is not null)
+                    {
+                        (tabs ??= []).Add(caption);
+                    }
+                }
+            }
+            catch
+            {
+                // A strip whose tabs will not answer renders as the bare box it was.
+            }
+        }
+
         return new DesignRow(
             spec,
             TryNumber(control, "InsideWidth"),
             TryNumber(control, "InsideHeight"),
             fontName, fontSize, fontBold, fontItalic,
             TryInt(control, "BackColor"),
-            TryInt(control, "ForeColor"));
+            TryInt(control, "ForeColor"),
+            tabs);
     }
 
     private static void WalkPages(
@@ -470,13 +501,41 @@ internal static partial class FormDesignService
         }
     }
 
-    private static double? PropertyNumber(DispatchObject component, string name)
+    internal static double? PropertyNumber(DispatchObject component, string name)
     {
         try
         {
             using var properties = component.GetObject("Properties");
             using var row = properties?.CallObject("Item", name);
             return row?.GetDouble("Value");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static string? PropertyText(DispatchObject component, string name)
+    {
+        try
+        {
+            using var properties = component.GetObject("Properties");
+            using var row = properties?.CallObject("Item", name);
+            return row?.GetString("Value");
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    internal static int? PropertyInt(DispatchObject component, string name)
+    {
+        try
+        {
+            using var properties = component.GetObject("Properties");
+            using var row = properties?.CallObject("Item", name);
+            return row?.GetInt32("Value");
         }
         catch
         {
@@ -746,19 +805,29 @@ internal static partial class FormDesignService
             tail = property[(dot + 1)..];
         }
 
-        if (tail is null && found is null && target.GetDispId(property) == DispId.Unknown)
+        if (tail is null && found is null)
         {
+            // THE BAG FIRST for a form-level property, the designer dispatch only when the
+            // bag lacks the name. The native Properties window writes the component's
+            // Properties collection, and that is the slot the real surface paints: a
+            // Caption written on the designer dispatch reads back happily and never
+            // reaches the form frame - the running form and the design surface both said
+            // "UserForm1" over a designer whose Caption read "Quarter Entry" (measured
+            // 2026-08-14; the owner's run-beside-canvas is what made it visible).
             using var properties = component.GetObject("Properties");
             using var row = properties?.CallObject("Item", property);
-            if (row is null)
+            if (row is not null)
             {
-                throw new InvalidOperationException(
-                    $"no property named {property}, on the designer or the component");
+                WriteDesignerProperty(row, "Value", value, asKind);
+                var (_, rowDisplay) = row.ReadProperty("Value");
+                return rowDisplay;
             }
 
-            WriteDesignerProperty(row, "Value", value, asKind);
-            var (_, rowDisplay) = row.ReadProperty("Value");
-            return rowDisplay;
+            if (target.GetDispId(property) == DispId.Unknown)
+            {
+                throw new InvalidOperationException(
+                    $"no property named {property}, on the component or the designer");
+            }
         }
 
         if (tail is null)

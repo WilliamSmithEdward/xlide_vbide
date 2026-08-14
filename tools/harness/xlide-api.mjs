@@ -794,6 +794,14 @@ function clientFor(entry) {
     dismiss: (button, caption) => call(`dismiss${query({ button, caption })}`, { method: "POST" }),
 
     /**
+     * The captions of every RUNNING form, or - with action "close" - closes one the way its
+     * X would. Off the host thread on purpose: a modally running form holds the host thread
+     * inside the Run command, and this is the verb that watches it stand and takes it down.
+     */
+    userforms: (action, caption) => call(`userform${query({ action, caption })}`,
+      action === "close" ? { method: "POST" } : undefined),
+
+    /**
      * Runs script in the live page.
      *
      * Prefer `.value` over `.result`. The browser returns a result as JSON, so a script returning
@@ -1302,6 +1310,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "engine": return api.engineCosts({ reset: rest[0] === "reset" });
       case "wait": return api.waitForLog(rest.join(" "));
       case "dismiss": return api.dismiss(rest[0] ?? "Cancel", rest[1]);
+      case "userforms": return api.userforms(rest[0], rest[1]);
       case "palette": return api.paletteHide();
       case "frame": return api.frame(rest[0] ?? "show");
       case "session": return api.session(rest[0] ?? "cancelledShutdown");

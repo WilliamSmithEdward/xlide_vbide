@@ -98,7 +98,8 @@ public sealed record FormMarkupControl(
     [property: JsonPropertyName("backColor")] string? BackColor = null,
     [property: JsonPropertyName("foreColor")] string? ForeColor = null,
     [property: JsonPropertyName("insideWidth")] double? InsideWidth = null,
-    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null);
+    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null,
+    [property: JsonPropertyName("tabs")] string[]? Tabs = null);
 
 /// <summary>
 /// Tells the surface there is nothing to show: every pane is closed. The surface drops every

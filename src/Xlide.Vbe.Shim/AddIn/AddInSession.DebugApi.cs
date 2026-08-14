@@ -2022,6 +2022,28 @@ internal sealed partial class AddInSession
                     new DebugCommandReply(dismissed, 0), DebugJsonContext.Default.DebugCommandReply));
             }
 
+            case "userform":
+            {
+                // No host thread, twice over: enumeration is pure Win32, and the one moment
+                // this route matters - watching or closing a modally RUNNING form - is
+                // exactly when the host thread is parked inside the Run command until that
+                // form goes away. A host-bound route here would deadlock against its caller.
+                request.Query.TryGetValue("action", out var formAction);
+                request.Query.TryGetValue("caption", out var formCaption);
+
+                if (string.Equals(formAction, "close", StringComparison.OrdinalIgnoreCase))
+                {
+                    var closed = DialogWatch.CloseRunningForm(formCaption);
+                    return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        new DebugCommandReply(closed, 0, closed ? "closed" : "no running form matched"),
+                        DebugJsonContext.Default.DebugCommandReply));
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugUserFormsReply(DialogWatch.RunningForms()),
+                    DebugJsonContext.Default.DebugUserFormsReply));
+            }
+
             case "stats":
             {
                 var placement = PerfCounters.PlacementSnapshot();

@@ -759,7 +759,8 @@ internal sealed class EditorSurface : IDisposable
                     row?.FontName, row?.FontSize, row?.FontBold, row?.FontItalic,
                     row?.BackColor is { } bc ? FormDesignService.OleColorToCss(bc) : null,
                     row?.ForeColor is { } fc ? FormDesignService.OleColorToCss(fc) : null,
-                    row?.InsideWidth, row?.InsideHeight);
+                    row?.InsideWidth, row?.InsideHeight,
+                    row?.Tabs is { Count: > 0 } tabs ? [.. tabs] : null);
             })
             .ToArray();
 

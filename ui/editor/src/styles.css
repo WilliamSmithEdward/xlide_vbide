@@ -3407,24 +3407,53 @@ body.objbrowser-page #objbrowser-card {
   box-sizing: content-box;
 }
 
+/* The RUNTIME's own chrome, not the classic designer's: a light bar, dark caption at the
+   left, a close glyph at the right - what the launched form wears on this machine. Inside
+   the form rect when the model answers its insides (`.chromed`, height set inline so the
+   chrome eats exactly what the runtime's does); floating above it as a plain label when
+   the insides are unknown. */
 .dc-form-title {
   position: absolute;
   left: 0;
   right: 0;
   top: -22px;
   height: 21px;
-  line-height: 21px;
-  padding: 0 8px;
-  background: #0055e5;
-  color: #fff;
-  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 0 9px;
+  background: #fff;
+  color: #1a1a1a;
+  border-bottom: 1px solid #e1e1e1;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.dc-form.chromed .dc-form-title {
+  top: 0;
+}
+
+.dc-form-title-text {
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
+.dc-form-close {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  font-size: 13px;
+  color: #444;
+}
+
 .dc-form {
   margin-top: 22px;
+}
+
+.dc-form.chromed {
+  margin-top: 0;
 }
 
 .dc-form-client {
@@ -3566,9 +3595,43 @@ body.objbrowser-page #objbrowser-card {
 
 .dc-ScrollBar,
 .dc-SpinButton {
-  background: #dddad0;
+  background: #f0f0f0;
   border: 1px solid #a0a0a0;
 }
+
+/* The arrow buttons a scroll bar and a spin button wear at their ends: the runtime draws
+   them, and without them both controls read as bare rectangles. A spin button is nothing
+   BUT its two buttons, so its caps split the whole control. */
+.dc-arrow {
+  position: absolute;
+  background: #e1e1e1;
+  border: 1px solid #a0a0a0;
+  box-sizing: border-box;
+}
+
+.dc-axis-v .dc-arrow { left: 0; right: 0; height: 33%; max-height: 17px; }
+.dc-axis-v .dc-arrow-start { top: 0; }
+.dc-axis-v .dc-arrow-end { bottom: 0; }
+.dc-axis-h .dc-arrow { top: 0; bottom: 0; width: 33%; max-width: 17px; }
+.dc-axis-h .dc-arrow-start { left: 0; }
+.dc-axis-h .dc-arrow-end { right: 0; }
+
+.dc-SpinButton.dc-axis-v .dc-arrow { height: 50%; max-height: none; }
+.dc-SpinButton.dc-axis-h .dc-arrow { width: 50%; max-width: none; }
+
+.dc-arrow::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: 3px solid transparent;
+}
+
+.dc-axis-v .dc-arrow-start::after { border-bottom-color: #444; border-top-width: 0; }
+.dc-axis-v .dc-arrow-end::after { border-top-color: #444; border-bottom-width: 0; }
+.dc-axis-h .dc-arrow-start::after { border-right-color: #444; border-left-width: 0; }
+.dc-axis-h .dc-arrow-end::after { border-left-color: #444; border-right-width: 0; }
 
 .dc-Image {
   background:

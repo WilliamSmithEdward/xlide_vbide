@@ -154,6 +154,7 @@ export interface FormMarkupControl {
   foreColor?: string | null;
   insideWidth?: number | null;
   insideHeight?: number | null;
+  tabs?: string[] | null;
 }
 
 /** A form's projection as one answer: the markup text and the spec it prints. */

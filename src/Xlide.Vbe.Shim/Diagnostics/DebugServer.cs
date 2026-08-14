@@ -706,6 +706,10 @@ public sealed record DebugWindowRow(
 public sealed record DebugWindowsReply(
     [property: JsonPropertyName("windows")] DebugWindowRow[] Windows);
 
+/// <summary>The captions of every RUNNING form, as GET userform lists them.</summary>
+public sealed record DebugUserFormsReply(
+    [property: JsonPropertyName("forms")] string[] Forms);
+
 /// <summary>
 /// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
 /// leaves it out - the difference between the editor's menu and the product's.
@@ -1345,6 +1349,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugVisibilityReply))]
 [JsonSerializable(typeof(DebugWindowRow))]
 [JsonSerializable(typeof(DebugWindowsReply))]
+[JsonSerializable(typeof(DebugUserFormsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]

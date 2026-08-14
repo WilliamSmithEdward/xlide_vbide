@@ -252,6 +252,36 @@ try {
     withDesigner.active === true && /\[Design\]/.test(withDesigner.label),
     JSON.stringify(withDesigner));
 
+  // ---- Run with the designer tab active launches the form - the editor's own F5 ----
+
+  // The command POSTS the editor's own action and answers promptly (measured 2026-08-14:
+  // the action reads its aim ~30ms after Execute returns); the form stands a beat later.
+  // The userform verb stays off the host thread so it answers whatever that thread is in.
+  // The caption on the REAL window doubles as the proof that a form-level property set
+  // through the api reaches the surface the runtime paints - the component Properties bag,
+  // not the designer dispatch's dead copy (the owner's side-by-side found the difference).
+  const running = api.command("run");
+  const launched = await waitFor("the form to stand running", async () =>
+    ((await api.userforms()).forms ?? []).find((title) => title.includes("Quarter Entry")),
+  { budgetMs: 20000 });
+  check("Run with the designer tab active launches the form, wearing the form's own caption",
+    launched !== undefined, JSON.stringify(launched ?? null));
+  const ranAnswer = await running;
+  check("and the Run command answered that it executed", ranAnswer.ran === true, ranAnswer.detail);
+
+  const closedForm = await api.userforms("close", "Quarter Entry");
+  check("the running form closes the way its X would", closedForm.ran === true, closedForm.detail);
+
+  await waitFor("design mode to return", async () =>
+    (await api.state()).debugMode === "design", { budgetMs: 15000 });
+  await waitFor("the native designer window to go back down", async () => {
+    const afterRun = await api.state();
+    const rows = (await api.windows()).windows ?? [];
+    return afterRun.paletteVisible === false
+      && !rows.some((w) => w.type === 1 && w.visible && w.caption.includes(form));
+  }, { budgetMs: 15000 });
+  check("and the native designer window went back down, no toolbox standing", true);
+
   // The round trip a click makes: away to the code tab, back to the designer tab. A tab
   // rebuilt from the strip WITHOUT its face is the code identity, so clicking back onto
   // the designer activated the code pane instead and the designer tab never took the slot

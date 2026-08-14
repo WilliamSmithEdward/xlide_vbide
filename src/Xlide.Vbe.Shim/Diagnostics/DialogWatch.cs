@@ -159,6 +159,43 @@ internal static unsafe class DialogWatch
         return false;
     }
 
+    /// <summary>The window class a RUNNING form wears - the forms runtime's own frame.</summary>
+    private const string RunFormClass = "ThunderDFrame";
+
+    /// <summary>WM_CLOSE: what clicking a form's X posts, QueryClose and all.</summary>
+    private const uint WmClose = 0x0010;
+
+    /// <summary>
+    /// The captions of every form RUNNING in this process right now. Off the host thread on
+    /// purpose, like everything here: a modally running form holds the host thread inside the
+    /// Run command until it closes, and this is the instrument that watches it do so.
+    /// </summary>
+    public static string[] RunningForms() =>
+        [.. TopLevelRunForms().Select(Win32.ReadWindowText)];
+
+    /// <summary>
+    /// Closes a running form the way its X would - WM_CLOSE, posted - matched on caption, or
+    /// the first one standing when no caption is given. False when nothing matched.
+    /// </summary>
+    public static bool CloseRunningForm(string? caption)
+    {
+        foreach (var form in TopLevelRunForms())
+        {
+            var title = Win32.ReadWindowText(form);
+            if (caption is { Length: > 0 }
+                && !title.Contains(caption, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            Log.Info($"dialog watch: closing the running form \"{title}\"");
+            Win32.PostMessage(form, WmClose, 0, 0);
+            return true;
+        }
+
+        return false;
+    }
+
     /*
      * The enumeration callbacks must be static and unmanaged, so the window each pass
      * collects goes into a static list behind a gate. Collection is the only thing done
@@ -173,6 +210,16 @@ internal static unsafe class DialogWatch
         {
             Collected.Clear();
             Win32.EnumWindows((nint)(delegate* unmanaged<nint, nint, int>)&OnTopLevel, 0);
+            return [.. Collected];
+        }
+    }
+
+    private static nint[] TopLevelRunForms()
+    {
+        lock (Gate)
+        {
+            Collected.Clear();
+            Win32.EnumWindows((nint)(delegate* unmanaged<nint, nint, int>)&OnTopLevelForm, 0);
             return [.. Collected];
         }
     }
@@ -195,6 +242,21 @@ internal static unsafe class DialogWatch
         if (owner == Win32.GetCurrentProcessId()
             && Win32.IsWindowVisible(window)
             && Win32.ReadClassName(window) == DialogClass)
+        {
+            Collected.Add(window);
+        }
+
+        return Collected.Count < 32 ? 1 : 0;
+    }
+
+    [UnmanagedCallersOnly]
+    private static int OnTopLevelForm(nint window, nint parameter)
+    {
+        uint owner;
+        Win32.GetWindowThreadProcessId(window, &owner);
+        if (owner == Win32.GetCurrentProcessId()
+            && Win32.IsWindowVisible(window)
+            && Win32.ReadClassName(window) == RunFormClass)
         {
             Collected.Add(window);
         }

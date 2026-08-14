@@ -1899,6 +1899,15 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface?.FlushEdits();
         SyncCaretToPane();
 
+        // Run with a designer tab holding the active slot runs THE FORM - the editor's own F5
+        // with a designer window selected. The flush above still matters: the form's
+        // code-behind may hold unwritten page edits, and running stale code is the same bug
+        // running a stale module was.
+        if (command == VbeCommands.Command.Run && _activeDesignerTab is { } designTab)
+        {
+            return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
+        }
+
         // Toggling a breakpoint is bookkeeping as well as a command. The editor cannot report which
         // lines carry one, so the record kept here is the only thing the surface can draw from, and
         // a route that skips it sets a breakpoint that is real and invisible.
@@ -1959,6 +1968,60 @@ internal sealed partial class AddInSession : IDisposable
         RefreshSurfacePlacement();
 
         return outcome;
+    }
+
+    /// <summary>
+    /// A designer window left standing for a form the Run command was aimed at. Measured
+    /// 2026-08-14, one layer per trace: the command POSTS the editor's own action, so a
+    /// synchronous put-down un-aims it and the run degrades to the Macros dialog; and a
+    /// put-down on the tick that sees the mode LEAVE design lands between run-start and the
+    /// form window appearing, and the launching form dies with its designer. Natively the
+    /// designer stands visible behind the running form, so that is what this does: down on
+    /// the tick that sees the run OVER (design again after not-design), or on the deadline
+    /// when the run never took hold.
+    /// </summary>
+    private (string Module, string ProjectId, long Deadline, bool SawRun)? _designerRunStanding;
+
+    /// <summary>
+    /// Runs a form the way the editor's own Run does with its designer selected. The Run
+    /// command aims at the editor's active window, so the form's native designer window is
+    /// made visible and focused - this product otherwise keeps designer windows down - and
+    /// goes back down through <see cref="_designerRunStanding"/> once the run has taken
+    /// hold, because the command's action is posted and putting the window down here would
+    /// un-aim it before the action reads its target.
+    /// </summary>
+    private VbeCommands.CommandRun RunFormFromDesigner(string moduleName, string projectId)
+    {
+        try
+        {
+            using var component = FindComponent(moduleName, projectId, out _);
+            if (component is null)
+            {
+                return VbeCommands.CommandRun.No($"no component named {moduleName}");
+            }
+
+            using var window = component.CallObject("DesignerWindow");
+            if (window is null)
+            {
+                return VbeCommands.CommandRun.No($"{moduleName}'s designer window would not open");
+            }
+
+            window.SetBool("Visible", true);
+            window.Invoke("SetFocus");
+
+            Log.Info($"run form: {moduleName} through the editor's own Run");
+            var outcome = VbeCommands.Execute(_editor, VbeCommands.Command.Run);
+
+            _designerRunStanding = (moduleName, projectId, Environment.TickCount64 + 3000, false);
+            WatchDebugState();
+
+            return outcome.Ran ? VbeCommands.CommandRun.Ok($"ran {moduleName}") : outcome;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"run form: {moduleName} would not run", ex);
+            return VbeCommands.CommandRun.No($"{moduleName}'s designer would not take focus");
+        }
     }
 
     /// <summary>
@@ -3766,6 +3829,39 @@ internal sealed partial class AddInSession : IDisposable
             Log.Verbose($"debug: mode {mode} ({(mode == BreakMode ? "break" : mode == DesignMode ? "design" : "run")})");
 
             PublishDebugMode(mode);
+
+            // A designer window a Run was aimed at goes down when the run is OVER - design
+            // mode again after the run was seen - or at the deadline when the run never took
+            // hold. Not at the Run itself (the posted action still needs the aim), and not
+            // when the run STARTS (hiding the designer between run-start and the form window
+            // appearing killed the launching form; natively the designer stands behind it).
+            if (_designerRunStanding is { } standing)
+            {
+                if (mode != DesignMode)
+                {
+                    if (!standing.SawRun)
+                    {
+                        _designerRunStanding = (standing.Module, standing.ProjectId, standing.Deadline, true);
+                    }
+                }
+                else if (standing.SawRun || Environment.TickCount64 > standing.Deadline)
+                {
+                    _designerRunStanding = null;
+                    try
+                    {
+                        using var ranForm = FindComponent(standing.Module, standing.ProjectId, out _);
+                        if (ranForm is not null)
+                        {
+                            FormDesignService.KeepDesignerDown(ranForm);
+                            Log.Info($"run form: {standing.Module}'s designer put back down");
+                        }
+                    }
+                    catch
+                    {
+                        // A component gone mid-run has no window left to put down.
+                    }
+                }
+            }
 
             // THE TITLE BAR SAYS THE MODE, because it is the one piece of state a developer needs
             // at a glance from another window: whether the thing they alt-tabbed away from is

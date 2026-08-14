@@ -369,10 +369,57 @@ the host-owns-membership invariant survives.
     BackColor is deliberately NOT painted until the walk reads BackStyle: its default is
     transparent, and colouring what the real surface leaves clear is the wrong direction
     to approximate.
+  - *Parity round 1, from the owner's side-by-side* - **landed 2026-08-13, late** (the
+    owner ran the fixture form beside the canvas and named the gaps): the form's chrome is
+    DERIVED now like the Frame's - the title bar sits inside the form rect and eats exactly
+    `(Height - InsideHeight)` less the border split, where before it floated above and the
+    full outer rect stood in for the client, sitting every control measurably off the
+    running form - and it wears the RUNTIME's look on this machine (light bar, dark caption
+    left, close glyph right) instead of the classic blue guess. A TabStrip's tabs ride the
+    walk's row now (they are not controls, unlike a MultiPage's pages, so the strip drew as
+    a bare box), and ScrollBar/SpinButton wear the arrow caps the runtime draws, axis from
+    their own aspect. Two of the owner's observed gaps are NOT canvas defects and are
+    recorded as the design surface's meaning: a checked Taxable and a filled combo exist at
+    RUN time only (`UserForm_Initialize` sets them), and the canvas - like the native
+    designer - shows design-time state.
+  - *The dead property slot, the owner's screenshot's real finding* - **found and fixed
+    2026-08-14**: the launched form wearing `UserForm1` was the current fixture telling
+    the truth. A form-level property set through the api landed on the DESIGNER dispatch,
+    which accepts the write and echoes it back on every read - route, markup, canvas all
+    agreed with each other and with nothing real - while the form frame paints a different
+    slot entirely: the component's Properties collection, the native Properties window's
+    own. Measured by running the form and reading the real window's title (designer said
+    "Quarter Entry", the running form and the design surface both said "UserForm1"; a
+    Caption written through the bag came up on the runtime titlebar immediately).
+    Form-level reads and writes now go BAG FIRST, designer dispatch only as fallback, in
+    the product walk, the debug walk and the apply - so the markup document, the canvas,
+    the native panel and the running form finally describe one form. The suite's run row
+    doubles as the pin: the launched window must wear the caption the api set. The
+    label-like "Quarter Entry" text inside the owner's run window remains unexplained by
+    the current plan and is left as an open observation.
+  - *Run is the form's, from a designer tab* - **landed with it** (the owner's ask): Run
+    with a designer tab holding the active slot runs THE FORM, the editor's own F5 with a
+    designer selected. The native designer window is made visible and focused as the aim;
+    the editor POSTS the Run action and answers, reading the aim ~30ms later (measured
+    2026-08-14 - the first cut put the window down synchronously after Execute, which
+    un-aimed the posted action and degraded the run to the Macros dialog; the second cut
+    put it down on the tick that saw the run START, which landed between run-start and the
+    form window appearing and killed the launching form). So the window stands BEHIND the
+    running form, exactly as the native editor leaves it, and goes down on the tick that
+    sees the run OVER - or a 3s deadline when it never takes hold. A bonus fact from the same trace: a designer SURFACE is itself a child
+    `ThunderDFrame` - the runtime's own class - which is why the `userform` route
+    enumerates top-level windows only. The suite runs the fixture form, reads its runtime
+    caption off the real window, closes it by its X's own message, and waits for the
+    designer window and Toolbox to be down after.
   - *The parity probe* - materialise the native designer window (Visible on, capture by
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
     on control edges after. This is the canvas's definition-of-done row.
+  - *The designer route refuses a from-disk form* - found 2026-08-13, late: the debug
+    `designer` GET answers "has no designer to read" for a form loaded from disk and never
+    touched, while the designer TAB reads the same form fine seconds later through the
+    identical `GetObject("Designer")` call. Suite-built forms never hit it (their designers
+    are live from creation), so it is bounded to the route; parked with a spawned task.
   - *Rename-follows-tab* - **landed 2026-08-13, late**, and the parked finding is
     corrected: the live re-trace (a `waitForLog` blocking read armed BEFORE the rename,
     the move the first attempt's post-hoc log walk should have been) proved the product
@@ -401,8 +448,10 @@ the host-owns-membership invariant survives.
   (Spikes 3 and 6.)
 - **M4 - the inspector.** Selection flows into the Properties panel; property writes go
   through the model; the transaction log starts recording. (Spike 7.)
-- **M5 - direct manipulation.** Move, resize, nudge, add from a toolbox, delete, align and
-  distribute, undo over the transaction log. (Spike 2 in full.)
+- **M5 - direct manipulation.** Click to select, drag to move, resize by handles, nudge,
+  add from an xlide toolbox by true drag-and-drop, delete, align and distribute, undo over
+  the transaction log - the native designer's full manipulation vocabulary, on our canvas.
+  (Spike 2 in full. Confirmed as the road with the owner, 2026-08-13.)
 - **M6 - the finishing set.** Tab order, z-order, zoom, snapping and guides - and the
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.

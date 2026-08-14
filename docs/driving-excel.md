@@ -253,6 +253,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `console` | `console(last)` | what the page said to itself |
 | `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |
 | `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |
+| `userform` | `userforms(action, caption)` | the RUNNING forms' captions; `"close"` posts the X's own close. Needs no host thread, so it answers whatever the host thread is in |
 | `doctor` | `doctor()` | the start-of-session checklist |
 | `documents` | `documents()` | what the surface holds TEXT for |
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |

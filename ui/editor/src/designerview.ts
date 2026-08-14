@@ -432,11 +432,34 @@ export class DesignerView {
 
     const titlebar = document.createElement("div");
     titlebar.className = "dc-form-title";
-    titlebar.textContent = payload.form?.caption ?? this.id.module;
+    const titleText = document.createElement("span");
+    titleText.className = "dc-form-title-text";
+    titleText.textContent = payload.form?.caption ?? this.id.module;
+    const titleClose = document.createElement("span");
+    titleClose.className = "dc-form-close";
+    titleClose.textContent = "×";
+    titlebar.append(titleText, titleClose);
     form.appendChild(titlebar);
 
     const client = document.createElement("div");
     client.className = "dc-form-client";
+    // The REAL client area when the model says it - the Frame's own rule at form scale: side
+    // borders split the width difference, and what remains of the height difference above
+    // the client is the title bar. Without this the full outer rect stood in for the client,
+    // and every control sat measurably off what the running form shows (the owner's
+    // side-by-side, 2026-08-13). The floating-bar fallback keeps forms whose insides the
+    // model will not answer rendering as before.
+    const outer = payload.form;
+    if (outer?.insideWidth && outer?.insideHeight && outer.width && outer.height) {
+      const side = Math.max(0, (outer.width - outer.insideWidth) / 2) * PT;
+      const top = Math.max(0, (outer.height - outer.insideHeight) * PT - side);
+      client.style.left = `${side}px`;
+      client.style.right = `${side}px`;
+      client.style.bottom = `${side}px`;
+      client.style.top = `${top}px`;
+      titlebar.style.height = `${top}px`;
+      form.classList.add("chromed");
+    }
     form.appendChild(client);
 
     // Flat rows into a tree by parent NAME, the walk's own shape. A parent the rows never
@@ -531,10 +554,16 @@ export class DesignerView {
         const strip = document.createElement("div");
         strip.className = "dc-page-strip";
         const pages = byParent.get(row.name.toLowerCase()) ?? [];
-        for (const [index, page] of pages.entries()) {
+        // A MultiPage's headers are its Page children; a TabStrip's are its own Tabs, which
+        // are not controls and ride the row instead - without them the strip drew as a bare
+        // box (the owner's side-by-side, 2026-08-13).
+        const headers = row.type === "TabStrip" && row.tabs?.length
+          ? row.tabs
+          : pages.map((page) => page.caption ?? page.name);
+        for (const [index, header] of headers.entries()) {
           const tab = document.createElement("span");
           tab.className = "dc-page-tab" + (index === 0 ? " first" : "");
-          tab.textContent = page.caption ?? page.name;
+          tab.textContent = header;
           strip.appendChild(tab);
         }
         box.appendChild(strip);
@@ -573,6 +602,21 @@ export class DesignerView {
         const arrow = document.createElement("span");
         arrow.className = "dc-drop-arrow";
         box.appendChild(arrow);
+        break;
+      }
+
+      case "ScrollBar":
+      case "SpinButton": {
+        // The runtime draws arrow buttons at the ends; a bare rectangle read as a TextBox
+        // in the owner's side-by-side. Vertical when taller than wide, the way the control
+        // itself decides its axis.
+        const vertical = (row.height ?? 0) >= (row.width ?? 0);
+        box.classList.add(vertical ? "dc-axis-v" : "dc-axis-h");
+        const startCap = document.createElement("span");
+        startCap.className = "dc-arrow dc-arrow-start";
+        const endCap = document.createElement("span");
+        endCap.className = "dc-arrow dc-arrow-end";
+        box.append(startCap, endCap);
         break;
       }
 

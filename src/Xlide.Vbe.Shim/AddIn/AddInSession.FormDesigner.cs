@@ -65,17 +65,18 @@ internal sealed partial class AddInSession
     private static (DebugDesignerForm Form, List<DebugDesignerControl> Rows) CollectDesigner(
         DispatchObject component, DispatchObject designer)
     {
-        // Width and Height are not the designer's: they live on the component's own Properties
-        // collection, the one the native Properties window edits. InsideWidth and InsideHeight
-        // ARE the designer's, and the pair differs by the frame chrome.
+        // The component's own Properties collection FIRST for the form-level values - the
+        // native Properties window's slot, and the one the real surface paints; the designer
+        // dispatch holds a copy that never reaches the form frame (measured 2026-08-14).
+        // InsideWidth and InsideHeight stay the designer's: live geometry, no second slot.
         var form = new DebugDesignerForm(
-            TryText(designer, "Caption"),
-            TryNumber(designer, "Width") ?? ComponentPropertyNumber(component, "Width"),
-            TryNumber(designer, "Height") ?? ComponentPropertyNumber(component, "Height"),
+            FormDesignService.PropertyText(component, "Caption") ?? TryText(designer, "Caption"),
+            FormDesignService.PropertyNumber(component, "Width") ?? TryNumber(designer, "Width"),
+            FormDesignService.PropertyNumber(component, "Height") ?? TryNumber(designer, "Height"),
             TryNumber(designer, "InsideWidth"),
             TryNumber(designer, "InsideHeight"),
-            TryInt(designer, "BackColor"),
-            TryInt(designer, "ForeColor"),
+            FormDesignService.PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor"),
+            FormDesignService.PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor"),
             TryInt(designer, "Zoom"));
 
         var rows = new List<DebugDesignerControl>();
@@ -538,21 +539,6 @@ internal sealed partial class AddInSession
         try
         {
             return target.GetBool(name);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>A number off the component's Properties collection, the native panel's source.</summary>
-    private static double? ComponentPropertyNumber(DispatchObject component, string name)
-    {
-        try
-        {
-            using var properties = component.GetObject("Properties");
-            using var row = properties?.CallObject("Item", name);
-            return row?.GetDouble("Value");
         }
         catch
         {
