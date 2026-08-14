@@ -411,14 +411,21 @@ the host-owns-membership invariant survives.
     class - which is why the `userform` route enumerates top-level windows only. The suite
     runs the fixture form, reads its runtime caption off the real window, closes it by its
     X's own message, and waits for the designer window and Toolbox to be down after. And
-    the Toolbox that rides designer visibility is put down TOTALLY at the event layer now
-    (the owner's third report, 2026-08-14): matched by HANDLE off the object model - Type
-    10, never the localised caption - on every show, with no designer-visibility exemption.
-    The old exemption's "designer surface" class was actually the editor FRAME's, so the
-    set it consulted had been empty since the day it landed, and a palette admitted while
-    a run kept a designer visible survived the designer's hide, because nothing re-fires
-    show. The Watches and Locals ghosts share the palette class and are left entirely
-    alone, which the handle match is FOR.
+    the Toolbox is put down TOTALLY at the event layer now, a policy that took the owner's
+    third AND fourth reports to finish (2026-08-14): the third fix matched the Toolbox by
+    handle but still gated on the VBFloatingPalette class, and the owner's next screenshot
+    plus an outside-the-process enumeration proved the standing window was the OTHER
+    species - an Office "F3 MinFrame" tool-window frame, restored at SESSION BOOT by a
+    workbook saved with designer state, which every earlier defense AND the enums that
+    verified them filtered out by class, and which the object model's Visible sweep cannot
+    even touch (route-end sweeps ran dozens of times while it stood). The rule now: a
+    MinFrame show goes down unconditionally, because every native tool window this product
+    replaces wears that frame and none of ours ever does; a VBFloatingPalette show goes
+    down only when the object model's Type-10 handle says it IS the Toolbox, because the
+    Watches and Locals ghosts share that class; and a Win32 sweep at hook-arm catches a
+    Toolbox shown before anything watched. The old "designer surface" exemption is gone
+    entirely - its class was the editor FRAME's, so the set it consulted had been empty
+    since the day it landed.
   - *The parity probe* - materialise the native designer window (Visible on, capture by
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff

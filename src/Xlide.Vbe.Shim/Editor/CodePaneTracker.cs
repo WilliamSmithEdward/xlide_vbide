@@ -97,6 +97,19 @@ internal sealed class CodePaneTracker : IDisposable
     public void Start()
     {
         _hook = WindowEventHook.Install(OnWindowEvent);
+
+        // A Toolbox shown BEFORE the hook armed fires no event this session will ever hear:
+        // a workbook saved with designer state restores it during load, and a host that
+        // loads the add-in late leaves that show in the past. One Win32 sweep at arm time
+        // closes the gap - the object model's Visible cannot, for this species (measured
+        // 2026-08-14: route-end OM sweeps ran dozens of times while a restored Toolbox
+        // stood).
+        foreach (var standing in VisibleMiniFrames())
+        {
+            Log.Info($"code panes: putting the boot toolbox down {standing:X}");
+            Win32.ShowWindow(standing, 0);
+        }
+
         Refresh();
     }
 
@@ -149,8 +162,18 @@ internal sealed class CodePaneTracker : IDisposable
         return 0;
     }
 
-    /// <summary>The class the editor's floating palettes - the Toolbox above all - wear.</summary>
+    /// <summary>One class the editor's floating palettes wear.</summary>
     private const string FloatingPaletteClass = "VBFloatingPalette";
+
+    /// <summary>
+    /// The OTHER class a palette wears: the Office tool-window frame, "F3 MinFrame" plus a
+    /// per-process hex suffix, so it is matched by prefix. The Toolbox restored by a
+    /// workbook saved with designer state shows as THIS species at session boot (measured
+    /// 2026-08-14, the owner's fourth report: the standing window's class, read from
+    /// outside, was "F3 MinFrame 8a860000" - and every defense before this one, plus the
+    /// verification enums that declared them working, filtered on VBFloatingPalette).
+    /// </summary>
+    private const string MiniFramePrefix = "F3 MinFrame";
 
     /// <summary>
     /// The Toolbox window's handle, resolved from the object model the first time a palette
@@ -159,13 +182,47 @@ internal sealed class CodePaneTracker : IDisposable
     /// </summary>
     private nint _toolboxWindow;
 
-    private bool IsTheToolbox(nint window)
+    private bool IsTheToolbox(nint window) =>
+        window != 0 && (window == _toolboxWindow || window == ResolveToolboxWindow());
+
+    /*
+     * The boot sweep's enumeration callback must be static and unmanaged, so its hits go
+     * into a static list behind a gate - the dialog watch's own pattern. Collection is the
+     * only thing done under the gate.
+     */
+    private static readonly Lock MiniFrameGate = new();
+    private static readonly List<nint> MiniFrameHits = [];
+
+    /// <summary>Every visible top-level MinFrame this process owns - native tool-window
+    /// frames, none of which is ever this product's.</summary>
+    private static unsafe nint[] VisibleMiniFrames()
     {
-        if (window == _toolboxWindow)
+        lock (MiniFrameGate)
         {
-            return true;
+            MiniFrameHits.Clear();
+            Win32.EnumWindows((nint)(delegate* unmanaged<nint, nint, int>)&OnTopLevelMiniFrame, 0);
+            return [.. MiniFrameHits];
+        }
+    }
+
+    [UnmanagedCallersOnly]
+    private static int OnTopLevelMiniFrame(nint window, nint parameter)
+    {
+        Win32.GetWindowThreadProcessId(window, out var owner);
+        if (owner == Win32.GetCurrentProcessId()
+            && Win32.IsWindowVisible(window)
+            && Win32.ReadClassName(window).StartsWith(MiniFramePrefix, StringComparison.Ordinal))
+        {
+            MiniFrameHits.Add(window);
         }
 
+        return MiniFrameHits.Count < 32 ? 1 : 0;
+    }
+
+    /// <summary>Reads the Toolbox's handle off the object model and remembers it. Zero when
+    /// the editor will not answer - the next asker resolves again.</summary>
+    private nint ResolveToolboxWindow()
+    {
         try
         {
             using var windows = _editor.GetObject("Windows");
@@ -176,17 +233,16 @@ internal sealed class CodePaneTracker : IDisposable
                 if (candidate?.GetInt32("Type") == 10)
                 {
                     _toolboxWindow = candidate.GetInt32("HWnd");
-                    return window == _toolboxWindow;
+                    return _toolboxWindow;
                 }
             }
         }
         catch
         {
-            // An editor that will not answer keeps its palette this once; the next show asks
-            // again.
+            // An editor that will not answer keeps its palette this once.
         }
 
-        return false;
+        return 0;
     }
 
     private void OnWindowEvent(WindowEvent windowEvent)
@@ -230,20 +286,23 @@ internal sealed class CodePaneTracker : IDisposable
 
         var className = Win32.ReadClassName(windowEvent.Window);
 
-        // THE TOOLBOX NEVER SHOWS - the owner's rule, restated three times before it became
-        // this total (2026-08-13 twice, 2026-08-14). The editor re-shows it on POSTED
-        // messages whenever a designer stirs or takes real focus, which lands AFTER every
-        // synchronous put-down this product makes, so the put-down lives here, in the event
-        // that showed it. The previous policy admitted a palette while a designer surface
-        // was visible and leaked exactly there: a designer is REGULARLY visible now while a
-        // form runs, a palette admitted then survived the designer's hide because nothing
-        // re-fires show - and the class its exemption tracked was the editor FRAME's, so
-        // the set it consulted had been empty from the first day. The window is matched by
-        // HANDLE off the object model - Type 10, never the localised caption - so the
-        // Watches and Locals ghosts, palettes of the same class, are left entirely alone.
-        if (windowEvent.IsShow && className == FloatingPaletteClass && IsTheToolbox(windowEvent.Window))
+        // THE TOOLBOX NEVER SHOWS - the owner's rule, restated four times before every hole
+        // was found (2026-08-13 twice, 2026-08-14 twice). It arrives on POSTED messages
+        // after every synchronous put-down this product makes, and at SESSION BOOT when a
+        // workbook saved with designer state restores it - so the put-down lives here, in
+        // the event that showed it, for BOTH of its window species. An Office MinFrame (the
+        // species the boot restore uses, which every earlier defense filtered out by class)
+        // goes down UNCONDITIONALLY: every native tool window this product replaces wears
+        // that frame and none of ours ever does, and the object model's Visible cannot even
+        // touch it (measured 2026-08-14: route-end sweeps ran dozens of times while a
+        // restored Toolbox stood). A VBFloatingPalette goes down only when it IS the
+        // Toolbox, matched by HANDLE off the object model - Type 10, never the localised
+        // caption - because the Watches and Locals ghosts share that class.
+        if (windowEvent.IsShow
+            && (className.StartsWith(MiniFramePrefix, StringComparison.Ordinal)
+                || (className == FloatingPaletteClass && IsTheToolbox(windowEvent.Window))))
         {
-            Log.Verbose($"window event: putting the toolbox down {windowEvent.Window:X}");
+            Log.Info($"window event: putting the toolbox down {windowEvent.Window:X} ({className})");
             Win32.ShowWindow(windowEvent.Window, 0);
         }
 

@@ -697,11 +697,13 @@ public sealed record DebugVisibilityReply(
     [property: JsonPropertyName("detail")] string Detail,
     [property: JsonPropertyName("visible")] bool Visible);
 
-/// <summary>One native editor window, as GET windows lists them.</summary>
+/// <summary>One native editor window, as GET windows lists them. `hwnd` is the window's own
+/// handle, for matching an object-model row to what enumeration or a screenshot found.</summary>
 public sealed record DebugWindowRow(
     [property: JsonPropertyName("type")] int Type,
     [property: JsonPropertyName("caption")] string Caption,
-    [property: JsonPropertyName("visible")] bool Visible);
+    [property: JsonPropertyName("visible")] bool Visible,
+    [property: JsonPropertyName("hwnd")] int Hwnd = 0);
 
 public sealed record DebugWindowsReply(
     [property: JsonPropertyName("windows")] DebugWindowRow[] Windows);

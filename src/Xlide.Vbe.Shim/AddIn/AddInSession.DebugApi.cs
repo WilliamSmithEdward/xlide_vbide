@@ -2909,7 +2909,8 @@ internal sealed partial class AddInSession
                         rows.Add(new DebugWindowRow(
                             window.GetInt32("Type"),
                             window.GetString("Caption") ?? string.Empty,
-                            window.GetBool("Visible")));
+                            window.GetBool("Visible"),
+                            window.GetInt32("HWnd")));
                     }
                 }
 
