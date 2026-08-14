@@ -1359,7 +1359,14 @@ export class Workspace {
       if (!tab?.dataset.module) {
         return null;
       }
-      return { module: tab.dataset.module, project: tab.dataset.project || null };
+      // WITH the face: a designer tab rebuilt without it is the same module's CODE identity,
+      // and the click then asks the host to activate the code pane - which is exactly how
+      // clicking back onto a designer tab did nothing (the developer, 2026-08-13).
+      return {
+        module: tab.dataset.module,
+        project: tab.dataset.project || null,
+        ...(tab.dataset.face === "design" ? { face: "design" as const } : {}),
+      };
     };
 
     strip.addEventListener("click", (event) => {
@@ -1479,7 +1486,11 @@ export class Workspace {
         return;
       }
 
-      const id: DocumentId = { module: tab.dataset.module, project: tab.dataset.project || null };
+      const id: DocumentId = {
+        module: tab.dataset.module,
+        project: tab.dataset.project || null,
+        ...(tab.dataset.face === "design" ? { face: "design" as const } : {}),
+      };
       const startX = event.clientX;
       const startY = event.clientY;
       const pointerId = event.pointerId;

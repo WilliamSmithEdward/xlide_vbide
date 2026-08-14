@@ -252,6 +252,17 @@ try {
     withDesigner.active === true && /\[Design\]/.test(withDesigner.label),
     JSON.stringify(withDesigner));
 
+  // The round trip a click makes: away to the code tab, back to the designer tab. A tab
+  // rebuilt from the strip WITHOUT its face is the code identity, so clicking back onto
+  // the designer activated the code pane instead and the designer tab never took the slot
+  // back (the developer, 2026-08-13).
+  const awayToCode = await api.act("activate", { module: form });
+  check("activating the code tab takes the active slot from the designer",
+    awayToCode.did === true, awayToCode.detail);
+  const backToDesign = await api.act("activate", { module: form, face: "design" });
+  check("and activating the designer tab takes it back",
+    backToDesign.did === true, backToDesign.detail);
+
   // The tab's own apply - the path Ctrl+S takes, through the view's document and the host
   // round trip - proven against the live form, not just against the route it shares a
   // service with.

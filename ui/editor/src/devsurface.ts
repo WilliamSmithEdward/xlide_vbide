@@ -764,9 +764,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       const wantedModule = module.toLowerCase();
       const wantedProject = project === null ? null : project.toLowerCase();
+      // The FACE is part of the identity: a form's code tab and designer tab share a name,
+      // and without this an activate could pick either. No face means the code tab.
+      const wantedFace = args.face === "design" ? "design" : undefined;
       const open = workspace.snapshot().groups.flatMap((group) => group.tabs);
       const matches = open.filter((tab) => tab.module.toLowerCase() === wantedModule
-        && (wantedProject === null || (tab.project ?? "").toLowerCase() === wantedProject));
+        && (wantedProject === null || (tab.project ?? "").toLowerCase() === wantedProject)
+        && (tab.face ?? undefined) === wantedFace);
 
       if (matches.length === 0) {
         const strip = open.map((tab) => tab.label).join(", ");
@@ -789,7 +793,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         picked = inShown;
       }
 
-      workspace.pickTab({ module: picked.module, project: picked.project });
+      workspace.pickTab({
+        module: picked.module,
+        project: picked.project,
+        ...(picked.face === "design" ? { face: "design" as const } : {}),
+      });
 
       /*
        * AWAITED, because the outcome is not synchronous the first time.
@@ -809,7 +817,8 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         const active = workspace.activeDocument();
         return active !== null
           && active.module.toLowerCase() === picked.module.toLowerCase()
-          && (active.project ?? "").toLowerCase() === (picked.project ?? "").toLowerCase();
+          && (active.project ?? "").toLowerCase() === (picked.project ?? "").toLowerCase()
+          && (active.face ?? undefined) === (picked.face ?? undefined);
       };
 
       return (async () => {
