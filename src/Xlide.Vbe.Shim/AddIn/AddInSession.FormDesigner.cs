@@ -102,31 +102,19 @@ internal sealed partial class AddInSession
             return HostError($"{module} is not a UserForm of this project");
         }
 
-        using var designer = component.GetObject("Designer");
-        if (designer is null)
+        // The PRODUCT projection, not a route-local one: the tab, the apply and this route
+        // must all print the same document, form properties included, and two projections is
+        // exactly the drift the service exists to end.
+        var markup = FormDesignService.MarkupOf(component, module, out var markupReason);
+        if (markup is null)
         {
-            return HostError($"{module} has no designer");
+            return HostError(markupReason ?? $"{module} could not be projected");
         }
-
-        var (form, rows) = CollectDesigner(component, designer);
-        var markup = Xlide.Vbe.Core.Forms.FormMarkup.Print(MarkupSpecOf(module, form, rows));
 
         return JsonSerializer.Serialize(
             new DebugDesignerMarkupReply(module, DisplayFromProjectId(foundProject), markup),
             DebugJsonContext.Default.DebugDesignerMarkupReply);
     }
-
-    private static Xlide.Vbe.Core.Forms.FormSpec MarkupSpecOf(
-        string module, DebugDesignerForm form, List<DebugDesignerControl> rows) => new(
-            module,
-            form.Caption,
-            form.Width,
-            form.Height,
-            [],
-            [.. rows.Select(row => new Xlide.Vbe.Core.Forms.ControlSpec(
-                row.Type, row.Name, row.Caption,
-                row.Left, row.Top, row.Width, row.Height,
-                row.Parent, []))]);
 
     /// <summary>
     /// Applies a markup document to the live form as a NAME-KEYED DIFF: controls only in the
@@ -153,6 +141,11 @@ internal sealed partial class AddInSession
         // markup tab's Ctrl+S ships in Release and shares it. This route is a wrapper: same
         // operation by construction, its own JSON.
         var outcome = FormDesignService.ApplyMarkup(component, module, body);
+        if (!outcome.ParseFailed)
+        {
+            RefreshDesignerTabFor(module);
+        }
+
         if (outcome.ParseFailed)
         {
             return HostError(outcome.Refused!);
@@ -215,6 +208,7 @@ internal sealed partial class AddInSession
         {
             var (actualName, actualType) = FormDesignService.AddControl(owner, progId, name, left, top, width, height);
             Log.Info($"designer: added {actualType} '{actualName}' to {module}{(parent is { Length: > 0 } ? $" in {parent}" : "")}");
+            RefreshDesignerTabFor(module);
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "add", actualName, actualType,
                     $"added to {(parent is { Length: > 0 } ? parent : module)}"),
@@ -257,6 +251,7 @@ internal sealed partial class AddInSession
         }
 
         Log.Info($"designer: removed '{name}' from {module}");
+        RefreshDesignerTabFor(module);
         return JsonSerializer.Serialize(
             new DebugDesignerEditReply(true, "remove", name, null, $"removed from {module}"),
             DebugJsonContext.Default.DebugDesignerEditReply);
@@ -293,6 +288,7 @@ internal sealed partial class AddInSession
         try
         {
             var display = FormDesignService.SetControlProperty(component, designer, name, property, value, asKind);
+            RefreshDesignerTabFor(module);
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {display}"),
                 DebugJsonContext.Default.DebugDesignerEditReply);

@@ -286,6 +286,46 @@ try {
   check("and the form is untouched by the refusal",
     !untouchedByTab.controls.some((control) => control.name === "TabBtn"));
 
+  // ---- form properties in the markup, linked to the native panel's source, and LIVE ----
+
+  // The refusal above deliberately left the BAD text in the tab's document, dirty - and a
+  // dirty document is protected from every push. Restore it first, which also pins that an
+  // ok apply reopens the document to pushes.
+  await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
+
+  // A change made OUTSIDE the tab - the api's set, same source the native Properties window
+  // writes - reaches the OPEN tab's document without anyone re-activating it: the routes
+  // re-project the tab after every mutation.
+  await api.designerEdit("set", { module: form, project, property: "BackColor", value: "12632256" });
+  await waitFor("the open tab's document to grow the BackColor line", async () => {
+    const read = await api.act("designerMarkup", { module: form });
+    return /BackColor = 12632256/.test(String(read.data ?? ""));
+  }, { budgetMs: 15000 });
+  check("a form property set through the api appears in the OPEN tab's document, live", true);
+
+  const routeMarkup = await api.designerMarkup(form, project);
+  check("and in the projection route's document",
+    /\r?\n  BackColor = 12632256\r?\n/.test(routeMarkup));
+
+  // The dialect's rule, held from the other side: a document WITHOUT the line cannot erase
+  // the colour - an unspoken property is one an apply never touches.
+  await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
+  const kept = await api.designer(form, project);
+  check("an apply of a document without the property line leaves the colour standing",
+    kept.form.backColor === 12632256, String(kept.form.backColor));
+
+  // A document WITH the line changes it - the write goes where the native panel's would.
+  const recoloured = `${String(tabMarkup.data).replace(/\r?\n/, "\r\n  BackColor = 12639424\r\n")}`;
+  await api.act("designerApply", { module: form, markup: recoloured });
+  const changed = await api.designer(form, project);
+  check("an apply of a document with the line writes the native panel's own property",
+    changed.form.backColor === 12639424, String(changed.form.backColor));
+
+  await api.designerEdit("set", { module: form, project, property: "BackColor", value: "-2147483633" });
+  const defaulted = await api.designerMarkup(form, project);
+  check("back at the default, the line leaves the document - defaults stay unspoken",
+    !/BackColor/.test(defaulted));
+
   await api.pane("close", { module: form, face: "design" });
   await waitFor("the designer tab to leave the strip", async () =>
     !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)

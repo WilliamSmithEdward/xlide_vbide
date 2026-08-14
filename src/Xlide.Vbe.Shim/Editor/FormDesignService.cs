@@ -51,17 +51,37 @@ internal static class FormDesignService
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Walk(designer, null, controls, seen, 0);
 
+        // The form's own properties, as the native Properties window holds them - which is
+        // what links the markup's lines to that panel: same source, same value. Printed only
+        // when NOT the default, because the dialect's rule is that an unspoken property is
+        // one an apply can never erase - so a document without the line leaves a custom
+        // colour standing, and printing defaults on every form would bury the real choices.
+        var properties = new List<PropertySpec>();
+        if (TryInt(designer, "BackColor") is { } backColor && backColor != DefaultFormBackColor)
+        {
+            properties.Add(new PropertySpec("BackColor", backColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
+        }
+
+        if (TryInt(designer, "ForeColor") is { } foreColor && foreColor != DefaultFormForeColor)
+        {
+            properties.Add(new PropertySpec("ForeColor", foreColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
+        }
+
         var spec = new FormSpec(
             module,
             TryText(designer, "Caption"),
             TryNumber(designer, "Width") ?? PropertyNumber(component, "Width"),
             TryNumber(designer, "Height") ?? PropertyNumber(component, "Height"),
-            [],
+            properties,
             controls);
 
         KeepDesignerDown(component);
         return spec;
     }
+
+    /// <summary>COLOR_BTNFACE and COLOR_BTNTEXT as OLE colours: what a fresh form carries.</summary>
+    private const int DefaultFormBackColor = unchecked((int)0x8000000F);
+    private const int DefaultFormForeColor = unchecked((int)0x80000012);
 
     /// <summary>
     /// The controls as the analyzer's implicit members: name plus the type completion resolves
@@ -297,6 +317,23 @@ internal static class FormDesignService
         try
         {
             return target.GetDouble(name);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryInt(DispatchObject target, string name)
+    {
+        if (target.GetDispId(name) == DispId.Unknown)
+        {
+            return null;
+        }
+
+        try
+        {
+            return target.GetInt32(name);
         }
         catch
         {

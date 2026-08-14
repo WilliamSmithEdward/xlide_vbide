@@ -335,6 +335,37 @@ the host-owns-membership invariant survives.
      the drift the analyzer/tokenizer split teaches against.
   3. *Completions and hover* - control types, `at`/`size` scaffolding, known property
      paths per control kind; needs the language service shape of (2) to answer from.
+
+  **Form properties joined the markup 2026-08-13, late** (the owner's ask): the projection
+  prints the form's own property lines - `BackColor`, `ForeColor` to start - read from the
+  SAME source the native Properties window edits, which is what links the document to that
+  panel: same property bag, same value. Printed only when NOT the default, because the
+  dialect's standing rule is that an unspoken property is one an apply can never erase - a
+  document without the line leaves a custom colour standing (suite-pinned from both sides).
+  The projection is ONE path now: the route, the tab and the apply all print through
+  `FormDesignService`, the route's own copy retired the day it drifted. And the first
+  LIVENESS hooks landed with it: every designer mutation route re-projects an open tab, so
+  an api `set` reaches the tab's document without re-activation - unless the developer
+  holds unapplied edits, which a push never clobbers.
+
+  **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
+  xlide sees on the real form surface is the truth the canvas answers to):
+
+  - *Geometry by the model's own numbers* - containers expose `InsideWidth`/`InsideHeight`,
+    the real client areas; the walk carries them and the canvas derives its insets from them
+    instead of the guessed constants it opened with (frame caption strip, page body).
+  - *Appearance* - the walk carries per-control Font (name, size, bold, italic) and
+    BackColor/ForeColor plus the form's own, OLE colours converted host-side through the
+    system palette (`GetSysColor` for the &H8000000x indexes); the canvas drops its
+    hardcoded Tahoma-11px-on-grey for the real values.
+  - *The parity probe* - materialise the native designer window (Visible on, capture by
+    hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
+    capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
+    on control edges after. This is the canvas's definition-of-done row.
+  - *Liveness beyond the funnel* - the panel's `editProperty` joins the refresh hooks, and
+    native-side edits (only possible if the developer opens the native designer themselves)
+    get a poll fingerprint gated on an open designer tab, with the COM-volume counter the
+    risks table demands before it is called cheap.
 - **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
   bounds, real captions, honest placeholders; selection; double-click writes the event stub.
   (Spikes 3 and 6.)

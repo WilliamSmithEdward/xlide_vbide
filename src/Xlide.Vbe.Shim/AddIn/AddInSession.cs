@@ -4337,6 +4337,24 @@ internal sealed partial class AddInSession : IDisposable
         }
     }
 
+    /// <summary>
+    /// An open designer tab follows every xlide-side change to its form: the designer routes
+    /// funnel through here after a successful mutation and the tab re-projects, which is what
+    /// keeps the markup and the visual current without anyone re-activating the tab. Native
+    /// -side edits have no event to hook - and the native designer window stays DOWN in this
+    /// product, so the only edits outside this funnel are a poll-fingerprint concern for the
+    /// liveness milestone (docs/userform-designer.md).
+    /// </summary>
+    private void RefreshDesignerTabFor(string moduleName)
+    {
+        var tab = _designerTabs.FirstOrDefault(t =>
+            string.Equals(t.Module, moduleName, StringComparison.OrdinalIgnoreCase));
+        if (tab != default)
+        {
+            PublishFormMarkup(tab.Module, DisplayFromProjectId(tab.ProjectId));
+        }
+    }
+
     /// <summary>Closes a designer tab, by name; closing what is not open changes nothing.</summary>
     private void CloseDesignerTab(string moduleName, string? projectDisplay)
     {
