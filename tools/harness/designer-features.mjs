@@ -357,6 +357,62 @@ try {
     ((await api.act("designerLint", { module: form })).data ?? []).length === 0, { budgetMs: 15000 });
   check("and the canonical document wears none", true);
 
+  // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
+
+  const designTabs = async () =>
+    ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .filter((tab) => tab.face === "design");
+
+  // The product rename, with the designer tab ACTIVE - the hardest case, because the shown
+  // module's name changes underneath and the publish must not read that as a native move
+  // that takes the active slot away from the tab.
+  const renamedForm = `${form}R`;
+  await api.act("activate", { module: form, face: "design" });
+  const away = await api.act("renameModule", { module: form, newName: renamedForm });
+  check("the product rename answers", away.did === true, away.detail);
+
+  const followed = await waitFor("the designer tab to follow the rename", async () =>
+    (await designTabs()).find((tab) => tab.module === renamedForm), { budgetMs: 15000 });
+  check("the designer tab stands under the NEW name, still active",
+    followed.active === true && followed.label === `${renamedForm} [Design]`,
+    JSON.stringify(followed));
+  check("and no corpse stands under the old one",
+    !(await designTabs()).some((tab) => tab.module === form));
+
+  const followedMarkup = await waitFor("the followed tab's document to answer under the new name",
+    async () => {
+      const read = await api.act("designerMarkup", { module: renamedForm });
+      return read.did === true && String(read.data).startsWith(`Form ${renamedForm}`) ? read : null;
+    }, { budgetMs: 15000 });
+  check("and its document answers under the new name, first line and all", true, followedMarkup.detail);
+
+  // There and back - which also proves a renamed-away name is reusable in the session,
+  // unlike a removed one's (probed 2026-08-13: a rename does not burn the name).
+  const back = await api.act("renameModule", { module: renamedForm, newName: form });
+  check("the rename back answers, reusing the renamed-away name", back.did === true, back.detail);
+  await waitFor("the designer tab to follow back", async () =>
+    (await designTabs()).find((tab) => tab.module === form), { budgetMs: 15000 });
+
+  // The Properties panel's own (Name) row renames through the same adoption, so the tab
+  // follows there too - it used to close instead. The panel targets whatever was last
+  // opened or selected, so the code tab aims it first.
+  await api.act("activate", { module: form });
+  await waitFor("the panel to target the form", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+  const panelAway = await api.act("editProperty", { name: "(Name)", value: renamedForm });
+  check("the panel's (Name) edit answers", panelAway.did === true, panelAway.detail);
+  await waitFor("the designer tab to follow the panel's rename", async () =>
+    (await designTabs()).find((tab) => tab.module === renamedForm), { budgetMs: 15000 });
+  check("the panel's rename carries the tab the same way, no corpse either",
+    !(await designTabs()).some((tab) => tab.module === form));
+
+  await waitFor("the panel to follow its own rename", async () =>
+    (await api.ui()).properties?.component === renamedForm, { budgetMs: 15000 });
+  await api.act("editProperty", { name: "(Name)", value: form });
+  await waitFor("the tab to come back once more", async () =>
+    (await designTabs()).find((tab) => tab.module === form), { budgetMs: 15000 });
+  check("and back once more through the panel", true);
+
   await api.pane("close", { module: form, face: "design" });
   await waitFor("the designer tab to leave the strip", async () =>
     !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)

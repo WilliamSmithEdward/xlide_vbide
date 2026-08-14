@@ -3459,13 +3459,8 @@ internal sealed partial class AddInSession : IDisposable
 
             if (renamed is not null && !string.Equals(renamed, component, StringComparison.OrdinalIgnoreCase))
             {
-                // A designer tab is keyed by the module's name, and the rename just retired
-                // that key: the tab closes rather than standing as a corpse the strip cannot
-                // activate. Re-opening under the new name is one click; a tab that LOOKS
-                // alive and answers nothing is worse than the click. Following the rename
-                // with the tab is the liveness milestone's, with the rest of the rename
-                // adoption (docs/userform-designer.md).
-                CloseDesignerTab(component, null);
+                // A designer tab is keyed by the module's name; AdoptRename re-keys it with
+                // everything else, so the tab follows the rename instead of closing.
                 AdoptRename(component, renamed);
             }
             else
@@ -3562,6 +3557,33 @@ internal sealed partial class AddInSession : IDisposable
         if (string.Equals(_propertiesTarget, oldName, StringComparison.OrdinalIgnoreCase))
         {
             _propertiesTarget = newName;
+        }
+
+        // A designer tab is keyed by the module's name, and it FOLLOWS the rename the way the
+        // native designer window would: re-keyed in place rather than closed, never left
+        // standing as a corpse under a name that no longer answers. Every rename path - the
+        // strip's, the panel's (Name) row, the component route and the undo - funnels through
+        // here (proven live 2026-08-13), so this is the one place the tab is told.
+        for (var index = 0; index < _designerTabs.Count; index++)
+        {
+            if (string.Equals(_designerTabs[index].Module, oldName, StringComparison.OrdinalIgnoreCase))
+            {
+                _designerTabs[index] = (newName, _designerTabs[index].ProjectId);
+            }
+        }
+
+        if (_activeDesignerTab is { } shownTab
+            && string.Equals(shownTab.Module, oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            _activeDesignerTab = (newName, shownTab.ProjectId);
+        }
+
+        // The renamed module's code pane did not MOVE; its name changed. Left alone, the next
+        // publish would read the new name as a native move and take the active slot away from
+        // a designer tab that holds it.
+        if (string.Equals(_lastNativeActive.Module, oldName, StringComparison.OrdinalIgnoreCase))
+        {
+            _lastNativeActive = (newName, _lastNativeActive.Project);
         }
 
         Log.Info($"properties: {oldName} renamed to {newName}");

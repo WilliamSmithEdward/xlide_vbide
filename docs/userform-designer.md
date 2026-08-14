@@ -373,14 +373,25 @@ the host-owns-membership invariant survives.
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
     on control edges after. This is the canvas's definition-of-done row.
-  - *Rename-follows-tab, with a finding paid for* - the first attempt (2026-08-13, late)
-    re-keyed the designer tab inside `AdoptRename` on the assumption every rename path
-    crosses it. Measured false: the PRODUCT rename (`renameModule`) never fired the adopt
-    log line, yet a tab appeared under EACH name - so that path renames the component and
-    grows a designer-tab entry somewhere not yet traced, while the old entry survives as a
-    corpse. Reverted rather than shipped half-understood. The next attempt starts by
-    tailing the log LIVE through a rename (`log waitMs` blocking reads), because the
-    after-the-fact walk lost the window.
+  - *Rename-follows-tab* - **landed 2026-08-13, late**, and the parked finding is
+    corrected: the live re-trace (a `waitForLog` blocking read armed BEFORE the rename,
+    the move the first attempt's post-hoc log walk should have been) proved the product
+    rename DOES cross `AdoptRename` - the adopt line fired within the second - and that
+    on the unpatched build no second tab ever appears; the first attempt's double tab was
+    its own broken patch, not an untraced path. So the fix is the one choke point the
+    attempt assumed: `AdoptRename` re-keys `_designerTabs` and `_activeDesignerTab` in
+    place, and re-keys `_lastNativeActive` so the publish does not read the shown module's
+    new name as a native move and strip the tab of the active slot. The panel's `(Name)`
+    branch stops closing the tab - following IS the adoption now. The page needed nothing:
+    its reconciliation already swaps a re-keyed face atomically in the one publish that
+    carries it. Suite rows rename there and back through both entrances (which also pinned
+    that a renamed-away name is reusable in-session, unlike a removed one's). Unapplied
+    markup edits do not survive the swap - the followed tab reopens canonical - and the
+    tab may change strip position; both accepted until someone misses them.
+  - *The panel targets a designer tab's form* - opening or activating a designer tab does
+    not move `_propertiesTarget` today (probed 2026-08-13: the panel kept showing a prior
+    component over an active designer tab), where the native designer click targets the
+    form. One line in `OpenDesignerTab` when taken up, suite row beside it.
   - *Liveness beyond the funnel* - the panel's `editProperty` joins the refresh hooks, and
     native-side edits (only possible if the developer opens the native designer themselves)
     get a poll fingerprint gated on an open designer tab, with the COM-volume counter the
