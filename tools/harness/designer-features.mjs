@@ -277,8 +277,10 @@ try {
   await waitFor("the native designer window to go back down", async () => {
     const afterRun = await api.state();
     const rows = (await api.windows()).windows ?? [];
+    // Type 1 is the designer window, type 10 the Toolbox - the palette the owner has now
+    // reported three times, total suppression pinned here by the editor's own window list.
     return afterRun.paletteVisible === false
-      && !rows.some((w) => w.type === 1 && w.visible && w.caption.includes(form));
+      && !rows.some((w) => ((w.type === 1 && w.caption.includes(form)) || w.type === 10) && w.visible);
   }, { budgetMs: 15000 });
   check("and the native designer window went back down, no toolbox standing", true);
 

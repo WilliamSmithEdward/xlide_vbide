@@ -406,11 +406,19 @@ the host-owns-membership invariant survives.
     put it down on the tick that saw the run START, which landed between run-start and the
     form window appearing and killed the launching form). So the window stands BEHIND the
     running form, exactly as the native editor leaves it, and goes down on the tick that
-    sees the run OVER - or a 3s deadline when it never takes hold. A bonus fact from the same trace: a designer SURFACE is itself a child
-    `ThunderDFrame` - the runtime's own class - which is why the `userform` route
-    enumerates top-level windows only. The suite runs the fixture form, reads its runtime
-    caption off the real window, closes it by its X's own message, and waits for the
-    designer window and Toolbox to be down after.
+    sees the run OVER - or a 3s deadline when it never takes hold. A bonus fact from the
+    same trace: a designer SURFACE is itself a child `ThunderDFrame` - the runtime's own
+    class - which is why the `userform` route enumerates top-level windows only. The suite
+    runs the fixture form, reads its runtime caption off the real window, closes it by its
+    X's own message, and waits for the designer window and Toolbox to be down after. And
+    the Toolbox that rides designer visibility is put down TOTALLY at the event layer now
+    (the owner's third report, 2026-08-14): matched by HANDLE off the object model - Type
+    10, never the localised caption - on every show, with no designer-visibility exemption.
+    The old exemption's "designer surface" class was actually the editor FRAME's, so the
+    set it consulted had been empty since the day it landed, and a palette admitted while
+    a run kept a designer visible survived the designer's hide, because nothing re-fires
+    show. The Watches and Locals ghosts share the palette class and are left entirely
+    alone, which the handle match is FOR.
   - *The parity probe* - materialise the native designer window (Visible on, capture by
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff

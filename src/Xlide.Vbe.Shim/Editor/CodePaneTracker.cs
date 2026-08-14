@@ -149,16 +149,45 @@ internal sealed class CodePaneTracker : IDisposable
         return 0;
     }
 
-    /// <summary>The designer-surface windows visible right now, kept from the show and hide
-    /// events themselves - the set the orphaned-palette policy below reads. Touched only on
-    /// the hook's own thread.</summary>
-    private readonly HashSet<nint> _visibleDesignerSurfaces = [];
-
-    /// <summary>The class a UserForm designer surface window wears.</summary>
-    private const string DesignerSurfaceClass = "wndclass_desked_gsk";
-
     /// <summary>The class the editor's floating palettes - the Toolbox above all - wear.</summary>
     private const string FloatingPaletteClass = "VBFloatingPalette";
+
+    /// <summary>
+    /// The Toolbox window's handle, resolved from the object model the first time a palette
+    /// shows and re-resolved whenever a shown palette does not match it. Type 10 in the
+    /// editor's window-type enumeration, matched by HANDLE because captions are localised.
+    /// </summary>
+    private nint _toolboxWindow;
+
+    private bool IsTheToolbox(nint window)
+    {
+        if (window == _toolboxWindow)
+        {
+            return true;
+        }
+
+        try
+        {
+            using var windows = _editor.GetObject("Windows");
+            var count = windows?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var candidate = windows!.GetItem(i);
+                if (candidate?.GetInt32("Type") == 10)
+                {
+                    _toolboxWindow = candidate.GetInt32("HWnd");
+                    return window == _toolboxWindow;
+                }
+            }
+        }
+        catch
+        {
+            // An editor that will not answer keeps its palette this once; the next show asks
+            // again.
+        }
+
+        return false;
+    }
 
     private void OnWindowEvent(WindowEvent windowEvent)
     {
@@ -201,28 +230,20 @@ internal sealed class CodePaneTracker : IDisposable
 
         var className = Win32.ReadClassName(windowEvent.Window);
 
-        // THE ORPHANED-PALETTE POLICY, at the event where the truth is. The editor re-shows
-        // its Toolbox on a POSTED message whenever a designer stirs, which lands AFTER every
-        // synchronous put-down this product makes - so the palette kept coming back however
-        // many times the object-model sweep hid it (the developer, 2026-08-13, twice). The
-        // designer-surface windows visible right now are kept from these same events, and a
-        // palette that shows while NONE is visible is chrome pointing at nothing: it goes
-        // down here, in the event that showed it. A DELIBERATE native designer (View >
-        // Object) keeps its palette, because its window is in the set.
-        if (className == DesignerSurfaceClass)
+        // THE TOOLBOX NEVER SHOWS - the owner's rule, restated three times before it became
+        // this total (2026-08-13 twice, 2026-08-14). The editor re-shows it on POSTED
+        // messages whenever a designer stirs or takes real focus, which lands AFTER every
+        // synchronous put-down this product makes, so the put-down lives here, in the event
+        // that showed it. The previous policy admitted a palette while a designer surface
+        // was visible and leaked exactly there: a designer is REGULARLY visible now while a
+        // form runs, a palette admitted then survived the designer's hide because nothing
+        // re-fires show - and the class its exemption tracked was the editor FRAME's, so
+        // the set it consulted had been empty from the first day. The window is matched by
+        // HANDLE off the object model - Type 10, never the localised caption - so the
+        // Watches and Locals ghosts, palettes of the same class, are left entirely alone.
+        if (windowEvent.IsShow && className == FloatingPaletteClass && IsTheToolbox(windowEvent.Window))
         {
-            if (windowEvent.IsShow)
-            {
-                _visibleDesignerSurfaces.Add(windowEvent.Window);
-            }
-            else if (windowEvent.IsHide || windowEvent.IsDestroy)
-            {
-                _visibleDesignerSurfaces.Remove(windowEvent.Window);
-            }
-        }
-        else if (windowEvent.IsShow && className == FloatingPaletteClass && _visibleDesignerSurfaces.Count == 0)
-        {
-            Log.Verbose($"window event: putting the orphaned palette down {windowEvent.Window:X}");
+            Log.Verbose($"window event: putting the toolbox down {windowEvent.Window:X}");
             Win32.ShowWindow(windowEvent.Window, 0);
         }
 
