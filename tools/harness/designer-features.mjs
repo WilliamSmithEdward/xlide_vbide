@@ -28,6 +28,16 @@ const near = (a, b) => a !== null && a !== undefined && Math.abs(a - b) < 0.01;
 
 console.log(`the designer route, against ${project}\n`);
 
+// The fixture's own from-disk form, read FIRST - before any designer tab or markup request
+// touches it. A 2026-08-13 session answered "has no designer to read" exactly here while
+// the designer-tab path read the same form seconds later; the split has not reproduced
+// since (probed first-touch on fresh sessions, 2026-08-14), so this row stands where the
+// reproduction would begin and names it if it ever returns.
+const fromDisk = await api.designer(PLANNED_FORM, project).catch((why) => ({ failed: why.message }));
+check("the fixture's own from-disk form answers the route first-touch",
+  fromDisk.failed === undefined && fromDisk.form?.caption === "Quarter Entry",
+  JSON.stringify(fromDisk.failed ?? fromDisk.form ?? null));
+
 /*
  * The suite's form gets a name the session will actually take. A form NAME can be refused for
  * the rest of a session once it has been used - added and removed, or even refused once - and

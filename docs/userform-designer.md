@@ -431,10 +431,14 @@ the host-owns-membership invariant survives.
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
     on control edges after. This is the canvas's definition-of-done row.
   - *The designer route refuses a from-disk form* - found 2026-08-13, late: the debug
-    `designer` GET answers "has no designer to read" for a form loaded from disk and never
-    touched, while the designer TAB reads the same form fine seconds later through the
-    identical `GetObject("Designer")` call. Suite-built forms never hit it (their designers
-    are live from creation), so it is bounded to the route; parked with a spawned task.
+    `designer` GET answered "has no designer to read" for a form loaded from disk and never
+    touched, while the designer TAB read the same form fine seconds later through the
+    identical `GetObject("Designer")` call. **Not reproducible at HEAD** (2026-08-14:
+    first-touch route reads on fresh sessions answer the full form, before any tab). The
+    likely-but-unproven variable is boot-time designer-restore state - the same restore
+    that raises the Toolbox materialises the designer - which the refusing sessions lacked.
+    The suite's FIRST row now reads the fixture's own from-disk form before anything
+    touches it, standing exactly where the reproduction would begin.
   - *Rename-follows-tab* - **landed 2026-08-13, late**, and the parked finding is
     corrected: the live re-trace (a `waitForLog` blocking read armed BEFORE the rename,
     the move the first attempt's post-hoc log walk should have been) proved the product
