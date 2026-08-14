@@ -18,7 +18,7 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import type { FormMarkupApplied, FormMarkupControl, FormMarkupPayload } from "./bridge.js";
+import type { FormMarkupApplied, FormMarkupControl, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
 import type { DocumentId } from "./documents.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
@@ -97,6 +97,10 @@ export interface DesignerViewDeps {
   watchApplied(listener: (outcome: FormMarkupApplied) => void): () => void;
   /** The document's unapplied-edit state changed; the tab wears the dot. */
   dirtyChanged(dirty: boolean): void;
+  /** Lint the document as it stands; findings return through watchLint. */
+  lint(markup: string): void;
+  /** Subscribe to the form's lint answers; returns the unwatch. */
+  watchLint(listener: (findings: FormMarkupLintFinding[]) => void): () => void;
 }
 
 export class DesignerView {
@@ -138,6 +142,8 @@ export class DesignerView {
   private readonly model: monaco.editor.ITextModel;
   private readonly unwatch: () => void;
   private readonly unwatchApplied: () => void;
+  private readonly unwatchLint: () => void;
+  private lintTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly deps: DesignerViewDeps;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
@@ -231,6 +237,10 @@ export class DesignerView {
       // creation-time measure is zero. The observer picks up the real box on mount, on group
       // moves, and on the splitter, the same way the group editors track their containers.
       automaticLayout: true,
+      // The language's own unit: four spaces per level, the printer's and the parser's.
+      tabSize: 4,
+      insertSpaces: true,
+      detectIndentation: false,
       minimap: { enabled: false },
       lineNumbers: "on",
       folding: false,
@@ -251,6 +261,11 @@ export class DesignerView {
         this.dirty = nowDirty;
         deps.dirtyChanged(nowDirty);
       }
+
+      // The squiggles follow the typing, debounced past the keystroke rate: the lint is a
+      // host round trip, and a request per keystroke asks the same question mid-word.
+      clearTimeout(this.lintTimer);
+      this.lintTimer = setTimeout(() => deps.lint(this.model.getValue()), 350);
     });
 
     this.installSplitter(splitter);
@@ -258,6 +273,7 @@ export class DesignerView {
     this.deps = deps;
     this.unwatch = deps.watch((payload) => this.update(payload));
     this.unwatchApplied = deps.watchApplied((outcome) => this.onApplied(outcome));
+    this.unwatchLint = deps.watchLint((findings) => this.showLint(findings));
     this.request = deps.request;
 
     // LAST, because it lays the editor out and the editor must exist: the first version ran
@@ -291,6 +307,39 @@ export class DesignerView {
   }
 
   private pendingActOutcome: ((outcome: FormMarkupApplied) => void) | null = null;
+
+  /** The squiggles: the host's tolerant parse, drawn on the document's own model. */
+  private showLint(findings: FormMarkupLintFinding[]): void {
+    monaco.editor.setModelMarkers(this.model, "xlide-form", findings.map((finding) => {
+      const line = Math.min(Math.max(1, finding.line), this.model.getLineCount());
+      const content = this.model.getLineContent(line);
+      const first = Math.max(1, content.length - content.trimStart().length + 1);
+      return {
+        startLineNumber: line,
+        startColumn: first,
+        endLineNumber: line,
+        endColumn: Math.max(first + 1, content.length + 1),
+        message: finding.message,
+        severity: finding.severity === "warning"
+          ? monaco.MarkerSeverity.Warning
+          : monaco.MarkerSeverity.Error,
+      };
+    }));
+  }
+
+  /** The current squiggles as data, for the debug surface. */
+  lintMarkers(): { line: number; message: string; severity: string }[] {
+    return monaco.editor.getModelMarkers({ resource: this.model.uri }).map((marker) => ({
+      line: marker.startLineNumber,
+      message: marker.message,
+      severity: marker.severity === monaco.MarkerSeverity.Warning ? "warning" : "error",
+    }));
+  }
+
+  /** For the debug surface: set the document WITHOUT applying - the typing path. */
+  setDocument(markup: string): void {
+    this.model.setValue(markup);
+  }
 
   private onApplied(outcome: FormMarkupApplied): void {
     this.pendingActOutcome?.(outcome);
@@ -619,8 +668,10 @@ export class DesignerView {
   }
 
   dispose(): void {
+    clearTimeout(this.lintTimer);
     this.unwatch();
     this.unwatchApplied();
+    this.unwatchLint();
     this.editor.dispose();
     this.model.dispose();
     this.root.remove();

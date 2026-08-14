@@ -156,6 +156,10 @@ internal sealed class EditorSurface : IDisposable
     /// (module, workbook display or null, the whole document).</summary>
     public Action<string, string?, string>? FormMarkupApplyRequested { get; set; }
 
+    /// <summary>Raised as the developer types in the markup tab, for the squiggles:
+    /// (module, workbook display or null, the document as it stands).</summary>
+    public Action<string, string?, string>? FormMarkupLintRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -762,6 +766,22 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new FormMarkupMessage("formMarkup", moduleName, project, markup, reason, form, controls),
             EditorMessageContext.Default.FormMarkupMessage));
+    }
+
+    /// <summary>The squiggles for the markup tab's document as it stands.</summary>
+    public void PublishFormMarkupLint(string moduleName, string? project, IReadOnlyList<Core.Forms.FormMarkupFinding> findings)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new FormMarkupLintMessage("formMarkupLint", moduleName, project,
+                [.. findings.Select(finding => new FormMarkupLintFinding(
+                    finding.Line, finding.Message,
+                    finding.Severity == Core.Forms.FormMarkupSeverity.Error ? "error" : "warning"))]),
+            EditorMessageContext.Default.FormMarkupLintMessage));
     }
 
     /// <summary>How an apply ended; the fresh formMarkup that follows carries the truth.</summary>
@@ -1667,6 +1687,22 @@ internal sealed class EditorSurface : IDisposable
                             document.RootElement.TryGetProperty("project", out var markupOwner)
                                 ? markupOwner.GetString()
                                 : null);
+                    }
+
+                    break;
+
+                case "lintFormMarkup":
+                    if (document.RootElement.TryGetProperty("module", out var lintModule)
+                        && lintModule.GetString() is { Length: > 0 } lintAsked
+                        && document.RootElement.TryGetProperty("markup", out var lintBody)
+                        && lintBody.GetString() is { } lintText)
+                    {
+                        FormMarkupLintRequested?.Invoke(
+                            lintAsked,
+                            document.RootElement.TryGetProperty("project", out var lintOwner)
+                                ? lintOwner.GetString()
+                                : null,
+                            lintText);
                     }
 
                     break;

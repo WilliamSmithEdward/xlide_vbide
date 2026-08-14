@@ -162,6 +162,8 @@ export interface DevSurfaceParts {
     viewFor(module: string, project: string | null): {
       applyDocument(markup: string): Promise<{ ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }>;
       markupText(): string;
+      setDocument(markup: string): void;
+      lintMarkers(): { line: number; message: string; severity: string }[];
     } | null;
   };
   search: {
@@ -635,6 +637,37 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : outcome.refused ?? "refused",
         data: outcome,
       };
+    },
+
+    /** Sets the designer tab's document WITHOUT applying - the typing path, for driving
+     * the squiggles. */
+    designerSetMarkup: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const markup = typeof args.markup === "string" ? args.markup : null;
+      if (!module || markup === null) {
+        return { did: false, detail: "designerSetMarkup takes module and markup" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      view.setDocument(markup);
+      return { did: true, detail: `${markup.length} char(s) set, not applied` };
+    },
+
+    /** The markup document's current squiggles, in `data`. */
+    designerLint: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerLint takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      return view
+        ? { did: true, detail: `${view.lintMarkers().length} finding(s)`, data: view.lintMarkers() }
+        : { did: false, detail: `no designer tab is open for ${module}` };
     },
 
     /** The designer tab's document as it stands, in `data`. */

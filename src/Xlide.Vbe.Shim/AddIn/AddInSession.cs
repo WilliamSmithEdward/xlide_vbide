@@ -1173,6 +1173,11 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
+        // Pure text both ways: the lint is Core's tolerant parse, no designer is touched,
+        // and the answer goes straight back - the one language, saying early what the
+        // apply would say late.
+        _editorSurface.FormMarkupLintRequested = (module, project, markup) =>
+            _editorSurface?.PublishFormMarkupLint(module, project, Core.Forms.FormMarkup.Lint(markup));
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;

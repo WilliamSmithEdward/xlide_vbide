@@ -45,6 +45,23 @@ public sealed record FormMarkupAppliedMessage(
     [property: JsonPropertyName("set")] int Set,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The lint of a markup document, answering the page's lintFormMarkup: every finding the
+/// tolerant parse collects, where the strict apply stops at the first. Pure text both ways -
+/// no designer is touched, so no window can stir.
+/// </summary>
+public sealed record FormMarkupLintMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("findings")] FormMarkupLintFinding[] Findings);
+
+/// <summary>One squiggle: 1-based line, the reason, and "error" or "warning".</summary>
+public sealed record FormMarkupLintFinding(
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("message")] string Message,
+    [property: JsonPropertyName("severity")] string Severity);
+
 /// <summary>The form's own box, as the markup layer projects it: points, like every bound.
 /// Colours arrive as CSS, converted host-side through the system palette, so the canvas
 /// paints what this machine's real form surface would; insides are the designer's own
@@ -598,6 +615,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(FormMarkupBox))]
 [JsonSerializable(typeof(FormMarkupControl))]
 [JsonSerializable(typeof(FormMarkupAppliedMessage))]
+[JsonSerializable(typeof(FormMarkupLintMessage))]
+[JsonSerializable(typeof(FormMarkupLintFinding))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]

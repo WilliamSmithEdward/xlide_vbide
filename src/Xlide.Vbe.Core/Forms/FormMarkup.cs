@@ -15,7 +15,7 @@ namespace Xlide.Vbe.Core.Forms;
 /// The dialect is VBA's on purpose: apostrophe comments, True/False, doubled quotes inside
 /// strings, &amp;H hex where a colour is spelled. A header line is
 /// `Type Name ["Caption"] [at left,top] [size width x height]`; anything else about a control
-/// is an indented `Path = value` line. Indentation is containment, two spaces per level.
+/// is an indented `Path = value` line. Indentation is containment, four spaces per level.
 ///
 /// Everything here is text in, records out, and back - no COM, no host - which is what makes
 /// the language testable without Excel and shared verbatim between the generate and apply
@@ -24,7 +24,10 @@ namespace Xlide.Vbe.Core.Forms;
 /// </summary>
 public static class FormMarkup
 {
-    private const int IndentWidth = 2;
+    // FOUR, the owner's call (2026-08-13): two-space levels read too shallow in a document
+    // whose whole structure is its indentation. The parser refuses other multiples, so the
+    // printer and every hand-written document agree about what a level is.
+    private const int IndentWidth = 4;
 
     /// <summary>
     /// The kinds a MultiPage's children must be, and the kinds that may hold children at all.
@@ -142,6 +145,115 @@ public static class FormMarkup
     private static string Number(double value) => value.ToString(CultureInfo.InvariantCulture);
 
     // ------------------------------------------------------------------ parsing
+
+    /// <summary>
+    /// Every finding in a document, tolerantly - the squiggles' source. Parse stops at the
+    /// first refusal because the apply's all-or-nothing promise depends on it; this collects
+    /// them ALL, and the strict parser stays the ONE grammar: each refusal's line is blanked
+    /// and the parse re-run, so a lint can never disagree with Parse about what is wrong,
+    /// only continue past it. A blanked container orphans its children, and their findings
+    /// are real - those lines ARE under nothing once the container line is bad. Semantic
+    /// warnings - what an apply would note and skip - ride on the spec that survives.
+    /// </summary>
+    public static IReadOnlyList<FormMarkupFinding> Lint(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var findings = new List<FormMarkupFinding>();
+        var lines = text.Replace("\r\n", "\n").Split('\n');
+        FormSpec? spec = null;
+
+        // Bounded by the line count: every round either parses or retires one line.
+        for (var attempt = 0; attempt <= lines.Length; attempt++)
+        {
+            try
+            {
+                spec = Parse(string.Join("\n", lines));
+                break;
+            }
+            catch (FormMarkupException refused)
+            {
+                findings.Add(new FormMarkupFinding(refused.Line, refused.Reason, FormMarkupSeverity.Error));
+                if (refused.Line < 1 || refused.Line > lines.Length)
+                {
+                    break;
+                }
+
+                lines[refused.Line - 1] = string.Empty;
+            }
+        }
+
+        if (spec is null)
+        {
+            return findings;
+        }
+
+        // The line a control's header sits on, for anchoring a semantic finding: the nth
+        // line whose body reads "<word> <name>". Good enough for a squiggle; the name is
+        // the identity, not the position.
+        int LineOf(string name, int occurrence = 1)
+        {
+            var seen = 0;
+            for (var index = 0; index < lines.Length; index++)
+            {
+                var body = lines[index].TrimStart();
+                var space = body.IndexOf(' ');
+                if (space > 0)
+                {
+                    var rest = body[(space + 1)..];
+                    if (rest.StartsWith(name, StringComparison.OrdinalIgnoreCase)
+                        && (rest.Length == name.Length || !char.IsLetterOrDigit(rest[name.Length])))
+                    {
+                        if (++seen == occurrence)
+                        {
+                            return index + 1;
+                        }
+                    }
+                }
+            }
+
+            return 1;
+        }
+
+        var taken = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { spec.Name };
+        var typeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var control in spec.Controls)
+        {
+            if (!taken.Add(control.Name))
+            {
+                findings.Add(new FormMarkupFinding(LineOf(control.Name, 2),
+                    $"the name '{control.Name}' is already taken on this form", FormMarkupSeverity.Error));
+            }
+            else
+            {
+                typeOf[control.Name] = control.Type;
+            }
+        }
+
+        // A stray Page needs no row here: the parser refuses one structurally, so it arrives
+        // above as an Error and can never reach the spec.
+        foreach (var control in spec.Controls)
+        {
+            if (!string.Equals(control.Type, "Page", StringComparison.OrdinalIgnoreCase)
+                && !ToolboxTypes.Contains(control.Type)
+                && !control.Properties.Any(p => string.Equals(p.Path, "ProgId", StringComparison.OrdinalIgnoreCase)))
+            {
+                findings.Add(new FormMarkupFinding(LineOf(control.Name),
+                    $"'{control.Type}' is not a toolbox kind and no ProgId line names one, so an apply would skip it",
+                    FormMarkupSeverity.Warning));
+            }
+        }
+
+        return [.. findings.OrderBy(finding => finding.Line)];
+    }
+
+    /// <summary>The toolbox spellings the dialect commits to - the same set the printer
+    /// writes and an apply resolves without a ProgId line.</summary>
+    private static readonly HashSet<string> ToolboxTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton",
+        "Frame", "CommandButton", "TabStrip", "MultiPage", "Page", "ScrollBar", "SpinButton", "Image",
+    };
 
     /// <summary>
     /// Reads a whole document, or refuses it with the line that is wrong. Nothing partial: an
@@ -605,4 +717,18 @@ public sealed class FormMarkupException(int line, string message)
     : Exception($"line {line}: {message}")
 {
     public int Line { get; } = line;
+
+    /// <summary>The reason alone, for a finding that carries the line separately.</summary>
+    public string Reason { get; } = message;
+}
+
+/// <summary>One lint finding: the line, the reason, and how hard it is wrong. An Error is
+/// what Parse refuses - an apply of this document changes nothing; a Warning is what an
+/// apply would note and skip.</summary>
+public sealed record FormMarkupFinding(int Line, string Message, FormMarkupSeverity Severity);
+
+public enum FormMarkupSeverity
+{
+    Error,
+    Warning,
 }

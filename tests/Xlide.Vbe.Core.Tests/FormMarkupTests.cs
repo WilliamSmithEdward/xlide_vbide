@@ -89,9 +89,9 @@ public class FormMarkupTests
         var parsed = FormMarkup.Parse(""""
             ' A comment above the form, and one after a header.
             Form Entry "It's ""quoted""" size 100x80   ' the caption holds an apostrophe AND quotes
-              Label Hint "say ' nothing" at 1,2 size 3x4
-                ForeColor = &H8000000F&
-                Visible = False
+                Label Hint "say ' nothing" at 1,2 size 3x4
+                    ForeColor = &H8000000F&
+                    Visible = False
             """");
 
         Assert.Equal("It's \"quoted\"", parsed.Caption);
@@ -106,17 +106,17 @@ public class FormMarkupTests
     [InlineData("", 1, "empty")]
     [InlineData("Label Hint\n", 1, "Form line")]
     [InlineData("Form F\nLabel Hint\n", 2, "unindented")]
-    [InlineData("Form F\n   Label Hint\n", 2, "2 spaces")]
+    [InlineData("Form F\n  Label Hint\n", 2, "4 spaces")]
     [InlineData("Form F\n\tLabel Hint\n", 2, "tab")]
-    [InlineData("Form F\n    Label Hint\n", 2, "under nothing")]
-    [InlineData("Form F\n  Label Hint trailing junk here\n", 2, "rest of the line")]
-    [InlineData("Form F\n  Label Hint \"never closed\n", 2, "never closes")]
-    [InlineData("Form F\n  Label Hint at 1\n", 2, "two numbers")]
-    [InlineData("Form F\n  Label Hint\n    Caption = maybe\n", 3, "not a value")]
-    [InlineData("Form F\n  Label Hint\n    Caption =\n", 3, "missing")]
-    [InlineData("Form F\n  MultiPage M\n    Label Hint\n", 3, "holds Pages")]
-    [InlineData("Form F\n  Page P\n", 2, "under a MultiPage")]
-    [InlineData("Form F\n  Label Hint\n    TextBox Inner\n", 3, "holds no controls")]
+    [InlineData("Form F\n        Label Hint\n", 2, "under nothing")]
+    [InlineData("Form F\n    Label Hint trailing junk here\n", 2, "rest of the line")]
+    [InlineData("Form F\n    Label Hint \"never closed\n", 2, "never closes")]
+    [InlineData("Form F\n    Label Hint at 1\n", 2, "two numbers")]
+    [InlineData("Form F\n    Label Hint\n        Caption = maybe\n", 3, "not a value")]
+    [InlineData("Form F\n    Label Hint\n        Caption =\n", 3, "missing")]
+    [InlineData("Form F\n    MultiPage M\n        Label Hint\n", 3, "holds Pages")]
+    [InlineData("Form F\n    Page P\n", 2, "under a MultiPage")]
+    [InlineData("Form F\n    Label Hint\n        TextBox Inner\n", 3, "holds no controls")]
     public void ABadDocumentIsRefusedWithItsLine(string document, int line, string names)
     {
         var refused = Assert.Throws<FormMarkupException>(() => FormMarkup.Parse(document));
@@ -129,9 +129,9 @@ public class FormMarkupTests
     {
         var parsed = FormMarkup.Parse("""
             Form F
-              Frame Box at 1,1 size 50x50
-                Label Inner at 2,2 size 10x10
-              Label Outer at 60,1 size 10x10
+                Frame Box at 1,1 size 50x50
+                    Label Inner at 2,2 size 10x10
+                Label Outer at 60,1 size 10x10
             """);
 
         Assert.Equal("Box", parsed.Controls.Single(control => control.Name == "Inner").Parent);
@@ -143,7 +143,7 @@ public class FormMarkupTests
     {
         // The walk answers null geometry for Pages, and a hand-written line may say only where
         // or only how big. Printing carries whichever halves exist as pairs.
-        var parsed = FormMarkup.Parse("Form F\n  Label Hint size 10x20\n");
+        var parsed = FormMarkup.Parse("Form F\n    Label Hint size 10x20\n");
         var hint = Assert.Single(parsed.Controls);
         Assert.Null(hint.Left);
         Assert.Equal(10, hint.Width);
@@ -155,8 +155,78 @@ public class FormMarkupTests
     [Fact]
     public void CaseIsAsForgivingAsTheHost()
     {
-        var parsed = FormMarkup.Parse("form F \"hi\" SIZE 10x10\n  LABEL Hint AT 1,2 Size 3x4\n");
+        var parsed = FormMarkup.Parse("form F \"hi\" SIZE 10x10\n    LABEL Hint AT 1,2 Size 3x4\n");
         Assert.Equal("hi", parsed.Caption);
         Assert.Equal(1, Assert.Single(parsed.Controls).Left);
+    }
+
+    [Fact]
+    public void LintOfACleanDocumentFindsNothing()
+    {
+        Assert.Empty(FormMarkup.Lint("Form F \"hi\" size 100x100\n    Label Hint at 1,2 size 3x4\n"));
+    }
+
+    [Fact]
+    public void LintCollectsEveryRefusalWhereParseStopsAtTheFirst()
+    {
+        // Two bad lines. Parse dies on line 2; the lint reports both, each at its own line,
+        // because each round retires exactly the line the parser refused.
+        var findings = FormMarkup.Lint(
+            "Form F size 100x100\n    Label A at banana\n    Label B at 1,2 size 3x4\n    Label C size pear\n");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(2, findings[0].Line);
+        Assert.Equal(4, findings[1].Line);
+        Assert.All(findings, finding => Assert.Equal(FormMarkupSeverity.Error, finding.Severity));
+    }
+
+    [Fact]
+    public void LintAnchorsADuplicateNameAtItsSecondMention()
+    {
+        var findings = FormMarkup.Lint(
+            "Form F size 100x100\n    Label Twin at 1,1 size 2x2\n    TextBox Twin at 9,9 size 2x2\n");
+
+        var duplicate = Assert.Single(findings);
+        Assert.Equal(3, duplicate.Line);
+        Assert.Equal(FormMarkupSeverity.Error, duplicate.Severity);
+        Assert.Contains("already taken", duplicate.Message);
+    }
+
+    [Fact]
+    public void LintWarnsWhatAnApplyWouldSkip()
+    {
+        // A foreign type with no ProgId line is the apply's documented skip-with-a-note case,
+        // so the lint says so BEFORE the apply. A stray Page beside it arrives as an ERROR -
+        // the parser refuses one structurally, and the lint never re-judges the grammar.
+        var findings = FormMarkup.Lint(
+            "Form F size 100x100\n    Gadget Widget at 1,1 size 2x2\n    Page Stray \"P\"\n");
+
+        Assert.Equal(2, findings.Count);
+        var widget = findings.Single(finding => finding.Line == 2);
+        Assert.Equal(FormMarkupSeverity.Warning, widget.Severity);
+        Assert.Contains("ProgId", widget.Message);
+        var stray = findings.Single(finding => finding.Line == 3);
+        Assert.Equal(FormMarkupSeverity.Error, stray.Severity);
+        Assert.Contains("MultiPage", stray.Message);
+    }
+
+    [Fact]
+    public void LintForgivesAForeignTypeThatNamesItsProgId()
+    {
+        Assert.Empty(FormMarkup.Lint(
+            "Form F size 100x100\n    Gadget Widget at 1,1 size 2x2\n        ProgId = \"Vendor.Widget.1\"\n"));
+    }
+
+    [Fact]
+    public void LintReportsOrphansOfARetiredContainerAsTheirOwnFindings()
+    {
+        // The Frame line is bad; once retired, its child is indented under nothing - which is
+        // true of the document as it stands, and both lines deserve their squiggle.
+        var findings = FormMarkup.Lint(
+            "Form F size 100x100\n    Frame Box at banana\n        Label Inner at 1,1 size 2x2\n");
+
+        Assert.Equal(2, findings.Count);
+        Assert.Equal(2, findings[0].Line);
+        Assert.Equal(3, findings[1].Line);
     }
 }

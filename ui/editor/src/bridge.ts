@@ -64,6 +64,7 @@ export type HostMessage =
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
+  | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[] }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -161,6 +162,13 @@ export interface FormMarkupPayload {
   reason: string | null;
   form?: FormMarkupBox | null;
   controls?: FormMarkupControl[] | null;
+}
+
+/** One squiggle for the markup document: 1-based line, reason, "error" or "warning". */
+export interface FormMarkupLintFinding {
+  line: number;
+  message: string;
+  severity: string;
 }
 
 /** How an apply of the designer tab's document ended; the fresh projection follows it. */
@@ -326,6 +334,7 @@ export type ClientMessage =
   | { type: "closeModule"; name: string; project?: string; action?: string; face?: string }
   | { type: "requestFormMarkup"; module: string; project?: string }
   | { type: "applyFormMarkup"; module: string; project?: string; markup: string }
+  | { type: "lintFormMarkup"; module: string; project?: string; markup: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
@@ -631,6 +640,24 @@ export class EditorBridge {
   }
 
   private readonly formMarkupAppliedWatchers = new Map<string, (outcome: FormMarkupApplied) => void>();
+
+  /** Asks the host to lint the document as it stands; findings return through the watcher. */
+  lintFormMarkup(module: string, project: string | null, markup: string): void {
+    this.transport.post({ type: "lintFormMarkup", module, ...(project ? { project } : {}), markup });
+  }
+
+  /** Watches a form's lint answers; returns the unwatch. One watcher per form. */
+  onFormMarkupLint(module: string, project: string | null, watcher: (findings: FormMarkupLintFinding[]) => void): () => void {
+    const key = docKeyOf(module, project);
+    this.formMarkupLintWatchers.set(key, watcher);
+    return () => {
+      if (this.formMarkupLintWatchers.get(key) === watcher) {
+        this.formMarkupLintWatchers.delete(key);
+      }
+    };
+  }
+
+  private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[]) => void>();
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
@@ -1148,6 +1175,9 @@ export class EditorBridge {
         return;
       case "formMarkupApplied":
         this.formMarkupAppliedWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message);
+        return;
+      case "formMarkupLint":
+        this.formMarkupLintWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message.findings);
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

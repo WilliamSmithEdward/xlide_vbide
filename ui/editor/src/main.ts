@@ -453,6 +453,8 @@ function boot(): void {
         apply: (markup) => bridge.applyFormMarkup(id.module, id.project ?? null, markup),
         watchApplied: (listener) => bridge.onFormMarkupApplied(id.module, id.project ?? null, listener),
         dirtyChanged: (dirty) => workspace?.setFaceDirty(id, dirty),
+        lint: (markup) => bridge.lintFormMarkup(id.module, id.project ?? null, markup),
+        watchLint: (listener) => bridge.onFormMarkupLint(id.module, id.project ?? null, listener),
       });
       designerViews.set(key, view);
     }
