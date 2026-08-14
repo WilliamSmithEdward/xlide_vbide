@@ -252,6 +252,40 @@ try {
     withDesigner.active === true && /\[Design\]/.test(withDesigner.label),
     JSON.stringify(withDesigner));
 
+  // The tab's own apply - the path Ctrl+S takes, through the view's document and the host
+  // round trip - proven against the live form, not just against the route it shares a
+  // service with.
+  const tabMarkup = await waitFor("the tab's document to hold the form's markup", async () => {
+    const read = await api.act("designerMarkup", { module: form });
+    return read.did === true && String(read.data).startsWith(`Form ${form}`) ? read : null;
+  }, { budgetMs: 15000 });
+  check("the tab's document holds the form's markup", true, tabMarkup.detail);
+
+  const tabApplied = await api.act("designerApply", {
+    module: form,
+    markup: `${String(tabMarkup.data).trimEnd()}\r\n  CommandButton TabBtn "Go" at 8,282 size 60x20\r\n`,
+  });
+  check("applying an edited document from the tab lands on the form",
+    tabApplied.did === true && (tabApplied.data?.added ?? []).includes("TabBtn"),
+    JSON.stringify({ detail: tabApplied.detail, data: tabApplied.data }));
+
+  const afterTabApply = await api.designer(form, project);
+  check("and the form truly carries what the tab applied",
+    afterTabApply.controls.some((control) => control.name === "TabBtn"
+      && control.type === "CommandButton" && control.caption === "Go"));
+
+  const putBack = await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
+  check("re-applying the original document from the tab removes it again",
+    putBack.did === true && (putBack.data?.removed ?? []).includes("TabBtn"),
+    JSON.stringify(putBack.data));
+
+  const refusedTab = await api.act("designerApply", { module: form, markup: "Form X\n  Label L at banana\n" });
+  check("a document that does not parse is refused at the tab, naming the line",
+    refusedTab.did === false && /line 2/.test(refusedTab.detail ?? ""), refusedTab.detail);
+  const untouchedByTab = await api.designer(form, project);
+  check("and the form is untouched by the refusal",
+    !untouchedByTab.controls.some((control) => control.name === "TabBtn"));
+
   await api.pane("close", { module: form, face: "design" });
   await waitFor("the designer tab to leave the strip", async () =>
     !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)

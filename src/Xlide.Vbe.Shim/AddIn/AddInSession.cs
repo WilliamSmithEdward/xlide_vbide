@@ -1172,6 +1172,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.RenameUndoRequested = id => _editorSurface?.RunOnHostThread(() => UndoRename(id));
         _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
+        _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
@@ -4357,6 +4358,67 @@ internal sealed partial class AddInSession : IDisposable
             Log.Info($"designer tab: closed {moduleName}");
             PublishModules();
         }
+    }
+
+    /// <summary>
+    /// The markup tab's Ctrl+S: the document applied to the live form through the SAME service
+    /// the api's applyMarkup route wraps, so the two paths are one operation by construction.
+    /// The outcome goes back first, then a fresh projection - even when the apply stopped
+    /// partway, because what LANDED is on the form and the tab must show the truth.
+    /// </summary>
+    private void ApplyFormMarkup(string moduleName, string? projectDisplay, string markup)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out var owner);
+                if (component is null)
+                {
+                    surface.PublishFormMarkupApplied(moduleName, projectDisplay, false, [], [], 0,
+                        $"no component named {moduleName}");
+                    CloseDesignerTab(moduleName, projectDisplay);
+                    return;
+                }
+
+                if (component.GetInt32("Type") != 3)
+                {
+                    surface.PublishFormMarkupApplied(moduleName, projectDisplay, false, [], [], 0,
+                        $"{moduleName} is not a UserForm");
+                    return;
+                }
+
+                var display = DisplayFromProjectId(owner ?? projectId);
+                var outcome = FormDesignService.ApplyMarkup(component, moduleName, markup);
+                Log.Info($"form markup: apply to {moduleName} "
+                    + $"{(outcome.Ok ? "ok" : "stopped")}: +{outcome.Added.Count} -{outcome.Removed.Count} set {outcome.Set}"
+                    + (outcome.Refused is null ? string.Empty : $" ({outcome.Refused})"));
+
+                surface.PublishFormMarkupApplied(moduleName, display, outcome.Ok,
+                    outcome.Added, outcome.Removed, outcome.Set, outcome.Refused);
+
+                // The fresh projection, unless nothing was touched: a parse refusal changes
+                // no state, and the republish would clobber the developer's document with
+                // the pre-edit text while they are looking at the refusal it earned.
+                if (!outcome.ParseFailed)
+                {
+                    PublishFormMarkup(moduleName, display);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"form markup: apply to {moduleName} failed ({ex.GetType().Name})");
+                surface.PublishFormMarkupApplied(moduleName, projectDisplay, false, [], [], 0,
+                    "the apply failed before it could start");
+            }
+        });
     }
 
     /// <summary>

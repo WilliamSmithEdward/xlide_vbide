@@ -3332,11 +3332,29 @@ body.objbrowser-page #objbrowser-card {
   background: var(--xl-editor-bg, #1e1e1e);
 }
 
-.designer-markup {
+.designer-markup-half {
   flex: 0 0 46%;
   min-width: 160px;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.designer-markup {
+  flex: 1 1 auto;
+  min-height: 0;
   position: relative;
+}
+
+/* A refusal lands at the document that earned it, in the host's own words. */
+.designer-error {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #fff;
+  background: #8b2e2e;
+  border-top: 1px solid #a94444;
+  white-space: pre-wrap;
 }
 
 .designer-splitter {

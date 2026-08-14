@@ -30,6 +30,21 @@ public sealed record FormMarkupMessage(
     [property: JsonPropertyName("form")] FormMarkupBox? Form = null,
     [property: JsonPropertyName("controls")] FormMarkupControl[]? Controls = null);
 
+/// <summary>
+/// How an apply of the markup tab's document ended: what landed, and why it stopped if it
+/// did. A fresh formMarkup follows it either way, because what LANDED is on the form even
+/// when the apply stopped partway - the tab shows the truth, the refusal explains the gap.
+/// </summary>
+public sealed record FormMarkupAppliedMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("ok")] bool Ok,
+    [property: JsonPropertyName("added")] string[] Added,
+    [property: JsonPropertyName("removed")] string[] Removed,
+    [property: JsonPropertyName("set")] int Set,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>The form's own box, as the markup layer projects it: points, like every bound.</summary>
 public sealed record FormMarkupBox(
     [property: JsonPropertyName("caption")] string? Caption,
@@ -565,6 +580,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(FormMarkupMessage))]
 [JsonSerializable(typeof(FormMarkupBox))]
 [JsonSerializable(typeof(FormMarkupControl))]
+[JsonSerializable(typeof(FormMarkupAppliedMessage))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]

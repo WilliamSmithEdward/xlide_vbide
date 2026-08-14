@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Xlide.Vbe.Shim.Com;
+using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Diagnostics;
 
 namespace Xlide.Vbe.Shim.AddIn;
@@ -148,184 +149,20 @@ internal sealed partial class AddInSession
             return HostError($"{module} is not a UserForm of this project");
         }
 
-        using var designer = component.GetObject("Designer");
-        if (designer is null)
+        // The machinery lives product-side now (FormDesignService.ApplyMarkup), because the
+        // markup tab's Ctrl+S ships in Release and shares it. This route is a wrapper: same
+        // operation by construction, its own JSON.
+        var outcome = FormDesignService.ApplyMarkup(component, module, body);
+        if (outcome.ParseFailed)
         {
-            return HostError($"{module} has no designer");
+            return HostError(outcome.Refused!);
         }
 
-        Xlide.Vbe.Core.Forms.FormSpec wanted;
-        try
-        {
-            wanted = Xlide.Vbe.Core.Forms.FormMarkup.Parse(body);
-        }
-        catch (Xlide.Vbe.Core.Forms.FormMarkupException refused)
-        {
-            return HostError($"the markup did not parse, so nothing was applied: {refused.Message}");
-        }
-
-        var (_, current) = CollectDesigner(component, designer);
-        var currentByName = current.ToDictionary(row => row.Name, StringComparer.OrdinalIgnoreCase);
-        var wantedByName = wanted.Controls.ToDictionary(spec => spec.Name, StringComparer.OrdinalIgnoreCase);
-
-        var added = new List<string>();
-        var removed = new List<string>();
-        var setCount = 0;
-        var notes = new List<string>();
-
-        try
-        {
-            // The form's own header and properties first: caption, size, property lines.
-            if (wanted.Caption is { } formCaption)
-            {
-                SetCore(component, designer, null, "Caption", formCaption, "text");
-                setCount++;
-            }
-
-            if (wanted.Width is { } formWidth)
-            {
-                SetCore(component, designer, null, "Width", FormatNumber(formWidth), "number");
-                setCount++;
-            }
-
-            if (wanted.Height is { } formHeight)
-            {
-                SetCore(component, designer, null, "Height", FormatNumber(formHeight), "number");
-                setCount++;
-            }
-
-            foreach (var property in wanted.Properties)
-            {
-                SetCore(component, designer, null, property.Path, property.Value, KindWord(property.Kind));
-                setCount++;
-            }
-
-            // Removals before additions, so a name moving container or kind frees itself first.
-            // Pages are the MultiPage's own; the diff neither creates nor removes one (a page
-            // set that disagrees is reported rather than half-applied).
-            foreach (var row in current)
-            {
-                var isPage = string.Equals(row.Type, "Page", StringComparison.OrdinalIgnoreCase);
-                var match = wantedByName.TryGetValue(row.Name, out var spec) ? spec : null;
-                var stays = match is not null
-                    && string.Equals(match.Type, row.Type, StringComparison.OrdinalIgnoreCase)
-                    && SameParent(match, row, module);
-
-                if (isPage)
-                {
-                    if (match is null)
-                    {
-                        notes.Add($"{row.Name}: pages belong to their MultiPage; the diff does not remove one");
-                    }
-
-                    continue;
-                }
-
-                if (!stays)
-                {
-                    if (RemoveControlCore(designer, row.Name))
-                    {
-                        removed.Add(row.Name);
-                    }
-                }
-            }
-
-            // Additions and updates, in document order so containers exist before their children.
-            foreach (var spec in wanted.Controls)
-            {
-                var isPage = string.Equals(spec.Type, "Page", StringComparison.OrdinalIgnoreCase);
-                var match = currentByName.TryGetValue(spec.Name, out var row) ? row : null;
-                var survived = match is not null
-                    && string.Equals(match.Type, spec.Type, StringComparison.OrdinalIgnoreCase)
-                    && SameParent(spec, match, module)
-                    && !removed.Contains(match.Name);
-
-                if (isPage && match is null)
-                {
-                    notes.Add($"{spec.Name}: pages belong to their MultiPage; the diff does not add one");
-                    continue;
-                }
-
-                if (!isPage && !survived)
-                {
-                    var progId = ProgIdFor(spec.Type)
-                        ?? spec.Properties.FirstOrDefault(p => string.Equals(p.Path, "ProgId", StringComparison.OrdinalIgnoreCase))?.Value;
-                    if (progId is null)
-                    {
-                        notes.Add($"{spec.Name}: '{spec.Type}' is not a toolbox kind and no ProgId line names one, so it was not added");
-                        continue;
-                    }
-
-                    using var owner = spec.Parent is { Length: > 0 }
-                        ? FindContainerControls(designer, spec.Parent, 0)
-                        : designer.GetObject("Controls");
-                    if (owner is null)
-                    {
-                        notes.Add($"{spec.Name}: no container named {spec.Parent}, so it was not added");
-                        continue;
-                    }
-
-                    AddControlCore(owner, progId, spec.Name, spec.Left, spec.Top, spec.Width, spec.Height);
-                    added.Add(spec.Name);
-                }
-                else if (survived || isPage)
-                {
-                    if (spec.Left is { } left) { SetCore(component, designer, spec.Name, "Left", FormatNumber(left), "number"); setCount++; }
-                    if (spec.Top is { } top) { SetCore(component, designer, spec.Name, "Top", FormatNumber(top), "number"); setCount++; }
-                    if (spec.Width is { } width) { SetCore(component, designer, spec.Name, "Width", FormatNumber(width), "number"); setCount++; }
-                    if (spec.Height is { } height) { SetCore(component, designer, spec.Name, "Height", FormatNumber(height), "number"); setCount++; }
-                }
-
-                if (spec.Caption is { } caption)
-                {
-                    SetCore(component, designer, spec.Name, "Caption", caption, "text");
-                    setCount++;
-                }
-
-                foreach (var property in spec.Properties)
-                {
-                    if (string.Equals(property.Path, "ProgId", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    SetCore(component, designer, spec.Name, property.Path, property.Value, KindWord(property.Kind));
-                    setCount++;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"designer: apply to {module} stopped partway ({ex.GetType().Name})");
-            return JsonSerializer.Serialize(
-                new DebugDesignerApplyReply(false, [.. added], [.. removed], setCount,
-                    $"stopped at: {ex.Message.Trim()}. What is listed here landed before the refusal.",
-                    [.. notes]),
-                DebugJsonContext.Default.DebugDesignerApplyReply);
-        }
-
-        Log.Info($"designer: markup applied to {module}: +{added.Count} -{removed.Count} set {setCount}");
         return JsonSerializer.Serialize(
-            new DebugDesignerApplyReply(true, [.. added], [.. removed], setCount, null, [.. notes]),
+            new DebugDesignerApplyReply(outcome.Ok, [.. outcome.Added], [.. outcome.Removed],
+                outcome.Set, outcome.Refused, [.. outcome.Notes]),
             DebugJsonContext.Default.DebugDesignerApplyReply);
     }
-
-    private static bool SameParent(Xlide.Vbe.Core.Forms.ControlSpec spec, DebugDesignerControl row, string module)
-    {
-        var specParent = spec.Parent ?? module;
-        var rowParent = row.Parent ?? module;
-        return string.Equals(specParent, rowParent, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string FormatNumber(double value) =>
-        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-
-    private static string KindWord(Xlide.Vbe.Core.Forms.PropertyValueKind kind) => kind switch
-    {
-        Xlide.Vbe.Core.Forms.PropertyValueKind.Text => "text",
-        Xlide.Vbe.Core.Forms.PropertyValueKind.Flag => "flag",
-        _ => "number",
-    };
 
     /// <summary>
     /// Adds a control through the designer model - the same call the native toolbox makes - and
@@ -355,7 +192,7 @@ internal sealed partial class AddInSession
             return HostError($"{module} has no designer");
         }
 
-        var progId = ProgIdFor(type);
+        var progId = FormDesignService.ProgIdFor(type);
         if (progId is null)
         {
             return HostError(
@@ -365,7 +202,7 @@ internal sealed partial class AddInSession
         }
 
         using var owner = parent is { Length: > 0 }
-            ? FindContainerControls(designer, parent, 0)
+            ? FormDesignService.FindContainerControls(designer, parent, 0)
             : designer.GetObject("Controls");
         if (owner is null)
         {
@@ -376,7 +213,7 @@ internal sealed partial class AddInSession
 
         try
         {
-            var (actualName, actualType) = AddControlCore(owner, progId, name, left, top, width, height);
+            var (actualName, actualType) = FormDesignService.AddControl(owner, progId, name, left, top, width, height);
             Log.Info($"designer: added {actualType} '{actualName}' to {module}{(parent is { Length: > 0 } ? $" in {parent}" : "")}");
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "add", actualName, actualType,
@@ -386,53 +223,6 @@ internal sealed partial class AddInSession
         catch (Exception ex)
         {
             return HostError(ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// The add itself, against a resolved Controls collection: the control asked for, placed -
-    /// or nothing, because an add that cannot then take its geometry is taken back out. Shared
-    /// by the route and the markup apply, which is why it throws rather than answering.
-    /// </summary>
-    private static (string Name, string Type) AddControlCore(
-        DispatchObject owner, string progId, string? name,
-        double? left, double? top, double? width, double? height)
-    {
-        DispatchObject? added;
-        try
-        {
-            added = name is { Length: > 0 } ? owner.CallObject("Add", progId, name) : owner.CallObject("Add", progId);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"the designer refused to add a {progId} ({ex.Message.Trim()})");
-        }
-
-        if (added is null)
-        {
-            throw new InvalidOperationException($"the designer answered nothing for a {progId}");
-        }
-
-        using (added)
-        {
-            var actualName = TryText(added, "Name") ?? name ?? "";
-            try
-            {
-                if (left is { } l) { added.SetDouble("Left", l); }
-                if (top is { } t) { added.SetDouble("Top", t); }
-                if (width is { } w) { added.SetDouble("Width", w); }
-                if (height is { } h) { added.SetDouble("Height", h); }
-            }
-            catch (Exception ex)
-            {
-                try { owner.Invoke("Remove", actualName); }
-                catch (Exception undo) { Log.Warn($"designer: could not undo the add ({undo.GetType().Name})"); }
-
-                throw new InvalidOperationException(
-                    $"'{actualName}' would not take its geometry, so nothing was added ({ex.Message.Trim()})");
-            }
-
-            return (actualName, FriendlyControlType(added.TypeName() ?? progId));
         }
     }
 
@@ -461,7 +251,7 @@ internal sealed partial class AddInSession
             return HostError($"{module} has no designer");
         }
 
-        if (!RemoveControlCore(designer, name))
+        if (!FormDesignService.RemoveControl(designer, name))
         {
             return HostError($"no control named {name} on {module}");
         }
@@ -470,31 +260,6 @@ internal sealed partial class AddInSession
         return JsonSerializer.Serialize(
             new DebugDesignerEditReply(true, "remove", name, null, $"removed from {module}"),
             DebugJsonContext.Default.DebugDesignerEditReply);
-    }
-
-    /// <summary>
-    /// The remove itself: through the collection that owns the control. False when no control
-    /// carries the name - which for the markup diff is an answer, not a failure, because a
-    /// child leaves with its removed container. Shared by the route and the apply.
-    /// </summary>
-    private static bool RemoveControlCore(DispatchObject designer, string name)
-    {
-        using var owner = FindOwnerControls(designer, name, 0);
-        if (owner is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            owner.Invoke("Remove", name);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"the designer refused to remove {name} ({ex.Message.Trim()})");
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -527,7 +292,7 @@ internal sealed partial class AddInSession
         var targetLabel = name is { Length: > 0 } ? name : module;
         try
         {
-            var display = SetCore(component, designer, name, property, value, asKind);
+            var display = FormDesignService.SetControlProperty(component, designer, name, property, value, asKind);
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {display}"),
                 DebugJsonContext.Default.DebugDesignerEditReply);
@@ -535,115 +300,6 @@ internal sealed partial class AddInSession
         catch (Exception ex)
         {
             return HostError($"{targetLabel}.{property} refused the write ({ex.Message.Trim()})");
-        }
-    }
-
-    /// <summary>
-    /// The write itself, answering what the property READS BACK. No control name targets the
-    /// form; one level of dotting reaches an object-valued member; a form property the
-    /// designer does not carry - Width, Height - falls through to the component's Properties
-    /// collection, which is what the native Properties window writes. Controls never take that
-    /// path; their surface is the designer's. Shared by the route and the markup apply, which
-    /// is why it throws rather than answering.
-    /// </summary>
-    private static string SetCore(
-        DispatchObject component, DispatchObject designer,
-        string? name, string property, string value, string? asKind)
-    {
-        using var found = name is { Length: > 0 } ? FindControlNamed(designer, name, 0) : null;
-        if (name is { Length: > 0 } && found is null)
-        {
-            throw new InvalidOperationException($"no control named {name}");
-        }
-
-        var target = found ?? designer;
-
-        var head = property;
-        string? tail = null;
-        var dot = property.IndexOf('.');
-        if (dot > 0 && dot < property.Length - 1)
-        {
-            head = property[..dot];
-            tail = property[(dot + 1)..];
-        }
-
-        if (tail is null && found is null && target.GetDispId(property) == DispId.Unknown)
-        {
-            using var properties = component.GetObject("Properties");
-            using var row = properties?.CallObject("Item", property);
-            if (row is null)
-            {
-                throw new InvalidOperationException(
-                    $"no property named {property}, on the designer or the component");
-            }
-
-            WriteDesignerProperty(row, "Value", value, asKind);
-            var (_, rowDisplay) = row.ReadProperty("Value");
-            return rowDisplay;
-        }
-
-        if (tail is null)
-        {
-            WriteDesignerProperty(target, property, value, asKind);
-            var (_, display) = target.ReadProperty(property);
-            return display;
-        }
-
-        using var inner = target.GetObject(head);
-        if (inner is null)
-        {
-            throw new InvalidOperationException($"{head} is not an object, so {property} cannot be reached");
-        }
-
-        WriteDesignerProperty(inner, tail, value, asKind);
-        var (_, innerDisplay) = inner.ReadProperty(tail);
-        return innerDisplay;
-    }
-
-    /// <summary>
-    /// Writes with the type the value spells, unless the caller names one with `as`. The
-    /// heuristic order matters: "True" is a flag before it is text, "12" is a whole number
-    /// before it is a double, and anything else is text - a caption of "123" wants
-    /// as=text, which is why the override exists.
-    /// </summary>
-    private static void WriteDesignerProperty(DispatchObject target, string property, string value, string? asKind)
-    {
-        switch (asKind)
-        {
-            case "text":
-                target.SetString(property, value);
-                return;
-            case "flag":
-                target.SetBool(property, bool.Parse(value));
-                return;
-            case "number":
-                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var asked))
-                {
-                    target.SetInt32(property, asked);
-                }
-                else
-                {
-                    target.SetDouble(property, double.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture));
-                }
-
-                return;
-        }
-
-        if (bool.TryParse(value, out var flag))
-        {
-            target.SetBool(property, flag);
-        }
-        else if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var whole))
-        {
-            target.SetInt32(property, whole);
-        }
-        else if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var real))
-        {
-            target.SetDouble(property, real);
-        }
-        else
-        {
-            target.SetString(property, value);
         }
     }
 
@@ -819,228 +475,6 @@ internal sealed partial class AddInSession
     // ------------------------------------------------------------------ finding
 
     /// <summary>The Controls collection of the named container: a Frame's own, or a Page's by page name.</summary>
-    private static DispatchObject? FindContainerControls(DispatchObject container, string wanted, int depth)
-    {
-        if (depth > 8)
-        {
-            return null;
-        }
-
-        using var controls = container.GetObject("Controls");
-        if (controls is null)
-        {
-            return null;
-        }
-
-        foreach (var control in ItemsOf(controls))
-        {
-            using (control)
-            {
-                var name = TryText(control, "Name");
-
-                if (control.GetDispId("Pages") != DispId.Unknown)
-                {
-                    using var pages = control.GetObject("Pages");
-                    if (pages is not null)
-                    {
-                        foreach (var page in ItemsOf(pages))
-                        {
-                            using (page)
-                            {
-                                if (string.Equals(TryText(page, "Name"), wanted, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    return page.GetObject("Controls");
-                                }
-
-                                var below = FindContainerControls(page, wanted, depth + 1);
-                                if (below is not null)
-                                {
-                                    return below;
-                                }
-                            }
-                        }
-                    }
-                }
-                else if (control.GetDispId("Controls") != DispId.Unknown)
-                {
-                    if (string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return control.GetObject("Controls");
-                    }
-
-                    var below = FindContainerControls(control, wanted, depth + 1);
-                    if (below is not null)
-                    {
-                        return below;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The collection that owns the named control. Containers are searched BEFORE this level's
-    /// names, so a flat top-level collection cannot claim a control its Frame owns.
-    /// </summary>
-    private static DispatchObject? FindOwnerControls(DispatchObject container, string wanted, int depth)
-    {
-        if (depth > 8)
-        {
-            return null;
-        }
-
-        var controls = container.GetObject("Controls");
-        if (controls is null)
-        {
-            return null;
-        }
-
-        var keep = false;
-        try
-        {
-            foreach (var control in ItemsOf(controls))
-            {
-                using (control)
-                {
-                    if (control.GetDispId("Pages") != DispId.Unknown)
-                    {
-                        using var pages = control.GetObject("Pages");
-                        if (pages is null)
-                        {
-                            continue;
-                        }
-
-                        foreach (var page in ItemsOf(pages))
-                        {
-                            using (page)
-                            {
-                                var below = FindOwnerControls(page, wanted, depth + 1);
-                                if (below is not null)
-                                {
-                                    return below;
-                                }
-                            }
-                        }
-                    }
-                    else if (control.GetDispId("Controls") != DispId.Unknown)
-                    {
-                        var below = FindOwnerControls(control, wanted, depth + 1);
-                        if (below is not null)
-                        {
-                            return below;
-                        }
-                    }
-                }
-            }
-
-            foreach (var control in ItemsOf(controls))
-            {
-                using (control)
-                {
-                    if (string.Equals(TryText(control, "Name"), wanted, StringComparison.OrdinalIgnoreCase))
-                    {
-                        keep = true;
-                        return controls;
-                    }
-                }
-            }
-        }
-        finally
-        {
-            if (!keep)
-            {
-                controls.Dispose();
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The named control itself, wherever it sits - or a Page by its name, since pages take
-    /// property writes too. Match order does not matter: form-wide names are unique.
-    /// </summary>
-    private static DispatchObject? FindControlNamed(DispatchObject container, string wanted, int depth)
-    {
-        if (depth > 8)
-        {
-            return null;
-        }
-
-        using var controls = container.GetObject("Controls");
-        if (controls is null)
-        {
-            return null;
-        }
-
-        foreach (var control in ItemsOf(controls))
-        {
-            var give = true;
-            try
-            {
-                if (string.Equals(TryText(control, "Name"), wanted, StringComparison.OrdinalIgnoreCase))
-                {
-                    give = false;
-                    return control;
-                }
-
-                if (control.GetDispId("Pages") != DispId.Unknown)
-                {
-                    using var pages = control.GetObject("Pages");
-                    if (pages is null)
-                    {
-                        continue;
-                    }
-
-                    foreach (var page in ItemsOf(pages))
-                    {
-                        var keepPage = false;
-                        try
-                        {
-                            if (string.Equals(TryText(page, "Name"), wanted, StringComparison.OrdinalIgnoreCase))
-                            {
-                                keepPage = true;
-                                return page;
-                            }
-
-                            var below = FindControlNamed(page, wanted, depth + 1);
-                            if (below is not null)
-                            {
-                                return below;
-                            }
-                        }
-                        finally
-                        {
-                            if (!keepPage)
-                            {
-                                page.Dispose();
-                            }
-                        }
-                    }
-                }
-                else if (control.GetDispId("Controls") != DispId.Unknown)
-                {
-                    var below = FindControlNamed(control, wanted, depth + 1);
-                    if (below is not null)
-                    {
-                        return below;
-                    }
-                }
-            }
-            finally
-            {
-                if (give)
-                {
-                    control.Dispose();
-                }
-            }
-        }
-
-        return null;
-    }
-
     // ------------------------------------------------------------------ tolerant reads
 
     private static string? TryText(DispatchObject target, string name)
@@ -1190,27 +624,5 @@ internal sealed partial class AddInSession
         "IImage" => "Image",
         _ => raw,
     };
-
-    /// <summary>The standard toolbox by its everyday names, or any ProgID a caller spells whole.</summary>
-    private static string? ProgIdFor(string type) => type.Contains('.')
-        ? type
-        : type.ToLowerInvariant() switch
-        {
-            "label" => "Forms.Label.1",
-            "textbox" => "Forms.TextBox.1",
-            "combobox" => "Forms.ComboBox.1",
-            "listbox" => "Forms.ListBox.1",
-            "checkbox" => "Forms.CheckBox.1",
-            "optionbutton" => "Forms.OptionButton.1",
-            "togglebutton" => "Forms.ToggleButton.1",
-            "frame" => "Forms.Frame.1",
-            "commandbutton" => "Forms.CommandButton.1",
-            "tabstrip" => "Forms.TabStrip.1",
-            "multipage" => "Forms.MultiPage.1",
-            "scrollbar" => "Forms.ScrollBar.1",
-            "spinbutton" => "Forms.SpinButton.1",
-            "image" => "Forms.Image.1",
-            _ => null,
-        };
 }
 #endif

@@ -606,13 +606,15 @@ export class Workspace {
       this.openNameCounts.set(lower, (this.openNameCounts.get(lower) ?? 0) + 1);
     }
 
-    // Remove closed tabs, refresh dirty flags on the survivors.
+    // Remove closed tabs, refresh dirty flags on the survivors. A DESIGN face keeps its own
+    // dot: unapplied markup is this page's state, the host publishes false for those tabs,
+    // and letting the echo overwrite it would blink the dot off mid-edit.
     for (const group of [...this.groups]) {
       for (const tab of [...group.tabs]) {
         const index = openKeys.get(docKeyOf(tab.id.module, tab.id.project, tab.id.face));
         if (index === undefined) {
           group.remove(tab.id);
-        } else {
+        } else if (!tab.id.face) {
           tab.dirty = dirty[index] ?? false;
         }
       }
@@ -697,6 +699,17 @@ export class Workspace {
     this.handlers.designerRetain(new Set(
       open.filter((id) => id.face === "design")
         .map((id) => docKeyOf(id.module, id.project, id.face))));
+  }
+
+  /** A design-face tab's unapplied-edit dot, owned by the page rather than the host. */
+  setFaceDirty(id: DocumentId, dirty: boolean): void {
+    for (const group of this.groups) {
+      const tab = group.tabs.find((one) => group.key(one.id) === group.key(id));
+      if (tab && tab.dirty !== dirty) {
+        tab.dirty = dirty;
+        group.renderTabs();
+      }
+    }
   }
 
   /** Re-renders every strip, for badge changes. */

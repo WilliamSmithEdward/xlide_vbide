@@ -63,6 +63,7 @@ export type HostMessage =
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
+  | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -146,6 +147,15 @@ export interface FormMarkupPayload {
   reason: string | null;
   form?: FormMarkupBox | null;
   controls?: FormMarkupControl[] | null;
+}
+
+/** How an apply of the designer tab's document ended; the fresh projection follows it. */
+export interface FormMarkupApplied {
+  ok: boolean;
+  added: string[];
+  removed: string[];
+  set: number;
+  refused?: string | null;
 }
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
@@ -301,6 +311,7 @@ export type ClientMessage =
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string; project?: string; action?: string; face?: string }
   | { type: "requestFormMarkup"; module: string; project?: string }
+  | { type: "applyFormMarkup"; module: string; project?: string; markup: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
@@ -587,6 +598,25 @@ export class EditorBridge {
   }
 
   private readonly formMarkupWatchers = new Map<string, (payload: FormMarkupPayload) => void>();
+
+  /** Applies the designer tab's document to the form; the outcome and a fresh projection
+   * come back through the watchers. */
+  applyFormMarkup(module: string, project: string | null, markup: string): void {
+    this.transport.post({ type: "applyFormMarkup", module, ...(project ? { project } : {}), markup });
+  }
+
+  /** Watches a form's apply outcomes; returns the unwatch. One watcher per form. */
+  onFormMarkupApplied(module: string, project: string | null, watcher: (outcome: FormMarkupApplied) => void): () => void {
+    const key = docKeyOf(module, project);
+    this.formMarkupAppliedWatchers.set(key, watcher);
+    return () => {
+      if (this.formMarkupAppliedWatchers.get(key) === watcher) {
+        this.formMarkupAppliedWatchers.delete(key);
+      }
+    };
+  }
+
+  private readonly formMarkupAppliedWatchers = new Map<string, (outcome: FormMarkupApplied) => void>();
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
@@ -1101,6 +1131,9 @@ export class EditorBridge {
         // Keyed by the FORM, not the tab: the answer describes the module, and whoever draws
         // it - today the designer tab's two halves - subscribes under the form's own key.
         this.formMarkupWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message);
+        return;
+      case "formMarkupApplied":
+        this.formMarkupAppliedWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message);
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

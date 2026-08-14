@@ -450,6 +450,9 @@ function boot(): void {
       view = new DesignerView(id, {
         request: () => bridge.requestFormMarkup(id.module, id.project ?? null),
         watch: (listener) => bridge.onFormMarkup(id.module, id.project ?? null, listener),
+        apply: (markup) => bridge.applyFormMarkup(id.module, id.project ?? null, markup),
+        watchApplied: (listener) => bridge.onFormMarkupApplied(id.module, id.project ?? null, listener),
+        dirtyChanged: (dirty) => workspace?.setFaceDirty(id, dirty),
       });
       designerViews.set(key, view);
     }
@@ -1001,6 +1004,17 @@ function boot(): void {
     workspace,
     explorer: shell.explorerTree(),
     bridge,
+    designer: {
+      viewFor: (module, project) => {
+        for (const view of designerViews.values()) {
+          if (view.id.module.toLowerCase() === module.toLowerCase()
+            && (project === null || (view.id.project ?? "").toLowerCase() === project.toLowerCase())) {
+            return view;
+          }
+        }
+        return null;
+      },
+    },
     search: searchWidget,
     bookmarks,
     providers: {

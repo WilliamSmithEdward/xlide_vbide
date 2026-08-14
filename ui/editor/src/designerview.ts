@@ -18,7 +18,7 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import type { FormMarkupControl, FormMarkupPayload } from "./bridge.js";
+import type { FormMarkupApplied, FormMarkupControl, FormMarkupPayload } from "./bridge.js";
 import type { DocumentId } from "./documents.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
@@ -33,6 +33,13 @@ export interface DesignerViewDeps {
   request(): void;
   /** Subscribe to the form's projection answers; returns the unwatch. */
   watch(listener: (payload: FormMarkupPayload) => void): () => void;
+  /** Apply the document to the form; the outcome arrives through watchApplied, and a fresh
+   * projection follows it through watch. */
+  apply(markup: string): void;
+  /** Subscribe to the form's apply outcomes; returns the unwatch. */
+  watchApplied(listener: (outcome: FormMarkupApplied) => void): () => void;
+  /** The document's unapplied-edit state changed; the tab wears the dot. */
+  dirtyChanged(dirty: boolean): void;
 }
 
 export class DesignerView {
@@ -40,11 +47,23 @@ export class DesignerView {
   readonly id: DocumentId;
 
   private readonly markupHost: HTMLElement;
+  private readonly markupHalf: HTMLElement;
   private readonly canvasScroll: HTMLElement;
   private readonly notice: HTMLElement;
+  private readonly errorStrip: HTMLElement;
   private readonly editor: monaco.editor.IStandaloneCodeEditor;
   private readonly model: monaco.editor.ITextModel;
   private readonly unwatch: () => void;
+  private readonly unwatchApplied: () => void;
+  private readonly deps: DesignerViewDeps;
+
+  /** The last text known to BE the form - what dirty is measured against. Null before the
+   * first projection arrives, and while an apply's fresh projection is on its way. */
+  private canonical: string | null = null;
+  private dirty = false;
+  /** An apply was accepted; the next projection is its canonical text and is adopted even
+   * though the document was just marked clean. */
+  private awaitingAdopt = false;
 
   constructor(id: DocumentId, deps: DesignerViewDeps) {
     this.id = id;
@@ -76,7 +95,18 @@ export class DesignerView {
     this.notice.hidden = true;
     canvasHalf.appendChild(this.notice);
 
-    this.root.append(this.markupHost, splitter, canvasHalf);
+    // Where a refusal lands: at the document that earned it, with the host's own wording -
+    // the line number for a parse, "what landed first" for a stop partway.
+    this.errorStrip = document.createElement("div");
+    this.errorStrip.className = "designer-error";
+    this.errorStrip.setAttribute("role", "alert");
+    this.errorStrip.hidden = true;
+
+    this.markupHalf = document.createElement("div");
+    this.markupHalf.className = "designer-markup-half";
+    this.markupHalf.append(this.markupHost, this.errorStrip);
+
+    this.root.append(this.markupHalf, splitter, canvasHalf);
 
     this.model = monaco.editor.createModel("", "plaintext",
       monaco.Uri.parse(`xlide-form:/${encodeURIComponent((id.project ?? "").toLowerCase())}/${encodeURIComponent(id.module)}`));
@@ -86,8 +116,6 @@ export class DesignerView {
       // creation-time measure is zero. The observer picks up the real box on mount, on group
       // moves, and on the splitter, the same way the group editors track their containers.
       automaticLayout: true,
-      readOnly: true,
-      readOnlyMessage: { value: "The markup is read-only until applying lands; edit the form through the api meanwhile." },
       minimap: { enabled: false },
       lineNumbers: "on",
       folding: false,
@@ -98,13 +126,72 @@ export class DesignerView {
       fixedOverflowWidgets: true,
     });
 
+    // Ctrl+S applies THIS document, while focus is in it; the code editors' save flows are
+    // untouched because the command binds to this editor instance alone.
+    this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.applyNow());
+
+    this.model.onDidChangeContent(() => {
+      const nowDirty = this.canonical !== null && this.model.getValue() !== this.canonical;
+      if (nowDirty !== this.dirty) {
+        this.dirty = nowDirty;
+        deps.dirtyChanged(nowDirty);
+      }
+    });
+
     this.installSplitter(splitter);
 
+    this.deps = deps;
     this.unwatch = deps.watch((payload) => this.update(payload));
+    this.unwatchApplied = deps.watchApplied((outcome) => this.onApplied(outcome));
     this.request = deps.request;
   }
 
   private readonly request: () => void;
+
+  /** The apply itself: the whole document, as typed, to the host. */
+  applyNow(): void {
+    this.errorStrip.hidden = true;
+    this.deps.apply(this.model.getValue());
+  }
+
+  /** For the debug surface: set the document and apply, answering the outcome - the same
+   * path Ctrl+S takes, which is the point of driving it from a suite. */
+  applyDocument(markup: string): Promise<FormMarkupApplied> {
+    this.model.setValue(markup);
+    return new Promise((settle) => {
+      this.pendingActOutcome = settle;
+      this.applyNow();
+    });
+  }
+
+  /** The document as it stands, for the debug surface's read side. */
+  markupText(): string {
+    return this.model.getValue();
+  }
+
+  private pendingActOutcome: ((outcome: FormMarkupApplied) => void) | null = null;
+
+  private onApplied(outcome: FormMarkupApplied): void {
+    this.pendingActOutcome?.(outcome);
+    this.pendingActOutcome = null;
+
+    if (outcome.ok) {
+      this.errorStrip.hidden = true;
+      // The fresh projection that follows is this apply's canonical print; adopt it even
+      // though the dot just cleared.
+      this.awaitingAdopt = true;
+      if (this.dirty) {
+        this.dirty = false;
+        this.deps.dirtyChanged(false);
+      }
+      return;
+    }
+
+    // The document keeps the developer's text; the canvas will show what actually landed
+    // (the projection follows a partial apply too); the strip explains the gap.
+    this.errorStrip.textContent = outcome.refused ?? "the apply was refused";
+    this.errorStrip.hidden = false;
+  }
 
   /** Called when the tab goes on screen: every show asks the host again, so the picture
    * follows edits made elsewhere (the api, the native designer) while it was hidden. */
@@ -117,7 +204,11 @@ export class DesignerView {
     this.editor.layout();
   }
 
-  /** Adopts one projection answer: the text into the document, the spec onto the canvas. */
+  /** Adopts one projection answer: the text into the document, the spec onto the canvas.
+   * The CANVAS always follows - it is the truth of the form. The DOCUMENT follows unless the
+   * developer holds unapplied edits in it, because an echo must not eat their typing; their
+   * dirty document is then measured against the NEW canonical, so typing the form's own text
+   * back clears the dot honestly. */
   update(payload: FormMarkupPayload): void {
     if (payload.markup === null) {
       this.notice.textContent = payload.reason ?? "the form could not be read";
@@ -127,12 +218,27 @@ export class DesignerView {
 
     this.notice.hidden = true;
 
-    if (this.model.getValue() !== payload.markup) {
+    const adopt = this.awaitingAdopt || !this.dirty;
+    this.awaitingAdopt = false;
+    this.canonical = payload.markup;
+
+    if (adopt && this.model.getValue() !== payload.markup) {
       const state = this.editor.saveViewState();
-      this.model.setValue(payload.markup);
+      // A single undoable edit rather than setValue: the developer's undo stack survives the
+      // canonical print landing after their own apply.
+      this.model.pushEditOperations([], [{
+        range: this.model.getFullModelRange(),
+        text: payload.markup,
+      }], () => null);
       if (state) {
         this.editor.restoreViewState(state);
       }
+    }
+
+    const nowDirty = this.model.getValue() !== this.canonical;
+    if (nowDirty !== this.dirty) {
+      this.dirty = nowDirty;
+      this.deps.dirtyChanged(nowDirty);
     }
 
     this.renderCanvas(payload);
@@ -278,13 +384,13 @@ export class DesignerView {
 
     const onMove = (event: PointerEvent) => {
       const width = Math.max(160, startWidth + (event.clientX - startX));
-      this.markupHost.style.flex = `0 0 ${width}px`;
+      this.markupHalf.style.flex = `0 0 ${width}px`;
       this.layout();
     };
 
     splitter.addEventListener("pointerdown", (event) => {
       startX = event.clientX;
-      startWidth = this.markupHost.getBoundingClientRect().width;
+      startWidth = this.markupHalf.getBoundingClientRect().width;
       splitter.setPointerCapture(event.pointerId);
       splitter.addEventListener("pointermove", onMove);
       const done = () => {
@@ -301,15 +407,16 @@ export class DesignerView {
         return;
       }
       event.preventDefault();
-      const width = this.markupHost.getBoundingClientRect().width
+      const width = this.markupHalf.getBoundingClientRect().width
         + (event.key === "ArrowRight" ? 24 : -24);
-      this.markupHost.style.flex = `0 0 ${Math.max(160, width)}px`;
+      this.markupHalf.style.flex = `0 0 ${Math.max(160, width)}px`;
       this.layout();
     });
   }
 
   dispose(): void {
     this.unwatch();
+    this.unwatchApplied();
     this.editor.dispose();
     this.model.dispose();
     this.root.remove();

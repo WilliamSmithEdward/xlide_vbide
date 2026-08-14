@@ -302,15 +302,24 @@ the host-owns-membership invariant survives.
     through that list, so a move cannot be mistaken for a close. The tree's form row offers
     Open Designer from its menu (opening the designer has no shorter gesture, which is this
     menu's own admission rule).
-  - **Read-only this slice, and it says so**: the markup half wears a read-only message
-    naming the reason, because an editable document whose edits go nowhere is a lie. The
-    apply loop - Ctrl+S posts the document, the shim answers through the SAME `applyMarkup`
-    service the route uses, the canvas re-renders from the fresh walk - is the next slice,
-    with the page-side dirty dot and the canonical re-adopt.
+  - **The apply loop closed the same evening**: Ctrl+S in the markup half posts the document,
+    the shim applies it through `FormDesignService.ApplyMarkup` - the machinery MOVED OUT of
+    the `#if DEBUG` partial to product side, which is the unification the service header had
+    promised, so the api's `applyMarkup` route and the tab's Ctrl+S are one operation by
+    construction (the route is a wrapper now) - and the outcome comes back first
+    (`formMarkupApplied`), then a fresh projection re-renders the canvas. The document
+    adopts the canonical print as ONE UNDOABLE EDIT when the developer holds no unapplied
+    edits; a refusal lands in a strip under the document with the host's own wording (the
+    parse line, or "what landed first" for a stop partway) while the canvas shows what
+    actually landed. The page owns the design tab's dirty dot - unapplied markup is page
+    state, and the host's echo is barred from blinking it off. `act designerApply` and
+    `act designerMarkup` drive the tab's own path from suites.
 
-  Suite: 107 checks, including the tab standing active and labelled `[Design]`, its close
-  taking only the design face, and a non-form refused. The paint was verified by capture:
-  markup document beside the rendered form, Frame and MultiPage nesting correct.
+  Suite: 113 checks - the tab standing active and labelled `[Design]`, its close taking only
+  the design face, a non-form refused, and the tab's own apply landing a control on the real
+  form (independently confirmed by the designer read), removing it on re-apply, and refusing
+  a bad document by line while touching nothing. The paint was verified by capture: markup
+  document beside the rendered form, Frame and MultiPage nesting correct.
 - **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
   bounds, real captions, honest placeholders; selection; double-click writes the event stub.
   (Spikes 3 and 6.)

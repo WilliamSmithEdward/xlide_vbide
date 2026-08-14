@@ -157,6 +157,13 @@ export interface DevSurfaceParts {
   workspace: Workspace;
   explorer: Explorer;
   bridge: EditorBridge;
+  /** The designer tabs, for driving the markup-apply path a Ctrl+S takes. */
+  designer: {
+    viewFor(module: string, project: string | null): {
+      applyDocument(markup: string): Promise<{ ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }>;
+      markupText(): string;
+    } | null;
+  };
   search: {
     state(): UiSnapshot["search"];
     find(query: string, options?: { scope?: string; matchCase?: boolean; wholeWord?: boolean }): void;
@@ -399,7 +406,7 @@ export interface ActResult {
 type ActAnswer = ActResult | Promise<ActResult>;
 
 export function installDevSurface(parts: DevSurfaceParts): void {
-  const { workspace, explorer, bridge } = parts;
+  const { workspace, explorer, bridge, designer } = parts;
 
   /**
    * A position argument as an offset into the active model.
@@ -603,6 +610,46 @@ export function installDevSurface(parts: DevSurfaceParts): void {
   };
 
   const actions: Record<string, (args: Record<string, unknown>) => ActAnswer> = {
+    /*
+     * The designer tab's own apply - the path Ctrl+S takes, through the view's document and
+     * the host round trip, so a suite proves the TAB works and not merely the route the tab
+     * shares a service with. Answers the outcome the strip under the document shows.
+     */
+    designerApply: async (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const markup = typeof args.markup === "string" ? args.markup : null;
+      if (!module || markup === null) {
+        return { did: false, detail: "designerApply takes module and markup" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = await view.applyDocument(markup);
+      return {
+        did: outcome.ok,
+        detail: outcome.ok
+          ? `+${outcome.added.length} -${outcome.removed.length} set ${outcome.set}`
+          : outcome.refused ?? "refused",
+        data: outcome,
+      };
+    },
+
+    /** The designer tab's document as it stands, in `data`. */
+    designerMarkup: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerMarkup takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      return view
+        ? { did: true, detail: `${view.markupText().length} char(s)`, data: view.markupText() }
+        : { did: false, detail: `no designer tab is open for ${module}` };
+    },
+
     /*
      * Closing is a REQUEST, and saying otherwise is how this route lied for an afternoon.
      *

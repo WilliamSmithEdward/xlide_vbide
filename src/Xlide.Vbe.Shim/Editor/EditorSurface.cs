@@ -152,6 +152,10 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page wants a form's design as markup, for the markup tab.</summary>
     public Action<string, string?>? FormMarkupRequested { get; set; }
 
+    /// <summary>Raised when the developer applies the markup tab's document to the form:
+    /// (module, workbook display or null, the whole document).</summary>
+    public Action<string, string?, string>? FormMarkupApplyRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -742,6 +746,21 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new FormMarkupMessage("formMarkup", moduleName, project, markup, reason, form, controls),
             EditorMessageContext.Default.FormMarkupMessage));
+    }
+
+    /// <summary>How an apply ended; the fresh formMarkup that follows carries the truth.</summary>
+    public void PublishFormMarkupApplied(
+        string moduleName, string? project, bool ok,
+        IReadOnlyList<string> added, IReadOnlyList<string> removed, int set, string? refused)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new FormMarkupAppliedMessage("formMarkupApplied", moduleName, project, ok, [.. added], [.. removed], set, refused),
+            EditorMessageContext.Default.FormMarkupAppliedMessage));
     }
 
     private void PostSyncDocument(string moduleName, string? project, string text)
@@ -1632,6 +1651,22 @@ internal sealed class EditorSurface : IDisposable
                             document.RootElement.TryGetProperty("project", out var markupOwner)
                                 ? markupOwner.GetString()
                                 : null);
+                    }
+
+                    break;
+
+                case "applyFormMarkup":
+                    if (document.RootElement.TryGetProperty("module", out var applyModule)
+                        && applyModule.GetString() is { Length: > 0 } applyAsked
+                        && document.RootElement.TryGetProperty("markup", out var applyBody)
+                        && applyBody.GetString() is { } applyText)
+                    {
+                        FormMarkupApplyRequested?.Invoke(
+                            applyAsked,
+                            document.RootElement.TryGetProperty("project", out var applyOwner)
+                                ? applyOwner.GetString()
+                                : null,
+                            applyText);
                     }
 
                     break;
