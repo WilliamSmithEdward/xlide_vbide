@@ -15,16 +15,41 @@ public sealed record OpenDocumentMessage(
     [property: JsonPropertyName("text")] string Text);
 
 /// <summary>
-/// A form's design as markup text, answering the page's requestFormMarkup. `markup` null means
-/// the form could not be projected and `reason` says why - the tab shows the reason rather
-/// than an empty document pretending to be a form.
+/// A form's design, answering the page's requestFormMarkup: the markup TEXT and the walked
+/// SPEC it was printed from, in one message so the designer tab's two halves - the document
+/// and the visual - are the same walk and cannot skew. `markup` null means the form could not
+/// be projected and `reason` says why - the tab shows the reason rather than an empty
+/// document pretending to be a form.
 /// </summary>
 public sealed record FormMarkupMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("markup")] string? Markup,
-    [property: JsonPropertyName("reason")] string? Reason);
+    [property: JsonPropertyName("reason")] string? Reason,
+    [property: JsonPropertyName("form")] FormMarkupBox? Form = null,
+    [property: JsonPropertyName("controls")] FormMarkupControl[]? Controls = null);
+
+/// <summary>The form's own box, as the markup layer projects it: points, like every bound.</summary>
+public sealed record FormMarkupBox(
+    [property: JsonPropertyName("caption")] string? Caption,
+    [property: JsonPropertyName("width")] double? Width,
+    [property: JsonPropertyName("height")] double? Height);
+
+/// <summary>
+/// One control of the projection, flat with a parent NAME - the walk's own shape. Bounds are
+/// points relative to the parent's client area, which is MSForms' own coordinate model; the
+/// canvas composes them by nesting rather than by arithmetic.
+/// </summary>
+public sealed record FormMarkupControl(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("caption")] string? Caption,
+    [property: JsonPropertyName("left")] double? Left,
+    [property: JsonPropertyName("top")] double? Top,
+    [property: JsonPropertyName("width")] double? Width,
+    [property: JsonPropertyName("height")] double? Height,
+    [property: JsonPropertyName("parent")] string? Parent);
 
 /// <summary>
 /// Tells the surface there is nothing to show: every pane is closed. The surface drops every
@@ -70,7 +95,10 @@ public sealed record SetCaretMessage(
 /// <summary>
 /// The modules the editor has open, and which one is showing. Projects runs parallel to
 /// Modules - the workbook each tab belongs to, by the name the tree uses - so the strip can
-/// say WHICH Module1 when two workbooks hold one.
+/// say WHICH Module1 when two workbooks hold one. Faces runs parallel too: null or "code" is
+/// a code pane mirrored from the host's own pane list, "design" is a form's designer tab,
+/// which is THIS product's state rather than a mirror - the native designer window stays
+/// down on purpose (the Toolbox trap), so these tabs exist only here and in the page.
 /// </summary>
 public sealed record SetModulesMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -78,7 +106,9 @@ public sealed record SetModulesMessage(
     [property: JsonPropertyName("projects")] string?[] Projects,
     [property: JsonPropertyName("active")] string? Active,
     [property: JsonPropertyName("activeProject")] string? ActiveProject,
-    [property: JsonPropertyName("dirty")] bool[]? Dirty = null);
+    [property: JsonPropertyName("dirty")] bool[]? Dirty = null,
+    [property: JsonPropertyName("faces")] string?[]? Faces = null,
+    [property: JsonPropertyName("activeFace")] string? ActiveFace = null);
 
 /// <summary>The developer's settings, for the page's dialog and its typing behaviour.</summary>
 public sealed record SetSettingsMessage(
@@ -533,6 +563,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(OpenDocumentMessage))]
 [JsonSerializable(typeof(FormMarkupMessage))]
+[JsonSerializable(typeof(FormMarkupBox))]
+[JsonSerializable(typeof(FormMarkupControl))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]

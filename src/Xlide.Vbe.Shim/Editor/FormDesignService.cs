@@ -21,6 +21,17 @@ internal static class FormDesignService
     /// <summary>The form's markup, or null with a reason when the component has no designer.</summary>
     public static string? MarkupOf(DispatchObject component, string module, out string? reason)
     {
+        var spec = SpecOf(component, module, out reason);
+        return spec is null ? null : FormMarkup.Print(spec);
+    }
+
+    /// <summary>
+    /// The projection itself, in ONE walk: what the designer tab's two halves both ride. The
+    /// markup text is Print of this and the visual renders this, so the document and the
+    /// canvas cannot disagree about a form they were read from at different moments.
+    /// </summary>
+    public static FormSpec? SpecOf(DispatchObject component, string module, out string? reason)
+    {
         reason = null;
 
         if (component.GetInt32("Type") != 3)
@@ -49,7 +60,7 @@ internal static class FormDesignService
             controls);
 
         KeepDesignerDown(component);
-        return FormMarkup.Print(spec);
+        return spec;
     }
 
     /// <summary>

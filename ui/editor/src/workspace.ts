@@ -41,6 +41,15 @@ export interface WorkspaceHandlers {
   activeChanged(id: DocumentId | null, editor: monaco.editor.IStandaloneCodeEditor): void;
   /** Group geometry changed, so anything measuring the page re-measures. */
   layoutChanged(): void;
+  /** The body a design-face tab shows - one per document, built on demand, reparented as the
+   * tab moves. Null refuses the show (an id that is not a form's designer). */
+  designerBody(id: DocumentId): HTMLElement | null;
+  /** A designer body just went on screen (mounted or re-mounted); it lays itself out. */
+  designerShown(body: HTMLElement): void;
+  /** The design-face keys still open after a host list landed. Views not named are dead -
+   * this is the ONE membership signal that cannot mistake a between-groups move for a close,
+   * because moves never pass through the host's list. */
+  designerRetain(openKeys: Set<string>): void;
 }
 
 /** How far one arrow key moves a splitter. */
@@ -75,6 +84,8 @@ interface Tab {
 export interface TabSnapshot {
   module: string;
   project: string | null;
+  /** "design" for a form's designer tab; absent for a code pane. */
+  face?: string;
   /** The label as rendered, workbook and all when the name collides. */
   label: string;
   active: boolean;
@@ -160,15 +171,17 @@ class EditorGroup {
   }
 
   key(tab: DocumentId): string {
-    return docKeyOf(tab.module, tab.project);
+    return docKeyOf(tab.module, tab.project, tab.face);
   }
 
   holds(id: DocumentId): boolean {
-    const key = docKeyOf(id.module, id.project);
+    const key = this.key(id);
     return this.tabs.some((tab) => this.key(tab.id) === key);
   }
 
-  /** Shows a document this group holds: model on the editor, view states swapped. */
+  /** Shows a document this group holds: model on the editor, view states swapped. A designer
+   * tab shows its own body over the editor instead - the editor keeps its model and its state,
+   * it is simply not the thing on screen while a form is. */
   show(id: DocumentId): void {
     // A group shows what it HOLDS. Asked for anything else it would draw a module with no tab in
     // its own strip and report it as active - which a group waiting on a document whose tab closed
@@ -177,10 +190,27 @@ class EditorGroup {
       return;
     }
 
+    if (id.face === "design") {
+      const body = this.workspace.handlers.designerBody(id);
+      if (!body) {
+        return;
+      }
+
+      if (this.active && !this.active.face && this.editor.getModel()) {
+        this.viewStates.set(this.key(this.active), this.editor.saveViewState());
+      }
+
+      this.mountDesigner(body);
+      this.setActive(id);
+      return;
+    }
+
     const model = this.workspace.documents.get(id.module, id.project);
     if (!model) {
       return;
     }
+
+    this.unmountDesigner();
 
     const outgoing = this.editor.getModel();
     if (outgoing === model) {
@@ -190,18 +220,52 @@ class EditorGroup {
 
     if (outgoing) {
       const previous = this.active;
-      if (previous) {
-        this.viewStates.set(docKeyOf(previous.module, previous.project), this.editor.saveViewState());
+      if (previous && !previous.face) {
+        this.viewStates.set(this.key(previous), this.editor.saveViewState());
       }
     }
 
     this.editor.setModel(model);
-    const held = this.viewStates.get(docKeyOf(id.module, id.project));
+    const held = this.viewStates.get(this.key(id));
     if (held) {
       this.editor.restoreViewState(held);
     }
 
     this.setActive(id);
+  }
+
+  /** The designer body currently over this group's editor, if any. */
+  private designerMount: HTMLElement | null = null;
+
+  /** Puts a designer body over the editor. The body belongs to the DOCUMENT, not the group:
+   * it is reparented here and taken along when the tab moves, view state and all. */
+  private mountDesigner(body: HTMLElement): void {
+    if (this.designerMount === body) {
+      return;
+    }
+
+    this.unmountDesigner();
+    const editorNode = this.editor.getDomNode();
+    if (editorNode) {
+      editorNode.style.display = "none";
+    }
+    this.designerMount = body;
+    this.body.appendChild(body);
+    this.workspace.handlers.designerShown(body);
+  }
+
+  private unmountDesigner(): void {
+    if (!this.designerMount) {
+      return;
+    }
+
+    this.designerMount.remove();
+    this.designerMount = null;
+    const editorNode = this.editor.getDomNode();
+    if (editorNode) {
+      editorNode.style.display = "";
+      this.editor.layout();
+    }
   }
 
   private setActive(id: DocumentId): void {
@@ -263,6 +327,7 @@ class EditorGroup {
     this.pending = null;
     this.shownHere = [];
     this.viewStates.clear();
+    this.unmountDesigner();
     this.editor.setModel(null);
   }
 
@@ -273,7 +338,9 @@ class EditorGroup {
       .filter((id): id is DocumentId => id !== undefined);
 
     for (const id of [...remembered, ...survivors]) {
-      if (this.workspace.documents.get(id.module, id.project)) {
+      // A designer tab can always show: its body is built on demand rather than waiting on
+      // text the host has not published.
+      if (id.face === "design" || this.workspace.documents.get(id.module, id.project)) {
         this.show(id);
         return true;
       }
@@ -284,8 +351,8 @@ class EditorGroup {
 
   /** Drops a document from this group; true when it was the active one. */
   remove(id: DocumentId): boolean {
-    const key = docKeyOf(id.module, id.project);
-    const wasActive = this.active !== null && docKeyOf(this.active.module, this.active.project) === key;
+    const key = this.key(id);
+    const wasActive = this.active !== null && this.key(this.active) === key;
 
     this.tabs = this.tabs.filter((tab) => this.key(tab.id) !== key);
     this.viewStates.delete(key);
@@ -302,7 +369,9 @@ class EditorGroup {
 
     if (wasActive) {
       this.active = null;
-      if (this.editor.getModel()) {
+      if (id.face === "design") {
+        this.unmountDesigner();
+      } else if (this.editor.getModel()) {
         this.editor.setModel(null);
       }
     }
@@ -348,22 +417,28 @@ class EditorGroup {
 
       const tab = document.createElement("button");
       tab.type = "button";
-      tab.className = "tab" + (isActive ? " active" : "") + (dirty ? " dirty" : "");
+      tab.className = "tab" + (isActive ? " active" : "") + (dirty ? " dirty" : "")
+        + (id.face === "design" ? " design" : "");
       tab.dataset.module = id.module;
       tab.dataset.project = id.project ?? "";
+      if (id.face) {
+        tab.dataset.face = id.face;
+      }
       // The workbook is added to the LABEL only when two open tabs share a module name, which is
       // exactly when the bare name is ambiguous. Putting it on every tab costs strip width, and
       // the strip runs out: it grew scroll arrows for that reason.
       //
       // Bracketed rather than dashed, because the workbook qualifies the name rather than
-      // standing beside it as a second thing of equal weight.
-      tab.textContent = collides && id.project ? `${id.module} (${id.project})` : id.module;
+      // standing beside it as a second thing of equal weight. A designer tab says its face the
+      // same way: the module worn a second way needs telling apart from its code tab above all.
+      const shown = id.face === "design" ? `${id.module} [Design]` : id.module;
+      tab.textContent = collides && id.project ? `${shown} (${id.project})` : shown;
 
       // The tooltip always carries it, collision or not. Otherwise a bare tab offers no way at
       // all to find out which workbook it belongs to, and the answer to "which one is this?"
       // should not depend on some other tab happening to share its name (the developer,
       // 2026-08-07).
-      tab.title = id.project ? `${id.module} (${id.project})` : id.module;
+      tab.title = id.project ? `${shown} (${id.project})` : shown;
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(isActive));
       tab.draggable = false;
@@ -397,6 +472,7 @@ class EditorGroup {
 
   dispose(): void {
     this.scroller.dispose();
+    this.unmountDesigner();
     this.editor.setModel(null);
     this.editor.dispose();
     this.root.remove();
@@ -491,16 +567,20 @@ export class Workspace {
         active: group === this.activeGroup,
         pending: group.pending ? { ...group.pending } : null,
         recent: group.shownOrder(),
-        tabs: group.tabs.map(({ id, dirty }) => ({
-          module: id.module,
-          project: id.project,
-          label: (this.openNameCounts.get(id.module.toLowerCase()) ?? 0) > 1 && id.project
-            ? `${id.module} (${id.project})`
-            : id.module,
-          active: group.active !== null && group.key(group.active) === group.key(id),
-          dirty,
-          problems: this.problemCountFor(id),
-        })),
+        tabs: group.tabs.map(({ id, dirty }) => {
+          const shown = id.face === "design" ? `${id.module} [Design]` : id.module;
+          return {
+            module: id.module,
+            project: id.project,
+            ...(id.face ? { face: id.face } : {}),
+            label: (this.openNameCounts.get(id.module.toLowerCase()) ?? 0) > 1 && id.project
+              ? `${shown} (${id.project})`
+              : shown,
+            active: group.active !== null && group.key(group.active) === group.key(id),
+            dirty,
+            problems: this.problemCountFor(id),
+          };
+        }),
       })),
       active: this.activeDocument(),
       empty: this.groups.every((group) => group.tabs.length === 0),
@@ -513,10 +593,15 @@ export class Workspace {
    * ones leave wherever they sit, and a group emptied by the diff dissolves.
    */
   setOpen(open: DocumentId[], dirty: boolean[], active: DocumentId | null): void {
-    const openKeys = new Map(open.map((id, index) => [docKeyOf(id.module, id.project), index] as const));
+    const openKeys = new Map(open.map((id, index) => [docKeyOf(id.module, id.project, id.face), index] as const));
 
     this.openNameCounts = new Map();
     for (const id of open) {
+      // A designer tab does not make its own module's name ambiguous - [Design] already
+      // tells the two faces apart. Only same-named modules across workbooks collide.
+      if (id.face) {
+        continue;
+      }
       const lower = id.module.toLowerCase();
       this.openNameCounts.set(lower, (this.openNameCounts.get(lower) ?? 0) + 1);
     }
@@ -524,7 +609,7 @@ export class Workspace {
     // Remove closed tabs, refresh dirty flags on the survivors.
     for (const group of [...this.groups]) {
       for (const tab of [...group.tabs]) {
-        const index = openKeys.get(docKeyOf(tab.id.module, tab.id.project));
+        const index = openKeys.get(docKeyOf(tab.id.module, tab.id.project, tab.id.face));
         if (index === undefined) {
           group.remove(tab.id);
         } else {
@@ -536,11 +621,11 @@ export class Workspace {
     // Add new tabs to the active group, in the host's order among themselves - unless a drop
     // already chose where one of them goes, in which case the placement hint says the group
     // and the index, and is spent on the tab it named.
-    const held = new Set(this.groups.flatMap((group) => group.tabs.map((tab) => docKeyOf(tab.id.module, tab.id.project))));
+    const held = new Set(this.groups.flatMap((group) => group.tabs.map((tab) => docKeyOf(tab.id.module, tab.id.project, tab.id.face))));
     open.forEach((id, index) => {
-      if (!held.has(docKeyOf(id.module, id.project))) {
+      if (!held.has(docKeyOf(id.module, id.project, id.face))) {
         const hint = this.placement !== null
-          && this.placement.key === docKeyOf(id.module, id.project)
+          && this.placement.key === docKeyOf(id.module, id.project, id.face)
           && this.groups.includes(this.placement.group)
           ? this.placement
           : null;
@@ -608,6 +693,10 @@ export class Workspace {
     }
 
     this.setEmpty(open.length === 0);
+
+    this.handlers.designerRetain(new Set(
+      open.filter((id) => id.face === "design")
+        .map((id) => docKeyOf(id.module, id.project, id.face))));
   }
 
   /** Re-renders every strip, for badge changes. */
@@ -658,7 +747,7 @@ export class Workspace {
   documentOpened(module: string, project: string | null): void {
     const key = docKeyOf(module, project);
     for (const group of this.groups) {
-      if (group.pending && docKeyOf(group.pending.module, group.pending.project) === key) {
+      if (group.pending && docKeyOf(group.pending.module, group.pending.project, group.pending.face) === key) {
         group.show(group.pending);
       }
     }
@@ -714,7 +803,7 @@ export class Workspace {
 
   private announceActive(): void {
     const id = this.activeGroup.active;
-    const key = `${id ? docKeyOf(id.module, id.project) : ""}${this.groups.indexOf(this.activeGroup)}`;
+    const key = `${id ? docKeyOf(id.module, id.project, id.face) : ""}${this.groups.indexOf(this.activeGroup)}`;
     if (key === this.lastAnnounced) {
       return;
     }
@@ -730,10 +819,10 @@ export class Workspace {
       return null;
     }
 
-    const activeKey = group.active ? docKeyOf(group.active.module, group.active.project) : null;
-    const at = Math.max(0, group.tabs.findIndex((tab) => docKeyOf(tab.id.module, tab.id.project) === activeKey));
+    const activeKey = group.active ? docKeyOf(group.active.module, group.active.project, group.active.face) : null;
+    const at = Math.max(0, group.tabs.findIndex((tab) => docKeyOf(tab.id.module, tab.id.project, tab.id.face) === activeKey));
     const next = group.tabs[(at + delta + group.tabs.length) % group.tabs.length];
-    if (!next || docKeyOf(next.id.module, next.id.project) === activeKey) {
+    if (!next || docKeyOf(next.id.module, next.id.project, next.id.face) === activeKey) {
       return null;
     }
 
@@ -980,8 +1069,8 @@ export class Workspace {
     from: EditorGroup,
     destination: { group?: EditorGroup; index?: number; split?: { of: EditorGroup; direction: Exclude<DropZone, "center"> } },
   ): void {
-    const key = docKeyOf(id.module, id.project);
-    const tab = from.tabs.find((candidate) => docKeyOf(candidate.id.module, candidate.id.project) === key);
+    const key = docKeyOf(id.module, id.project, id.face);
+    const tab = from.tabs.find((candidate) => docKeyOf(candidate.id.module, candidate.id.project, candidate.id.face) === key);
     if (!tab) {
       return;
     }
@@ -1005,7 +1094,7 @@ export class Workspace {
     }
 
     const leavingIndex = from.tabs.findIndex((candidate) =>
-      docKeyOf(candidate.id.module, candidate.id.project) === key);
+      docKeyOf(candidate.id.module, candidate.id.project, candidate.id.face) === key);
     const wasActive = from.remove(id);
 
     // The source group does not sit blank: it goes back to what it was last showing, the way
@@ -1232,7 +1321,7 @@ export class Workspace {
       if (holder) {
         this.moveTab(id, holder, { group: target, index });
       } else {
-        this.placement = { key: docKeyOf(id.module, id.project), group: target, index };
+        this.placement = { key: docKeyOf(id.module, id.project, id.face), group: target, index };
         target.pending = id;
         this.activeGroup = target;
         this.markActiveGroup();
@@ -1294,7 +1383,7 @@ export class Workspace {
       const under = tabIdOf(target);
       if (target.closest(".tab-close")
         && under
-        && docKeyOf(under.module, under.project) === docKeyOf(pressed.module, pressed.project)) {
+        && docKeyOf(under.module, under.project, under.face) === docKeyOf(pressed.module, pressed.project, pressed.face)) {
         this.handlers.close(pressed);
       }
     });
@@ -1332,7 +1421,7 @@ export class Workspace {
 
       event.preventDefault();
       const others = this.groups.flatMap((g) => g.tabs).filter((tab) =>
-        docKeyOf(tab.id.module, tab.id.project) !== docKeyOf(id.module, id.project));
+        docKeyOf(tab.id.module, tab.id.project, tab.id.face) !== docKeyOf(id.module, id.project, id.face));
 
       showContextMenu(event.clientX, event.clientY, [
         { label: "Close", run: () => this.handlers.close(id) },
@@ -1444,8 +1533,8 @@ export class Workspace {
             group.tabs = [...strip.querySelectorAll<HTMLElement>("[data-module]")]
               .filter((element) => !!element.dataset.module)
               .map((element) => {
-                const key = docKeyOf(element.dataset.module!, element.dataset.project || null);
-                return group.tabs.find((t) => docKeyOf(t.id.module, t.id.project) === key)!;
+                const key = docKeyOf(element.dataset.module!, element.dataset.project || null, element.dataset.face || null);
+                return group.tabs.find((t) => docKeyOf(t.id.module, t.id.project, t.id.face) === key)!;
               })
               .filter(Boolean);
           } else {

@@ -616,8 +616,8 @@ function clientFor(entry) {
      * `awaiting: "confirm"`, which is neither a failure nor a close - answer it with
      * `act("answerCloseConfirm", { answer })` rather than polling to find out what happened.
      */
-    pane: (action, { module, project, answer } = {}) =>
-      call(`pane${query({ action, module, project, answer })}`, { method: "POST" }),
+    pane: (action, { module, project, answer, face } = {}) =>
+      call(`pane${query({ action, module, project, answer, face })}`, { method: "POST" }),
 
     /**
      * Puts the Object Browser palette away, the way its own close box does: hidden with its

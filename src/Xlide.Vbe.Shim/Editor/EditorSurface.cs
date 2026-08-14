@@ -126,8 +126,9 @@ internal sealed class EditorSurface : IDisposable
     public Action<string, string?, string>? TextChanged { get; set; }
 
     /// <summary>Raised when the developer picks a module, with the workbook when the picker
-    /// knows it (the tree does; the tab strip does not yet).</summary>
-    public Action<string, string?>? ModuleRequested { get; set; }
+    /// knows it (the tree does; the tab strip does not yet). The third value is the FACE:
+    /// null or "code" activates the module's code pane, "design" a form's designer tab.</summary>
+    public Action<string, string?, string?>? ModuleRequested { get; set; }
 
     /// <summary>Raised when the developer wants to be taken to a place, with the workbook when
     /// the asker knows it.</summary>
@@ -168,8 +169,9 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised when the developer closes a module's tab, with its workbook when the
     /// tab carries one. The third value is their answer for unsaved changes - "save" or
-    /// "discard" - and null on the first ask, before any question has been put.</summary>
-    public Action<string, string?, string?>? ModuleCloseRequested { get; set; }
+    /// "discard" - and null on the first ask, before any question has been put. The fourth is
+    /// the face the tab shows: "design" closes a designer tab, which has no unsaved-text ask.</summary>
+    public Action<string, string?, string?, string?>? ModuleCloseRequested { get; set; }
 
     /// <summary>Raised when the developer changed a setting in the page's dialog.</summary>
     public Action<ProductSettings>? SettingsChangeRequested { get; set; }
@@ -720,15 +722,25 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>The markup answer, straight through: the page holds the document, not this side.</summary>
-    public void PublishFormMarkup(string moduleName, string? project, string? markup, string? reason)
+    public void PublishFormMarkup(string moduleName, string? project, string? markup, string? reason, Core.Forms.FormSpec? spec = null)
     {
         if (!_loaded)
         {
             return;
         }
 
+        // The DTOs restate the spec rather than serializing Core's records straight: the wire
+        // contract lives in EditorMessages beside every other message, and Core stays free of
+        // page concerns.
+        var form = spec is null ? null : new FormMarkupBox(spec.Caption, spec.Width, spec.Height);
+        var controls = spec is null ? null : spec.Controls
+            .Select(control => new FormMarkupControl(
+                control.Type, control.Name, control.Caption,
+                control.Left, control.Top, control.Width, control.Height, control.Parent))
+            .ToArray();
+
         Post(JsonSerializer.Serialize(
-            new FormMarkupMessage("formMarkup", moduleName, project, markup, reason),
+            new FormMarkupMessage("formMarkup", moduleName, project, markup, reason, form, controls),
             EditorMessageContext.Default.FormMarkupMessage));
     }
 
@@ -1053,14 +1065,15 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetSettingsMessage));
     }
 
-    /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.</summary>
-    public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject, bool[]? dirty = null)
+    /// <summary>Replaces the tab strip: every module the editor has open, and which one is shown.
+    /// Faces runs parallel to modules when any tab is not a code pane (a form's designer tab).</summary>
+    public void ShowModules(string[] modules, string?[] projects, string? active, string? activeProject, bool[]? dirty = null, string?[]? faces = null, string? activeFace = null)
     {
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(projects);
 
         Send("setModules", JsonSerializer.Serialize(
-            new SetModulesMessage("setModules", modules, projects, active, activeProject, dirty),
+            new SetModulesMessage("setModules", modules, projects, active, activeProject, dirty, faces, activeFace),
             EditorMessageContext.Default.SetModulesMessage));
     }
 
@@ -1543,9 +1556,13 @@ internal sealed class EditorSurface : IDisposable
                         var requestedProject = document.RootElement.TryGetProperty("project", out var wanted)
                             ? wanted.GetString()
                             : null;
+                        var requestedFace = document.RootElement.TryGetProperty("face", out var facing)
+                            ? facing.GetString()
+                            : null;
                         Log.Info($"surface: activate {name} requested"
-                            + (requestedProject is null ? string.Empty : $" in {requestedProject}"));
-                        ModuleRequested?.Invoke(name, requestedProject);
+                            + (requestedProject is null ? string.Empty : $" in {requestedProject}")
+                            + (requestedFace is null ? string.Empty : $" ({requestedFace})"));
+                        ModuleRequested?.Invoke(name, requestedProject, requestedFace);
                     }
 
                     break;
@@ -1665,7 +1682,10 @@ internal sealed class EditorSurface : IDisposable
                         var closingAction = document.RootElement.TryGetProperty("action", out var closingChoice)
                             ? closingChoice.GetString()
                             : null;
-                        ModuleCloseRequested?.Invoke(closingName, closingProject, closingAction);
+                        var closingFace = document.RootElement.TryGetProperty("face", out var closingFacing)
+                            ? closingFacing.GetString()
+                            : null;
+                        ModuleCloseRequested?.Invoke(closingName, closingProject, closingAction, closingFace);
                     }
 
                     break;

@@ -15,15 +15,18 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { VBA_LANGUAGE_ID } from "./vba.js";
 
-/** One open document's identity: the module, and its workbook display name when known. */
+/** One open document's identity: the module, its workbook display name when known, and the
+ * FACE when it is not the code pane - a form's designer tab is the same module worn a second
+ * way, and the two are two tabs. */
 export interface DocumentId {
   module: string;
   project: string | null;
+  face?: "design";
 }
 
 /** The identity two documents are the same by. Case-insensitive, the way the host compares. */
-export function docKeyOf(module: string, project: string | null | undefined): string {
-  return `${(project ?? "").toLowerCase()}\0${module.toLowerCase()}`;
+export function docKeyOf(module: string, project: string | null | undefined, face?: string | null): string {
+  return `${(project ?? "").toLowerCase()}\0${module.toLowerCase()}${face ? `\0${face}` : ""}`;
 }
 
 /** The model URI for a document. Both parts encoded, so names with slashes cannot forge paths. */

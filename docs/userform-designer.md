@@ -272,8 +272,45 @@ the host-owns-membership invariant survives.
   projects the live walk; `applyMarkup` diffs an edited document back - proven live by the
   suite: idempotent on the form's own text, a line added materialises a placed captioned
   control, re-applying the original removes it, and a document that does not parse applies
-  nothing with its line named. What remains of M2 is the developer-facing half: the tree's two
-  faces and the markup tab.
+  nothing with its line named.
+
+  **The designer TAB landed 2026-08-13, late evening, to the owner's shape** (his words, four
+  messages: the markup lives inside the editor space, not a dock pane; a form opens a special
+  editor tab that splits into the markup document and the visual representation, both visible
+  at once; edits to the markup update the form; and it plays nice with the existing tab
+  setup). What stands:
+
+  - **The tab is host-tracked, not page-faked.** The pane list the strip mirrors gained a
+    FACE: a code pane is the host's own window mirrored, a `design` tab is product state the
+    shim carries (`_designerTabs`), because backing it with a native designer window would
+    summon the Toolbox - `KeepDesignerDown` is the standing contract. That is the one
+    designated exception to "the strip mirrors the host", documented at the field. It
+    survives page reloads, publishes through `setModules` (`faces`, `activeFace`), and the
+    api drives it with `pane?action=open&face=design` - the same method the tree's Open
+    Designer item calls, so the api leaves the click's state (the mirror rule).
+  - **One walk feeds both halves.** `formMarkup` carries the markup TEXT and the SPEC it was
+    printed from (`FormDesignService.SpecOf`, one designer walk), so the document and the
+    visual cannot describe two moments of the form. The visual is the honest canvas opened
+    early: points scaled 4/3, children composed by NESTING inside their container's element
+    (MSForms' own coordinate model), captions real, a foreign type drawn as bounds plus its
+    name, never a guessed appearance. Page tabs render as headers with the first page's
+    content showing.
+  - **The page half**: `DocumentId` grew an optional face (two tabs, one module, distinct
+    keys); the workspace mounts a per-form `DesignerView` over the group's editor and
+    reparents it as the tab moves, so the markup editor's scroll and undo ride along; the
+    view disposes when the host's list drops its tab - a move between groups never passes
+    through that list, so a move cannot be mistaken for a close. The tree's form row offers
+    Open Designer from its menu (opening the designer has no shorter gesture, which is this
+    menu's own admission rule).
+  - **Read-only this slice, and it says so**: the markup half wears a read-only message
+    naming the reason, because an editable document whose edits go nowhere is a lie. The
+    apply loop - Ctrl+S posts the document, the shim answers through the SAME `applyMarkup`
+    service the route uses, the canvas re-renders from the fresh walk - is the next slice,
+    with the page-side dirty dot and the canonical re-adopt.
+
+  Suite: 107 checks, including the tab standing active and labelled `[Design]`, its close
+  taking only the design face, and a non-form refused. The paint was verified by capture:
+  markup document beside the rendered form, Frame and MultiPage nesting correct.
 - **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
   bounds, real captions, honest placeholders; selection; double-click writes the event stub.
   (Spikes 3 and 6.)

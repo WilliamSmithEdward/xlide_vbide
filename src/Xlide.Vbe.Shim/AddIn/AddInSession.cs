@@ -1111,8 +1111,20 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.KeyPressed = OnSurfaceKey;
         // The page asked for a module that is gone: say so on the surface rather than leaving the
         // developer looking at the module they were already on, wondering whether the click landed.
-        _editorSurface.ModuleRequested = (component, project) =>
+        _editorSurface.ModuleRequested = (component, project, face) =>
         {
+            // A designer tab is this product's own state, not a mirror of a native pane: the
+            // native designer window stays down (the Toolbox trap), so activating one changes
+            // nothing in the object model and everything in the published strip.
+            if (face == "design")
+            {
+                OpenDesignerTab(component, project);
+                return;
+            }
+
+            // The developer asked for the CODE tab, which must take the active slot back even
+            // when the native pane underneath was already this module and nothing else moves.
+            _activeDesignerTab = null;
             if (ShowModule(component, project) is { } missing)
             {
                 _editorSurface?.Notify(missing);
@@ -1167,8 +1179,18 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ComponentSelected = OnComponentSelected;
         // The tab's X does not read the outcome: it sees its tab go, or sees the question. The
         // debug api's caller has neither, so the method answers and this discards.
-        _editorSurface.ModuleCloseRequested = (component, project, action) =>
+        _editorSurface.ModuleCloseRequested = (component, project, action, face) =>
+        {
+            // A designer tab holds no unsaved text of its own (unapplied markup lives in the
+            // page and the page asks its own question), so closing one is unconditional.
+            if (face == "design")
+            {
+                CloseDesignerTab(component, project);
+                return;
+            }
+
             OnModuleCloseRequested(component, project, action);
+        };
         _editorSurface.ComponentInsertRequested = InsertComponent;
         _editorSurface.ComponentRemoveRequested = (component, project) =>
         {
@@ -4248,6 +4270,96 @@ internal sealed partial class AddInSession : IDisposable
      */
 
     /// <summary>
+    /// The designer tabs the editor has open, in opening order, keyed by PROJECT ID rather
+    /// than display name so a workbook whose display changes (unsaved numbering, save-as)
+    /// keeps its tab. This list is product state, not a mirror: the native editor holds no
+    /// designer window for these - KeepDesignerDown is the standing contract, because a live
+    /// designer window summons the Toolbox and a save while one exists restores it on open.
+    /// The pane half of the published strip mirrors the host; this half IS the truth, which
+    /// is the one designated exception to the mirror (docs/userform-designer.md).
+    /// </summary>
+    private readonly List<(string Module, string ProjectId)> _designerTabs = [];
+
+    /// <summary>The designer tab holding the active slot, when one is.</summary>
+    private (string Module, string ProjectId)? _activeDesignerTab;
+
+    /// <summary>
+    /// The native (module, project) pair the last publish saw. When it moves, the developer
+    /// acted in the native editor or a code activation landed, and either way the code pane
+    /// takes the active slot back from any designer tab that held it.
+    /// </summary>
+    private (string? Module, string? Project) _lastNativeActive;
+
+    /// <summary>
+    /// Opens (or re-activates) a form's designer tab. Validates against the object model
+    /// first: a name that is not a component, or a component that is not a form, is refused
+    /// out loud rather than opening a tab whose every markup request would apologise.
+    /// </summary>
+    private void OpenDesignerTab(string moduleName, string? projectDisplay)
+    {
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        try
+        {
+            using var component = FindComponent(moduleName, projectId, out var owner);
+            if (component is null)
+            {
+                _editorSurface?.Notify($"no component named {moduleName}");
+                return;
+            }
+
+            if (component.GetInt32("Type") != 3)
+            {
+                _editorSurface?.Notify($"{moduleName} is not a UserForm, so it has no designer");
+                return;
+            }
+
+            // The component's own casing, so the strip and every later request agree with the
+            // tree rather than with however the click spelled it.
+            var cased = component.GetString("Name") ?? moduleName;
+            var ownerId = owner ?? projectId ?? string.Empty;
+
+            if (!_designerTabs.Any(tab => string.Equals(tab.Module, cased, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(tab.ProjectId, ownerId, StringComparison.OrdinalIgnoreCase)))
+            {
+                _designerTabs.Add((cased, ownerId));
+                Log.Info($"designer tab: opened {cased}");
+            }
+
+            _activeDesignerTab = (cased, ownerId);
+            PublishModules();
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"designer tab: {moduleName} would not open ({ex.GetType().Name})");
+            _editorSurface?.Notify($"{moduleName}'s designer could not be read");
+        }
+    }
+
+    /// <summary>Closes a designer tab, by name; closing what is not open changes nothing.</summary>
+    private void CloseDesignerTab(string moduleName, string? projectDisplay)
+    {
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject ?? string.Empty;
+
+        var removed = _designerTabs.RemoveAll(tab =>
+            string.Equals(tab.Module, moduleName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(tab.ProjectId, projectId, StringComparison.OrdinalIgnoreCase));
+
+        if (_activeDesignerTab is { } shown
+            && string.Equals(shown.Module, moduleName, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(shown.ProjectId, projectId, StringComparison.OrdinalIgnoreCase))
+        {
+            _activeDesignerTab = null;
+        }
+
+        if (removed > 0)
+        {
+            Log.Info($"designer tab: closed {moduleName}");
+            PublishModules();
+        }
+    }
+
+    /// <summary>
     /// The markup tab's text: the form walked into the markup layer's language, or the reason
     /// it could not be. Same conversion rule as PublishDocument below, same thread rule.
     /// </summary>
@@ -4268,12 +4380,19 @@ internal sealed partial class AddInSession : IDisposable
                 if (component is null)
                 {
                     surface.PublishFormMarkup(moduleName, projectDisplay, null, $"no component named {moduleName}");
+                    // A designer tab whose form is gone is a corpse; the request that found
+                    // out is the moment it is collected.
+                    CloseDesignerTab(moduleName, projectDisplay);
                     return;
                 }
 
-                var markup = FormDesignService.MarkupOf(component, moduleName, out var reason);
-                Log.Info($"form markup: publishing {moduleName}, {(markup?.Length ?? 0)} char(s){(reason is null ? "" : $" ({reason})")}");
-                surface.PublishFormMarkup(moduleName, DisplayFromProjectId(owner ?? projectId), markup, reason);
+                // ONE walk feeds both halves of the designer tab: the text is Print of the
+                // spec the visual renders, so they cannot describe two moments of the form.
+                var spec = FormDesignService.SpecOf(component, moduleName, out var reason);
+                var markup = spec is null ? null : Core.Forms.FormMarkup.Print(spec);
+                Log.Info($"form markup: publishing {moduleName}, {(markup?.Length ?? 0)} char(s), "
+                    + $"{spec?.Controls.Count ?? 0} control(s){(reason is null ? "" : $" ({reason})")}");
+                surface.PublishFormMarkup(moduleName, DisplayFromProjectId(owner ?? projectId), markup, reason, spec);
             }
             catch (Exception ex)
             {
@@ -5696,12 +5815,32 @@ internal sealed partial class AddInSession : IDisposable
             // from the same published list.
             surface.PruneDocuments([.. modules.Select(m => (m.Name, m.Project))]);
 
+            // Designer tabs join the same strip. Pruned here only of closed WORKBOOKS (their
+            // project id stops resolving to a display); a form removed while its tab stands is
+            // collected lazily, when the tab's next markup request answers "no component".
+            _designerTabs.RemoveAll(tab => DisplayFromProjectId(tab.ProjectId) is not { Length: > 0 });
+            if (_activeDesignerTab is { } held && !_designerTabs.Contains(held))
+            {
+                _activeDesignerTab = null;
+            }
+
+            // A NATIVE move takes the active slot back: the developer clicked a code pane, or
+            // an activation landed one. A designer tab stays active only while nothing under
+            // it moves.
+            var nativeActive = (surface.Module, _shownProject);
+            if (nativeActive != _lastNativeActive)
+            {
+                _lastNativeActive = nativeActive;
+                _activeDesignerTab = null;
+            }
+
             // Closing the LAST pane leaves the surface holding a document nobody can see a
             // tab for, when no window event reaches the tracker to say so - the mirror of
             // the empty view that outlived its panes (2026-08-06). The object model is the
             // authority both ways: an empty open list with a module still shown IS the
-            // empty workspace, and every close route passes through this publish.
-            if (modules.Count == 0 && hadDocuments)
+            // empty workspace, and every close route passes through this publish. A standing
+            // designer tab keeps the workspace: it is a tab, just not the host's.
+            if (modules.Count == 0 && _designerTabs.Count == 0 && hadDocuments)
             {
                 Log.Info("editor surface: the last module closed, showing the empty workspace");
                 _watchingEmpty = true;
@@ -5787,24 +5926,50 @@ internal sealed partial class AddInSession : IDisposable
                 return !string.Equals(text, baseline, StringComparison.Ordinal);
             }
 
-            string[] names = [.. modules.Select(m => m.Name)];
-            string?[] projects = [.. modules.Select(m => m.Project)];
-            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Name, m.Project))];
-            var active = surface.Module;
-            var activeProject = DisplayFromProjectId(_shownProject);
+            // Designer tabs append after the mirrored panes, wearing their face. Their dirty
+            // is always false HERE: unapplied markup is the page's own state, and the page
+            // wears that dot itself rather than asking the host to relay it.
+            var designerRows = _designerTabs
+                .Select(tab => (tab.Module, Project: DisplayFromProjectId(tab.ProjectId)))
+                .ToList();
+
+            string[] names = [.. modules.Select(m => m.Name), .. designerRows.Select(d => d.Module)];
+            string?[] projects = [.. modules.Select(m => m.Project), .. designerRows.Select(d => d.Project)];
+            bool[] dirty = [.. modules.Select(m => DirtyOf(m.Name, m.Project)), .. designerRows.Select(_ => false)];
+            string?[]? faces = designerRows.Count == 0
+                ? null
+                : [.. modules.Select(_ => (string?)null), .. designerRows.Select(_ => (string?)"design")];
+
+            string? active;
+            string? activeProject;
+            string? activeFace;
+            if (_activeDesignerTab is { } designer)
+            {
+                active = designer.Module;
+                activeProject = DisplayFromProjectId(designer.ProjectId);
+                activeFace = "design";
+            }
+            else
+            {
+                active = surface.Module;
+                activeProject = DisplayFromProjectId(_shownProject);
+                activeFace = null;
+            }
 
             // Sent on change only: the polls re-derive this several times a second during an
             // episode, and an identical strip is not news to the page or the log.
             var key = string.Join("|", names) + "\n" + string.Join("|", projects)
-                + "\n" + string.Join("|", dirty) + "\n" + active + "\n" + activeProject;
+                + "\n" + string.Join("|", dirty) + "\n" + active + "\n" + activeProject
+                + "\n" + string.Join("|", faces ?? []) + "\n" + activeFace;
             if (key == _lastModulesKey)
             {
                 return;
             }
 
             _lastModulesKey = key;
-            Log.Verbose($"modules: publish [{string.Join(",", names)}] dirty [{string.Join(",", dirty)}]");
-            surface.ShowModules(names, projects, active, activeProject, dirty);
+            Log.Verbose($"modules: publish [{string.Join(",", names)}] dirty [{string.Join(",", dirty)}]"
+                + (designerRows.Count == 0 ? string.Empty : $" designer [{string.Join(",", designerRows.Select(d => d.Module))}]"));
+            surface.ShowModules(names, projects, active, activeProject, dirty, faces, activeFace);
         }
     }
 

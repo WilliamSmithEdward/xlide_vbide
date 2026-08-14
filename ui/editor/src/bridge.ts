@@ -55,13 +55,14 @@ export type HostMessage =
   | { type: "notice"; text: string; sticky?: boolean }
   | { type: "editorCommand"; id: string }
   | { type: "immediateResult"; text: string; failed: boolean }
-  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[] }
+  | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[]; faces?: (string | null)[]; activeFace?: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
   | { type: "setProjects"; projects: ExplorerProject[] }
   | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
   | { type: "confirmClose"; name: string; project?: string | null }
+  | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -114,6 +115,37 @@ export interface ObMember {
   signature: string;
   description: string;
   line: number;
+}
+
+/** The form's own box as the markup layer projects it. Bounds are points, like the markup's. */
+export interface FormMarkupBox {
+  caption?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+/**
+ * One control of the form projection, flat with a parent NAME - the walk's shape. Bounds are
+ * points relative to the parent's client area (MSForms' own model); the canvas composes them
+ * by nesting rather than by arithmetic.
+ */
+export interface FormMarkupControl {
+  type: string;
+  name: string;
+  caption?: string | null;
+  left?: number | null;
+  top?: number | null;
+  width?: number | null;
+  height?: number | null;
+  parent?: string | null;
+}
+
+/** A form's projection as one answer: the markup text and the spec it prints. */
+export interface FormMarkupPayload {
+  markup: string | null;
+  reason: string | null;
+  form?: FormMarkupBox | null;
+  controls?: FormMarkupControl[] | null;
 }
 
 /** One procedure in a module's outline: the kind as the tree spells it, and its 1-based line. */
@@ -256,7 +288,7 @@ export type ClientMessage =
   | { type: "contentChanged"; moduleName: string; project?: string; revision: number; changes: HostTextChange[]; fullLength: number; source?: "format" }
   | { type: "selectionChanged"; startLine: number; startColumn: number; endLine: number; endColumn: number }
   | { type: "breakpointToggleRequested"; line: number }
-  | { type: "activateModule"; moduleName: string; project?: string }
+  | { type: "activateModule"; moduleName: string; project?: string; face?: string }
   | { type: "navigate"; module: string; line: number; column: number; project?: string }
   | { type: "command"; name: string }
   | { type: "evaluate"; text: string }
@@ -267,7 +299,8 @@ export type ClientMessage =
   | { type: "menuExecute"; path: number[] }
   | { type: "editProperty"; component: string; name: string; value: string }
   | { type: "selectComponent"; name: string }
-  | { type: "closeModule"; name: string; project?: string; action?: string }
+  | { type: "closeModule"; name: string; project?: string; action?: string; face?: string }
+  | { type: "requestFormMarkup"; module: string; project?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
@@ -521,10 +554,39 @@ export class EditorBridge {
     this.transport.post(timings ? { type: "ready", timings } : { type: "ready" });
   }
 
-  /** Asks the host to show a module. The tree names the workbook it means; a tab cannot yet. */
-  activateModule(moduleName: string, project?: string): void {
-    this.transport.post({ type: "activateModule", moduleName, ...(project ? { project } : {}) });
+  /** Asks the host to show a module. The tree names the workbook it means; a tab cannot yet.
+   * face "design" asks for a form's designer tab instead of its code pane. */
+  activateModule(moduleName: string, project?: string, face?: string): void {
+    this.transport.post({
+      type: "activateModule",
+      moduleName,
+      ...(project ? { project } : {}),
+      ...(face ? { face } : {}),
+    });
   }
+
+  /**
+   * Asks the host for a form's projection - the markup text and the spec it prints - and
+   * routes the answer to whoever watches that form. The answer is a broadcast rather than a
+   * reply: an apply, a later request, or another view of the same form all land here, and the
+   * designer tab wants each one, not only the one it asked for.
+   */
+  requestFormMarkup(module: string, project: string | null): void {
+    this.transport.post({ type: "requestFormMarkup", module, ...(project ? { project } : {}) });
+  }
+
+  /** Watches a form's projection answers; returns the unwatch. One watcher per form. */
+  onFormMarkup(module: string, project: string | null, watcher: (payload: FormMarkupPayload) => void): () => void {
+    const key = docKeyOf(module, project);
+    this.formMarkupWatchers.set(key, watcher);
+    return () => {
+      if (this.formMarkupWatchers.get(key) === watcher) {
+        this.formMarkupWatchers.delete(key);
+      }
+    };
+  }
+
+  private readonly formMarkupWatchers = new Map<string, (payload: FormMarkupPayload) => void>();
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
@@ -623,13 +685,15 @@ export class EditorBridge {
 
   /** Asks the host to close a module's pane, which is what closes its tab. The host holds a
    * close whose module has unsaved changes and asks back with confirmClose; the developer's
-   * choice returns through the same message as the action - "save" or "discard". */
-  closeModule(name: string, project?: string, action?: string): void {
+   * choice returns through the same message as the action - "save" or "discard". face
+   * "design" closes a form's designer tab, which has no unsaved-text question host-side. */
+  closeModule(name: string, project?: string, action?: string, face?: string): void {
     this.transport.post({
       type: "closeModule",
       name,
       ...(project ? { project } : {}),
       ...(action ? { action } : {}),
+      ...(face ? { face } : {}),
     });
   }
 
@@ -990,15 +1054,22 @@ export class EditorBridge {
         return;
       case "setModules": {
         // The open list is the models' truth too: a pane closed anywhere disposes its model
-        // here, undo history and all, the same moment its tab leaves the strip.
+        // here, undo history and all, the same moment its tab leaves the strip. Designer tabs
+        // ride the list wearing their face; their keys differ from the code panes', so the
+        // model store - which only ever holds code documents - is untouched by them.
         const open: DocumentId[] = message.modules.map((module, index) => ({
           module,
           project: (message.projects ?? [])[index] ?? null,
+          ...((message.faces ?? [])[index] === "design" ? { face: "design" as const } : {}),
         }));
-        this.documents.closeMissing(open);
+        this.documents.closeMissing(open.filter((id) => !id.face));
 
         this.hostActive = message.active
-          ? { module: message.active, project: message.activeProject ?? null }
+          ? {
+            module: message.active,
+            project: message.activeProject ?? null,
+            ...(message.activeFace === "design" ? { face: "design" as const } : {}),
+          }
           : null;
 
         this.workspace?.setOpen(open, message.dirty ?? [], this.hostActive);
@@ -1025,6 +1096,11 @@ export class EditorBridge {
         return;
       case "confirmClose":
         this.shell?.confirmClose(message.name, message.project ?? null);
+        return;
+      case "formMarkup":
+        // Keyed by the FORM, not the tab: the answer describes the module, and whoever draws
+        // it - today the designer tab's two halves - subscribes under the form's own key.
+        this.formMarkupWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message);
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

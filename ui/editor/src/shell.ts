@@ -42,6 +42,8 @@ export interface ShellProperty {
 export interface ShellHandlers {
   /** The developer picked a module. The tree names the workbook; the tab strip cannot yet. */
   activateModule(name: string, workbook?: string): void;
+  /** The developer asked for a form's designer tab - markup beside the visual form. */
+  openDesigner(name: string, workbook?: string): void;
   /** The developer picked a finding or a procedure, and wants to be taken to it. */
   navigate(module: string, line: number, column: number, selectLine?: boolean, workbook?: string): void;
   /**
@@ -1043,6 +1045,12 @@ export class Shell {
       // a module named the same in two workbooks was renamed in whichever answered first.
       { label: "Rename...", run: () => this.beginRename(name, workbook ?? null) },
     ];
+
+    // A form's designer HAS no shorter gesture - the click opens the code-behind - so the
+    // menu is exactly where it belongs by this menu's own rule.
+    if (kind === ComponentKind.Form) {
+      items.unshift({ label: "Open Designer", run: () => this.handlers.openDesigner(name, workbook) }, {});
+    }
 
     // A document module cannot be removed: ThisWorkbook and a sheet's code belong to the workbook
     // and the host refuses Remove on them. Left out rather than shown greyed, the way the rest of

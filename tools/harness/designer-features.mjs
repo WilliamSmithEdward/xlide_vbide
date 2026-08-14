@@ -242,6 +242,29 @@ try {
     untouched.controls.length === afterMarkup.controls.length - 1,
     `${untouched.controls.length} controls vs ${afterMarkup.controls.length} with the probe button`);
 
+  // ---- the designer tab: the form worn as an editor tab, markup beside the visual ----
+
+  await api.pane("open", { module: form, face: "design" });
+  const withDesigner = await waitFor("the designer tab to stand in the strip", async () =>
+    ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .find((tab) => tab.module === form && tab.face === "design"), { budgetMs: 15000 });
+  check("the designer tab stands, active, labelled with its face",
+    withDesigner.active === true && /\[Design\]/.test(withDesigner.label),
+    JSON.stringify(withDesigner));
+
+  await api.pane("close", { module: form, face: "design" });
+  await waitFor("the designer tab to leave the strip", async () =>
+    !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .some((tab) => tab.module === form && tab.face === "design"), { budgetMs: 15000 });
+  check("and its close takes only the designer face, not the code tab",
+    ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .some((tab) => tab.module === form && !tab.face));
+
+  const notFormTab = await api.pane("open", { module: plainModule, face: "design" })
+    .catch((why) => why.message);
+  check("a module that is not a form is refused a designer tab",
+    /no designer tab/.test(String(notFormTab)), String(notFormTab));
+
   // ---- refusals are answers ----
 
   const missing = await api.designer("NoSuchForm", project).catch((why) => why.message);

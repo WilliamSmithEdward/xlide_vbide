@@ -3243,6 +3243,20 @@ internal sealed partial class AddInSession
                         // And its answer is the show's answer: opening a module that is not there
                         // replied ok, which is the same lie the write route told about a module
                         // that is not there (2026-08-09).
+                        //
+                        // `face=design` opens a form's DESIGNER TAB instead - the same method
+                        // the page's own activate uses, so the api leaves the state the click
+                        // would (the mirror rule). Its refusals go to the surface as notices,
+                        // the way the click's do; the route reads the tab's presence back from
+                        // the published strip rather than being answered twice.
+                        if (request.Query.TryGetValue("face", out var paneFace) && paneFace == "design")
+                        {
+                            OpenDesignerTab(paneModule, DisplayFromProjectId(paneOwner));
+                            var openedTab = _designerTabs.Any(tab =>
+                                string.Equals(tab.Module, paneModule, StringComparison.OrdinalIgnoreCase));
+                            return openedTab ? HostOk() : HostError($"{paneModule} has no designer tab to open");
+                        }
+
                         var showed = ShowModule(paneModule, DisplayFromProjectId(paneOwner));
                         return showed is null ? HostOk() : HostError(showed);
 
@@ -3256,6 +3270,14 @@ internal sealed partial class AddInSession
                         // above gives: a save that would not save, a revert the module refused,
                         // and a confirm now standing on screen all left the tab where it was and
                         // all replied ok.
+                        if (request.Query.TryGetValue("face", out var closeFace) && closeFace == "design")
+                        {
+                            // A designer tab has no unsaved-text question on this side; the
+                            // page owns unapplied markup and asks its own.
+                            CloseDesignerTab(paneModule, DisplayFromProjectId(paneOwner));
+                            return HostOk();
+                        }
+
                         request.Query.TryGetValue("answer", out var closeAnswer);
                         var closed = OnModuleCloseRequested(paneModule, DisplayFromProjectId(paneOwner), closeAnswer);
                         return System.Text.Json.JsonSerializer.Serialize(

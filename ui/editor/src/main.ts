@@ -71,7 +71,8 @@ import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type Host
 import { showContextMenu } from "./contextmenu.js";
 import { installDevSurface } from "./devsurface.js";
 import { openReferencesDialog } from "./referencesdialog.js";
-import { DocumentStore, docUriOf } from "./documents.js";
+import { DocumentStore, docKeyOf, docUriOf, type DocumentId } from "./documents.js";
+import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
@@ -436,21 +437,60 @@ function boot(): void {
   });
   bridge.searchWidget = searchWidget;
 
+  // The designer views, one per form, living as long as their tab does. The workspace mounts
+  // a view's root into whichever group shows its tab; membership comes back from the host's
+  // list through designerRetain, which is what disposes a view - a move between groups never
+  // touches the host's list, so a move can never be mistaken for a close.
+  const designerViews = new Map<string, DesignerView>();
+
+  const designerViewFor = (id: DocumentId): DesignerView => {
+    const key = docKeyOf(id.module, id.project, id.face);
+    let view = designerViews.get(key);
+    if (!view) {
+      view = new DesignerView(id, {
+        request: () => bridge.requestFormMarkup(id.module, id.project ?? null),
+        watch: (listener) => bridge.onFormMarkup(id.module, id.project ?? null, listener),
+      });
+      designerViews.set(key, view);
+    }
+    return view;
+  };
+
   workspace = new Workspace(editorArea, emptyView, documents, {
     createEditor: (groupBody) => {
       const editor = monaco.editor.create(groupBody, editorOptions);
       wireEditor(editor);
       return editor;
     },
-    activate: (id) => bridge.activateModule(id.module, id.project ?? undefined),
-    close: (id, action) => bridge.closeModule(id.module, id.project ?? undefined, action),
+    activate: (id) => bridge.activateModule(id.module, id.project ?? undefined, id.face),
+    close: (id, action) => bridge.closeModule(id.module, id.project ?? undefined, action, id.face),
     activeChanged: (id, editor) => {
       // The search widget floats over the active group and searches its editor.
       searchWidget.attachTo(editor.getContainerDomNode());
       searchWidget.onActiveEditorChanged();
       shell?.setActiveModule(id?.module ?? null, id?.project ?? null);
     },
-    layoutChanged: () => workspace?.editors().forEach((editor) => editor.layout()),
+    layoutChanged: () => {
+      workspace?.editors().forEach((editor) => editor.layout());
+      designerViews.forEach((view) => view.layout());
+    },
+    designerBody: (id) => (id.face === "design" ? designerViewFor(id).root : null),
+    designerShown: (body) => {
+      for (const view of designerViews.values()) {
+        if (view.root === body) {
+          view.shown();
+          return;
+        }
+      }
+    },
+    designerRetain: (openKeys) => {
+      for (const [key, view] of [...designerViews]) {
+        if (!openKeys.has(key)) {
+          designerViews.delete(key);
+          view.dispose();
+        }
+      }
+    },
   });
   bridge.workspace = workspace;
 
@@ -477,6 +517,7 @@ function boot(): void {
 
   shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
+    openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
     navigate: (module, line, column, selectLine, workbook) =>
       bridge.navigate(module, line, column, selectLine, workbook),
     // The drop ends in the same state the row's own click ends in - the module's activate, or
