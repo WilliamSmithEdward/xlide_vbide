@@ -206,17 +206,17 @@ try {
   check("the markup opens with the form line",
     markup.startsWith(`Form ${form} "`), markup.split("\n")[0]);
   check("a nested control prints inside its container",
-    /\r?\n  Frame Options "Freight" at 12,112 size 92x66\r?\n    OptionButton PickGround/.test(markup),
+    /\r?\n    Frame Options "Freight" at 12,112 size 92x66\r?\n        OptionButton PickGround/.test(markup),
     markup.slice(0, 400));
   check("a page prints under its MultiPage, a control under the page",
-    /\r?\n  MultiPage Wizard[^\r\n]*\r?\n    Page Page1 "Page1"\r?\n      CheckBox Agree/.test(markup));
+    /\r?\n    MultiPage Wizard[^\r\n]*\r?\n        Page Page1 "Page1"\r?\n            CheckBox Agree/.test(markup));
 
   const idempotent = await api.applyMarkup(form, markup, project);
   check("applying the form's own markup adds and removes nothing",
     idempotent.ok === true && idempotent.added.length === 0 && idempotent.removed.length === 0,
     JSON.stringify({ added: idempotent.added, removed: idempotent.removed, set: idempotent.set }));
 
-  const withButton = `${markup.trimEnd()}\r\n  CommandButton MarkupBtn "Go" at 8,282 size 60x20\r\n`;
+  const withButton = `${markup.trimEnd()}\r\n    CommandButton MarkupBtn "Go" at 8,282 size 60x20\r\n`;
   const applied = await api.applyMarkup(form, withButton, project);
   check("a line added to the document adds the control",
     applied.ok === true && applied.added.includes("MarkupBtn"), JSON.stringify(applied));
@@ -274,7 +274,7 @@ try {
 
   const tabApplied = await api.act("designerApply", {
     module: form,
-    markup: `${String(tabMarkup.data).trimEnd()}\r\n  CommandButton TabBtn "Go" at 8,282 size 60x20\r\n`,
+    markup: `${String(tabMarkup.data).trimEnd()}\r\n    CommandButton TabBtn "Go" at 8,282 size 60x20\r\n`,
   });
   check("applying an edited document from the tab lands on the form",
     tabApplied.did === true && (tabApplied.data?.added ?? []).includes("TabBtn"),
@@ -316,7 +316,7 @@ try {
 
   const routeMarkup = await api.designerMarkup(form, project);
   check("and in the projection route's document",
-    /\r?\n  BackColor = 12632256\r?\n/.test(routeMarkup));
+    /\r?\n    BackColor = 12632256\r?\n/.test(routeMarkup));
 
   // The dialect's rule, held from the other side: a document WITHOUT the line cannot erase
   // the colour - an unspoken property is one an apply never touches.
@@ -326,7 +326,7 @@ try {
     kept.form.backColor === 12632256, String(kept.form.backColor));
 
   // A document WITH the line changes it - the write goes where the native panel's would.
-  const recoloured = `${String(tabMarkup.data).replace(/\r?\n/, "\r\n  BackColor = 12639424\r\n")}`;
+  const recoloured = `${String(tabMarkup.data).replace(/\r?\n/, "\r\n    BackColor = 12639424\r\n")}`;
   await api.act("designerApply", { module: form, markup: recoloured });
   const changed = await api.designer(form, project);
   check("an apply of a document with the line writes the native panel's own property",
@@ -336,6 +336,26 @@ try {
   const defaulted = await api.designerMarkup(form, project);
   check("back at the default, the line leaves the document - defaults stay unspoken",
     !/BackColor/.test(defaulted));
+
+  // ---- the squiggles: Core's tolerant parse, drawn on the document as it is typed ----
+
+  await api.act("designerSetMarkup", {
+    module: form,
+    markup: `Form ${form} size 100x100\r\n    Label A at banana\r\n    Gadget G at 1,1 size 2x2\r\n`,
+  });
+  const lint = await waitFor("the squiggles to arrive", async () => {
+    const read = (await api.act("designerLint", { module: form })).data ?? [];
+    return read.length >= 2 ? read : null;
+  }, { budgetMs: 15000 });
+  check("a bad document wears its squiggles, each at its line, warnings apart from errors",
+    lint.some((f) => f.line === 2 && f.severity === "error")
+    && lint.some((f) => f.line === 3 && f.severity === "warning" && /ProgId/.test(f.message)),
+    JSON.stringify(lint));
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the squiggles to clear on the canonical text", async () =>
+    ((await api.act("designerLint", { module: form })).data ?? []).length === 0, { budgetMs: 15000 });
+  check("and the canonical document wears none", true);
 
   await api.pane("close", { module: form, face: "design" });
   await waitFor("the designer tab to leave the strip", async () =>

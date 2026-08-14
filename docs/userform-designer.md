@@ -140,18 +140,18 @@ than a rival editing model.
 ```
 ' EntryForm, as xlide projects it. Edits here apply back through the designer model.
 Form EntryForm "Quarter Entry" size 360x320
-  Label NameLabel "Customer" at 12,14 size 66x16
-  TextBox NameBox at 84,12 size 120x20
-  Frame Options "Freight" at 12,112 size 92x66
-    OptionButton PickGround "Ground" at 8,14 size 76x16
-    OptionButton PickAir "Air" at 8,34 size 76x16
-  MultiPage Wizard at 12,188 size 192x86
-    Page Page1 "Page1"
-      CheckBox Agree "Agreed" at 8,8 size 100x16
-    Page Page2 "Page2"
-  CommandButton OkButton "Start" at 262,250 size 72x24
-    Font.Size = 12
-    Font.Bold = True
+    Label NameLabel "Customer" at 12,14 size 66x16
+    TextBox NameBox at 84,12 size 120x20
+    Frame Options "Freight" at 12,112 size 92x66
+        OptionButton PickGround "Ground" at 8,14 size 76x16
+        OptionButton PickAir "Air" at 8,34 size 76x16
+    MultiPage Wizard at 12,188 size 192x86
+        Page Page1 "Page1"
+            CheckBox Agree "Agreed" at 8,8 size 100x16
+        Page Page2 "Page2"
+    CommandButton OkButton "Start" at 262,250 size 72x24
+        Font.Size = 12
+        Font.Bold = True
 ```
 
 The dialect is VBA's, deliberately: apostrophe comments, `True`/`False`, doubled quotes inside
@@ -326,13 +326,18 @@ the host-owns-membership invariant survives.
   1. *Highlighting and auto-indent* - a Monarch grammar on the page, standard token names so
      the existing themes colour it without edits, and enter-rules that indent under a
      container line. Page-local, no host involvement.
-  2. *Linting, red squiggles* - and the design decision is WHERE it comes from: Core's
-     parser is the one grammar, so the diagnostics must be a TOLERANT PARSE on the host
-     side (collect every line's refusal rather than throwing at the first, plus the
-     semantic checks an apply would trip over: a duplicate name, a parent that is not a
-     container, a type outside the toolbox with no ProgId line), carried over the bridge
-     and set as markers on the markup model. Never a second page-side grammar - that is
-     the drift the analyzer/tokenizer split teaches against.
+  2. *Linting, red squiggles* - **landed 2026-08-13, late**: `FormMarkup.Lint` is a
+     TOLERANT PARSE with the strict parser as the one grammar - each refusal's line is
+     blanked and the parse re-run, so the lint can never disagree with Parse, only continue
+     past it - plus the semantic rows an apply would note and skip (a duplicate name at its
+     second mention, a foreign type with no ProgId line; a stray Page arrives as the
+     parser's own error). Six Core tests hold the collector; the wire is pure text both
+     ways (`lintFormMarkup`/`formMarkupLint`, no designer touched, no window stirred); the
+     view lints debounced as the developer types and draws the markers on the document.
+     `act designerSetMarkup` and `act designerLint` drive it; suite rows pin the squiggles
+     appearing at their lines, warnings apart from errors, and clearing on canonical text.
+     The same evening the language moved to FOUR-space indentation (the owner's call):
+     printer, parser, editor tab size, every literal and sample.
   3. *Completions and hover* - control types, `at`/`size` scaffolding, known property
      paths per control kind; needs the language service shape of (2) to answer from.
 
