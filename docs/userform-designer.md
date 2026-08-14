@@ -373,6 +373,14 @@ the host-owns-membership invariant survives.
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
     on control edges after. This is the canvas's definition-of-done row.
+  - *Rename-follows-tab, with a finding paid for* - the first attempt (2026-08-13, late)
+    re-keyed the designer tab inside `AdoptRename` on the assumption every rename path
+    crosses it. Measured false: the PRODUCT rename (`renameModule`) never fired the adopt
+    log line, yet a tab appeared under EACH name - so that path renames the component and
+    grows a designer-tab entry somewhere not yet traced, while the old entry survives as a
+    corpse. Reverted rather than shipped half-understood. The next attempt starts by
+    tailing the log LIVE through a rename (`log waitMs` blocking reads), because the
+    after-the-fact walk lost the window.
   - *Liveness beyond the funnel* - the panel's `editProperty` joins the refresh hooks, and
     native-side edits (only possible if the developer opens the native designer themselves)
     get a poll fingerprint gated on an open designer tab, with the COM-volume counter the
