@@ -149,6 +149,17 @@ internal sealed class CodePaneTracker : IDisposable
         return 0;
     }
 
+    /// <summary>The designer-surface windows visible right now, kept from the show and hide
+    /// events themselves - the set the orphaned-palette policy below reads. Touched only on
+    /// the hook's own thread.</summary>
+    private readonly HashSet<nint> _visibleDesignerSurfaces = [];
+
+    /// <summary>The class a UserForm designer surface window wears.</summary>
+    private const string DesignerSurfaceClass = "wndclass_desked_gsk";
+
+    /// <summary>The class the editor's floating palettes - the Toolbox above all - wear.</summary>
+    private const string FloatingPaletteClass = "VBFloatingPalette";
+
     private void OnWindowEvent(WindowEvent windowEvent)
     {
         // Ahead of the layout gate, which does not admit renames: the editor rewrites its own
@@ -189,6 +200,31 @@ internal sealed class CodePaneTracker : IDisposable
         }
 
         var className = Win32.ReadClassName(windowEvent.Window);
+
+        // THE ORPHANED-PALETTE POLICY, at the event where the truth is. The editor re-shows
+        // its Toolbox on a POSTED message whenever a designer stirs, which lands AFTER every
+        // synchronous put-down this product makes - so the palette kept coming back however
+        // many times the object-model sweep hid it (the developer, 2026-08-13, twice). The
+        // designer-surface windows visible right now are kept from these same events, and a
+        // palette that shows while NONE is visible is chrome pointing at nothing: it goes
+        // down here, in the event that showed it. A DELIBERATE native designer (View >
+        // Object) keeps its palette, because its window is in the set.
+        if (className == DesignerSurfaceClass)
+        {
+            if (windowEvent.IsShow)
+            {
+                _visibleDesignerSurfaces.Add(windowEvent.Window);
+            }
+            else if (windowEvent.IsHide || windowEvent.IsDestroy)
+            {
+                _visibleDesignerSurfaces.Remove(windowEvent.Window);
+            }
+        }
+        else if (windowEvent.IsShow && className == FloatingPaletteClass && _visibleDesignerSurfaces.Count == 0)
+        {
+            Log.Verbose($"window event: putting the orphaned palette down {windowEvent.Window:X}");
+            Win32.ShowWindow(windowEvent.Window, 0);
+        }
 
         // Moves are logged only for the editor's own windows. The hook hears the whole
         // process, and resizing the HOST streams thousands of move events for its own
