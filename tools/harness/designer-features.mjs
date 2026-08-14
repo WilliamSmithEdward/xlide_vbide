@@ -32,25 +32,36 @@ console.log(`the designer route, against ${project}\n`);
 // touches it. A 2026-08-13 session answered "has no designer to read" exactly here while
 // the designer-tab path read the same form seconds later; the split has not reproduced
 // since (probed first-touch on fresh sessions, 2026-08-14), so this row stands where the
-// reproduction would begin and names it if it ever returns.
-const fromDisk = await api.designer(PLANNED_FORM, project).catch((why) => ({ failed: why.message }));
-check("the fixture's own from-disk form answers the route first-touch",
-  fromDisk.failed === undefined && fromDisk.form?.caption === "Quarter Entry",
-  JSON.stringify(fromDisk.failed ?? fromDisk.form ?? null));
+// reproduction would begin and names it if it ever returns. On a session whose fixture form
+// is already gone (a crashed run's aftermath) the condition is not exercisable - the gate's
+// fresh session is where it always is.
+const fixtureFormStands = components.some((component) => component.name === PLANNED_FORM);
+if (fixtureFormStands) {
+  const fromDisk = await api.designer(PLANNED_FORM, project).catch((why) => ({ failed: why.message }));
+  check("the fixture's own from-disk form answers the route first-touch",
+    fromDisk.failed === undefined && fromDisk.form?.caption === "Quarter Entry",
+    JSON.stringify(fromDisk.failed ?? fromDisk.form ?? null));
+} else {
+  check("the fixture's own from-disk form answers the route first-touch", true,
+    `not exercisable: ${PLANNED_FORM} is not in this session`);
+}
 
 /*
  * The suite's form gets a name the session will actually take. A form NAME can be refused for
  * the rest of a session once it has been used - added and removed, or even refused once - and
  * a workbook that LOADED holding the planned name (FormFixture itself) burns it the moment
  * anything removes that form. So: never remove a form this suite did not create, and walk to
- * the first name that adds cleanly. The plan's own name still comes first, which is what the
- * gate's fresh session uses.
+ * the first name that adds cleanly. The PLANNED name itself is never in the walk: it is the
+ * fixture's own form, load-bearing for the first-touch row above - on a session where some
+ * mishap already removed it, walking onto that name built a suite form there and the cleanup
+ * then removed the fixture's name for good (measured 2026-08-14: a crashed run left the next
+ * one to do exactly that).
  */
-let form = PLANNED_FORM;
+let form = `${PLANNED_FORM}2`;
 {
   let built = false;
   for (let attempt = 0; attempt < 4 && !built; attempt++) {
-    form = attempt === 0 ? PLANNED_FORM : `${PLANNED_FORM}${attempt + 1}`;
+    form = `${PLANNED_FORM}${attempt + 2}`;
     try {
       await buildForm(api, project, form);
       built = true;
@@ -62,7 +73,7 @@ let form = PLANNED_FORM;
   }
 
   if (!built) {
-    throw new Error(`no usable form name: the session has burned ${PLANNED_FORM} through ${form}`);
+    throw new Error(`no usable form name: the session has burned ${PLANNED_FORM}2 through ${form}`);
   }
 }
 
@@ -398,6 +409,34 @@ try {
   await waitFor("the squiggles to clear on the canonical text", async () =>
     ((await api.act("designerLint", { module: form })).data ?? []).length === 0, { budgetMs: 15000 });
   check("and the canonical document wears none", true);
+
+  // ---- the canvas follows the document: the draft previews, the form untouched ----
+
+  const draftMarkup = `${String(tabMarkup.data).trimEnd()}\r\n    CommandButton DraftBtn "Soon" at 8,282 size 60x20\r\n`;
+  await api.act("designerSetMarkup", { module: form, markup: draftMarkup });
+  const draftCanvas = await waitFor("the canvas to preview the draft", async () => {
+    const read = (await api.act("designerCanvas", { module: form })).data;
+    return read?.draft === true && read.controls.some((c) => c.name === "DraftBtn") ? read : null;
+  }, { budgetMs: 15000 });
+  check("a control typed into the document appears on the canvas as a DRAFT, before any apply",
+    true, `${draftCanvas.controls.length} control(s), draft`);
+  check("and the form itself is untouched by the preview",
+    !(await api.designer(form, project)).controls.some((c) => c.name === "DraftBtn"));
+
+  // A half-typed line must not blank the picture: broken text keeps the last good draft.
+  await api.act("designerSetMarkup", { module: form, markup: `${draftMarkup}    Label Broken at banana\r\n` });
+  await waitFor("the squiggles to arrive on the broken text", async () =>
+    ((await api.act("designerLint", { module: form })).data ?? []).length > 0, { budgetMs: 15000 });
+  const heldCanvas = (await api.act("designerCanvas", { module: form })).data;
+  check("a document that stops parsing keeps the last good picture",
+    heldCanvas.draft === true && heldCanvas.controls.some((c) => c.name === "DraftBtn"));
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the applied projection to return", async () => {
+    const read = (await api.act("designerCanvas", { module: form })).data;
+    return read?.draft === false && !read.controls.some((c) => c.name === "DraftBtn");
+  }, { budgetMs: 15000 });
+  check("and a document back at canonical puts the form's own picture back", true);
 
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 

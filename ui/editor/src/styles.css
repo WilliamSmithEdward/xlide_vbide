@@ -3462,6 +3462,22 @@ body.objbrowser-page #objbrowser-card {
   overflow: hidden;
 }
 
+/* The canvas previewing the DOCUMENT's draft rather than the form: the note names it, and
+   the dashed outline says "not applied" without repainting the form's own colours. */
+.designer-draft-note {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  font-size: 11px;
+  color: var(--fg-muted, #8a7a4a);
+  background: rgba(181, 137, 0, 0.12);
+  border-top: 1px solid rgba(181, 137, 0, 0.35);
+}
+
+.designer-canvas-scroll.draft .dc-form {
+  outline: 2px dashed rgba(181, 137, 0, 0.55);
+  outline-offset: 3px;
+}
+
 .dc {
   position: absolute;
   box-sizing: border-box;

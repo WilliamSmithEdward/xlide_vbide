@@ -1177,7 +1177,23 @@ internal sealed partial class AddInSession : IDisposable
         // and the answer goes straight back - the one language, saying early what the
         // apply would say late.
         _editorSurface.FormMarkupLintRequested = (module, project, markup) =>
-            _editorSurface?.PublishFormMarkupLint(module, project, Core.Forms.FormMarkup.Lint(markup));
+        {
+            // The tolerant pass collects the squiggles; the strict parse - the ONE grammar,
+            // the apply's own - yields the draft the canvas previews as the developer types.
+            // A text the apply would refuse has no draft, and the canvas holds its last
+            // picture rather than blanking under a half-typed line.
+            Core.Forms.FormSpec? draft = null;
+            try
+            {
+                draft = Core.Forms.FormMarkup.Parse(markup);
+            }
+            catch (Core.Forms.FormMarkupException)
+            {
+                // The findings already carry the refusal, line and all.
+            }
+
+            _editorSurface?.PublishFormMarkupLint(module, project, Core.Forms.FormMarkup.Lint(markup), draft);
+        };
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;

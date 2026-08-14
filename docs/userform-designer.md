@@ -353,6 +353,20 @@ the host-owns-membership invariant survives.
   an api `set` reaches the tab's document without re-activation - unless the developer
   holds unapplied edits, which a push never clobbers.
 
+  **The canvas follows the typing - the draft preview, landed 2026-08-14** (the owner:
+  "if I update in the markdown pane, it doesn't reflect in the xlide form designer"). The
+  debounced lint round trip - already parsing every keystroke's text host-side - carries
+  the parsed spec back beside the squiggles, and the canvas renders THAT while the
+  document is dirty: dialect fields from the draft, display extras (fonts, colours,
+  insets, tabs) worn from the last applied projection by name so the preview stays
+  dressed, the unspoken-colour rule applied exactly as an apply would. A draft that stops
+  parsing keeps the last good picture rather than blanking under a half-typed line; a
+  document back at canonical puts the form's own picture back; a note strip and a dashed
+  outline say DRAFT out loud. The form is untouched throughout - Ctrl+S remains the only
+  apply - and there is still exactly ONE parser: the strict grammar, host-side, the
+  apply's own. `designerCanvas` reads what the canvas shows, draft flag and placed
+  controls both.
+
   **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
   xlide sees on the real form surface is the truth the canvas answers to):
 

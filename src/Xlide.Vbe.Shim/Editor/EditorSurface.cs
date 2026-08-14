@@ -769,20 +769,48 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.FormMarkupMessage));
     }
 
-    /// <summary>The squiggles for the markup tab's document as it stands.</summary>
-    public void PublishFormMarkupLint(string moduleName, string? project, IReadOnlyList<Core.Forms.FormMarkupFinding> findings)
+    /// <summary>The squiggles for the markup tab's document as it stands - and the DRAFT the
+    /// document describes when it parses, so the canvas can follow the typing.</summary>
+    public void PublishFormMarkupLint(string moduleName, string? project,
+        IReadOnlyList<Core.Forms.FormMarkupFinding> findings, Core.Forms.FormSpec? draft = null)
     {
         if (!_loaded)
         {
             return;
         }
 
+        // Dialect fields only: the draft is TEXT, so no walk rides beside it - no fonts, no
+        // client areas, no colours beyond the property lines it speaks. The page carries the
+        // display extras over from the last applied projection by name, which keeps the
+        // preview steady instead of flickering between dressed and bare.
+        var draftForm = draft is null ? null : new FormMarkupBox(
+            draft.Caption, draft.Width, draft.Height,
+            DraftColour(draft, "BackColor"), DraftColour(draft, "ForeColor"));
+        var draftControls = draft?.Controls
+            .Select(control => new FormMarkupControl(
+                control.Type, control.Name, control.Caption,
+                control.Left, control.Top, control.Width, control.Height, control.Parent))
+            .ToArray();
+
         Post(JsonSerializer.Serialize(
             new FormMarkupLintMessage("formMarkupLint", moduleName, project,
                 [.. findings.Select(finding => new FormMarkupLintFinding(
                     finding.Line, finding.Message,
-                    finding.Severity == Core.Forms.FormMarkupSeverity.Error ? "error" : "warning"))]),
+                    finding.Severity == Core.Forms.FormMarkupSeverity.Error ? "error" : "warning"))],
+                draftForm, draftControls),
             EditorMessageContext.Default.FormMarkupLintMessage));
+    }
+
+    /// <summary>A colour property line's value as CSS, when the draft speaks it.</summary>
+    private static string? DraftColour(Core.Forms.FormSpec draft, string name)
+    {
+        var line = draft.Properties.FirstOrDefault(p =>
+            string.Equals(p.Path, name, StringComparison.OrdinalIgnoreCase));
+        return line is not null
+            && int.TryParse(line.Value, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var ole)
+            ? FormDesignService.OleColorToCss(ole)
+            : null;
     }
 
     /// <summary>How an apply ended; the fresh formMarkup that follows carries the truth.</summary>

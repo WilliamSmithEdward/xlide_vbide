@@ -64,7 +64,7 @@ export type HostMessage =
   | { type: "confirmClose"; name: string; project?: string | null }
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
-  | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[] }
+  | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -170,6 +170,13 @@ export interface FormMarkupLintFinding {
   line: number;
   message: string;
   severity: string;
+}
+
+/** The DRAFT a lint round trip parsed out of the document: dialect fields only - the text
+ * has no walk beside it - for the canvas to preview while the document is dirty. */
+export interface FormMarkupDraft {
+  form: FormMarkupBox | null;
+  controls: FormMarkupControl[];
 }
 
 /** How an apply of the designer tab's document ended; the fresh projection follows it. */
@@ -648,7 +655,7 @@ export class EditorBridge {
   }
 
   /** Watches a form's lint answers; returns the unwatch. One watcher per form. */
-  onFormMarkupLint(module: string, project: string | null, watcher: (findings: FormMarkupLintFinding[]) => void): () => void {
+  onFormMarkupLint(module: string, project: string | null, watcher: (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void): () => void {
     const key = docKeyOf(module, project);
     this.formMarkupLintWatchers.set(key, watcher);
     return () => {
@@ -658,7 +665,7 @@ export class EditorBridge {
     };
   }
 
-  private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[]) => void>();
+  private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void>();
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
@@ -1178,7 +1185,9 @@ export class EditorBridge {
         this.formMarkupAppliedWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message);
         return;
       case "formMarkupLint":
-        this.formMarkupLintWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(message.findings);
+        this.formMarkupLintWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(
+          message.findings,
+          message.draft ? { form: message.draftForm ?? null, controls: message.draft } : null);
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

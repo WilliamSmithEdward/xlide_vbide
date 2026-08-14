@@ -164,6 +164,7 @@ export interface DevSurfaceParts {
       markupText(): string;
       setDocument(markup: string): void;
       lintMarkers(): { line: number; message: string; severity: string }[];
+      canvasSnapshot(): { draft: boolean; controls: { name: string; left: number; top: number }[] };
     } | null;
   };
   search: {
@@ -668,6 +669,27 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return view
         ? { did: true, detail: `${view.lintMarkers().length} finding(s)`, data: view.lintMarkers() }
         : { did: false, detail: `no designer tab is open for ${module}` };
+    },
+
+    /** The canvas as rendered, in `data`: whether the picture is the DRAFT the document
+     * describes or the applied projection, and every control's name and placed position. */
+    designerCanvas: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerCanvas takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const snapshot = view.canvasSnapshot();
+      return {
+        did: true,
+        detail: `${snapshot.controls.length} control(s), ${snapshot.draft ? "draft" : "applied"}`,
+        data: snapshot,
+      };
     },
 
     /** The designer tab's document as it stands, in `data`. */

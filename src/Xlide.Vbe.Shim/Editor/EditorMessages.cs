@@ -54,7 +54,13 @@ public sealed record FormMarkupLintMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
     [property: JsonPropertyName("project")] string? Project,
-    [property: JsonPropertyName("findings")] FormMarkupLintFinding[] Findings);
+    [property: JsonPropertyName("findings")] FormMarkupLintFinding[] Findings,
+    // The DRAFT the text describes, when it parses strictly: the same ride the squiggles
+    // take, so the canvas can follow the document as it is typed without a second parser
+    // or a second round trip - and without the form being touched. Dialect fields only;
+    // the page carries display extras over from the last applied projection by name.
+    [property: JsonPropertyName("draftForm")] FormMarkupBox? DraftForm = null,
+    [property: JsonPropertyName("draft")] FormMarkupControl[]? Draft = null);
 
 /// <summary>One squiggle: 1-based line, the reason, and "error" or "warning".</summary>
 public sealed record FormMarkupLintFinding(

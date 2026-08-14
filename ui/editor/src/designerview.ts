@@ -18,7 +18,7 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import type { FormMarkupApplied, FormMarkupControl, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
+import type { FormMarkupApplied, FormMarkupControl, FormMarkupDraft, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
 import type { DocumentId } from "./documents.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
@@ -99,8 +99,9 @@ export interface DesignerViewDeps {
   dirtyChanged(dirty: boolean): void;
   /** Lint the document as it stands; findings return through watchLint. */
   lint(markup: string): void;
-  /** Subscribe to the form's lint answers; returns the unwatch. */
-  watchLint(listener: (findings: FormMarkupLintFinding[]) => void): () => void;
+  /** Subscribe to the form's lint answers - squiggles, and the DRAFT the document parsed
+   * to, which the canvas previews while the document is dirty; returns the unwatch. */
+  watchLint(listener: (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void): () => void;
 }
 
 export class DesignerView {
@@ -145,6 +146,14 @@ export class DesignerView {
   private readonly unwatchLint: () => void;
   private lintTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly deps: DesignerViewDeps;
+
+  /** The last APPLIED projection - the form's own truth, and the wardrobe a draft preview
+   * borrows its display extras from. */
+  private lastPayload: FormMarkupPayload | null = null;
+
+  /** Whether the canvas is currently showing the DOCUMENT's draft rather than the form. */
+  private draftShown = false;
+  private readonly draftNote: HTMLElement;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
    * first projection arrives, and while an apply's fresh projection is on its way. */
@@ -208,6 +217,14 @@ export class DesignerView {
     this.canvasScroll = document.createElement("div");
     this.canvasScroll.className = "designer-canvas-scroll";
     canvasHalf.appendChild(this.canvasScroll);
+
+    // Worn while the canvas previews the DOCUMENT rather than the form: the picture is the
+    // draft's, and Ctrl+S is what makes it the form's.
+    this.draftNote = document.createElement("div");
+    this.draftNote.className = "designer-draft-note";
+    this.draftNote.textContent = "previewing unapplied edits - Ctrl+S applies them to the form";
+    this.draftNote.hidden = true;
+    canvasHalf.appendChild(this.draftNote);
 
     this.notice = document.createElement("div");
     this.notice.className = "designer-notice";
@@ -273,7 +290,10 @@ export class DesignerView {
     this.deps = deps;
     this.unwatch = deps.watch((payload) => this.update(payload));
     this.unwatchApplied = deps.watchApplied((outcome) => this.onApplied(outcome));
-    this.unwatchLint = deps.watchLint((findings) => this.showLint(findings));
+    this.unwatchLint = deps.watchLint((findings, draft) => {
+      this.showLint(findings);
+      this.previewDraft(findings, draft);
+    });
     this.request = deps.request;
 
     // LAST, because it lays the editor out and the editor must exist: the first version ran
@@ -411,7 +431,98 @@ export class DesignerView {
       this.deps.dirtyChanged(nowDirty);
     }
 
+    this.lastPayload = payload;
+    this.setDraftShown(false);
     this.renderCanvas(payload);
+  }
+
+  /**
+   * The canvas follows the DOCUMENT while it is dirty (the owner, 2026-08-14: "if I update
+   * in the markdown pane, it doesn't reflect in the xlide form designer"): the draft the
+   * lint round trip parsed - the strict parser, the apply's own grammar, host-side so there
+   * is exactly one - renders in place of the applied projection, dressed in that
+   * projection's display extras by name so the preview stays steady instead of flickering
+   * between dressed and bare. A draft that does not parse keeps the last picture, because a
+   * half-typed line must not blank the form; a document back at canonical puts the applied
+   * projection back. The FORM is untouched throughout - Ctrl+S is still the only apply.
+   */
+  private previewDraft(findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null): void {
+    if (!this.dirty) {
+      if (this.draftShown && this.lastPayload) {
+        this.setDraftShown(false);
+        this.renderCanvas(this.lastPayload);
+      }
+      return;
+    }
+
+    if (draft === null || findings.some((finding) => finding.severity === "error")) {
+      return;
+    }
+
+    this.setDraftShown(true);
+    this.renderCanvas(this.dressDraft(draft));
+  }
+
+  private setDraftShown(shown: boolean): void {
+    this.draftShown = shown;
+    this.draftNote.hidden = !shown;
+    this.canvasScroll.classList.toggle("draft", shown);
+  }
+
+  /** A draft wearing the last applied projection's display extras, matched by name. */
+  private dressDraft(draft: FormMarkupDraft): FormMarkupPayload {
+    const applied = this.lastPayload;
+    const wardrobe = new Map((applied?.controls ?? []).map((row) => [row.name.toLowerCase(), row]));
+
+    const controls = draft.controls.map((row) => {
+      const worn = wardrobe.get(row.name.toLowerCase());
+      return worn
+        ? {
+          ...row,
+          fontName: worn.fontName ?? null,
+          fontSize: worn.fontSize ?? null,
+          fontBold: worn.fontBold ?? null,
+          fontItalic: worn.fontItalic ?? null,
+          backColor: worn.backColor ?? null,
+          foreColor: worn.foreColor ?? null,
+          insideWidth: worn.insideWidth ?? null,
+          insideHeight: worn.insideHeight ?? null,
+          tabs: worn.tabs ?? null,
+        }
+        : row;
+    });
+
+    // The dialect's own rule dresses the form box: an unspoken colour keeps the applied
+    // one, exactly as an apply would. The derived chrome (insides) carries over only while
+    // the draft keeps the applied OUTER size - resized, the real insets are unknown until
+    // the apply answers, and the canvas falls back to its floating title bar honestly.
+    const appliedForm = applied?.form ?? null;
+    const sameSize = appliedForm !== null && draft.form !== null
+      && appliedForm.width === draft.form.width && appliedForm.height === draft.form.height;
+    const form = draft.form
+      ? {
+        ...draft.form,
+        backColor: draft.form.backColor ?? appliedForm?.backColor ?? null,
+        foreColor: draft.form.foreColor ?? appliedForm?.foreColor ?? null,
+        insideWidth: sameSize ? appliedForm?.insideWidth ?? null : null,
+        insideHeight: sameSize ? appliedForm?.insideHeight ?? null : null,
+      }
+      : appliedForm;
+
+    return { markup: null, reason: null, form, controls };
+  }
+
+  /** The canvas as rendered, for the harness: which picture stands (draft or applied), and
+   * every control's name with its placed position. */
+  canvasSnapshot(): { draft: boolean; controls: { name: string; left: number; top: number }[] } {
+    return {
+      draft: this.draftShown,
+      controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
+        name: el.dataset.control ?? "",
+        left: Number.parseFloat(el.style.left || "0"),
+        top: Number.parseFloat(el.style.top || "0"),
+      })),
+    };
   }
 
   private renderCanvas(payload: FormMarkupPayload): void {
