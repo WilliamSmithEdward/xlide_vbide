@@ -102,6 +102,9 @@ export interface DesignerViewDeps {
   /** Subscribe to the form's lint answers - squiggles, and the DRAFT the document parsed
    * to, which the canvas previews while the document is dirty; returns the unwatch. */
   watchLint(listener: (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void): () => void;
+  /** Save the workbook, the host's own File Save - the second half of the designer's
+   * Ctrl+S, after a successful apply. */
+  saveWorkbook(): void;
 }
 
 export class DesignerView {
@@ -226,6 +229,32 @@ export class DesignerView {
     this.draftNote.hidden = true;
     canvasHalf.appendChild(this.draftNote);
 
+    // The wheel scrolls the canvas wherever it lands on it, unconditionally - and this is
+    // also what gives the harness a wheel it can drive, because a synthesised WheelEvent
+    // never triggers native scrolling (the owner, 2026-08-15: "need to be able to scroll
+    // form designer window, currently cant").
+    canvasHalf.addEventListener("wheel", (event) => {
+      this.canvasScroll.scrollTop += event.deltaY;
+      this.canvasScroll.scrollLeft += event.deltaX;
+      event.preventDefault();
+    }, { passive: false });
+
+    // A click gives the canvas focus, so PageUp, arrows and Ctrl+S work from either half:
+    // a keydown routes through the view only when something inside it holds focus.
+    this.canvasScroll.tabIndex = -1;
+    this.canvasScroll.addEventListener("pointerdown", () => this.canvasScroll.focus());
+
+    // Ctrl+S anywhere in the view is the same save. Capture, so it runs ahead of the
+    // markup editor's own binding and nothing double-fires.
+    this.root.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey
+        && (event.key === "s" || event.key === "S")) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.applyNow();
+      }
+    }, { capture: true });
+
     this.notice = document.createElement("div");
     this.notice.className = "designer-notice";
     this.notice.hidden = true;
@@ -305,19 +334,35 @@ export class DesignerView {
 
   private readonly request: () => void;
 
-  /** The apply itself: the whole document, as typed, to the host. */
+  /** Set when an apply should be followed by the host's save - every Ctrl+S is, because
+   * Ctrl+S means "save the workbook" everywhere else in the product and the designer must
+   * not quietly mean less (the owner, 2026-08-15: "CTRL+S in designer isn't saving"). */
+  private saveAfterApply = false;
+
+  /** Ctrl+S: the document to the form, then the workbook to disk. A clean document has
+   * nothing to apply and just saves. */
   applyNow(): void {
     this.errorStrip.hidden = true;
+    if (!this.dirty) {
+      this.deps.saveWorkbook();
+      return;
+    }
+
+    this.saveAfterApply = true;
     this.deps.apply(this.model.getValue());
   }
 
   /** For the debug surface: set the document and apply, answering the outcome - the same
-   * path Ctrl+S takes, which is the point of driving it from a suite. */
+   * path Ctrl+S takes, save included, which is the point of driving it from a suite. The
+   * apply is unconditional here: the act's contract is an outcome, and the clean-document
+   * shortcut above answers with a save instead of one. */
   applyDocument(markup: string): Promise<FormMarkupApplied> {
     this.model.setValue(markup);
     return new Promise((settle) => {
       this.pendingActOutcome = settle;
-      this.applyNow();
+      this.errorStrip.hidden = true;
+      this.saveAfterApply = true;
+      this.deps.apply(this.model.getValue());
     });
   }
 
@@ -365,6 +410,9 @@ export class DesignerView {
     this.pendingActOutcome?.(outcome);
     this.pendingActOutcome = null;
 
+    const saveNext = this.saveAfterApply;
+    this.saveAfterApply = false;
+
     if (outcome.ok) {
       this.errorStrip.hidden = true;
       // The fresh projection that follows is this apply's canonical print; adopt it even
@@ -374,6 +422,14 @@ export class DesignerView {
         this.dirty = false;
         this.deps.dirtyChanged(false);
       }
+
+      // The second half of Ctrl+S: what just landed on the form reaches the file. Only
+      // after an OK - a refused apply saves nothing, because the file would then hold a
+      // form the developer was just told did not take their document.
+      if (saveNext) {
+        this.deps.saveWorkbook();
+      }
+
       return;
     }
 

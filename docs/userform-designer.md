@@ -367,6 +367,18 @@ the host-owns-membership invariant survives.
   apply's own. `designerCanvas` reads what the canvas shows, draft flag and placed
   controls both.
 
+  **Ctrl+S is the product's save, and the canvas scrolls - 2026-08-15, the owner's pair of
+  reports.** The designer's Ctrl+S applied the document and stopped there, which read as
+  "isn't saving" because it was not: Ctrl+S means "save the workbook" everywhere else in
+  the product. It is apply-THEN-save now - the host's own File Save follows an OK apply, a
+  refusal saves nothing (the file must not hold a form the developer was just told did not
+  take their document), a clean document skips straight to the save - and it works from
+  EITHER half: a capture-phase handler on the view routes the key, and a click gives the
+  canvas focus so keys reach the view from there at all. The canvas wheel is unconditional
+  on the canvas half (which is also what makes it drivable: a synthesised WheelEvent never
+  triggers native scrolling, so the scroll path had no driver before), and the focused
+  canvas scrolls by keyboard too.
+
   **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
   xlide sees on the real form surface is the truth the canvas answers to):
 

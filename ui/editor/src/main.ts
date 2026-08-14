@@ -455,6 +455,8 @@ function boot(): void {
         dirtyChanged: (dirty) => workspace?.setFaceDirty(id, dirty),
         lint: (markup) => bridge.lintFormMarkup(id.module, id.project ?? null, markup),
         watchLint: (listener) => bridge.onFormMarkupLint(id.module, id.project ?? null, listener),
+        // The host's own File Save, the same command the toolbar's Save button sends.
+        saveWorkbook: () => bridge.runCommand({ id: "save", target: "host", icon: "", label: "Save" }),
       });
       designerViews.set(key, view);
     }

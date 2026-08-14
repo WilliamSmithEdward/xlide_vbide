@@ -438,6 +438,32 @@ try {
   }, { budgetMs: 15000 });
   check("and a document back at canonical puts the form's own picture back", true);
 
+  // ---- the canvas scrolls, and Ctrl+S is the product's save ----
+
+  // A draft tall enough to guarantee overflow, whatever the frame's height; the wheel is
+  // synthesised, which is exactly what the view's own wheel handler exists to serve - a
+  // dispatched WheelEvent never triggers native scrolling, so this path had no driver.
+  await api.act("designerSetMarkup", {
+    module: form,
+    markup: String(tabMarkup.data).replace(/size \d+x[\d.]+/, "size 360x900"),
+  });
+  await waitFor("the tall draft to render", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.draft) === true, { budgetMs: 15000 });
+  const wheeled = await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.scrollTop = 0; el.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true })); return el.scrollTop; })()');
+  check("a wheel over the canvas scrolls the form", Number(wheeled) > 0, `scrollTop ${wheeled}`);
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+
+  // The apply the tab's Ctrl+S makes is followed by the HOST'S save - command 3, File
+  // Save - because Ctrl+S means "save the workbook" everywhere else in the product and
+  // the designer must not quietly mean less.
+  const saveMark = (await api.log({ max: 20000 })).next;
+  await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
+  const savedLine = await api.waitForLog("command: 3 executed", { since: saveMark, timeout: 15000 })
+    .catch(() => null);
+  check("an apply through the tab is followed by the host's own save - Ctrl+S saves here too",
+    savedLine !== null && (savedLine.lines ?? []).length > 0,
+    savedLine ? savedLine.lines[0] : "no File Save in the log after the apply");
+
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 
   const designTabs = async () =>
