@@ -118,11 +118,17 @@ export interface ObMember {
   line: number;
 }
 
-/** The form's own box as the markup layer projects it. Bounds are points, like the markup's. */
+/** The form's own box as the markup layer projects it. Bounds are points, like the markup's;
+ * colours arrive as CSS, already through the system palette; insides are the designer's own
+ * client area - the parity numbers. */
 export interface FormMarkupBox {
   caption?: string | null;
   width?: number | null;
   height?: number | null;
+  backColor?: string | null;
+  foreColor?: string | null;
+  insideWidth?: number | null;
+  insideHeight?: number | null;
 }
 
 /**
@@ -139,6 +145,14 @@ export interface FormMarkupControl {
   width?: number | null;
   height?: number | null;
   parent?: string | null;
+  fontName?: string | null;
+  fontSize?: number | null;
+  fontBold?: boolean | null;
+  fontItalic?: boolean | null;
+  backColor?: string | null;
+  foreColor?: string | null;
+  insideWidth?: number | null;
+  insideHeight?: number | null;
 }
 
 /** A form's projection as one answer: the markup text and the spec it prints. */

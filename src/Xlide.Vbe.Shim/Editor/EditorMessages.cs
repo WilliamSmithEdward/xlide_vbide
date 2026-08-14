@@ -45,16 +45,25 @@ public sealed record FormMarkupAppliedMessage(
     [property: JsonPropertyName("set")] int Set,
     [property: JsonPropertyName("refused")] string? Refused);
 
-/// <summary>The form's own box, as the markup layer projects it: points, like every bound.</summary>
+/// <summary>The form's own box, as the markup layer projects it: points, like every bound.
+/// Colours arrive as CSS, converted host-side through the system palette, so the canvas
+/// paints what this machine's real form surface would; insides are the designer's own
+/// client area, the parity numbers the canvas derives its chrome from.</summary>
 public sealed record FormMarkupBox(
     [property: JsonPropertyName("caption")] string? Caption,
     [property: JsonPropertyName("width")] double? Width,
-    [property: JsonPropertyName("height")] double? Height);
+    [property: JsonPropertyName("height")] double? Height,
+    [property: JsonPropertyName("backColor")] string? BackColor = null,
+    [property: JsonPropertyName("foreColor")] string? ForeColor = null,
+    [property: JsonPropertyName("insideWidth")] double? InsideWidth = null,
+    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null);
 
 /// <summary>
 /// One control of the projection, flat with a parent NAME - the walk's own shape. Bounds are
 /// points relative to the parent's client area, which is MSForms' own coordinate model; the
-/// canvas composes them by nesting rather than by arithmetic.
+/// canvas composes them by nesting rather than by arithmetic. The display fields beyond the
+/// markup's vocabulary - font, colours, a container's real client area - ride here for the
+/// canvas's parity with the real form surface; the DOCUMENT deliberately does not speak them.
 /// </summary>
 public sealed record FormMarkupControl(
     [property: JsonPropertyName("type")] string Type,
@@ -64,7 +73,15 @@ public sealed record FormMarkupControl(
     [property: JsonPropertyName("top")] double? Top,
     [property: JsonPropertyName("width")] double? Width,
     [property: JsonPropertyName("height")] double? Height,
-    [property: JsonPropertyName("parent")] string? Parent);
+    [property: JsonPropertyName("parent")] string? Parent,
+    [property: JsonPropertyName("fontName")] string? FontName = null,
+    [property: JsonPropertyName("fontSize")] double? FontSize = null,
+    [property: JsonPropertyName("fontBold")] bool? FontBold = null,
+    [property: JsonPropertyName("fontItalic")] bool? FontItalic = null,
+    [property: JsonPropertyName("backColor")] string? BackColor = null,
+    [property: JsonPropertyName("foreColor")] string? ForeColor = null,
+    [property: JsonPropertyName("insideWidth")] double? InsideWidth = null,
+    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null);
 
 /// <summary>
 /// Tells the surface there is nothing to show: every pane is closed. The surface drops every

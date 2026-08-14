@@ -351,13 +351,19 @@ the host-owns-membership invariant survives.
   **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
   xlide sees on the real form surface is the truth the canvas answers to):
 
-  - *Geometry by the model's own numbers* - containers expose `InsideWidth`/`InsideHeight`,
-    the real client areas; the walk carries them and the canvas derives its insets from them
-    instead of the guessed constants it opened with (frame caption strip, page body).
-  - *Appearance* - the walk carries per-control Font (name, size, bold, italic) and
-    BackColor/ForeColor plus the form's own, OLE colours converted host-side through the
-    system palette (`GetSysColor` for the &H8000000x indexes); the canvas drops its
-    hardcoded Tahoma-11px-on-grey for the real values.
+  - *Geometry by the model's own numbers* - **landed 2026-08-13, late**: the walk carries
+    `InsideWidth`/`InsideHeight` and the canvas derives Frame and MultiPage client areas
+    from them (side borders split the width difference, the remainder above is the caption
+    strip); the guessed constants stay only as fallbacks for a model that will not answer.
+    Measured immediately: the frame's real inset is 7.5px where the guess said 13.3.
+  - *Appearance* - **landed with it**: per-control Font (name, size, bold, italic) and
+    BackColor/ForeColor plus the form's own ride the same walk, OLE colours converted
+    host-side through the live system palette (`GetSysColor`), so the canvas paints what
+    THIS machine's real surface would - the form face went from the hardcoded classic-grey
+    guess to the machine's actual `#f0f0f0` the moment the palette call landed. A Label's
+    BackColor is deliberately NOT painted until the walk reads BackStyle: its default is
+    transparent, and colouring what the real surface leaves clear is the wrong direction
+    to approximate.
   - *The parity probe* - materialise the native designer window (Visible on, capture by
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff

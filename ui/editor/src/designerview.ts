@@ -309,6 +309,14 @@ export class DesignerView {
     form.className = "dc-form";
     form.style.width = `${Math.max(60, (payload.form?.width ?? 240)) * PT}px`;
     form.style.height = `${Math.max(40, (payload.form?.height ?? 180)) * PT}px`;
+    // The REAL colours, through the machine's own palette - what the form surface a user
+    // without xlide sees would paint. The stylesheet's grey is only the fallback.
+    if (payload.form?.backColor) {
+      form.style.background = payload.form.backColor;
+    }
+    if (payload.form?.foreColor) {
+      form.style.color = payload.form.foreColor;
+    }
 
     const titlebar = document.createElement("div");
     titlebar.className = "dc-form-title";
@@ -356,6 +364,29 @@ export class DesignerView {
     box.title = `${row.name} (${row.type})`;
     box.dataset.control = row.name;
 
+    // The control's own font, points scaled like every bound. A Label's BackColor is NOT
+    // painted: its BackStyle defaults to transparent and the walk does not read BackStyle
+    // yet, so painting would colour what the real surface leaves clear - the honest
+    // approximation goes the other way.
+    if (row.fontName) {
+      box.style.fontFamily = `"${row.fontName}", Tahoma, sans-serif`;
+    }
+    if (row.fontSize) {
+      box.style.fontSize = `${row.fontSize * PT}px`;
+    }
+    if (row.fontBold) {
+      box.style.fontWeight = "bold";
+    }
+    if (row.fontItalic) {
+      box.style.fontStyle = "italic";
+    }
+    if (row.backColor && row.type !== "Label") {
+      box.style.background = row.backColor;
+    }
+    if (row.foreColor) {
+      box.style.color = row.foreColor;
+    }
+
     const caption = row.caption ?? "";
 
     switch (row.type) {
@@ -366,7 +397,18 @@ export class DesignerView {
         box.appendChild(legend);
         const inner = document.createElement("div");
         inner.className = "dc-frame-client";
-        inner.style.top = `${FRAME_INSET_TOP}px`;
+        // The REAL client area when the model says it: side borders split the width
+        // difference evenly, and what remains of the height difference above the client is
+        // the caption strip - derived, not guessed, which is the parity rule.
+        if (row.insideWidth && row.insideHeight && row.width && row.height) {
+          const side = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
+          inner.style.left = `${side}px`;
+          inner.style.right = `${side}px`;
+          inner.style.bottom = `${side}px`;
+          inner.style.top = `${Math.max(0, (row.height - row.insideHeight) * PT - side)}px`;
+        } else {
+          inner.style.top = `${FRAME_INSET_TOP}px`;
+        }
         box.appendChild(inner);
         renderInto(inner, row.name.toLowerCase());
         break;
@@ -391,6 +433,15 @@ export class DesignerView {
         if (first) {
           const body = document.createElement("div");
           body.className = "dc-page-body";
+          // The MultiPage's own client area, when the model says it: what is not client,
+          // above, is the tab strip plus chrome - derived like the Frame's.
+          if (row.insideWidth && row.insideHeight && row.width && row.height) {
+            const side = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
+            body.style.left = `${side}px`;
+            body.style.right = `${side}px`;
+            body.style.bottom = `${side}px`;
+            body.style.top = `${Math.max(0, (row.height - row.insideHeight) * PT - side)}px`;
+          }
           box.appendChild(body);
           renderInto(body, first.name.toLowerCase());
         }

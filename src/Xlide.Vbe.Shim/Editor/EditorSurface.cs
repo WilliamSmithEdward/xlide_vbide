@@ -735,12 +735,28 @@ internal sealed class EditorSurface : IDisposable
 
         // The DTOs restate the spec rather than serializing Core's records straight: the wire
         // contract lives in EditorMessages beside every other message, and Core stays free of
-        // page concerns.
-        var form = spec is null ? null : new FormMarkupBox(spec.Caption, spec.Width, spec.Height);
+        // page concerns. The display half - fonts, colours, real client areas - comes from
+        // the SAME walk (FormDesignService leaves it beside the spec), so the canvas's
+        // parity truths and the document describe one moment of the form.
+        var rows = FormDesignService.lastWalkRows;
+        var form = spec is null ? null : new FormMarkupBox(
+            spec.Caption, spec.Width, spec.Height,
+            FormDesignService.lastWalkFormBack is { } fb ? FormDesignService.OleColorToCss(fb) : null,
+            FormDesignService.lastWalkFormFore is { } ff ? FormDesignService.OleColorToCss(ff) : null,
+            FormDesignService.lastWalkFormInsideWidth,
+            FormDesignService.lastWalkFormInsideHeight);
         var controls = spec is null ? null : spec.Controls
-            .Select(control => new FormMarkupControl(
-                control.Type, control.Name, control.Caption,
-                control.Left, control.Top, control.Width, control.Height, control.Parent))
+            .Select(control =>
+            {
+                var row = rows?.FirstOrDefault(r => ReferenceEquals(r.Spec, control));
+                return new FormMarkupControl(
+                    control.Type, control.Name, control.Caption,
+                    control.Left, control.Top, control.Width, control.Height, control.Parent,
+                    row?.FontName, row?.FontSize, row?.FontBold, row?.FontItalic,
+                    row?.BackColor is { } bc ? FormDesignService.OleColorToCss(bc) : null,
+                    row?.ForeColor is { } fc ? FormDesignService.OleColorToCss(fc) : null,
+                    row?.InsideWidth, row?.InsideHeight);
+            })
             .ToArray();
 
         Post(JsonSerializer.Serialize(

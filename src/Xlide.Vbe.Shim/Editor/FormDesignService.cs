@@ -1,4 +1,5 @@
 using Xlide.Vbe.Core.Forms;
+using System.Runtime.InteropServices;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 
@@ -16,7 +17,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// Release build must carry THIS: the markup tab is product surface. Unifying them is part of
 /// finishing M2.
 /// </summary>
-internal static class FormDesignService
+internal static partial class FormDesignService
 {
     /// <summary>The form's markup, or null with a reason when the component has no designer.</summary>
     public static string? MarkupOf(DispatchObject component, string module, out string? reason)
@@ -47,9 +48,10 @@ internal static class FormDesignService
             return null;
         }
 
-        var controls = new List<ControlSpec>();
+        var rows = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, controls, seen, 0);
+        Walk(designer, null, rows, seen, 0);
+        var controls = rows.Select(row => row.Spec).ToList();
 
         // The form's own properties, as the native Properties window holds them - which is
         // what links the markup's lines to that panel: same source, same value. Printed only
@@ -76,8 +78,36 @@ internal static class FormDesignService
             controls);
 
         KeepDesignerDown(component);
+        lastWalkRows = rows;
+        lastWalkFormBack = TryInt(designer, "BackColor");
+        lastWalkFormFore = TryInt(designer, "ForeColor");
+        lastWalkFormInsideWidth = TryNumber(designer, "InsideWidth");
+        lastWalkFormInsideHeight = TryNumber(designer, "InsideHeight");
         return spec;
     }
+
+    /*
+     * The display half of the LAST SpecOf, for the publisher that calls SpecOf and then
+     * needs the rows: one walk serves both, and threading a tuple through every SpecOf
+     * caller for the one that wants more would put the message's needs into the markup's
+     * signature. Host-thread only, read immediately after the call, like the out reason.
+     */
+    [ThreadStatic] internal static List<DesignRow>? lastWalkRows;
+    [ThreadStatic] internal static int? lastWalkFormBack;
+    [ThreadStatic] internal static int? lastWalkFormFore;
+    [ThreadStatic] internal static double? lastWalkFormInsideWidth;
+    [ThreadStatic] internal static double? lastWalkFormInsideHeight;
+
+    /// <summary>An OLE colour as CSS: system indexes through the live system palette, the
+    /// rest as the BGR they are. The canvas paints what the machine would.</summary>
+    internal static string OleColorToCss(int ole)
+    {
+        var colorRef = (ole & unchecked((int)0x80000000)) != 0 ? GetSysColor(ole & 0xFF) : ole;
+        return $"#{colorRef & 0xFF:x2}{(colorRef >> 8) & 0xFF:x2}{(colorRef >> 16) & 0xFF:x2}";
+    }
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetSysColor(int index);
 
     /// <summary>COLOR_BTNFACE and COLOR_BTNTEXT as OLE colours: what a fresh form carries.</summary>
     private const int DefaultFormBackColor = unchecked((int)0x8000000F);
@@ -102,7 +132,7 @@ internal static class FormDesignService
             return null;
         }
 
-        var rows = new List<ControlSpec>();
+        var rows = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Walk(designer, null, rows, seen, 0);
         if (rows.Count == 0)
@@ -112,8 +142,8 @@ internal static class FormDesignService
 
         KeepDesignerDown(component);
         return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
-            row.Name,
-            IsToolboxType(row.Type) ? $"MSForms.{row.Type}" : row.Type))];
+            row.Spec.Name,
+            IsToolboxType(row.Spec.Type) ? $"MSForms.{row.Spec.Type}" : row.Spec.Type))];
     }
 
     /// <summary>
@@ -149,8 +179,26 @@ internal static class FormDesignService
     /// rows carry exact parents without a COM read per control. Recursion plus the dedupe
     /// makes flat and hierarchical collections the same world, as the debug walk's does.
     /// </summary>
+    /// <summary>
+    /// One control's row with what the CANVAS needs beside what the markup speaks: the spec
+    /// (identity, containment, geometry, caption - the dialect), and the display truths the
+    /// dialect deliberately does not (font, colours, and a container's REAL client area via
+    /// InsideWidth/InsideHeight - the parity numbers, so the canvas derives its insets from
+    /// the model instead of guessing them).
+    /// </summary>
+    internal sealed record DesignRow(
+        ControlSpec Spec,
+        double? InsideWidth,
+        double? InsideHeight,
+        string? FontName,
+        double? FontSize,
+        bool? FontBold,
+        bool? FontItalic,
+        int? BackColor,
+        int? ForeColor);
+
     private static void Walk(
-        DispatchObject container, string? parentName, List<ControlSpec> rows, HashSet<string> seen, int depth)
+        DispatchObject container, string? parentName, List<DesignRow> rows, HashSet<string> seen, int depth)
     {
         if (depth > 8)
         {
@@ -185,11 +233,11 @@ internal static class FormDesignService
                         type = "Control";
                     }
 
-                    rows.Add(new ControlSpec(
+                    rows.Add(RowOf(control, new ControlSpec(
                         type, name, TryText(control, "Caption"),
                         TryNumber(control, "Left"), TryNumber(control, "Top"),
                         TryNumber(control, "Width"), TryNumber(control, "Height"),
-                        parentName, []));
+                        parentName, [])));
                 }
 
                 if (control.GetDispId("Pages") != DispId.Unknown)
@@ -204,8 +252,41 @@ internal static class FormDesignService
         }
     }
 
+    /// <summary>The display truths, read tolerantly like everything else: a control without a
+    /// Font is a row with null fonts, never a failure.</summary>
+    private static DesignRow RowOf(DispatchObject control, ControlSpec spec)
+    {
+        string? fontName = null;
+        double? fontSize = null;
+        bool? fontBold = null;
+        bool? fontItalic = null;
+        try
+        {
+            using var font = control.GetDispId("Font") != DispId.Unknown ? control.GetObject("Font") : null;
+            if (font is not null)
+            {
+                fontName = TryText(font, "Name");
+                fontSize = TryNumber(font, "Size");
+                fontBold = TryFlag(font, "Bold");
+                fontItalic = TryFlag(font, "Italic");
+            }
+        }
+        catch
+        {
+            // A control whose font will not answer renders in the form's own.
+        }
+
+        return new DesignRow(
+            spec,
+            TryNumber(control, "InsideWidth"),
+            TryNumber(control, "InsideHeight"),
+            fontName, fontSize, fontBold, fontItalic,
+            TryInt(control, "BackColor"),
+            TryInt(control, "ForeColor"));
+    }
+
     private static void WalkPages(
-        DispatchObject multiPage, string multiPageName, List<ControlSpec> rows, HashSet<string> seen, int depth)
+        DispatchObject multiPage, string multiPageName, List<DesignRow> rows, HashSet<string> seen, int depth)
     {
         if (depth > 8)
         {
@@ -230,13 +311,30 @@ internal static class FormDesignService
 
                 if (seen.Add(name))
                 {
-                    rows.Add(new ControlSpec(
+                    rows.Add(RowOf(page, new ControlSpec(
                         "Page", name, TryText(page, "Caption"),
-                        null, null, null, null, multiPageName, []));
+                        null, null, null, null, multiPageName, [])));
                 }
 
                 Walk(page, name, rows, seen, depth + 1);
             }
+        }
+    }
+
+    private static bool? TryFlag(DispatchObject target, string name)
+    {
+        if (target.GetDispId(name) == DispId.Unknown)
+        {
+            return null;
+        }
+
+        try
+        {
+            return target.GetBool(name);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -420,9 +518,10 @@ internal static class FormDesignService
             return new ApplyOutcome(false, [], [], 0, $"{module} has no designer", [], false);
         }
 
-        var current = new List<ControlSpec>();
+        var walked = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, current, seen, 0);
+        Walk(designer, null, walked, seen, 0);
+        var current = walked.Select(row => row.Spec).ToList();
 
         var currentByName = current.ToDictionary(row => row.Name, StringComparer.OrdinalIgnoreCase);
         var wantedByName = wanted.Controls.ToDictionary(spec => spec.Name, StringComparer.OrdinalIgnoreCase);
