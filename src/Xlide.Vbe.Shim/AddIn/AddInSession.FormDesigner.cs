@@ -54,6 +54,7 @@ internal sealed partial class AddInSession
         }
 
         var (form, rows) = CollectDesigner(component, designer);
+        FormDesignService.KeepDesignerDown(component);
 
         return JsonSerializer.Serialize(
             new DebugDesignerReply(module, DisplayFromProjectId(foundProject), form, [.. rows]),
@@ -208,6 +209,7 @@ internal sealed partial class AddInSession
         {
             var (actualName, actualType) = FormDesignService.AddControl(owner, progId, name, left, top, width, height);
             Log.Info($"designer: added {actualType} '{actualName}' to {module}{(parent is { Length: > 0 } ? $" in {parent}" : "")}");
+            FormDesignService.KeepDesignerDown(component);
             RefreshDesignerTabFor(module);
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "add", actualName, actualType,
@@ -251,6 +253,7 @@ internal sealed partial class AddInSession
         }
 
         Log.Info($"designer: removed '{name}' from {module}");
+        FormDesignService.KeepDesignerDown(component);
         RefreshDesignerTabFor(module);
         return JsonSerializer.Serialize(
             new DebugDesignerEditReply(true, "remove", name, null, $"removed from {module}"),
@@ -288,6 +291,7 @@ internal sealed partial class AddInSession
         try
         {
             var display = FormDesignService.SetControlProperty(component, designer, name, property, value, asKind);
+            FormDesignService.KeepDesignerDown(component);
             RefreshDesignerTabFor(module);
             return JsonSerializer.Serialize(
                 new DebugDesignerEditReply(true, "set", targetLabel, null, $"{targetLabel}.{property} is {display}"),

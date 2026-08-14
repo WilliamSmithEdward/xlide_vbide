@@ -151,9 +151,14 @@ internal static partial class FormDesignService
     /// RESTORES it on open - which is how the native Toolbox appeared floating over the
     /// surface the first time a saved form's project was walked (2026-08-13). The designer
     /// surface is the canvas milestone's; until it lands, a designer window this side wakes
-    /// goes back down, and the Toolbox follows it.
+    /// goes back down - and the TOOLBOX goes down WITH it, explicitly, because the editor
+    /// raises it whenever a designer window stirs and does not always lower it when the
+    /// window merely turns invisible. With the liveness hooks re-projecting on every
+    /// mutation, that gap showed as "the native toolbox pane keeps showing" (the developer,
+    /// 2026-08-13): each refresh stirred the designer, the Toolbox stood back up, and
+    /// nothing put it away.
     /// </summary>
-    private static void KeepDesignerDown(DispatchObject component)
+    internal static void KeepDesignerDown(DispatchObject component)
     {
         try
         {
@@ -166,6 +171,32 @@ internal static partial class FormDesignService
         catch
         {
             // A designer without a window has nothing to put down.
+        }
+
+        try
+        {
+            // vbext_wt_Toolbox = 10 in the editor's window-type enumeration.
+            using var vbe = component.GetObject("VBE");
+            using var windows = vbe?.GetObject("Windows");
+            if (windows is null)
+            {
+                return;
+            }
+
+            foreach (var toolWindow in ItemsOf(windows))
+            {
+                using (toolWindow)
+                {
+                    if (toolWindow.GetInt32("Type") == 10 && toolWindow.GetBool("Visible"))
+                    {
+                        toolWindow.SetBool("Visible", false);
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // A toolbox that will not answer is not one standing over the surface.
         }
     }
 
