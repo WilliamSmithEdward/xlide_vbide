@@ -5915,13 +5915,19 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             // A NATIVE move takes the active slot back: the developer clicked a code pane, or
-            // an activation landed one. A designer tab stays active only while nothing under
-            // it moves.
+            // an activation landed one. Only a move TO A PANE counts - a transition to no
+            // module at all is a pane closing or an empty workspace, and treating it as focus
+            // stripped a designer tab of the slot in the very publish that granted it, which
+            // is how a designer tab opened over an empty workspace stood inactive and unshown
+            // (2026-08-13, the second face of "clicking back does not activate").
             var nativeActive = (surface.Module, _shownProject);
             if (nativeActive != _lastNativeActive)
             {
                 _lastNativeActive = nativeActive;
-                _activeDesignerTab = null;
+                if (nativeActive.Item1 is not null)
+                {
+                    _activeDesignerTab = null;
+                }
             }
 
             // Closing the LAST pane leaves the surface holding a document nobody can see a
