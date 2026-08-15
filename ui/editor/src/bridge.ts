@@ -65,6 +65,7 @@ export type HostMessage =
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
+  | { type: "designerApplySave"; moduleName: string; project?: string | null }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -667,6 +668,19 @@ export class EditorBridge {
 
   private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void>();
 
+  /** The host's Ctrl+S asking a designer tab to apply-then-save; keyed by the form. */
+  onDesignerApplySave(module: string, project: string | null, watcher: () => void): () => void {
+    const key = docKeyOf(module, project);
+    this.designerApplySaveWatchers.set(key, watcher);
+    return () => {
+      if (this.designerApplySaveWatchers.get(key) === watcher) {
+        this.designerApplySaveWatchers.delete(key);
+      }
+    };
+  }
+
+  private readonly designerApplySaveWatchers = new Map<string, () => void>();
+
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
     this.transport.post({ type: "panel", name, open });
@@ -1188,6 +1202,9 @@ export class EditorBridge {
         this.formMarkupLintWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(
           message.findings,
           message.draft ? { form: message.draftForm ?? null, controls: message.draft } : null);
+        return;
+      case "designerApplySave":
+        this.designerApplySaveWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.();
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

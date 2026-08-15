@@ -3463,14 +3463,21 @@ body.objbrowser-page #objbrowser-card {
 }
 
 /* The canvas previewing the DOCUMENT's draft rather than the form: the note names it, and
-   the dashed outline says "not applied" without repainting the form's own colours. */
+   the dashed outline says "not applied" without repainting the form's own colours. An
+   OVERLAY pinned above the scroll box - as a flow sibling of a positioned scroll it
+   painted UNDER the scrolled form (the owner, 2026-08-15: "scrolling goes over yellow
+   banner") - and opaque, so what scrolls beneath it reads as beneath it. */
 .designer-draft-note {
-  flex: 0 0 auto;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 2;
   padding: 3px 10px;
   font-size: 11px;
-  color: var(--fg-muted, #8a7a4a);
-  background: rgba(181, 137, 0, 0.12);
-  border-top: 1px solid rgba(181, 137, 0, 0.35);
+  color: #e6d087;
+  background: #423a1e;
+  border-bottom: 1px solid rgba(181, 137, 0, 0.5);
 }
 
 .designer-canvas-scroll.draft .dc-form {

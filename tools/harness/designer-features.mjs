@@ -451,6 +451,13 @@ try {
     ((await api.act("designerCanvas", { module: form })).data?.draft) === true, { budgetMs: 15000 });
   const wheeled = await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.scrollTop = 0; el.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true })); return el.scrollTop; })()');
   check("a wheel over the canvas scrolls the form", Number(wheeled) > 0, `scrollTop ${wheeled}`);
+
+  // With the canvas scrolled and the draft note up, the note must be what the point under
+  // its centre HITS - as a flow sibling of the positioned scroll box it painted UNDER the
+  // scrolled form until it became a pinned overlay.
+  const bannerHit = await api.ask('(() => { const note = document.querySelector(".designer-draft-note"); if (!note || note.hidden) return "no note standing"; const r = note.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return note.contains(hit) ? "note on top" : `covered by ${hit?.className ?? "nothing"}`; })()');
+  check("the draft banner stays above the scrolled form", bannerHit === "note on top", String(bannerHit));
+
   await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
 
   // The apply the tab's Ctrl+S makes is followed by the HOST'S save - command 3, File
@@ -463,6 +470,23 @@ try {
   check("an apply through the tab is followed by the host's own save - Ctrl+S saves here too",
     savedLine !== null && (savedLine.lines ?? []).length > 0,
     savedLine ? savedLine.lines[0] : "no File Save in the log after the apply");
+
+  // The REAL Ctrl+S is a HOST accelerator - the page never sees the key - so the host's
+  // Save, finding the designer tab active, asks the tab to apply and the page calls back
+  // for the raw save. `command save` drives the exact entry the keystroke takes.
+  await api.act("activate", { module: form, face: "design" });
+  await api.act("designerSetMarkup", { module: form, markup: draftMarkup });
+  const acceleratorMark = (await api.log({ max: 20000 })).next;
+  await api.command("save");
+  await waitFor("the draft to land on the form through the host's save", async () =>
+    (await api.designer(form, project)).controls.some((c) => c.name === "DraftBtn"), { budgetMs: 15000 });
+  check("the host's own Ctrl+S with a designer tab active applies the draft first", true);
+  const acceleratorSave = await api.waitForLog("command: 3 executed", { since: acceleratorMark, timeout: 15000 })
+    .catch(() => null);
+  check("and the raw save follows it",
+    acceleratorSave !== null && (acceleratorSave.lines ?? []).length > 0,
+    acceleratorSave ? acceleratorSave.lines[0] : "no File Save in the log");
+  await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
 
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 

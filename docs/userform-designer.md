@@ -368,16 +368,21 @@ the host-owns-membership invariant survives.
   controls both.
 
   **Ctrl+S is the product's save, and the canvas scrolls - 2026-08-15, the owner's pair of
-  reports.** The designer's Ctrl+S applied the document and stopped there, which read as
-  "isn't saving" because it was not: Ctrl+S means "save the workbook" everywhere else in
-  the product. It is apply-THEN-save now - the host's own File Save follows an OK apply, a
-  refusal saves nothing (the file must not hold a form the developer was just told did not
-  take their document), a clean document skips straight to the save - and it works from
-  EITHER half: a capture-phase handler on the view routes the key, and a click gives the
-  canvas focus so keys reach the view from there at all. The canvas wheel is unconditional
-  on the canvas half (which is also what makes it drivable: a synthesised WheelEvent never
-  triggers native scrolling, so the scroll path had no driver before), and the focused
-  canvas scrolls by keyboard too.
+  reports, and the key's REAL route took a second report to find.** Ctrl+S is a HOST
+  accelerator: the editor takes the key before the page ever sees it and routes it through
+  the session's Save - which is why the code editor's Ctrl+S works (the host flushes page
+  edits, then saves) and why a page-side binding alone read as "still not working" from
+  both halves. The designer now has the same shape the code editor has: the host's Save,
+  finding a designer tab active, asks the PAGE to apply the tab's document - the document
+  lives there, the host cannot flush it itself - and the page calls back for the raw save
+  ("saveOnly", which skips the designer branch so the callback cannot loop). An OK apply
+  is followed by the save; a refusal saves nothing (the file must not hold a form the
+  developer was just told did not take their document); a clean document skips straight to
+  the save. The page-side bindings stay as belts for focus states the accelerator misses.
+  The canvas wheel is unconditional on the canvas half (which is also what makes it
+  drivable: a synthesised WheelEvent never triggers native scrolling, so the scroll path
+  had no driver before), a click gives the canvas focus so it scrolls by keyboard too, and
+  the draft banner is a pinned overlay the scrolled form passes UNDER rather than over.
 
   **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
   xlide sees on the real form surface is the truth the canvas answers to):

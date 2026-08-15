@@ -1892,7 +1892,7 @@ internal sealed partial class AddInSession : IDisposable
     /// two of these is exactly how the toolbar's toggle came to set a breakpoint that was never
     /// drawn: the bookkeeping was on the key path and the button went straight at the command.
     /// </summary>
-    private VbeCommands.CommandRun ExecuteEditorCommand(int command)
+    private VbeCommands.CommandRun ExecuteEditorCommand(int command, bool skipDesignerApply = false)
     {
         if (command == 0)
         {
@@ -1922,6 +1922,17 @@ internal sealed partial class AddInSession : IDisposable
         if (command == VbeCommands.Command.Run && _activeDesignerTab is { } designTab)
         {
             return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
+        }
+
+        // Save with a designer tab holding the active slot is the designer's FlushEdits:
+        // the tab's document lives in the PAGE, so the page applies it to the form and
+        // calls back for the raw save ("saveOnly"). Ctrl+S is a HOST accelerator - the
+        // page never sees the key at all, which is why a page-side binding alone read as
+        // "CTRL+S still not working" from both halves (the owner, 2026-08-15).
+        if (command == VbeCommands.Command.Save && !skipDesignerApply && _activeDesignerTab is { } saveTab)
+        {
+            _editorSurface?.RequestDesignerApplySave(saveTab.Module, DisplayFromProjectId(saveTab.ProjectId));
+            return VbeCommands.CommandRun.Ok("the designer tab applies, then saves");
         }
 
         // Toggling a breakpoint is bookkeeping as well as a command. The editor cannot report which
@@ -5832,6 +5843,15 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
     private void RunCommand(string name)
     {
+        // The designer's save callback: the RAW File Save, skipping the designer branch -
+        // that branch is what asked the page to apply in the first place, and letting the
+        // callback loop back into it would apply forever.
+        if (string.Equals(name, "saveOnly", StringComparison.Ordinal))
+        {
+            ExecuteEditorCommand(VbeCommands.Command.Save, skipDesignerApply: true);
+            return;
+        }
+
         var command = VbeCommands.ForName(name);
         if (command == 0)
         {

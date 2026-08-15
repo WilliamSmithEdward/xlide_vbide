@@ -62,6 +62,16 @@ public sealed record FormMarkupLintMessage(
     [property: JsonPropertyName("draftForm")] FormMarkupBox? DraftForm = null,
     [property: JsonPropertyName("draft")] FormMarkupControl[]? Draft = null);
 
+/// <summary>
+/// The host's Ctrl+S with a designer tab active: the page applies the tab's document to
+/// the form and calls back for the raw save ("saveOnly"). The document lives in the page,
+/// so the host cannot flush it itself the way it flushes code edits before a save.
+/// </summary>
+public sealed record DesignerApplySaveMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("moduleName")] string ModuleName,
+    [property: JsonPropertyName("project")] string? Project);
+
 /// <summary>One squiggle: 1-based line, the reason, and "error" or "warning".</summary>
 public sealed record FormMarkupLintFinding(
     [property: JsonPropertyName("line")] int Line,
@@ -623,6 +633,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(FormMarkupControl))]
 [JsonSerializable(typeof(FormMarkupAppliedMessage))]
 [JsonSerializable(typeof(FormMarkupLintMessage))]
+[JsonSerializable(typeof(DesignerApplySaveMessage))]
 [JsonSerializable(typeof(FormMarkupLintFinding))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]

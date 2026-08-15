@@ -455,8 +455,10 @@ function boot(): void {
         dirtyChanged: (dirty) => workspace?.setFaceDirty(id, dirty),
         lint: (markup) => bridge.lintFormMarkup(id.module, id.project ?? null, markup),
         watchLint: (listener) => bridge.onFormMarkupLint(id.module, id.project ?? null, listener),
-        // The host's own File Save, the same command the toolbar's Save button sends.
-        saveWorkbook: () => bridge.runCommand({ id: "save", target: "host", icon: "", label: "Save" }),
+        // The RAW File Save - "saveOnly" skips the host's designer branch, which is what
+        // asked this view to apply in the first place; "save" here would loop forever.
+        saveWorkbook: () => bridge.runCommand({ id: "saveOnly", target: "host", icon: "", label: "Save" }),
+        watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
       });
       designerViews.set(key, view);
     }

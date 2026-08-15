@@ -769,6 +769,20 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.FormMarkupMessage));
     }
 
+    /// <summary>Asks the designer tab's view to apply its document and call back for the raw
+    /// save - the designer's half of the host's Ctrl+S.</summary>
+    public void RequestDesignerApplySave(string moduleName, string? project)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new DesignerApplySaveMessage("designerApplySave", moduleName, project),
+            EditorMessageContext.Default.DesignerApplySaveMessage));
+    }
+
     /// <summary>The squiggles for the markup tab's document as it stands - and the DRAFT the
     /// document describes when it parses, so the canvas can follow the typing.</summary>
     public void PublishFormMarkupLint(string moduleName, string? project,

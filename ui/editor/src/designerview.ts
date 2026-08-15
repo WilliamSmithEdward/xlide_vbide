@@ -105,6 +105,9 @@ export interface DesignerViewDeps {
   /** Save the workbook, the host's own File Save - the second half of the designer's
    * Ctrl+S, after a successful apply. */
   saveWorkbook(): void;
+  /** Subscribe to the HOST's Ctrl+S: the accelerator never reaches the page, so the host
+   * asks the tab to apply-then-save through this; returns the unwatch. */
+  watchApplySave(listener: () => void): () => void;
 }
 
 export class DesignerView {
@@ -147,6 +150,7 @@ export class DesignerView {
   private readonly unwatch: () => void;
   private readonly unwatchApplied: () => void;
   private readonly unwatchLint: () => void;
+  private readonly unwatchApplySave: () => void;
   private lintTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly deps: DesignerViewDeps;
 
@@ -323,6 +327,9 @@ export class DesignerView {
       this.showLint(findings);
       this.previewDraft(findings, draft);
     });
+    // The REAL Ctrl+S: a host accelerator the page never sees as a key. The host's Save,
+    // finding this tab active, asks for the apply-then-save here.
+    this.unwatchApplySave = deps.watchApplySave(() => this.applyNow());
     this.request = deps.request;
 
     // LAST, because it lays the editor out and the editor must exist: the first version ran
@@ -883,6 +890,7 @@ export class DesignerView {
     this.unwatch();
     this.unwatchApplied();
     this.unwatchLint();
+    this.unwatchApplySave();
     this.editor.dispose();
     this.model.dispose();
     this.root.remove();
