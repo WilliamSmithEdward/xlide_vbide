@@ -741,7 +741,12 @@ try {
     new RegExp(`^Form ${form} .* size 380x332$`, "m").test(await tabText()), { budgetMs: 15000 });
   check("360x320 becomes 380x332 on the Form line, with no position added", true);
 
-  // The promise the handles now keep: each wears the cursor of the pull it makes.
+  // The promise the handles now keep: each wears the cursor of the pull it makes, and the
+  // pointer can actually land on it. Asked of a CONTROL near the top of the form rather than
+  // of the form's own frame, whose far corner sits below the canvas viewport on a short tab -
+  // where elementFromPoint honestly answers the markup editor underneath (2026-08-15, the
+  // first run after the toolbox strip took its 30px).
+  await api.act("designerSelect", { module: form, control: "NameBox" });
   const handleCursor = await api.ask(`(() => { const h = ${inView(".dc-handle-se")}; if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : "covered by " + (hit?.className || "nothing")); })()`);
   check("a handle wears its own resize cursor and the pointer can reach it",
     handleCursor === "nwse-resize|reachable", String(handleCursor));
@@ -785,6 +790,75 @@ try {
   });
   check("one Ctrl+Z brings the whole block back - a mistaken Delete costs one keystroke",
     blockBack === "restored", String(blockBack));
+
+  // ---- the xlide toolbox: a kind dragged out of the palette and dropped on the form ----
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the document back at canonical before the toolbox rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  // The palette must offer exactly what the apply can add. The route's own refusal names its
+  // kinds, so the two lists are compared rather than both being written down twice.
+  const kindsOffered = await api.ask(`${inViewAll(".designer-tool")}.map(b => b.dataset.kind.toLowerCase()).sort().join(",")`);
+  const kindsRefusal = String((await api.designerEdit("add", { module: form, project, type: "gizmo" })
+    .catch((why) => why.message)));
+  const kindsTaken = (kindsRefusal.match(/one of ([^:]+)$/)?.[1] ?? "")
+    .split(",").map((one) => one.trim().toLowerCase()).filter(Boolean).sort().join(",");
+  check("the toolbox offers exactly the kinds the apply can add",
+    String(kindsOffered) === kindsTaken, `palette=${kindsOffered} route=${kindsTaken}`);
+
+  // An empty patch of the form's ground: right of the Frame, below the Image and the two
+  // spinner shapes, so the drop lands on the FORM rather than on something already there.
+  const fromPalette = await api.act("designerToolbox",
+    { module: form, kind: "CommandButton", left: 230, top: 120 });
+  check("a kind dragged out of the toolbox lands on the form",
+    fromPalette.did === true, fromPalette.detail);
+  const withDrop = await tabText();
+  check("the drop writes a whole line - named, placed and sized like the native toolbox's",
+    /^ {4}CommandButton CommandButton1 at 230,120 size 72x24$/m.test(withDrop),
+    withDrop.split(/\r?\n/).find((line) => /CommandButton1/.test(line)) ?? "no line");
+  check("and the new control is SELECTED, the way one dropped from the native palette is",
+    ((await api.act("designerCanvas", { module: form })).data?.selected) === "CommandButton1");
+  check("the FORM does not have it until the save",
+    !(await api.designer(form, project)).controls.some((c) => c.name === "CommandButton1"));
+
+  // Dropped INSIDE a Frame, the container under the pointer wins: the line nests under it and
+  // its position is the frame's own, not the form's.
+  const nestedDrop = await api.act("designerToolbox",
+    { module: form, kind: "Label", left: 40, top: 150 });
+  check("a drop over a Frame goes INTO the frame", nestedDrop.did === true, nestedDrop.detail);
+  const withNested = await tabText();
+  check("and its line is indented under it, placed in the frame's own coordinates",
+    /^ {8}Label Label1 at \d+,\d+ size 66x16$/m.test(withNested),
+    withNested.split(/\r?\n/).find((line) => /Label1/.test(line)) ?? "no line");
+
+  // The whole loop: Ctrl+S puts both on the FORM, through the same add the api route makes.
+  await api.command("save");
+  const landed = await waitFor("the drops to reach the form", async () => {
+    const walk = await api.designer(form, project);
+    const button = walk.controls.find((c) => c.name === "CommandButton1");
+    const label = walk.controls.find((c) => c.name === "Label1");
+    return button && label ? { button, label } : null;
+  }, { budgetMs: 20000 });
+  check("Ctrl+S adds them to the form where the drop put them",
+    near(landed.button.left, 230) && near(landed.button.top, 120)
+    && landed.button.type === "CommandButton", JSON.stringify(landed.button));
+  check("and the one dropped in the Frame is parented to it",
+    landed.label.parent === "Options", `parent=${landed.label.parent}`);
+
+  // Off the form entirely is not a drop: the ghost goes home and the document is untouched.
+  const missed = await api.act("designerToolbox", { module: form, kind: "Label", left: -400, top: -400 });
+  check("a drop outside the form adds nothing rather than a control at the origin",
+    missed.did === false, missed.detail);
+
+  await api.act("designerDelete", { module: form, control: "CommandButton1" });
+  await api.act("designerDelete", { module: form, control: "Label1" });
+  await api.command("save");
+  await waitFor("the toolbox's controls to leave the form again", async () => {
+    const walk = await api.designer(form, project);
+    return !walk.controls.some((c) => c.name === "CommandButton1" || c.name === "Label1");
+  }, { budgetMs: 20000 });
+  check("and Delete takes them off the form the same way, leaving the plan's own controls", true);
 
   // Undo all the way to the FLOOR of the stack. The document's own arrival must not be a step
   // on it: as an edit it was, and one Ctrl+Z in a tab whose only edit was the projection

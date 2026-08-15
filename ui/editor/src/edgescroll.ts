@@ -39,9 +39,15 @@ export function installEdgeScroll(strip: HTMLElement, className = "toolbar-edge"
 
   const update = (): void => {
     const furthest = strip.scrollWidth - strip.clientWidth;
-    // A pixel of slack: fractional widths mean scrollLeft rarely lands exactly on the end.
+    // Slack at both ends, because none of these numbers are whole. At fractional zoom the
+    // scroll position is fractional while scrollWidth comes back ROUNDED, so a strip sitting at
+    // its true end reads as a pixel or so short of it - and the forward edge stands there
+    // pointing at nothing (the owner, 2026-08-15: "right arrow doesn't go away when fully
+    // scrolled"). Rounding the position up a device pixel before comparing settles it, and
+    // costs the last pixel of a strip that genuinely has more: it would show an edge for a
+    // sliver nobody can read anyway.
     back.hidden = strip.scrollLeft <= 1;
-    forward.hidden = strip.scrollLeft >= furthest - 1;
+    forward.hidden = Math.ceil(strip.scrollLeft) + 1 >= furthest;
   };
 
   const slide = (direction: -1 | 1): void => {

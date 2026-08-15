@@ -563,11 +563,41 @@ the host-owns-membership invariant survives.
   its own canvas: removing a component is the tree's gesture, with the confirmation the
   product asks there.
 
+  **The xlide toolbox landed 2026-08-15**, which is the thing the native Toolbox was
+  suppressed FOR. A palette of the fourteen kinds the apply can add, docked in the tab
+  rather than floating over the form, and a kind is dragged out of it onto the canvas: the
+  pointer carries a ghost of the control's real size, the drop resolves the deepest
+  CONTAINER under it - a Frame's client, a MultiPage's page, the form's own ground - and
+  writes a line under that container, at that point, named the way the native toolbox
+  names one (the kind plus the first free number) and sized the way MSForms sizes a
+  control dropped rather than drawn. One undoable edit; the control is selected on
+  arrival; Ctrl+S adds it to the form through the apply's own name-keyed diff, so a
+  control born on the canvas is indistinguishable from one born through the api. A drop
+  outside the form adds nothing rather than a control at the origin.
+
+  Three notes from building it. The palette's icons are drawn FOR the palette: the first
+  landing put a real canvas control in each button, on the theory that the two should not
+  hold separate opinions about what a kind looks like, and at 16px every kind is the same
+  grey rectangle, because what tells them apart on the canvas is their children. It is ONE
+  ROW that scrolls, wearing the same edge arrows as the command strip and the tab strip
+  (the owner's call): a second row of palette eats the canvas on a narrow tab. And the
+  suite pins the palette against the ROUTE - the add route's own refusal names its kinds,
+  so the two lists are compared rather than both being written down twice.
+
   One measured trap sits under all of this: **a gesture's origin comes from the DOCUMENT,
   never from the painted box.** The first resize read `element.offsetWidth`, which carries
   whatever border the renderer drew, so a form pulled twenty points wider grew twenty-one.
   The pointer path now starts where the keyboard path always did - at the numbers the line
   spells - and falls back to the picture only for a clause the line does not carry.
+
+  And one measured latency: **a gesture does not wait out the typing debounce.** The canvas
+  redraws from the host's own parse, which the lint round trip carries, and that request is
+  debounced 350ms so a keystroke does not ask the same question mid-word. A drop and a
+  delete were paying it: 347ms and 348ms from the act to the canvas, measured, and felt at
+  once by the owner ("some delay when dragging an element onto the UI, or deleting"). A
+  drag and a resize never showed it because they paint themselves as they go. Every commit
+  now asks for its lint immediately - a gesture is finished the moment it happens - and the
+  same two measurements read 4ms and 3ms.
 
   **The document IS the transaction log**, and that is the design decision this slice
   makes rather than the feature it ships. A canvas gesture writes the same text a hand

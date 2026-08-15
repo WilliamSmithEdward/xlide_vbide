@@ -23,6 +23,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { FormMarkupApplied, FormMarkupControl, FormMarkupDraft, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
 import type { DocumentId } from "./documents.js";
+import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
 const PT = 4 / 3;
@@ -92,6 +93,11 @@ const FRAME_INSET_TOP = 10 * PT;
  * it a press is a selection and nothing moves, which is what keeps a click a click. */
 const DRAG_THRESHOLD = 3;
 
+/** How long the lint waits after a KEYSTROKE: long enough that a word is not asked about
+ * mid-typing, and the canvas's draft follows the same beat. A GESTURE does not wait it out -
+ * see `lintNow` - because a drop or a delete is finished the moment it happens. */
+const TYPING_DEBOUNCE = 350;
+
 /** The arrow keys' vocabulary: one point a press, the finest move the document can spell. */
 const NUDGE: Readonly<Record<string, { dx: number; dy: number }>> = {
   ArrowLeft: { dx: -1, dy: 0 },
@@ -144,6 +150,69 @@ interface CanvasDrag {
  * rather than a design. */
 const MIN_CONTROL = 4;
 const MIN_FORM = 24;
+
+/**
+ * The toolbox: the kinds a drag can add, in the order the native palette lists them, each with
+ * the size MSForms gives a control dropped rather than drawn. The sizes are the fixture plan's
+ * own, which is where this product's idea of an ordinary control already lives.
+ *
+ * A Page is not here: a page is added to a MultiPage, not dropped on a form, and the gesture for
+ * that is the MultiPage's own (M6). Nor is anything third-party - Additional Controls stays
+ * suppressed until add-by-ProgID is proven against a real one.
+ */
+const TOOLBOX: readonly { kind: string; width: number; height: number }[] = [
+  { kind: "Label", width: 66, height: 16 },
+  { kind: "TextBox", width: 120, height: 20 },
+  { kind: "ComboBox", width: 120, height: 20 },
+  { kind: "ListBox", width: 120, height: 42 },
+  { kind: "CheckBox", width: 66, height: 16 },
+  { kind: "OptionButton", width: 76, height: 16 },
+  { kind: "ToggleButton", width: 92, height: 22 },
+  { kind: "Frame", width: 92, height: 66 },
+  { kind: "CommandButton", width: 72, height: 24 },
+  { kind: "TabStrip", width: 122, height: 86 },
+  { kind: "MultiPage", width: 192, height: 86 },
+  { kind: "ScrollBar", width: 14, height: 96 },
+  { kind: "SpinButton", width: 14, height: 42 },
+  { kind: "Image", width: 76, height: 42 },
+];
+
+/**
+ * The palette's icons, 16x16, drawn for the palette rather than borrowed from the canvas.
+ *
+ * The first landing put a real canvas control in each button at 15px, on the theory that the
+ * palette and the form should not hold two opinions about what a kind looks like. At that size
+ * every kind is the same grey rectangle - what tells a ComboBox from a ListBox on the canvas is
+ * its children, and children that small are noise (the owner, one look: "glyphs don't look
+ * great"). So these are icons: the shape a person recognises, in `currentColor`, at the one size
+ * they are ever drawn.
+ */
+const TOOL_ICON: Readonly<Record<string, string>> = {
+  Label: '<path d="M2.5 5h11M2.5 8h8M2.5 11h5"/>',
+  TextBox: '<rect x="1.5" y="4.5" width="13" height="7" rx="1"/><path d="M4 6.5v3M3 6.5h2M3 9.5h2"/>',
+  ComboBox: '<rect x="1.5" y="4.5" width="13" height="7" rx="1"/><path d="M10.5 4.5v7"/><path d="M11.5 7.5l1 1.5 1-1.5z" fill="currentColor"/>',
+  ListBox: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M4 5.5h8M4 8h8M4 10.5h5"/>',
+  CheckBox: '<rect x="1.5" y="3.5" width="9" height="9" rx="1"/><path d="M3.5 8l2.5 2.5 4-5"/>',
+  OptionButton: '<circle cx="6" cy="8" r="4.5"/><circle cx="6" cy="8" r="1.8" fill="currentColor" stroke="none"/>',
+  ToggleButton: '<rect x="1.5" y="4.5" width="13" height="7" rx="1.5" fill="currentColor" fill-opacity="0.28"/><path d="M4.5 6.5v3"/>',
+  Frame: '<path d="M4.5 3.5H14v10H2v-10h1"/><path d="M3.5 3.5h1"/>',
+  CommandButton: '<rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M5 8h6"/>',
+  TabStrip: '<path d="M1.5 5.5h5v-2h4v2h5v8h-14z"/>',
+  MultiPage: '<path d="M1.5 5.5h5v-2h4v2h5v8h-14z"/><path d="M2.5 5.5h4v-1h3v1" fill="currentColor" fill-opacity="0.35" stroke="none"/><path d="M4 9h8M4 11h5"/>',
+  ScrollBar: '<rect x="5.5" y="1.5" width="5" height="13" rx="1"/><path d="M6.8 4.4L8 3l1.2 1.4zM6.8 11.6L8 13l1.2-1.4z" fill="currentColor"/>',
+  SpinButton: '<rect x="5.5" y="3.5" width="5" height="9" rx="1"/><path d="M6.8 7L8 5.6 9.2 7zM6.8 9L8 10.4 9.2 9z" fill="currentColor"/>',
+  Image: '<rect x="1.5" y="3.5" width="13" height="9" rx="1"/><circle cx="5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><path d="M2 11.5l3.5-3 2.5 2 2-1.5 4 2.5"/>',
+};
+
+/** What a palette button says when the kind's own name is too long for one: short enough to
+ * read at a glance, and the full name is on the tooltip either way. */
+const SHORT_KIND: Readonly<Record<string, string>> = {
+  OptionButton: "Option",
+  ToggleButton: "Toggle",
+  CommandButton: "Button",
+  ScrollBar: "Scroll",
+  SpinButton: "Spin",
+};
 
 /** The cursor each handle's pull deserves, worn by the whole canvas while that pull runs. */
 const EDGE_CURSOR: Readonly<Record<string, string>> = {
@@ -244,6 +313,11 @@ export class DesignerView {
   /** The press in flight, once it has grabbed something movable. */
   private drag: CanvasDrag | null = null;
 
+  /** The palette, its edge arrows, and the kind being carried out of it right now. */
+  private readonly toolbox: HTMLElement;
+  private readonly toolboxEdges: EdgeScroll;
+  private carrying: { kind: string; width: number; height: number; ghost: HTMLElement } | null = null;
+
   /** The last text known to BE the form - what dirty is measured against. Null before the
    * first projection arrives, and while an apply's fresh projection is on its way. */
   private canonical: string | null = null;
@@ -311,6 +385,42 @@ export class DesignerView {
 
     const canvasHalf = document.createElement("div");
     canvasHalf.className = "designer-canvas-half";
+
+    // The xlide toolbox: our own palette, docked in the tab rather than floating over it, in
+    // the strip the draft banner used to occupy. The native Toolbox stays suppressed - this is
+    // the thing it was suppressed FOR (docs/userform-designer.md, M5).
+    //
+    // ONE ROW that scrolls, with the same edge arrows the command strip and the tab strip wear
+    // (the owner's call, 2026-08-15): wrapping to a second row eats the canvas on a narrow tab,
+    // and a strip that scrolls the way the others do is one behaviour to learn, not three.
+    const toolboxRow = document.createElement("div");
+    toolboxRow.className = "designer-toolbox";
+    const toolbox = document.createElement("div");
+    toolbox.className = "designer-toolbox-strip";
+    toolbox.setAttribute("role", "toolbar");
+    toolbox.setAttribute("aria-label", "Controls to drag onto the form");
+    toolboxRow.appendChild(toolbox);
+    for (const tool of TOOLBOX) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "designer-tool";
+      button.dataset.kind = tool.kind;
+      button.title = `Drag a ${tool.kind} onto the form`;
+      const glyph = document.createElement("span");
+      glyph.className = "designer-tool-glyph";
+      glyph.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+        + 'fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" '
+        + `stroke-linejoin="round">${TOOL_ICON[tool.kind] ?? ""}</svg>`;
+      button.append(glyph, document.createTextNode(SHORT_KIND[tool.kind] ?? tool.kind));
+      toolbox.appendChild(button);
+    }
+
+    toolbox.addEventListener("pointerdown", (event) => this.onToolboxPress(event));
+    canvasHalf.appendChild(toolboxRow);
+    this.toolbox = toolbox;
+    // Inserted into the strip's own parent, which is why the row exists: the arrows sit beside
+    // the palette rather than inside it, and appear only when there is something past the edge.
+    this.toolboxEdges = installEdgeScroll(toolbox, "toolbar-edge");
 
     this.canvasScroll = document.createElement("div");
     this.canvasScroll.className = "designer-canvas-scroll";
@@ -417,7 +527,7 @@ export class DesignerView {
       // The squiggles follow the typing, debounced past the keystroke rate: the lint is a
       // host round trip, and a request per keystroke asks the same question mid-word.
       clearTimeout(this.lintTimer);
-      this.lintTimer = setTimeout(() => deps.lint(this.model.getValue()), 350);
+      this.lintTimer = setTimeout(() => deps.lint(this.model.getValue()), TYPING_DEBOUNCE);
     });
 
     this.installSplitter(splitter);
@@ -743,6 +853,110 @@ export class DesignerView {
     this.deps.eventStub(control);
   }
 
+  /**
+   * A press on the palette picks a kind up. From here the pointer carries a ghost of the
+   * control's real size until it is dropped on the form - the toolbox gesture the native
+   * designer has and the suppressed palette was suppressed for.
+   *
+   * The whole drag lives on the DOCUMENT window rather than on the palette, because the
+   * interesting part of it happens over the canvas: capture on the button would keep the
+   * events but hide which container the pointer is over, and that container is the answer the
+   * drop needs.
+   */
+  private onToolboxPress(event: PointerEvent): void {
+    const button = (event.target as HTMLElement).closest<HTMLElement>(".designer-tool");
+    const tool = TOOLBOX.find((one) => one.kind === button?.dataset.kind);
+    if (!tool || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const ghost = document.createElement("div");
+    ghost.className = "designer-tool-ghost";
+    ghost.style.width = `${tool.width * PT}px`;
+    ghost.style.height = `${tool.height * PT}px`;
+    ghost.textContent = tool.kind;
+    document.body.appendChild(ghost);
+    this.carrying = { kind: tool.kind, width: tool.width, height: tool.height, ghost };
+    this.moveGhost(event.clientX, event.clientY);
+
+    const onMove = (moved: PointerEvent): void => this.moveGhost(moved.clientX, moved.clientY);
+    const onUp = (dropped: PointerEvent): void => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      this.dropTool(dropped.clientX, dropped.clientY);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+
+  /** The ghost rides the pointer by its TOP-LEFT, because that is where the control will land:
+   * what the eye follows is the box that is about to exist, not a cursor with a label. */
+  private moveGhost(x: number, y: number): void {
+    if (!this.carrying) {
+      return;
+    }
+
+    this.carrying.ghost.style.left = `${x}px`;
+    this.carrying.ghost.style.top = `${y}px`;
+    const over = this.containerAt(x, y);
+    this.carrying.ghost.classList.toggle("over", over !== null);
+  }
+
+  /**
+   * Where a drop would land: the deepest CONTAINER under the pointer - a Frame's client, a
+   * MultiPage's page body, or the form's own client area - with the name it goes under and the
+   * point inside it, in points. Null when the pointer is not over this form at all, which is
+   * how a drop outside becomes nothing rather than a control at 0,0.
+   */
+  private containerAt(x: number, y: number): { parent: string; left: number; top: number } | null {
+    const hit = document.elementFromPoint(x, y);
+    const client = hit?.closest<HTMLElement>(".dc-frame-client, .dc-page-body, .dc-form-client");
+    if (!client || !this.canvasScroll.contains(client)) {
+      return null;
+    }
+
+    // A Frame's client belongs to the Frame; a page body belongs to the PAGE whose content it
+    // draws, which is the parent the markup names; the form's client belongs to the form.
+    const box = client.getBoundingClientRect();
+    const owner = client.closest<HTMLElement>(".dc");
+    const parent = client.classList.contains("dc-page-body")
+      ? this.firstPageOf(owner?.dataset.control ?? "")
+      : owner?.dataset.control ?? "";
+    return { parent, left: (x - box.left) / PT, top: (y - box.top) / PT };
+  }
+
+  /** The page a MultiPage is showing - the canvas draws the first one - by the document's own
+   * order, because a control dropped on that body belongs to that page and not to the frame. */
+  private firstPageOf(multiPage: string): string {
+    if (!multiPage) {
+      return "";
+    }
+
+    const own = this.headerOf(multiPage);
+    if (!own) {
+      return multiPage;
+    }
+
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+    const level = indent(lines[own.line - 1] ?? "");
+    for (let at = own.line; at < lines.length; at++) {
+      const text = lines[at] ?? "";
+      if (indent(text) <= level) {
+        break;
+      }
+
+      const page = /^\s+Page\s+(\S+)/.exec(text);
+      if (page?.[1]) {
+        return page[1];
+      }
+    }
+
+    return multiPage;
+  }
+
   /** A press on the canvas: a HANDLE resizes what is already selected, anything else picks
    * what is under the pointer and arms a move. */
   private onCanvasPress(event: PointerEvent): void {
@@ -1034,7 +1248,94 @@ export class DesignerView {
       text,
     }], () => null);
     this.paintBox(element, { left, top, width, height });
+    this.lintNow();
     return true;
+  }
+
+  /**
+   * The drop: a new control's line into the document, under the container the pointer was over,
+   * at the point it was let go - clamped inside that container, on whole points, named the way
+   * the native toolbox names one (the kind plus the first free number).
+   *
+   * One undoable edit, like every other canvas gesture, and it writes the DOCUMENT: the draft
+   * preview draws the control at once, the dot says it is not on the form yet, and Ctrl+S adds
+   * it there through the apply's name-keyed diff - which is the SAME add the `designer` route
+   * makes, so a control born on the canvas is indistinguishable from one born through the api.
+   */
+  private dropTool(x: number, y: number): boolean {
+    const carrying = this.carrying;
+    this.carrying = null;
+    carrying?.ghost.remove();
+    if (!carrying) {
+      return false;
+    }
+
+    const where = this.containerAt(x, y);
+    if (!where) {
+      return false;
+    }
+
+    const host = where.parent === "" ? this.headerOf("") : this.headerOf(where.parent);
+    if (!host) {
+      return false;
+    }
+
+    // Inside the container, and never off its edges: the same floor every gesture keeps.
+    const room = this.roomOfContainer(where.parent);
+    const box = this.clamp(
+      { left: where.left, top: where.top, width: carrying.width, height: carrying.height },
+      room, MIN_CONTROL);
+    const name = this.freeName(carrying.kind);
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+    const level = where.parent === "" ? 0 : indent(lines[host.line - 1] ?? "");
+
+    // At the END of the container's block, which is where a control added last belongs: the
+    // markup's order is the model's order, and the model appends.
+    let after = host.line;
+    while (after < lines.length && (where.parent === "" || indent(lines[after] ?? "") > level)) {
+      after += 1;
+    }
+
+    const line = `${" ".repeat(level + 4)}${carrying.kind} ${name}`
+      + ` at ${Math.round(box.left)},${Math.round(box.top)}`
+      + ` size ${Math.round(box.width)}x${Math.round(box.height)}`;
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: new monaco.Range(after, this.model.getLineMaxColumn(after), after, this.model.getLineMaxColumn(after)),
+      text: `\n${line}`,
+    }], () => null);
+
+    // Selected on arrival, the way a control dropped from the native toolbox is: the panel
+    // targets it and the next gesture is about the thing just made.
+    this.select(name);
+    this.lintNow();
+    return true;
+  }
+
+  /** The inside of a container, in points, for a drop that has no element to measure yet. */
+  private roomOfContainer(parent: string): { width: number; height: number } | null {
+    const client = parent === ""
+      ? this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")
+      : this.elementFor(parent)?.querySelector<HTMLElement>(".dc-frame-client, .dc-page-body")
+        ?? this.canvasScroll.querySelector<HTMLElement>(`.dc[data-control="${CSS.escape(parent)}"]`)
+          ?.closest<HTMLElement>(".dc-page-body");
+    return client ? { width: client.clientWidth / PT, height: client.clientHeight / PT } : null;
+  }
+
+  /** The name the native toolbox would give: the kind, then the first number the document is
+   * not already using - counted across the WHOLE document, because a form's names are one
+   * namespace however deeply a control is nested. */
+  private freeName(kind: string): string {
+    const taken = new Set(this.model.getLinesContent()
+      .map((text) => /^\s+\S+\s+(\S+)/.exec(text)?.[1]?.toLowerCase())
+      .filter((name): name is string => name !== undefined));
+    for (let at = 1; ; at++) {
+      const name = `${kind}${at}`;
+      if (!taken.has(name.toLowerCase())) {
+        return name;
+      }
+    }
   }
 
   /**
@@ -1077,7 +1378,23 @@ export class DesignerView {
     this.model.pushStackElement();
     this.model.pushEditOperations([], [{ range, text: "" }], () => null);
     this.select("");
+    this.lintNow();
     return true;
+  }
+
+  /**
+   * Asks for the lint NOW, cancelling the typing debounce.
+   *
+   * A GESTURE is finished the moment it happens - a drop, a delete, a drag let go - so waiting
+   * out a delay built for keystrokes is a delay for nothing. Measured before this existed: a
+   * toolbox drop took 347ms to appear on the canvas and a delete 348ms, which is the debounce
+   * almost exactly, and which the owner felt immediately (2026-08-15: "some delay when dragging
+   * an element onto the UI, or deleting"). A drag and a resize paint themselves as they go, so
+   * they never showed it; the two gestures that change the SHAPE of the document did.
+   */
+  private lintNow(): void {
+    clearTimeout(this.lintTimer);
+    this.deps.lint(this.model.getValue());
   }
 
   /** Where a gesture starts from: the DOCUMENT's own numbers when the line spells them, and the
@@ -1293,6 +1610,52 @@ export class DesignerView {
 
     this.sendGesture(reached, spot, dx, dy);
     return `resized ${name === "" ? "the form" : name}`;
+  }
+
+  /**
+   * A toolbox drag driven from the debug surface: the REAL pointer sequence, out of the palette
+   * button for `kind` and onto a point on the canvas given in POINTS from the form's own client
+   * origin - the same coordinates the document carries, so a row can ask for 40,120 and then
+   * read `at 40,120` back. Answers the name the drop gave the new control, which is the one
+   * thing the caller cannot know in advance.
+   */
+  addFromToolbox(kind: string, left: number, top: number): string {
+    const button = this.toolbox.querySelector<HTMLElement>(`.designer-tool[data-kind="${CSS.escape(kind)}"]`);
+    if (!button) {
+      return `no ${kind} in the toolbox`;
+    }
+
+    const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client");
+    if (!client) {
+      return "the form's client area is not drawn";
+    }
+
+    const from = button.getBoundingClientRect();
+    const face = client.getBoundingClientRect();
+    const to = { x: face.left + left * PT, y: face.top + top * PT };
+    const send = (target: EventTarget, type: string, x: number, y: number): void => {
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: type === "pointerup" ? 0 : 1,
+        clientX: x,
+        clientY: y,
+      }));
+    };
+
+    // The press goes to the button; the move and the drop go to the WINDOW, which is where the
+    // gesture listens once it has left the palette - the same place a real pointer's events go.
+    const before = new Set(this.model.getLinesContent());
+    send(button, "pointerdown", from.left + from.width / 2, from.top + from.height / 2);
+    send(window, "pointermove", to.x, to.y);
+    send(window, "pointerup", to.x, to.y);
+
+    const added = this.model.getLinesContent().find((line) => !before.has(line));
+    const named = added ? /^\s+\S+\s+(\S+)/.exec(added)?.[1] : undefined;
+    return named ? `added ${named}` : `nothing landed at ${left},${top}`;
   }
 
   /**
@@ -1715,6 +2078,7 @@ export class DesignerView {
     this.unwatchApplied();
     this.unwatchLint();
     this.unwatchApplySave();
+    this.toolboxEdges.dispose();
     this.editor.dispose();
     this.model.dispose();
     this.root.remove();

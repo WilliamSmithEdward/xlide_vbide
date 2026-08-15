@@ -3369,16 +3369,25 @@ body.objbrowser-page #objbrowser-card {
   outline: none;
 }
 
+/* A COLUMN, since the toolbox arrived: the palette takes the height it needs - one row, or two
+   when the tab is narrow - and the canvas takes the rest. It was a positioning context with an
+   inset-0 scroll box inside it, which put the form underneath the strip rather than below it
+   (the owner, 2026-08-15: "the form is overlapping the strip"). */
 .designer-canvas-half {
   flex: 1 1 auto;
   min-width: 0;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  /* Still the positioning context the "form could not be read" notice hangs from - it covers
+     the palette as well as the canvas, which is right: with no form there is nothing to drag. */
+  position: relative;
 }
 
 .designer-canvas-scroll {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   padding: 24px;
 }
@@ -3476,6 +3485,133 @@ body.objbrowser-page #objbrowser-card {
    OVERLAY pinned above the scroll box - as a flow sibling of a positioned scroll it
    painted UNDER the scrolled form (the owner, 2026-08-15: "scrolling goes over yellow
    banner") - and opaque, so what scrolls beneath it reads as beneath it. */
+/* THE XLIDE TOOLBOX: our own palette, docked in the tab where the native one floats over the
+   form. It wraps rather than scrolls, because a palette that hides half its kinds behind a
+   scrollbar is a palette people stop reading. */
+/* The row: the palette between its two edge arrows, which the shared scroller inserts here. */
+.designer-toolbox {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--xl-border, #333);
+  background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+}
+
+/* ONE row that scrolls rather than a block that wraps: a second row of palette eats the canvas
+   on a narrow tab, and the arrows are the behaviour the command and tab strips already have. */
+.designer-toolbox-strip {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 3px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.designer-toolbox-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.designer-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px 2px 5px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: inherit;
+  background: var(--xl-editor-bg, #1e1e1e);
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  /* The OPEN HAND: this is a thing you pick up, which is exactly what the gesture is - and it
+     closes on the press, the one cursor pair the web already agrees means "carry me". */
+  cursor: grab;
+  /* The press starts a drag; the browser's own text selection would fight it. */
+  user-select: none;
+  touch-action: none;
+  transition: background 90ms ease-out, border-color 90ms ease-out, transform 90ms ease-out;
+}
+
+.designer-tool:hover {
+  border-color: var(--xl-accent, #0e639c);
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.22));
+  /* A lift small enough to feel rather than watch: the row must not shift under the pointer. */
+  transform: translateY(-1px);
+}
+
+.designer-tool:focus-visible {
+  outline: 1px solid var(--xl-accent, #0e639c);
+  outline-offset: 1px;
+}
+
+.designer-tool:active {
+  cursor: grabbing;
+  transform: translateY(0);
+  background: var(--vscode-toolbar-activeBackground, rgba(128, 128, 128, 0.32));
+}
+
+/* Nothing here animates for someone who has asked the machine to stop moving. */
+@media (prefers-reduced-motion: reduce) {
+  .designer-tool {
+    transition: none;
+  }
+
+  .designer-tool:hover {
+    transform: none;
+  }
+}
+
+/* Icons drawn for the palette, not canvas controls shrunk into it: at 16px every kind's canvas
+   paint is the same grey rectangle, because what tells them apart there is their children. */
+.designer-tool-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  /* The icon takes no pointer of its own: the button owns the gesture, and an icon that
+     swallowed the press would start a drag with no kind attached. */
+  pointer-events: none;
+  color: var(--vscode-descriptionForeground, #a6a6a6);
+  transition: color 90ms ease-out, transform 90ms ease-out;
+}
+
+.designer-tool:hover .designer-tool-glyph {
+  color: var(--xl-accent, #0e639c);
+  transform: scale(1.12);
+}
+
+.designer-tool:active .designer-tool-glyph {
+  transform: scale(1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .designer-tool-glyph,
+  .designer-tool:hover .designer-tool-glyph {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* What the pointer carries out of the palette: the control's REAL size, so the drop is aimed
+   at a box the eye has already seen, and a tint when it is over somewhere it can land. */
+.designer-tool-ghost {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 1px 3px;
+  font-size: 10px;
+  color: #cfd6e4;
+  background: rgba(74, 106, 157, 0.25);
+  border: 1px dashed #4a6a9d;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.designer-tool-ghost.over {
+  background: rgba(74, 106, 157, 0.45);
+  border-style: solid;
+}
+
 /* A DRAFT picture - the document's unapplied edits rather than the form - is said twice and
    no more: the tab's own unsaved dot, and this outline around the form. The banner that used
    to say it a third time in words was retired 2026-08-15 (the owner: the dot on the tab is

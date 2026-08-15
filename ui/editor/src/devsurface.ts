@@ -177,6 +177,7 @@ export interface DevSurfaceParts {
       dragControl(name: string, dx: number, dy: number): string;
       resizeControl(name: string, edge: string, dx: number, dy: number): string;
       deleteControl(name: string): string;
+      addFromToolbox(kind: string, left: number, top: number): string;
     } | null;
   };
   search: {
@@ -772,6 +773,33 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       const outcome = view.resizeControl(typeof args.control === "string" ? args.control : "", edge, dx, dy);
       return { did: outcome.startsWith("resized"), detail: `${outcome} by ${dx},${dy}pt on ${edge}` };
+    },
+
+    /** Drags a KIND out of the xlide toolbox and drops it on the form: the real pointer
+     * sequence, from the palette button to a point given in POINTS from the form's client
+     * origin. The drop writes a new line into the DOCUMENT - named the way the native toolbox
+     * names one - and `detail` answers that name; the form gains the control on the tab's
+     * Ctrl+S, through the same add the designer route makes. */
+    designerToolbox: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const kind = typeof args.kind === "string" ? args.kind : null;
+      if (!module || !kind) {
+        return { did: false, detail: "designerToolbox takes module and kind" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const left = Number(args.left ?? 0);
+      const top = Number(args.top ?? 0);
+      if (!Number.isFinite(left) || !Number.isFinite(top)) {
+        return { did: false, detail: "left and top are points from the form's client origin" };
+      }
+
+      const outcome = view.addFromToolbox(kind, left, top);
+      return { did: outcome.startsWith("added"), detail: `${outcome} at ${left},${top}` };
     },
 
     /** Deletes a control from the canvas: selects it, then presses the real Delete key on the

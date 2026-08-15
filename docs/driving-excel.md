@@ -1358,6 +1358,7 @@ node tools\harness\xlide-api.mjs act designerSelect module EntryForm control Reg
 node tools\harness\xlide-api.mjs act designerDrag module EntryForm control RegionPick dx 24 dy 12
 node tools\harness\xlide-api.mjs act designerResize module EntryForm control RegionPick edge se dx 24 dy 12
 node tools\harness\xlide-api.mjs act designerResize module EntryForm edge se dx 20 dy 12
+node tools\harness\xlide-api.mjs act designerToolbox module EntryForm kind CommandButton left 230 top 120
 node tools\harness\xlide-api.mjs act designerDelete module EntryForm control RegionPick
 node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
 node tools\harness\xlide-api.mjs command save
@@ -1374,7 +1375,11 @@ box, `designerMarkup` shows the rewritten line, and the form itself does not mov
 `designerCanvas`'s `undoable` says whether the document still has one to give.
 
 `designerDelete` is the same shape with the Delete key: the control's line leaves the document
-with everything indented under it, and the form keeps the control until the save. To drive the
+with everything indented under it, and the form keeps the control until the save.
+`designerToolbox` drags a kind out of the xlide palette to a point in POINTS from the form's
+client origin, and the drop lands in whatever container is under it - aim inside a Frame and the
+new control is the Frame's, in the Frame's own coordinates. Its `detail` answers the name the
+drop chose, which is the one thing the caller cannot know in advance. To drive the
 keyboard gestures by hand - arrows nudge, Shift+arrows resize, Ctrl+Z undoes - dispatch a
 `keydown` at `.designer-view[data-module="EntryForm"] .designer-canvas-scroll`. Aim it with
 that attribute rather than at a bare `.designer-canvas-scroll`: a session can hold several
