@@ -516,11 +516,51 @@ the host-owns-membership invariant survives.
   re-projecting per edit. Selecting the form's ground returns the panel to the component.
   The native panel enumerates the control's whole typelib; this one grows with the
   service, and the transaction log stays ahead - it opens with direct manipulation, where
-  undo starts mattering.
+  undo starts mattering. It opened the same day, below, and it turned out to be the
+  markup document itself.
 - **M5 - direct manipulation.** Click to select, drag to move, resize by handles, nudge,
   add from an xlide toolbox by true drag-and-drop, delete, align and distribute, undo over
   the transaction log - the native designer's full manipulation vocabulary, on our canvas.
-  (Spike 2 in full. Confirmed as the road with the owner, 2026-08-13.)
+  (Spike 2 in full. Confirmed as the road with the owner, 2026-08-13.) **Moving landed
+  2026-08-15**: a press picks a control up, the pointer carries it, and the drop rewrites
+  that control's line in the DOCUMENT - `at 84,38` becomes `at 108,50` - as one edit.
+  Arrow keys nudge the selection a point at a time through the same commit, and the cursor
+  finally promises what the canvas delivers (move over a control, pointer over the form's
+  ground, the resize cursors still unworn).
+
+  **The document IS the transaction log**, and that is the design decision this slice
+  makes rather than the feature it ships. A canvas gesture writes the same text a hand
+  would have typed, so there is no second model to keep in step: the draft preview shows
+  the move at once, the dirty dot says it has not reached the form, Ctrl+S applies it
+  through the one apply path, and Ctrl+Z takes a whole drag back from either half - from
+  the canvas because the view routes undo to the document that both halves share. A move
+  is a document edit, not a COM write, so the FORM does not move until the save; the
+  Properties panel keeps reading the form's own truth meanwhile, which the draft banner
+  is there to explain. The base for a move is read from the DOCUMENT rather than from the
+  picture, so the arithmetic stays right even when the canvas is a parse behind.
+
+  **Undo has two rules, and both were learned the same hour.** A move opens its own undo
+  element (a stack stop before the edit), so one Ctrl+Z gives back one gesture rather than
+  every move since the tab opened. But the element stays OPEN afterwards on purpose, so
+  the canonical print that lands after a save rides along with the move it echoes: without
+  that, an undo after Ctrl+S first walks through a step that differs only by the machine's
+  own rounding - the form reads back 50.000025 where the document said 50 - and looks like
+  it did nothing. And the document's ARRIVAL is not on the stack at all: the first
+  projection lands by `setValue`, which clears it. As an edit it left a "back to empty"
+  step underneath everything, so one Ctrl+Z in a barely-touched tab blanked the whole
+  document while the canvas kept showing the form - found by hand and by the owner within
+  the same minute, with ten green drag rows standing. Two suite rows hold the line now:
+  one gesture per undo, and twelve undos at the floor still leave the form's own text.
+
+  Three rules the gesture keeps: a drag lands on whole points, because a hand-placed
+  control wants round numbers (the 6-point grid the native designer snaps to is M6's); a
+  drag cannot lose a control behind its parent's edge, so it stops at the corner - and
+  dragging a control OUT of its Frame is reparenting, a later gesture, not a clamp
+  failure; and a press below the drag threshold is still just a click, which is what keeps
+  selection and moving one gesture. A line the view cannot rewrite - half-typed, a caption
+  whose quote never closes - refuses the move rather than guessing, and a Page, which has
+  no position of its own, offers no drag at all. `designerDrag` drives it with the real
+  pointer sequence, aimed through the hit test.
 - **M6 - the finishing set.** Tab order, z-order, zoom, snapping and guides - and the
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.

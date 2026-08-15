@@ -1349,6 +1349,24 @@ name-keyed diff: add a control by adding a line, remove one by deleting its line
 the text does not speak of is touched. A document that does not parse applies nothing, with
 the line named.
 
+The designer TAB - the product's own surface over that route - drives through `act`, and its
+gestures are the ones a hand makes. The tab must be open first (`pane open face design`):
+
+```bash
+node tools\harness\xlide-api.mjs pane open EntryForm face design
+node tools\harness\xlide-api.mjs act designerSelect module EntryForm control RegionPick
+node tools\harness\xlide-api.mjs act designerDrag module EntryForm control RegionPick dx 24 dy 12
+node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
+node tools\harness\xlide-api.mjs command save
+```
+
+`designerDrag` sends the REAL pointer sequence at the control - the press goes to whatever the
+hit test answers, which is how an invisible overlay over the canvas gets caught - and its
+deltas are POINTS, the document's own unit. The drop rewrites the control's line in the
+document rather than writing the form: `designerCanvas` then reports `draft: true`, `dirty:
+true` and the new position, `designerMarkup` shows the rewritten line, and the form itself does
+not move until `command save`, which is the tab's Ctrl+S. One undo takes a whole drag back.
+
 `tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
 children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.
 Its declaration is `tools\harness\form-plan.mjs`, shared verbatim with `designer-features.mjs`

@@ -77,6 +77,9 @@ let form = `${PLANNED_FORM}2`;
   }
 }
 
+/** What the cleanup's workbook write answered, checked after the try closes. */
+let written = null;
+
 try {
   // ---- built through the model, as the fixture generator builds it ----
 
@@ -541,9 +544,11 @@ try {
   check("a real click's hit-test lands on the control, not an invisible overlay",
     hitAnswer === "the control", String(hitAnswer));
 
-  const ergonomics = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); return getComputedStyle(el).cursor + "|" + (el.title || "no title"); })()');
-  check("the canvas wears its ergonomics: a clickable cursor and the name-and-kind tooltip",
-    /^pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
+  // The cursor promises exactly what the gesture delivers: a control MOVES (M5), so it wears
+  // the move cursor; the form's own ground selects, so it wears a pointer.
+  const ergonomics = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); const face = document.querySelector(".dc-form"); return getComputedStyle(el).cursor + "|" + getComputedStyle(face).cursor + "|" + (el.title || "no title"); })()');
+  check("the canvas wears its ergonomics: the move cursor, the form's pointer, the tooltip",
+    /^move\|pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
 
   await api.act("designerSelect", { module: form, control: "RegionPick" });
   const controlPanel = await waitFor("the panel to show the selected control", async () => {
@@ -575,6 +580,94 @@ try {
   await waitFor("the form's ground to return the panel to the form", async () =>
     (await api.ui()).properties?.component === form, { budgetMs: 15000 });
   check("selecting the form returns the panel to the component", true);
+
+  // ---- M5 opens: the canvas moves controls, and the DOCUMENT is the transaction log ----
+
+  // The real pointer sequence - press on what the hit test answers, past the threshold, drop -
+  // so the row proves the gesture, not the arithmetic behind it.
+  const dragged = await api.act("designerDrag", { module: form, control: "RegionPick", dx: 24, dy: 12 });
+  check("a pointer drag on the canvas moves a control", dragged.did === true, dragged.detail);
+  await waitFor("the drop to reach the document", async () =>
+    /RegionPick at 108,50/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("the drop rewrites the control's line - at 84,38 becomes at 108,50", true);
+
+  const dragCanvas = await waitFor("the canvas to preview the drop", async () => {
+    const read = (await api.act("designerCanvas", { module: form })).data;
+    return read?.draft === true ? read : null;
+  }, { budgetMs: 15000 });
+  const dropped = dragCanvas.controls.find((c) => c.name === "RegionPick");
+  check("the picture is the DRAFT, and the control stands where it was dropped",
+    dragCanvas.dirty === true && Math.abs(Number(dropped?.left) - 108) < 0.51,
+    JSON.stringify({ dirty: dragCanvas.dirty, left: dropped?.left }));
+  check("and the FORM is untouched until the save - the drag writes the document, not the form",
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.01);
+
+  // Ctrl+S is the road to the form, the same one a hand-typed edit takes.
+  await api.command("save");
+  await waitFor("the drag to land on the form", async () =>
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 108) < 0.01, { budgetMs: 15000 });
+  check("Ctrl+S carries the drag to the form", true);
+
+  // One Ctrl+Z takes the whole drag back, from the CANVAS half: proof the drop is a single
+  // edit rather than a stream of them, and that the canvas reaches the document's undo.
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await waitFor("the document to come back", async () =>
+    /RegionPick at 84,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("one Ctrl+Z on the canvas undoes the whole drag - the document is the transaction log", true);
+  await api.command("save");
+  await waitFor("the undo to reach the form too", async () =>
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.01, { budgetMs: 15000 });
+  check("and the undo travels the same road back to the form", true);
+
+  // The arrow keys: one point a press, through the same commit the drop takes.
+  await api.act("designerSelect", { module: form, control: "RegionPick" });
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); return "sent"; })()');
+  await waitFor("the nudge to reach the document", async () =>
+    /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("an arrow nudges the selection by a single point", true);
+
+  // A second nudge is a SECOND undo step. The stack stop before each move is what keeps one
+  // gesture from swallowing the one before it, and one Ctrl+Z gives back exactly one.
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); return "sent"; })()');
+  await waitFor("the second nudge", async () =>
+    /RegionPick at 86,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await waitFor("one gesture back", async () =>
+    /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("each move is its own undo step - one Ctrl+Z gives back one gesture, not the pair", true);
+
+  // A drag with nowhere to go cannot lose the control behind an edge: it stops at the corner.
+  await api.act("designerDrag", { module: form, control: "RegionPick", dx: -400, dy: -400 });
+  await waitFor("the clamped drop", async () =>
+    /RegionPick at 0,0/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("a drag past the top-left stops at the parent's corner rather than going negative", true);
+
+  // Undo all the way to the FLOOR of the stack. The document's own arrival must not be a step
+  // on it: as an edit it was, and one Ctrl+Z in a tab whose only edit was the projection
+  // landing blanked the document while the canvas kept showing the form - found by hand and by
+  // the owner in the same minute, with ten green drag rows standing (2026-08-15).
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); for (let i = 0; i < 12; i++) { el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); } return "sent"; })()');
+  const floor = String((await api.act("designerMarkup", { module: form })).data);
+  check("undone to the floor of the stack, the document is still the form's text - never blank",
+    /^Form /.test(floor) && /CommandButton OkButton/.test(floor), `${floor.length} char(s)`);
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  const restored = await waitFor("the document back at canonical", async () => {
+    const read = (await api.act("designerCanvas", { module: form })).data;
+    return read?.dirty === false ? read : null;
+  }, { budgetMs: 15000 });
+  check("and the unapplied moves let go, leaving the form as the plan draws it",
+    restored.draft === false);
+  await api.act("designerSelect", { module: form });
 
   // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
   await api.act("activate", { module: form, face: "design" });
@@ -664,10 +757,19 @@ try {
     String(badKind));
 } finally {
   await api.component("remove", { name: form, project }).catch(() => {});
+  // And the FILE too, not only the session. This suite saves the workbook on purpose - the
+  // Ctrl+S rows exist to prove the designer's save reaches it - so every run left its temporary
+  // form written into the fixture, where the next run's other suites found it. The gate's own
+  // discard probe takes the project's FIRST module as its subject, and on 2026-08-15 that was
+  // a leftover UserForm for the first time; it timed out waiting for the form's findings to
+  // clear. The save after the removal is what makes "as found" true on disk.
+  written = await api.command("save").catch((why) => ({ ran: false, detail: why.message }));
 }
 
 const swept = await api.project();
 check("the form is gone again, leaving the fixture as found",
   !swept.components.some((component) => component.name === form));
+check("and the workbook was written after the removal, so the FILE is as found too",
+  written?.ran === true, JSON.stringify(written ?? null));
 
 done();

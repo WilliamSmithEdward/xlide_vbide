@@ -166,12 +166,14 @@ export interface DevSurfaceParts {
       lintMarkers(): { line: number; message: string; severity: string }[];
       canvasSnapshot(): {
         draft: boolean;
+        dirty: boolean;
         selected: string | null;
         markupLine: number;
         controls: { name: string; left: number; top: number }[];
       };
       select(name: string): void;
       requestEventStub(control: string | null): void;
+      dragControl(name: string, dx: number, dy: number): string;
     } | null;
   };
   search: {
@@ -715,6 +717,32 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       const name = typeof args.control === "string" ? args.control : "";
       view.select(name);
       return { did: true, detail: name === "" ? "the form is selected" : `${name} is selected` };
+    },
+
+    /** Drags a control on the canvas by a delta in POINTS - the document's own unit - through
+     * the REAL pointer sequence, on the element the hit test answers. The drop rewrites the
+     * control's line in the document; read the result through designerCanvas or
+     * designerMarkup. */
+    designerDrag: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const control = typeof args.control === "string" ? args.control : null;
+      if (!module || !control) {
+        return { did: false, detail: "designerDrag takes module and control" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const dx = Number(args.dx ?? 0);
+      const dy = Number(args.dy ?? 0);
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        return { did: false, detail: "dx and dy are deltas in points" };
+      }
+
+      const outcome = view.dragControl(control, dx, dy);
+      return { did: outcome.startsWith("dragged"), detail: `${outcome} by ${dx},${dy}pt` };
     },
 
     /** The canvas double-click: asks the host for the default event handler - written when

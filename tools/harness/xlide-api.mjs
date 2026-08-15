@@ -1266,11 +1266,16 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       //
       //   xlide-api.mjs native            xlide-api.mjs projects
       //   xlide-api.mjs pane open Sheet1 "VBAProject 01"
+      //   xlide-api.mjs pane open EntryForm face design      the FORM's designer tab
       //   xlide-api.mjs outline Runner    xlide-api.mjs caret 12 Runner
       case "native": return api.native({ text: rest[0] === "text" });
       case "projects": return api.projects();
       case "console": return api.console(Number(rest[0] ?? 20));
-      case "pane": return api.pane(rest[0] ?? "open", { module: rest[1], project: rest[2], answer: rest[3] });
+      // The face is named rather than counted: it arrived after the positionals were spent,
+      // and `pane open EntryForm face design` reads better than a fourth silent slot.
+      case "pane": return api.pane(rest[0] ?? "open", rest[2] === "face"
+        ? { module: rest[1], face: rest[3] }
+        : { module: rest[1], project: rest[2], answer: rest[3] });
       case "outline": return api.outline(rest[0], rest[1]);
       case "caret": return api.caret(Number(rest[0] ?? 1), { module: rest[1], project: rest[2] });
       case "breakpoints": return api.breakpoints();

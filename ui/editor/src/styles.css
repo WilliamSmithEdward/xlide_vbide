@@ -3504,16 +3504,39 @@ body.objbrowser-page #objbrowser-card {
 
 /* Hover ergonomics (the owner, 2026-08-15): the control a click would select lights up,
    and only the DEEPEST hovered control does - without :has, a Frame outlines under its
-   own children. The cursor stays a pointer across the whole form face, because every
-   inch of it selects something; the resize and move cursors are M5's, worn only when the
-   handles actually drag. */
+   own children. The form's own ground selects, so it wears a pointer; a control MOVES
+   now (M5), so it wears the move cursor - the promise the drag keeps. The resize cursors
+   stay unworn until the handles resize. */
 .dc-form {
+  cursor: pointer;
+}
+
+.dc {
+  cursor: move;
+}
+
+/* A Page has no position of its own - it fills its MultiPage - so it offers no move. */
+.dc-Page {
   cursor: pointer;
 }
 
 .dc:hover:not(:has(.dc:hover)) {
   outline: 1px solid rgba(74, 106, 157, 0.8);
   outline-offset: 1px;
+}
+
+/* Under the pointer during a drag: above its siblings, so a control being placed is never
+   hidden by the one it passes over, and lightly lifted so the gesture reads as in-flight. */
+.dc-dragging {
+  z-index: 5;
+  opacity: 0.85;
+}
+
+/* While a drag runs, the cursor is the gesture's everywhere on the canvas - the pointer may
+   travel over the form's ground or another control, and the move does not stop for it. */
+.designer-canvas-scroll.dragging,
+.designer-canvas-scroll.dragging * {
+  cursor: move;
 }
 
 .dc-Label {

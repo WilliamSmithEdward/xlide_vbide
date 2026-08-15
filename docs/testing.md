@@ -135,6 +135,20 @@ rather than assuming it is where it looks - `getBoundingClientRect()` on the reg
 then doesn't" was the difference between a module being open and not, which is exactly what the
 reporter eventually said.
 
+**A suite that SAVES the workbook has to clean the file, not just the session.** Removing a
+temporary component at the end leaves the session as found and the FILE holding it, because the
+save in the middle already wrote it there - and the next run's other suites open the file. The
+designer suite saves on purpose (its Ctrl+S rows exist to prove the designer's save reaches the
+workbook), so every run since those rows landed had been writing a spare UserForm into
+DebugFixture.xlsm; the gate's discard probe takes the project's FIRST module as its subject and
+found that form there on 2026-08-15. The cleanup now saves after the removal, and the suite
+asserts the write happened rather than assuming it. Worth separating from what it looked like:
+the probe's timeouts did NOT pin to the change under suspicion - the SAME bundle failed twice
+and passed twice on fresh sessions of the same fixture - so the pollution is the defect that
+was real here, and the probe's waits are a second, still-open question. Two runs are not a
+verdict either way: the discriminator has to be run both ways more than once before a build is
+blamed or cleared.
+
 **Counts beat megabytes for leaks.** `Test-Churn.ps1` asserts that editors, models, dock groups and
 DOM nodes return to their starting numbers after two dozen cycles. An exact number that must return
 to its starting value is a far better detector than a heap figure nobody can interpret.

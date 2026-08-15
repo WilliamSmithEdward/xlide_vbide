@@ -12,9 +12,12 @@
  * the way they sit inside its client area, so containment is the browser's composition rather
  * than arithmetic here.
  *
- * The markup half is read-only in this first landing: an editable document whose edits go
- * nowhere is a lie, and the apply loop is the next slice. The read-only banner says exactly
- * that, so nobody wonders which half is the truth.
+ * Both halves EDIT, and they edit the same thing: a canvas gesture - a drag, a nudge - rewrites
+ * the control's line in the document, one undoable edit each, exactly as the hand would have
+ * typed it. That is what makes the document the designer's transaction log (M5): the draft
+ * preview shows the gesture at once, the dirty dot says it has not reached the form, Ctrl+S
+ * applies it, and Ctrl+Z takes it back from either half. The FORM is never written behind the
+ * document's back.
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
@@ -84,6 +87,47 @@ function registerMarkupLanguage(): void {
 /** The frame's caption strip eats this much of its client area's top, approximately - an
  * honest inset rather than a measured one, until the canvas milestone measures it. */
 const FRAME_INSET_TOP = 10 * PT;
+
+/** How far a press must travel before it is a DRAG rather than a click, in CSS pixels. Below
+ * it a press is a selection and nothing moves, which is what keeps a click a click. */
+const DRAG_THRESHOLD = 3;
+
+/** The arrow keys' vocabulary: one point a press, the finest move the document can spell. */
+const NUDGE: Readonly<Record<string, { dx: number; dy: number }>> = {
+  ArrowLeft: { dx: -1, dy: 0 },
+  ArrowRight: { dx: 1, dy: 0 },
+  ArrowUp: { dx: 0, dy: -1 },
+  ArrowDown: { dx: 0, dy: 1 },
+};
+
+/** A name as a literal inside a pattern: control names are the developer's, and a dot in one
+ * must not quietly become "any character". */
+function escapeForRegExp(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A control's line in the document, split at its geometry: everything before the `at` clause,
+ * the position that clause spells (null when the line carries none), and the `size` clause to
+ * keep after it - the shape a move rewrites. */
+interface HeaderLine {
+  line: number;
+  head: string;
+  at: { left: number; top: number } | null;
+  size: string;
+}
+
+/** A press that may become a move: what it grabbed, where it started, and whether it has
+ * travelled far enough to count. */
+interface CanvasDrag {
+  name: string;
+  element: HTMLElement;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  originLeft: number;
+  originTop: number;
+  moved: boolean;
+}
 
 export interface DesignerViewDeps {
   /** Ask the host for the form's projection; the answer arrives through watch. */
@@ -169,6 +213,9 @@ export class DesignerView {
 
   /** The selected control's name, "" for the FORM itself, null for no selection. */
   private selectedName: string | null = null;
+
+  /** The press in flight, once it has grabbed something movable. */
+  private drag: CanvasDrag | null = null;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
    * first projection arrives, and while an apply's fresh projection is on its way. */
@@ -260,23 +307,21 @@ export class DesignerView {
       event.preventDefault();
     }, { passive: false });
 
-    // A click gives the canvas focus, so PageUp, arrows and Ctrl+S work from either half:
+    // A press gives the canvas focus, so PageUp, arrows and Ctrl+S work from either half:
     // a keydown routes through the view only when something inside it holds focus.
     this.canvasScroll.tabIndex = -1;
-    this.canvasScroll.addEventListener("pointerdown", () => this.canvasScroll.focus());
 
-    // M3's first gesture: a click selects - a control by name, the form by its ground -
-    // and the markup caret follows to the selected thing's line, the two halves pointing
-    // at one thing. A double-click asks the host for the default event handler, the
-    // native designer's own gesture; it also fires the two clicks, which is native too.
-    this.canvasScroll.addEventListener("click", (event) => {
-      const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
-      if (control?.dataset.control) {
-        this.select(control.dataset.control);
-      } else if ((event.target as HTMLElement).closest(".dc-form")) {
-        this.select("");
-      }
-    });
+    // M3's gesture, now carrying M5's: a press SELECTS - a control by name, the form by its
+    // ground - the markup caret follows to the selected thing's line, and the same press
+    // arms a drag. Selection on PRESS rather than release is the native designer's timing,
+    // and it is what lets one gesture both pick and move. A double-click asks the host for
+    // the default event handler, the native gesture; it also fires the presses, which is
+    // native too.
+    this.canvasScroll.addEventListener("pointerdown", (event) => this.onCanvasPress(event));
+    this.canvasScroll.addEventListener("pointermove", (event) => this.onCanvasDragMove(event));
+    this.canvasScroll.addEventListener("pointerup", (event) => this.onCanvasDrop(event));
+    this.canvasScroll.addEventListener("pointercancel", () => this.cancelDrag());
+    this.canvasScroll.addEventListener("keydown", (event) => this.onCanvasKey(event));
     this.canvasScroll.addEventListener("dblclick", (event) => {
       const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
       if (control?.dataset.control) {
@@ -510,17 +555,31 @@ export class DesignerView {
     this.notice.hidden = true;
 
     const adopt = this.awaitingAdopt || !this.dirty;
+    const first = this.canonical === null;
     this.awaitingAdopt = false;
     this.canonical = payload.markup;
 
     if (adopt && this.model.getValue() !== payload.markup) {
       const state = this.editor.saveViewState();
-      // A single undoable edit rather than setValue: the developer's undo stack survives the
-      // canonical print landing after their own apply.
-      this.model.pushEditOperations([], [{
-        range: this.model.getFullModelRange(),
-        text: payload.markup,
-      }], () => null);
+      if (first) {
+        // The FIRST projection fills an empty document, and it lands by setValue - which
+        // clears the undo stack - so there is no "back to empty" step underneath everything
+        // else. As an edit it left one, and a Ctrl+Z at the floor of the stack blanked the
+        // whole document while the canvas kept showing the form (found live, and by the
+        // owner in the same minute, 2026-08-15).
+        this.model.setValue(payload.markup);
+      } else {
+        // A single undoable edit rather than setValue: the developer's undo stack survives the
+        // canonical print landing after their own apply. It deliberately gets NO stack stop of
+        // its own, so it rides in the element of whatever edit it is echoing - the print of a
+        // form the machine reads back as 50.000025 must not become an undo step the developer
+        // has to walk through to reach their own move.
+        this.model.pushEditOperations([], [{
+          range: this.model.getFullModelRange(),
+          text: payload.markup,
+        }], () => null);
+      }
+
       if (state) {
         this.editor.restoreViewState(state);
       }
@@ -613,23 +672,26 @@ export class DesignerView {
     return { markup: null, reason: null, form, controls };
   }
 
-  /** The canvas as rendered, for the harness: which picture stands (draft or applied),
-   * every control's name with its placed position, what is selected, and where the markup
-   * caret sits. */
+  /** The canvas as rendered, for the harness: which picture stands (draft or applied), whether
+   * the document holds unapplied edits, every control's name with its placed position in
+   * POINTS - the document's own unit, so a row can compare the two - what is selected, and
+   * where the markup caret sits. */
   canvasSnapshot(): {
     draft: boolean;
+    dirty: boolean;
     selected: string | null;
     markupLine: number;
     controls: { name: string; left: number; top: number }[];
   } {
     return {
       draft: this.draftShown,
+      dirty: this.dirty,
       selected: this.selectedName,
       markupLine: this.editor.getPosition()?.lineNumber ?? 0,
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
         name: el.dataset.control ?? "",
-        left: Number.parseFloat(el.style.left || "0"),
-        top: Number.parseFloat(el.style.top || "0"),
+        left: Number.parseFloat(el.style.left || "0") / PT,
+        top: Number.parseFloat(el.style.top || "0") / PT,
       })),
     };
   }
@@ -648,6 +710,341 @@ export class DesignerView {
   /** A canvas double-click, for the debug surface: the host's event-stub gesture. */
   requestEventStub(control: string | null): void {
     this.deps.eventStub(control);
+  }
+
+  /** A press on the canvas: pick what is under the pointer, and arm a drag when it is a
+   * control that has a position to change. */
+  private onCanvasPress(event: PointerEvent): void {
+    this.canvasScroll.focus();
+    if (event.button !== 0) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    const control = target.closest<HTMLElement>(".dc");
+    if (!control?.dataset.control) {
+      if (target.closest(".dc-form")) {
+        this.select("");
+      }
+      return;
+    }
+
+    this.select(control.dataset.control);
+
+    // A Page is not placed by coordinates - it fills its MultiPage - so there is nothing to
+    // drag it by. Everything else only ARMS here: the move begins past the threshold, which
+    // is what keeps a plain click a plain click.
+    if (control.dataset.kind === "Page") {
+      return;
+    }
+
+    this.drag = {
+      name: control.dataset.control,
+      element: control,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originLeft: Number.parseFloat(control.style.left || "0"),
+      originTop: Number.parseFloat(control.style.top || "0"),
+      moved: false,
+    };
+
+    try {
+      this.canvasScroll.setPointerCapture(event.pointerId);
+    } catch {
+      // A synthesised pointer has no capture to take; the drag then runs on bubbling alone,
+      // which is all the harness's own pointer sequence needs.
+    }
+  }
+
+  /** The control follows the pointer, in the picture only - the document is written once, at
+   * the drop, so a drag is one undo step rather than one per pixel. */
+  private onCanvasDragMove(event: PointerEvent): void {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (!drag.moved) {
+      if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) {
+        return;
+      }
+
+      drag.moved = true;
+      drag.element.classList.add("dc-dragging");
+      this.canvasScroll.classList.add("dragging");
+    }
+
+    const placed = this.clampToParent(drag.element, (drag.originLeft + dx) / PT, (drag.originTop + dy) / PT);
+    this.paintPlacement(drag.element, placed.left, placed.top);
+    event.preventDefault();
+  }
+
+  /** The drop writes the document: where the control landed, in points, as one edit. */
+  private onCanvasDrop(event: PointerEvent): void {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+
+    this.releaseDrag(drag);
+    if (!drag.moved) {
+      return;
+    }
+
+    // A drop the document refuses - a line this cannot rewrite - puts the control back where
+    // the document still says it is, rather than leaving a picture nothing agrees with.
+    const written = this.moveByPoints(
+      drag.name, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT);
+    if (!written) {
+      this.paintPlacement(drag.element, drag.originLeft / PT, drag.originTop / PT);
+    }
+  }
+
+  /** Abandons a drag in flight - Escape, or the pointer taken away - and puts the control
+   * back where the document still says it is, because nothing was written yet. */
+  private cancelDrag(): void {
+    const drag = this.drag;
+    if (!drag) {
+      return;
+    }
+
+    this.releaseDrag(drag);
+    if (drag.moved) {
+      this.paintPlacement(drag.element, drag.originLeft / PT, drag.originTop / PT);
+    }
+  }
+
+  private releaseDrag(drag: CanvasDrag): void {
+    drag.element.classList.remove("dc-dragging");
+    this.canvasScroll.classList.remove("dragging");
+    try {
+      this.canvasScroll.releasePointerCapture(drag.pointerId);
+    } catch {
+      // Never captured, or the pointer is already gone: either way there is nothing to give
+      // back, and the drag is over regardless.
+    }
+
+    this.drag = null;
+  }
+
+  /** The canvas's own keys: arrows nudge the selection a point at a time - through the same
+   * commit a drag takes, so the picture, the dot and undo behave identically - Escape
+   * abandons a drag in flight, and undo/redo reach the document from this half too, because
+   * this half edits it now. */
+  private onCanvasKey(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+      this.cancelDrag();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+      const key = event.key.toLowerCase();
+      if (key === "z" || key === "y") {
+        this.editor.trigger("canvas", key === "y" || event.shiftKey ? "redo" : "undo", null);
+        event.preventDefault();
+      }
+
+      return;
+    }
+
+    const step = NUDGE[event.key];
+    if (!step || event.altKey || event.shiftKey || !this.selectedName) {
+      return;
+    }
+
+    // Without this the canvas scrolls under the control the developer is placing.
+    event.preventDefault();
+    this.moveByPoints(this.selectedName, step.dx, step.dy);
+  }
+
+  /**
+   * Moves a control by a delta in POINTS: the document's own position plus the delta, clamped
+   * inside the box that holds it, rounded to whole points, written back as ONE undoable edit
+   * and painted at once so the gesture lands before the round trip answers.
+   *
+   * This is the single commit every canvas move takes - drag, nudge, and the harness's act -
+   * and it writes the DOCUMENT, never the form: the draft preview shows it immediately, the
+   * dot says it has not reached the form yet, and Ctrl+S is still the only apply. The base is
+   * read from the document rather than the picture, so a move stays self-consistent even when
+   * the canvas is showing a slightly older parse. Whole points because a hand-placed control
+   * wants round numbers; the 6-point grid the native designer snaps to is M6's.
+   */
+  private moveByPoints(name: string, dx: number, dy: number): boolean {
+    const element = this.elementFor(name);
+    const header = this.headerOf(name);
+    if (!element || !header) {
+      return false;
+    }
+
+    const base = header.at ?? {
+      left: Number.parseFloat(element.style.left || "0") / PT,
+      top: Number.parseFloat(element.style.top || "0") / PT,
+    };
+    const placed = this.clampToParent(element, base.left + dx, base.top + dy);
+    const left = Math.round(placed.left);
+    const top = Math.round(placed.top);
+
+    // A stack stop BEFORE the edit and none after. Monaco appends edits to whichever element is
+    // open, so the stop is what keeps one move from joining the move before it; leaving the
+    // element open afterwards is equally deliberate, because the canonical print that follows a
+    // save belongs to this gesture - with it riding along, one Ctrl+Z after a save reaches the
+    // text from before the move rather than a step that only differs by the machine's own
+    // rounding (both halves measured live, 2026-08-15).
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: new monaco.Range(header.line, 1, header.line, this.model.getLineMaxColumn(header.line)),
+      text: `${header.head} at ${left},${top}${header.size}`,
+    }], () => null);
+    this.paintPlacement(element, left, top);
+    return true;
+  }
+
+  /** Keeps a moved control inside the box that holds it: a gesture may reposition a control,
+   * never lose it behind an edge. Reparenting - dragging a control out of its Frame - is a
+   * later gesture, so the parent's client area is the whole floor here. A control already
+   * bigger than its parent keeps a zero origin rather than being yanked to a negative one. */
+  private clampToParent(element: HTMLElement, left: number, top: number): { left: number; top: number } {
+    const host = element.parentElement;
+    const maxLeft = host ? Math.max(0, (host.clientWidth - element.offsetWidth) / PT) : Number.POSITIVE_INFINITY;
+    const maxTop = host ? Math.max(0, (host.clientHeight - element.offsetHeight) / PT) : Number.POSITIVE_INFINITY;
+    return {
+      left: Math.min(Math.max(0, left), maxLeft),
+      top: Math.min(Math.max(0, top), maxTop),
+    };
+  }
+
+  /** Puts a control - and the handles dressing it - at a position in points, without touching
+   * the document: what the eye follows during a drag, and the instant landing after one. */
+  private paintPlacement(element: HTMLElement, left: number, top: number): void {
+    element.style.left = `${left * PT}px`;
+    element.style.top = `${top * PT}px`;
+
+    const overlay = element.nextElementSibling;
+    if (overlay instanceof HTMLElement && overlay.classList.contains("dc-selection")) {
+      overlay.style.left = element.style.left;
+      overlay.style.top = element.style.top;
+    }
+  }
+
+  private elementFor(name: string): HTMLElement | null {
+    return this.canvasScroll.querySelector<HTMLElement>(`.dc[data-control="${CSS.escape(name)}"]`);
+  }
+
+  /**
+   * The document line that declares a control, split at its geometry. Null when no line names
+   * it, or when the line is not in a shape this can rewrite - a half-typed header, a caption
+   * whose quote never closes - because a gesture that cannot write the document must not
+   * pretend to have moved anything.
+   *
+   * The caption is skipped by scanning rather than by regex: ` at ` inside a caption is
+   * ordinary text, and only a scan that knows about doubled quotes can tell the two apart.
+   */
+  private headerOf(name: string): HeaderLine | null {
+    const line = this.headerLineOf(name);
+    if (line === 0) {
+      return null;
+    }
+
+    const text = this.model.getLineContent(line);
+    const named = new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(?=\\s|$)`).exec(text);
+    if (!named) {
+      return null;
+    }
+
+    let at = named[0].length;
+    if (/^\s+"/.test(text.slice(at))) {
+      let scan = at + text.slice(at).indexOf('"') + 1;
+      let closed = false;
+      while (scan < text.length) {
+        if (text[scan] !== '"') {
+          scan += 1;
+        } else if (text[scan + 1] === '"') {
+          scan += 2;
+        } else {
+          scan += 1;
+          closed = true;
+          break;
+        }
+      }
+
+      if (!closed) {
+        return null;
+      }
+
+      at = scan;
+    }
+
+    // What follows the caption is geometry and nothing else, so a plain match is safe here.
+    const tail = /^(?:\s+at\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?(\s+size\s+-?\d+(?:\.\d+)?\s*x\s*-?\d+(?:\.\d+)?)?\s*$/i
+      .exec(text.slice(at));
+    if (!tail) {
+      return null;
+    }
+
+    return {
+      line,
+      head: text.slice(0, at),
+      at: tail[1] === undefined ? null : { left: Number.parseFloat(tail[1]), top: Number.parseFloat(tail[2] ?? "0") },
+      size: tail[3] ?? "",
+    };
+  }
+
+  /** The 1-based line that declares a control, or 0 when the document names it nowhere. */
+  private headerLineOf(name: string): number {
+    const needle = new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(\\s|$)`);
+    return this.model.getLinesContent().findIndex((text) => needle.test(text)) + 1;
+  }
+
+  /**
+   * A drag driven from the debug surface: the REAL pointer sequence, on the element a mouse
+   * would actually hit - elementFromPoint at a point inside the control - so the act proves
+   * hit-testing, the threshold and the commit rather than the arithmetic alone. Deltas are in
+   * POINTS, the designer's unit and the document's. Returns what happened, for the row.
+   */
+  dragControl(name: string, dx: number, dy: number): string {
+    const element = this.elementFor(name);
+    if (!element) {
+      return `no control named ${name} on the canvas`;
+    }
+
+    const box = element.getBoundingClientRect();
+    // The centre first, the way a hand aims; a CONTAINER's centre belongs to its children, so
+    // the near corner is the fallback - inside the container's own border, above no child.
+    const centre = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    const corner = { x: box.left + 2, y: box.top + 2 };
+    const hits = (spot: { x: number; y: number }): HTMLElement | null =>
+      document.elementFromPoint(spot.x, spot.y)?.closest<HTMLElement>(".dc") ?? null;
+    const grabbed = [centre, corner].find((spot) => hits(spot)?.dataset.control === name);
+    if (!grabbed) {
+      const covering = document.elementFromPoint(centre.x, centre.y);
+      return `${name} is not what a press at its own centre reaches - ${covering?.className || "nothing"} is`;
+    }
+
+    const send = (target: EventTarget, type: string, x: number, y: number): void => {
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: type === "pointerup" ? 0 : 1,
+        clientX: x,
+        clientY: y,
+      }));
+    };
+
+    // The press goes to what the hit test answered - that IS the proof - and the rest to the
+    // canvas, exactly where a captured pointer's events are delivered once a real drag has
+    // the mouse. Past the threshold first, then the whole way: the two moves a hand makes.
+    const landed = hits(grabbed) ?? element;
+    send(landed, "pointerdown", grabbed.x, grabbed.y);
+    send(this.canvasScroll, "pointermove", grabbed.x + DRAG_THRESHOLD + 1, grabbed.y);
+    send(this.canvasScroll, "pointermove", grabbed.x + dx * PT, grabbed.y + dy * PT);
+    send(this.canvasScroll, "pointerup", grabbed.x + dx * PT, grabbed.y + dy * PT);
+    return `dragged ${name}`;
   }
 
   private dressSelection(): void {
@@ -695,13 +1092,10 @@ export class DesignerView {
   private revealInMarkup(name: string): void {
     let line = 1;
     if (name !== "") {
-      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const needle = new RegExp(`^\\s+\\S+\\s+${escaped}(\\s|$)`);
-      const at = this.model.getLinesContent().findIndex((text) => needle.test(text));
-      if (at < 0) {
+      line = this.headerLineOf(name);
+      if (line === 0) {
         return;
       }
-      line = at + 1;
     }
 
     this.editor.setPosition({ lineNumber: line, column: this.model.getLineMaxColumn(line) });
@@ -796,6 +1190,9 @@ export class DesignerView {
     box.style.height = `${Math.max(4, (row.height ?? 12)) * PT}px`;
     box.title = `${row.name} (${row.type})`;
     box.dataset.control = row.name;
+    // The kind rides the element because the gestures ask about it: a Page has no position
+    // of its own to drag, and the harness reads it to aim.
+    box.dataset.kind = row.type;
 
     // The control's own font, points scaled like every bound. A Label's BackColor is NOT
     // painted: its BackStyle defaults to transparent and the walk does not read BackStyle
