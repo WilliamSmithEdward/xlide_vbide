@@ -3849,6 +3849,12 @@ body.objbrowser-page #objbrowser-card {
   pointer-events: none;
   border: 1px dashed #4a6a9d;
   box-sizing: border-box;
+  /* ABOVE every control, because the handles hang 3px OUTSIDE the box they dress and the
+     overlay is only a sibling of it: a neighbour later in the document painted over them, and
+     that edge could not be grabbed at all. Found by the perf walk, which could not resize a
+     TextBox whose right edge met a ScrollBar (2026-08-15). The native designer's handles are
+     above everything for the same reason. */
+  z-index: 6;
 }
 
 .dc-selection-form {

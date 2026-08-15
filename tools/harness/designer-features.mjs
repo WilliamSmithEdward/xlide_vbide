@@ -746,10 +746,21 @@ try {
   // of the form's own frame, whose far corner sits below the canvas viewport on a short tab -
   // where elementFromPoint honestly answers the markup editor underneath (2026-08-15, the
   // first run after the toolbox strip took its 30px).
+  // A handle that overlaps a NEIGHBOUR must still be what a press reaches. The handles hang
+  // 3px outside the box they dress and their overlay is only a sibling of it, so a control
+  // later in the document painted straight over them: NameBox's right edge meets the ScrollBar,
+  // and that edge could not be grabbed at all until the overlay was lifted above the controls
+  // (found by the perf walk, 2026-08-15). NameBox is chosen for exactly that adjacency.
   await api.act("designerSelect", { module: form, control: "NameBox" });
   const handleCursor = await api.ask(`(() => { const h = ${inView(".dc-handle-se")}; if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : "covered by " + (hit?.className || "nothing")); })()`);
   check("a handle wears its own resize cursor and the pointer can reach it",
     handleCursor === "nwse-resize|reachable", String(handleCursor));
+
+  // ...and the resize that handle promises actually runs, over the neighbour and all.
+  const overNeighbour = await api.act("designerResize",
+    { module: form, control: "NameBox", edge: "se", dx: 6, dy: 0 });
+  check("and the pull it promises runs, even where a neighbour overlaps the handle",
+    overNeighbour.did === true, overNeighbour.detail);
 
   // ---- and Delete takes a control out, children and all ----
 

@@ -1385,6 +1385,21 @@ keyboard gestures by hand - arrows nudge, Shift+arrows resize, Ctrl+Z undoes - d
 that attribute rather than at a bare `.designer-canvas-scroll`: a session can hold several
 designer tabs, and only one view is mounted at a time.
 
+And when a gesture feels slow, `designer-perf.mjs` times the whole surface rather than guessing
+which part of it is at fault:
+
+```bash
+node tools\harness\designer-perf.mjs
+```
+
+It walks every interaction five times - the read routes, opening a tab, selection, nudge, drag,
+resize, the toolbox drop, delete, the draft preview after a typed edit, and Ctrl+S - reporting
+median and worst for each, then what a projection costs in COM wrappers with an idle tick as the
+floor, and the leak ledger. It PRINTS rather than passing or failing: what counts as slow is a
+judgement about a person's patience, and a threshold nobody can defend is a number the next
+person raises. It resets the document between sections and puts the form back, saved, at the
+end, so two runs measure the same shape.
+
 `tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
 children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.
 Its declaration is `tools\harness\form-plan.mjs`, shared verbatim with `designer-features.mjs`

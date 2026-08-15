@@ -637,6 +637,41 @@ the host-owns-membership invariant survives.
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.
 
+## What it costs, measured
+
+The owner felt a lag in two gestures and asked for a walk of the whole surface
+(2026-08-15). `tools\harness\designer-perf.mjs` is that walk, kept: every interaction timed
+five times from the act to the moment the surface has ANSWERED - the canvas redrawn, the
+panel following, the form itself carrying it - against the eighteen-control fixture form.
+
+| interaction | median | worst |
+| --- | --- | --- |
+| designer route, 18 controls | 8ms | 8ms |
+| markup route | 6ms | 7ms |
+| open the designer tab | 12ms | 15ms |
+| select a control, panel follows | 5ms | 5ms |
+| nudge by an arrow key | 7ms | 10ms |
+| drag a control | 8ms | 9ms |
+| resize by a handle | 8ms | 8ms |
+| toolbox drop | 15ms | 16ms |
+| delete | 11ms | 13ms |
+| typed edit to draft preview | 6ms | 7ms |
+| Ctrl+S: apply and save | 128ms | 139ms |
+
+Everything a hand does is single-digit or low-double-digit milliseconds. The one
+three-digit number is the save, and it is Excel writing the workbook: the host-thread
+marshal samples during those saves read 110-140ms while every other crossing reads 15-16ms,
+which is also the floor under every number above - one hop to the host thread costs about a
+frame, and the designer's own work disappears underneath it.
+
+Two things came out of the walk rather than out of the clock. The drop and the delete were
+paying the typing debounce (347ms and 348ms, now 4ms and 3ms - see M5 above). And timing a
+surface means touching every part of it, which is how the handles were found to be
+unreachable wherever a neighbouring control overlapped them: a TextBox whose right edge met
+a ScrollBar could not be resized from that side at all, because the selection overlay is a
+sibling of the control it dresses and the neighbour painted over it. The overlay is above
+the controls now, with a suite row on the adjacency that found it.
+
 ## Risks worth respecting
 
 - **Pictures.** `IPictureDisp` to bytes may need an OLE round trip through a temporary
@@ -646,6 +681,12 @@ the host-owns-membership invariant survives.
   third-party control.
 - **COM volume.** Every property is a crossing; the designer's read path gets its own
   counter beside `publishUs` and `hostReadMs` before anyone asserts it is cheap.
+  **Measured 2026-08-15** by `tools\harness\designer-perf.mjs`, on the eighteen-control
+  fixture form: a full projection costs **185 COM wrappers and 8ms**, the markup print
+  152 and 6ms, an idle tick 0 and 2ms - about ten wrappers a control, which is the
+  identity, the geometry, the colours and the font, and no surprises hiding in it. The
+  ledger stayed level across the whole walk (`givenBack == disposed`). So the read path
+  is cheap, and now it is cheap with a number.
 - **The interop class of bug.** New interface, same rules: every wrapper counted, every
   release on the right thread, `com-leak.mjs` rows before features - the 16-byte VARIANT and
   the finalizer-thread FailFast were both found the expensive way.
