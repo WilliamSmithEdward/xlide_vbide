@@ -544,6 +544,32 @@ internal static partial class FormDesignService
     }
 
     /// <summary>The toolbox name for an extender's internal interface, unknown names untouched.</summary>
+    /// <summary>A control's toolbox kind, read off the live dispatch; "Control" when it
+    /// will not answer.</summary>
+    internal static string FriendlyTypeOf(DispatchObject control)
+    {
+        try
+        {
+            return FriendlyType(control.TypeName() ?? "Control");
+        }
+        catch
+        {
+            return "Control";
+        }
+    }
+
+    /// <summary>
+    /// The event a double-click writes, per toolbox kind - the native designer's own
+    /// defaults: Change for the value-bearing kinds, Click for everything else, the form
+    /// included.
+    /// </summary>
+    internal static string DefaultEventFor(string type) => type switch
+    {
+        "TextBox" or "ComboBox" or "ListBox" or "ScrollBar" or "SpinButton"
+            or "MultiPage" or "TabStrip" => "Change",
+        _ => "Click",
+    };
+
     private static string FriendlyType(string raw) => raw switch
     {
         "ILabelControl" => "Label",
@@ -1113,7 +1139,7 @@ internal static partial class FormDesignService
     /// The named control itself, wherever it sits - or a Page by its name, since pages take
     /// property writes too. Match order does not matter: form-wide names are unique.
     /// </summary>
-    private static DispatchObject? FindControlNamed(DispatchObject container, string wanted, int depth)
+    internal static DispatchObject? FindControlNamed(DispatchObject container, string wanted, int depth)
     {
         if (depth > 8)
         {

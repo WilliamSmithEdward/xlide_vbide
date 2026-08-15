@@ -160,6 +160,11 @@ internal sealed class EditorSurface : IDisposable
     /// (module, workbook display or null, the document as it stands).</summary>
     public Action<string, string?, string>? FormMarkupLintRequested { get; set; }
 
+    /// <summary>Raised by a double-click on the canvas: (module, workbook display or null,
+    /// control name or null for the form itself). The host writes or shows the default
+    /// event handler, the native designer's own gesture.</summary>
+    public Action<string, string?, string?>? DesignerEventStubRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -1762,6 +1767,22 @@ internal sealed class EditorSurface : IDisposable
                                 ? applyOwner.GetString()
                                 : null,
                             applyText);
+                    }
+
+                    break;
+
+                case "designerEventStub":
+                    if (document.RootElement.TryGetProperty("module", out var stubModule)
+                        && stubModule.GetString() is { Length: > 0 } stubAsked)
+                    {
+                        DesignerEventStubRequested?.Invoke(
+                            stubAsked,
+                            document.RootElement.TryGetProperty("project", out var stubOwner)
+                                ? stubOwner.GetString()
+                                : null,
+                            document.RootElement.TryGetProperty("control", out var stubControl)
+                                ? stubControl.GetString()
+                                : null);
                     }
 
                     break;

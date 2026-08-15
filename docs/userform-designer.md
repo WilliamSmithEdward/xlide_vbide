@@ -495,7 +495,18 @@ the host-owns-membership invariant survives.
     risks table demands before it is called cheap.
 - **M3 - the honest canvas.** A renderer of the same projection beside the markup: real
   bounds, real captions, honest placeholders; selection; double-click writes the event stub.
-  (Spikes 3 and 6.)
+  (Spikes 3 and 6.) **First slice landed 2026-08-15** (the owner's go-ahead): a click
+  SELECTS - a control by name, the form by its ground - dressing the selection in the
+  native handles (an overlay beside the control, because every control box clips its
+  overflow; M5 is where the handles learn to drag) and landing the markup caret on the
+  selected thing's line, the two halves pointing at one thing. A double-click asks the
+  HOST for the control's default event handler - Change for the value-bearing kinds,
+  Click for the rest and the form, whose handlers answer to "UserForm" whatever the form
+  is called - written into the code-behind through the product's own module write when
+  absent, navigated to when standing, never duplicated. And opening a designer tab now
+  targets the form in the Properties panel, the native designer's own selection (the nit
+  queued 2026-08-13). `designerSelect`, `designerEventStub` and the grown `designerCanvas`
+  drive all of it.
 - **M4 - the inspector.** Selection flows into the Properties panel; property writes go
   through the model; the transaction log starts recording. (Spike 7.)
 - **M5 - direct manipulation.** Click to select, drag to move, resize by handles, nudge,

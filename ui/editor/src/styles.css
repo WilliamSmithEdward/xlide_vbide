@@ -3664,6 +3664,38 @@ body.objbrowser-page #objbrowser-card {
   border: 1px solid #a0a0a0;
 }
 
+/* M3's selection: the native designer's dress - a moving-ants boundary and eight white
+   handles - on an OVERLAY beside the control, because every control box clips overflow.
+   Pointer events pass through; M5 is where the handles learn to drag. */
+.dc-selection {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed #4a6a9d;
+  box-sizing: border-box;
+}
+
+.dc-selection-form {
+  inset: 0;
+}
+
+.dc-handle {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #fff;
+  border: 1px solid #333;
+  box-sizing: border-box;
+}
+
+.dc-handle-nw { left: -3px; top: -3px; }
+.dc-handle-n { left: 50%; top: -3px; margin-left: -3px; }
+.dc-handle-ne { right: -3px; top: -3px; }
+.dc-handle-e { right: -3px; top: 50%; margin-top: -3px; }
+.dc-handle-se { right: -3px; bottom: -3px; }
+.dc-handle-s { left: 50%; bottom: -3px; margin-left: -3px; }
+.dc-handle-sw { left: -3px; bottom: -3px; }
+.dc-handle-w { left: -3px; top: 50%; margin-top: -3px; }
+
 /* A type outside the toolbox: honest bounds and its name, never a guessed appearance. */
 .dc-foreign {
   border: 1px dashed #8a6d3b;

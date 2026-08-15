@@ -344,6 +344,7 @@ export type ClientMessage =
   | { type: "requestFormMarkup"; module: string; project?: string }
   | { type: "applyFormMarkup"; module: string; project?: string; markup: string }
   | { type: "lintFormMarkup"; module: string; project?: string; markup: string }
+  | { type: "designerEventStub"; module: string; project?: string; control?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
@@ -653,6 +654,17 @@ export class EditorBridge {
   /** Asks the host to lint the document as it stands; findings return through the watcher. */
   lintFormMarkup(module: string, project: string | null, markup: string): void {
     this.transport.post({ type: "lintFormMarkup", module, ...(project ? { project } : {}), markup });
+  }
+
+  /** A canvas double-click: the host writes or shows the control's default event handler.
+   * A null control means the form itself. */
+  designerEventStub(module: string, project: string | null, control: string | null): void {
+    this.transport.post({
+      type: "designerEventStub",
+      module,
+      ...(project ? { project } : {}),
+      ...(control ? { control } : {}),
+    });
   }
 
   /** Watches a form's lint answers; returns the unwatch. One watcher per form. */

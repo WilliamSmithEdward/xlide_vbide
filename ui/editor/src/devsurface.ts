@@ -164,7 +164,14 @@ export interface DevSurfaceParts {
       markupText(): string;
       setDocument(markup: string): void;
       lintMarkers(): { line: number; message: string; severity: string }[];
-      canvasSnapshot(): { draft: boolean; controls: { name: string; left: number; top: number }[] };
+      canvasSnapshot(): {
+        draft: boolean;
+        selected: string | null;
+        markupLine: number;
+        controls: { name: string; left: number; top: number }[];
+      };
+      select(name: string): void;
+      requestEventStub(control: string | null): void;
     } | null;
   };
   search: {
@@ -690,6 +697,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         detail: `${snapshot.controls.length} control(s), ${snapshot.draft ? "draft" : "applied"}`,
         data: snapshot,
       };
+    },
+
+    /** Selects on the canvas by name - the click's own entry; "" or omitted selects the
+     * FORM. The markup caret follows; read the result through designerCanvas. */
+    designerSelect: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerSelect takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const name = typeof args.control === "string" ? args.control : "";
+      view.select(name);
+      return { did: true, detail: name === "" ? "the form is selected" : `${name} is selected` };
+    },
+
+    /** The canvas double-click: asks the host for the default event handler - written when
+     * absent, shown either way. Omit `control` for the form's own. */
+    designerEventStub: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerEventStub takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const control = typeof args.control === "string" && args.control.length > 0 ? args.control : null;
+      view.requestEventStub(control);
+      return { did: true, detail: `the ${control ?? "form"} stub was requested` };
     },
 
     /** The designer tab's document as it stands, in `data`. */

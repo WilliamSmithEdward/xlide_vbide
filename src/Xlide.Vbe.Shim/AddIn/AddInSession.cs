@@ -1173,6 +1173,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.DocumentRequested = PublishDocument;
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
+        _editorSurface.DesignerEventStubRequested = OnDesignerEventStub;
         // Pure text both ways: the lint is Core's tolerant parse, no designer is touched,
         // and the answer goes straight back - the one language, saying early what the
         // apply would say late.
@@ -4488,7 +4489,14 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             _activeDesignerTab = (cased, ownerId);
+
+            // The native designer's click selects the form in the Properties window; the
+            // designer tab does the same (queued 2026-08-13, when a probe showed the panel
+            // holding a prior component over an active designer tab).
+            _propertiesTarget = cased;
+
             PublishModules();
+            PublishProperties();
         }
         catch (Exception ex)
         {
@@ -4513,6 +4521,86 @@ internal sealed partial class AddInSession : IDisposable
         {
             PublishFormMarkup(tab.Module, DisplayFromProjectId(tab.ProjectId));
         }
+    }
+
+    /// <summary>
+    /// The canvas's double-click: the control's default event handler in the code-behind,
+    /// written when it is not there and shown either way - the native designer's own
+    /// gesture. The form's own handlers answer to "UserForm" whatever the form is called,
+    /// which is VBA's convention rather than ours.
+    /// </summary>
+    private void OnDesignerEventStub(string moduleName, string? projectDisplay, string? controlName)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out _);
+                if (component is null)
+                {
+                    surface.Notify($"no component named {moduleName}");
+                    return;
+                }
+
+                var owner = "UserForm";
+                var defaultEvent = "Click";
+                if (controlName is { Length: > 0 })
+                {
+                    using var designer = component.GetObject("Designer");
+                    using var control = designer is null
+                        ? null
+                        : FormDesignService.FindControlNamed(designer, controlName, 0);
+                    if (control is null)
+                    {
+                        surface.Notify($"no control named {controlName} on {moduleName}");
+                        return;
+                    }
+
+                    owner = controlName;
+                    defaultEvent = FormDesignService.DefaultEventFor(FormDesignService.FriendlyTypeOf(control));
+                    FormDesignService.KeepDesignerDown(component);
+                }
+
+                var source = ProjectReader.ReadSource(component) ?? string.Empty;
+                var header = $"Private Sub {owner}_{defaultEvent}(";
+                var lines = source.Replace("\r\n", "\n").Split('\n');
+                var at = Array.FindIndex(lines, line =>
+                    line.TrimStart().StartsWith(header, StringComparison.OrdinalIgnoreCase));
+
+                if (at >= 0)
+                {
+                    // Standing already: the gesture navigates, never duplicates.
+                    ShowModuleInSurface(moduleName, projectId);
+                    surface.SetCaret(at + 2, 1);
+                    return;
+                }
+
+                var bare = source.TrimEnd('\r', '\n');
+                var stub = $"Private Sub {owner}_{defaultEvent}()\r\n\r\nEnd Sub";
+                var text = bare.Length == 0 ? $"{stub}\r\n" : $"{bare}\r\n\r\n{stub}\r\n";
+                if (WriteModule(moduleName, text, projectId, hostRewrite: true) is { } refused)
+                {
+                    surface.Notify($"the event stub could not be written: {refused}");
+                    return;
+                }
+
+                Log.Info($"designer: event stub {owner}_{defaultEvent} on {moduleName}");
+                ShowModuleInSurface(moduleName, projectId);
+                surface.SetCaret(text.Replace("\r\n", "\n").TrimEnd('\n').Split('\n').Length - 1, 1);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"designer: the event stub on {moduleName} failed", ex);
+                surface.Notify("the event stub could not be written");
+            }
+        });
     }
 
     /// <summary>Closes a designer tab, by name; closing what is not open changes nothing.</summary>

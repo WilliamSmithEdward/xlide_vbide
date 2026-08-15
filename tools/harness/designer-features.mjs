@@ -273,6 +273,10 @@ try {
     withDesigner.active === true && /\[Design\]/.test(withDesigner.label),
     JSON.stringify(withDesigner));
 
+  await waitFor("the panel to target the designer tab's form", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+  check("and opening it targets the form in the Properties panel, the native designer's own selection", true);
+
   // ---- Run with the designer tab active launches the form - the editor's own F5 ----
 
   // The command POSTS the editor's own action and answers promptly (measured 2026-08-14:
@@ -487,6 +491,40 @@ try {
     acceleratorSave !== null && (acceleratorSave.lines ?? []).length > 0,
     acceleratorSave ? acceleratorSave.lines[0] : "no File Save in the log");
   await api.act("designerApply", { module: form, markup: String(tabMarkup.data) });
+
+  // ---- M3 opens: selection on the canvas, and the double-click's event stub ----
+
+  await api.act("designerSelect", { module: form, control: "RegionPick" });
+  const selectedCanvas = (await api.act("designerCanvas", { module: form })).data;
+  check("clicking a control selects it on the canvas", selectedCanvas.selected === "RegionPick",
+    JSON.stringify(selectedCanvas.selected));
+  const markupLine = Number(selectedCanvas.markupLine ?? 0);
+  const markupLines = String((await api.act("designerMarkup", { module: form })).data).split(/\r?\n/);
+  check("and the markup caret lands on the selected control's line",
+    markupLine > 1 && /RegionPick/.test(markupLines[markupLine - 1] ?? ""), `line ${markupLine}`);
+
+  await api.act("designerSelect", { module: form });
+  const formSelected = (await api.act("designerCanvas", { module: form })).data;
+  check("clicking the form's own ground selects the form, caret to the Form line",
+    formSelected.selected === "" && Number(formSelected.markupLine) === 1,
+    JSON.stringify({ selected: formSelected.selected, line: formSelected.markupLine }));
+
+  // The double-click: the control's DEFAULT event handler, written into the code-behind
+  // when absent (RegionPick is a ComboBox, so Change), and only navigated to when it
+  // stands - the native designer's gesture, duplication and all... minus the duplication.
+  await api.act("designerEventStub", { module: form, control: "RegionPick" });
+  await waitFor("the default event stub to land in the code-behind", async () =>
+    /Private Sub RegionPick_Change\(\)/.test((await api.readModule(form, project)).text ?? ""), { budgetMs: 15000 });
+  check("double-click writes the control's default event stub", true);
+
+  await api.act("designerEventStub", { module: form, control: "RegionPick" });
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  const stubs = ((await api.readModule(form, project)).text ?? "").match(/Private Sub RegionPick_Change\(\)/g) ?? [];
+  check("and a second double-click navigates rather than duplicating", stubs.length === 1,
+    `${stubs.length} stub(s)`);
+
+  // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
+  await api.act("activate", { module: form, face: "design" });
 
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 

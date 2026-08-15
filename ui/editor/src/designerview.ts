@@ -108,6 +108,9 @@ export interface DesignerViewDeps {
   /** Subscribe to the HOST's Ctrl+S: the accelerator never reaches the page, so the host
    * asks the tab to apply-then-save through this; returns the unwatch. */
   watchApplySave(listener: () => void): () => void;
+  /** A canvas double-click: the host writes or shows the control's default event handler.
+   * Null means the form itself. */
+  eventStub(control: string | null): void;
 }
 
 export class DesignerView {
@@ -161,6 +164,9 @@ export class DesignerView {
   /** Whether the canvas is currently showing the DOCUMENT's draft rather than the form. */
   private draftShown = false;
   private readonly draftNote: HTMLElement;
+
+  /** The selected control's name, "" for the FORM itself, null for no selection. */
+  private selectedName: string | null = null;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
    * first projection arrives, and while an apply's fresh projection is on its way. */
@@ -247,6 +253,27 @@ export class DesignerView {
     // a keydown routes through the view only when something inside it holds focus.
     this.canvasScroll.tabIndex = -1;
     this.canvasScroll.addEventListener("pointerdown", () => this.canvasScroll.focus());
+
+    // M3's first gesture: a click selects - a control by name, the form by its ground -
+    // and the markup caret follows to the selected thing's line, the two halves pointing
+    // at one thing. A double-click asks the host for the default event handler, the
+    // native designer's own gesture; it also fires the two clicks, which is native too.
+    this.canvasScroll.addEventListener("click", (event) => {
+      const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
+      if (control?.dataset.control) {
+        this.select(control.dataset.control);
+      } else if ((event.target as HTMLElement).closest(".dc-form")) {
+        this.select("");
+      }
+    });
+    this.canvasScroll.addEventListener("dblclick", (event) => {
+      const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
+      if (control?.dataset.control) {
+        this.deps.eventStub(control.dataset.control);
+      } else if ((event.target as HTMLElement).closest(".dc-form")) {
+        this.deps.eventStub(null);
+      }
+    });
 
     // Ctrl+S anywhere in the view is the same save. Capture, so it runs ahead of the
     // markup editor's own binding and nothing double-fires.
@@ -575,17 +602,97 @@ export class DesignerView {
     return { markup: null, reason: null, form, controls };
   }
 
-  /** The canvas as rendered, for the harness: which picture stands (draft or applied), and
-   * every control's name with its placed position. */
-  canvasSnapshot(): { draft: boolean; controls: { name: string; left: number; top: number }[] } {
+  /** The canvas as rendered, for the harness: which picture stands (draft or applied),
+   * every control's name with its placed position, what is selected, and where the markup
+   * caret sits. */
+  canvasSnapshot(): {
+    draft: boolean;
+    selected: string | null;
+    markupLine: number;
+    controls: { name: string; left: number; top: number }[];
+  } {
     return {
       draft: this.draftShown,
+      selected: this.selectedName,
+      markupLine: this.editor.getPosition()?.lineNumber ?? 0,
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
         name: el.dataset.control ?? "",
         left: Number.parseFloat(el.style.left || "0"),
         top: Number.parseFloat(el.style.top || "0"),
       })),
     };
+  }
+
+  /** Selects a control by name - "" is the FORM itself - dresses it in the native handles,
+   * and puts the markup caret on its line: the two halves pointing at one thing. The same
+   * entry a canvas click takes, so the act and the click stay one gesture. */
+  select(name: string): void {
+    this.selectedName = name;
+    this.dressSelection();
+    this.revealInMarkup(name);
+  }
+
+  /** A canvas double-click, for the debug surface: the host's event-stub gesture. */
+  requestEventStub(control: string | null): void {
+    this.deps.eventStub(control);
+  }
+
+  private dressSelection(): void {
+    this.canvasScroll.querySelector(".dc-selection")?.remove();
+
+    const name = this.selectedName;
+    if (name === null) {
+      return;
+    }
+
+    const target = name === ""
+      ? this.canvasScroll.querySelector<HTMLElement>(".dc-form")
+      : this.canvasScroll.querySelector<HTMLElement>(`.dc[data-control="${CSS.escape(name)}"]`);
+    if (!target) {
+      return;
+    }
+
+    // The handles live on an OVERLAY beside the control rather than inside it: every
+    // control box clips its overflow, so handles ON the boundary would be half-eaten.
+    // Pointer events pass through; M5 is where the handles learn to drag.
+    const overlay = document.createElement("div");
+    overlay.className = "dc-selection";
+
+    for (const spot of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+      const handle = document.createElement("span");
+      handle.className = `dc-handle dc-handle-${spot}`;
+      overlay.appendChild(handle);
+    }
+
+    if (name === "") {
+      // The form does not clip, so its overlay lives inside it, over the whole face.
+      overlay.classList.add("dc-selection-form");
+      target.appendChild(overlay);
+    } else {
+      overlay.style.left = target.style.left;
+      overlay.style.top = target.style.top;
+      overlay.style.width = target.style.width;
+      overlay.style.height = target.style.height;
+      target.insertAdjacentElement("afterend", overlay);
+    }
+  }
+
+  /** The markup caret onto the selected thing's line: the form's is line 1, a control's is
+   * the line that names it. */
+  private revealInMarkup(name: string): void {
+    let line = 1;
+    if (name !== "") {
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const needle = new RegExp(`^\\s+\\S+\\s+${escaped}(\\s|$)`);
+      const at = this.model.getLinesContent().findIndex((text) => needle.test(text));
+      if (at < 0) {
+        return;
+      }
+      line = at + 1;
+    }
+
+    this.editor.setPosition({ lineNumber: line, column: this.model.getLineMaxColumn(line) });
+    this.editor.revealLineInCenterIfOutsideViewport(line);
   }
 
   private renderCanvas(payload: FormMarkupPayload): void {
@@ -657,6 +764,10 @@ export class DesignerView {
     renderInto(client, "");
 
     this.canvasScroll.appendChild(form);
+
+    // A re-render replaces every element, so the selection is dressed again onto the new
+    // ones; a selected control the new picture no longer holds simply loses its handles.
+    this.dressSelection();
   }
 
   private renderControl(
