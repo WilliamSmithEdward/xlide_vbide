@@ -465,11 +465,17 @@ try {
   const wheeled = await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.scrollTop = 0; el.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true })); return el.scrollTop; })()');
   check("a wheel over the canvas scrolls the form", Number(wheeled) > 0, `scrollTop ${wheeled}`);
 
-  // With the canvas scrolled and the draft note up, the note must be what the point under
-  // its centre HITS - as a flow sibling of the positioned scroll box it painted UNDER the
-  // scrolled form until it became a pinned overlay.
-  const bannerHit = await api.ask('(() => { const note = document.querySelector(".designer-draft-note"); if (!note || note.hidden) return "no note standing"; const r = note.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return note.contains(hit) ? "note on top" : `covered by ${hit?.className ?? "nothing"}`; })()');
-  check("the draft banner stays above the scrolled form", bannerHit === "note on top", String(bannerHit));
+  // A draft picture is said twice and no more: the tab's own unsaved dot, and the outline
+  // around the form. The banner that said it a third time in words was retired 2026-08-15
+  // (the owner: the dot on the tab is fine), so this row holds the two cues that remain -
+  // and the absence of the third, because the strip it occupied is the point.
+  const draftCues = await api.ask('(() => { const scroll = document.querySelector(".designer-canvas-scroll"); const face = document.querySelector(".dc-form"); return [scroll?.classList.contains("draft") ? "outlined" : "no outline", document.querySelector(".designer-draft-note") ? "banner stands" : "no banner", face ? "form drawn" : "no form"].join("|"); })()');
+  check("the draft picture wears the form outline and no banner",
+    draftCues === "outlined|no banner|form drawn", String(draftCues));
+  const draftTab = ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+    .find((tab) => tab.module === form && tab.face === "design");
+  check("and the tab carries the unsaved dot, which is where the state is said plainly",
+    draftTab?.dirty === true, JSON.stringify(draftTab ?? null));
 
   await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
 
@@ -544,13 +550,21 @@ try {
   check("a real click's hit-test lands on the control, not an invisible overlay",
     hitAnswer === "the control", String(hitAnswer));
 
-  // The cursor promises exactly what the gesture delivers: a control MOVES (M5), so it wears
-  // the move cursor; the form's own ground selects, so it wears a pointer.
+  // The HAND across the whole form face (the owner's call, 2026-08-15): every inch of it
+  // responds to a press, which is what a hand means. The gesture cursors live elsewhere - the
+  // move cursor while a drag runs, each handle's own resize cursor.
   const ergonomics = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); const face = document.querySelector(".dc-form"); return getComputedStyle(el).cursor + "|" + getComputedStyle(face).cursor + "|" + (el.title || "no title"); })()');
-  check("the canvas wears its ergonomics: the move cursor, the form's pointer, the tooltip",
-    /^move\|pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
+  check("hovering the canvas shows the hand, and the name-and-kind tooltip stands",
+    /^pointer\|pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
 
   await api.act("designerSelect", { module: form, control: "RegionPick" });
+
+  // Selected, it offers the move - and says so with the cursor, which an unselected control
+  // beside it does not (the owner's rule, 2026-08-15).
+  const selectedCursor = await api.ask('(() => { const of = (n) => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === n); return el ? getComputedStyle(el).cursor : "missing"; }; return of("RegionPick") + "|" + of("NameBox"); })()');
+  check("the SELECTED control wears the move cursor, its neighbours keep the hand",
+    selectedCursor === "move|pointer", String(selectedCursor));
+
   const controlPanel = await waitFor("the panel to show the selected control", async () => {
     const shown = (await api.ui()).properties;
     return shown?.component === "RegionPick" ? shown : null;
@@ -650,6 +664,55 @@ try {
     /RegionPick at 0,0/.test(String((await api.act("designerMarkup", { module: form })).data)),
   { budgetMs: 15000 });
   check("a drag past the top-left stops at the parent's corner rather than going negative", true);
+
+  // ---- and the handles resize: the same commit, the same undo, the size clause too ----
+
+  // From canonical, so every number below is exact rather than inherited from the rows above.
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the document back at canonical before the resize rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  const tabText = async () => String((await api.act("designerMarkup", { module: form })).data);
+  const grew = await api.act("designerResize",
+    { module: form, control: "RegionPick", edge: "se", dx: 24, dy: 12 });
+  check("a pull on the south-east handle resizes a control", grew.did === true, grew.detail);
+  await waitFor("the size clause to follow the handle", async () =>
+    /RegionPick at 84,38 size 144x32/.test(await tabText()), { budgetMs: 15000 });
+  check("120x20 becomes 144x32, and the position is untouched", true);
+
+  await api.act("designerResize", { module: form, control: "RegionPick", edge: "nw", dx: 12, dy: 12 });
+  await waitFor("the north-west pull", async () =>
+    /RegionPick at 96,50 size 132x20/.test(await tabText()), { budgetMs: 15000 });
+  check("a north-west pull moves the origin and the extent together", true);
+
+  const drawn = (await api.act("designerCanvas", { module: form })).data.controls
+    .find((c) => c.name === "RegionPick");
+  check("and the canvas draws the box it just wrote",
+    Math.abs(Number(drawn?.width) - 132) < 0.51 && Math.abs(Number(drawn?.height) - 20) < 0.51,
+    JSON.stringify(drawn));
+
+  await api.act("designerResize", { module: form, control: "RegionPick", edge: "se", dx: -500, dy: -500 });
+  await waitFor("the floored box", async () =>
+    /RegionPick at 96,50 size 4x4/.test(await tabText()), { budgetMs: 15000 });
+  check("a pull past the far edge stops at the floor size rather than inverting the box", true);
+
+  // Shift+arrow is the keyboard's resize, the native designer's own pairing with a bare arrow.
+  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await waitFor("the keyboard resize", async () =>
+    /RegionPick at 96,50 size 5x4/.test(await tabText()), { budgetMs: 15000 });
+  check("Shift+arrow resizes by a point where a bare arrow moves", true);
+
+  // The FORM's own frame resizes too - and its line takes a size and never a position.
+  const formGrew = await api.act("designerResize", { module: form, edge: "se", dx: 20, dy: 12 });
+  check("the form's own frame resizes by its handles", formGrew.did === true, formGrew.detail);
+  await waitFor("the form's line to carry the new size", async () =>
+    new RegExp(`^Form ${form} .* size 380x332$`, "m").test(await tabText()), { budgetMs: 15000 });
+  check("360x320 becomes 380x332 on the Form line, with no position added", true);
+
+  // The promise the handles now keep: each wears the cursor of the pull it makes.
+  const handleCursor = await api.ask('(() => { const h = document.querySelector(".dc-handle-se"); if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : `covered by ${hit?.className || "nothing"}`); })()');
+  check("a handle wears its own resize cursor and the pointer can reach it",
+    handleCursor === "nwse-resize|reachable", String(handleCursor));
 
   // Undo all the way to the FLOOR of the stack. The document's own arrival must not be a step
   // on it: as an edit it was, and one Ctrl+Z in a tab whose only edit was the projection

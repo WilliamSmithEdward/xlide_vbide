@@ -169,11 +169,12 @@ export interface DevSurfaceParts {
         dirty: boolean;
         selected: string | null;
         markupLine: number;
-        controls: { name: string; left: number; top: number }[];
+        controls: { name: string; left: number; top: number; width: number; height: number }[];
       };
       select(name: string): void;
       requestEventStub(control: string | null): void;
       dragControl(name: string, dx: number, dy: number): string;
+      resizeControl(name: string, edge: string, dx: number, dy: number): string;
     } | null;
   };
   search: {
@@ -743,6 +744,32 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       const outcome = view.dragControl(control, dx, dy);
       return { did: outcome.startsWith("dragged"), detail: `${outcome} by ${dx},${dy}pt` };
+    },
+
+    /** Resizes by a HANDLE, the way a hand does: the thing is selected, its `edge` handle -
+     * nw, n, ne, e, se, s, sw, w - is pressed through the hit test and pulled by a delta in
+     * POINTS. `control` omitted means the FORM's own frame. The drop rewrites that line's
+     * geometry in the document, so the read side is designerCanvas or designerMarkup. */
+    designerResize: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const edge = typeof args.edge === "string" ? args.edge : null;
+      if (!module || !edge) {
+        return { did: false, detail: "designerResize takes module and edge (nw, n, ne, e, se, s, sw, w)" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const dx = Number(args.dx ?? 0);
+      const dy = Number(args.dy ?? 0);
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        return { did: false, detail: "dx and dy are deltas in points" };
+      }
+
+      const outcome = view.resizeControl(typeof args.control === "string" ? args.control : "", edge, dx, dy);
+      return { did: outcome.startsWith("resized"), detail: `${outcome} by ${dx},${dy}pt on ${edge}` };
     },
 
     /** The canvas double-click: asks the host for the default event handler - written when

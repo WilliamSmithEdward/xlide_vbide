@@ -82,11 +82,19 @@ const cleanUp = async () => {
   // at which point the PROJECT stops compiling ("Ambiguous name detected") and the failure lands
   // on whichever suite next asks for a compile. The gate runs this suite twice, once per
   // planner, and that is exactly how it surfaced (2026-08-12).
+  // ...and the FILE with it, not only the session. The apply this suite drives reaches the
+  // workbook, so restoring the module in memory leaves the dirty text on disk, where the next
+  // run inherits it. That drift is self-sustaining: with a spare sub in Helper, the builtIn
+  // planner's round trip leaves the Locals ghost on the CALLER's frame, step-into-features
+  // fails, the group aborts there - and the suites that would have re-saved never run. Two
+  // gates in a row failed that way, in a suite nothing to do with the change under test
+  // (2026-08-15). One save at the end of the restore closes it.
   if (helperOriginal !== null) {
     try {
       await api.writeModule("Helper", helperOriginal, project.projectId);
       await waitFor("Helper to be back as found", async () =>
         (await api.readModule("Helper", project.projectId)).text === helperOriginal);
+      await api.command("save");
     } catch (error) {
       console.log(`     WARNING: Helper was left holding this run's import (${error.message})`);
     }

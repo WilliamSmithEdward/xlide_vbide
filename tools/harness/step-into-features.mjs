@@ -114,7 +114,17 @@ try {
       check("every open module's content still matches", all.agreed,
         all.stale.map((one) => one.module).join(","));
 
-      const locals = await api.locals();
+      // The Locals ghost republishes on its own tick, so the frame the panel is showing lags
+      // the step by a beat. Wait for the panel's own CONTEXT line to be Helper's - a different
+      // observable from the rows asserted below, so the check can still fail rather than only
+      // time out - and then ask what it holds. Without this the read took the CALLER's frame
+      // on a loaded gate session and failed there while every standalone run passed
+      // (2026-08-15: "the Locals panel shows Helper's frame -- Runner").
+      const locals = await until("the Locals panel to be on Helper's frame", async () => {
+        const reading = await api.locals();
+        return /helper/i.test(reading.context ?? "") ? reading : null;
+      }, 12000).catch(() => api.locals());
+
       check("the Locals panel shows Helper's frame",
         (locals.rows ?? []).some((r) => (r.expression ?? "").toLowerCase() === "value"
           || (r.expression ?? "").toLowerCase() === "prefix"),

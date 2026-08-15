@@ -3476,19 +3476,10 @@ body.objbrowser-page #objbrowser-card {
    OVERLAY pinned above the scroll box - as a flow sibling of a positioned scroll it
    painted UNDER the scrolled form (the owner, 2026-08-15: "scrolling goes over yellow
    banner") - and opaque, so what scrolls beneath it reads as beneath it. */
-.designer-draft-note {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  z-index: 2;
-  padding: 3px 10px;
-  font-size: 11px;
-  color: #e6d087;
-  background: #423a1e;
-  border-bottom: 1px solid rgba(181, 137, 0, 0.5);
-}
-
+/* A DRAFT picture - the document's unapplied edits rather than the form - is said twice and
+   no more: the tab's own unsaved dot, and this outline around the form. The banner that used
+   to say it a third time in words was retired 2026-08-15 (the owner: the dot on the tab is
+   fine), and with it a strip across the top of the canvas. */
 .designer-canvas-scroll.draft .dc-form {
   outline: 2px dashed rgba(181, 137, 0, 0.55);
   outline-offset: 3px;
@@ -3504,20 +3495,22 @@ body.objbrowser-page #objbrowser-card {
 
 /* Hover ergonomics (the owner, 2026-08-15): the control a click would select lights up,
    and only the DEEPEST hovered control does - without :has, a Frame outlines under its
-   own children. The form's own ground selects, so it wears a pointer; a control MOVES
-   now (M5), so it wears the move cursor - the promise the drag keeps. The resize cursors
-   stay unworn until the handles resize. */
-.dc-form {
-  cursor: pointer;
-}
+   own children.
 
+   The cursors are the owner's rule, settled over three tries on 2026-08-15. The HAND across
+   the whole form face: the web's own "this responds to a press", which is exactly true here,
+   because every inch of the face selects something. The four-way MOVE on the control that is
+   already selected, and only on it - that is the one a press would actually pick up and carry,
+   where a four-way on every control was a promise about hovering rather than about dragging.
+   A handle keeps its own resize cursor, aimed at a 7px target that earns the hint, and a drag
+   in flight paints the whole canvas with its gesture's cursor. */
+.dc-form,
 .dc {
-  cursor: move;
+  cursor: pointer;
 }
 
-/* A Page has no position of its own - it fills its MultiPage - so it offers no move. */
-.dc-Page {
-  cursor: pointer;
+.dc-selected {
+  cursor: move;
 }
 
 .dc:hover:not(:has(.dc:hover)) {
@@ -3532,11 +3525,12 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.85;
 }
 
-/* While a drag runs, the cursor is the gesture's everywhere on the canvas - the pointer may
-   travel over the form's ground or another control, and the move does not stop for it. */
-.designer-canvas-scroll.dragging,
+/* While a gesture runs, every child inherits the canvas's cursor - the pointer may travel over
+   the form's ground or another control, and the gesture does not change because of what it
+   passes over. Which cursor that is depends on the gesture, so the canvas is given it in code:
+   the move cursor for a drag, the grabbed edge's own for a resize. */
 .designer-canvas-scroll.dragging * {
-  cursor: move;
+  cursor: inherit;
 }
 
 .dc-Label {
@@ -3712,7 +3706,8 @@ body.objbrowser-page #objbrowser-card {
 
 /* M3's selection: the native designer's dress - a moving-ants boundary and eight white
    handles - on an OVERLAY beside the control, because every control box clips overflow.
-   Pointer events pass through; M5 is where the handles learn to drag. */
+   The overlay itself passes pointer events through so the boundary never eats a click; the
+   handles take them, because a handle RESIZES now (M5). */
 .dc-selection {
   position: absolute;
   pointer-events: none;
@@ -3731,16 +3726,19 @@ body.objbrowser-page #objbrowser-card {
   background: #fff;
   border: 1px solid #333;
   box-sizing: border-box;
+  /* The one part of the overlay that takes the pointer, because it is the one part that does
+     something: each handle pulls its own edges, and wears the cursor for the pull it makes. */
+  pointer-events: auto;
 }
 
-.dc-handle-nw { left: -3px; top: -3px; }
-.dc-handle-n { left: 50%; top: -3px; margin-left: -3px; }
-.dc-handle-ne { right: -3px; top: -3px; }
-.dc-handle-e { right: -3px; top: 50%; margin-top: -3px; }
-.dc-handle-se { right: -3px; bottom: -3px; }
-.dc-handle-s { left: 50%; bottom: -3px; margin-left: -3px; }
-.dc-handle-sw { left: -3px; bottom: -3px; }
-.dc-handle-w { left: -3px; top: 50%; margin-top: -3px; }
+.dc-handle-nw { left: -3px; top: -3px; cursor: nwse-resize; }
+.dc-handle-n { left: 50%; top: -3px; margin-left: -3px; cursor: ns-resize; }
+.dc-handle-ne { right: -3px; top: -3px; cursor: nesw-resize; }
+.dc-handle-e { right: -3px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+.dc-handle-se { right: -3px; bottom: -3px; cursor: nwse-resize; }
+.dc-handle-s { left: 50%; bottom: -3px; margin-left: -3px; cursor: ns-resize; }
+.dc-handle-sw { left: -3px; bottom: -3px; cursor: nesw-resize; }
+.dc-handle-w { left: -3px; top: 50%; margin-top: -3px; cursor: ew-resize; }
 
 /* A type outside the toolbox: honest bounds and its name, never a guessed appearance. */
 .dc-foreign {

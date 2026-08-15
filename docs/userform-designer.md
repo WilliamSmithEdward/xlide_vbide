@@ -381,8 +381,10 @@ the host-owns-membership invariant survives.
   the save. The page-side bindings stay as belts for focus states the accelerator misses.
   The canvas wheel is unconditional on the canvas half (which is also what makes it
   drivable: a synthesised WheelEvent never triggers native scrolling, so the scroll path
-  had no driver before), a click gives the canvas focus so it scrolls by keyboard too, and
-  the draft banner is a pinned overlay the scrolled form passes UNDER rather than over.
+  had no driver before), and a click gives the canvas focus so it scrolls by keyboard too.
+  A draft picture said so in a banner across the top of the canvas until 2026-08-15, when
+  the owner retired it: the tab's unsaved dot already says it, the amber outline around the
+  form says it in place, and a strip of canvas is a lot of room for a third voice.
 
   **The parity build, designed and next** (the owner's bar, 2026-08-13: what a user WITHOUT
   xlide sees on the real form surface is the truth the canvas answers to):
@@ -524,9 +526,37 @@ the host-owns-membership invariant survives.
   (Spike 2 in full. Confirmed as the road with the owner, 2026-08-13.) **Moving landed
   2026-08-15**: a press picks a control up, the pointer carries it, and the drop rewrites
   that control's line in the DOCUMENT - `at 84,38` becomes `at 108,50` - as one edit.
-  Arrow keys nudge the selection a point at a time through the same commit, and the cursor
-  finally promises what the canvas delivers (move over a control, pointer over the form's
-  ground, the resize cursors still unworn).
+  Arrow keys nudge the selection a point at a time through the same commit.
+
+  **The cursors took three tries with the owner, and the rule they settled on is worth
+  keeping.** The HAND across the whole form face: the web's own "this responds to a press",
+  which is exactly true, because every inch of the face selects something. The four-way
+  MOVE only on the control that is already SELECTED - the one a press would actually pick
+  up and carry. Worn by every control on hover, as it was for an hour, a four-way arrow is
+  a claim about hovering rather than about dragging; worn by nothing, as the plain arrow
+  that briefly replaced it, the canvas says nothing at all. A handle keeps its own resize
+  cursor, aimed at a 7px target that earns the hint, and a drag in flight paints the whole
+  canvas with its own gesture's cursor so passing over another control does not change what
+  the hand is doing.
+
+  **Resizing landed the same day**, and the handles stopped being decoration: each of the
+  eight takes the pointer (the overlay around them still passes it through, so the
+  boundary never eats a click), pulls its own edges, and wears the cursor for the pull it
+  makes. A west or north handle moves the origin as well as the extent, which is what
+  makes a corner feel like a corner rather than a move. Shift+arrow is the keyboard's
+  resize where a bare arrow moves, the native designer's own pairing. The FORM resizes by
+  its own frame, and its line takes a size and never a position. A pull past the opposite
+  edge stops at a floor - four points for a control, twenty-four for a form, because a
+  form that has lost its title bar is a mistake rather than a design - instead of
+  inverting the box. It is one commit for every gesture: the same document write, the same
+  undo element, the same draft preview, and a move that finds no `size` clause does not
+  quietly add one.
+
+  One measured trap sits under all of this: **a gesture's origin comes from the DOCUMENT,
+  never from the painted box.** The first resize read `element.offsetWidth`, which carries
+  whatever border the renderer drew, so a form pulled twenty points wider grew twenty-one.
+  The pointer path now starts where the keyboard path always did - at the numbers the line
+  spells - and falls back to the picture only for a clause the line does not carry.
 
   **The document IS the transaction log**, and that is the design decision this slice
   makes rather than the feature it ships. A canvas gesture writes the same text a hand
@@ -535,9 +565,10 @@ the host-owns-membership invariant survives.
   through the one apply path, and Ctrl+Z takes a whole drag back from either half - from
   the canvas because the view routes undo to the document that both halves share. A move
   is a document edit, not a COM write, so the FORM does not move until the save; the
-  Properties panel keeps reading the form's own truth meanwhile, which the draft banner
-  is there to explain. The base for a move is read from the DOCUMENT rather than from the
-  picture, so the arithmetic stays right even when the canvas is a parse behind.
+  Properties panel keeps reading the form's own truth meanwhile, which the tab's dot and
+  the form's draft outline are there to explain. The base for a move is read from the
+  DOCUMENT rather than from the picture, so the arithmetic stays right even when the canvas
+  is a parse behind.
 
   **Undo has two rules, and both were learned the same hour.** A move opens its own undo
   element (a stack stop before the edit), so one Ctrl+Z gives back one gesture rather than

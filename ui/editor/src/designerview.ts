@@ -106,28 +106,56 @@ function escapeForRegExp(name: string): string {
   return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** A control's line in the document, split at its geometry: everything before the `at` clause,
- * the position that clause spells (null when the line carries none), and the `size` clause to
- * keep after it - the shape a move rewrites. */
+/** A declaring line in the document, split at its geometry: everything before the clauses, the
+ * position and the size each clause spells (null where the line carries none), and whether this
+ * is the FORM's line, which takes a size and never a position. The shape a move or a resize
+ * rewrites. */
 interface HeaderLine {
   line: number;
   head: string;
   at: { left: number; top: number } | null;
-  size: string;
+  size: { width: number; height: number } | null;
+  form: boolean;
 }
 
-/** A press that may become a move: what it grabbed, where it started, and whether it has
- * travelled far enough to count. */
+/** A box in POINTS, the document's unit: what a gesture is proposing. */
+interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** A press that may become a gesture: what it grabbed, which handle if any, where it started,
+ * the box it started from (in CSS pixels), and whether it has travelled far enough to count. */
 interface CanvasDrag {
   name: string;
   element: HTMLElement;
+  edge: string | null;
   pointerId: number;
   startX: number;
   startY: number;
-  originLeft: number;
-  originTop: number;
+  origin: Box;
   moved: boolean;
 }
+
+/** The smallest a gesture may make something, in points. A control can be tiny - the renderer
+ * floors its own boxes at four - but a form small enough to lose its title bar is a mistake
+ * rather than a design. */
+const MIN_CONTROL = 4;
+const MIN_FORM = 24;
+
+/** The cursor each handle's pull deserves, worn by the whole canvas while that pull runs. */
+const EDGE_CURSOR: Readonly<Record<string, string>> = {
+  nw: "nwse-resize",
+  n: "ns-resize",
+  ne: "nesw-resize",
+  e: "ew-resize",
+  se: "nwse-resize",
+  s: "ns-resize",
+  sw: "nesw-resize",
+  w: "ew-resize",
+};
 
 export interface DesignerViewDeps {
   /** Ask the host for the form's projection; the answer arrives through watch. */
@@ -209,7 +237,6 @@ export class DesignerView {
 
   /** Whether the canvas is currently showing the DOCUMENT's draft rather than the form. */
   private draftShown = false;
-  private readonly draftNote: HTMLElement;
 
   /** The selected control's name, "" for the FORM itself, null for no selection. */
   private selectedName: string | null = null;
@@ -288,14 +315,6 @@ export class DesignerView {
     this.canvasScroll = document.createElement("div");
     this.canvasScroll.className = "designer-canvas-scroll";
     canvasHalf.appendChild(this.canvasScroll);
-
-    // Worn while the canvas previews the DOCUMENT rather than the form: the picture is the
-    // draft's, and Ctrl+S is what makes it the form's.
-    this.draftNote = document.createElement("div");
-    this.draftNote.className = "designer-draft-note";
-    this.draftNote.textContent = "previewing unapplied edits - Ctrl+S applies them to the form";
-    this.draftNote.hidden = true;
-    canvasHalf.appendChild(this.draftNote);
 
     // The wheel scrolls the canvas wherever it lands on it, unconditionally - and this is
     // also what gives the harness a wheel it can drive, because a synthesised WheelEvent
@@ -623,9 +642,12 @@ export class DesignerView {
     this.renderCanvas(this.dressDraft(draft));
   }
 
+  /** The draft state wears TWO cues and no third: the tab's own unsaved dot, and the amber
+   * dashed outline this class puts around the form. A banner saying the same thing in words
+   * stood here until 2026-08-15, when the owner retired it - the dot already says it, and a
+   * strip across the top of the canvas is a lot of room for a sentence nobody needs twice. */
   private setDraftShown(shown: boolean): void {
     this.draftShown = shown;
-    this.draftNote.hidden = !shown;
     this.canvasScroll.classList.toggle("draft", shown);
   }
 
@@ -681,7 +703,7 @@ export class DesignerView {
     dirty: boolean;
     selected: string | null;
     markupLine: number;
-    controls: { name: string; left: number; top: number }[];
+    controls: { name: string; left: number; top: number; width: number; height: number }[];
   } {
     return {
       draft: this.draftShown,
@@ -690,8 +712,12 @@ export class DesignerView {
       markupLine: this.editor.getPosition()?.lineNumber ?? 0,
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
         name: el.dataset.control ?? "",
-        left: Number.parseFloat(el.style.left || "0") / PT,
-        top: Number.parseFloat(el.style.top || "0") / PT,
+        ...this.inPoints({
+          left: Number.parseFloat(el.style.left || "0"),
+          top: Number.parseFloat(el.style.top || "0"),
+          width: el.offsetWidth,
+          height: el.offsetHeight,
+        }),
       })),
     };
   }
@@ -712,8 +738,8 @@ export class DesignerView {
     this.deps.eventStub(control);
   }
 
-  /** A press on the canvas: pick what is under the pointer, and arm a drag when it is a
-   * control that has a position to change. */
+  /** A press on the canvas: a HANDLE resizes what is already selected, anything else picks
+   * what is under the pointer and arms a move. */
   private onCanvasPress(event: PointerEvent): void {
     this.canvasScroll.focus();
     if (event.button !== 0) {
@@ -721,6 +747,15 @@ export class DesignerView {
     }
 
     const target = event.target as HTMLElement;
+
+    // The handles come first, because they stand ON the selection's boundary: a press there is
+    // a resize of the selected thing, never a pick of whatever the boundary crosses.
+    const handle = target.closest<HTMLElement>(".dc-handle");
+    if (handle?.dataset.edge && this.selectedName !== null) {
+      this.arm(this.selectedName, handle.dataset.edge, event);
+      return;
+    }
+
     const control = target.closest<HTMLElement>(".dc");
     if (!control?.dataset.control) {
       if (target.closest(".dc-form")) {
@@ -732,33 +767,49 @@ export class DesignerView {
     this.select(control.dataset.control);
 
     // A Page is not placed by coordinates - it fills its MultiPage - so there is nothing to
-    // drag it by. Everything else only ARMS here: the move begins past the threshold, which
+    // drag it by. Everything else only ARMS here: the gesture begins past the threshold, which
     // is what keeps a plain click a plain click.
     if (control.dataset.kind === "Page") {
       return;
     }
 
+    this.arm(control.dataset.control, null, event);
+  }
+
+  /** Arms a gesture on a named thing - a move with no edge, a resize with one - recording the
+   * box it starts from so every later frame measures from the press rather than from the last
+   * one, which is what keeps a slow drag from accumulating rounding. */
+  private arm(name: string, edge: string | null, event: PointerEvent): void {
+    const element = this.elementOf(name);
+    const header = this.headerOf(name);
+    if (!element || !header) {
+      return;
+    }
+
     this.drag = {
-      name: control.dataset.control,
-      element: control,
+      name,
+      element,
+      edge,
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
-      originLeft: Number.parseFloat(control.style.left || "0"),
-      originTop: Number.parseFloat(control.style.top || "0"),
+      // In POINTS, off the DOCUMENT - never off the painted box, whose width carries whatever
+      // border the renderer drew. Measured live: a form dragged 20 points wider grew 21,
+      // because its element is two pixels bigger than the size its own line spells.
+      origin: this.baseBox(header, element),
       moved: false,
     };
 
     try {
       this.canvasScroll.setPointerCapture(event.pointerId);
     } catch {
-      // A synthesised pointer has no capture to take; the drag then runs on bubbling alone,
+      // A synthesised pointer has no capture to take; the gesture then runs on bubbling alone,
       // which is all the harness's own pointer sequence needs.
     }
   }
 
-  /** The control follows the pointer, in the picture only - the document is written once, at
-   * the drop, so a drag is one undo step rather than one per pixel. */
+  /** The thing follows the pointer, in the picture only - the document is written once, at the
+   * drop, so a whole gesture is one undo step rather than one per pixel. */
   private onCanvasDragMove(event: PointerEvent): void {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) {
@@ -775,14 +826,16 @@ export class DesignerView {
       drag.moved = true;
       drag.element.classList.add("dc-dragging");
       this.canvasScroll.classList.add("dragging");
+      // The gesture's own cursor, worn by the whole canvas while it runs, so passing over
+      // another control does not change what the hand is doing.
+      this.canvasScroll.style.cursor = drag.edge ? EDGE_CURSOR[drag.edge] ?? "move" : "move";
     }
 
-    const placed = this.clampToParent(drag.element, (drag.originLeft + dx) / PT, (drag.originTop + dy) / PT);
-    this.paintPlacement(drag.element, placed.left, placed.top);
+    this.paintBox(drag.element, this.proposal(drag, dx / PT, dy / PT));
     event.preventDefault();
   }
 
-  /** The drop writes the document: where the control landed, in points, as one edit. */
+  /** The drop writes the document: the box the gesture ended on, in points, as one edit. */
   private onCanvasDrop(event: PointerEvent): void {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) {
@@ -794,17 +847,55 @@ export class DesignerView {
       return;
     }
 
-    // A drop the document refuses - a line this cannot rewrite - puts the control back where
-    // the document still says it is, rather than leaving a picture nothing agrees with.
-    const written = this.moveByPoints(
-      drag.name, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT);
-    if (!written) {
-      this.paintPlacement(drag.element, drag.originLeft / PT, drag.originTop / PT);
+    // A drop the document refuses - a line this cannot rewrite - puts the thing back the way
+    // the document still describes it, rather than leaving a picture nothing agrees with.
+    const box = this.proposal(drag, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT);
+    if (!this.writeBox(drag.name, box, drag.edge !== null)) {
+      this.paintBox(drag.element, drag.origin);
     }
   }
 
-  /** Abandons a drag in flight - Escape, or the pointer taken away - and puts the control
-   * back where the document still says it is, because nothing was written yet. */
+  /**
+   * What a gesture is proposing, in points: the origin box with the pointer's travel applied -
+   * moved whole for a drag, or with the grabbed edges pushed for a resize - then clamped so
+   * nothing leaves its parent or collapses to nothing. Measured from the PRESS every frame, so
+   * a slow drag cannot accumulate rounding, and rounded to whole points because that is what
+   * the document will carry.
+   */
+  private proposal(drag: CanvasDrag, dx: number, dy: number): Box {
+    const origin = drag.origin;
+    const room = this.roomFor(drag.element);
+    const floor = drag.name === "" ? MIN_FORM : MIN_CONTROL;
+
+    if (drag.edge === null) {
+      return this.clamp({ ...origin, left: origin.left + dx, top: origin.top + dy }, room, floor);
+    }
+
+    // The grabbed edges move and the opposite ones stay: west and north change the origin as
+    // well as the extent, which is what makes a north-west drag feel like a corner rather than
+    // a move. A push past the opposite edge stops at the floor instead of inverting the box.
+    const box = { ...origin };
+    if (drag.edge.includes("w")) {
+      const travel = Math.min(dx, origin.width - floor);
+      box.left = origin.left + travel;
+      box.width = origin.width - travel;
+    } else if (drag.edge.includes("e")) {
+      box.width = Math.max(floor, origin.width + dx);
+    }
+
+    if (drag.edge.includes("n")) {
+      const travel = Math.min(dy, origin.height - floor);
+      box.top = origin.top + travel;
+      box.height = origin.height - travel;
+    } else if (drag.edge.includes("s")) {
+      box.height = Math.max(floor, origin.height + dy);
+    }
+
+    return this.clamp(box, room, floor);
+  }
+
+  /** Abandons a gesture in flight - Escape, or the pointer taken away - and puts the thing back
+   * the way the document still describes it, because nothing was written yet. */
   private cancelDrag(): void {
     const drag = this.drag;
     if (!drag) {
@@ -813,13 +904,14 @@ export class DesignerView {
 
     this.releaseDrag(drag);
     if (drag.moved) {
-      this.paintPlacement(drag.element, drag.originLeft / PT, drag.originTop / PT);
+      this.paintBox(drag.element, drag.origin);
     }
   }
 
   private releaseDrag(drag: CanvasDrag): void {
     drag.element.classList.remove("dc-dragging");
     this.canvasScroll.classList.remove("dragging");
+    this.canvasScroll.style.cursor = "";
     try {
       this.canvasScroll.releasePointerCapture(drag.pointerId);
     } catch {
@@ -851,82 +943,153 @@ export class DesignerView {
     }
 
     const step = NUDGE[event.key];
-    if (!step || event.altKey || event.shiftKey || !this.selectedName) {
+    if (!step || event.altKey || this.selectedName === null) {
       return;
     }
 
-    // Without this the canvas scrolls under the control the developer is placing.
+    // The FORM has no position of its own - it is where the canvas puts it - so a bare arrow
+    // has nothing to do there, while a Shift+arrow resizes it like anything else.
+    if (this.selectedName === "" && !event.shiftKey) {
+      return;
+    }
+
+    // Without this the canvas scrolls under the thing the developer is placing.
     event.preventDefault();
-    this.moveByPoints(this.selectedName, step.dx, step.dy);
+
+    // SHIFT resizes where a bare arrow moves, the native designer's own pairing: the same two
+    // deltas, applied to the extent rather than to the origin.
+    const header = this.headerOf(this.selectedName);
+    const element = this.elementOf(this.selectedName);
+    if (!header || !element) {
+      return;
+    }
+
+    const base = this.baseBox(header, element);
+    const room = this.roomFor(element);
+    const floor = this.selectedName === "" ? MIN_FORM : MIN_CONTROL;
+    const box = event.shiftKey
+      ? { ...base, width: base.width + step.dx, height: base.height + step.dy }
+      : { ...base, left: base.left + step.dx, top: base.top + step.dy };
+    this.writeBox(this.selectedName, this.clamp(box, room, floor), event.shiftKey);
   }
 
   /**
-   * Moves a control by a delta in POINTS: the document's own position plus the delta, clamped
-   * inside the box that holds it, rounded to whole points, written back as ONE undoable edit
-   * and painted at once so the gesture lands before the round trip answers.
+   * Writes a box into the document: the thing's own line rewritten with the position and size
+   * it now has, rounded to whole points, as ONE undoable edit, and painted at once so the
+   * gesture lands before the round trip answers.
    *
-   * This is the single commit every canvas move takes - drag, nudge, and the harness's act -
-   * and it writes the DOCUMENT, never the form: the draft preview shows it immediately, the
-   * dot says it has not reached the form yet, and Ctrl+S is still the only apply. The base is
-   * read from the document rather than the picture, so a move stays self-consistent even when
-   * the canvas is showing a slightly older parse. Whole points because a hand-placed control
-   * wants round numbers; the 6-point grid the native designer snaps to is M6's.
+   * This is the single commit every canvas gesture takes - drag, resize, nudge, and the
+   * harness's acts - and it writes the DOCUMENT, never the form: the draft preview shows it
+   * immediately, the dot says it has not reached the form yet, and Ctrl+S is still the only
+   * apply. Whole points because a hand-placed control wants round numbers; the 6-point grid the
+   * native designer snaps to is M6's. The FORM's line takes a size and never a position.
    */
-  private moveByPoints(name: string, dx: number, dy: number): boolean {
-    const element = this.elementFor(name);
+  private writeBox(name: string, box: Box, sized: boolean): boolean {
+    const element = this.elementOf(name);
     const header = this.headerOf(name);
     if (!element || !header) {
       return false;
     }
 
-    const base = header.at ?? {
-      left: Number.parseFloat(element.style.left || "0") / PT,
-      top: Number.parseFloat(element.style.top || "0") / PT,
-    };
-    const placed = this.clampToParent(element, base.left + dx, base.top + dy);
-    const left = Math.round(placed.left);
-    const top = Math.round(placed.top);
+    const left = Math.round(box.left);
+    const top = Math.round(box.top);
+    const width = Math.round(box.width);
+    const height = Math.round(box.height);
+    // A line that spelled no size keeps spelling none unless this gesture is a resize: a move
+    // must not quietly pin a size the developer left to the control.
+    const spellSize = sized || header.size !== null;
+    const text = header.head
+      + (header.form ? "" : ` at ${left},${top}`)
+      + (spellSize ? ` size ${width}x${height}` : "");
 
     // A stack stop BEFORE the edit and none after. Monaco appends edits to whichever element is
-    // open, so the stop is what keeps one move from joining the move before it; leaving the
-    // element open afterwards is equally deliberate, because the canonical print that follows a
-    // save belongs to this gesture - with it riding along, one Ctrl+Z after a save reaches the
-    // text from before the move rather than a step that only differs by the machine's own
-    // rounding (both halves measured live, 2026-08-15).
+    // open, so the stop is what keeps one gesture from joining the gesture before it; leaving
+    // the element open afterwards is equally deliberate, because the canonical print that
+    // follows a save belongs to this gesture - with it riding along, one Ctrl+Z after a save
+    // reaches the text from before the move rather than a step that only differs by the
+    // machine's own rounding (both halves measured live, 2026-08-15).
     this.model.pushStackElement();
     this.model.pushEditOperations([], [{
       range: new monaco.Range(header.line, 1, header.line, this.model.getLineMaxColumn(header.line)),
-      text: `${header.head} at ${left},${top}${header.size}`,
+      text,
     }], () => null);
-    this.paintPlacement(element, left, top);
+    this.paintBox(element, { left, top, width, height });
     return true;
   }
 
-  /** Keeps a moved control inside the box that holds it: a gesture may reposition a control,
-   * never lose it behind an edge. Reparenting - dragging a control out of its Frame - is a
-   * later gesture, so the parent's client area is the whole floor here. A control already
-   * bigger than its parent keeps a zero origin rather than being yanked to a negative one. */
-  private clampToParent(element: HTMLElement, left: number, top: number): { left: number; top: number } {
-    const host = element.parentElement;
-    const maxLeft = host ? Math.max(0, (host.clientWidth - element.offsetWidth) / PT) : Number.POSITIVE_INFINITY;
-    const maxTop = host ? Math.max(0, (host.clientHeight - element.offsetHeight) / PT) : Number.POSITIVE_INFINITY;
+  /** Where a gesture starts from: the DOCUMENT's own numbers when the line spells them, and the
+   * picture's only where it does not, so the arithmetic stays right even when the canvas is a
+   * parse behind. */
+  private baseBox(header: HeaderLine, element: HTMLElement): Box {
+    const painted = this.inPoints({
+      left: Number.parseFloat(element.style.left || "0"),
+      top: Number.parseFloat(element.style.top || "0"),
+      width: element.offsetWidth,
+      height: element.offsetHeight,
+    });
     return {
-      left: Math.min(Math.max(0, left), maxLeft),
-      top: Math.min(Math.max(0, top), maxTop),
+      left: header.at?.left ?? painted.left,
+      top: header.at?.top ?? painted.top,
+      width: header.size?.width ?? painted.width,
+      height: header.size?.height ?? painted.height,
     };
   }
 
-  /** Puts a control - and the handles dressing it - at a position in points, without touching
-   * the document: what the eye follows during a drag, and the instant landing after one. */
-  private paintPlacement(element: HTMLElement, left: number, top: number): void {
-    element.style.left = `${left * PT}px`;
-    element.style.top = `${top * PT}px`;
+  /** The floor a gesture works on, in points: the inside of the box that holds this thing, or
+   * nothing at all for the FORM, which is held by the canvas and may grow as it likes. */
+  private roomFor(element: HTMLElement): { width: number; height: number } | null {
+    const host = element.classList.contains("dc-form") ? null : element.parentElement;
+    return host ? { width: host.clientWidth / PT, height: host.clientHeight / PT } : null;
+  }
 
+  /** Keeps a gesture inside the box that holds it and above the floor size: a gesture may
+   * reposition or resize a control, never lose it behind an edge or collapse it to nothing.
+   * Reparenting - dragging a control out of its Frame - is a later gesture, so the parent's
+   * client area is the whole floor here. A control already bigger than its parent keeps a zero
+   * origin rather than being yanked to a negative one. */
+  private clamp(box: Box, room: { width: number; height: number } | null, floor: number): Box {
+    const width = Math.max(floor, room ? Math.min(box.width, room.width) : box.width);
+    const height = Math.max(floor, room ? Math.min(box.height, room.height) : box.height);
+    const maxLeft = room ? Math.max(0, room.width - width) : Number.POSITIVE_INFINITY;
+    const maxTop = room ? Math.max(0, room.height - height) : Number.POSITIVE_INFINITY;
+    return {
+      left: Math.min(Math.max(0, box.left), maxLeft),
+      top: Math.min(Math.max(0, box.top), maxTop),
+      width,
+      height,
+    };
+  }
+
+  private inPoints(box: Box): Box {
+    return { left: box.left / PT, top: box.top / PT, width: box.width / PT, height: box.height / PT };
+  }
+
+  /** Puts a thing - and the handles dressing it - at a box in points, without touching the
+   * document: what the eye follows during a gesture, and the instant landing after one. */
+  private paintBox(element: HTMLElement, box: Box): void {
+    const form = element.classList.contains("dc-form");
+    if (!form) {
+      element.style.left = `${box.left * PT}px`;
+      element.style.top = `${box.top * PT}px`;
+    }
+
+    element.style.width = `${box.width * PT}px`;
+    element.style.height = `${box.height * PT}px`;
+
+    // The form's handles ride inside it and follow by themselves; a control's overlay is a
+    // sibling and has to be carried.
     const overlay = element.nextElementSibling;
-    if (overlay instanceof HTMLElement && overlay.classList.contains("dc-selection")) {
+    if (!form && overlay instanceof HTMLElement && overlay.classList.contains("dc-selection")) {
       overlay.style.left = element.style.left;
       overlay.style.top = element.style.top;
+      overlay.style.width = element.style.width;
+      overlay.style.height = element.style.height;
     }
+  }
+
+  /** The element a name stands for: "" is the FORM's own face. */
+  private elementOf(name: string): HTMLElement | null {
+    return name === "" ? this.canvasScroll.querySelector<HTMLElement>(".dc-form") : this.elementFor(name);
   }
 
   private elementFor(name: string): HTMLElement | null {
@@ -934,22 +1097,25 @@ export class DesignerView {
   }
 
   /**
-   * The document line that declares a control, split at its geometry. Null when no line names
-   * it, or when the line is not in a shape this can rewrite - a half-typed header, a caption
-   * whose quote never closes - because a gesture that cannot write the document must not
-   * pretend to have moved anything.
+   * The document line that declares a thing - a control by name, the FORM for "" - split at its
+   * geometry. Null when no line names it, or when the line is not in a shape this can rewrite -
+   * a half-typed header, a caption whose quote never closes - because a gesture that cannot
+   * write the document must not pretend to have changed anything.
    *
    * The caption is skipped by scanning rather than by regex: ` at ` inside a caption is
    * ordinary text, and only a scan that knows about doubled quotes can tell the two apart.
    */
   private headerOf(name: string): HeaderLine | null {
-    const line = this.headerLineOf(name);
-    if (line === 0) {
+    const form = name === "";
+    const line = form ? 1 : this.headerLineOf(name);
+    if (line === 0 || line > this.model.getLineCount()) {
       return null;
     }
 
     const text = this.model.getLineContent(line);
-    const named = new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(?=\\s|$)`).exec(text);
+    const named = form
+      ? /^Form\s+\S+/.exec(text)
+      : new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(?=\\s|$)`).exec(text);
     if (!named) {
       return null;
     }
@@ -978,17 +1144,25 @@ export class DesignerView {
     }
 
     // What follows the caption is geometry and nothing else, so a plain match is safe here.
-    const tail = /^(?:\s+at\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?(\s+size\s+-?\d+(?:\.\d+)?\s*x\s*-?\d+(?:\.\d+)?)?\s*$/i
+    const tail = /^(?:\s+at\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?(?:\s+size\s+(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?))?\s*$/i
       .exec(text.slice(at));
     if (!tail) {
       return null;
     }
 
+    const number = (spelled: string | undefined): number | null =>
+      spelled === undefined ? null : Number.parseFloat(spelled);
+    const left = number(tail[1]);
+    const top = number(tail[2]);
+    const width = number(tail[3]);
+    const height = number(tail[4]);
+
     return {
       line,
       head: text.slice(0, at),
-      at: tail[1] === undefined ? null : { left: Number.parseFloat(tail[1]), top: Number.parseFloat(tail[2] ?? "0") },
-      size: tail[3] ?? "",
+      at: left === null || top === null ? null : { left, top },
+      size: width === null || height === null ? null : { width, height },
+      form,
     };
   }
 
@@ -1023,8 +1197,47 @@ export class DesignerView {
       return `${name} is not what a press at its own centre reaches - ${covering?.className || "nothing"} is`;
     }
 
-    const send = (target: EventTarget, type: string, x: number, y: number): void => {
-      target.dispatchEvent(new PointerEvent(type, {
+    // The press goes to what the hit test answered - that IS the proof - and the rest to the
+    // canvas, exactly where a captured pointer's events are delivered once a real drag has
+    // the mouse. Past the threshold first, then the whole way: the two moves a hand makes.
+    const landed = hits(grabbed) ?? element;
+    this.sendGesture(landed, grabbed, dx, dy);
+    return `dragged ${name}`;
+  }
+
+  /**
+   * A resize driven from the debug surface: the named thing is SELECTED first, the way a hand
+   * must, and then the real pointer sequence grabs its handle - `nw`, `n`, `ne`, `e`, `se`,
+   * `s`, `sw`, `w` - and pulls it by a delta in POINTS. "" is the form's own frame. The press
+   * goes through the hit test at the handle, so a handle nothing can reach fails the act.
+   */
+  resizeControl(name: string, edge: string, dx: number, dy: number): string {
+    if (this.selectedName !== name) {
+      this.select(name);
+    }
+
+    const handle = this.canvasScroll.querySelector<HTMLElement>(`.dc-handle-${CSS.escape(edge)}`);
+    if (!handle) {
+      return `no ${edge} handle stands on ${name === "" ? "the form" : name}`;
+    }
+
+    const box = handle.getBoundingClientRect();
+    const spot = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    const reached = document.elementFromPoint(spot.x, spot.y)?.closest<HTMLElement>(".dc-handle");
+    if (reached?.dataset.edge !== edge) {
+      return `the ${edge} handle is not what a press on it reaches - ${reached?.className || "nothing"} is`;
+    }
+
+    this.sendGesture(reached, spot, dx, dy);
+    return `resized ${name === "" ? "the form" : name}`;
+  }
+
+  /** The pointer sequence both instruments send: press where the hit test answered, one move
+   * past the threshold, one move the whole way, and the release - all but the press delivered
+   * to the canvas, which is where a captured pointer's events go. */
+  private sendGesture(target: EventTarget, from: { x: number; y: number }, dx: number, dy: number): void {
+    const send = (to: EventTarget, type: string, x: number, y: number): void => {
+      to.dispatchEvent(new PointerEvent(type, {
         bubbles: true,
         cancelable: true,
         pointerId: 1,
@@ -1036,19 +1249,15 @@ export class DesignerView {
       }));
     };
 
-    // The press goes to what the hit test answered - that IS the proof - and the rest to the
-    // canvas, exactly where a captured pointer's events are delivered once a real drag has
-    // the mouse. Past the threshold first, then the whole way: the two moves a hand makes.
-    const landed = hits(grabbed) ?? element;
-    send(landed, "pointerdown", grabbed.x, grabbed.y);
-    send(this.canvasScroll, "pointermove", grabbed.x + DRAG_THRESHOLD + 1, grabbed.y);
-    send(this.canvasScroll, "pointermove", grabbed.x + dx * PT, grabbed.y + dy * PT);
-    send(this.canvasScroll, "pointerup", grabbed.x + dx * PT, grabbed.y + dy * PT);
-    return `dragged ${name}`;
+    send(target, "pointerdown", from.x, from.y);
+    send(this.canvasScroll, "pointermove", from.x + DRAG_THRESHOLD + 1, from.y);
+    send(this.canvasScroll, "pointermove", from.x + dx * PT, from.y + dy * PT);
+    send(this.canvasScroll, "pointerup", from.x + dx * PT, from.y + dy * PT);
   }
 
   private dressSelection(): void {
     this.canvasScroll.querySelector(".dc-selection")?.remove();
+    this.canvasScroll.querySelector(".dc-selected")?.classList.remove("dc-selected");
 
     const name = this.selectedName;
     if (name === null) {
@@ -1071,6 +1280,8 @@ export class DesignerView {
     for (const spot of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
       const handle = document.createElement("span");
       handle.className = `dc-handle dc-handle-${spot}`;
+      // The edge rides the element: a press reads which way to pull from what it grabbed.
+      handle.dataset.edge = spot;
       overlay.appendChild(handle);
     }
 
@@ -1084,6 +1295,13 @@ export class DesignerView {
       overlay.style.width = target.style.width;
       overlay.style.height = target.style.height;
       target.insertAdjacentElement("afterend", overlay);
+
+      // A SELECTED control offers the move, and says so with the cursor (the owner's rule,
+      // 2026-08-15). Only the selected one, and only a control that has a position to change:
+      // the form is where the canvas puts it, and a Page fills its MultiPage.
+      if (target.dataset.kind !== "Page") {
+        target.classList.add("dc-selected");
+      }
     }
   }
 

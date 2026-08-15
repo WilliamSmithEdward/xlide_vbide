@@ -114,6 +114,13 @@ VBA behind and the next run starts from somewhere new.
 appears while modules are open, so the check passed or failed on whether the fixture happened to
 have a module open. Watch for the specific thing.
 
+**A check with NO readiness wait is the mirror-image failure**, and it hides better: it passes on a
+quiet machine and fails in the gate. The Locals panel is fed by a ghost reader's own tick, so the
+frame it shows lags a Step Into by a beat; `step-into-features` read it with no wait at all, took
+the CALLER's frame once - in the gate, after eight other suites had loaded that session - and
+passed every standalone re-run afterwards (2026-08-15). The fix is a wait on the panel's own
+context line, which is not what the rows below it assert.
+
 **A readiness wait must name a different observable from the check that follows it.** Otherwise the
 check cannot fail, only time out, and the assertion has moved into the setup where nobody counts it.
 Replacing a sleep with `waitFor` is the moment this goes wrong: the obvious condition to wait for is
@@ -134,6 +141,18 @@ rather than assuming it is where it looks - `getBoundingClientRect()` on the reg
 `0x0` immediately. And take an intermittent report as a clue about state rather than noise: "works,
 then doesn't" was the difference between a module being open and not, which is exactly what the
 reporter eventually said.
+
+**Fixture drift is self-sustaining, and it fails in a place unrelated to the change under
+test.** `module-sync` writes a spare `ByTheDialog` sub into Helper, drives the apply - which
+reaches the workbook - and restores the module in the SESSION only, so the file kept the dirty
+text. With that sub present, the builtIn planner's round trip leaves the Locals ghost on the
+CALLER's frame, `step-into-features` fails, and `Invoke-SuiteGroup` aborts the group there,
+before the suites that would have re-saved the file. So the next run inherits the same drift and
+fails the same way: two gates in a row, in a debugger suite, while the change under test was a
+designer canvas (2026-08-15). Three habits fall out. A restore puts the FILE back, not just the
+module. When a gate fails somewhere unrelated twice, suspect the fixture before the change -
+`New-DebugFixture.ps1` takes forty seconds and settles it. And an interrupted gate run is a
+fixture-corrupting event, because the cleanup half never ran.
 
 **A suite that SAVES the workbook has to clean the file, not just the session.** Removing a
 temporary component at the end leaves the session as found and the FILE holding it, because the
