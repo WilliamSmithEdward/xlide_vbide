@@ -165,6 +165,10 @@ internal sealed class EditorSurface : IDisposable
     /// event handler, the native designer's own gesture.</summary>
     public Action<string, string?, string?>? DesignerEventStubRequested { get; set; }
 
+    /// <summary>Raised when the canvas selection changes: (module, workbook display or
+    /// null, control name or null for the form itself). The Properties panel follows.</summary>
+    public Action<string, string?, string?>? DesignerSelectionRequested { get; set; }
+
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
 
@@ -1782,6 +1786,22 @@ internal sealed class EditorSurface : IDisposable
                                 : null,
                             document.RootElement.TryGetProperty("control", out var stubControl)
                                 ? stubControl.GetString()
+                                : null);
+                    }
+
+                    break;
+
+                case "designerSelection":
+                    if (document.RootElement.TryGetProperty("module", out var selModule)
+                        && selModule.GetString() is { Length: > 0 } selAsked)
+                    {
+                        DesignerSelectionRequested?.Invoke(
+                            selAsked,
+                            document.RootElement.TryGetProperty("project", out var selOwner)
+                                ? selOwner.GetString()
+                                : null,
+                            document.RootElement.TryGetProperty("control", out var selControl)
+                                ? selControl.GetString()
                                 : null);
                     }
 

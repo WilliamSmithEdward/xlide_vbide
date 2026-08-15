@@ -529,6 +529,40 @@ try {
   check("and a second double-click navigates rather than duplicating", stubs.length === 1,
     `${stubs.length} stub(s)`);
 
+  // ---- the M4 bridgehead: selection flows into the Properties panel as control rows ----
+
+  await api.act("activate", { module: form, face: "design" });
+  await api.act("designerSelect", { module: form, control: "RegionPick" });
+  const controlPanel = await waitFor("the panel to show the selected control", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === "RegionPick" ? shown : null;
+  }, { budgetMs: 15000 });
+  check("selecting a control targets the panel at it, kind and all",
+    controlPanel.kind === "ComboBox", controlPanel.kind);
+  const leftRow = controlPanel.rows.find((row) => row.name === "Left");
+  check("and its geometry reads through the rows", Number(leftRow?.value) === 84, leftRow?.value);
+
+  const panelMove = await api.act("editProperty", { name: "Left", value: "90" });
+  check("a control row's edit answers through the model", panelMove.did === true, panelMove.detail);
+  await waitFor("the form to carry the panel's move", async () =>
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 90) < 0.01, { budgetMs: 15000 });
+  check("the form truly moved", true);
+  await waitFor("and the open tab's document to follow it", async () =>
+    /RegionPick at 90,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+  { budgetMs: 15000 });
+  check("the markup follows the panel's move - liveness end to end", true);
+
+  await api.act("editProperty", { name: "Left", value: "84" });
+  await waitFor("and back where the plan puts it", async () =>
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.01, { budgetMs: 15000 });
+
+  await api.act("designerSelect", { module: form });
+  await waitFor("the form's ground to return the panel to the form", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+  check("selecting the form returns the panel to the component", true);
+
   // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
   await api.act("activate", { module: form, face: "design" });
 

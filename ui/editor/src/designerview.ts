@@ -111,6 +111,8 @@ export interface DesignerViewDeps {
   /** A canvas double-click: the host writes or shows the control's default event handler.
    * Null means the form itself. */
   eventStub(control: string | null): void;
+  /** The selection changed: the Properties panel follows. Null is the form itself. */
+  selection(control: string | null): void;
 }
 
 export class DesignerView {
@@ -639,6 +641,8 @@ export class DesignerView {
     this.selectedName = name;
     this.dressSelection();
     this.revealInMarkup(name);
+    // The Properties panel follows the selection host-side - M4's bridgehead.
+    this.deps.selection(name === "" ? null : name);
   }
 
   /** A canvas double-click, for the debug surface: the host's event-stub gesture. */

@@ -383,7 +383,7 @@ internal static partial class FormDesignService
         }
     }
 
-    private static bool? TryFlag(DispatchObject target, string name)
+    internal static bool? TryFlag(DispatchObject target, string name)
     {
         if (target.GetDispId(name) == DispId.Unknown)
         {
@@ -450,7 +450,7 @@ internal static partial class FormDesignService
         }
     }
 
-    private static string? TryText(DispatchObject target, string name)
+    internal static string? TryText(DispatchObject target, string name)
     {
         if (target.GetDispId(name) == DispId.Unknown)
         {
@@ -467,7 +467,7 @@ internal static partial class FormDesignService
         }
     }
 
-    private static double? TryNumber(DispatchObject target, string name)
+    internal static double? TryNumber(DispatchObject target, string name)
     {
         if (target.GetDispId(name) == DispId.Unknown)
         {
@@ -484,7 +484,7 @@ internal static partial class FormDesignService
         }
     }
 
-    private static int? TryInt(DispatchObject target, string name)
+    internal static int? TryInt(DispatchObject target, string name)
     {
         if (target.GetDispId(name) == DispId.Unknown)
         {
@@ -791,7 +791,7 @@ internal static partial class FormDesignService
         return string.Equals(leftParent, rightParent, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string FormatNumber(double value) =>
+    internal static string FormatNumber(double value) =>
         value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string KindWord(PropertyValueKind kind) => kind switch

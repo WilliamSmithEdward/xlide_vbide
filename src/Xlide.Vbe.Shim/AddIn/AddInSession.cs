@@ -1174,6 +1174,15 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
         _editorSurface.DesignerEventStubRequested = OnDesignerEventStub;
+        _editorSurface.DesignerSelectionRequested = (module, project, control) =>
+            _editorSurface?.RunOnHostThread(() =>
+            {
+                // The canvas said what it selected; the panel follows. An empty control is
+                // the form's ground - the component itself, the row set that always existed.
+                _propertiesTarget = module;
+                _propertiesControl = string.IsNullOrEmpty(control) ? null : control;
+                PublishProperties();
+            });
         // Pure text both ways: the lint is Core's tolerant parse, no designer is touched,
         // and the answer goes straight back - the one language, saying early what the
         // apply would say late.
@@ -3349,12 +3358,26 @@ internal sealed partial class AddInSession : IDisposable
     /// code name as "(Name)" sorted first, and for a document component the host object's
     /// browsable properties alongside it.
     /// </summary>
+    /// <summary>
+    /// The control the Properties panel is aimed at, on the form `_propertiesTarget` names -
+    /// the canvas selection's half of M4. Null means the panel shows the component itself,
+    /// which is everything that existed before controls could be selected. Cleared wherever
+    /// the target moves to another component.
+    /// </summary>
+    private string? _propertiesControl;
+
     private void PublishProperties()
     {
         var surface = _editorSurface;
         var target = _propertiesTarget ?? surface?.Module;
         if (surface is null || target is null)
         {
+            return;
+        }
+
+        if (_propertiesControl is { Length: > 0 } selectedControl)
+        {
+            PublishControlProperties(target, selectedControl);
             return;
         }
 
@@ -3456,6 +3479,169 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
+    /// A control row's edit: through the designer service, the same write an api `set`
+    /// makes, so the panel, the routes and the markup apply stay one operation. A rename
+    /// carries the selection with it; the code-behind's handlers stay put, which is the
+    /// native designer's own behaviour.
+    /// </summary>
+    private void OnControlPropertyEdit(string formName, string controlName, string name, string value)
+    {
+        try
+        {
+            using var component = FindComponent(formName);
+            using var designer = component?.GetObject("Designer");
+            if (component is null || designer is null)
+            {
+                _propertiesControl = null;
+                PublishProperties();
+                return;
+            }
+
+            var property = string.Equals(name, "(Name)", StringComparison.Ordinal) ? "Name" : name;
+            var display = FormDesignService.SetControlProperty(component, designer, controlName, property, value, null);
+            Log.Info($"properties: {formName}.{controlName}.{property} = {display}");
+
+            if (string.Equals(property, "Name", StringComparison.OrdinalIgnoreCase))
+            {
+                _propertiesControl = value;
+            }
+
+            FormDesignService.KeepDesignerDown(component);
+            RefreshDesignerTabFor(formName);
+            PublishProperties();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"properties: {formName}.{controlName}.{name} could not be set", ex);
+            _editorSurface?.Notify($"{name}: {ex.Message}");
+            PublishProperties();
+        }
+    }
+
+    /// <summary>
+    /// The panel aimed at a CONTROL: the curated rows the designer service speaks - identity,
+    /// caption, geometry, state, colours, font - read tolerantly off the live control, and
+    /// written back through the same service an api `set` uses. The native panel enumerates
+    /// the control's whole typelib; this one shows what the model can honestly round-trip,
+    /// and grows with the service.
+    /// </summary>
+    private void PublishControlProperties(string formName, string controlName)
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        try
+        {
+            using var component = FindComponent(formName);
+            using var designer = component?.GetObject("Designer");
+            using var control = designer is null
+                ? null
+                : FormDesignService.FindControlNamed(designer, controlName, 0);
+            if (component is null || control is null)
+            {
+                // The control is gone - removed, or the markup renamed it. The panel falls
+                // back to the form rather than showing rows of nothing.
+                _propertiesControl = null;
+                PublishProperties();
+                return;
+            }
+
+            var kind = FormDesignService.FriendlyTypeOf(control);
+            var entries = new List<SurfacePropertyEntry>
+            {
+                new("(Name)", controlName, true, false),
+            };
+
+            void Number(string name)
+            {
+                if (FormDesignService.TryNumber(control, name) is { } value)
+                {
+                    entries.Add(new SurfacePropertyEntry(name, FormDesignService.FormatNumber(value), true, false));
+                }
+            }
+
+            void Flag(string name)
+            {
+                if (FormDesignService.TryFlag(control, name) is { } value)
+                {
+                    entries.Add(new SurfacePropertyEntry(name, value ? "True" : "False", true, true));
+                }
+            }
+
+            void Colour(string name)
+            {
+                if (FormDesignService.TryInt(control, name) is { } value)
+                {
+                    entries.Add(new SurfacePropertyEntry(name, value.ToString(System.Globalization.CultureInfo.InvariantCulture), true, false));
+                }
+            }
+
+            if (FormDesignService.TryText(control, "Caption") is { } caption)
+            {
+                entries.Add(new SurfacePropertyEntry("Caption", caption, true, false));
+            }
+
+            Number("Left");
+            Number("Top");
+            Number("Width");
+            Number("Height");
+            Flag("Enabled");
+            Flag("Visible");
+            if (FormDesignService.TryInt(control, "TabIndex") is { } tabIndex)
+            {
+                entries.Add(new SurfacePropertyEntry("TabIndex", tabIndex.ToString(System.Globalization.CultureInfo.InvariantCulture), true, false));
+            }
+
+            Colour("BackColor");
+            Colour("ForeColor");
+
+            try
+            {
+                using var font = control.GetDispId("Font") != DispId.Unknown ? control.GetObject("Font") : null;
+                if (font is not null)
+                {
+                    if (FormDesignService.TryText(font, "Name") is { } fontName)
+                    {
+                        entries.Add(new SurfacePropertyEntry("Font.Name", fontName, true, false));
+                    }
+
+                    if (FormDesignService.TryNumber(font, "Size") is { } fontSize)
+                    {
+                        entries.Add(new SurfacePropertyEntry("Font.Size", FormDesignService.FormatNumber(fontSize), true, false));
+                    }
+
+                    if (FormDesignService.TryFlag(font, "Bold") is { } bold)
+                    {
+                        entries.Add(new SurfacePropertyEntry("Font.Bold", bold ? "True" : "False", true, true));
+                    }
+
+                    if (FormDesignService.TryFlag(font, "Italic") is { } italic)
+                    {
+                        entries.Add(new SurfacePropertyEntry("Font.Italic", italic ? "True" : "False", true, true));
+                    }
+                }
+            }
+            catch
+            {
+                // A control without a font shows none.
+            }
+
+            FormDesignService.KeepDesignerDown(component);
+
+            entries.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            surface.ShowProperties(controlName, kind, [.. entries]);
+            Log.Info($"properties: {formName}.{controlName} ({kind}), showing {entries.Count} control row(s)");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"properties: {formName}.{controlName} could not be read", ex);
+        }
+    }
+
+    /// <summary>
     /// One property, rendered for the panel. Whether it is offered for editing comes from the type
     /// it currently holds: values of simple types are editable, objects and the unreadable are not.
     /// The editor can still refuse an edit, and that refusal is reported when it happens.
@@ -3483,6 +3669,7 @@ internal sealed partial class AddInSession : IDisposable
     private void OnComponentSelected(string component)
     {
         _propertiesTarget = component;
+        _propertiesControl = null;
         PublishProperties();
     }
 
@@ -3493,6 +3680,17 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private void OnPropertyEdit(string component, string name, string value)
     {
+        // The panel aimed at a CONTROL: the edit goes through the designer service - the
+        // same write an api `set` makes - and the open designer tab re-projects, liveness
+        // and all. The component echo names the control while one is targeted.
+        if (_propertiesControl is { Length: > 0 } editedControl
+            && string.Equals(component, editedControl, StringComparison.OrdinalIgnoreCase)
+            && _propertiesTarget is { Length: > 0 } owningForm)
+        {
+            OnControlPropertyEdit(owningForm, editedControl, name, value);
+            return;
+        }
+
         try
         {
             using var found = FindComponent(component);
@@ -4494,6 +4692,7 @@ internal sealed partial class AddInSession : IDisposable
             // designer tab does the same (queued 2026-08-13, when a probe showed the panel
             // holding a prior component over an active designer tab).
             _propertiesTarget = cased;
+            _propertiesControl = null;
 
             PublishModules();
             PublishProperties();
@@ -6010,6 +6209,7 @@ internal sealed partial class AddInSession : IDisposable
 
         // Opening a module also selects it, the way the editor's own tree behaves.
         _propertiesTarget = component;
+        _propertiesControl = null;
 
         var display = DisplayFromProjectId(owner);
         _writtenModules[WrittenKey(component, display)] = source;
@@ -7578,6 +7778,7 @@ internal sealed partial class AddInSession : IDisposable
             if (string.Equals(_propertiesTarget, removed, StringComparison.OrdinalIgnoreCase))
             {
                 _propertiesTarget = null;
+                _propertiesControl = null;
             }
 
             Log.Info($"project: removed {removed}" + (owner is null ? string.Empty : $" from {owner}"));

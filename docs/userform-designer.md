@@ -508,7 +508,15 @@ the host-owns-membership invariant survives.
   queued 2026-08-13). `designerSelect`, `designerEventStub` and the grown `designerCanvas`
   drive all of it.
 - **M4 - the inspector.** Selection flows into the Properties panel; property writes go
-  through the model; the transaction log starts recording. (Spike 7.)
+  through the model; the transaction log starts recording. (Spike 7.) **Bridgehead landed
+  2026-08-15**: a canvas selection targets the panel at the CONTROL - curated rows the
+  designer service can honestly round-trip (name, caption, geometry, state, colours,
+  font), read tolerantly off the live control, edited through `SetControlProperty` so the
+  panel, the api routes and the markup apply stay one write path, the open tab
+  re-projecting per edit. Selecting the form's ground returns the panel to the component.
+  The native panel enumerates the control's whole typelib; this one grows with the
+  service, and the transaction log stays ahead - it opens with direct manipulation, where
+  undo starts mattering.
 - **M5 - direct manipulation.** Click to select, drag to move, resize by handles, nudge,
   add from an xlide toolbox by true drag-and-drop, delete, align and distribute, undo over
   the transaction log - the native designer's full manipulation vocabulary, on our canvas.

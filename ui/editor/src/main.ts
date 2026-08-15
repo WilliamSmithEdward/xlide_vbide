@@ -460,6 +460,7 @@ function boot(): void {
         saveWorkbook: () => bridge.runCommand({ id: "saveOnly", target: "host", icon: "", label: "Save" }),
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
         eventStub: (control) => bridge.designerEventStub(id.module, id.project ?? null, control),
+        selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),
       });
       designerViews.set(key, view);
     }

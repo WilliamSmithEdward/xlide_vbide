@@ -345,6 +345,7 @@ export type ClientMessage =
   | { type: "applyFormMarkup"; module: string; project?: string; markup: string }
   | { type: "lintFormMarkup"; module: string; project?: string; markup: string }
   | { type: "designerEventStub"; module: string; project?: string; control?: string }
+  | { type: "designerSelection"; module: string; project?: string; control?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
   | { type: "completion"; id: number; offset: number }
@@ -661,6 +662,17 @@ export class EditorBridge {
   designerEventStub(module: string, project: string | null, control: string | null): void {
     this.transport.post({
       type: "designerEventStub",
+      module,
+      ...(project ? { project } : {}),
+      ...(control ? { control } : {}),
+    });
+  }
+
+  /** The canvas selection changed: the Properties panel follows it host-side. A null
+   * control is the form's ground - the component itself. */
+  designerSelection(module: string, project: string | null, control: string | null): void {
+    this.transport.post({
+      type: "designerSelection",
       module,
       ...(project ? { project } : {}),
       ...(control ? { control } : {}),
