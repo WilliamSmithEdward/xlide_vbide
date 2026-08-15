@@ -532,6 +532,19 @@ try {
   // ---- the M4 bridgehead: selection flows into the Properties panel as control rows ----
 
   await api.act("activate", { module: form, face: "design" });
+
+  // The REAL click's path: hit-testing at the control's own centre must answer the
+  // control. designerSelect bypasses hit-testing, which is how an invisible full-canvas
+  // overlay (the notice, display-clobbered past its hidden attribute) ate every real
+  // click while 157 checks stayed green.
+  const hitAnswer = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); if (!el) return "no element"; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit) ? "the control" : (hit?.className || "nothing"); })()');
+  check("a real click's hit-test lands on the control, not an invisible overlay",
+    hitAnswer === "the control", String(hitAnswer));
+
+  const ergonomics = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); return getComputedStyle(el).cursor + "|" + (el.title || "no title"); })()');
+  check("the canvas wears its ergonomics: a clickable cursor and the name-and-kind tooltip",
+    /^pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
+
   await api.act("designerSelect", { module: form, control: "RegionPick" });
   const controlPanel = await waitFor("the panel to show the selected control", async () => {
     const shown = (await api.ui()).properties;

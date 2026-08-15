@@ -3383,6 +3383,15 @@ body.objbrowser-page #objbrowser-card {
   padding: 24px;
 }
 
+/* The `display: grid` here BEATS the browser's own `[hidden] { display: none }` - author
+   styles outrank the UA sheet - so without the explicit [hidden] rule below, the "form
+   could not be read" surface stood invisibly over the whole canvas and ate every real
+   click while the suite's programmatic selects sailed past it (the owner, 2026-08-15:
+   "clicking on the xlide surface, and I dont see anything happen"). */
+.designer-notice[hidden] {
+  display: none;
+}
+
 .designer-notice {
   position: absolute;
   inset: 0;
@@ -3491,6 +3500,20 @@ body.objbrowser-page #objbrowser-card {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Hover ergonomics (the owner, 2026-08-15): the control a click would select lights up,
+   and only the DEEPEST hovered control does - without :has, a Frame outlines under its
+   own children. The cursor stays a pointer across the whole form face, because every
+   inch of it selects something; the resize and move cursors are M5's, worn only when the
+   handles actually drag. */
+.dc-form {
+  cursor: pointer;
+}
+
+.dc:hover:not(:has(.dc:hover)) {
+  outline: 1px solid rgba(74, 106, 157, 0.8);
+  outline-offset: 1px;
 }
 
 .dc-Label {
