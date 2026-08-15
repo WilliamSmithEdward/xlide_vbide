@@ -202,7 +202,15 @@ export class DesignerView {
     // arranging, a full-width document while writing, one click each way.
     const hideMarkup = document.createElement("button");
     hideMarkup.type = "button";
+    // A REAL chevron rather than a border-trick pseudo-element: the owner caught one of
+    // the triangles rendering as an empty button in a state the headless frame does not
+    // reproduce (2026-08-15), and an inline path is immune to the whole class - border
+    // rounding, margin interplay, rotation - at any zoom. One glyph pointing UP; the
+    // stylesheet rotates it per orientation and collapse state.
+    const chevron = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2 6.5 L5 3.5 L8 6.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+
     hideMarkup.className = "designer-collapse designer-collapse-markup";
+    hideMarkup.innerHTML = chevron;
     hideMarkup.addEventListener("click", (event) => {
       event.stopPropagation();
       this.setCollapsed(this.collapsed === "markup" ? null : "markup");
@@ -213,6 +221,7 @@ export class DesignerView {
     const hideCanvas = document.createElement("button");
     hideCanvas.type = "button";
     hideCanvas.className = "designer-collapse designer-collapse-canvas";
+    hideCanvas.innerHTML = chevron;
     hideCanvas.addEventListener("click", (event) => {
       event.stopPropagation();
       this.setCollapsed(this.collapsed === "canvas" ? null : "canvas");

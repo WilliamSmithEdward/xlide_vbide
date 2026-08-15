@@ -3782,28 +3782,34 @@ body.objbrowser-page #objbrowser-card {
   background: var(--xl-accent, #0e639c);
 }
 
-.designer-collapse::after {
-  content: "";
-  border: 4px solid transparent;
+/* One SVG chevron per button, pointing UP at rest; rotation carries the meaning. A real
+   path replaced the border-trick pseudo after one triangle rendered as an empty button in
+   a state the headless frame could not reproduce (the owner, 2026-08-15). */
+.designer-collapse svg {
+  width: 10px;
+  height: 10px;
+  display: block;
 }
 
 /* Side-by-side: markup left, canvas right - chevrons point at what they hide. */
 .designer-collapse-markup { left: 50%; top: calc(50% - 34px); transform: translateX(-50%); }
 .designer-collapse-canvas { left: 50%; top: calc(50% + 20px); transform: translateX(-50%); }
-.designer-collapse-markup::after { border-right-color: currentColor; margin-left: -4px; }
-.designer-collapse-canvas::after { border-left-color: currentColor; margin-right: -4px; }
+.designer-collapse-markup svg { transform: rotate(-90deg); }
+.designer-collapse-canvas svg { transform: rotate(90deg); }
 
 /* Stacked: canvas above, markup below - the chevrons rotate with the axis. */
 .designer-view.stacked .designer-collapse-markup { top: 50%; left: calc(50% - 34px); transform: translateY(-50%); }
 .designer-view.stacked .designer-collapse-canvas { top: 50%; left: calc(50% + 20px); transform: translateY(-50%); }
-.designer-view.stacked .designer-collapse-markup::after { border-right-color: transparent; border-top-color: currentColor; margin: 2px 0 -2px; }
-.designer-view.stacked .designer-collapse-canvas::after { border-left-color: transparent; border-bottom-color: currentColor; margin: -2px 0 2px; }
+.designer-view.stacked .designer-collapse-markup svg { transform: rotate(180deg); }
+.designer-view.stacked .designer-collapse-canvas svg { transform: rotate(0deg); }
 
 /* A hidden half leaves the divider standing as the way home; the flipped chevron reads
    as "bring it back". */
 .designer-view.hide-markup .designer-markup-half { display: none; }
 .designer-view.hide-canvas .designer-canvas-half { display: none; }
-.designer-view.hide-markup .designer-collapse-markup::after,
-.designer-view.hide-canvas .designer-collapse-canvas::after { transform: rotate(180deg); }
+.designer-view.hide-markup .designer-collapse-markup svg { transform: rotate(90deg); }
+.designer-view.hide-canvas .designer-collapse-canvas svg { transform: rotate(-90deg); }
+.designer-view.stacked.hide-markup .designer-collapse-markup svg { transform: rotate(0deg); }
+.designer-view.stacked.hide-canvas .designer-collapse-canvas svg { transform: rotate(180deg); }
 .designer-view.hide-markup .designer-splitter,
 .designer-view.hide-canvas .designer-splitter { cursor: default; }

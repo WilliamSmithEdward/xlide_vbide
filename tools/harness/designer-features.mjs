@@ -277,6 +277,12 @@ try {
     (await api.ui()).properties?.component === form, { budgetMs: 15000 });
   check("and opening it targets the form in the Properties panel, the native designer's own selection", true);
 
+  // The divider's chevrons are real SVG paths now - one rendered as an empty button in a
+  // state the headless frame could not reproduce (the owner, 2026-08-15) - and a glyph
+  // that is an element can be counted where a border-trick pseudo could not be.
+  const chevrons = await api.ask('document.querySelectorAll(".designer-collapse svg").length');
+  check("both divider chevrons carry their glyph", Number(chevrons) === 2, `${chevrons} glyph(s)`);
+
   // ---- Run with the designer tab active launches the form - the editor's own F5 ----
 
   // The command POSTS the editor's own action and answers promptly (measured 2026-08-14:
