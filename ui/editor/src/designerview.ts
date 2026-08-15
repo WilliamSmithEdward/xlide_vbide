@@ -701,6 +701,7 @@ export class DesignerView {
   canvasSnapshot(): {
     draft: boolean;
     dirty: boolean;
+    undoable: boolean;
     selected: string | null;
     markupLine: number;
     controls: { name: string; left: number; top: number; width: number; height: number }[];
@@ -708,6 +709,10 @@ export class DesignerView {
     return {
       draft: this.draftShown,
       dirty: this.dirty,
+      // Whether the DOCUMENT has a gesture to give back. The canvas's own Ctrl+Z is only as
+      // good as this, and a row that waits for an undo to land wants to know the difference
+      // between "undone and re-rendered" and "there was nothing on the stack".
+      undoable: this.model.canUndo(),
       selected: this.selectedName,
       markupLine: this.editor.getPosition()?.lineNumber ?? 0,
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
@@ -922,10 +927,10 @@ export class DesignerView {
     this.drag = null;
   }
 
-  /** The canvas's own keys: arrows nudge the selection a point at a time - through the same
-   * commit a drag takes, so the picture, the dot and undo behave identically - Escape
-   * abandons a drag in flight, and undo/redo reach the document from this half too, because
-   * this half edits it now. */
+  /** The canvas's own keys: arrows nudge the selection a point at a time and Shift+arrow
+   * resizes it - through the same commit a drag takes, so the picture, the dot and undo behave
+   * identically - Delete takes the selection out of the document, Escape abandons a gesture in
+   * flight, and undo/redo reach the document from this half too, because this half edits it. */
   private onCanvasKey(event: KeyboardEvent): void {
     if (event.key === "Escape") {
       this.cancelDrag();
@@ -935,10 +940,25 @@ export class DesignerView {
     if ((event.ctrlKey || event.metaKey) && !event.altKey) {
       const key = event.key.toLowerCase();
       if (key === "z" || key === "y") {
-        this.editor.trigger("canvas", key === "y" || event.shiftKey ? "redo" : "undo", null);
+        // The MODEL's own undo rather than `editor.trigger("undo")`. The undo stack belongs to
+        // the document both halves share, and this half has no editor of its own to route
+        // through: going straight at the model says what it means and does not depend on
+        // monaco's idea of which editor is active.
+        if (key === "y" || event.shiftKey) {
+          this.model.redo();
+        } else {
+          this.model.undo();
+        }
+
         event.preventDefault();
       }
 
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+      this.deleteSelection();
       return;
     }
 
@@ -1014,6 +1034,49 @@ export class DesignerView {
       text,
     }], () => null);
     this.paintBox(element, { left, top, width, height });
+    return true;
+  }
+
+  /**
+   * Takes the selected control out of the document - its line and everything indented under it,
+   * which is its properties and, for a container, its children. One undoable edit, like every
+   * other canvas gesture, so a mistaken Delete is one Ctrl+Z away and the form itself is
+   * untouched until the save carries the removal through the apply's name-keyed diff.
+   *
+   * The FORM cannot be deleted from its own canvas: removing a component is the tree's gesture,
+   * with the confirmation the product asks there. Selection lands back on the form, which is
+   * where the native designer leaves it and what returns the Properties panel to the component.
+   */
+  private deleteSelection(): boolean {
+    const name = this.selectedName;
+    if (!name) {
+      return false;
+    }
+
+    const header = this.headerOf(name);
+    if (!header) {
+      return false;
+    }
+
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+    const own = indent(lines[header.line - 1] ?? "");
+    let last = header.line;
+    while (last < lines.length && indent(lines[last] ?? "") > own) {
+      last += 1;
+    }
+
+    // Eat the line break BEFORE the block when it runs to the end of the document, and the one
+    // after it otherwise: either way the document is left without a blank line where the
+    // control used to be, which is a line the parser would refuse.
+    const range = last < this.model.getLineCount()
+      ? new monaco.Range(header.line, 1, last + 1, 1)
+      : new monaco.Range(header.line - 1, this.model.getLineMaxColumn(header.line - 1),
+        last, this.model.getLineMaxColumn(last));
+
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{ range, text: "" }], () => null);
+    this.select("");
     return true;
   }
 
@@ -1230,6 +1293,28 @@ export class DesignerView {
 
     this.sendGesture(reached, spot, dx, dy);
     return `resized ${name === "" ? "the form" : name}`;
+  }
+
+  /**
+   * A delete driven from the debug surface: the control is SELECTED the way a hand must, and
+   * then the real Delete key is pressed on the canvas - the same listener, the same commit - so
+   * the act cannot pass on a path the keyboard does not take.
+   */
+  deleteControl(name: string): string {
+    if (this.selectedName !== name) {
+      this.select(name);
+    }
+
+    if (this.selectedName !== name) {
+      return `${name} is not on the canvas to select`;
+    }
+
+    this.canvasScroll.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Delete",
+      bubbles: true,
+      cancelable: true,
+    }));
+    return this.headerLineOf(name) === 0 ? `deleted ${name}` : `${name} is still in the document`;
   }
 
   /** The pointer sequence both instruments send: press where the hit test answered, one move

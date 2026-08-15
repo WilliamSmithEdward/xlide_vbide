@@ -552,6 +552,17 @@ the host-owns-membership invariant survives.
   undo element, the same draft preview, and a move that finds no `size` clause does not
   quietly add one.
 
+  **Delete landed with them**, and it is the gesture that finishes the sentence the canvas
+  started: the selected control's line leaves the document, and everything indented under
+  it goes too - its properties, and a container's children - because a Frame whose header
+  went but whose children stayed is not a document the parser would take. One undoable
+  edit, like every other gesture, so a mistaken Delete costs one keystroke. The form keeps
+  the control until Ctrl+S carries the removal through the apply's name-keyed diff.
+  Selection lands back on the form, which is where the native designer leaves it and what
+  returns the Properties panel to the component. The FORM itself cannot be deleted from
+  its own canvas: removing a component is the tree's gesture, with the confirmation the
+  product asks there.
+
   One measured trap sits under all of this: **a gesture's origin comes from the DOCUMENT,
   never from the painted box.** The first resize read `element.offsetWidth`, which carries
   whatever border the renderer drew, so a form pulled twenty points wider grew twenty-one.

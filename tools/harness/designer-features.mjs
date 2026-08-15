@@ -80,6 +80,38 @@ let form = `${PLANNED_FORM}2`;
 /** What the cleanup's workbook write answered, checked after the try closes. */
 let written = null;
 
+/*
+ * Every raw-DOM row below scopes itself to THIS form's view.
+ *
+ * A live session can hold more than one designer tab - another form's, or one a developer left
+ * open by hand - and a bare `querySelector(".designer-canvas-scroll")` takes whichever stands
+ * first in the DOM, which is a coin toss about which document a keystroke edits. The view root
+ * carries `data-module`, so aiming is one attribute; every gesture row below is aimed.
+ */
+const inView = (selector) => `document.querySelector('.designer-view[data-module="${form}"] ${selector}')`;
+const inViewAll = (selector) => `[...document.querySelectorAll('.designer-view[data-module="${form}"] ${selector}')]`;
+
+/**
+ * A real keydown on THIS view's canvas: the gestures the keyboard owns - nudge, resize, undo,
+ * delete - all arrive this way, through the listener a developer's own key would reach.
+ *
+ * It THROWS when the canvas is not mounted, and that is half the point of the helper: the page
+ * keeps one designer view attached at a time, so a canvas whose tab is not showing is not in
+ * the DOM at all, and a press into nothing would leave the row waiting out its budget for a
+ * change nobody asked for. An instrument that quietly does nothing is worse than a missing one.
+ */
+const press = async (key, extra = "") => {
+  const answer = await api.ask(
+    `(() => { const el = ${inView(".designer-canvas-scroll")}; if (!el) return "no canvas"; `
+    + `el.dispatchEvent(new KeyboardEvent("keydown", { key: ${JSON.stringify(key)}, ${extra} `
+    + `bubbles: true, cancelable: true })); return "sent"; })()`);
+  if (answer !== "sent") {
+    throw new Error(`${key} went nowhere: ${form}'s canvas is not mounted (${answer})`);
+  }
+
+  return answer;
+};
+
 try {
   // ---- built through the model, as the fixture generator builds it ----
 
@@ -283,7 +315,7 @@ try {
   // The divider's chevrons are real SVG paths now - one rendered as an empty button in a
   // state the headless frame could not reproduce (the owner, 2026-08-15) - and a glyph
   // that is an element can be counted where a border-trick pseudo could not be.
-  const chevrons = await api.ask('document.querySelectorAll(".designer-collapse svg").length');
+  const chevrons = await api.ask(`${inViewAll(".designer-collapse svg")}.length`);
   check("both divider chevrons carry their glyph", Number(chevrons) === 2, `${chevrons} glyph(s)`);
 
   // ---- Run with the designer tab active launches the form - the editor's own F5 ----
@@ -462,14 +494,14 @@ try {
   });
   await waitFor("the tall draft to render", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.draft) === true, { budgetMs: 15000 });
-  const wheeled = await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.scrollTop = 0; el.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true })); return el.scrollTop; })()');
+  const wheeled = await api.ask(`(() => { const el = ${inView(".designer-canvas-scroll")}; el.scrollTop = 0; el.dispatchEvent(new WheelEvent("wheel", { deltaY: 240, bubbles: true, cancelable: true })); return el.scrollTop; })()`);
   check("a wheel over the canvas scrolls the form", Number(wheeled) > 0, `scrollTop ${wheeled}`);
 
   // A draft picture is said twice and no more: the tab's own unsaved dot, and the outline
   // around the form. The banner that said it a third time in words was retired 2026-08-15
   // (the owner: the dot on the tab is fine), so this row holds the two cues that remain -
   // and the absence of the third, because the strip it occupied is the point.
-  const draftCues = await api.ask('(() => { const scroll = document.querySelector(".designer-canvas-scroll"); const face = document.querySelector(".dc-form"); return [scroll?.classList.contains("draft") ? "outlined" : "no outline", document.querySelector(".designer-draft-note") ? "banner stands" : "no banner", face ? "form drawn" : "no form"].join("|"); })()');
+  const draftCues = await api.ask(`(() => { const scroll = ${inView(".designer-canvas-scroll")}; const face = ${inView(".dc-form")}; return [scroll?.classList.contains("draft") ? "outlined" : "no outline", ${inView(".designer-draft-note")} ? "banner stands" : "no banner", face ? "form drawn" : "no form"].join("|"); })()`);
   check("the draft picture wears the form outline and no banner",
     draftCues === "outlined|no banner|form drawn", String(draftCues));
   const draftTab = ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
@@ -546,14 +578,14 @@ try {
   // control. designerSelect bypasses hit-testing, which is how an invisible full-canvas
   // overlay (the notice, display-clobbered past its hidden attribute) ate every real
   // click while 157 checks stayed green.
-  const hitAnswer = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); if (!el) return "no element"; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit) ? "the control" : (hit?.className || "nothing"); })()');
+  const hitAnswer = await api.ask(`(() => { const el = ${inViewAll(".dc")}.find(e => e.dataset.control === "RegionPick"); if (!el) return "no element"; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit) ? "the control" : (hit?.className || "nothing"); })()`);
   check("a real click's hit-test lands on the control, not an invisible overlay",
     hitAnswer === "the control", String(hitAnswer));
 
   // The HAND across the whole form face (the owner's call, 2026-08-15): every inch of it
   // responds to a press, which is what a hand means. The gesture cursors live elsewhere - the
   // move cursor while a drag runs, each handle's own resize cursor.
-  const ergonomics = await api.ask('(() => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === "RegionPick"); const face = document.querySelector(".dc-form"); return getComputedStyle(el).cursor + "|" + getComputedStyle(face).cursor + "|" + (el.title || "no title"); })()');
+  const ergonomics = await api.ask(`(() => { const el = ${inViewAll(".dc")}.find(e => e.dataset.control === "RegionPick"); const face = ${inView(".dc-form")}; return getComputedStyle(el).cursor + "|" + getComputedStyle(face).cursor + "|" + (el.title || "no title"); })()`);
   check("hovering the canvas shows the hand, and the name-and-kind tooltip stands",
     /^pointer\|pointer\|RegionPick \(ComboBox\)$/.test(String(ergonomics)), String(ergonomics));
 
@@ -561,7 +593,7 @@ try {
 
   // Selected, it offers the move - and says so with the cursor, which an unselected control
   // beside it does not (the owner's rule, 2026-08-15).
-  const selectedCursor = await api.ask('(() => { const of = (n) => { const el = [...document.querySelectorAll(".dc")].find(e => e.dataset.control === n); return el ? getComputedStyle(el).cursor : "missing"; }; return of("RegionPick") + "|" + of("NameBox"); })()');
+  const selectedCursor = await api.ask(`(() => { const of = (n) => { const el = ${inViewAll(".dc")}.find(e => e.dataset.control === n); return el ? getComputedStyle(el).cursor : "missing"; }; return of("RegionPick") + "|" + of("NameBox"); })()`);
   check("the SELECTED control wears the move cursor, its neighbours keep the hand",
     selectedCursor === "move|pointer", String(selectedCursor));
 
@@ -627,7 +659,7 @@ try {
 
   // One Ctrl+Z takes the whole drag back, from the CANVAS half: proof the drop is a single
   // edit rather than a stream of them, and that the canvas reaches the document's undo.
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await press("z", "ctrlKey: true,");
   await waitFor("the document to come back", async () =>
     /RegionPick at 84,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
   { budgetMs: 15000 });
@@ -640,7 +672,7 @@ try {
 
   // The arrow keys: one point a press, through the same commit the drop takes.
   await api.act("designerSelect", { module: form, control: "RegionPick" });
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); return "sent"; })()');
+  await press("ArrowRight");
   await waitFor("the nudge to reach the document", async () =>
     /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
   { budgetMs: 15000 });
@@ -648,11 +680,11 @@ try {
 
   // A second nudge is a SECOND undo step. The stack stop before each move is what keeps one
   // gesture from swallowing the one before it, and one Ctrl+Z gives back exactly one.
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true })); return "sent"; })()');
+  await press("ArrowRight");
   await waitFor("the second nudge", async () =>
     /RegionPick at 86,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
   { budgetMs: 15000 });
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await press("z", "ctrlKey: true,");
   await waitFor("one gesture back", async () =>
     /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
   { budgetMs: 15000 });
@@ -697,7 +729,7 @@ try {
   check("a pull past the far edge stops at the floor size rather than inverting the box", true);
 
   // Shift+arrow is the keyboard's resize, the native designer's own pairing with a bare arrow.
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", shiftKey: true, bubbles: true, cancelable: true })); return "sent"; })()');
+  await press("ArrowRight", "shiftKey: true,");
   await waitFor("the keyboard resize", async () =>
     /RegionPick at 96,50 size 5x4/.test(await tabText()), { budgetMs: 15000 });
   check("Shift+arrow resizes by a point where a bare arrow moves", true);
@@ -710,15 +742,55 @@ try {
   check("360x320 becomes 380x332 on the Form line, with no position added", true);
 
   // The promise the handles now keep: each wears the cursor of the pull it makes.
-  const handleCursor = await api.ask('(() => { const h = document.querySelector(".dc-handle-se"); if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : `covered by ${hit?.className || "nothing"}`); })()');
+  const handleCursor = await api.ask(`(() => { const h = ${inView(".dc-handle-se")}; if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : "covered by " + (hit?.className || "nothing")); })()`);
   check("a handle wears its own resize cursor and the pointer can reach it",
     handleCursor === "nwse-resize|reachable", String(handleCursor));
+
+  // ---- and Delete takes a control out, children and all ----
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the document back at canonical before the delete rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  // A Frame, on purpose: its child is indented UNDER it, so a delete that only took the header
+  // line would leave an orphaned OptionButton the parser has nowhere to put.
+  //
+  // The Frame holds ONE child here, not the two the plan draws: the nested-remove row above
+  // took PickAir off the form for good, and every projection since has been without it. A
+  // first draft of these rows asserted all three names came back and spent an hour looking for
+  // a fault in undo - the document simply never held the third. Read what the state IS.
+  const deleted = await api.act("designerDelete", { module: form, control: "Options" });
+  check("Delete takes the selected control out of the document", deleted.did === true, deleted.detail);
+  const afterDelete = await tabText();
+  check("and its whole block goes with it - properties and children included",
+    !/Frame Options/.test(afterDelete) && !/PickGround/.test(afterDelete)
+    && /ToggleButton HoldToggle/.test(afterDelete),
+    afterDelete.split(/\r?\n/).length + " line(s) left");
+  check("the FORM still holds it until the save",
+    (await api.designer(form, project)).controls.some((c) => c.name === "PickGround"));
+  check("and the selection lands back on the form, where the panel follows it",
+    ((await api.act("designerCanvas", { module: form })).data?.selected) === "");
+
+  await press("z", "ctrlKey: true,");
+  const blockBack = await waitFor("the block to come back", async () => {
+    const text = await tabText();
+    return /Frame Options/.test(text) && /PickGround/.test(text) ? "restored" : null;
+  }, { budgetMs: 8000 }).catch(async () => {
+    // A bare timeout says nothing about WHY, and chasing this one without the state cost an
+    // hour. The document's own stack answers first: an undo that found nothing to give back
+    // reads undoable=false, and a document already at canonical reads dirty=false.
+    const snap = (await api.act("designerCanvas", { module: form })).data;
+    return `not back: undoable=${snap?.undoable} dirty=${snap?.dirty} `
+      + `selected=${JSON.stringify(snap?.selected)} drawn=${snap?.controls?.length}`;
+  });
+  check("one Ctrl+Z brings the whole block back - a mistaken Delete costs one keystroke",
+    blockBack === "restored", String(blockBack));
 
   // Undo all the way to the FLOOR of the stack. The document's own arrival must not be a step
   // on it: as an edit it was, and one Ctrl+Z in a tab whose only edit was the projection
   // landing blanked the document while the canvas kept showing the form - found by hand and by
   // the owner in the same minute, with ten green drag rows standing (2026-08-15).
-  await api.ask('(() => { const el = document.querySelector(".designer-canvas-scroll"); for (let i = 0; i < 12; i++) { el.dispatchEvent(new KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true })); } return "sent"; })()');
+  for (let i = 0; i < 12; i++) { await press("z", "ctrlKey: true,"); }
   const floor = String((await api.act("designerMarkup", { module: form })).data);
   check("undone to the floor of the stack, the document is still the form's text - never blank",
     /^Form /.test(floor) && /CommandButton OkButton/.test(floor), `${floor.length} char(s)`);

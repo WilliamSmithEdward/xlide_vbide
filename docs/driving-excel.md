@@ -1358,6 +1358,7 @@ node tools\harness\xlide-api.mjs act designerSelect module EntryForm control Reg
 node tools\harness\xlide-api.mjs act designerDrag module EntryForm control RegionPick dx 24 dy 12
 node tools\harness\xlide-api.mjs act designerResize module EntryForm control RegionPick edge se dx 24 dy 12
 node tools\harness\xlide-api.mjs act designerResize module EntryForm edge se dx 20 dy 12
+node tools\harness\xlide-api.mjs act designerDelete module EntryForm control RegionPick
 node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
 node tools\harness\xlide-api.mjs command save
 ```
@@ -1369,7 +1370,15 @@ handle (`edge` is `nw`, `n`, `ne`, `e`, `se`, `s`, `sw` or `w`), and with no `co
 the FORM's own frame. Either way the drop rewrites that line's geometry in the document rather
 than writing the form: `designerCanvas` then reports `draft: true`, `dirty: true` and the new
 box, `designerMarkup` shows the rewritten line, and the form itself does not move until
-`command save`, which is the tab's Ctrl+S. One undo takes a whole gesture back.
+`command save`, which is the tab's Ctrl+S. One undo takes a whole gesture back, and
+`designerCanvas`'s `undoable` says whether the document still has one to give.
+
+`designerDelete` is the same shape with the Delete key: the control's line leaves the document
+with everything indented under it, and the form keeps the control until the save. To drive the
+keyboard gestures by hand - arrows nudge, Shift+arrows resize, Ctrl+Z undoes - dispatch a
+`keydown` at `.designer-view[data-module="EntryForm"] .designer-canvas-scroll`. Aim it with
+that attribute rather than at a bare `.designer-canvas-scroll`: a session can hold several
+designer tabs, and only one view is mounted at a time.
 
 `tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
 children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.

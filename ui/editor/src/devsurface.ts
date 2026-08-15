@@ -167,6 +167,7 @@ export interface DevSurfaceParts {
       canvasSnapshot(): {
         draft: boolean;
         dirty: boolean;
+        undoable: boolean;
         selected: string | null;
         markupLine: number;
         controls: { name: string; left: number; top: number; width: number; height: number }[];
@@ -175,6 +176,7 @@ export interface DevSurfaceParts {
       requestEventStub(control: string | null): void;
       dragControl(name: string, dx: number, dy: number): string;
       resizeControl(name: string, edge: string, dx: number, dy: number): string;
+      deleteControl(name: string): string;
     } | null;
   };
   search: {
@@ -770,6 +772,26 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       const outcome = view.resizeControl(typeof args.control === "string" ? args.control : "", edge, dx, dy);
       return { did: outcome.startsWith("resized"), detail: `${outcome} by ${dx},${dy}pt on ${edge}` };
+    },
+
+    /** Deletes a control from the canvas: selects it, then presses the real Delete key on the
+     * canvas. The control's line - and everything indented under it, its properties and a
+     * container's children - leaves the DOCUMENT as one undoable edit; the form itself keeps
+     * the control until the tab's Ctrl+S carries the removal through the apply. */
+    designerDelete: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const control = typeof args.control === "string" ? args.control : null;
+      if (!module || !control) {
+        return { did: false, detail: "designerDelete takes module and control" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = view.deleteControl(control);
+      return { did: outcome.startsWith("deleted"), detail: outcome };
     },
 
     /** The canvas double-click: asks the host for the default event handler - written when
