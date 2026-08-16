@@ -3608,6 +3608,29 @@ body.objbrowser-page #objbrowser-card {
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
 }
 
+/* An alignment guide, drawn while a gesture is lining up with a neighbour's edge or centre and
+   gone the moment it ends. Inside the moving control's own container, which is the box its
+   coordinates are measured in. Warm rather than blue: the selection is already blue, and a line
+   that says "this is where it is landing" should not read as another selection. */
+.dc-guide {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  background: #e5556b;
+}
+
+.dc-guide-x {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.dc-guide-y {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
 /* The canvas selection's block in the document: a wash over every line of it, header and
    properties and children, so the two halves agree about what is selected without the reader
    working out where the block stops. Light enough to read the code through. */
@@ -3624,17 +3647,27 @@ body.objbrowser-page #objbrowser-card {
   justify-content: center;
   flex: 0 0 auto;
   width: 26px;
-  /* Room on the left for the strip's forward arrow, which sits right against this whenever the
-     palette has more to show: two controls touching read as one control (the owner,
-     2026-08-16, "need some padding against the arrow and the quick toggle"). */
-  margin: 3px 5px 3px 9px;
+  /* Room on the left for the strip's forward arrow, which sits right against the pair whenever
+     the palette has more to show; the two switches themselves sit close together, because they
+     are one choice and a gap between them reads as two unrelated controls (the owner,
+     2026-08-16, "need some padding against the arrow and the quick toggle", then "too much gap
+     between them"). The margin rule below closes the pair up again. */
+  margin: 3px 3px 3px 9px;
   padding: 0;
   color: inherit;
-  opacity: 0.5;
-  background: transparent;
-  border: 1px solid transparent;
+  opacity: 0.6;
+  background: var(--xl-editor-bg, #1e1e1e);
+  /* A border even when it is OFF: these are buttons, and a button with no edge until it is
+     pressed looks like a decoration until somebody guesses (the owner: "please add a
+     non-selected border around each to show they are buttons"). */
+  border: 1px solid var(--xl-border, #333);
   border-radius: 3px;
   cursor: pointer;
+}
+
+/* The pair is one choice: only the first of them takes the gap from the palette. */
+.designer-snap + .designer-snap {
+  margin-left: 0;
 }
 
 .designer-snap:hover {

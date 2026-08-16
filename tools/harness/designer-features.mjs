@@ -812,13 +812,13 @@ try {
   // the row would be measuring the grid rather than the commit path it was written for. Off
   // here, on there, and the restore is at the end of the grid's own section.
   const shipped = await api.settings();
-  check("the grid ships on, at six points - the editor's own Align Controls to Grid",
-    shipped.designerSnapToGrid === true && shipped.designerGridSize === 6,
-    JSON.stringify({ on: shipped.designerSnapToGrid, size: shipped.designerGridSize }));
+  check("snapping ships set to the grid, at six points - the editor's own Align Controls to Grid",
+    shipped.designerSnap === "grid" && shipped.designerGridSize === 6,
+    JSON.stringify({ snap: shipped.designerSnap, size: shipped.designerGridSize }));
 
-  await api.settings({ designerSnapToGrid: false });
-  await waitFor("the page to hear that the grid is off", async () =>
-    (await api.ui()).settings?.designerSnapToGrid === false, { budgetMs: 15000 });
+  await api.settings({ designerSnap: "off" });
+  await waitFor("the page to hear that snapping is off", async () =>
+    (await api.ui()).settings?.designerSnap === "off", { budgetMs: 15000 });
 
   // The real pointer sequence - press on what the hit test answers, past the threshold, drop -
   // so the row proves the gesture, not the arithmetic behind it.
@@ -1161,9 +1161,9 @@ try {
     free[0] === beforeFree[0] + 7 && free[1] === beforeFree[1] + 7,
     `${beforeFree.join(",")} + 7,7 is ${free.join(",")}`);
 
-  await api.settings({ designerSnapToGrid: true });
+  await api.settings({ designerSnap: "grid" });
   await waitFor("the page to hear that the grid is back", async () =>
-    (await api.ui()).settings?.designerSnapToGrid === true, { budgetMs: 15000 });
+    (await api.ui()).settings?.designerSnap === "grid", { budgetMs: 15000 });
 
   // And with it on, four points land on the nearest six - a delta chosen because it does NOT
   // reach a grid line by itself, so the row can tell snapping from arithmetic. Seven points
@@ -1200,6 +1200,60 @@ try {
     `${overridden.join(",")} then one arrow is ${nudged.join(",")}`);
 
   check("and the setting is as the developer's file had it, which the rows above borrowed", true);
+
+  // ---- or it lines up with the OTHER CONTROLS, which is the other mode ----
+  //
+  // One or the other, never both: two snapping systems that disagree give a control two right
+  // answers and it takes whichever the code asked first. The rows below switch the mode and
+  // prove the difference by putting one control somewhere OFF the grid - with alt, the only way
+  // to get there - and then bringing another near it: landing on that odd number is alignment,
+  // and landing on the nearest six would be the grid it is no longer using.
+
+  await api.settings({ designerSnap: "objects" });
+  await waitFor("the page to hear that snapping follows the controls", async () =>
+    (await api.ui()).settings?.designerSnap === "objects", { budgetMs: 15000 });
+
+  const placeOf = async (control) => {
+    const found = new RegExp(`${control}(?: .*)? at ([0-9]+),([0-9]+)`).exec(await tabText());
+    return found ? found.slice(1).map(Number) : [];
+  };
+
+  const boxWas = await placeOf("NameBox");
+  await api.act("designerDrag", { module: form, control: "NameBox", dx: 1, dy: 0, alt: 1 });
+  await waitFor("the off-grid neighbour", async () =>
+    (await placeOf("NameBox"))[0] === boxWas[0] + 1, { budgetMs: 15000 });
+  const oddEdge = (await placeOf("NameBox"))[0];
+  check("a control can be put somewhere the grid would never allow", oddEdge % 6 !== 0,
+    `${oddEdge} is not a multiple of six, which is what makes the next row mean something`);
+
+  // Whatever the grid would have said is irrelevant in this mode - that is the point of the
+  // either/or - but the odd number still tells an alignment from an accident.
+
+  const holdWas = await placeOf("HoldToggle");
+  const lining = await api.act("designerDrag",
+    { module: form, control: "HoldToggle", dx: oddEdge - holdWas[0] + 2, dy: 0 });
+  await waitFor("the aligned drop", async () =>
+    (await placeOf("HoldToggle"))[0] !== holdWas[0], { budgetMs: 15000 });
+  const lined = await placeOf("HoldToggle");
+  check("a drag that comes near another control's edge lines up with it",
+    lined[0] === oddEdge,
+    `landed at ${lined[0]} where the neighbour's edge is ${oddEdge}`);
+
+  check("and the act says what it lined up with, which is the guide the canvas drew",
+    /lined up with x=/.test(lining.detail ?? ""), lining.detail);
+
+  // Alt escapes the alignment too, not only the grid.
+  const before = await placeOf("HoldToggle");
+  const freed = await api.act("designerDrag",
+    { module: form, control: "HoldToggle", dx: 2, dy: 0, alt: 1 });
+  await waitFor("the drop with alt held", async () =>
+    (await placeOf("HoldToggle"))[0] === before[0] + 2, { budgetMs: 15000 });
+  check("and alt escapes the alignment as well as the grid",
+    !/lined up with/.test(freed.detail ?? ""), freed.detail);
+
+  await api.settings({ designerSnap: "grid" });
+  await waitFor("snapping back the way the developer's file had it", async () =>
+    (await api.ui()).settings?.designerSnap === "grid", { budgetMs: 15000 });
 
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 
@@ -1292,7 +1346,7 @@ try {
   // then fails for a reason that has nothing to do with the code. Which is exactly what
   // happened the first time this suite aborted mid-section (2026-08-16). A borrowed setting is
   // returned in the finally, like anything else borrowed.
-  await api.settings({ designerSnapToGrid: true }).catch(() => {});
+  await api.settings({ designerSnap: "grid" }).catch(() => {});
 
   await api.component("remove", { name: form, project }).catch(() => {});
   // And the FILE too, not only the session. This suite saves the workbook on purpose - the

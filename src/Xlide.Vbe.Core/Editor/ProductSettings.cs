@@ -83,20 +83,28 @@ public sealed record ProductSettings
     // deliver. A `format.canonicalKeywords` in an older settings file is ignored rather than read.
 
     /// <summary>
-    /// The form designer's canvas snaps pointer gestures to its grid - a drag, a resize, a drop
-    /// out of the toolbox. The editor's own Align Controls to Grid, and on for the same reason:
-    /// a form built by hand is a form whose edges line up, and lining them up one point at a
-    /// time is work nobody should do twice.
+    /// What the form designer's canvas snaps POINTER gestures to: "grid", "objects" or "off".
     ///
-    /// The KEYBOARD is never snapped. Arrows and Shift+arrows move by a single point whatever
-    /// this says, because the developer who reaches for them has already decided that the grid
-    /// is not where they want the thing - and a nudge that jumps six points is not a nudge.
+    /// One or the other, never both. They collide when they disagree - a control near a
+    /// neighbour's edge and near a grid line has two right answers and takes whichever the code
+    /// asked first, which reads as a designer that cannot make up its mind (the owner,
+    /// 2026-08-16: "looks like snap to grid mode, and snap to object mode collide... should we
+    /// have it be either or (or neither)").
+    ///
+    /// "grid" is the editor's own Align Controls to Grid and the default for that reason.
+    /// "objects" is the design-surface behaviour: edges and centres of the neighbours sharing a
+    /// container, with a guide drawn where the gesture lines up.
+    ///
+    /// The KEYBOARD is never snapped, whichever this says. Arrows and Shift+arrows move by a
+    /// single point, because the hand that reaches for them has already decided that neither the
+    /// grid nor the neighbours are where they want the thing - and a nudge that jumps six points
+    /// is not a nudge. Holding ALT escapes whichever mode is on, for one gesture.
     /// </summary>
-    [JsonPropertyName("designer.snapToGrid")]
-    public bool DesignerSnapToGrid { get; set; } = true;
+    [JsonPropertyName("designer.snap")]
+    public string DesignerSnap { get; set; } = "grid";
 
     /// <summary>The grid's spacing in POINTS, the designer's own unit. Six, as the editor's
-    /// Options dialog ships it.</summary>
+    /// Options dialog ships it. Read only in "grid" mode.</summary>
     [JsonPropertyName("designer.gridSize")]
     public int DesignerGridSize { get; set; } = 6;
 
@@ -122,6 +130,12 @@ public sealed record ProductSettings
             : "comfy",
         FormatIndentSize = Math.Clamp(FormatIndentSize, 1, 8),
         DesignerGridSize = Math.Clamp(DesignerGridSize, 2, 24),
+        DesignerSnap = DesignerSnap?.ToLowerInvariant() switch
+        {
+            "objects" => "objects",
+            "off" => "off",
+            _ => "grid",
+        },
         SyncEngine = string.Equals(SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase)
             ? "builtIn"
             : "xlide",

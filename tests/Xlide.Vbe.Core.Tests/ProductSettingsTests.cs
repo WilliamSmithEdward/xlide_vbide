@@ -19,9 +19,22 @@ public class ProductSettingsTests
         Assert.True(settings.MirrorCommentSpacing);
         Assert.Equal(4, settings.FormatIndentSize);
 
-        // On, and six points, which is what the editor's own Options dialog ships.
-        Assert.True(settings.DesignerSnapToGrid);
+        // The grid, at six points, which is what the editor's own Options dialog ships.
+        Assert.Equal("grid", settings.DesignerSnap);
         Assert.Equal(6, settings.DesignerGridSize);
+    }
+
+    [Theory]
+    [InlineData("objects", "objects")]
+    [InlineData("OBJECTS", "objects")]
+    [InlineData("off", "off")]
+    [InlineData("grid", "grid")]
+    [InlineData("whatever", "grid")]
+    public void SnappingIsOneOfThreeAndAnythingElseIsTheGrid(string asked, string kept)
+    {
+        var settings = ProductSettings.Parse($"{{ \"designer.snap\": \"{asked}\" }}");
+
+        Assert.Equal(kept, settings.DesignerSnap);
     }
 
     [Theory]
@@ -52,7 +65,7 @@ public class ProductSettingsTests
         var settings = ProductSettings.Parse("{ \"format.indentSize\": 2 }");
 
         Assert.Equal(2, settings.FormatIndentSize);
-        Assert.True(settings.DesignerSnapToGrid);
+        Assert.Equal("grid", settings.DesignerSnap);
         Assert.Equal(6, settings.DesignerGridSize);
         Assert.Equal("comfy", settings.BlockLayout);
         Assert.True(settings.ContinueCommentOnNewline);

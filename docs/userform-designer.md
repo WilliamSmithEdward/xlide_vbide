@@ -473,20 +473,46 @@ the host-owns-membership invariant survives.
     calls back through `saveOnlyThenRun`) rather than being remembered on the host, because
     a refused apply calls nothing back: a flag waiting for a callback that never comes would
     have fired on somebody's unrelated Ctrl+S minutes later.
-  - *Snap to grid* - **landed 2026-08-16** (the owner: "can we add a toggleable snap to grid
-    mode for our designer?"). On by default at six points, which is the editor's own Align
-    Controls to Grid and its own spacing. Pointer gestures land on it - a drag, a resize by a
-    handle, a drop out of the toolbox - and the KEYBOARD never does: an arrow moves one point
-    whatever the setting says, because the hand that reaches for it has already decided the grid
-    is not where this control belongs, and a nudge that jumps six points is not a nudge.
+  - *Snapping, one way or the other* - **landed 2026-08-16** (the owner: "can we add a
+    toggleable snap to grid mode", then "can we add a snap to other objects realignment with
+    guide lines, think the experience of moving objects in a powerpoint slide", then - having
+    watched the two fight - "should we have it be either or (or neither)").
 
-    The switch sits at the end of the toolbox row rather than in the settings dialog alone,
-    because snapping is something a developer turns off for one awkward control and back on
-    immediately. It writes the SETTING, so the button, the dialog row and `settings?
-    designerSnapToGrid=` are three views of one fact, and it survives the session because the
-    setting does. The grid is painted as a repeating background on the form's client - a
-    360x320 form at six points is 3,180 cells, and that many divs is a canvas that stutters -
-    at a sixth of the form's own ink, which is a dot you can place against and stop seeing.
+    So `designer.snap` is `grid`, `objects` or `off`, and never two at once. They collide when
+    they disagree: a control near a neighbour's edge AND near a grid line has two right answers
+    and takes whichever the code asked first, which reads as a designer that cannot make up its
+    mind. `grid` ships, at six points, because that is the editor's own Align Controls to Grid.
+
+    Pointer gestures snap - a drag, a resize by a handle, a drop out of the palette - and the
+    KEYBOARD never does: an arrow moves one point whatever the mode, because the hand reaching
+    for it has already decided that neither the grid nor the neighbours are where this control
+    belongs, and a nudge that jumps six points is not a nudge. **Holding Alt escapes whichever
+    mode is on**, for one gesture, read per pointer event so pressing or releasing it mid-drag
+    changes what the next movement does.
+
+    Two switches at the end of the toolbox row rather than a setting two dialogs away, because
+    snapping is something a developer turns off for one awkward control and back on immediately.
+    Each is a toggle of its own mode and the pair gives the either/or/neither; both write the
+    SETTING, so the buttons, the dialog's row and `settings?designerSnap=` are three views of
+    one fact.
+
+    In `objects` mode the candidates are the edges and CENTRES of the siblings sharing a
+    container, plus the container's own inside edges and middle - siblings only, because
+    lining up with a control in another box is lining up with a coincidence. A guide is drawn
+    where the gesture lands, inside that container, and comes down on release; the acts answer
+    what they lined up with, which is the only way a probe can tell an alignment from an
+    accident.
+
+    **A container offers the edge it PAINTS.** A Frame's rectangle starts at the top of its
+    caption band and its rule is four points lower, so a guide at the rectangle ran through the
+    lettering and the control lining up with it looked aligned to the caption (the owner: "the
+    button should snap to the frame's edge, not the label"). A developer means the line they
+    can see.
+
+    The grid is painted as a repeating background on the form's client - 3,180 cells on a
+    360x320 form, and that many divs is a canvas that stutters - at a sixth of the form's ink,
+    shifted back half a cell so a dot lands ON the coordinates the snap produces. Asked whether
+    controls should sit exactly on the dots: yes, and they did not until that shift.
 
     **It also found a bug in the settings file, four settings old.** The record's properties
     were `init`, so the JSON source generator had to set every one of them in a single object
@@ -495,7 +521,7 @@ the host-owns-membership invariant survives.
     Nobody could see it while every key was in every file; the grid was the first setting added
     since, and it read back off, at a two-point spacing, on a machine whose file predated it by
     an hour. Settable properties let the generator construct first and assign only what is
-    there. A row pins it now: a key the file never mentions keeps its shipping default.
+    there. A row pins it: a key the file never mentions keeps its shipping default.
   - *A closed form is not yet an unloaded one* - measured while pinning the above. For about
     400ms after the close is posted, the component answers "no designer to read": the object
     is gone, not empty. `debugMode` is no guide (the log has it back at design while the form

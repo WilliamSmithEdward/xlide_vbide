@@ -1170,7 +1170,7 @@ internal sealed class EditorSurface : IDisposable
                 settings.TreeFollowsEditor,
                 settings.FormatIndentSize,
                 settings.SyncEngine,
-                settings.DesignerSnapToGrid,
+                settings.DesignerSnap,
                 settings.DesignerGridSize),
             EditorMessageContext.Default.SetSettingsMessage));
     }
@@ -1894,9 +1894,10 @@ internal sealed class EditorSurface : IDisposable
                         && engineValue.ValueKind == JsonValueKind.String
                             ? engineValue.GetString() ?? held.SyncEngine
                             : held.SyncEngine;
-                    var snapToGrid = document.RootElement.TryGetProperty("designerSnapToGrid", out var snapValue)
-                        ? snapValue.ValueKind is not JsonValueKind.False
-                        : held.DesignerSnapToGrid;
+                    var snapMode = document.RootElement.TryGetProperty("designerSnap", out var snapValue)
+                        && snapValue.ValueKind == JsonValueKind.String
+                            ? snapValue.GetString() ?? held.DesignerSnap
+                            : held.DesignerSnap;
                     var gridSize = document.RootElement.TryGetProperty("designerGridSize", out var gridValue)
                         && gridValue.TryGetInt32(out var gridAsked)
                         ? gridAsked
@@ -1910,7 +1911,7 @@ internal sealed class EditorSurface : IDisposable
                         TreeFollowsEditor = treeFollows,
                         FormatIndentSize = indentSize,
                         SyncEngine = syncEngine,
-                        DesignerSnapToGrid = snapToGrid,
+                        DesignerSnap = snapMode,
                         DesignerGridSize = gridSize,
                     }.Normalized());
                     break;

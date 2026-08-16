@@ -1008,8 +1008,8 @@ public sealed record DebugSettingsReply(
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     /// <summary>Which planner decides an import or export: "xlide" or "builtIn".</summary>
     [property: JsonPropertyName("syncEngine")] string SyncEngine,
-    /// <summary>The designer canvas snaps POINTER gestures to its grid; the keyboard never.</summary>
-    [property: JsonPropertyName("designerSnapToGrid")] bool DesignerSnapToGrid,
+    /// <summary>What the designer canvas snaps POINTER gestures to: grid, objects or off.</summary>
+    [property: JsonPropertyName("designerSnap")] string DesignerSnap,
     /// <summary>The grid's spacing in points.</summary>
     [property: JsonPropertyName("designerGridSize")] int DesignerGridSize);
 

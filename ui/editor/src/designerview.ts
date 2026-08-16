@@ -105,6 +105,18 @@ const FRAME_INSET_TOP = 10 * PT;
  */
 const FRAME_CAPTION_LINE = 12;
 
+/** How near an edge has to be, in POINTS, before a gesture lines up with it. Three is about
+ * four device pixels at 100%: close enough that a hand aiming at an edge finds it, far enough
+ * that a hand aiming between two of them is not dragged to either. */
+const ALIGN_REACH = 3;
+
+/** A line the canvas draws while a gesture is lining up with something: which axis it runs
+ * along, and where it sits in POINTS from the container's own origin. */
+interface Guide {
+  axis: "x" | "y";
+  at: number;
+}
+
 /** The tab strip's own height, as the stylesheet draws it. The rule below the tabs cannot sit
  * higher than this or the tabs hang through the line, and the runtime's band measures within
  * a point of it - so it is also the truer of the two numbers available. */
@@ -346,6 +358,7 @@ export class DesignerView {
   /** The grid's switch, at the end of the palette, and the unsubscribe for the setting it
    * follows: the button shows what the setting says rather than what it was last clicked to. */
   private readonly snapToggle: HTMLButtonElement;
+  private readonly alignToggle: HTMLButtonElement;
   private readonly unwatchSettings: () => void;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
@@ -456,18 +469,32 @@ export class DesignerView {
      * three views of one fact rather than three states to keep in step, and it survives the
      * session because the setting does.
      */
-    this.snapToggle = document.createElement("button");
-    this.snapToggle.type = "button";
-    this.snapToggle.className = "designer-snap";
-    this.snapToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
-      + 'fill="currentColor"><circle cx="4" cy="4" r="1"/><circle cx="8" cy="4" r="1"/>'
-      + '<circle cx="12" cy="4" r="1"/><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/>'
-      + '<circle cx="12" cy="8" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="8" cy="12" r="1"/>'
-      + '<circle cx="12" cy="12" r="1"/></svg>';
-    this.snapToggle.addEventListener("click", () => {
-      deps.changeSetting("designerSnapToGrid", !currentSettings().designerSnapToGrid);
-    });
-    toolboxRow.appendChild(this.snapToggle);
+    const switchFor = (mode: "grid" | "objects", glyph: string): HTMLButtonElement => {
+      const control = document.createElement("button");
+      control.type = "button";
+      control.className = "designer-snap";
+      control.dataset.mode = mode;
+      control.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+        + `fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">${glyph}</svg>`;
+      // Each one is a TOGGLE of its own mode, and the two together are the either/or: pressing
+      // the one that is already on turns snapping off, pressing the other switches. Two plain
+      // buttons rather than one that cycles, because a cycling button hides its third state.
+      control.addEventListener("click", () => {
+        deps.changeSetting("designerSnap", currentSettings().designerSnap === mode ? "off" : mode);
+      });
+      toolboxRow.appendChild(control);
+      return control;
+    };
+
+    // Nine dots for the grid; a shape between two guide lines for the neighbours.
+    this.snapToggle = switchFor("grid",
+      '<g fill="currentColor" stroke="none">'
+      + '<circle cx="4" cy="4" r="1"/><circle cx="8" cy="4" r="1"/><circle cx="12" cy="4" r="1"/>'
+      + '<circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/><circle cx="12" cy="8" r="1"/>'
+      + '<circle cx="4" cy="12" r="1"/><circle cx="8" cy="12" r="1"/><circle cx="12" cy="12" r="1"/>'
+      + '</g>');
+    this.alignToggle = switchFor("objects",
+      '<path d="M3 1.5v13"/><path d="M13 1.5v13"/><rect x="5.5" y="5" width="5" height="6" rx="1"/>');
 
     canvasHalf.appendChild(toolboxRow);
     this.toolbox = toolbox;
@@ -1204,11 +1231,41 @@ export class DesignerView {
     const room = this.roomFor(drag.element);
     const floor = drag.name === "" ? MIN_FORM : MIN_CONTROL;
 
+    /*
+     * ALIGNMENT COMES FIRST AND THE GRID SECOND, when the two disagree.
+     *
+     * A neighbour's edge is a place a developer MEANT; a grid line is only a place that was
+     * available. So a gesture within reach of an edge takes the edge and draws the guide, and
+     * the grid gets what is left over - which is every gesture that is not near anything.
+     * Doing it the other way round produced a control that jumped to the grid a point away
+     * from the button it was clearly being lined up with.
+     */
+    // The chrome above this thing's own client, if it has any: a container's grid snap goes
+    // to the line it draws rather than to the top of its caption band.
+    const chrome = drag.element.querySelector<HTMLElement>(
+      ":scope > .dc-frame-rule, :scope > .dc-page-rule");
+    const band = chrome ? Number.parseFloat(chrome.style.top || "0") / PT : 0;
+
+    const settle = (box: Box, edge: string | null): Box => {
+      const lining = currentSettings().designerSnap === "objects";
+      if (free || !lining || drag.name === "") {
+        this.showGuides([]);
+        return this.snapped(box, edge, free, band);
+      }
+
+      const lined = this.aligned(box, drag.name, edge);
+      this.showGuides(lined.guides);
+      return lined.guides.length > 0
+        ? lined.box
+        : { left: Math.round(box.left), top: Math.round(box.top),
+            width: Math.round(box.width), height: Math.round(box.height) };
+    };
+
     // Snapped BEFORE the clamp, so an edge of the parent beats the grid rather than the other
     // way about: a control pushed into a corner belongs in the corner.
     if (drag.edge === null) {
       return this.clamp(
-        this.snapped({ ...origin, left: origin.left + dx, top: origin.top + dy }, null, free),
+        settle({ ...origin, left: origin.left + dx, top: origin.top + dy }, null),
         room, floor);
     }
 
@@ -1232,7 +1289,67 @@ export class DesignerView {
       box.height = Math.max(floor, origin.height + dy);
     }
 
-    return this.clamp(this.snapped(box, drag.edge, free), room, floor);
+    return this.clamp(settle(box, drag.edge), room, floor);
+  }
+
+  /**
+   * Draws the alignment guides for the gesture in flight, and clears them when it ends.
+   *
+   * Inside the moving control's OWN container, because that is the box its coordinates are
+   * measured in - a guide drawn on the form for a control inside a Frame would be a line
+   * through the right pixels for the wrong reason, and would move when the Frame did. They are
+   * two divs, reused, because a gesture repaints them on every pointer move.
+   */
+  private showGuides(guides: Guide[]): void {
+    // Kept after the gesture ends, so the acts can answer what they lined up WITH. The lines
+    // themselves come down on release; this is the record of them, and a hand driving the api
+    // has no other way to tell an alignment from a coincidence.
+    this.lastGuides = guides;
+
+    const host = this.selectedName === null ? null : this.elementOf(this.selectedName)?.parentElement;
+    if (!host) {
+      return;
+    }
+
+    const wanted = new Map(guides.map((guide) => [guide.axis, guide.at]));
+    for (const axis of ["x", "y"] as const) {
+      const found = host.querySelector<HTMLElement>(`.dc-guide-${axis}`);
+      const at = wanted.get(axis);
+      if (at === undefined) {
+        found?.remove();
+        continue;
+      }
+
+      const line = found ?? document.createElement("div");
+      line.className = `dc-guide dc-guide-${axis}`;
+      if (axis === "x") {
+        line.style.left = `${at * PT}px`;
+      } else {
+        line.style.top = `${at * PT}px`;
+      }
+
+      if (!found) {
+        host.appendChild(line);
+      }
+    }
+  }
+
+  /** What the last gesture lined up with, for the acts to report. */
+  private lastGuides: Guide[] = [];
+
+  /** The alignment an act should mention, or nothing when the gesture lined up with nothing. */
+  private guideNote(): string {
+    return this.lastGuides.length === 0
+      ? ""
+      : `, lined up with ${this.lastGuides.map((one) => `${one.axis}=${one.at}`).join(" and ")}`;
+  }
+
+  /** Takes every guide down, wherever it was drawn: a gesture that ends anywhere - dropped,
+   * cancelled, or its control re-rendered underneath it - leaves none behind. */
+  private clearGuides(): void {
+    for (const line of this.canvasScroll.querySelectorAll(".dc-guide")) {
+      line.remove();
+    }
   }
 
   /** Abandons a gesture in flight - Escape, or the pointer taken away - and puts the thing back
@@ -1252,6 +1369,9 @@ export class DesignerView {
   private releaseDrag(drag: CanvasDrag): void {
     drag.element.classList.remove("dc-dragging");
     this.canvasScroll.classList.remove("dragging");
+    // Every way out of a gesture comes through here - dropped, cancelled, taken away - which
+    // is the one place a guide can be guaranteed to be taken down with it.
+    this.clearGuides();
     this.canvasScroll.style.cursor = "";
     try {
       this.canvasScroll.releasePointerCapture(drag.pointerId);
@@ -1405,11 +1525,18 @@ export class DesignerView {
     // Inside the container, and never off its edges: the same floor every gesture keeps - and
     // onto the grid on the way, because a control dropped from the palette is placed by the
     // pointer like any other.
+    // A container dropped from the palette gets the same courtesy a dragged one does: the grid
+    // takes the line it will DRAW, not the top of the caption band above it. There is nothing
+    // rendered yet to measure, so the band is the one the stylesheet will give it.
     const room = this.roomOfContainer(where.parent);
+    const dropBand = carrying.kind === "Frame" || carrying.kind === "MultiPage"
+      || carrying.kind === "TabStrip"
+      ? (carrying.kind === "Frame" ? FRAME_CAPTION_LINE / 2 : PAGE_STRIP_HEIGHT) / PT
+      : 0;
     const box = this.clamp(
       this.snapped(
         { left: where.left, top: where.top, width: carrying.width, height: carrying.height },
-        null, free),
+        null, free, dropBand),
       room, MIN_CONTROL);
     const name = this.freeName(carrying.kind);
     const lines = this.model.getLinesContent();
@@ -1581,14 +1708,24 @@ export class DesignerView {
    */
   private showGrid(): void {
     const settings = currentSettings();
-    const on = settings.designerSnapToGrid;
+    const on = settings.designerSnap === "grid";
+    const lining = settings.designerSnap === "objects";
 
-    this.snapToggle.setAttribute("aria-pressed", on ? "true" : "false");
-    this.snapToggle.classList.toggle("on", on);
-    this.snapToggle.title = on
-      ? `Snapping to a ${settings.designerGridSize}-point grid. Arrow keys still move by one point.`
-      : "Snap to grid is off. Click to place controls on the grid again.";
-    this.snapToggle.setAttribute("aria-label", this.snapToggle.title);
+    const dress = (control: HTMLButtonElement, pressed: boolean, title: string): void => {
+      control.setAttribute("aria-pressed", pressed ? "true" : "false");
+      control.classList.toggle("on", pressed);
+      control.title = title;
+      control.setAttribute("aria-label", title);
+    };
+
+    dress(this.snapToggle, on, on
+      ? `Snapping to a ${settings.designerGridSize}-point grid. Alt overrides it; arrow keys `
+        + "always move by one point."
+      : "Snap to grid: place controls on an even grid.");
+    dress(this.alignToggle, lining, lining
+      ? "Lining up with the other controls - their edges and centres, with a guide where it "
+        + "lands. Alt overrides it."
+      : "Snap to the other controls: line up with a neighbour's edge or centre.");
 
     const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")
       ?? this.canvasScroll.querySelector<HTMLElement>(".dc-form");
@@ -1626,7 +1763,7 @@ export class DesignerView {
    */
   private onGrid(value: number): number {
     const settings = currentSettings();
-    if (!settings.designerSnapToGrid) {
+    if (settings.designerSnap !== "grid") {
       return Math.round(value);
     }
 
@@ -1635,12 +1772,147 @@ export class DesignerView {
   }
 
   /**
+   * The edges and centres of everything the gesture could line up WITH: the siblings sharing
+   * this control's container, plus the container's own inside edges and middle.
+   *
+   * Siblings only, because lining up with a control in a different box means nothing on screen -
+   * a button inside a Frame and a button beside it are measured from different origins, and a
+   * guide drawn between them would be pointing at a coincidence.
+   */
+  private neighbours(name: string): { x: number[]; y: number[] } {
+    const element = this.elementOf(name);
+    const host = element?.parentElement;
+    if (!element || !host) {
+      return { x: [], y: [] };
+    }
+
+    const x: number[] = [];
+    const y: number[] = [];
+
+    for (const other of host.children) {
+      if (!(other instanceof HTMLElement) || other === element
+        || !other.classList.contains("dc") || !other.dataset.control) {
+        continue;
+      }
+
+      // Rounded to a hundredth of a point, because these come back through the browser's own
+      // pixel arithmetic: a control the document puts at 85 measures 84.99975, and a guide
+      // reported at that is a true number nobody can read.
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      const left = round(Number.parseFloat(other.style.left || "0") / PT);
+      const top = round(Number.parseFloat(other.style.top || "0") / PT);
+      const width = round(other.offsetWidth / PT);
+      const height = round(other.offsetHeight / PT);
+
+      /*
+       * A CONTAINER OFFERS THE EDGE IT PAINTS, not the one its rectangle has.
+       *
+       * A Frame's rectangle starts at the top of its caption band and its RULE is about four
+       * points lower, so a guide at the rectangle's top runs through the caption and the
+       * control lining up with it looks aligned to the lettering (the owner, 2026-08-16: "the
+       * button should snap to the frame's edge, not the label"). A developer means the line
+       * they can see. The same is true of a MultiPage, whose rectangle starts at the tabs.
+       */
+      const rule = other.querySelector<HTMLElement>(":scope > .dc-frame-rule, :scope > .dc-page-rule");
+      const band = rule ? round(Number.parseFloat(rule.style.top || "0") / PT) : 0;
+
+      x.push(left, round(left + width / 2), left + width);
+      y.push(round(top + band), round(top + band + (height - band) / 2), top + height);
+    }
+
+    // The container itself: its inside edges, and its middle for centring against.
+    const room = this.roomFor(element);
+    if (room) {
+      const round = (value: number): number => Math.round(value * 100) / 100;
+      x.push(0, round(room.width / 2), round(room.width));
+      y.push(0, round(room.height / 2), round(room.height));
+    }
+
+    return { x, y };
+  }
+
+  /**
+   * A gesture's box, aligned to the nearest neighbour edge within reach - and the guides to
+   * draw for it.
+   *
+   * The candidates on each axis are the moving box's own leading edge, centre and trailing
+   * edge, so a control lines up left-to-left, centre-to-centre and right-to-left alike, which
+   * is what makes this feel like a design surface rather than like magnets. The NEAREST match
+   * inside the tolerance wins and the others are ignored: two guides on one axis would be two
+   * different answers to where the thing goes.
+   */
+  private aligned(box: Box, name: string, edge: string | null): { box: Box; guides: Guide[] } {
+    const near = this.neighbours(name);
+    const guides: Guide[] = [];
+    const out = { ...box };
+
+    const pick = (mine: number[], theirs: number[]): { at: number; shift: number } | null => {
+      let best: { at: number; shift: number } | null = null;
+      for (const candidate of mine) {
+        for (const line of theirs) {
+          const shift = line - candidate;
+          if (Math.abs(shift) <= ALIGN_REACH
+            && (best === null || Math.abs(shift) < Math.abs(best.shift))) {
+            best = { at: line, shift };
+          }
+        }
+      }
+
+      return best;
+    };
+
+    // A resize moves the edges the hand holds; a move takes the whole box, so all three of its
+    // lines are candidates.
+    const holdsWest = edge?.includes("w") ?? false;
+    const holdsEast = edge?.includes("e") ?? false;
+    const holdsNorth = edge?.includes("n") ?? false;
+    const holdsSouth = edge?.includes("s") ?? false;
+
+    const mineX = edge === null
+      ? [box.left, box.left + box.width / 2, box.left + box.width]
+      : [...(holdsWest ? [box.left] : []), ...(holdsEast ? [box.left + box.width] : [])];
+    const mineY = edge === null
+      ? [box.top, box.top + box.height / 2, box.top + box.height]
+      : [...(holdsNorth ? [box.top] : []), ...(holdsSouth ? [box.top + box.height] : [])];
+
+    const onX = pick(mineX, near.x);
+    if (onX) {
+      if (edge === null) {
+        out.left = box.left + onX.shift;
+      } else if (holdsWest) {
+        out.left = box.left + onX.shift;
+        out.width = box.width - onX.shift;
+      } else {
+        out.width = box.width + onX.shift;
+      }
+
+      guides.push({ axis: "x", at: onX.at });
+    }
+
+    const onY = pick(mineY, near.y);
+    if (onY) {
+      if (edge === null) {
+        out.top = box.top + onY.shift;
+      } else if (holdsNorth) {
+        out.top = box.top + onY.shift;
+        out.height = box.height - onY.shift;
+      } else {
+        out.height = box.height + onY.shift;
+      }
+
+      guides.push({ axis: "y", at: onY.at });
+    }
+
+    return { box: out, guides };
+  }
+
+  /**
    * A gesture's box, snapped. A move takes its ORIGIN to the grid and keeps its size, so a
    * control does not change shape by being moved; a resize takes the edges the hand is holding
    * and leaves the opposite ones exactly where they were, which is what keeps the other side of
    * the control still while one side is pulled.
    */
-  private snapped(box: Box, edge: string | null, free = false): Box {
+  private snapped(box: Box, edge: string | null, free = false, band = 0): Box {
     // ALT IS THE OVERRIDE, held rather than toggled: the one control that will not sit on the
     // grid is a reason to escape it for a moment, not to turn it off and forget to turn it back
     // on. Read per pointer event, so pressing or releasing Alt part-way through a drag changes
@@ -1655,8 +1927,23 @@ export class DesignerView {
       };
     }
 
+    /*
+     * `band` IS THE CHROME ABOVE A CONTAINER'S CLIENT - a Frame's caption strip, a MultiPage's
+     * tabs - and the grid is applied to the edge BELOW it.
+     *
+     * A Frame's rectangle starts at the top of its caption and the line it draws is four
+     * points lower, so snapping the rectangle puts the caption on a grid dot and the visible
+     * edge between two of them: the frame is on the grid and looks like the only thing on the
+     * form that is not (the owner, 2026-08-16: "in snap to grid, the snapping for container
+     * should be to the frame, not the label"). Everything else has a band of zero and is
+     * unaffected.
+     */
     if (edge === null) {
-      return { ...box, left: this.onGrid(box.left), top: this.onGrid(box.top) };
+      return {
+        ...box,
+        left: this.onGrid(box.left),
+        top: this.onGrid(box.top + band) - band,
+      };
     }
 
     const out = { ...box };
@@ -1670,7 +1957,7 @@ export class DesignerView {
 
     if (edge.includes("n")) {
       const bottom = box.top + box.height;
-      out.top = this.onGrid(box.top);
+      out.top = this.onGrid(box.top + band) - band;
       out.height = bottom - out.top;
     } else if (edge.includes("s")) {
       out.height = this.onGrid(box.top + box.height) - box.top;
@@ -1822,8 +2109,9 @@ export class DesignerView {
     // canvas, exactly where a captured pointer's events are delivered once a real drag has
     // the mouse. Past the threshold first, then the whole way: the two moves a hand makes.
     const landed = hits(grabbed) ?? element;
+    this.lastGuides = [];
     this.sendGesture(landed, grabbed, dx, dy, alt);
-    return `dragged ${name}`;
+    return `dragged ${name}${this.guideNote()}`;
   }
 
   /**
@@ -1854,8 +2142,9 @@ export class DesignerView {
       return `the ${edge} handle is not what a press on it reaches - ${reached?.className || "nothing"} is`;
     }
 
+    this.lastGuides = [];
     this.sendGesture(reached, spot, dx, dy, alt);
-    return `resized ${name === "" ? "the form" : name}`;
+    return `resized ${name === "" ? "the form" : name}${this.guideNote()}`;
   }
 
   /**

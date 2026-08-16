@@ -54,12 +54,17 @@ const OPTIONS = [
     max: 8,
   },
   {
-    key: "designerSnapToGrid" as const,
-    kind: "toggle" as const,
-    label: "Snap to grid in the form designer",
+    key: "designerSnap" as const,
+    kind: "choice" as const,
+    label: "Form designer snapping",
     description:
-      "Dragging, resizing and dropping a control land on the grid, so edges line up without "
-      + "being lined up by hand. Arrow keys still move by a single point.",
+      "Where a dragged, resized or dropped control lands. Arrow keys always move by a single "
+      + "point, and holding Alt overrides whichever is chosen.",
+    choices: [
+      { value: "grid", label: "To the grid" },
+      { value: "objects", label: "To the other controls" },
+      { value: "off", label: "Nowhere" },
+    ],
   },
   {
     key: "designerGridSize" as const,

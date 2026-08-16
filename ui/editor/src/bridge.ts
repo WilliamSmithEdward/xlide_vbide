@@ -2293,7 +2293,7 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
-          designerSnapToGrid: message.designerSnapToGrid !== false,
+          designerSnap: message.designerSnap,
           designerGridSize: message.designerGridSize,
         });
       }
