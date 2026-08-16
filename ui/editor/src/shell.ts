@@ -498,27 +498,7 @@ export class Shell {
 
       row.appendChild(name);
 
-      if (property.writable && property.boolean) {
-        // A boolean offers its two values rather than a text field that trusts spelling.
-        const select = document.createElement("select");
-        select.className = "prop-value";
-        select.setAttribute("aria-label", `${property.name} of ${this.propertiesComponent}`);
-
-        for (const option of ["True", "False"]) {
-          const choice = document.createElement("option");
-          choice.value = option;
-          choice.textContent = option;
-          choice.selected = option === property.value;
-          select.appendChild(choice);
-        }
-
-        select.addEventListener("change", () => {
-          property.value = select.value;
-          this.handlers.editProperty(this.propertiesComponent, property.name, select.value);
-        });
-
-        row.appendChild(select);
-      } else if (property.writable) {
+      if (property.writable) {
         const input = document.createElement("input");
         input.className = "prop-value";
         input.type = "text";
@@ -529,7 +509,12 @@ export class Shell {
         // A property whose type library NAMED its values, or a colour, gets a control beside
         // the field rather than instead of it: the field stays typeable either way (the owner,
         // 2026-08-15: "the user should be able to type into a type if it's selected").
-        const options = property.options ?? [];
+        // ONE dropdown in this pane, not two (the owner, 2026-08-16: "the drop down styles are
+        // different, can u unify them"). A boolean's two values are just the shortest list a
+        // type library ever names, so they go through the same combobox as an enum's fifteen -
+        // same caret, same popup, same keys - and gain typing on the way, which a `<select>`
+        // could never offer and which the enum rows already had.
+        const options = property.options ?? (property.boolean ? ["True", "False"] : []);
         if (options.length > 0 || property.swatch) {
           const cell = document.createElement("div");
           cell.className = "prop-cell";

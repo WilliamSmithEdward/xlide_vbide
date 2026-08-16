@@ -704,8 +704,8 @@ try {
   // affordance that appears on hover is one you have to know about first), a swatch on a
   // colour, and the platform's own arrow on a True/False - three rows, one visual language.
   const rowControls = await api.ask('(() => { const of = (name) => { const row = [...document.querySelectorAll(".prop-row")].find(r => r.querySelector(".prop-name")?.textContent === name); if (!row) return name + "=missing"; if (row.querySelector(".prop-caret")) return name + "=caret"; if (row.querySelector(".prop-swatch")) return name + "=swatch"; if (row.querySelector("select.prop-value")) return name + "=select"; return name + "=plain"; }; return [of("TextAlign"), of("BackColor"), of("Enabled"), of("Left")].join(" "); })()');
-  check("a named-value row wears a caret, a colour a swatch, a flag the platform's arrow",
-    String(rowControls) === "TextAlign=caret BackColor=swatch Enabled=select Left=plain",
+  check("every dropdown in the pane is the same one - an enum, a colour and a flag all match",
+    String(rowControls) === "TextAlign=caret BackColor=swatch Enabled=caret Left=plain",
     String(rowControls));
 
   // The caret shows EVERY member, not the one the field already holds: a datalist filtered by
