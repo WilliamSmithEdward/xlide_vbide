@@ -659,9 +659,18 @@ Three decisions worth keeping:
   wrongly is worse than one that shows the number. `StartUpPosition` is a plain Integer in
   MSForms however much it looks like an enum, so it keeps its number, and a suite row pins
   that it does.
-- **The row stays typeable.** The values are offered through a datalist rather than a locked
-  dropdown (the owner: "the user should be able to type into a type if it's selected"), so the
-  list drops down and the field still takes a number or a name nobody listed.
+- **The row stays typeable, and its caret is always there.** The values are offered beside a
+  field rather than instead of it (the owner: "the user should be able to type into a type if
+  it's selected"), so the list drops down and the field still takes a number or a name nobody
+  listed. The first landing used a `<datalist>`, which looks like that from the outside and is
+  not: it filters its list by what the field already holds, so a row showing
+  `fmScrollBarsBoth` offered exactly one choice - itself - and its caret only appeared on
+  hover. It is a real combobox now: the caret is always visible and shaped like the arrow on
+  the True/False rows beside it, the list shows every member, and typing filters it only while
+  the developer is typing something new. **A colour row gets a swatch** that paints the value
+  the host resolved - system colours included, because only the host knows what the machine
+  calls a button face today - and opens the platform's picker, committing on `change` rather
+  than on every frame of a drag around the wheel.
 - **A refusal is the host SAYING so**, not the row failing to echo the request. The
   `editProperty` act compared the two, which was right only while every value had one
   spelling; a written `0` that reads back `fmCycleAllForms` had it reporting an honest write

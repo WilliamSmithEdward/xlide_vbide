@@ -40,6 +40,9 @@ export interface ShellProperty {
   /** The values the type library named for this property - an enum's members, spelled the way
    * the developer writes them. Offered as a dropdown beside a field that still takes typing. */
   options?: string[];
+  /** A colour property's value as CSS, system colours already resolved by the host: what the
+   * swatch paints and what the picker opens on. */
+  swatch?: string;
 }
 
 export interface ShellHandlers {
@@ -523,21 +526,24 @@ export class Shell {
         input.spellcheck = false;
         input.setAttribute("aria-label", `${property.name} of ${this.propertiesComponent}`);
 
-        // A property whose type library NAMED its values offers them - and stays TYPEABLE (the
-        // owner, 2026-08-15: "the user should be able to type into a type if it's selected").
-        // A datalist is exactly that pairing: the list drops down, the field still takes a
-        // number or a name nobody listed, and the host reads either.
-        if (property.options && property.options.length > 0) {
-          const list = document.createElement("datalist");
-          list.id = `prop-options-${this.propertiesComponent}-${property.name}`.replace(/[^\w-]/g, "-");
-          for (const option of property.options) {
-            const choice = document.createElement("option");
-            choice.value = option;
-            list.appendChild(choice);
+        // A property whose type library NAMED its values, or a colour, gets a control beside
+        // the field rather than instead of it: the field stays typeable either way (the owner,
+        // 2026-08-15: "the user should be able to type into a type if it's selected").
+        const options = property.options ?? [];
+        if (options.length > 0 || property.swatch) {
+          const cell = document.createElement("div");
+          cell.className = "prop-cell";
+          cell.appendChild(input);
+
+          if (options.length > 0) {
+            this.attachOptions(cell, input, property, options);
+          } else if (property.swatch) {
+            this.attachColour(cell, input, property);
           }
 
-          input.setAttribute("list", list.id);
-          row.appendChild(list);
+          row.appendChild(cell);
+          this.propertiesList.appendChild(row);
+          continue;
         }
 
         // Committed when the developer is done, not per keystroke: Enter commits and stays,
@@ -565,6 +571,192 @@ export class Shell {
 
       this.propertiesList.appendChild(row);
     }
+  }
+
+  /**
+   * An editable combobox: the field the developer types in, and a caret that shows EVERY value
+   * the type library named.
+   *
+   * The first landing used a `<datalist>`, which looks like this from the outside and is not:
+   * it filters its list by what the field already holds, so a row showing `fmScrollBarsBoth`
+   * offered exactly one choice - itself - and the caret only appeared on hover (the owner, both
+   * within a minute). This popup lists everything, filters only while the developer is actually
+   * typing something new, and its caret is always there, because a control that hides its
+   * affordance until you find it is a control you have to know about already.
+   */
+  private attachOptions(
+    cell: HTMLElement,
+    input: HTMLInputElement,
+    property: ShellProperty,
+    options: string[],
+  ): void {
+    const caret = document.createElement("button");
+    caret.type = "button";
+    caret.className = "prop-caret";
+    caret.tabIndex = -1;
+    caret.title = `Choose a value for ${property.name}`;
+    caret.setAttribute("aria-label", caret.title);
+    caret.innerHTML = '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">'
+      + '<path d="M2 4l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.2" '
+      + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+    const list = document.createElement("div");
+    list.className = "prop-options";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-expanded", "false");
+    input.autocomplete = "off";
+
+    let active = -1;
+    const shown = (): HTMLElement[] => [...list.querySelectorAll<HTMLElement>(".prop-option")];
+
+    const paint = (filter: string): void => {
+      list.replaceChildren();
+      const needle = filter.trim().toLowerCase();
+      // Everything, unless the developer is typing something the list can narrow to. A filter
+      // that matches nothing shows the whole list rather than an empty box: they may be typing
+      // a number, which is allowed and is in no list.
+      const matching = needle.length === 0
+        ? options
+        : options.filter((option) => option.toLowerCase().includes(needle));
+      for (const option of (matching.length > 0 ? matching : options)) {
+        const choice = document.createElement("div");
+        choice.className = "prop-option";
+        choice.setAttribute("role", "option");
+        choice.textContent = option;
+        choice.setAttribute("aria-selected", String(option === input.value));
+        if (option === input.value) {
+          choice.classList.add("current");
+        }
+
+        choice.addEventListener("pointerdown", (event) => {
+          // Before the field's blur, or the commit races the click.
+          event.preventDefault();
+          input.value = option;
+          close();
+          this.commitProperty(property, input);
+        });
+        list.appendChild(choice);
+      }
+    };
+
+    const place = (): void => {
+      const box = input.getBoundingClientRect();
+      list.style.left = `${box.left}px`;
+      list.style.top = `${box.bottom + 1}px`;
+      list.style.minWidth = `${box.width}px`;
+    };
+
+    const open = (filter = ""): void => {
+      paint(filter);
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+      place();
+      active = shown().findIndex((one) => one.classList.contains("current"));
+      highlight();
+    };
+
+    function close(): void {
+      list.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      active = -1;
+    }
+
+    const highlight = (): void => {
+      const items = shown();
+      items.forEach((item, at) => item.classList.toggle("active", at === active));
+      items[active]?.scrollIntoView({ block: "nearest" });
+    };
+
+    const step = (by: number): void => {
+      const items = shown();
+      if (items.length === 0) {
+        return;
+      }
+
+      active = (active + by + items.length) % items.length;
+      highlight();
+    };
+
+    caret.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      if (list.hidden) {
+        input.focus();
+        open();
+      } else {
+        close();
+      }
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        if (list.hidden) {
+          open();
+        } else {
+          step(event.key === "ArrowDown" ? 1 : -1);
+        }
+
+        return;
+      }
+
+      if (event.key === "Enter" && !list.hidden && active >= 0) {
+        event.preventDefault();
+        const picked = shown()[active]?.textContent ?? input.value;
+        input.value = picked;
+        close();
+        this.commitProperty(property, input);
+        return;
+      }
+
+      if (event.key === "Escape" && !list.hidden) {
+        // The list closes first; a second Escape puts the value back, which is the field's
+        // own behaviour and worth reaching without losing the list's.
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }
+    });
+
+    input.addEventListener("input", () => {
+      if (!list.hidden) {
+        paint(input.value);
+        active = -1;
+      }
+    });
+    input.addEventListener("blur", () => close());
+    // The list is fixed to the viewport, so anything that moves the panel moves it out from
+    // under the field: closing is honest and costs the developer one click.
+    this.propertiesList.addEventListener("scroll", () => close(), { passive: true });
+
+    cell.append(caret, list);
+  }
+
+  /**
+   * A colour row: the swatch shows the colour the value MEANS - system colours resolved by the
+   * host, because only it knows what the machine calls a button face today - and opens the
+   * platform's picker. The field beside it still takes `&H8000000F&` or a number, which is the
+   * only way to say "the system's button face" rather than the RGB it happens to be now.
+   */
+  private attachColour(cell: HTMLElement, input: HTMLInputElement, property: ShellProperty): void {
+    const swatch = document.createElement("input");
+    swatch.type = "color";
+    swatch.className = "prop-swatch";
+    swatch.value = property.swatch ?? "#000000";
+    swatch.tabIndex = -1;
+    swatch.title = `Pick a colour for ${property.name}`;
+    swatch.setAttribute("aria-label", swatch.title);
+
+    // CHANGE, not input: the picker fires as the developer drags around the wheel, and a write
+    // per frame is a COM crossing per frame. This commits when they are done choosing.
+    swatch.addEventListener("change", () => {
+      input.value = swatch.value;
+      this.commitProperty(property, input);
+    });
+
+    cell.appendChild(swatch);
   }
 
   private commitProperty(property: ShellProperty, input: HTMLInputElement): void {

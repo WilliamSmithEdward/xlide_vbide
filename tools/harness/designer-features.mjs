@@ -679,6 +679,21 @@ try {
     alignRow?.value === "fmTextAlignLeft" && (alignRow?.options ?? []).includes("fmTextAlignCenter"),
     JSON.stringify(alignRow));
 
+  // The controls the rows wear: a caret that is ALWAYS there on a named-value row (an
+  // affordance that appears on hover is one you have to know about first), a swatch on a
+  // colour, and the platform's own arrow on a True/False - three rows, one visual language.
+  const rowControls = await api.ask('(() => { const of = (name) => { const row = [...document.querySelectorAll(".prop-row")].find(r => r.querySelector(".prop-name")?.textContent === name); if (!row) return name + "=missing"; if (row.querySelector(".prop-caret")) return name + "=caret"; if (row.querySelector(".prop-swatch")) return name + "=swatch"; if (row.querySelector("select.prop-value")) return name + "=select"; return name + "=plain"; }; return [of("TextAlign"), of("BackColor"), of("Enabled"), of("Left")].join(" "); })()');
+  check("a named-value row wears a caret, a colour a swatch, a flag the platform's arrow",
+    String(rowControls) === "TextAlign=caret BackColor=swatch Enabled=select Left=plain",
+    String(rowControls));
+
+  // The caret shows EVERY member, not the one the field already holds: a datalist filtered by
+  // the field's own text offered exactly one choice, which is no dropdown at all (the owner,
+  // 2026-08-15: "I only see one option for most").
+  const listed = await api.ask('(() => { const row = [...document.querySelectorAll(".prop-row")].find(r => r.querySelector(".prop-name")?.textContent === "TextAlign"); const caret = row?.querySelector(".prop-caret"); if (!caret) return "no caret"; caret.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true })); const options = [...row.querySelectorAll(".prop-option")].map(o => o.textContent); document.activeElement?.blur(); return options.join(","); })()');
+  check("and its caret opens the whole list, not just what the field holds",
+    String(listed) === "fmTextAlignLeft,fmTextAlignCenter,fmTextAlignRight", String(listed));
+
   const alignWrite = await api.act("editProperty", { name: "TextAlign", value: "fmTextAlignCenter" });
   check("and a control's enum takes a member name on the way in",
     alignWrite.did === true && /fmTextAlignCenter/.test(alignWrite.detail ?? ""), alignWrite.detail);

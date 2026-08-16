@@ -3610,7 +3610,8 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     shapes.TryGetValue(name, out var shape);
                     var raw = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    entries.Add(new SurfacePropertyEntry(name, PropertyTypes.Spell(shape, raw), true, false));
+                    entries.Add(new SurfacePropertyEntry(name, PropertyTypes.Spell(shape, raw), true, false,
+                        null, FormDesignService.OleColorToCss(value)));
                 }
             }
 
@@ -3715,13 +3716,20 @@ internal sealed partial class AddInSession : IDisposable
                 or VarEnum.VT_R4 or VarEnum.VT_R8 or VarEnum.VT_EMPTY;
 
             // The value as the developer WRITES it - fmCycleAllForms rather than 0, &H8000000F&
-            // rather than -2147483633 - with the enum's members offered as the row's choices.
+            // rather than -2147483633 - with the enum's members offered as the row's choices,
+            // and a colour's CSS so the row can show the colour itself rather than its digits.
             var spelled = PropertyTypes.Spell(shape, display);
             var options = shape?.Members is { Count: > 0 } members
                 ? members.Select(member => member.Name).ToArray()
                 : null;
+            var swatch = shape?.Colour == true
+                && int.TryParse(display, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var ole)
+                ? FormDesignService.OleColorToCss(ole)
+                : null;
 
-            return new SurfacePropertyEntry(shownName, spelled, writable, kind == VarEnum.VT_BOOL, options);
+            return new SurfacePropertyEntry(
+                shownName, spelled, writable, kind == VarEnum.VT_BOOL, options, swatch);
         }
         catch (Exception)
         {

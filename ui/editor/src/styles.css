@@ -616,6 +616,94 @@ input.prop-value:focus {
   border-color: var(--vscode-focusBorder, #0078d4);
 }
 
+/* A value with a control beside it: the field takes the whole cell and the caret or the swatch
+   sits at its end, inside the field's own box rather than stealing width from it. */
+.prop-cell {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.prop-cell input.prop-value {
+  padding-right: 18px;
+}
+
+/* ALWAYS VISIBLE, and shaped like the arrow on the True/False rows beside it (the owner,
+   2026-08-15: "the drop down arrow should always show" and "align enum style to boolean
+   dropdown style"). An affordance that appears on hover is one the developer has to already
+   know about, and two kinds of dropdown in one panel is two things to learn. So: no button
+   chrome, no hover highlight, the same chevron at the same inset as the platform's own - the
+   difference between these rows and a boolean's is that this one also takes typing. */
+.prop-caret {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* The list itself: fixed to the viewport because the panel scrolls and the row does not own a
+   stacking context worth fighting over. */
+.prop-options {
+  position: fixed;
+  z-index: 60;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  background: var(--vscode-dropdown-background, #252526);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.prop-option {
+  padding: 2px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.prop-option.current {
+  font-weight: 600;
+}
+
+.prop-option:hover,
+.prop-option.active {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+}
+
+/* The colour picker's own button, shrunk to a swatch: the browser paints the value, which is
+   exactly what the row wants to show. */
+.prop-swatch {
+  position: absolute;
+  right: 2px;
+  width: 16px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 2px;
+  background: none;
+  cursor: pointer;
+}
+
+.prop-swatch::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.prop-swatch::-webkit-color-swatch {
+  border: 0;
+  border-radius: 1px;
+}
+
 select.prop-value {
   width: 100%;
   box-sizing: border-box;

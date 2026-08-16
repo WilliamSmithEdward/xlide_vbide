@@ -428,7 +428,10 @@ public sealed record SurfacePropertyEntry(
     [property: JsonPropertyName("value")] string Value,
     [property: JsonPropertyName("writable")] bool Writable,
     [property: JsonPropertyName("boolean")] bool Boolean,
-    [property: JsonPropertyName("options")] string[]? Options = null);
+    [property: JsonPropertyName("options")] string[]? Options = null,
+    /// <summary>A colour property's value as CSS, system colours resolved - what a swatch
+    /// paints, and what the picker opens on. Null for everything that is not a colour.</summary>
+    [property: JsonPropertyName("swatch")] string? Swatch = null);
 
 /// <summary>
 /// The properties of the selected component, with the class name shown in the panel's object
