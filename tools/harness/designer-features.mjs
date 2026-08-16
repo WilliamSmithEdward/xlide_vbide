@@ -578,7 +578,10 @@ try {
   // control. designerSelect bypasses hit-testing, which is how an invisible full-canvas
   // overlay (the notice, display-clobbered past its hidden attribute) ate every real
   // click while 157 checks stayed green.
-  const hitAnswer = await api.ask(`(() => { const el = ${inViewAll(".dc")}.find(e => e.dataset.control === "RegionPick"); if (!el) return "no element"; const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit) ? "the control" : (hit?.className || "nothing"); })()`);
+  // Scrolled to first, because a hand cannot click what the canvas is not showing: on a narrow
+  // window the form is wider than the box that holds it, and the rect of a clipped control still
+  // reads as a position - one that belongs to whatever paints there instead.
+  const hitAnswer = await api.ask(`(() => { const el = ${inViewAll(".dc")}.find(e => e.dataset.control === "RegionPick"); if (!el) return "no element"; el.scrollIntoView({ block: "nearest", inline: "nearest" }); const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return el === hit || el.contains(hit) ? "the control" : (hit?.className || "nothing"); })()`);
   check("a real click's hit-test lands on the control, not an invisible overlay",
     hitAnswer === "the control", String(hitAnswer));
 

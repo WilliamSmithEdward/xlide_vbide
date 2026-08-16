@@ -168,6 +168,16 @@ was real here, and the probe's waits are a second, still-open question. Two runs
 verdict either way: the discriminator has to be run both ways more than once before a build is
 blamed or cleared.
 
+**A rect is reported for an element the viewport is not showing, and a hit test aimed there
+answers whatever paints at those coordinates.** The designer suite passed 214 checks on a session
+the fixture generator had started and failed two of them on the same build in a 704px-wide window:
+the form is wider than the canvas box, `RegionPick` sits clipped to the right, and
+`document.elementFromPoint` at its perfectly-good-looking centre returned the dock tab strip. It
+reads as a regression and is a window size. Anything that aims a synthetic pointer must
+`scrollIntoView({ block: "nearest", inline: "nearest" })` first, which is what a hand does; the
+resize act had learned this a day earlier and the drag act had not, so the lesson only half
+landed. Suspect it whenever a hit-test row fails and the arithmetic looks right.
+
 **Counts beat megabytes for leaks.** `Test-Churn.ps1` asserts that editors, models, dock groups and
 DOM nodes return to their starting numbers after two dozen cycles. An exact number that must return
 to its starting value is a far better detector than a heap figure nobody can interpret.

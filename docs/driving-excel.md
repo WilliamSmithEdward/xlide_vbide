@@ -1369,7 +1369,10 @@ node tools\harness\xlide-api.mjs command save
 hit test answers, which is how an invisible overlay over the canvas gets caught - and its
 deltas are POINTS, the document's own unit. `designerResize` does the same through a named
 handle (`edge` is `nw`, `n`, `ne`, `e`, `se`, `s`, `sw` or `w`), and with no `control` it pulls
-the FORM's own frame. Either way the drop rewrites that line's geometry in the document rather
+the FORM's own frame. Both scroll their target into view before aiming, because a hand does: on
+a narrow window the form is wider than the box that holds it, and a control clipped out of the
+canvas still reports a rect, so a hit test aimed there answers whatever paints at those
+coordinates instead. Either way the drop rewrites that line's geometry in the document rather
 than writing the form: `designerCanvas` then reports `draft: true`, `dirty: true` and the new
 box, `designerMarkup` shows the rewritten line, and the form itself does not move until
 `command save`, which is the tab's Ctrl+S. One undo takes a whole gesture back, and

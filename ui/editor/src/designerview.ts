@@ -1564,6 +1564,12 @@ export class DesignerView {
       return `no control named ${name} on the canvas`;
     }
 
+    // Into view first, for the reason resizeControl reaches for a handle: a narrow tab holds a
+    // form wider than the box it sits in, and a hit test aimed at a clipped control answers
+    // whatever paints at those coordinates instead - a dock strip, on a 704px window. A rect is
+    // reported whether or not the element is visible, so nothing about the arithmetic says so.
+    element.scrollIntoView({ block: "nearest", inline: "nearest" });
+
     const box = element.getBoundingClientRect();
     // The centre first, the way a hand aims; a CONTAINER's centre belongs to its children, so
     // the near corner is the fallback - inside the container's own border, above no child.
