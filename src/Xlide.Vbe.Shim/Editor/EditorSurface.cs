@@ -779,8 +779,9 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Asks the designer tab's view to apply its document and call back for the raw
-    /// save - the designer's half of the host's Ctrl+S.</summary>
-    public void RequestDesignerApplySave(string moduleName, string? project)
+    /// save - the designer's half of the host's Ctrl+S. With <paramref name="run"/> the callback
+    /// asks for the form to be launched after the save, which is F5's half of the same.</summary>
+    public void RequestDesignerApplySave(string moduleName, string? project, bool run = false)
     {
         if (!_loaded)
         {
@@ -788,7 +789,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         Post(JsonSerializer.Serialize(
-            new DesignerApplySaveMessage("designerApplySave", moduleName, project),
+            new DesignerApplySaveMessage("designerApplySave", moduleName, project, run),
             EditorMessageContext.Default.DesignerApplySaveMessage));
     }
 

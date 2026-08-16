@@ -459,6 +459,25 @@ the host-owns-membership invariant survives.
     Toolbox shown before anything watched. The old "designer surface" exemption is gone
     entirely - its class was the editor FRAME's, so the set it consulted had been empty
     since the day it landed.
+  - *And F5 runs the DOCUMENT, not the last save* - **landed 2026-08-16** (the owner: "F5 /
+    Run should fully save the active form designer before launching", with two screenshots of
+    a Hold button in two places after an undo). The document is the transaction log and the
+    form catches up on a save, so a run that skipped the save launched whatever was saved
+    last - the canvas and the running form disagreeing about a control that had just been
+    moved back. Run over a designer tab now takes the same apply-and-save handshake Ctrl+S
+    takes and rides its callback, so the window that opens is the document. A refused apply
+    launches nothing and says why at the document, which is the right way round: the old
+    behaviour would have run yesterday's form and said nothing at all.
+
+    The intent travels WITH the request (`designerApplySave` carries `run`, and the page
+    calls back through `saveOnlyThenRun`) rather than being remembered on the host, because
+    a refused apply calls nothing back: a flag waiting for a callback that never comes would
+    have fired on somebody's unrelated Ctrl+S minutes later.
+  - *A closed form is not yet an unloaded one* - measured while pinning the above. For about
+    400ms after the close is posted, the component answers "no designer to read": the object
+    is gone, not empty. `debugMode` is no guide (the log has it back at design while the form
+    still stands) and neither is the running-forms list, which empties first. Anything reading
+    a designer after a run waits for the designer itself.
   - *The parity probe* - materialise the native designer window (Visible on, capture by
     hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
     capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff

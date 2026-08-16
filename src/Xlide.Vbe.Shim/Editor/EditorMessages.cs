@@ -66,11 +66,17 @@ public sealed record FormMarkupLintMessage(
 /// The host's Ctrl+S with a designer tab active: the page applies the tab's document to
 /// the form and calls back for the raw save ("saveOnly"). The document lives in the page,
 /// so the host cannot flush it itself the way it flushes code edits before a save.
+///
+/// `Run` is the same handshake asked for by F5, and the callback it comes back through is
+/// "saveOnlyThenRun". The intent travels WITH the request rather than being remembered here,
+/// because a refused apply calls nothing back at all: a flag waiting on the host for a
+/// callback that never comes would fire on somebody else's Ctrl+S minutes later.
 /// </summary>
 public sealed record DesignerApplySaveMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("moduleName")] string ModuleName,
-    [property: JsonPropertyName("project")] string? Project);
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("run")] bool Run = false);
 
 /// <summary>One squiggle: 1-based line, the reason, and "error" or "warning".</summary>
 public sealed record FormMarkupLintFinding(

@@ -244,11 +244,12 @@ export interface DesignerViewDeps {
    * to, which the canvas previews while the document is dirty; returns the unwatch. */
   watchLint(listener: (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void): () => void;
   /** Save the workbook, the host's own File Save - the second half of the designer's
-   * Ctrl+S, after a successful apply. */
-  saveWorkbook(): void;
-  /** Subscribe to the HOST's Ctrl+S: the accelerator never reaches the page, so the host
-   * asks the tab to apply-then-save through this; returns the unwatch. */
-  watchApplySave(listener: () => void): () => void;
+   * Ctrl+S, after a successful apply. With `run`, the host launches the form after the
+   * save, which is what F5 over a designer tab asks for. */
+  saveWorkbook(run: boolean): void;
+  /** Subscribe to the HOST's Ctrl+S and F5: neither accelerator reaches the page, so the host
+   * asks the tab to apply-then-save through this - `run` is F5's - and returns the unwatch. */
+  watchApplySave(listener: (run: boolean) => void): () => void;
   /** A canvas double-click: the host writes or shows the control's default event handler.
    * Null means the form itself. */
   eventStub(control: string | null): void;
@@ -541,7 +542,7 @@ export class DesignerView {
     });
     // The REAL Ctrl+S: a host accelerator the page never sees as a key. The host's Save,
     // finding this tab active, asks for the apply-then-save here.
-    this.unwatchApplySave = deps.watchApplySave(() => this.applyNow());
+    this.unwatchApplySave = deps.watchApplySave((run) => this.applyNow(run));
     this.request = deps.request;
 
     // LAST, because it lays the editor out and the editor must exist: the first version ran
@@ -555,19 +556,21 @@ export class DesignerView {
 
   /** Set when an apply should be followed by the host's save - every Ctrl+S is, because
    * Ctrl+S means "save the workbook" everywhere else in the product and the designer must
-   * not quietly mean less (the owner, 2026-08-15: "CTRL+S in designer isn't saving"). */
-  private saveAfterApply = false;
+   * not quietly mean less (the owner, 2026-08-15: "CTRL+S in designer isn't saving"). `run`
+   * carries F5's extra half through the apply, so the launch waits for the same save. */
+  private pendingSave: { run: boolean } | null = null;
 
   /** Ctrl+S: the document to the form, then the workbook to disk. A clean document has
-   * nothing to apply and just saves. */
-  applyNow(): void {
+   * nothing to apply and just saves. F5 comes through here too, with `run`, because the
+   * form the developer is about to see must be the document they are looking at. */
+  applyNow(run = false): void {
     this.errorStrip.hidden = true;
     if (!this.dirty) {
-      this.deps.saveWorkbook();
+      this.deps.saveWorkbook(run);
       return;
     }
 
-    this.saveAfterApply = true;
+    this.pendingSave = { run };
     this.deps.apply(this.model.getValue());
   }
 
@@ -580,7 +583,7 @@ export class DesignerView {
     return new Promise((settle) => {
       this.pendingActOutcome = settle;
       this.errorStrip.hidden = true;
-      this.saveAfterApply = true;
+      this.pendingSave = { run: false };
       this.deps.apply(this.model.getValue());
     });
   }
@@ -629,8 +632,8 @@ export class DesignerView {
     this.pendingActOutcome?.(outcome);
     this.pendingActOutcome = null;
 
-    const saveNext = this.saveAfterApply;
-    this.saveAfterApply = false;
+    const saveNext = this.pendingSave;
+    this.pendingSave = null;
 
     if (outcome.ok) {
       this.errorStrip.hidden = true;
@@ -644,9 +647,10 @@ export class DesignerView {
 
       // The second half of Ctrl+S: what just landed on the form reaches the file. Only
       // after an OK - a refused apply saves nothing, because the file would then hold a
-      // form the developer was just told did not take their document.
+      // form the developer was just told did not take their document, and a refused F5
+      // launches nothing rather than launching yesterday's form.
       if (saveNext) {
-        this.deps.saveWorkbook();
+        this.deps.saveWorkbook(saveNext.run);
       }
 
       return;

@@ -456,8 +456,11 @@ function boot(): void {
         lint: (markup) => bridge.lintFormMarkup(id.module, id.project ?? null, markup),
         watchLint: (listener) => bridge.onFormMarkupLint(id.module, id.project ?? null, listener),
         // The RAW File Save - "saveOnly" skips the host's designer branch, which is what
-        // asked this view to apply in the first place; "save" here would loop forever.
-        saveWorkbook: () => bridge.runCommand({ id: "saveOnly", target: "host", icon: "", label: "Save" }),
+        // asked this view to apply in the first place; "save" here would loop forever. F5
+        // comes back through the sibling that saves and then launches the form.
+        saveWorkbook: (run) => bridge.runCommand({
+          id: run ? "saveOnlyThenRun" : "saveOnly", target: "host", icon: "", label: "Save",
+        }),
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
         eventStub: (control) => bridge.designerEventStub(id.module, id.project ?? null, control),
         selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),

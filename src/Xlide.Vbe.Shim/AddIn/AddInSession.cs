@@ -1929,8 +1929,22 @@ internal sealed partial class AddInSession : IDisposable
         // with a designer window selected. The flush above still matters: the form's
         // code-behind may hold unwritten page edits, and running stale code is the same bug
         // running a stale module was.
+        //
+        // AND THE DOCUMENT IS FLUSHED THE SAME WAY, through the tab's own apply-and-save. The
+        // designer's document is the transaction log and the form only catches up on a save, so
+        // a run that skipped it launched the last SAVE: undo a control move, press F5, and the
+        // form on screen still holds the move while the canvas beside it does not (the owner,
+        // 2026-08-16, with a screenshot of a Hold button in two places). The run rides the
+        // save's own callback, so a refused apply launches nothing and says why at the document.
         if (command == VbeCommands.Command.Run && _activeDesignerTab is { } designTab)
         {
+            if (!skipDesignerApply)
+            {
+                _editorSurface?.RequestDesignerApplySave(
+                    designTab.Module, DisplayFromProjectId(designTab.ProjectId), run: true);
+                return VbeCommands.CommandRun.Ok("the designer tab applies and saves, then runs");
+            }
+
             return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
         }
 
@@ -6365,6 +6379,15 @@ internal sealed partial class AddInSession : IDisposable
         if (string.Equals(name, "saveOnly", StringComparison.Ordinal))
         {
             ExecuteEditorCommand(VbeCommands.Command.Save, skipDesignerApply: true);
+            return;
+        }
+
+        // F5's callback: the same save, and then the form - which by now is the document, the
+        // whole point of routing a run through here.
+        if (string.Equals(name, "saveOnlyThenRun", StringComparison.Ordinal))
+        {
+            ExecuteEditorCommand(VbeCommands.Command.Save, skipDesignerApply: true);
+            ExecuteEditorCommand(VbeCommands.Command.Run, skipDesignerApply: true);
             return;
         }
 

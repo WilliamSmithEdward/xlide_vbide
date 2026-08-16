@@ -793,6 +793,62 @@ try {
   { budgetMs: 15000 });
   check("a drag past the top-left stops at the parent's corner rather than going negative", true);
 
+  // ---- F5 runs the DOCUMENT, not whatever was saved last ----
+  //
+  // The document is the transaction log and the form catches up on a save, so a run that
+  // skipped the save launched the last one: undo a move, press F5, and the form standing on
+  // screen still holds the move while the canvas beside it does not (the owner, 2026-08-16,
+  // with a screenshot of a Hold button in two places). Run applies and saves first now, which
+  // is worth pinning precisely because the two pictures agree again afterwards and nothing in
+  // the canvas or the document could show the gap.
+
+  const stale = (await api.designer(form, project)).controls.find((c) => c.name === "RegionPick");
+  check("the form has not caught up with the document yet - which IS the hazard",
+    Math.abs(Number(stale?.left)) > 0.5 || Math.abs(Number(stale?.top)) > 0.5,
+    `the form holds ${stale?.left},${stale?.top} while the document says 0,0; if these already `
+    + "agree the row below proves nothing");
+
+  const ranDirty = api.command("run");
+  await waitFor("the form to stand running", async () =>
+    ((await api.userforms()).forms ?? []).find((title) => title.includes("Quarter Entry")),
+  { budgetMs: 20000 });
+  const dirtyRunAnswer = await ranDirty;
+  check("F5 over a dirty designer answers that it ran", dirtyRunAnswer.ran === true,
+    dirtyRunAnswer.detail);
+
+  /*
+   * A CLOSED FORM IS NOT YET AN UNLOADED ONE, AND THE DESIGNER GOES WITH IT (measured 2026-08-16).
+   *
+   * The close is posted, and for roughly 400ms afterwards the component answers "no designer to
+   * read" - the object is not there to be asked, so the route throws and the whole group aborts.
+   * `debugMode` is no guide at all: the log has it back at design while the form still stands.
+   * Nor is the running list, which empties before the designer returns. So this waits for the
+   * designer to come back, which is a different question from where the control is - the read
+   * below is the assertion, and it must be a check that can fail rather than a wait that throws.
+   */
+  await api.userforms("close", "Quarter Entry");
+  await waitFor("the form to unload and give its designer back", async () =>
+    await api.designer(form, project).then(() => true, () => false), { budgetMs: 20000 });
+
+  const ranWith = (await api.designer(form, project)).controls.find((c) => c.name === "RegionPick");
+  check("and what it launched was the DOCUMENT - applied and saved on the way to the form",
+    Math.abs(Number(ranWith?.left)) < 0.51 && Math.abs(Number(ranWith?.top)) < 0.51,
+    `the form holds ${ranWith?.left},${ranWith?.top} and the document said 0,0`);
+
+  check("so the tab is clean afterwards, the way any other save leaves it",
+    (await api.act("designerCanvas", { module: form })).data?.dirty === false,
+    `the canvas reports dirty ${JSON.stringify((await api.act("designerCanvas", { module: form })).data?.dirty)}`);
+
+  // And the form goes back where the rows below expect it. That F5 SAVED is the whole point of
+  // the section, so it is this section's business to undo what it wrote to the form: the reset
+  // the resize rows open with sets the document, and a document set against a form that moved
+  // under it is dirty for ever.
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.command("save");
+  await waitFor("the form back where the F5 rows found it", async () =>
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.51, { budgetMs: 20000 });
+
   // ---- and the handles resize: the same commit, the same undo, the size clause too ----
 
   // From canonical, so every number below is exact rather than inherited from the rows above.

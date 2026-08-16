@@ -174,6 +174,31 @@ internal static unsafe class DialogWatch
         [.. TopLevelRunForms().Select(Win32.ReadWindowText)];
 
     /// <summary>
+    /// The window handle of a running form, matched on caption the way the close is, or the
+    /// first one standing when no caption is given. Zero when nothing matches.
+    ///
+    /// What it is FOR: a running form is the only picture of a designer's work that nothing in
+    /// the object model can answer for. MSForms draws its controls windowless, so there are no
+    /// child handles to enumerate and the designer's own collection describes the STORED form,
+    /// not the one on screen. Capturing the window is the only way to check the two agree - and
+    /// that is exactly the question F5 raised (the owner, 2026-08-16: "are you checking against
+    /// the live form?").
+    /// </summary>
+    public static nint RunningFormHandle(string? caption)
+    {
+        foreach (var form in TopLevelRunForms())
+        {
+            if (caption is not { Length: > 0 }
+                || Win32.ReadWindowText(form).Contains(caption, StringComparison.OrdinalIgnoreCase))
+            {
+                return form;
+            }
+        }
+
+        return 0;
+    }
+
+    /// <summary>
     /// Closes a running form the way its X would - WM_CLOSE, posted - matched on caption, or
     /// the first one standing when no caption is given. False when nothing matched.
     /// </summary>

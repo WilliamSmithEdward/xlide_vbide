@@ -470,7 +470,13 @@ function clientFor(entry) {
     log: ({ since, match, max, waitMs } = {}) =>
       call(`log${query({ since, match, max, waitMs })}`, { timeout: (waitMs ?? 0) + 10000 }),
     messages: (last) => call(`messages${query({ last })}`),
-    capture: (window) => call(`capture${query({ window })}`, { raw: true, timeout: 20000 }),
+    /**
+     * The window as a BMP: the editor `frame`, the Object Browser `palette`, or a RUNNING
+     * `form` picked by any part of its caption. The last is the only picture of a designer's
+     * work the object model cannot give - MSForms draws its controls windowless, and the
+     * designer's own collection describes the STORED form rather than the one on screen.
+     */
+    capture: (window, caption) => call(`capture${query({ window, caption })}`, { raw: true, timeout: 20000 }),
 
     command: (name) => call(`command${query({ name })}`, { method: "POST" }),
     placement: () => call("placement", { method: "POST" }),

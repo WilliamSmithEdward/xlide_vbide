@@ -21,6 +21,11 @@
 
 .EXAMPLE
     tools\harness\Get-Shot.ps1 -Selector '#dock-bottom' -Pad 0
+
+.EXAMPLE
+    tools\harness\Get-Shot.ps1 -Window form -Caption 'Quarter Entry' -Out live.png
+    The form as the RUNTIME paints it, which is the only way to check a designer's work
+    against the thing the developer will actually see.
 #>
 [CmdletBinding()]
 param(
@@ -30,9 +35,14 @@ param(
     # Pixels of breathing room around the element.
     [int] $Pad = 8,
 
-    # Which surface: the editor frame, or the Object Browser palette.
-    [ValidateSet('frame', 'palette')]
+    # Which surface: the editor frame, the Object Browser palette, or a RUNNING form.
+    [ValidateSet('frame', 'palette', 'form')]
     [string] $Window = 'frame',
+
+    # With -Window form, which running form: any caption it holds. The first one standing
+    # otherwise. A running form is the only picture of a designer's work the object model
+    # cannot answer for, because MSForms draws its controls without windows of their own.
+    [string] $Caption,
 
     # Where to write the PNG.
     [string] $Out = 'shot.png'
@@ -48,6 +58,9 @@ $api = $found.Base
 $query = "window=$Window"
 if ($Selector) {
     $query += "&selector=$([uri]::EscapeDataString($Selector))&pad=$Pad"
+}
+if ($Caption) {
+    $query += "&caption=$([uri]::EscapeDataString($Caption))"
 }
 
 $bmp = [IO.Path]::GetTempFileName() + '.bmp'

@@ -178,6 +178,14 @@ reads as a regression and is a window size. Anything that aims a synthetic point
 resize act had learned this a day earlier and the drag act had not, so the lesson only half
 landed. Suspect it whenever a hit-test row fails and the arithmetic looks right.
 
+**A closed form is not yet an unloaded one, and its designer goes with it.** For roughly 400ms
+after `userform?action=close` is posted, `designer?module=` answers "no designer to read" - the
+object is absent, not empty, so the route throws and the whole group aborts on it. Neither
+obvious signal helps: `debugMode` reads `design` while the form is still standing, and the
+running-forms list empties before the designer comes back. Wait for the designer itself
+(`api.designer(...).then(() => true, () => false)`), then assert on what it says - a wait that
+throws is not a check that fails, and the difference is a run that reports nothing.
+
 **Counts beat megabytes for leaks.** `Test-Churn.ps1` asserts that editors, models, dock groups and
 DOM nodes return to their starting numbers after two dozen cycles. An exact number that must return
 to its starting value is a far better detector than a heap figure nobody can interpret.

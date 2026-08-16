@@ -231,7 +231,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `await` | `until(predicate, {waitMs})` | waits for a condition IN the page |
 | `bench` | `bench(what, {n})` | times a scenario: min, median, p95, max, raw samples |
 | `breakpoint` | `breakpoint(module, line, {project, state})` | set, clear or toggle |
-| `capture` | `capture(window)` | a BMP of the window, through PrintWindow |
+| `capture` | `capture(window, caption)` | a BMP of the window, through PrintWindow. `"form"` photographs a RUNNING form by caption |
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
@@ -304,6 +304,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | The shim log, optionally BLOCKING until a line appears | `log({ match, waitMs })` |
 | One capture of a whole moment | `journal()` |
 | A picture of the window | `capture("frame")` |
+| A picture of the form the RUNTIME painted | `capture("form", "Quarter Entry")` |
 
 ### Doing
 
@@ -1388,6 +1389,16 @@ keyboard gestures by hand - arrows nudge, Shift+arrows resize, Ctrl+Z undoes - d
 `keydown` at `.designer-view[data-module="EntryForm"] .designer-canvas-scroll`. Aim it with
 that attribute rather than at a bare `.designer-canvas-scroll`: a session can hold several
 designer tabs, and only one view is mounted at a time.
+
+`command run` over a designer tab APPLIES AND SAVES the document first, then launches the form,
+so what opens is what the canvas shows rather than whatever was saved last (a refused apply
+launches nothing and says why at the document). Two things follow for a probe. The form it
+launched can be photographed - `capture("form", "Quarter Entry")`, the only picture of a
+designer's work anything can take, since MSForms draws windowless and the designer's collection
+describes the stored form. And after `userform?action=close` the component answers "no designer
+to read" for about 400ms: the object is gone, not empty. `debugMode` reads `design` while the
+form is still standing and the running-forms list empties before the designer returns, so wait
+for the designer itself.
 
 And when a gesture feels slow, `designer-perf.mjs` times the whole surface rather than guessing
 which part of it is at fault:

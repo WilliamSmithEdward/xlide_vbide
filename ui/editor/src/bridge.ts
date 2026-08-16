@@ -65,7 +65,7 @@ export type HostMessage =
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
-  | { type: "designerApplySave"; moduleName: string; project?: string | null }
+  | { type: "designerApplySave"; moduleName: string; project?: string | null; run?: boolean }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
@@ -692,8 +692,9 @@ export class EditorBridge {
 
   private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void>();
 
-  /** The host's Ctrl+S asking a designer tab to apply-then-save; keyed by the form. */
-  onDesignerApplySave(module: string, project: string | null, watcher: () => void): () => void {
+  /** The host's Ctrl+S asking a designer tab to apply-then-save; keyed by the form. `run` is
+   * F5 asking for the same thing with the form launched after the save. */
+  onDesignerApplySave(module: string, project: string | null, watcher: (run: boolean) => void): () => void {
     const key = docKeyOf(module, project);
     this.designerApplySaveWatchers.set(key, watcher);
     return () => {
@@ -703,7 +704,7 @@ export class EditorBridge {
     };
   }
 
-  private readonly designerApplySaveWatchers = new Map<string, () => void>();
+  private readonly designerApplySaveWatchers = new Map<string, (run: boolean) => void>();
 
   /** Tells the host which panel is showing, so it only watches what is being looked at. */
   panelChanged(name: string, open: boolean): void {
@@ -1228,7 +1229,8 @@ export class EditorBridge {
           message.draft ? { form: message.draftForm ?? null, controls: message.draft } : null);
         return;
       case "designerApplySave":
-        this.designerApplySaveWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.();
+        this.designerApplySaveWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(
+          message.run === true);
         return;
       case "revealLine":
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);

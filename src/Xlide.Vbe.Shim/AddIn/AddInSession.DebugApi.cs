@@ -758,11 +758,26 @@ internal sealed partial class AddInSession
             case "capture":
             {
                 request.Query.TryGetValue("window", out var which);
+
+                // `form` is a RUNNING form, matched on caption like the userform close - the one
+                // picture of a designer's work nothing in the object model can answer for, since
+                // MSForms draws windowless and the designer's collection describes the stored
+                // form rather than the one on screen.
+                request.Query.TryGetValue("caption", out var wantedCaption);
                 var target = which switch
                 {
                     "palette" => _browserPalette?.Handle ?? 0,
+                    "form" => DialogWatch.RunningFormHandle(wantedCaption),
                     _ => _frame,
                 };
+
+                if (which == "form" && target == 0)
+                {
+                    return DebugError(wantedCaption is { Length: > 0 }
+                        ? $"no running form whose caption holds '{wantedCaption}'"
+                        : "no form is running");
+                }
+
                 var bytes = DebugCapture.CaptureBmp(target);
                 if (bytes is null)
                 {
