@@ -637,6 +637,39 @@ the host-owns-membership invariant survives.
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.
 
+## The panel speaks the developer's language
+
+**Landed 2026-08-15** (the owner, looking at a form's rows: "can we get the actual enums
+loaded? instead of the int representation"). The panel had been showing what the object model
+hands over - `BorderStyle 0`, `Cycle 0`, `MousePointer 0`, `BackColor -2147483633` - and every
+one of those is a name in the language the developer writes.
+
+The names come from where the Object Browser's come from: the object's own `ITypeInfo`. For
+each property getter the return type is followed, through an alias if it is one, and where it
+lands on an enum that enum's members are read with their values. So a row shows
+`fmCycleAllForms`, offers the members it could hold, and takes a member name, a hex literal or
+the raw number on the way back in - `PropertyTypes.Spell` and `Unspell` are the one pair of
+translations, and both panels use them: the component's rows and the designer's control rows,
+because they are one panel as far as the developer is concerned.
+
+Three decisions worth keeping:
+
+- **Nothing is guessed from a property's NAME.** `fmBorderStyle` for `BorderStyle` is a
+  convention until the day a control names one differently, and a panel that renames a value
+  wrongly is worse than one that shows the number. `StartUpPosition` is a plain Integer in
+  MSForms however much it looks like an enum, so it keeps its number, and a suite row pins
+  that it does.
+- **The row stays typeable.** The values are offered through a datalist rather than a locked
+  dropdown (the owner: "the user should be able to type into a type if it's selected"), so the
+  list drops down and the field still takes a number or a name nobody listed.
+- **A refusal is the host SAYING so**, not the row failing to echo the request. The
+  `editProperty` act compared the two, which was right only while every value had one
+  spelling; a written `0` that reads back `fmCycleAllForms` had it reporting an honest write
+  as refused. It watches the status line now, and answers with what the row holds.
+
+Read once per class and cached: a loaded type does not change, and the panel republishes on
+every selection.
+
 ## What it costs, measured
 
 The owner felt a lag in two gestures and asked for a walk of the whole surface

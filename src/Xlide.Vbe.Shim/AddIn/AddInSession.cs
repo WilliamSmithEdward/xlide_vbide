@@ -3366,6 +3366,13 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private string? _propertiesControl;
 
+    /// <summary>
+    /// What the panel's numbers MEAN, read from each object's type library once per class: enum
+    /// members by name, colours as the hex the VBE spells. Lives for the session because a
+    /// loaded type does not change, and the panel republishes on every selection.
+    /// </summary>
+    private readonly PropertyTypes _propertyTypes = new();
+
     private void PublishProperties()
     {
         var surface = _editorSurface;
@@ -3392,6 +3399,13 @@ internal sealed partial class AddInSession : IDisposable
 
             var componentType = found.GetInt32("Type");
             var count = properties.GetInt32("Count");
+
+            // What the values MEAN, from the type library of the thing that owns them. A form's
+            // design properties are the DESIGNER's, so that is the object whose types are read;
+            // a component with no designer keeps the raw numbers, which is what the panel showed
+            // before any of this and is still honest.
+            using var designer = found.GetObject("Designer");
+            var shapes = designer is null ? null : _propertyTypes.Of(designer);
 
             // Names first, values second. Enumerating names runs nothing; it is the value reads
             // that must be limited to what is known to be safe.
@@ -3463,7 +3477,9 @@ internal sealed partial class AddInSession : IDisposable
                     ? "(Name)"
                     : name;
 
-                entries.Add(DescribeProperty(shownName, property));
+                PropertyTypes.Shape? shape = null;
+                shapes?.TryGetValue(name, out shape);
+                entries.Add(DescribeProperty(shownName, property, shape));
             }
 
             // Alphabetical, which puts "(Name)" first: the parenthesis sorts before any letter,
@@ -3498,7 +3514,19 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             var property = string.Equals(name, "(Name)", StringComparison.Ordinal) ? "Name" : name;
-            var display = FormDesignService.SetControlProperty(component, designer, controlName, property, value, null);
+
+            // The panel shows the developer's spelling, the model stores a number: the same
+            // translation the component rows make, on the way in.
+            var stored = value;
+            using (var control = FormDesignService.FindControlNamed(designer, controlName, 0))
+            {
+                if (control is not null && _propertyTypes.Of(control).TryGetValue(property, out var shape))
+                {
+                    stored = PropertyTypes.Unspell(shape, value);
+                }
+            }
+
+            var display = FormDesignService.SetControlProperty(component, designer, controlName, property, stored, null);
             Log.Info($"properties: {formName}.{controlName}.{property} = {display}");
 
             if (string.Equals(property, "Name", StringComparison.OrdinalIgnoreCase))
@@ -3571,11 +3599,35 @@ internal sealed partial class AddInSession : IDisposable
                 }
             }
 
+            // The control's own type library, for the same reason the component's rows read one:
+            // a colour is hex and an enum is a name, in both panels, because they are one panel
+            // as far as the developer is concerned.
+            var shapes = _propertyTypes.Of(control);
+
             void Colour(string name)
             {
                 if (FormDesignService.TryInt(control, name) is { } value)
                 {
-                    entries.Add(new SurfacePropertyEntry(name, value.ToString(System.Globalization.CultureInfo.InvariantCulture), true, false));
+                    shapes.TryGetValue(name, out var shape);
+                    var raw = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    entries.Add(new SurfacePropertyEntry(name, PropertyTypes.Spell(shape, raw), true, false));
+                }
+            }
+
+            // A property whose values the library NAMES - a control's BorderStyle, SpecialEffect,
+            // MousePointer, TextAlign - shown as the name, offered as the list, typed as either.
+            void Named(string name)
+            {
+                if (!shapes.TryGetValue(name, out var shape) || shape.Members is not { Count: > 0 } members)
+                {
+                    return;
+                }
+
+                if (FormDesignService.TryInt(control, name) is { } value)
+                {
+                    var raw = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                    entries.Add(new SurfacePropertyEntry(name, PropertyTypes.Spell(shape, raw), true, false,
+                        [.. members.Select(member => member.Name)]));
                 }
             }
 
@@ -3597,6 +3649,12 @@ internal sealed partial class AddInSession : IDisposable
 
             Colour("BackColor");
             Colour("ForeColor");
+            // Offered only where the control HAS them: a Label has no SpecialEffect worth
+            // showing and a CommandButton no TextAlign, and `Named` adds nothing it cannot read.
+            Named("BorderStyle");
+            Named("SpecialEffect");
+            Named("TextAlign");
+            Named("MousePointer");
 
             try
             {
@@ -3646,7 +3704,8 @@ internal sealed partial class AddInSession : IDisposable
     /// it currently holds: values of simple types are editable, objects and the unreadable are not.
     /// The editor can still refuse an edit, and that refusal is reported when it happens.
     /// </summary>
-    private static SurfacePropertyEntry DescribeProperty(string shownName, DispatchObject property)
+    private static SurfacePropertyEntry DescribeProperty(
+        string shownName, DispatchObject property, PropertyTypes.Shape? shape)
     {
         try
         {
@@ -3655,7 +3714,14 @@ internal sealed partial class AddInSession : IDisposable
                 or VarEnum.VT_I2 or VarEnum.VT_I4 or VarEnum.VT_INT
                 or VarEnum.VT_R4 or VarEnum.VT_R8 or VarEnum.VT_EMPTY;
 
-            return new SurfacePropertyEntry(shownName, display, writable, kind == VarEnum.VT_BOOL);
+            // The value as the developer WRITES it - fmCycleAllForms rather than 0, &H8000000F&
+            // rather than -2147483633 - with the enum's members offered as the row's choices.
+            var spelled = PropertyTypes.Spell(shape, display);
+            var options = shape?.Members is { Count: > 0 } members
+                ? members.Select(member => member.Name).ToArray()
+                : null;
+
+            return new SurfacePropertyEntry(shownName, spelled, writable, kind == VarEnum.VT_BOOL, options);
         }
         catch (Exception)
         {
@@ -3731,14 +3797,28 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
-            if (!WriteProperty(property, value, out var complaint))
+            // The panel shows what the developer WRITES - fmCycleAllForms, &H8000000F& - and the
+            // model stores a number, so the name goes back through the type library on the way
+            // in. Anything the library does not name passes through untouched, which is how a
+            // developer who types the number still gets the number.
+            using var designer = found.GetObject("Designer");
+            PropertyTypes.Shape? shape = null;
+            if (designer is not null)
+            {
+                _propertyTypes.Of(designer).TryGetValue(name, out shape);
+            }
+
+            var stored = PropertyTypes.Unspell(shape, value);
+
+            if (!WriteProperty(property, stored, out var complaint))
             {
                 _editorSurface?.Notify($"{name}: {complaint}");
                 PublishProperties();
                 return;
             }
 
-            Log.Info($"properties: {component}.{name} = '{value}'");
+            Log.Info($"properties: {component}.{name} = '{value}'"
+                + (stored == value ? string.Empty : $" ({stored})"));
 
             // Renaming changes the key everything else holds: the write baseline, the breakpoint
             // record, the tabs, the explorer, and the name the surface files the document under.

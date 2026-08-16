@@ -417,11 +417,18 @@ public sealed record SetInstallPathMessage(
 /// will be attempted, not promised: the editor can still refuse one, and the refusal is reported.
 /// Boolean marks a value that offers True and False rather than free text.
 /// </summary>
+/// <summary>
+/// One row of the Properties panel. `Options`, when the type library named them, are the values
+/// this property can take - an enum's members, spelled the way the developer writes them - and
+/// the row becomes a list rather than a text box. `Boolean` is the same idea from before the
+/// typelib was read, kept because True/False needs no library to know.
+/// </summary>
 public sealed record SurfacePropertyEntry(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("value")] string Value,
     [property: JsonPropertyName("writable")] bool Writable,
-    [property: JsonPropertyName("boolean")] bool Boolean);
+    [property: JsonPropertyName("boolean")] bool Boolean,
+    [property: JsonPropertyName("options")] string[]? Options = null);
 
 /// <summary>
 /// The properties of the selected component, with the class name shown in the panel's object

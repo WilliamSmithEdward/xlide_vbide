@@ -627,6 +627,63 @@ try {
     (await api.ui()).properties?.component === form, { budgetMs: 15000 });
   check("selecting the form returns the panel to the component", true);
 
+  // ---- the panel speaks the developer's language: members, not their ints ----
+
+  const formPanel = await waitFor("the panel to show the form", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === form ? shown : null;
+  }, { budgetMs: 15000 });
+
+  const cycleRow = formPanel.rows.find((row) => row.name === "Cycle");
+  check("an enum-valued property shows its member name, and offers the members",
+    cycleRow?.value === "fmCycleAllForms" && (cycleRow?.options ?? []).includes("fmCycleCurrentForm"),
+    JSON.stringify(cycleRow));
+
+  const colourRow = formPanel.rows.find((row) => row.name === "BackColor");
+  check("a colour shows the hex the VBE spells, not a signed integer",
+    /^&H[0-9A-F]{8}&$/.test(String(colourRow?.value)), String(colourRow?.value));
+
+  // The honest limit, pinned: names come from the TYPE LIBRARY, never from the property's own
+  // name. StartUpPosition is a plain Integer in MSForms however much it looks like an enum, so
+  // it keeps its number rather than being given a vocabulary this product invented.
+  const plainRow = formPanel.rows.find((row) => row.name === "StartUpPosition");
+  check("a property the library does not name keeps its number - nothing is guessed",
+    /^-?\d+$/.test(String(plainRow?.value)) && !plainRow?.options, JSON.stringify(plainRow));
+
+  const wroteName = await api.act("editProperty", { name: "Cycle", value: "fmCycleCurrentForm" });
+  check("a member NAME writes through to the model", wroteName.did === true, wroteName.detail);
+
+  // ...and the number still writes, which is what keeps the row a text field rather than a
+  // list: the developer types either, and the panel answers in the language it reads back.
+  const wroteNumber = await api.act("editProperty", { name: "Cycle", value: "0" });
+  check("the raw number writes too, and reads back as the member's name",
+    wroteNumber.did === true && /fmCycleAllForms/.test(wroteNumber.detail ?? ""), wroteNumber.detail);
+
+  const wroteHex = await api.act("editProperty", { name: "BackColor", value: "&H00C0FFC0&" });
+  check("a colour written as hex lands as the model's own number",
+    wroteHex.did === true, wroteHex.detail);
+  await waitFor("the form to carry the colour", async () =>
+    ((await api.designer(form, project)).form?.backColor ?? 0) === 12648384, { budgetMs: 15000 });
+  check("12648384, which is what &H00C0FFC0& means", true);
+  await api.act("editProperty", { name: "BackColor", value: "&H8000000F&" });
+
+  // A CONTROL's rows read the same way, from that control's own library.
+  await api.act("designerSelect", { module: form, control: "RegionPick" });
+  const controlNamed = await waitFor("the panel to show the control's named values", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === "RegionPick"
+      && shown.rows.some((row) => row.name === "TextAlign") ? shown : null;
+  }, { budgetMs: 15000 });
+  const alignRow = controlNamed.rows.find((row) => row.name === "TextAlign");
+  check("a control's enum rows are named too, from its own type library",
+    alignRow?.value === "fmTextAlignLeft" && (alignRow?.options ?? []).includes("fmTextAlignCenter"),
+    JSON.stringify(alignRow));
+
+  const alignWrite = await api.act("editProperty", { name: "TextAlign", value: "fmTextAlignCenter" });
+  check("and a control's enum takes a member name on the way in",
+    alignWrite.did === true && /fmTextAlignCenter/.test(alignWrite.detail ?? ""), alignWrite.detail);
+  await api.act("editProperty", { name: "TextAlign", value: "fmTextAlignLeft" });
+
   // ---- M5 opens: the canvas moves controls, and the DOCUMENT is the transaction log ----
 
   // The real pointer sequence - press on what the hit test answers, past the threshold, drop -

@@ -190,6 +190,24 @@ internal sealed unsafe class DispatchObject : IDisposable
     /// properties arrive through the same dispatch - so the name here is the name a developer
     /// would use, not the extender's.
     /// </summary>
+    /// <summary>
+    /// The object's own type information, for the callers that need more than its name - what a
+    /// property MEANS, which is the type library's answer rather than the object model's. Null
+    /// when the object offers none, which plenty do.
+    ///
+    /// CALLER-OWNED: dispose the handle. Every other pointer this class hands out follows the
+    /// same rule, and the type machinery is the one place where forgetting shows up as a leak
+    /// the wrapper counters cannot see.
+    /// </summary>
+    public ComHandle<Interop.ITypeInfo>? TypeInfo()
+    {
+        ObjectDisposedException.ThrowIf(_dispatch is null, this);
+
+        return _dispatch.GetTypeInfo(0, 0, out var infoPointer) < 0 || infoPointer == 0
+            ? null
+            : ComHandle<Interop.ITypeInfo>.Own(infoPointer);
+    }
+
     public string? TypeName()
     {
         ObjectDisposedException.ThrowIf(_dispatch is null, this);

@@ -1431,15 +1431,30 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       // refused, it republishes either way - and only then is the value worth comparing.
       const asked = shown.round;
 
+      // A REFUSAL IS THE HOST SAYING SO, not the row failing to echo the request back.
+      //
+      // This compared the republished value against the text that was sent, which held only
+      // while the panel showed values in exactly the spelling a caller typed. It does not any
+      // more: a property whose type library names its values answers `fmCycleAllForms` to a
+      // written `0`, and the honest write read as a refusal for two seconds and then lied
+      // (2026-08-15). The host complains through the status line when it will not take a
+      // value, so the notice is the signal - and the detail reports what the row HOLDS, which
+      // is the answer the caller actually wanted.
+      const saidBefore = parts.statusNotice();
+
       const settled = (): Promise<ActResult> => new Promise((answer) => {
         const deadline = Date.now() + 2000;
 
         const look = (): void => {
           const now = parts.properties();
           const row = now.rows.find((one) => one.name.toLowerCase() === name.toLowerCase());
+          const said = parts.statusNotice();
 
-          if (now.round !== asked && row?.value === value) {
-            answer({ did: true, detail: `${now.component}.${row.name} is ${JSON.stringify(value)}` });
+          if (now.round !== asked && (said === saidBefore || !said)) {
+            answer({
+              did: true,
+              detail: `${now.component}.${row?.name ?? name} is ${JSON.stringify(row?.value ?? value)}`,
+            });
             return;
           }
 

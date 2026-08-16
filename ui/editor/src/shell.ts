@@ -37,6 +37,9 @@ export interface ShellProperty {
   writable: boolean;
   /** True and False rather than free text. */
   boolean: boolean;
+  /** The values the type library named for this property - an enum's members, spelled the way
+   * the developer writes them. Offered as a dropdown beside a field that still takes typing. */
+  options?: string[];
 }
 
 export interface ShellHandlers {
@@ -519,6 +522,23 @@ export class Shell {
         input.value = property.value;
         input.spellcheck = false;
         input.setAttribute("aria-label", `${property.name} of ${this.propertiesComponent}`);
+
+        // A property whose type library NAMED its values offers them - and stays TYPEABLE (the
+        // owner, 2026-08-15: "the user should be able to type into a type if it's selected").
+        // A datalist is exactly that pairing: the list drops down, the field still takes a
+        // number or a name nobody listed, and the host reads either.
+        if (property.options && property.options.length > 0) {
+          const list = document.createElement("datalist");
+          list.id = `prop-options-${this.propertiesComponent}-${property.name}`.replace(/[^\w-]/g, "-");
+          for (const option of property.options) {
+            const choice = document.createElement("option");
+            choice.value = option;
+            list.appendChild(choice);
+          }
+
+          input.setAttribute("list", list.id);
+          row.appendChild(list);
+        }
 
         // Committed when the developer is done, not per keystroke: Enter commits and stays,
         // leaving commits, Escape puts the truth back.
