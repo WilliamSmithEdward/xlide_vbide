@@ -478,10 +478,35 @@ the host-owns-membership invariant survives.
     is gone, not empty. `debugMode` is no guide (the log has it back at design while the form
     still stands) and neither is the running-forms list, which empties first. Anything reading
     a designer after a run waits for the designer itself.
-  - *The parity probe* - materialise the native designer window (Visible on, capture by
-    hwnd, Visible off, Toolbox down, NEVER saving while one stands - the restore trap),
-    capture the canvas beside it, ship both images side by side; eyeball first, pixel-diff
-    on control edges after. This is the canvas's definition-of-done row.
+  - *The parity probe* - **landed 2026-08-16** as `tools\harness\designer-parity.mjs`, and it
+    found what it was built to find. Not the native designer window in the end but the RUNNING
+    form, which is the surface a developer judges by: launched from the tab (so both surfaces
+    hold the same document), photographed through `capture?window=form`, and compared landmark
+    by landmark against the canvas's own DOM. Both sides reduce to points from the form's
+    client origin, and the landmark is what each kind actually PAINTS at its top - a frame's
+    rule, a tick box's glyph, the box itself for the rest - because the model's rectangle is
+    the thing the two already agreed about.
+
+    Three findings, all of them the same shape: **the canvas was drawing a container's
+    rectangle where the model's rectangle is, and the runtime does not.** A Frame's caption
+    band belongs to the control's own box, so its rule is about four points lower and its
+    first child about nine - the canvas drew the rule at the box edge, which lines a frame up
+    with the button beside it on screen and nowhere else (the owner's side-by-side). A
+    MultiPage draws nothing at all above or beside its tabs, and the canvas drew a rectangle
+    all the way round. And the model's `InsideHeight` reads about two and a half points short
+    of the runtime's band for a frame, so the band comes from the caption's own line box now,
+    which measures true.
+
+    Before: the frame four points out, its children six, the multipage structurally wrong.
+    After: every control's painted top edge within a point of the running form's, and most
+    within a third of one. The probe prints rather than passing, the way the perf walk does.
+
+    Its own three false starts are worth remembering, because each one produced a confident
+    table of nonsense: it calibrated the client origin off a checkbox INSIDE a page (a
+    container's child carries its parent's coordinates), it scanned a window that reached up
+    into the control above and read that control's bottom as this one's top, and it aimed at a
+    container's left edge where the column runs through the caption lettering rather than the
+    rule.
   - *The designer route refuses a from-disk form* - found 2026-08-13, late: the debug
     `designer` GET answered "has no designer to read" for a form loaded from disk and never
     touched, while the designer TAB read the same form fine seconds later through the

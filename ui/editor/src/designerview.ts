@@ -86,8 +86,28 @@ function registerMarkupLanguage(): void {
 }
 
 /** The frame's caption strip eats this much of its client area's top, approximately - an
- * honest inset rather than a measured one, until the canvas milestone measures it. */
+ * honest inset rather than a measured one, used only when the model declines to say. */
 const FRAME_INSET_TOP = 10 * PT;
+
+/*
+ * A FRAME'S CAPTION BAND, measured off the running form rather than reasoned about.
+ *
+ * MSForms draws a group box the way Windows does: the caption occupies a band at the top of
+ * the control's own rectangle, the rule runs through the MIDDLE of that band, and the client
+ * area begins BELOW it. So a frame at top 112 shows its line at about 116 and its first child
+ * sits from about 121 - which is why a button placed level with the frame looks level in a
+ * designer that draws the line at 112 and is not (the owner's side-by-side, 2026-08-16).
+ *
+ * The band is the caption's line box, which the stylesheet sets and this matches. The model's
+ * InsideHeight was tried first and reads about two and a half points short of the runtime;
+ * designer-parity.mjs is what told the difference, comparing glyph against glyph.
+ */
+const FRAME_CAPTION_LINE = 12;
+
+/** The tab strip's own height, as the stylesheet draws it. The rule below the tabs cannot sit
+ * higher than this or the tabs hang through the line, and the runtime's band measures within
+ * a point of it - so it is also the truer of the two numbers available. */
+const PAGE_STRIP_HEIGHT = 20;
 
 /** How far a press must travel before it is a DRAG rather than a click, in CSS pixels. Below
  * it a press is a selection and nothing moves, which is what keeps a click a click. */
@@ -1902,24 +1922,46 @@ export class DesignerView {
 
     switch (row.type) {
       case "Frame": {
-        const legend = document.createElement("div");
-        legend.className = "dc-frame-caption";
-        legend.textContent = caption;
-        box.appendChild(legend);
         const inner = document.createElement("div");
         inner.className = "dc-frame-client";
         // The REAL client area when the model says it: side borders split the width
         // difference evenly, and what remains of the height difference above the client is
         // the caption strip - derived, not guessed, which is the parity rule.
+        // The sides and the bottom are the model's - a border each way, split evenly. The TOP
+        // is the caption band, which the model's InsideHeight understates; see the constant.
         if (row.insideWidth && row.insideHeight && row.width && row.height) {
           const side = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
           inner.style.left = `${side}px`;
           inner.style.right = `${side}px`;
           inner.style.bottom = `${side}px`;
-          inner.style.top = `${Math.max(0, (row.height - row.insideHeight) * PT - side)}px`;
-        } else {
-          inner.style.top = `${FRAME_INSET_TOP}px`;
         }
+
+        const band = FRAME_CAPTION_LINE;
+        inner.style.top = `${band}px`;
+
+        /*
+         * THE RULE IS DRAWN THROUGH THE CAPTION, NOT AT THE CONTROL'S TOP.
+         *
+         * A Frame at top 112 shows its line about four points lower and its first child about
+         * nine, because the caption band belongs to the control's own rectangle. The canvas
+         * drew the line at the box edge, which lines a frame up with the button beside it on
+         * screen and lines them up nowhere else - the owner's side-by-side of the canvas
+         * against the running form caught it (2026-08-16, "the xlide designer doesn't
+         * accurately represent how the controls align with each other in actual runtime").
+         */
+        const rule = document.createElement("div");
+        rule.className = "dc-frame-rule";
+        rule.style.top = `${Math.round(band / 2) - 1}px`;
+        box.appendChild(rule);
+
+        // Straddling the rule: the band is the caption's own line box, so putting the caption
+        // at the top of it puts the rule through its middle.
+        const legend = document.createElement("div");
+        legend.className = "dc-frame-caption";
+        legend.textContent = caption;
+        legend.style.top = "0px";
+        box.appendChild(legend);
+
         box.appendChild(inner);
         renderInto(inner, row.name.toLowerCase());
         break;
@@ -1927,6 +1969,12 @@ export class DesignerView {
 
       case "MultiPage":
       case "TabStrip": {
+        // The rule goes in FIRST so the tabs paint over it, the way a tab control's selected
+        // tab breaks the line it sits on.
+        const edge = document.createElement("div");
+        edge.className = "dc-page-rule";
+        box.appendChild(edge);
+
         const strip = document.createElement("div");
         strip.className = "dc-page-strip";
         const pages = byParent.get(row.name.toLowerCase()) ?? [];
@@ -1947,18 +1995,40 @@ export class DesignerView {
         // The FIRST page's content shows, the way the control itself opens; the others are
         // headers only until selection lands with the canvas milestone.
         const first = pages[0];
+
+        // The MultiPage's own client area, when the model says it: what is not client,
+        // above, is the tab strip plus chrome - derived like the Frame's.
+        let strung = FRAME_INSET_TOP;
+        let flank = 0;
+        if (row.insideWidth && row.insideHeight && row.width && row.height) {
+          flank = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
+          strung = Math.max(0, (row.height - row.insideHeight) * PT - flank);
+        }
+
+        // Never less than the strip the canvas actually draws. A MultiPage's InsideHeight
+        // describes its PAGE, and the difference it leaves is the borders rather than the
+        // whole tab band - so the model's number put the rule through the middle of the tabs
+        // and left them hanging below the line (the owner, 2026-08-16). The runtime's band
+        // measures 14 points against this 13.5, which is the closer of the two by far.
+        strung = Math.max(strung, PAGE_STRIP_HEIGHT);
+
+        // The rectangle starts at the BODY, for the frame's reason: the runtime draws no
+        // border above or beside the tabs, and the canvas drew one all the way round - so a
+        // control placed level with the tab strip looked enclosed by a box that is not there
+        // (measured on the running form, 2026-08-16: nothing at all above the body's top
+        // edge, which sits 14 points below the control's).
+        edge.style.top = `${Math.max(0, strung - 1)}px`;
+
         if (first) {
           const body = document.createElement("div");
           body.className = "dc-page-body";
-          // The MultiPage's own client area, when the model says it: what is not client,
-          // above, is the tab strip plus chrome - derived like the Frame's.
-          if (row.insideWidth && row.insideHeight && row.width && row.height) {
-            const side = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
-            body.style.left = `${side}px`;
-            body.style.right = `${side}px`;
-            body.style.bottom = `${side}px`;
-            body.style.top = `${Math.max(0, (row.height - row.insideHeight) * PT - side)}px`;
+          body.style.top = `${strung}px`;
+          if (flank > 0) {
+            body.style.left = `${flank}px`;
+            body.style.right = `${flank}px`;
+            body.style.bottom = `${flank}px`;
           }
+
           box.appendChild(body);
           renderInto(body, first.name.toLowerCase());
         }

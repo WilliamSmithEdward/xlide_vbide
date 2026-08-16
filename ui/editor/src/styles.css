@@ -3832,19 +3832,30 @@ body.objbrowser-page #objbrowser-card {
   border-radius: 50%;
 }
 
+/* No border of its own: the rule below is the frame's visible rectangle, and it starts at the
+   client rather than at the control's top, because that is where MSForms draws it. */
 .dc-Frame {
-  border: 1px solid #a0a0a0;
-  border-radius: 2px;
+  border: 0;
   background: transparent;
   overflow: visible;
 }
 
+.dc-frame-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border: 1px solid #a0a0a0;
+  border-radius: 2px;
+}
+
+/* Straddling the rule, its own ground cutting the line the way a group box's caption does.
+   `top` is set per frame, from the band the model describes. */
 .dc-frame-caption {
   position: absolute;
-  top: -7px;
   left: 6px;
   padding: 0 3px;
-  background: #ece9d8;
+  background: inherit;
   line-height: 12px;
 }
 
@@ -3856,34 +3867,53 @@ body.objbrowser-page #objbrowser-card {
   overflow: hidden;
 }
 
+/* Like the Frame: no border of its own. The runtime draws nothing above or beside the tabs,
+   and the rule below starts at the body. */
 .dc-MultiPage,
 .dc-TabStrip {
+  border: 0;
+  background: transparent;
+}
+
+/* Transparent: the control's own BackColor is on the box, where MSForms puts it - painting a
+   ground here as well turned every page body beige over the top of its tabs. */
+.dc-page-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
   border: 1px solid #a0a0a0;
-  background: #ece9d8;
 }
 
 .dc-page-strip {
   display: flex;
   gap: 1px;
   padding: 2px 2px 0;
-  border-bottom: 1px solid #a0a0a0;
   height: 18px;
   box-sizing: border-box;
 }
 
+/* The control's OWN ground, a touch darker for the tabs that are not showing - as an image
+   layer, so whatever BackColor the model gives shows through underneath. The two classic
+   beiges that used to be here were an XP palette against a form the runtime paints in modern
+   grey, which is a difference the eye reads before any of the geometry (the owner, 2026-08-16:
+   "colors look off from what they were"). */
 .dc-page-tab {
   padding: 1px 8px;
   border: 1px solid #a0a0a0;
   border-bottom: none;
   border-radius: 2px 2px 0 0;
-  background: #dddad0;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.05));
 }
 
+/* The one that is showing: the ground undarkened, and bold, which is how the runtime marks it. */
 .dc-page-tab.first {
-  background: #ece9d8;
+  background-image: none;
   font-weight: bold;
 }
 
+/* `top` is set per control, from the band the model describes; these are the fallbacks for a
+   model that declines to say. */
 .dc-page-body {
   position: absolute;
   left: 2px;

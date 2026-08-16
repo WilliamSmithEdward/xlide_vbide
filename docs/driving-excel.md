@@ -1400,6 +1400,20 @@ to read" for about 400ms: the object is gone, not empty. `debugMode` reads `desi
 form is still standing and the running-forms list empties before the designer returns, so wait
 for the designer itself.
 
+And when the canvas and the form look different, `designer-parity.mjs` measures the difference
+rather than arguing about it:
+
+```bash
+node tools\harness\designer-parity.mjs
+```
+
+It launches the fixture form from its designer tab, photographs the running window, and compares
+what each kind PAINTS at its top edge - a frame's rule, a tick box's glyph, the box itself for
+the rest - against the canvas's own DOM, both in points from the form's client origin. It prints
+a row per control and names anything a point or more out. What it does NOT compare is the model's
+rectangle, which both surfaces have always agreed about and which is exactly why a four-point
+difference could sit on screen for a week.
+
 And when a gesture feels slow, `designer-perf.mjs` times the whole surface rather than guessing
 which part of it is at fault:
 
