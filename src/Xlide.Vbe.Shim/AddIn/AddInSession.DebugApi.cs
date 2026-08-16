@@ -3519,6 +3519,9 @@ internal sealed partial class AddInSession
                         SyncEngine = request.Query.TryGetValue("syncEngine", out var planner)
                             ? planner
                             : settings.SyncEngine,
+                        DesignerSnapToGrid = Flag("designerSnapToGrid", settings.DesignerSnapToGrid),
+                        DesignerGridSize = request.Query.TryGetValue("designerGridSize", out var grid)
+                            && int.TryParse(grid, out var gridAsked) ? gridAsked : settings.DesignerGridSize,
                     }.Normalized();
 
                     OnSettingsChanged(settings);
@@ -3531,7 +3534,9 @@ internal sealed partial class AddInSession
                         settings.MirrorCommentSpacing,
                         settings.TreeFollowsEditor,
                         settings.FormatIndentSize,
-                        settings.SyncEngine),
+                        settings.SyncEngine,
+                        settings.DesignerSnapToGrid,
+                        settings.DesignerGridSize),
                     DebugJsonContext.Default.DebugSettingsReply);
             }
 

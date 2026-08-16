@@ -1007,7 +1007,11 @@ public sealed record DebugSettingsReply(
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     /// <summary>Which planner decides an import or export: "xlide" or "builtIn".</summary>
-    [property: JsonPropertyName("syncEngine")] string SyncEngine);
+    [property: JsonPropertyName("syncEngine")] string SyncEngine,
+    /// <summary>The designer canvas snaps POINTER gestures to its grid; the keyboard never.</summary>
+    [property: JsonPropertyName("designerSnapToGrid")] bool DesignerSnapToGrid,
+    /// <summary>The grid's spacing in points.</summary>
+    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize);
 
 /// <summary>Where a marker landed in the log, so a caller can read back from exactly there.</summary>
 public sealed record DebugMarkReply(

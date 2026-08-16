@@ -473,6 +473,29 @@ the host-owns-membership invariant survives.
     calls back through `saveOnlyThenRun`) rather than being remembered on the host, because
     a refused apply calls nothing back: a flag waiting for a callback that never comes would
     have fired on somebody's unrelated Ctrl+S minutes later.
+  - *Snap to grid* - **landed 2026-08-16** (the owner: "can we add a toggleable snap to grid
+    mode for our designer?"). On by default at six points, which is the editor's own Align
+    Controls to Grid and its own spacing. Pointer gestures land on it - a drag, a resize by a
+    handle, a drop out of the toolbox - and the KEYBOARD never does: an arrow moves one point
+    whatever the setting says, because the hand that reaches for it has already decided the grid
+    is not where this control belongs, and a nudge that jumps six points is not a nudge.
+
+    The switch sits at the end of the toolbox row rather than in the settings dialog alone,
+    because snapping is something a developer turns off for one awkward control and back on
+    immediately. It writes the SETTING, so the button, the dialog row and `settings?
+    designerSnapToGrid=` are three views of one fact, and it survives the session because the
+    setting does. The grid is painted as a repeating background on the form's client - a
+    360x320 form at six points is 3,180 cells, and that many divs is a canvas that stutters -
+    at a sixth of the form's own ink, which is a dot you can place against and stop seeing.
+
+    **It also found a bug in the settings file, four settings old.** The record's properties
+    were `init`, so the JSON source generator had to set every one of them in a single object
+    initializer - passing `default` for each key the document did not name. A settings file
+    naming only `format.indentSize` therefore produced FALSE for every boolean in the record.
+    Nobody could see it while every key was in every file; the grid was the first setting added
+    since, and it read back off, at a two-point spacing, on a machine whose file predated it by
+    an hour. Settable properties let the generator construct first and assign only what is
+    there. A row pins it now: a key the file never mentions keeps its shipping default.
   - *A closed form is not yet an unloaded one* - measured while pinning the above. For about
     400ms after the close is posted, the component answers "no designer to read": the object
     is gone, not empty. `debugMode` is no guide (the log has it back at design while the form

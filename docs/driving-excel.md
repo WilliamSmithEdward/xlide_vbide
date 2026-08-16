@@ -244,7 +244,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `frame` | `frame(action)` | the editor window itself: `close` posts the developer's own X click and the outcome is read off `state().frameVisible`; `show` is synchronous and its reply is the outcome |
 | `session` | `session("cancelledShutdown")` | a shutdown begun and cancelled, so the watchdog revives the session (the 2026-08-02 dead-add-in field failure). The reply beats the teardown; after it this port is dead, so re-`discover()` for the revived session's new port and `startedAt`. `session-lifecycle.mjs` drives it in the `-Deep` gate |
 | `projects` | `projects()` / `projectHolding(module)` | EVERY open workbook, which `project()` cannot answer: it answers about one |
-| `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest |
+| `settings` | `settings()` / `settings({...})` | read them, or change one without restating the rest. `designerSnapToGrid` and `designerGridSize` are the designer's grid |
 | `undoRename` | `undoRename()` | puts the last rename back, across every module it touched. Answers `{undone, from, to, modules, stopped}` - read `stopped`, because an undo can restore four modules and be refused the fifth, which leaves the project in neither state. It is the SHIM's undo, not the context-menu item; drive the item with `act("editorAction", {id: "xlide.undoRename"})` |
 | `breakpoints` | `breakpoints()` / `breakpointsIn(project)` | what is set, per module AND workbook, and the mode |
 | `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |

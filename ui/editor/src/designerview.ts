@@ -24,6 +24,7 @@ import * as monaco from "monaco-editor/editor/editor.api.js";
 import type { FormMarkupApplied, FormMarkupControl, FormMarkupDraft, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
 import type { DocumentId } from "./documents.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
+import { currentSettings, onSettingsApplied } from "./settings.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
 const PT = 4 / 3;
@@ -275,6 +276,9 @@ export interface DesignerViewDeps {
   eventStub(control: string | null): void;
   /** The selection changed: the Properties panel follows. Null is the form itself. */
   selection(control: string | null): void;
+  /** Writes one setting through the host - the same call the settings dialog's controls make,
+   * so the grid's switch here and its row there are two views of one fact. */
+  changeSetting(key: string, value: unknown): void;
 }
 
 export class DesignerView {
@@ -338,6 +342,11 @@ export class DesignerView {
   private readonly toolbox: HTMLElement;
   private readonly toolboxEdges: EdgeScroll;
   private carrying: { kind: string; width: number; height: number; ghost: HTMLElement } | null = null;
+
+  /** The grid's switch, at the end of the palette, and the unsubscribe for the setting it
+   * follows: the button shows what the setting says rather than what it was last clicked to. */
+  private readonly snapToggle: HTMLButtonElement;
+  private readonly unwatchSettings: () => void;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
    * first projection arrives, and while an apply's fresh projection is on its way. */
@@ -437,6 +446,29 @@ export class DesignerView {
     }
 
     toolbox.addEventListener("pointerdown", (event) => this.onToolboxPress(event));
+
+    /*
+     * THE GRID'S SWITCH, at the end of the palette rather than buried in the settings dialog.
+     *
+     * It belongs where the work is: snapping is something a developer turns off for one
+     * awkward control and back on immediately, and a switch two dialogs away is a switch that
+     * stays where it was. It writes the SETTING, so the dialog, the api and this button are
+     * three views of one fact rather than three states to keep in step, and it survives the
+     * session because the setting does.
+     */
+    this.snapToggle = document.createElement("button");
+    this.snapToggle.type = "button";
+    this.snapToggle.className = "designer-snap";
+    this.snapToggle.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+      + 'fill="currentColor"><circle cx="4" cy="4" r="1"/><circle cx="8" cy="4" r="1"/>'
+      + '<circle cx="12" cy="4" r="1"/><circle cx="4" cy="8" r="1"/><circle cx="8" cy="8" r="1"/>'
+      + '<circle cx="12" cy="8" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="8" cy="12" r="1"/>'
+      + '<circle cx="12" cy="12" r="1"/></svg>';
+    this.snapToggle.addEventListener("click", () => {
+      deps.changeSetting("designerSnapToGrid", !currentSettings().designerSnapToGrid);
+    });
+    toolboxRow.appendChild(this.snapToggle);
+
     canvasHalf.appendChild(toolboxRow);
     this.toolbox = toolbox;
     // Inserted into the strip's own parent, which is why the row exists: the arrows sit beside
@@ -563,6 +595,12 @@ export class DesignerView {
     // The REAL Ctrl+S: a host accelerator the page never sees as a key. The host's Save,
     // finding this tab active, asks for the apply-then-save here.
     this.unwatchApplySave = deps.watchApplySave((run) => this.applyNow(run));
+
+    // The grid follows the SETTING, from wherever it was changed: this tab's switch, the
+    // settings dialog, the api, another designer tab. One fact, several views of it.
+    this.unwatchSettings = onSettingsApplied(() => this.showGrid());
+    this.showGrid();
+
     this.request = deps.request;
 
     // LAST, because it lays the editor out and the editor must exist: the first version ran
@@ -908,7 +946,7 @@ export class DesignerView {
     const onUp = (dropped: PointerEvent): void => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
-      this.dropTool(dropped.clientX, dropped.clientY);
+      this.dropTool(dropped.clientX, dropped.clientY, dropped.altKey);
     };
 
     window.addEventListener("pointermove", onMove);
@@ -1074,7 +1112,7 @@ export class DesignerView {
       this.canvasScroll.style.cursor = drag.edge ? EDGE_CURSOR[drag.edge] ?? "move" : "move";
     }
 
-    this.paintBox(drag.element, this.proposal(drag, dx / PT, dy / PT));
+    this.paintBox(drag.element, this.proposal(drag, dx / PT, dy / PT, event.altKey));
     event.preventDefault();
   }
 
@@ -1092,7 +1130,8 @@ export class DesignerView {
 
     // A drop the document refuses - a line this cannot rewrite - puts the thing back the way
     // the document still describes it, rather than leaving a picture nothing agrees with.
-    const box = this.proposal(drag, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT);
+    const box = this.proposal(
+      drag, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT, event.altKey);
     if (!this.writeBox(drag.name, box, drag.edge !== null)) {
       this.paintBox(drag.element, drag.origin);
     }
@@ -1105,13 +1144,17 @@ export class DesignerView {
    * a slow drag cannot accumulate rounding, and rounded to whole points because that is what
    * the document will carry.
    */
-  private proposal(drag: CanvasDrag, dx: number, dy: number): Box {
+  private proposal(drag: CanvasDrag, dx: number, dy: number, free = false): Box {
     const origin = drag.origin;
     const room = this.roomFor(drag.element);
     const floor = drag.name === "" ? MIN_FORM : MIN_CONTROL;
 
+    // Snapped BEFORE the clamp, so an edge of the parent beats the grid rather than the other
+    // way about: a control pushed into a corner belongs in the corner.
     if (drag.edge === null) {
-      return this.clamp({ ...origin, left: origin.left + dx, top: origin.top + dy }, room, floor);
+      return this.clamp(
+        this.snapped({ ...origin, left: origin.left + dx, top: origin.top + dy }, null, free),
+        room, floor);
     }
 
     // The grabbed edges move and the opposite ones stay: west and north change the origin as
@@ -1134,7 +1177,7 @@ export class DesignerView {
       box.height = Math.max(floor, origin.height + dy);
     }
 
-    return this.clamp(box, room, floor);
+    return this.clamp(this.snapped(box, drag.edge, free), room, floor);
   }
 
   /** Abandons a gesture in flight - Escape, or the pointer taken away - and puts the thing back
@@ -1286,7 +1329,7 @@ export class DesignerView {
    * it there through the apply's name-keyed diff - which is the SAME add the `designer` route
    * makes, so a control born on the canvas is indistinguishable from one born through the api.
    */
-  private dropTool(x: number, y: number): boolean {
+  private dropTool(x: number, y: number, free = false): boolean {
     const carrying = this.carrying;
     this.carrying = null;
     carrying?.ghost.remove();
@@ -1304,10 +1347,14 @@ export class DesignerView {
       return false;
     }
 
-    // Inside the container, and never off its edges: the same floor every gesture keeps.
+    // Inside the container, and never off its edges: the same floor every gesture keeps - and
+    // onto the grid on the way, because a control dropped from the palette is placed by the
+    // pointer like any other.
     const room = this.roomOfContainer(where.parent);
     const box = this.clamp(
-      { left: where.left, top: where.top, width: carrying.width, height: carrying.height },
+      this.snapped(
+        { left: where.left, top: where.top, width: carrying.width, height: carrying.height },
+        null, free),
       room, MIN_CONTROL);
     const name = this.freeName(carrying.kind);
     const lines = this.model.getLinesContent();
@@ -1468,6 +1515,115 @@ export class DesignerView {
     return { left: box.left / PT, top: box.top / PT, width: box.width / PT, height: box.height / PT };
   }
 
+  /**
+   * Draws the grid on the form's ground, and puts the switch in the state the setting is in.
+   *
+   * On the FORM rather than on the canvas behind it, because the grid a developer is placing
+   * against starts at the form's own origin - a grid drawn on the scroll box would drift with
+   * every scroll and line up with nothing. Two one-pixel dots per cell, painted as a repeating
+   * background so the DOM carries no grid elements at all: a 360x320 form at a six-point grid
+   * is 3,180 cells, and that many divs is a canvas that stutters when it moves.
+   */
+  private showGrid(): void {
+    const settings = currentSettings();
+    const on = settings.designerSnapToGrid;
+
+    this.snapToggle.setAttribute("aria-pressed", on ? "true" : "false");
+    this.snapToggle.classList.toggle("on", on);
+    this.snapToggle.title = on
+      ? `Snapping to a ${settings.designerGridSize}-point grid. Arrow keys still move by one point.`
+      : "Snap to grid is off. Click to place controls on the grid again.";
+    this.snapToggle.setAttribute("aria-label", this.snapToggle.title);
+
+    const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")
+      ?? this.canvasScroll.querySelector<HTMLElement>(".dc-form");
+    if (!client) {
+      return;
+    }
+
+    // A sixth of the form's own ink, which is a dot you can place against and stop seeing while
+    // you work. At full strength it read as texture on the form rather than as a grid under it
+    // (the owner, 2026-08-16: "can you make the dots more subtle?").
+    //
+    // AND SHIFTED BACK BY HALF A CELL, because a radial gradient is centred in its tile: drawn
+    // at the origin the dots sit half a step from every coordinate this snaps to, so a control
+    // that landed exactly on the grid appeared to land exactly between it ("should controls
+    // align exactly on the dots in snap to grid mode?" - yes, and now they do). The shift puts a
+    // dot on 0,0 and on every multiple after it, measured from the client's own corner, which
+    // is where a control's Left and Top are measured from too.
+    const step = Math.max(2, settings.designerGridSize) * PT;
+    const half = -step / 2;
+    client.style.backgroundImage = on
+      ? "radial-gradient(color-mix(in srgb, currentColor 16%, transparent) 0.5px, transparent 0.5px)"
+      : "";
+    client.style.backgroundSize = on ? `${step}px ${step}px` : "";
+    client.style.backgroundPosition = on ? `${half}px ${half}px` : "";
+  }
+
+  /**
+   * A number on the grid, in points, when the grid is on - and a whole point when it is not.
+   *
+   * ONLY POINTER GESTURES COME THROUGH HERE. An arrow key moves one point whatever the setting
+   * says, because the hand that reaches for the keyboard has already decided the grid is not
+   * where this control belongs, and a nudge that jumps six points is not a nudge. That is the
+   * editor's own division of labour and the reason its Align Controls to Grid never fought
+   * anyone: the mouse is the fast tool and the keyboard is the exact one.
+   */
+  private onGrid(value: number): number {
+    const settings = currentSettings();
+    if (!settings.designerSnapToGrid) {
+      return Math.round(value);
+    }
+
+    const step = Math.max(2, settings.designerGridSize);
+    return Math.round(value / step) * step;
+  }
+
+  /**
+   * A gesture's box, snapped. A move takes its ORIGIN to the grid and keeps its size, so a
+   * control does not change shape by being moved; a resize takes the edges the hand is holding
+   * and leaves the opposite ones exactly where they were, which is what keeps the other side of
+   * the control still while one side is pulled.
+   */
+  private snapped(box: Box, edge: string | null, free = false): Box {
+    // ALT IS THE OVERRIDE, held rather than toggled: the one control that will not sit on the
+    // grid is a reason to escape it for a moment, not to turn it off and forget to turn it back
+    // on. Read per pointer event, so pressing or releasing Alt part-way through a drag changes
+    // what the next movement does - which is how every design surface a developer already knows
+    // behaves (the owner, 2026-08-16: "holding alt key should override any snapping").
+    if (free) {
+      return {
+        left: Math.round(box.left),
+        top: Math.round(box.top),
+        width: Math.round(box.width),
+        height: Math.round(box.height),
+      };
+    }
+
+    if (edge === null) {
+      return { ...box, left: this.onGrid(box.left), top: this.onGrid(box.top) };
+    }
+
+    const out = { ...box };
+    if (edge.includes("w")) {
+      const right = box.left + box.width;
+      out.left = this.onGrid(box.left);
+      out.width = right - out.left;
+    } else if (edge.includes("e")) {
+      out.width = this.onGrid(box.left + box.width) - box.left;
+    }
+
+    if (edge.includes("n")) {
+      const bottom = box.top + box.height;
+      out.top = this.onGrid(box.top);
+      out.height = bottom - out.top;
+    } else if (edge.includes("s")) {
+      out.height = this.onGrid(box.top + box.height) - box.top;
+    }
+
+    return out;
+  }
+
   /** Puts a thing - and the handles dressing it - at a box in points, without touching the
    * document: what the eye follows during a gesture, and the instant landing after one. */
   private paintBox(element: HTMLElement, box: Box): void {
@@ -1582,7 +1738,7 @@ export class DesignerView {
    * hit-testing, the threshold and the commit rather than the arithmetic alone. Deltas are in
    * POINTS, the designer's unit and the document's. Returns what happened, for the row.
    */
-  dragControl(name: string, dx: number, dy: number): string {
+  dragControl(name: string, dx: number, dy: number, alt = false): string {
     const element = this.elementFor(name);
     if (!element) {
       return `no control named ${name} on the canvas`;
@@ -1611,7 +1767,7 @@ export class DesignerView {
     // canvas, exactly where a captured pointer's events are delivered once a real drag has
     // the mouse. Past the threshold first, then the whole way: the two moves a hand makes.
     const landed = hits(grabbed) ?? element;
-    this.sendGesture(landed, grabbed, dx, dy);
+    this.sendGesture(landed, grabbed, dx, dy, alt);
     return `dragged ${name}`;
   }
 
@@ -1621,7 +1777,7 @@ export class DesignerView {
    * `s`, `sw`, `w` - and pulls it by a delta in POINTS. "" is the form's own frame. The press
    * goes through the hit test at the handle, so a handle nothing can reach fails the act.
    */
-  resizeControl(name: string, edge: string, dx: number, dy: number): string {
+  resizeControl(name: string, edge: string, dx: number, dy: number, alt = false): string {
     if (this.selectedName !== name) {
       this.select(name);
     }
@@ -1643,7 +1799,7 @@ export class DesignerView {
       return `the ${edge} handle is not what a press on it reaches - ${reached?.className || "nothing"} is`;
     }
 
-    this.sendGesture(reached, spot, dx, dy);
+    this.sendGesture(reached, spot, dx, dy, alt);
     return `resized ${name === "" ? "the form" : name}`;
   }
 
@@ -1718,7 +1874,9 @@ export class DesignerView {
   /** The pointer sequence both instruments send: press where the hit test answered, one move
    * past the threshold, one move the whole way, and the release - all but the press delivered
    * to the canvas, which is where a captured pointer's events go. */
-  private sendGesture(target: EventTarget, from: { x: number; y: number }, dx: number, dy: number): void {
+  private sendGesture(
+    target: EventTarget, from: { x: number; y: number }, dx: number, dy: number, alt = false,
+  ): void {
     const send = (to: EventTarget, type: string, x: number, y: number): void => {
       to.dispatchEvent(new PointerEvent(type, {
         bubbles: true,
@@ -1729,6 +1887,9 @@ export class DesignerView {
         buttons: type === "pointerup" ? 0 : 1,
         clientX: x,
         clientY: y,
+        // Held for the whole gesture, which is what a hand on Alt does; the move and the
+        // drop both read it, so the preview and the commit agree about the override.
+        altKey: alt,
       }));
     };
 
@@ -1876,6 +2037,9 @@ export class DesignerView {
     // A re-render replaces every element, so the selection is dressed again onto the new
     // ones; a selected control the new picture no longer holds simply loses its handles.
     this.dressSelection();
+
+    // And the grid, for the same reason: the client it is painted on is one of those elements.
+    this.showGrid();
   }
 
   private renderControl(
@@ -2163,6 +2327,7 @@ export class DesignerView {
     this.unwatchApplied();
     this.unwatchLint();
     this.unwatchApplySave();
+    this.unwatchSettings();
     this.toolboxEdges.dispose();
     this.editor.dispose();
     this.model.dispose();

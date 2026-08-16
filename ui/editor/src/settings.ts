@@ -24,6 +24,14 @@ export interface EditorSettings {
   formatIndentSize: number;
   /** Which planner decides what an import or export will do: "xlide" or "builtIn". */
   syncEngine: string;
+  /**
+   * The form designer snaps POINTER gestures to its grid - drag, resize, a drop out of the
+   * toolbox. Never the keyboard: an arrow moves one point whatever this says, because the hand
+   * that reaches for it has already decided the grid is not where the control belongs.
+   */
+  designerSnapToGrid: boolean;
+  /** The grid's spacing in points, the designer's own unit. */
+  designerGridSize: number;
 }
 
 /** What ships: the companion editor's own defaults. */
@@ -34,6 +42,8 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   treeFollowsEditor: true,
   formatIndentSize: 4,
   syncEngine: "xlide",
+  designerSnapToGrid: true,
+  designerGridSize: 6,
 };
 
 let current: EditorSettings = { ...DEFAULT_SETTINGS };
@@ -61,6 +71,8 @@ export function applySettings(next: IncomingSettings): void {
     treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",
+    designerSnapToGrid: next.designerSnapToGrid !== false,
+    designerGridSize: Math.min(24, Math.max(2, Math.round(next.designerGridSize ?? 6) || 6)),
   };
 
   for (const listener of listeners) {

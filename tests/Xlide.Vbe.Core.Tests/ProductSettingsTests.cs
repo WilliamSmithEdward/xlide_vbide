@@ -18,6 +18,45 @@ public class ProductSettingsTests
         Assert.True(settings.ContinueCommentOnNewline);
         Assert.True(settings.MirrorCommentSpacing);
         Assert.Equal(4, settings.FormatIndentSize);
+
+        // On, and six points, which is what the editor's own Options dialog ships.
+        Assert.True(settings.DesignerSnapToGrid);
+        Assert.Equal(6, settings.DesignerGridSize);
+    }
+
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(1, 2)]
+    [InlineData(-4, 2)]
+    [InlineData(25, 24)]
+    [InlineData(8, 8)]
+    public void TheGridSizeIsClampedToItsLegalRange(int asked, int kept)
+    {
+        var settings = ProductSettings.Parse($"{{ \"designer.gridSize\": {asked} }}");
+
+        Assert.Equal(kept, settings.DesignerGridSize);
+    }
+
+    /// <summary>
+    /// A KEY THE FILE DOES NOT MENTION READS AS ITS SHIPPING DEFAULT, not as its type's zero.
+    ///
+    /// Every developer with a settings file written before a setting existed is in this case,
+    /// which is every developer the day any setting is added. It went unnoticed for as long as
+    /// every key in the record happened to be in every file: the grid arrived on 2026-08-16 and
+    /// read back off as a two-point spacing - `default(bool)` and `default(int)` clamped - from
+    /// a file that named neither.
+    /// </summary>
+    [Fact]
+    public void AKeyTheFileNeverMentionsKeepsItsShippingDefault()
+    {
+        var settings = ProductSettings.Parse("{ \"format.indentSize\": 2 }");
+
+        Assert.Equal(2, settings.FormatIndentSize);
+        Assert.True(settings.DesignerSnapToGrid);
+        Assert.Equal(6, settings.DesignerGridSize);
+        Assert.Equal("comfy", settings.BlockLayout);
+        Assert.True(settings.ContinueCommentOnNewline);
+        Assert.Equal("xlide", settings.SyncEngine);
     }
 
     /// <summary>

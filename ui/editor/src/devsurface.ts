@@ -174,8 +174,8 @@ export interface DevSurfaceParts {
       };
       select(name: string): void;
       requestEventStub(control: string | null): void;
-      dragControl(name: string, dx: number, dy: number): string;
-      resizeControl(name: string, edge: string, dx: number, dy: number): string;
+      dragControl(name: string, dx: number, dy: number, alt?: boolean): string;
+      resizeControl(name: string, edge: string, dx: number, dy: number, alt?: boolean): string;
       deleteControl(name: string): string;
       addFromToolbox(kind: string, left: number, top: number): string;
     } | null;
@@ -745,8 +745,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: "dx and dy are deltas in points" };
       }
 
-      const outcome = view.dragControl(control, dx, dy);
-      return { did: outcome.startsWith("dragged"), detail: `${outcome} by ${dx},${dy}pt` };
+      // `alt=1` holds the Alt key for the whole gesture, which overrides every snap.
+      const held = args.alt === true || args.alt === "1" || args.alt === "true";
+      const outcome = view.dragControl(control, dx, dy, held);
+      return {
+        did: outcome.startsWith("dragged"),
+        detail: `${outcome} by ${dx},${dy}pt${held ? " with alt held" : ""}`,
+      };
     },
 
     /** Resizes by a HANDLE, the way a hand does: the thing is selected, its `edge` handle -
@@ -771,8 +776,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: "dx and dy are deltas in points" };
       }
 
-      const outcome = view.resizeControl(typeof args.control === "string" ? args.control : "", edge, dx, dy);
-      return { did: outcome.startsWith("resized"), detail: `${outcome} by ${dx},${dy}pt on ${edge}` };
+      const heldOnEdge = args.alt === true || args.alt === "1" || args.alt === "true";
+      const outcome = view.resizeControl(
+        typeof args.control === "string" ? args.control : "", edge, dx, dy, heldOnEdge);
+      return {
+        did: outcome.startsWith("resized"),
+        detail: `${outcome} by ${dx},${dy}pt on ${edge}${heldOnEdge ? " with alt held" : ""}`,
+      };
     },
 
     /** Drags a KIND out of the xlide toolbox and drops it on the form: the real pointer

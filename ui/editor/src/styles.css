@@ -3598,6 +3598,44 @@ body.objbrowser-page #objbrowser-card {
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
 }
 
+/* The grid's switch, at the fixed end of the palette row: outside the scrolling strip, so it
+   is reachable however narrow the tab gets. It is a toggle, so it says which state it is in
+   rather than which state it would move to - pressed means the grid is on. */
+.designer-snap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  /* Room on the left for the strip's forward arrow, which sits right against this whenever the
+     palette has more to show: two controls touching read as one control (the owner,
+     2026-08-16, "need some padding against the arrow and the quick toggle"). */
+  margin: 3px 5px 3px 9px;
+  padding: 0;
+  color: inherit;
+  opacity: 0.5;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.designer-snap:hover {
+  opacity: 0.9;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.designer-snap.on {
+  opacity: 1;
+  background: var(--vscode-inputOption-activeBackground, rgba(64, 128, 255, 0.22));
+  border-color: var(--vscode-inputOption-activeBorder, rgba(64, 128, 255, 0.6));
+}
+
+.designer-snap:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4d9fff);
+  outline-offset: 1px;
+}
+
 /* ONE row that scrolls rather than a block that wraps: a second row of palette eats the canvas
    on a narrow tab, and the arrows are the behaviour the command and tab strips already have. */
 .designer-toolbox-strip {

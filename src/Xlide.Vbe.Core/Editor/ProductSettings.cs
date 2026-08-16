@@ -10,20 +10,39 @@ namespace Xlide.Vbe.Core.Editor;
 /// </summary>
 public sealed record ProductSettings
 {
+    /*
+     * THE PROPERTIES ARE `set`, NOT `init`, AND THAT IS LOAD-BEARING.
+     *
+     * An init-only property can only be assigned in an object initializer, so the JSON source
+     * generator has to set every one of them at construction - passing `default` for each key
+     * the document does not mention. That silently clobbers the initializers below: a file
+     * naming only `format.indentSize` produced FALSE for every boolean in this record, because
+     * `default(bool)` is false and the "= true" beside it never survived.
+     *
+     * Nobody saw it for as long as every key was in every file. It surfaced the moment a
+     * setting was ADDED - the designer grid, 2026-08-16 - which read back as off, at a
+     * two-point spacing, on a machine whose settings file predated it by an hour. Every
+     * developer with an older file was in that case, for every boolean.
+     *
+     * With settable properties the generator constructs first and assigns only what the
+     * document names, so an absent key keeps the value written here. A record with setters is
+     * a small ugliness; a settings type that cannot be added to is a larger one.
+     */
+
     /// <summary>
     /// Smart Enter and block-snippet layout: "comfy" opens spacer lines around the editable
     /// body, "compact" places the body directly above the closer.
     /// </summary>
     [JsonPropertyName("editor.blockLayout")]
-    public string BlockLayout { get; init; } = "comfy";
+    public string BlockLayout { get; set; } = "comfy";
 
     /// <summary>Enter at the end of a whole-line comment continues the apostrophes.</summary>
     [JsonPropertyName("editor.continueCommentOnNewline")]
-    public bool ContinueCommentOnNewline { get; init; } = true;
+    public bool ContinueCommentOnNewline { get; set; } = true;
 
     /// <summary>A continued comment also mirrors the spaces after the apostrophes.</summary>
     [JsonPropertyName("editor.mirrorCommentSpacing")]
-    public bool MirrorCommentSpacing { get; init; } = true;
+    public bool MirrorCommentSpacing { get; set; } = true;
 
     /// <summary>
     /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
@@ -31,7 +50,7 @@ public sealed record ProductSettings
     /// hand that opened it.
     /// </summary>
     [JsonPropertyName("explorer.treeFollowsEditor")]
-    public bool TreeFollowsEditor { get; init; } = true;
+    public bool TreeFollowsEditor { get; set; } = true;
 
     /// <summary>
     /// One indent level, in spaces. Governs the EDITOR's own indentation, what smart Enter
@@ -39,7 +58,7 @@ public sealed record ProductSettings
     /// name (2026-08-08).
     /// </summary>
     [JsonPropertyName("format.indentSize")]
-    public int FormatIndentSize { get; init; } = 4;
+    public int FormatIndentSize { get; set; } = 4;
 
     // THERE IS NO "indent with tabs" SETTING, and there cannot be a working one.
     //
@@ -64,6 +83,24 @@ public sealed record ProductSettings
     // deliver. A `format.canonicalKeywords` in an older settings file is ignored rather than read.
 
     /// <summary>
+    /// The form designer's canvas snaps pointer gestures to its grid - a drag, a resize, a drop
+    /// out of the toolbox. The editor's own Align Controls to Grid, and on for the same reason:
+    /// a form built by hand is a form whose edges line up, and lining them up one point at a
+    /// time is work nobody should do twice.
+    ///
+    /// The KEYBOARD is never snapped. Arrows and Shift+arrows move by a single point whatever
+    /// this says, because the developer who reaches for them has already decided that the grid
+    /// is not where they want the thing - and a nudge that jumps six points is not a nudge.
+    /// </summary>
+    [JsonPropertyName("designer.snapToGrid")]
+    public bool DesignerSnapToGrid { get; set; } = true;
+
+    /// <summary>The grid's spacing in POINTS, the designer's own unit. Six, as the editor's
+    /// Options dialog ships it.</summary>
+    [JsonPropertyName("designer.gridSize")]
+    public int DesignerGridSize { get; set; } = 6;
+
+    /// <summary>
     /// Which code decides what an import or export will do: "xlide" or "builtIn".
     ///
     /// "xlide" runs the companion editor's own planner inside the engine, so both products make
@@ -73,7 +110,7 @@ public sealed record ProductSettings
     /// running.
     /// </summary>
     [JsonPropertyName("sync.engine")]
-    public string SyncEngine { get; init; } = "xlide";
+    public string SyncEngine { get; set; } = "xlide";
 
     public static ProductSettings Default { get; } = new();
 
@@ -84,6 +121,7 @@ public sealed record ProductSettings
             ? "compact"
             : "comfy",
         FormatIndentSize = Math.Clamp(FormatIndentSize, 1, 8),
+        DesignerGridSize = Math.Clamp(DesignerGridSize, 2, 24),
         SyncEngine = string.Equals(SyncEngine, "builtIn", StringComparison.OrdinalIgnoreCase)
             ? "builtIn"
             : "xlide",

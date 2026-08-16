@@ -464,6 +464,9 @@ function boot(): void {
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
         eventStub: (control) => bridge.designerEventStub(id.module, id.project ?? null, control),
         selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),
+        // The whole settings object with one field replaced, which is the call every control
+        // in the settings dialog makes: the grid's switch on the canvas is one more of them.
+        changeSetting: (key, value) => bridge.updateSettings({ ...currentSettings(), [key]: value }),
       });
       designerViews.set(key, view);
     }

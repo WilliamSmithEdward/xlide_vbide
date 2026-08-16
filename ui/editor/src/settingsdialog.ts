@@ -54,6 +54,22 @@ const OPTIONS = [
     max: 8,
   },
   {
+    key: "designerSnapToGrid" as const,
+    kind: "toggle" as const,
+    label: "Snap to grid in the form designer",
+    description:
+      "Dragging, resizing and dropping a control land on the grid, so edges line up without "
+      + "being lined up by hand. Arrow keys still move by a single point.",
+  },
+  {
+    key: "designerGridSize" as const,
+    kind: "number" as const,
+    label: "Grid size",
+    description: "The designer's grid spacing, in points.",
+    min: 2,
+    max: 24,
+  },
+  {
     key: "syncEngine" as const,
     kind: "choice" as const,
     // Short enough to stay on ONE line beside its 'i'. The longer version wrapped, which put the

@@ -2293,6 +2293,8 @@ export function demoTransport(): HostTransport {
           mirrorCommentSpacing: message.mirrorCommentSpacing,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
+          designerSnapToGrid: message.designerSnapToGrid !== false,
+          designerGridSize: message.designerGridSize,
         });
       }
       // The demo has no engine; answering the recase requests empty keeps a keystroke an

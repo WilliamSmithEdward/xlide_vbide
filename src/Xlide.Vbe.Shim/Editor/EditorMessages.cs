@@ -190,7 +190,9 @@ public sealed record SetSettingsMessage(
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
-    [property: JsonPropertyName("syncEngine")] string SyncEngine);
+    [property: JsonPropertyName("syncEngine")] string SyncEngine,
+    [property: JsonPropertyName("designerSnapToGrid")] bool DesignerSnapToGrid,
+    [property: JsonPropertyName("designerGridSize")] int DesignerGridSize);
 
 /// <summary>One search hit, as the results list draws it. Workbook is the display name.</summary>
 public sealed record SurfaceSearchMatch(

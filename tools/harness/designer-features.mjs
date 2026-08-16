@@ -725,6 +725,21 @@ try {
 
   // ---- M5 opens: the canvas moves controls, and the DOCUMENT is the transaction log ----
 
+  // THE GRID GOES OFF FOR THE GESTURE ROWS, and has its own section after them.
+  //
+  // It ships ON, which is the right default and the wrong thing for a row that drags by twelve
+  // points and names where it should land: with snapping the drop goes to the nearest six, and
+  // the row would be measuring the grid rather than the commit path it was written for. Off
+  // here, on there, and the restore is at the end of the grid's own section.
+  const shipped = await api.settings();
+  check("the grid ships on, at six points - the editor's own Align Controls to Grid",
+    shipped.designerSnapToGrid === true && shipped.designerGridSize === 6,
+    JSON.stringify({ on: shipped.designerSnapToGrid, size: shipped.designerGridSize }));
+
+  await api.settings({ designerSnapToGrid: false });
+  await waitFor("the page to hear that the grid is off", async () =>
+    (await api.ui()).settings?.designerSnapToGrid === false, { budgetMs: 15000 });
+
   // The real pointer sequence - press on what the hit test answers, past the threshold, drop -
   // so the row proves the gesture, not the arithmetic behind it.
   const dragged = await api.act("designerDrag", { module: form, control: "RegionPick", dx: 24, dy: 12 });
@@ -1044,6 +1059,68 @@ try {
   // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
   await api.act("activate", { module: form, face: "design" });
 
+  // ---- the grid: pointer gestures land on it, the keyboard never does ----
+
+  // The caption sits between the name and the position - `ToggleButton HoldToggle "Hold" at
+  // 112,112` - so a `name at` pattern matches nothing at all, quietly, for every control that
+  // carries one.
+  const gridPlace = async () =>
+    /HoldToggle .* at ([0-9]+),([0-9]+)/.exec(await tabText())?.slice(1).map(Number) ?? [];
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await waitFor("the document back at canonical before the grid rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  // The same seven-point drag with the grid off lands seven points away.
+  const beforeFree = await gridPlace();
+  await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 7, dy: 7 });
+  await waitFor("the unsnapped drop", async () =>
+    (await gridPlace())[0] === beforeFree[0] + 7, { budgetMs: 15000 });
+  const free = await gridPlace();
+  check("with the grid off a drag lands exactly where the pointer left it",
+    free[0] === beforeFree[0] + 7 && free[1] === beforeFree[1] + 7,
+    `${beforeFree.join(",")} + 7,7 is ${free.join(",")}`);
+
+  await api.settings({ designerSnapToGrid: true });
+  await waitFor("the page to hear that the grid is back", async () =>
+    (await api.ui()).settings?.designerSnapToGrid === true, { budgetMs: 15000 });
+
+  // And with it on, four points land on the nearest six - a delta chosen because it does NOT
+  // reach a grid line by itself, so the row can tell snapping from arithmetic. Seven points
+  // from 119 reaches 126, which is on the grid already and would have proved nothing.
+  await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 4, dy: 4 });
+  await waitFor("the snapped drop", async () =>
+    (await gridPlace())[0] !== free[0], { budgetMs: 15000 });
+  const snapped = await gridPlace();
+  check("with it on a drag lands on the grid instead of where the pointer stopped",
+    snapped[0] % 6 === 0 && snapped[1] % 6 === 0
+      && snapped[0] !== free[0] + 4 && snapped[1] !== free[1] + 4,
+    `landed at ${snapped.join(",")} from ${free.join(",")}; four points is `
+    + `${free[0] + 4},${free[1] + 4} and the six-point grid is the nearest multiple`);
+
+  // ALT overrides it, held rather than toggled: the one control that will not sit on the grid
+  // is a reason to escape it for a moment, not to turn the grid off and forget to turn it on.
+  const heldDrag = await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 7, dy: 7, alt: 1 });
+  check("a drag with alt held is accepted", heldDrag.did === true, heldDrag.detail);
+  await waitFor("the drop with alt held", async () =>
+    (await gridPlace())[0] !== snapped[0], { budgetMs: 15000 });
+  const overridden = await gridPlace();
+  check("holding alt overrides the grid for that one gesture",
+    overridden[0] === snapped[0] + 7 && overridden[1] === snapped[1] + 7,
+    `${snapped.join(",")} + 7,7 with alt held is ${overridden.join(",")}, and the grid `
+    + "would have said " + `${Math.round((snapped[0] + 7) / 6) * 6},${Math.round((snapped[1] + 7) / 6) * 6}`);
+
+  // The keyboard is exact whatever the grid says: an arrow moves ONE point, off the grid.
+  await api.act("designerSelect", { module: form, control: "HoldToggle" });
+  await press("ArrowRight");
+  await waitFor("the nudge", async () => (await gridPlace())[0] === overridden[0] + 1, { budgetMs: 15000 });
+  const nudged = await gridPlace();
+  check("an arrow still moves a single point, off the grid and on purpose",
+    nudged[0] === overridden[0] + 1,
+    `${overridden.join(",")} then one arrow is ${nudged.join(",")}`);
+
+  check("and the setting is as the developer's file had it, which the rows above borrowed", true);
+
   // ---- a rename carries the designer tab: re-keyed in place, never a corpse ----
 
   const designTabs = async () =>
@@ -1128,6 +1205,15 @@ try {
   check("an unknown control kind is refused with the list", /not a control kind/.test(String(badKind)),
     String(badKind));
 } finally {
+  // THE GRID GOES BACK ON HERE, not where the rows that borrowed it finish.
+  //
+  // It ships on and the gesture rows turn it off, so a run that dies between the two leaves the
+  // DEVELOPER'S OWN settings file with snapping disabled - and the next run's first grid row
+  // then fails for a reason that has nothing to do with the code. Which is exactly what
+  // happened the first time this suite aborted mid-section (2026-08-16). A borrowed setting is
+  // returned in the finally, like anything else borrowed.
+  await api.settings({ designerSnapToGrid: true }).catch(() => {});
+
   await api.component("remove", { name: form, project }).catch(() => {});
   // And the FILE too, not only the session. This suite saves the workbook on purpose - the
   // Ctrl+S rows exist to prove the designer's save reaches it - so every run left its temporary
