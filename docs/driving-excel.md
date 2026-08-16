@@ -1366,6 +1366,13 @@ node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
 node tools\harness\xlide-api.mjs command save
 ```
 
+`designerSelect` picks on the canvas and `designerCaret` picks in the markup, and the two are
+one selection: selecting a control washes its whole BLOCK in the document (its header, its
+properties, a container's children), and putting the caret inside a block selects that block's
+control on the canvas. `designerCanvas` answers `markupBlock` as `{from, to}` for the read side -
+count that rather than `.designer-block-mark` elements, which monaco draws a frame later and only
+for the lines in view. A press on the canvas but OFF the form selects the form.
+
 `designerDrag` sends the REAL pointer sequence at the control - the press goes to whatever the
 hit test answers, which is how an invisible overlay over the canvas gets caught - and its
 deltas are POINTS, the document's own unit. `designerResize` does the same through a named

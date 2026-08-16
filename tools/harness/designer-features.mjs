@@ -550,11 +550,91 @@ try {
   check("and the markup caret lands on the selected control's line",
     markupLine > 1 && /RegionPick/.test(markupLines[markupLine - 1] ?? ""), `line ${markupLine}`);
 
+  // The WHOLE BLOCK is washed, not just the header: a control is a block in this language -
+  // its properties and, for a container, its children - so a caret alone said where it started
+  // and left the reader to find where it stopped.
+  // Asked of the DOCUMENT through the snapshot, not counted off the screen: monaco renders a
+  // decoration on the next frame and only for the lines in view, so a DOM count measures its
+  // renderer and the scroll position - which is how the first cut of this row read two lines
+  // for a three-line block and failed while the feature worked.
+  const blockOn = async (control) => {
+    await api.act("designerSelect", { module: form, ...(control ? { control } : {}) });
+    const block = (await api.act("designerCanvas", { module: form })).data?.markupBlock;
+    return block ? block.to - block.from + 1 : 0;
+  };
+
+  // The expectation is read off the DOCUMENT rather than written down: an M1 row above removes
+  // one of the Frame's option buttons for good, so a literal "3" here is a row that passes
+  // until somebody reorders the suite and then fails for a reason that is not a defect.
+  const framedLines = (() => {
+    const at = markupLines.findIndex((text) => /Frame\s+Options/.test(text));
+    const indent = (text) => text.length - text.trimStart().length;
+    let last = at;
+    while (last + 1 < markupLines.length
+      && markupLines[last + 1].trim().length > 0
+      && indent(markupLines[last + 1]) > indent(markupLines[at])) {
+      last += 1;
+    }
+
+    return last - at + 1;
+  })();
+
+  const framedBlock = await blockOn("Options");
+  check("selecting a container covers its whole block in the markup, children included",
+    framedBlock === framedLines && framedBlock > 1,
+    `${framedBlock} line(s) where the document indents ${framedLines} under the Frame`);
+
+  const plainBlock = await blockOn("RegionPick");
+  check("and a plain control covers its own line alone", plainBlock === 1, `${plainBlock} line(s)`);
+
+  check("and the wash is drawn on the lines the block names",
+    Number(await api.ask(`${inViewAll(".designer-block-mark")}.length`)) >= 1,
+    "monaco draws a decoration for the lines in view, so this counts what is on screen");
+
+  // Markup to canvas, the other direction: a caret INSIDE a control's block selects that
+  // control, because a property line belongs to the thing it describes.
+  const caretPicks = async (line) => {
+    await api.act("designerCaret", { module: form, line });
+    return (await api.act("designerCanvas", { module: form })).data?.selected;
+  };
+
+  const framedLine = markupLines.findIndex((text) => /OptionButton\s+PickGround/.test(text)) + 1;
+  check("a caret on a control's own line selects it on the canvas",
+    await caretPicks(framedLine) === "PickGround", `line ${framedLine}`);
+
+  const frameLine = markupLines.findIndex((text) => /Frame\s+Options/.test(text)) + 1;
+  check("and a caret on the container's line selects the container, not its child",
+    await caretPicks(frameLine) === "Options", `line ${frameLine}`);
+
+  check("and a caret on the Form line selects the form", await caretPicks(1) === "");
+
   await api.act("designerSelect", { module: form });
   const formSelected = (await api.act("designerCanvas", { module: form })).data;
   check("clicking the form's own ground selects the form, caret to the Form line",
     formSelected.selected === "" && Number(formSelected.markupLine) === 1,
     JSON.stringify({ selected: formSelected.selected, line: formSelected.markupLine }));
+
+  // A press on the canvas but OFF the form selects the form too. It used to select nothing and
+  // leave the last control dressed, so the panel and the handles went on describing something
+  // the developer had clicked away from.
+  await api.act("designerSelect", { module: form, control: "RegionPick" });
+  const offForm = await api.ask(`(() => {
+    const view = document.querySelector('.designer-view[data-module=${JSON.stringify(form)}]');
+    const scroll = view.querySelector('.designer-canvas-scroll');
+    const box = scroll.getBoundingClientRect();
+    const shape = view.querySelector('.dc-form').getBoundingClientRect();
+    // Below the form, inside the scroll box: canvas ground, not the form's.
+    const y = Math.min(box.bottom - 4, shape.bottom + 12);
+    scroll.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1,
+      clientX: box.left + 12, clientY: y,
+    }));
+    return y > shape.bottom ? 'pressed below the form' : 'no room below the form';
+  })()`);
+  check("a press on the canvas but off the form selects the form",
+    (await api.act("designerCanvas", { module: form })).data?.selected === "",
+    `${offForm}; the canvas says `
+    + JSON.stringify((await api.act("designerCanvas", { module: form })).data?.selected));
 
   // The double-click: the control's DEFAULT event handler, written into the code-behind
   // when absent (RegionPick is a ComboBox, so Change), and only navigated to when it

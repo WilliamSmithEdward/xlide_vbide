@@ -570,6 +570,22 @@ export class DesignerView {
     // untouched because the command binds to this editor instance alone.
     this.editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => this.applyNow());
 
+    /*
+     * THE CARET PICKS THE CONTROL, which is the canvas-to-markup link run backwards.
+     *
+     * Only when the caret MOVED by a hand - a click, an arrow, a search landing - because the
+     * other direction sets the caret too, and a selection that re-selects on its own echo is a
+     * loop. Monaco names the reason, so the loop is cut by asking rather than by a flag that
+     * has to be cleared on every path out.
+     */
+    this.editor.onDidChangeCursorPosition((event) => {
+      const byHand = event.reason === monaco.editor.CursorChangeReason.Explicit
+        || event.reason === monaco.editor.CursorChangeReason.NotSet;
+      if (byHand && !this.followingSelection) {
+        this.selectFromMarkup(event.position.lineNumber);
+      }
+    });
+
     this.model.onDidChangeContent(() => {
       const nowDirty = this.canonical !== null && this.model.getValue() !== this.canonical;
       if (nowDirty !== this.dirty) {
@@ -649,6 +665,24 @@ export class DesignerView {
   /** The document as it stands, for the debug surface's read side. */
   markupText(): string {
     return this.model.getValue();
+  }
+
+  /**
+   * Puts the markup caret on a line, for the debug surface: the drive side of the selection
+   * link that runs markup-to-canvas. It goes through the editor's own position, so the cursor
+   * listener answers it exactly as it answers a click - which is the point of driving it here
+   * rather than calling the selection directly.
+   */
+  markupCaret(line: number): string {
+    const lines = this.model.getLineCount();
+    if (!Number.isFinite(line) || line < 1 || line > lines) {
+      return `line ${line} is outside the document's ${lines}`;
+    }
+
+    this.editor.focus();
+    this.editor.setPosition({ lineNumber: line, column: 1 });
+    this.editor.revealLineInCenterIfOutsideViewport(line);
+    return `caret on line ${line}, selecting ${this.selectedName === "" ? "the form" : this.selectedName}`;
   }
 
   private pendingActOutcome: ((outcome: FormMarkupApplied) => void) | null = null;
@@ -868,14 +902,15 @@ export class DesignerView {
 
   /** The canvas as rendered, for the harness: which picture stands (draft or applied), whether
    * the document holds unapplied edits, every control's name with its placed position in
-   * POINTS - the document's own unit, so a row can compare the two - what is selected, and
-   * where the markup caret sits. */
+   * POINTS - the document's own unit, so a row can compare the two - what is selected, where
+   * the markup caret sits, and which LINES the selection's block covers. */
   canvasSnapshot(): {
     draft: boolean;
     dirty: boolean;
     undoable: boolean;
     selected: string | null;
     markupLine: number;
+    markupBlock: { from: number; to: number } | null;
     controls: { name: string; left: number; top: number; width: number; height: number }[];
   } {
     return {
@@ -887,6 +922,11 @@ export class DesignerView {
       undoable: this.model.canUndo(),
       selected: this.selectedName,
       markupLine: this.editor.getPosition()?.lineNumber ?? 0,
+      // The block the canvas selection lights up, asked of the DOCUMENT rather than counted
+      // off the screen: monaco renders a decoration on the next frame and only for the lines
+      // in view, so a DOM count measures its renderer and the scroll position (which is how
+      // the first version of this row read two lines for a three-line block).
+      markupBlock: this.selectedName === null ? null : this.blockOf(this.selectedName),
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
         name: el.dataset.control ?? "",
         ...this.inPoints({
@@ -902,10 +942,21 @@ export class DesignerView {
   /** Selects a control by name - "" is the FORM itself - dresses it in the native handles,
    * and puts the markup caret on its line: the two halves pointing at one thing. The same
    * entry a canvas click takes, so the act and the click stay one gesture. */
+  /** Set while the markup is being moved to FOLLOW a selection, so the caret it lands does not
+   * bounce straight back as a fresh selection. */
+  private followingSelection = false;
+
   select(name: string): void {
     this.selectedName = name;
     this.dressSelection();
-    this.revealInMarkup(name);
+
+    this.followingSelection = true;
+    try {
+      this.revealInMarkup(name);
+    } finally {
+      this.followingSelection = false;
+    }
+
     // The Properties panel follows the selection host-side - M4's bridgehead.
     this.deps.selection(name === "" ? null : name);
   }
@@ -1039,9 +1090,13 @@ export class DesignerView {
 
     const control = target.closest<HTMLElement>(".dc");
     if (!control?.dataset.control) {
-      if (target.closest(".dc-form")) {
-        this.select("");
-      }
+      // ANYWHERE on the canvas selects the FORM, not just the form's own ground. A press on the
+      // grey around it used to select nothing at all and leave the last control dressed, so the
+      // panel and the handles went on describing something the developer had just clicked away
+      // from - and there was no way to get back to the form's own properties except to find a
+      // bare patch of it (the owner, 2026-08-16: "if I click inside of the designer canvas, but
+      // not on the form, I'd like the form to be selected").
+      this.select("");
       return;
     }
 
@@ -1951,17 +2006,113 @@ export class DesignerView {
 
   /** The markup caret onto the selected thing's line: the form's is line 1, a control's is
    * the line that names it. */
+  /**
+   * The selection's BLOCK in the document: its header line and everything indented under it -
+   * a control's properties, a container's children. The form's block is the whole document.
+   *
+   * A control is a block in this language, not a line, so a caret on the header said "here is
+   * where it starts" and left the reader to work out where it stopped (the owner, 2026-08-16:
+   * "I'd like the full row or block to highlight"). Answers null when the document holds no
+   * such thing, which is every moment between a canvas gesture and the projection that follows.
+   */
+  private blockOf(name: string): { from: number; to: number } | null {
+    const lines = this.model.getLinesContent();
+    if (name === "") {
+      return { from: 1, to: Math.max(1, lines.length) };
+    }
+
+    const from = this.headerLineOf(name);
+    if (from === 0) {
+      return null;
+    }
+
+    const indentOf = (text: string): number => text.length - text.trimStart().length;
+    const level = indentOf(lines[from - 1] ?? "");
+
+    let to = from;
+    while (to < lines.length) {
+      const next = lines[to] ?? "";
+      if (next.trim().length > 0 && indentOf(next) <= level) {
+        break;
+      }
+
+      to += 1;
+    }
+
+    return { from, to };
+  }
+
+  /** What the canvas selection lights up in the document, cleared when nothing is selected. */
+  private blockMarks: string[] = [];
+
   private revealInMarkup(name: string): void {
-    let line = 1;
-    if (name !== "") {
-      line = this.headerLineOf(name);
-      if (line === 0) {
-        return;
+    const block = this.blockOf(name);
+    if (!block) {
+      return;
+    }
+
+    // The whole block, highlighted, with the caret at the end of its header so typing goes
+    // where a hand would put it. The form's block is the document, and highlighting all of it
+    // says nothing, so the form gets the caret and no wash.
+    this.blockMarks = this.editor.deltaDecorations(this.blockMarks, name === "" ? [] : [{
+      range: new monaco.Range(block.from, 1, block.to, this.model.getLineMaxColumn(block.to)),
+      options: {
+        isWholeLine: true,
+        className: "designer-block-mark",
+        overviewRuler: {
+          color: "rgba(100, 160, 255, 0.5)",
+          position: monaco.editor.OverviewRulerLane.Left,
+        },
+      },
+    }]);
+
+    this.editor.setPosition({
+      lineNumber: block.from,
+      column: this.model.getLineMaxColumn(block.from),
+    });
+    this.editor.revealLineInCenterIfOutsideViewport(block.from);
+  }
+
+  /**
+   * The other direction: the caret's line names a control, and the canvas selects it.
+   *
+   * A line INSIDE a control's block counts as that control - a property line belongs to the
+   * thing it describes, and a developer clicking one means that thing (the owner, 2026-08-16:
+   * "if I click on a row in the markup editor, I'd like the corresponding control in the
+   * designer to focus"). The form's own line, and anything outside every block, selects the
+   * form. Nothing is written: this is a selection, and the document is already what it is.
+   */
+  private selectFromMarkup(line: number): void {
+    const lines = this.model.getLinesContent();
+    const indentOf = (text: string): number => text.length - text.trimStart().length;
+
+    let found = "";
+    for (let at = Math.min(line, lines.length); at >= 1; at -= 1) {
+      const text = lines[at - 1] ?? "";
+      if (text.trim().length === 0) {
+        continue;
+      }
+
+      // A header names its control in the second word; a property line's indent is deeper than
+      // its header's, so the walk upwards stops at the first line that can own this one.
+      const header = /^\s+\S+\s+(\S+)/.exec(text);
+      if (header && (at === line || indentOf(text) < indentOf(lines[line - 1] ?? ""))) {
+        found = header[1] ?? "";
+        break;
+      }
+
+      if (/^Form\s+/.test(text)) {
+        break;
       }
     }
 
-    this.editor.setPosition({ lineNumber: line, column: this.model.getLineMaxColumn(line) });
-    this.editor.revealLineInCenterIfOutsideViewport(line);
+    if (found !== "" && !this.elementFor(found)) {
+      found = "";
+    }
+
+    if (this.selectedName !== found) {
+      this.select(found);
+    }
   }
 
   private renderCanvas(payload: FormMarkupPayload): void {

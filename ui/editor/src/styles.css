@@ -1998,8 +1998,18 @@ body.live-resize .minimap {
   font-size: 13px;
 }
 
+/* The two QUESTION cards are plain content in a card - no header, no body, no scroll box - so
+   the card itself is what holds them off its edges. Every other dialog has an inner layout that
+   pads its own parts, which is why the shared .modal-card carries none and why this one went
+   without: `#close-confirm-card` had no rule at all, and its buttons sat in the corner (the
+   owner, 2026-08-16, "padding for this modal is not right"). */
 #remove-confirm-card {
   width: 420px;
+  padding: 16px;
+}
+
+#close-confirm-card {
+  max-width: 460px;
   padding: 16px;
 }
 
@@ -3596,6 +3606,13 @@ body.objbrowser-page #objbrowser-card {
   flex: 0 0 auto;
   border-bottom: 1px solid var(--xl-border, #333);
   background: var(--vscode-editorGroupHeader-tabsBackground, rgba(128, 128, 128, 0.08));
+}
+
+/* The canvas selection's block in the document: a wash over every line of it, header and
+   properties and children, so the two halves agree about what is selected without the reader
+   working out where the block stops. Light enough to read the code through. */
+.designer-block-mark {
+  background: var(--vscode-editor-selectionHighlightBackground, rgba(100, 160, 255, 0.14));
 }
 
 /* The grid's switch, at the fixed end of the palette row: outside the scrolling strip, so it

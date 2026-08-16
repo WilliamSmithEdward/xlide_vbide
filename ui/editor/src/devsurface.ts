@@ -162,6 +162,7 @@ export interface DevSurfaceParts {
     viewFor(module: string, project: string | null): {
       applyDocument(markup: string): Promise<{ ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }>;
       markupText(): string;
+      markupCaret(line: number): string;
       setDocument(markup: string): void;
       lintMarkers(): { line: number; message: string; severity: string }[];
       canvasSnapshot(): {
@@ -170,6 +171,7 @@ export interface DevSurfaceParts {
         undoable: boolean;
         selected: string | null;
         markupLine: number;
+        markupBlock: { from: number; to: number } | null;
         controls: { name: string; left: number; top: number; width: number; height: number }[];
       };
       select(name: string): void;
@@ -861,6 +863,26 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return view
         ? { did: true, detail: `${view.markupText().length} char(s)`, data: view.markupText() }
         : { did: false, detail: `no designer tab is open for ${module}` };
+    },
+
+    /** Puts the markup caret on a LINE, which is the drive side of the selection link that
+     * runs the other way: a caret inside a control's block selects that control on the canvas,
+     * the way clicking the line does. Goes through the editor's own position, so the cursor
+     * listener answers it as it answers a click rather than being bypassed. */
+    designerCaret: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const line = Number(args.line);
+      if (!module || !Number.isFinite(line)) {
+        return { did: false, detail: "designerCaret takes module and line" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = view.markupCaret(line);
+      return { did: outcome.startsWith("caret"), detail: outcome };
     },
 
     /*
