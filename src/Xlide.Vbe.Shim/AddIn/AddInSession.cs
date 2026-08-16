@@ -3384,9 +3384,15 @@ internal sealed partial class AddInSession : IDisposable
     private void PublishProperties()
     {
         var surface = _editorSurface;
-        var target = _propertiesTarget ?? surface?.Module;
-        if (surface is null || target is null)
+        if (surface is null)
         {
+            return;
+        }
+
+        var target = _propertiesTarget ?? surface.Module;
+        if (target is null)
+        {
+            ShowNoProperties();
             return;
         }
 
@@ -3398,22 +3404,29 @@ internal sealed partial class AddInSession : IDisposable
 
         try
         {
-            using var found = FindComponent(target);
+            using var found = FindComponent(target, null, out var foundIn);
             using var properties = found?.GetObject("Properties");
             if (found is null || properties is null)
             {
+                // The component the panel is aimed at is not there any more. Republishing is what
+                // a removal does; noticing that the target went with it is THIS method's job,
+                // because the alternative is every removal path remembering to clear the aim and
+                // one of them forgetting - which is what happened, and the panel went on
+                // describing a form the tree no longer listed (reported 2026-08-15).
+                if (ForgetMissingTarget(target, surface))
+                {
+                    PublishProperties();
+                }
+
                 return;
             }
 
             var componentType = found.GetInt32("Type");
             var count = properties.GetInt32("Count");
 
-            // What the values MEAN, from the type library of the thing that owns them. A form's
-            // design properties are the DESIGNER's, so that is the object whose types are read;
-            // a component with no designer keeps the raw numbers, which is what the panel showed
-            // before any of this and is still honest.
-            using var designer = found.GetObject("Designer");
-            var shapes = designer is null ? null : _propertyTypes.Of(designer);
+            // What the values MEAN, from the type library of the thing that owns them.
+            using var typed = TypeSourceOf(found, target, foundIn);
+            var shapes = typed is null ? null : _propertyTypes.Of(typed);
 
             // Names first, values second. Enumerating names runs nothing; it is the value reads
             // that must be limited to what is known to be safe.
@@ -3500,6 +3513,119 @@ internal sealed partial class AddInSession : IDisposable
         {
             Log.Error($"properties: {target} could not be read", ex);
         }
+    }
+
+    /// <summary>
+    /// The object whose type library describes what a component's property values MEAN.
+    ///
+    /// A form's design properties are the DESIGNER's, so that is what a form answers. A DOCUMENT
+    /// component's are the HOST object's - the worksheet or the workbook itself, over in Excel's
+    /// object model rather than the editor's. Until this, a document component had no designer
+    /// and therefore no library, so a worksheet's rows read `Visible -1` and `EnableSelection 0`
+    /// where the language says `xlSheetVisible` and `xlNoRestrictions` (the owner, 2026-08-15:
+    /// "please update enums for workbook / worksheet properties").
+    ///
+    /// NOT through the property bag, which was the first attempt and looked right: a VBE
+    /// `Property` answers `Object` with its own VALUE, not with the thing it belongs to, so
+    /// asking the first property in a worksheet's collection returned Excel's Application and
+    /// the panel learned the enums of the wrong class entirely.
+    ///
+    /// The workbook comes from the same trust-free application route the dirty dots use, and the
+    /// sheet is matched by CODE NAME - which is what a document component's name IS, and which
+    /// keeps a chart sheet reading a chart's library rather than a neighbouring worksheet's.
+    ///
+    /// A component with neither keeps the raw numbers, which is what the panel showed before any
+    /// of this and is still honest.
+    /// </summary>
+    private DispatchObject? TypeSourceOf(DispatchObject component, string name, string? projectId)
+    {
+        try
+        {
+            if (component.GetInt32("Type") != DocumentComponent)
+            {
+                return component.GetObject("Designer");
+            }
+
+            if (DisplayFromProjectId(projectId) is not { Length: > 0 } display)
+            {
+                return null;
+            }
+
+            // Not a `using`: the workbook IS the answer for the workbook document, and a caller
+            // that owns what it is given cannot be handed something already released.
+            var workbook = FindWorkbookByDisplay(display);
+            if (workbook is null)
+            {
+                return null;
+            }
+
+            // The workbook document is the one whose code name is the workbook's own.
+            if (string.Equals(workbook.GetString("CodeName"), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return workbook;
+            }
+
+            try
+            {
+                using var sheets = workbook.GetObject("Sheets");
+                var count = sheets?.GetInt32("Count") ?? 0;
+                for (var i = 1; i <= count; i++)
+                {
+                    var sheet = sheets!.GetItem(i);
+                    if (sheet is not null
+                        && string.Equals(sheet.GetString("CodeName"), name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return sheet;
+                    }
+
+                    sheet?.Dispose();
+                }
+            }
+            finally
+            {
+                workbook.Dispose();
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Nothing to say the developer can act on: the rows fall back to their raw values,
+            // which is a panel that reads worse rather than a panel that lies.
+            Log.Info($"properties: no type library for {name} ({ex.GetType().Name})");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The panel with nothing in it: no object, no rows. What it looks like before anything has
+    /// been selected, and what it must go back to when the selection stops existing - a panel
+    /// that keeps its last picture is a panel describing something that is not there.
+    /// </summary>
+    private void ShowNoProperties() => _editorSurface?.ShowProperties(string.Empty, string.Empty, []);
+
+    /// <summary>
+    /// Drops an aim at a component that is no longer in the project. True when there is a
+    /// different one to fall back to, so the caller may publish again; false when the panel has
+    /// been emptied and there is nothing more to do.
+    /// </summary>
+    private bool ForgetMissingTarget(string missing, EditorSurface surface)
+    {
+        Log.Info($"properties: {missing} is gone, the panel lets it go");
+        _propertiesTarget = null;
+        _propertiesControl = null;
+
+        // The shown module, unless the shown module IS the thing that went - which is the case
+        // when the removed component was the open one, and is also the guard that keeps the
+        // caller's re-entry to a single hop.
+        if (surface.Module is { Length: > 0 } shown
+            && !string.Equals(shown, missing, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        ShowNoProperties();
+        return false;
     }
 
     /// <summary>
@@ -3775,7 +3901,7 @@ internal sealed partial class AddInSession : IDisposable
 
         try
         {
-            using var found = FindComponent(component);
+            using var found = FindComponent(component, null, out var foundIn);
             if (found is null)
             {
                 Log.Info($"properties: {component} no longer exists");
@@ -3813,15 +3939,15 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
-            // The panel shows what the developer WRITES - fmCycleAllForms, &H8000000F& - and the
-            // model stores a number, so the name goes back through the type library on the way
-            // in. Anything the library does not name passes through untouched, which is how a
-            // developer who types the number still gets the number.
-            using var designer = found.GetObject("Designer");
+            // The panel shows what the developer WRITES - fmCycleAllForms, xlSheetVeryHidden,
+            // &H8000000F& - and the model stores a number, so the name goes back through the type
+            // library on the way in. Anything the library does not name passes through untouched,
+            // which is how a developer who types the number still gets the number.
+            using var typed = TypeSourceOf(found, component, foundIn);
             PropertyTypes.Shape? shape = null;
-            if (designer is not null)
+            if (typed is not null)
             {
-                _propertyTypes.Of(designer).TryGetValue(name, out shape);
+                _propertyTypes.Of(typed).TryGetValue(name, out shape);
             }
 
             var stored = PropertyTypes.Unspell(shape, value);
@@ -4006,6 +4132,13 @@ internal sealed partial class AddInSession : IDisposable
     {
         PublishModules();
         PublishProjects();
+
+        // The Properties panel is one of those relevant panes, and it was the one left out: it
+        // holds the name of whatever it was last aimed at, so a removal took a component out of
+        // the tree and left the panel describing it (reported 2026-08-15). After the two publishes
+        // above, because the first prunes the surface's documents and this reads what they left.
+        PublishProperties();
+
         _analysis?.Reanalyse();
     }
 
@@ -7871,15 +8004,12 @@ internal sealed partial class AddInSession : IDisposable
                 _breakpoints.Remove(key);
             }
 
-            if (string.Equals(_propertiesTarget, removed, StringComparison.OrdinalIgnoreCase))
-            {
-                _propertiesTarget = null;
-                _propertiesControl = null;
-            }
-
             Log.Info($"project: removed {removed}" + (owner is null ? string.Empty : $" from {owner}"));
 
-            // The strip, the tree and the analyzer, the same three that an insert has to tell.
+            // The strip, the tree, the analyzer and the Properties panel, the same four that an
+            // insert has to tell. The panel used to be cleared by hand right here, which covered
+            // this route and no other: PublishProperties drops a missing aim itself now, so a
+            // removal through any path leaves it honest.
             ComponentsChanged();
             return null;
         }

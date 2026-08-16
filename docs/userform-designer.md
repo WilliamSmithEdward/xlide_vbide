@@ -679,6 +679,20 @@ Three decisions worth keeping:
 Read once per class and cached: a loaded type does not change, and the panel republishes on
 every selection.
 
+**And a document component too, the same evening** (the owner: "please update enums for
+workbook / worksheet properties"). A worksheet's values live in EXCEL's library rather than the
+editor's, and a worksheet has no designer to point at one, so those rows had gone on reading
+`Visible -1` and `EnableSelection 0` while every form in the product spoke in names. The panel
+goes to the HOST object for them now - the sheet or the workbook itself, matched by code name
+through the same trust-free application route the unsaved dots use - and the rows read
+`xlSheetVisible`, `xlNoRestrictions`, `xlUpdateLinksUserSetting`, offering their members and
+taking a member name back.
+
+The obvious route was wrong and looked right: a VBE `Property` answers `Object` with its own
+VALUE, not with the thing it belongs to, so asking the first property in a worksheet's
+collection handed back Excel's Application - and the panel learned the enums of the wrong class
+entirely, quietly, because a wrong library still answers.
+
 ## What it costs, measured
 
 The owner felt a lag in two gestures and asked for a walk of the whole surface

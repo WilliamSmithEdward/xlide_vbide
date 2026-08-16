@@ -477,14 +477,26 @@ export class Shell {
     this.propertiesList.replaceChildren();
 
     // The object header, naming the selection and its class the way the editor's own window does.
+    // With nothing selected it says so: the header cannot be hidden, because the docks own that
+    // flag on it, and a bare rule under a blank line is a panel that looks broken rather than idle.
     this.propertiesObject.replaceChildren();
     const objectName = document.createElement("span");
-    objectName.className = "prop-object-name";
-    objectName.textContent = this.propertiesComponent;
+    objectName.className = this.propertiesComponent ? "prop-object-name" : "prop-object-none";
+    objectName.textContent = this.propertiesComponent || "Nothing selected";
     const objectKind = document.createElement("span");
     objectKind.className = "prop-object-kind";
     objectKind.textContent = this.propertiesKind;
     this.propertiesObject.append(objectName, objectKind);
+
+    if (this.properties.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "prop-empty";
+      empty.textContent = this.propertiesComponent
+        ? "No properties to show."
+        : "Select a component in the explorer, or a control on a form.";
+      this.propertiesList.appendChild(empty);
+      return;
+    }
 
     for (const property of this.properties) {
       const row = document.createElement("div");

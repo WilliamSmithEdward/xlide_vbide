@@ -576,6 +576,19 @@ html.drag-live * {
   opacity: 0.6;
 }
 
+/* The header with nothing to name. Not bold, because it is a state and not a title. */
+.prop-object-none {
+  opacity: 0.55;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The idle panel's one line, sharing the Locals panel's shape so the two read as one product. */
+.prop-empty {
+  padding: 6px 10px;
+  opacity: 0.55;
+}
+
 #properties-list {
   flex: 1 1 auto;
   overflow-y: auto;

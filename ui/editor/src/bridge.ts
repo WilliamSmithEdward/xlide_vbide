@@ -1917,6 +1917,9 @@ export function demoTransport(): HostTransport {
   const dirtyModules = new Set(openModules);
   let activeModule: string | null = openModules[0] ?? null;
 
+  // What the Properties panel was last aimed at, so a removal can empty it the way the host does.
+  let propertiesComponent: string | null = null;
+
   // Every module the demo can show, by name, so activating one that is closed can re-open it
   // with its text - which is what the host does, and what a drag of a closed module's tree row
   // onto the editor relies on.
@@ -2119,9 +2122,19 @@ export function demoTransport(): HostTransport {
 
           sendModules();
           sendProjects();
+
+          // And the panel lets it go. The host publishes the properties of whatever is left on
+          // every components change; here that is one message, sent for the same reason - a panel
+          // still naming a removed component is the defect this mirrors.
+          if (propertiesComponent === message.name) {
+            propertiesComponent = null;
+            send({ type: "setProperties", component: "", kind: "", properties: [] });
+          }
         }
       }
       if (message.type === "selectComponent") {
+        propertiesComponent = message.name;
+
         // A worksheet-shaped answer, so the boolean dropdowns and the header are reachable.
         send({
           type: "setProperties",
