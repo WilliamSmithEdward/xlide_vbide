@@ -2994,6 +2994,20 @@ internal sealed partial class AddInSession
             case "sync":
                 return HandleSync(request.Query, request.Body);
 
+            // What a control of a KIND holds untouched, measured from a bare instance of the
+            // coclass MSForms registers - no form, no workbook, nothing on screen. This is the
+            // inventory the markup projection compares against to decide what a developer has
+            // actually changed, and reading it is how anyone checks that claim.
+            case "defaults" when request.Query.TryGetValue("type", out var defaultsType) && defaultsType.Length > 0:
+            {
+                var known = _controlDefaults.For(defaultsType);
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugDefaultsReply(defaultsType, known.Count,
+                        [.. known.OrderBy(one => one.Key, StringComparer.OrdinalIgnoreCase)
+                            .Select(one => new DebugDefaultRow(one.Key, one.Value))]),
+                    DebugJsonContext.Default.DebugDefaultsReply);
+            }
+
             case "designer" when request.Query.TryGetValue("module", out var designerModule) && designerModule.Length > 0:
             {
                 // A UserForm's design, read and mutated through the MSForms designer object

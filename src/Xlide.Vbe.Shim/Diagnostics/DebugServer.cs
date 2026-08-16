@@ -1191,6 +1191,17 @@ public sealed record DebugReloadReply(
     [property: JsonPropertyName("bundleBuiltUtc")] string BundleBuiltUtc,
     [property: JsonPropertyName("stale")] bool Stale);
 
+/// <summary>One property of an untouched control: what it is called, and what it holds.</summary>
+public sealed record DebugDefaultRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("value")] string Value);
+
+/// <summary>A kind's whole inventory, measured from a bare instance of its coclass.</summary>
+public sealed record DebugDefaultsReply(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("properties")] DebugDefaultRow[] Properties);
+
 /// <summary>The Locals ghost's feed as data, for the debug-side suite.</summary>
 public sealed record DebugLocalsReply(
     [property: JsonPropertyName("context")] string? Context,
@@ -1359,6 +1370,7 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugLogReply))]
 [JsonSerializable(typeof(DebugMessageRow))]
 [JsonSerializable(typeof(DebugMessagesReply))]
+[JsonSerializable(typeof(DebugDefaultsReply))]
 [JsonSerializable(typeof(DebugLocalsReply))]
 [JsonSerializable(typeof(DebugWatchesReply))]
 [JsonSerializable(typeof(DebugFindingRow))]

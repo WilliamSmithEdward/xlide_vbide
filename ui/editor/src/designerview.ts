@@ -1601,6 +1601,11 @@ export class DesignerView {
       return `no ${edge} handle stands on ${name === "" ? "the form" : name}`;
     }
 
+    // Into view first, the way a hand reaches a handle past the edge of the canvas: on a narrow
+    // tab the form is wider than the box that holds it, and a hit test aimed off-screen answers
+    // nothing - which is a true answer to the wrong question.
+    handle.scrollIntoView({ block: "nearest", inline: "nearest" });
+
     const box = handle.getBoundingClientRect();
     const spot = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
     const reached = document.elementFromPoint(spot.x, spot.y)?.closest<HTMLElement>(".dc-handle");

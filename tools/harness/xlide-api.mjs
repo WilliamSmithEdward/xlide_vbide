@@ -591,6 +591,15 @@ function clientFor(entry) {
       call(`designer${query({ module, project, format: "markup" })}`).then((answer) => answer.markup),
 
     /**
+     * What a control of a KIND holds untouched: the inventory the markup projection compares
+     * against to print only what a developer changed. Measured from a bare instance of the
+     * coclass MSForms registers - no form, no workbook, nothing on screen - so it cannot drift
+     * from the MSForms this machine actually has. A kind with no ProgID of ours, or one whose
+     * coclass will not come up, answers zero properties rather than a guess.
+     */
+    controlDefaults: (type) => call(`defaults${query({ type })}`),
+
+    /**
      * Applies a markup document to the live form as a NAME-KEYED DIFF: controls only in the
      * markup are added, controls only in the model are removed, matched controls take their
      * header geometry, caption and property lines - and an unspoken property is never
@@ -1276,6 +1285,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "pane": return api.pane(rest[0] ?? "open", rest[2] === "face"
         ? { module: rest[1], face: rest[3] }
         : { module: rest[1], project: rest[2], answer: rest[3] });
+      // xlide-api.mjs defaults commandButton      what one holds untouched
+      case "defaults": return api.controlDefaults(rest[0]);
       case "outline": return api.outline(rest[0], rest[1]);
       case "caret": return api.caret(Number(rest[0] ?? 1), { module: rest[1], project: rest[2] });
       case "breakpoints": return api.breakpoints();

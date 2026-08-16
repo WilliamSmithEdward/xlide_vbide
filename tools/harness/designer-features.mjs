@@ -627,6 +627,27 @@ try {
     (await api.ui()).properties?.component === form, { budgetMs: 15000 });
   check("selecting the form returns the panel to the component", true);
 
+  // ---- the defaults inventory: what a kind holds before anyone touches it ----
+
+  // Measured from a bare instance of the coclass, so this is MSForms' own answer rather than a
+  // table of ours. It is what the projection will compare against to print only what changed.
+  const buttonDefaults = await api.controlDefaults("commandButton");
+  const byProperty = new Map(buttonDefaults.properties.map((row) => [row.name, row.value]));
+  check("a kind's untouched values are measured, not written down",
+    buttonDefaults.count > 10 && byProperty.get("BackColor") === "-2147483633"
+    && byProperty.get("Enabled") === "True",
+    `${buttonDefaults.count} properties, BackColor=${byProperty.get("BackColor")}`);
+
+  // The inventory's own honesty: a FONT on a bare control is not the font it would wear on a
+  // form, which inherits. So the projection compares fonts against the form, not against this.
+  check("and it says so where a bare control cannot know - a font is inherited, not defaulted",
+    byProperty.get("FontName") !== undefined && byProperty.get("FontName") !== "Tahoma",
+    `bare says ${byProperty.get("FontName")}, a form's control wears Tahoma`);
+
+  const foreign = await api.controlDefaults("gizmo");
+  check("a kind with no coclass of ours answers nothing rather than a guess",
+    foreign.count === 0, JSON.stringify(foreign));
+
   // ---- the panel speaks the developer's language: members, not their ints ----
 
   const formPanel = await waitFor("the panel to show the form", async () => {

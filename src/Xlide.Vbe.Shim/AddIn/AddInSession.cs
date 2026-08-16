@@ -3373,6 +3373,14 @@ internal sealed partial class AddInSession : IDisposable
     /// </summary>
     private readonly PropertyTypes _propertyTypes = new();
 
+    /// <summary>
+    /// What each control KIND holds untouched, measured once per kind from a bare instance of
+    /// its coclass. The inventory the markup projection will compare against to print only what
+    /// a developer changed; readable today through `defaults?type=`, which is how the claim gets
+    /// checked before anything depends on it.
+    /// </summary>
+    private readonly ControlDefaults _controlDefaults = new();
+
     private void PublishProperties()
     {
         var surface = _editorSurface;

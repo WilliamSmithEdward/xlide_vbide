@@ -76,6 +76,102 @@ internal sealed unsafe class PropertyTypes
         return read;
     }
 
+    /// <summary>
+    /// Every property an object will answer with no arguments, by name - the list the defaults
+    /// inventory reads and the projection compares against. Getters only, and no leading
+    /// underscore: those are the library's own business rather than the developer's.
+    /// </summary>
+    public static IReadOnlyList<string> PropertyNames(DispatchObject subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+
+        using var info = subject.TypeInfo();
+        if (info is null)
+        {
+            return [];
+        }
+
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            NamesInto(info, names, seen, depth: 0);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"property types: a property list could not be read ({ex.GetType().Name})");
+        }
+
+        return names;
+    }
+
+    private static void NamesInto(
+        ComHandle<ITypeInfo> info, List<string> names, HashSet<string> seen, int depth)
+    {
+        if (info.Target.GetTypeAttr(out var attrPointer) < 0 || attrPointer == 0)
+        {
+            return;
+        }
+
+        var attr = (TypeAttr*)attrPointer;
+        var kind = attr->TypeKind;
+        var funcCount = attr->FuncCount;
+        var implCount = attr->ImplTypeCount;
+        info.Target.ReleaseTypeAttr(attrPointer);
+
+        if (kind != 5)
+        {
+            for (var i = 0; i < funcCount; i++)
+            {
+                if (info.Target.GetFuncDesc(i, out var funcPointer) < 0 || funcPointer == 0)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var function = (FuncDesc*)funcPointer;
+                    // Zero parameters: an indexed property is a collection reader, and reading
+                    // one without an index says nothing about a default.
+                    if (function->InvokeKind != InvokePropertyGet || function->ParameterCount != 0)
+                    {
+                        continue;
+                    }
+
+                    if (NameOf(info, function->MemberId) is { Length: > 0 } name
+                        && !name.StartsWith('_') && seen.Add(name))
+                    {
+                        names.Add(name);
+                    }
+                }
+                finally
+                {
+                    info.Target.ReleaseFuncDesc(funcPointer);
+                }
+            }
+        }
+
+        if (depth >= 3)
+        {
+            return;
+        }
+
+        for (var i = 0; i < implCount; i++)
+        {
+            if (info.Target.GetRefTypeOfImplType(i, out var refType) < 0
+                || info.Target.GetRefTypeInfo(refType, out var otherPointer) < 0 || otherPointer == 0)
+            {
+                continue;
+            }
+
+            using var other = ComHandle<ITypeInfo>.Own(otherPointer);
+            if (other is not null)
+            {
+                NamesInto(other, names, seen, depth + 1);
+            }
+        }
+    }
+
     /// <summary>The value as the developer would write it: an enum member's name, a colour's
     /// VBA hex, or the number as it stands when neither applies.</summary>
     public static string Spell(Shape? shape, string raw)

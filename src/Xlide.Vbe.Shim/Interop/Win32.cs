@@ -391,6 +391,11 @@ internal static unsafe partial class Win32
 
     public const uint SwpFrameChanged = 0x0020;
 
+    /// <summary>A ProgID to its class, for the coclasses MSForms registers: how a control of a
+    /// kind is made without a form to put it on.</summary>
+    [LibraryImport("ole32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    public static partial int CLSIDFromProgID(string progId, out Guid classId);
+
     [LibraryImport("ole32.dll")]
     public static partial int CoCreateInstance(
         in Guid classId,
