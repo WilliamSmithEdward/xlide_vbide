@@ -852,10 +852,11 @@ the host-owns-membership invariant survives.
 
   A TabStrip switches too and honestly shows nothing new, which is the whole truth about it:
   its tabs are an INDEX rather than containers, and the runtime draws the same controls under
-  every one. It gets no page menu, because its tabs are not in the dialect - they ride the
+  every one. ~~It gets no page menu, because its tabs are not in the dialect - they ride the
   walk as strings for painting, there is no line to add or remove, and every item would be a
-  claim the product cannot keep. That gap is the dialect's and is recorded here rather than
-  papered over in the menu.
+  claim the product cannot keep.~~ **Superseded the same week:** the dialect learned `Tab` lines
+  and the strip got its menu, three sub-sections down. The gap was real when this was written and
+  the refusal to paper over it in a menu was right; what closed it was closing the gap.
 
   **Which made the tab's own appearance the whole of the feedback, and it was not enough** (the
   owner, 2026-08-16: "in the tab strip, there is no differentiation between tab 1 and tab 2").
