@@ -349,7 +349,7 @@ try {
 
   const markup = await api.designerMarkup(form, project);
   check("the markup opens with the form line",
-    markup.startsWith(`Form ${form} "`), markup.split("\n")[0]);
+    markup.startsWith(`<Form Name="${form}"`), markup.split("\n")[0]);
   check("a nested control prints inside its container",
     /\r?\n    Frame Options "Freight" at 12,112 size 92x66\r?\n        OptionButton PickGround/.test(markup),
     markup.slice(0, 400));
@@ -361,7 +361,12 @@ try {
     idempotent.ok === true && idempotent.added.length === 0 && idempotent.removed.length === 0,
     JSON.stringify({ added: idempotent.added, removed: idempotent.removed, set: idempotent.set }));
 
-  const withButton = `${markup.trimEnd()}\r\n    CommandButton MarkupBtn "Go" at 8,282 size 60x20\r\n`;
+  // An element goes in before the form's own close, which is what "adding a line" means once the
+  // document is tagged: the close is a line rather than the end of the file.
+  const addElement = (document, element) =>
+    `${document.trimEnd().replace(/<\/Form>\s*$/, "")}    ${element}\r\n</Form>\r\n`;
+  const withButton = addElement(markup,
+    '<CommandButton Name="MarkupBtn" Caption="Go" Left="8" Top="282" Width="60" Height="20" />');
   const applied = await api.applyMarkup(form, withButton, project);
   check("a line added to the document adds the control",
     applied.ok === true && applied.added.includes("MarkupBtn"), JSON.stringify(applied));
@@ -469,13 +474,14 @@ try {
 
   const tabMarkup = await waitFor("the tab's document to hold the form's markup", async () => {
     const read = await api.act("designerMarkup", { module: form });
-    return read.did === true && String(read.data).startsWith(`Form ${form}`) ? read : null;
+    return read.did === true && String(read.data).startsWith(`<Form Name="${form}"`) ? read : null;
   }, { budgetMs: 15000 });
   check("the tab's document holds the form's markup", true, tabMarkup.detail);
 
   const tabApplied = await api.act("designerApply", {
     module: form,
-    markup: `${String(tabMarkup.data).trimEnd()}\r\n    CommandButton TabBtn "Go" at 8,282 size 60x20\r\n`,
+    markup: addElement(String(tabMarkup.data),
+      '<CommandButton Name="TabBtn" Caption="Go" Left="8" Top="282" Width="60" Height="20" />'),
   });
   check("applying an edited document from the tab lands on the form",
     tabApplied.did === true && (tabApplied.data?.added ?? []).includes("TabBtn"),
@@ -574,7 +580,9 @@ try {
 
   await api.act("designerSetMarkup", {
     module: form,
-    markup: `Form ${form} size 100x100\r\n    Label A at banana\r\n    Gadget G at 1,1 size 2x2\r\n`,
+    markup: `<Form Name="${form}" Width="100" Height="100">\r\n`
+      + '    <Label Name="A" Left="banana" Top="1" />\r\n'
+      + '    <Gadget Name="G" Left="1" Top="1" Width="2" Height="2" />\r\n</Form>\r\n',
   });
   const lint = await waitFor("the squiggles to arrive", async () => {
     const read = (await api.act("designerLint", { module: form })).data ?? [];
@@ -629,7 +637,7 @@ try {
     `${formKind?.properties.length} properties`);
 
   // A fresh indented line under the form: the kinds, arriving with their geometry scaffolded.
-  const okLine = lineOf(/^\s+CommandButton OkButton\b/);
+  const okLine = lineOf(/<CommandButton Name="OkButton"/);
   const freshDoc = `${String(tabMarkup.data).trimEnd()}\r\n    \r\n`;
   await api.act("designerSetMarkup", { module: form, markup: freshDoc });
   const freshLine = freshDoc.replace(/\r\n/g, "\n").split("\n").findIndex((text) => text === "    ") + 1;
@@ -727,7 +735,8 @@ try {
 
   // ---- the canvas follows the document: the draft previews, the form untouched ----
 
-  const draftMarkup = `${String(tabMarkup.data).trimEnd()}\r\n    CommandButton DraftBtn "Soon" at 8,282 size 60x20\r\n`;
+  const draftMarkup = addElement(String(tabMarkup.data),
+    '<CommandButton Name="DraftBtn" Caption="Soon" Left="8" Top="282" Width="60" Height="20" />');
   await api.act("designerSetMarkup", { module: form, markup: draftMarkup });
   const draftCanvas = await waitFor("the canvas to preview the draft", async () => {
     const read = (await api.act("designerCanvas", { module: form })).data;
@@ -739,7 +748,10 @@ try {
     !(await api.designer(form, project)).controls.some((c) => c.name === "DraftBtn"));
 
   // A half-typed line must not blank the picture: broken text keeps the last good draft.
-  await api.act("designerSetMarkup", { module: form, markup: `${draftMarkup}    Label Broken at banana\r\n` });
+  await api.act("designerSetMarkup", {
+    module: form,
+    markup: `${draftMarkup}    <Label Name="Broken" Left="banana" Top="1" />\r\n`,
+  });
   await waitFor("the squiggles to arrive on the broken text", async () =>
     ((await api.act("designerLint", { module: form })).data ?? []).length > 0, { budgetMs: 15000 });
   const heldCanvas = (await api.act("designerCanvas", { module: form })).data;
@@ -1136,7 +1148,7 @@ try {
   // inside the first.
   const canonicalText = String(tabMarkup.data);
   const withFont = canonicalText.split(/\r?\n/);
-  const buttonLine = withFont.findIndex((line) => /CommandButton OkButton/.test(line));
+  const buttonLine = withFont.findIndex((line) => /<CommandButton Name="OkButton"/.test(line));
   const tryLine = async (text) => {
     const lines = [...withFont];
     lines.splice(buttonLine + 1, 0, text);
@@ -1467,7 +1479,7 @@ try {
   const formGrew = await api.act("designerResize", { module: form, edge: "se", dx: 20, dy: 12 });
   check("the form's own frame resizes by its handles", formGrew.did === true, formGrew.detail);
   await waitFor("the form's line to carry the new size", async () =>
-    new RegExp(`^Form ${form} .* size 380x332$`, "m").test(await tabText()), { budgetMs: 15000 });
+    new RegExp(`<Form Name="${form}"[^>]*Width="380" Height="332"`).test(await tabText()), { budgetMs: 15000 });
   check("360x320 becomes 380x332 on the Form line, with no position added", true);
 
   // The promise the handles now keep: each wears the cursor of the pull it makes, and the
@@ -1571,13 +1583,15 @@ try {
 
     const design = readFileSync(join(syncFolder, `${form}.form`), "utf8");
     check("the design file holds the same projection the tab holds",
-      design.startsWith(`Form ${form}`) && /CommandButton OkButton/.test(design),
+      design.startsWith(`<Form Name="${form}"`) && /<CommandButton Name="OkButton"/.test(design),
       design.split(String.fromCharCode(10))[0]);
 
     // Edited on disk the way a developer would in a pull request, then imported: the row applies
     // through the markup's own diff, so the FORM itself moves.
     writeFileSync(join(syncFolder, `${form}.form`),
-      design.replace(/(CommandButton OkButton[^\r\n]*?) at \d+,\d+/, "$1 at 40,40"), "utf8");
+      design.replace(
+        /(<CommandButton Name="OkButton"[^>]*?) Left="\d+" Top="\d+"/,
+        '$1 Left="40" Top="40"'), "utf8");
 
     const incoming = await api.syncPlan("import", { folder: syncFolder });
     const designRow = (incoming.items ?? []).find((row) => row.file === `${form}.form`);
@@ -1602,14 +1616,14 @@ try {
     // thing that catches it is a cheap fingerprint - each control's name and bounds - asked on
     // the window events that already fire.
     const tabSaysNow = async () => String((await api.act("designerMarkup", { module: form })).data);
-    const staleTab = /OkButton "Start" at 262,250/.test(await tabSaysNow());
+    const staleTab = /<CommandButton Name="OkButton"[^>]*Left="262" Top="250"/.test(await tabSaysNow());
 
     if (staleTab) {
       const caught = await api.designerEdit("liveness", { module: form });
       check("an edit from OUTSIDE the funnel is caught by the fingerprint",
         /re-projected/.test(caught.detail ?? "") && caught.detail.includes(form), caught.detail);
       await waitFor("the tab to show what the form actually holds", async () =>
-        /OkButton "Start" at 40,40/.test(await tabSaysNow()), { budgetMs: 15000 });
+        /<CommandButton Name="OkButton"[^>]*Left="40" Top="40"/.test(await tabSaysNow()), { budgetMs: 15000 });
       check("and the tab shows what the form holds rather than what it last drew", true);
     } else {
       check("an edit from OUTSIDE the funnel is caught by the fingerprint", true,
@@ -1748,7 +1762,7 @@ try {
       "latin1");
     writeFileSync(join(syncFolder, `${arrival}.frx`), readFileSync(join(syncFolder, blob)));
     writeFileSync(join(syncFolder, `${arrival}.form`),
-      design.replace(new RegExp(`^Form ${form}`), `Form ${arrival}`), "utf8");
+      design.replace(new RegExp(`<Form Name="${form}"`), `<Form Name="${arrival}"`), "utf8");
 
     const arriving = await api.syncPlan("import", { folder: syncFolder });
     const createRow = (arriving.items ?? []).find((row) => row.file === `${arrival}${codeExt}`);
@@ -1831,7 +1845,7 @@ try {
     fromPalette.did === true, fromPalette.detail);
   const withDrop = await tabText();
   check("the drop writes a whole line - named, placed and sized like the native toolbox's",
-    /^ {4}CommandButton CommandButton1 at 230,120 size 72x24$/m.test(withDrop),
+    /<CommandButton Name="CommandButton1"[^>]*Left="230" Top="120" Width="72" Height="24"/.test(withDrop),
     withDrop.split(/\r?\n/).find((line) => /CommandButton1/.test(line)) ?? "no line");
   check("and the new control is SELECTED, the way one dropped from the native palette is",
     ((await api.act("designerCanvas", { module: form })).data?.selected) === "CommandButton1");
@@ -1883,7 +1897,7 @@ try {
   for (let i = 0; i < 12; i++) { await press("z", "ctrlKey: true,"); }
   const floor = String((await api.act("designerMarkup", { module: form })).data);
   check("undone to the floor of the stack, the document is still the form's text - never blank",
-    /^Form /.test(floor) && /CommandButton OkButton/.test(floor), `${floor.length} char(s)`);
+    /<Form /.test(floor) && /<CommandButton Name="OkButton"/.test(floor), `${floor.length} char(s)`);
 
   await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   const restored = await waitFor("the document back at canonical", async () => {
@@ -2721,7 +2735,7 @@ try {
   const followedMarkup = await waitFor("the followed tab's document to answer under the new name",
     async () => {
       const read = await api.act("designerMarkup", { module: renamedForm });
-      return read.did === true && String(read.data).startsWith(`Form ${renamedForm}`) ? read : null;
+      return read.did === true && String(read.data).startsWith(`<Form Name="${renamedForm}"`) ? read : null;
     }, { budgetMs: 15000 });
   check("and its document answers under the new name, first line and all", true, followedMarkup.detail);
 

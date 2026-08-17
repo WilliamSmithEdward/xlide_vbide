@@ -139,34 +139,51 @@ than a rival editing model.
 
 ### The shape
 
-```
-' EntryForm, as xlide projects it. Edits here apply back through the designer model.
-Form EntryForm "Quarter Entry" size 360x320
-    Label NameLabel "Customer" at 12,14 size 66x16
-    TextBox NameBox at 84,12 size 120x20
-    Frame Options "Freight" at 12,112 size 92x66
-        OptionButton PickGround "Ground" at 8,14 size 76x16
-        OptionButton PickAir "Air" at 8,34 size 76x16
-    MultiPage Wizard at 12,188 size 192x86
-        Page Page1 "Page1"
-            CheckBox Agree "Agreed" at 8,8 size 100x16
-        Page Page2 "Page2"
-    CommandButton OkButton "Start" at 262,250 size 72x24
-        Font.Size = 12
-        Font.Bold = True
+```xml
+<!-- EntryForm, as xlide projects it. Edits here apply back through the designer model. -->
+<Form Name="EntryForm" Caption="Quarter Entry" Width="360" Height="320">
+    <Label Name="NameLabel" Caption="Customer" Left="12" Top="14" Width="66" Height="16" />
+    <TextBox Name="NameBox" Left="84" Top="12" Width="120" Height="20" />
+    <Frame Name="Options" Caption="Freight" Left="12" Top="112" Width="92" Height="66" SpecialEffect="2">
+        <OptionButton Name="PickGround" Caption="Ground" Left="8" Top="14" Width="76" Height="16" />
+        <OptionButton Name="PickAir" Caption="Air" Left="8" Top="34" Width="76" Height="16" />
+    </Frame>
+    <MultiPage Name="Wizard" Left="12" Top="188" Width="192" Height="86">
+        <Page Name="Page1" Caption="Page1">
+            <CheckBox Name="Agree" Caption="Agreed" Left="8" Top="8" Width="100" Height="16" />
+        </Page>
+        <Page Name="Page2" Caption="Page2" />
+    </MultiPage>
+    <CommandButton Name="OkButton" Caption="Start" Left="262" Top="250" Width="72" Height="24"
+                   Font.Size="12" Font.Bold="True" />
+</Form>
 ```
 
-The dialect is VBA's, deliberately: apostrophe comments, `True`/`False`, doubled quotes inside
-strings. A COLOUR is the one place it is not (2026-08-16, at the owner's direction, when the
-Properties panel started spelling colours the same way): a plain colour is `#c0dcc0`, the
-spelling every developer already has, and `&H8000000F&` stays for a SYSTEM colour, which is a
-question about the machine rather than an RGB. Both spellings parse, one conversion in Core
-serves the parser, the printer and the panel, and the model still stores the decimal. A header line is
-`Type Name ["Caption"] [at left,top] [size width x height]` - identity and the universals
-inline, because every visual control has them - and anything else is an indented
-`Path = value` line, one level of dotting reaching a font. Indentation is containment: a
-Frame's children sit under it, a MultiPage's Pages under it, a Page's controls under the Page.
-Geometry is points, as the designer measures.
+**IT BECAME XAML-SHAPED 2026-08-17** (the owner: "should we update our markdown to use html like
+tagging syntax? to make multi row syntax less ambiguous", then "xaml is likely the better analog
+to replicate"). What it replaced was an indented dialect where a container's own properties and
+its children sat at the SAME depth with only the `=` telling them apart - tolerable while
+containers rarely carried properties, and not once the saved baseline started giving every control
+several. A control is an ELEMENT now, what it HAS is an attribute, what it CONTAINS is a child, and
+indentation is presentation rather than structure.
+
+**EVERY VALUE IS QUOTED** and the document carries no type information at all: `Left="12"` and
+`Caption="12"` are spelled alike on purpose. That was the owner's call twice over ("does it make
+sense to always wrap property values in quotes?"), and it works because the APPLY stopped trusting
+the document: it asks the property itself what it is, through the variant its current value
+answers with. The parser still guesses a kind from the content, but only for the canvas and the
+printer, where a wrong guess costs nothing.
+
+**A COLOUR IS SPELLED TWO WAYS BECAUSE IT IS TWO THINGS.** A literal is `#c0dcc0`, the spelling
+every developer already has. A SYSTEM colour keeps its NAME - `ButtonFace`, `Highlight` - because
+it is a question about the machine rather than an RGB, and spelling it as today's answer would
+freeze it and stop the control following the theme. One table in Core serves the document and the
+Properties panel, which shows the same names with their spaces. `&H8000000F&` still parses from a
+hand-written document; the model stores the decimal throughout.
+
+A control's name is its `Name` attribute, geometry is `Left`/`Top`/`Width`/`Height` in points as
+the designer measures, one level of dotting reaches a font (`Font.Size`), and a comment is
+`<!-- -->`. A control with no children closes itself, so the common case is still one line.
 
 ### The rules that make it honest
 

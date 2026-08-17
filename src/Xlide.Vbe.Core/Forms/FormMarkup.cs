@@ -12,10 +12,26 @@ namespace Xlide.Vbe.Core.Forms;
 /// developer with it gets a text surface - diffable, undoable, searchable - over the same
 /// design (docs/userform-designer.md, the markup layer).
 ///
-/// The dialect is VBA's on purpose: apostrophe comments, True/False, doubled quotes inside
-/// strings, &amp;H hex where a colour is spelled. A header line is
-/// `Type Name ["Caption"] [at left,top] [size width x height]`; anything else about a control
-/// is an indented `Path = value` line. Indentation is containment, four spaces per level.
+/// THE DIALECT IS XAML-SHAPED, 2026-08-17 (the owner: "xaml is likely the better analog to
+/// replicate"). A control is an ELEMENT, everything it has is an ATTRIBUTE, and everything it
+/// contains is a child element:
+///
+///     &lt;Form Name="EntryForm" Caption="Quarter Entry" Width="360" Height="320"&gt;
+///         &lt;Frame Name="Options" Caption="Freight" Left="12" Top="112" SpecialEffect="2"&gt;
+///             &lt;OptionButton Name="PickGround" Caption="Ground" Left="8" Top="14" /&gt;
+///         &lt;/Frame&gt;
+///     &lt;/Form&gt;
+///
+/// It replaced an indented line dialect whose containers put their own properties and their
+/// children at the SAME depth, with only the `=` to tell them apart - which stopped being
+/// tolerable once the saved baseline started giving every control property lines of its own.
+///
+/// EVERY VALUE IS QUOTED and the document carries no type information at all: `Left="12"` and
+/// `Caption="12"` are spelled alike on purpose. The parser guesses a kind from the content for
+/// the canvas and the printer, and the APPLY does not rely on that guess - it asks the property
+/// itself what it is. Colours keep VBA's flavour, `#rrggbb` for a literal and a name like
+/// `ButtonFace` for a system colour, so the theme question survives a round trip. Comments are
+/// `&lt;!-- --&gt;`. Indentation is presentation now, not structure.
 ///
 /// Everything here is text in, records out, and back - no COM, no host - which is what makes
 /// the language testable without Excel and shared verbatim between the generate and apply
