@@ -329,27 +329,20 @@ public static class FormMarkup
             return findings;
         }
 
-        // The line a control's header sits on, for anchoring a semantic finding: the nth
-        // line whose body reads "<word> <name>". Good enough for a squiggle; the name is
-        // the identity, not the position.
+        // The line an element's OPENING tag sits on, for anchoring a semantic finding: the nth
+        // line carrying `Name="..."` for this name. Good enough for a squiggle - the name is the
+        // identity, not the position - and it finds the tag wherever in the element the attribute
+        // was typed, because an element may wrap across lines.
         int LineOf(string name, int occurrence = 1)
         {
+            var wanted = $"Name=\"{name}\"";
             var seen = 0;
             for (var index = 0; index < lines.Length; index++)
             {
-                var body = lines[index].TrimStart();
-                var space = body.IndexOf(' ');
-                if (space > 0)
+                if (lines[index].Contains(wanted, StringComparison.OrdinalIgnoreCase)
+                    && ++seen == occurrence)
                 {
-                    var rest = body[(space + 1)..];
-                    if (rest.StartsWith(name, StringComparison.OrdinalIgnoreCase)
-                        && (rest.Length == name.Length || !char.IsLetterOrDigit(rest[name.Length])))
-                    {
-                        if (++seen == occurrence)
-                        {
-                            return index + 1;
-                        }
-                    }
+                    return index + 1;
                 }
             }
 
@@ -586,11 +579,15 @@ public static class FormMarkup
 
             switch (attribute.Name.ToUpperInvariant())
             {
+                // Name and Caption are TEXT, and text is quoted - the same rule the properties
+                // keep, and the reason `Caption=maybe` is a refusal rather than a caption reading
+                // "maybe". Without this the two structural strings were the one place a bare word
+                // slipped through.
                 case "NAME":
-                    name = attribute.Value;
+                    name = RequireQuoted(attribute);
                     continue;
                 case "CAPTION":
-                    caption = attribute.Value;
+                    caption = RequireQuoted(attribute);
                     continue;
                 case "LEFT" when !isForm:
                     left = ReadNumber(attribute);
@@ -633,6 +630,12 @@ public static class FormMarkup
 
         return (name, caption, left, top, width, height, properties);
     }
+
+    private static string RequireQuoted(Attribute attribute) =>
+        attribute.Quoted
+            ? attribute.Value
+            : throw new FormMarkupException(
+                attribute.Line, $"{attribute.Name} is not a value: {attribute.Name} takes quoted text");
 
     private static double ReadNumber(Attribute attribute) =>
         double.TryParse(attribute.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)

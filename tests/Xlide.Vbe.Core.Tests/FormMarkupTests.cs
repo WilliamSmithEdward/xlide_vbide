@@ -114,14 +114,15 @@ public class FormMarkupTests
     }
 
     [Fact]
-    public void TheDialectIsVbaFlavoured()
+    public void TheDialectKeepsVbasStringsAndFlags()
     {
         var parsed = FormMarkup.Parse(""""
-            ' A comment above the form, and one after a header.
-            Form Entry "It's ""quoted""" size 100x80   ' the caption holds an apostrophe AND quotes
-                Label Hint "say ' nothing" at 1,2 size 3x4
-                    ForeColor = &H8000000F&
-                    Visible = False
+            <!-- A comment above the form, and one inside it. -->
+            <Form Name="Entry" Caption="It's ""quoted""" Width=100 Height=80>
+                <!-- the caption above holds an apostrophe AND doubled quotes -->
+                <Label Name="Hint" Caption="say ' nothing" Left=1 Top=2 Width=3 Height=4
+                       ForeColor=ButtonFace Visible=False />
+            </Form>
             """");
 
         Assert.Equal("It's \"quoted\"", parsed.Caption);
@@ -130,13 +131,36 @@ public class FormMarkupTests
         Assert.Equal(unchecked((int)0x8000000F).ToString(), hint.Properties[0].Value);
         Assert.Equal(PropertyValueKind.Colour, hint.Properties[0].Kind);
         Assert.Equal("False", hint.Properties[1].Value);
+        Assert.Equal(PropertyValueKind.Flag, hint.Properties[1].Kind);
     }
 
     /// <summary>
-    /// A colour is spelled the way the Properties panel spells it, and read back the same - one
-    /// conversion for both surfaces (the owner, 2026-08-16). A SYSTEM colour keeps the VBA hex,
-    /// because it is a question about the machine rather than an RGB, and a document that spelled
-    /// today's answer would freeze it into the form.
+    /// An element may wrap across lines, because an attribute list gets long once a control
+    /// carries what the saved baseline says it changed. The scanner reads TAGS rather than lines,
+    /// so the only thing a newline inside a tag changes is which line an error is reported on.
+    /// </summary>
+    [Fact]
+    public void AnElementMayWrapAcrossLines()
+    {
+        var parsed = FormMarkup.Parse("""
+            <Form Name="F">
+                <TextBox Name="Box"
+                         Left=1 Top=2 Width=3 Height=4
+                         MaxLength=12
+                         ControlSource="Sheet1!A1" />
+            </Form>
+            """);
+
+        var box = Assert.Single(parsed.Controls);
+        Assert.Equal(1, box.Left);
+        Assert.Equal(2, box.Properties.Count);
+        Assert.Equal("Sheet1!A1", box.Properties[1].Value);
+        Assert.Equal(PropertyValueKind.Text, box.Properties[1].Kind);
+    }
+
+    /// <summary>
+    /// A colour is read from every spelling the dialect takes: `#rrggbb`, the shorthand, a system
+    /// colour's NAME, and VBA's own hex from a hand-written document.
     /// </summary>
     [Theory]
     [InlineData("#c0dcc0", 12639424)]
@@ -144,9 +168,11 @@ public class FormMarkupTests
     [InlineData("#000000", 0)]
     [InlineData("#fff", 16777215)]
     [InlineData("&H8000000F&", unchecked((int)0x8000000F))]
-    public void AColourIsReadFromEitherSpelling(string spelled, int stored)
+    [InlineData("ButtonFace", unchecked((int)0x8000000F))]
+    [InlineData("Highlight", unchecked((int)0x8000000D))]
+    public void AColourIsReadFromEverySpelling(string spelled, int stored)
     {
-        var parsed = FormMarkup.Parse($"Form F\n    Label L\n        BackColor = {spelled}\n");
+        var parsed = FormMarkup.Parse($"<Form Name=\"F\">\n    <Label Name=\"L\" BackColor={spelled} />\n</Form>\n");
 
         var colour = Assert.Single(Assert.Single(parsed.Controls).Properties);
         Assert.Equal(stored.ToString(), colour.Value);
@@ -154,7 +180,7 @@ public class FormMarkupTests
     }
 
     [Fact]
-    public void AColourPrintsAsCssAndASystemColourAsHex()
+    public void ALiteralPrintsAsHexAndASystemColourAsItsName()
     {
         var printed = FormMarkup.Print(new FormSpec(
             "F", null, null, null,
@@ -162,8 +188,8 @@ public class FormMarkupTests
             [Control("Label", "L", null, null, null, null, null, null,
                 new PropertySpec("ForeColor", unchecked((int)0x8000000F).ToString(), PropertyValueKind.Colour))]));
 
-        Assert.Contains("BackColor = #c0dcc0", printed);
-        Assert.Contains("ForeColor = &H8000000F&", printed);
+        Assert.Contains("BackColor=#c0dcc0", printed);
+        Assert.Contains("ForeColor=ButtonFace", printed);
 
         // And it round trips: what the printer wrote, the parser reads back to the same numbers.
         var back = FormMarkup.Parse(printed);
@@ -175,27 +201,45 @@ public class FormMarkupTests
     public void AColourThatIsNotOneIsRefusedByItsLine()
     {
         var refused = Assert.Throws<FormMarkupException>(() =>
-            FormMarkup.Parse("Form F\n    Label L\n        BackColor = #ggg\n"));
+            FormMarkup.Parse("<Form Name=\"F\">\n    <Label Name=\"L\" BackColor=#ggg />\n</Form>\n"));
 
-        Assert.Equal(3, refused.Line);
+        Assert.Equal(2, refused.Line);
         Assert.Contains("#rrggbb", refused.Reason);
     }
 
+    /// <summary>
+    /// Everything the grammar refuses, each with the line that earned it. A document that loses
+    /// something QUIETLY is worse than one that will not parse, which is why element content and a
+    /// repeated attribute are errors rather than shrugs.
+    /// </summary>
     [Theory]
     [InlineData("", 1, "empty")]
-    [InlineData("Label Hint\n", 1, "Form line")]
-    [InlineData("Form F\nLabel Hint\n", 2, "unindented")]
-    [InlineData("Form F\n  Label Hint\n", 2, "4 spaces")]
-    [InlineData("Form F\n\tLabel Hint\n", 2, "tab")]
-    [InlineData("Form F\n        Label Hint\n", 2, "under nothing")]
-    [InlineData("Form F\n    Label Hint trailing junk here\n", 2, "rest of the line")]
-    [InlineData("Form F\n    Label Hint \"never closed\n", 2, "never closes")]
-    [InlineData("Form F\n    Label Hint at 1\n", 2, "two numbers")]
-    [InlineData("Form F\n    Label Hint\n        Caption = maybe\n", 3, "not a value")]
-    [InlineData("Form F\n    Label Hint\n        Caption =\n", 3, "missing")]
-    [InlineData("Form F\n    MultiPage M\n        Label Hint\n", 3, "holds Pages")]
-    [InlineData("Form F\n    Page P\n", 2, "under a MultiPage")]
-    [InlineData("Form F\n    Label Hint\n        TextBox Inner\n", 3, "holds no controls")]
+    [InlineData("<Label Name=\"Hint\" />\n", 1, "<Form>")]
+    [InlineData("<Form Name=\"F\"></Form>\n<Label Name=\"H\" />\n", 2, "one Form per document")]
+    [InlineData("<Form Name=\"F\">\n    <Form Name=\"G\" />\n</Form>\n", 2, "holds no Form")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" />\n", 2, "never closed")]
+    [InlineData("<Form Name=\"F\">\n    <Frame Name=\"B\">\n    </Label>\n</Form>\n", 3, "tags nest")]
+    // Inside a Form the stack is never empty, so a stray close is a MISMATCH rather than an
+    // orphan - it is closing the Form, just not by that name.
+    [InlineData("<Form Name=\"F\">\n    </Label>\n</Form>\n", 2, "tags nest")]
+    [InlineData("</Label>\n", 1, "closes nothing")]
+    [InlineData("<Form Name=\"F\">\n    <Label />\n</Form>\n", 2, "needs a Name")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Left=1 />\n</Form>\n", 2, "come together")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Width=1 />\n</Form>\n", 2, "come together")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Left=x Top=1 />\n</Form>\n", 2, "takes a number")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Caption=maybe />\n</Form>\n", 2, "not a value")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Caption= />\n</Form>\n", 2, "missing its value")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Caption />\n</Form>\n", 2, "missing its value")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Top=1 Top=2 />\n</Form>\n", 2, "set twice")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\" Caption=\"never closed />\n</Form>\n", 2, "never closes")]
+    [InlineData("<Form Name=\"F\">\n    stray words\n</Form>\n", 2, "text between tags")]
+    [InlineData("<Form Name=\"F\">\n    <!-- never closed\n</Form>\n", 2, "comment opens")]
+    [InlineData("<Form Name=\"F\">\n    <MultiPage Name=\"M\">\n        <Label Name=\"H\" />\n", 3, "holds Pages")]
+    [InlineData("<Form Name=\"F\">\n    <Page Name=\"P\" />\n</Form>\n", 2, "under a MultiPage")]
+    [InlineData("<Form Name=\"F\">\n    <Tab Name=\"T\" />\n</Form>\n", 2, "under a TabStrip")]
+    [InlineData("<Form Name=\"F\">\n    <TabStrip Name=\"S\">\n        <Label Name=\"H\" />\n", 3, "holds Tabs")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"H\">\n        <TextBox Name=\"I\" />\n", 3, "holds no controls")]
+    [InlineData("<Form Name=\"F\">\n    <Label Name=\"9Lives\" />\n</Form>\n", 2, "not a name")]
     public void ABadDocumentIsRefusedWithItsLine(string document, int line, string names)
     {
         var refused = Assert.Throws<FormMarkupException>(() => FormMarkup.Parse(document));
@@ -207,10 +251,12 @@ public class FormMarkupTests
     public void SteppingBackOutOfAContainerLandsOnTheForm()
     {
         var parsed = FormMarkup.Parse("""
-            Form F
-                Frame Box at 1,1 size 50x50
-                    Label Inner at 2,2 size 10x10
-                Label Outer at 60,1 size 10x10
+            <Form Name="F">
+                <Frame Name="Box" Left=1 Top=1 Width=50 Height=50>
+                    <Label Name="Inner" Left=2 Top=2 Width=10 Height=10 />
+                </Frame>
+                <Label Name="Outer" Left=60 Top=1 Width=10 Height=10 />
+            </Form>
             """);
 
         Assert.Equal("Box", parsed.Controls.Single(control => control.Name == "Inner").Parent);
@@ -220,21 +266,22 @@ public class FormMarkupTests
     [Fact]
     public void GeometryHalvesMayBeAbsent()
     {
-        // The walk answers null geometry for Pages, and a hand-written line may say only where
+        // The walk answers null geometry for Pages, and a hand-written element may say only where
         // or only how big. Printing carries whichever halves exist as pairs.
-        var parsed = FormMarkup.Parse("Form F\n    Label Hint size 10x20\n");
+        var parsed = FormMarkup.Parse("<Form Name=\"F\">\n    <Label Name=\"Hint\" Width=10 Height=20 />\n</Form>\n");
         var hint = Assert.Single(parsed.Controls);
         Assert.Null(hint.Left);
         Assert.Equal(10, hint.Width);
 
-        Assert.Contains("size 10x20", FormMarkup.Print(parsed));
-        Assert.DoesNotContain(" at ", FormMarkup.Print(parsed));
+        Assert.Contains("Width=10 Height=20", FormMarkup.Print(parsed));
+        Assert.DoesNotContain("Left=", FormMarkup.Print(parsed));
     }
 
     [Fact]
     public void CaseIsAsForgivingAsTheHost()
     {
-        var parsed = FormMarkup.Parse("form F \"hi\" SIZE 10x10\n    LABEL Hint AT 1,2 Size 3x4\n");
+        var parsed = FormMarkup.Parse(
+            "<form name=\"F\" CAPTION=\"hi\" width=10 height=10>\n    <LABEL Name=\"Hint\" LEFT=1 top=2 />\n</FORM>\n");
         Assert.Equal("hi", parsed.Caption);
         Assert.Equal(1, Assert.Single(parsed.Controls).Left);
     }
@@ -242,16 +289,21 @@ public class FormMarkupTests
     [Fact]
     public void LintOfACleanDocumentFindsNothing()
     {
-        Assert.Empty(FormMarkup.Lint("Form F \"hi\" size 100x100\n    Label Hint at 1,2 size 3x4\n"));
+        Assert.Empty(FormMarkup.Lint(
+            "<Form Name=\"F\" Caption=\"hi\" Width=100 Height=100>\n"
+            + "    <Label Name=\"Hint\" Left=1 Top=2 Width=3 Height=4 />\n</Form>\n"));
     }
 
     [Fact]
     public void LintCollectsEveryRefusalWhereParseStopsAtTheFirst()
     {
-        // Two bad lines. Parse dies on line 2; the lint reports both, each at its own line,
+        // Two bad elements. Parse dies on the first; the lint reports both, each at its own line,
         // because each round retires exactly the line the parser refused.
         var findings = FormMarkup.Lint(
-            "Form F size 100x100\n    Label A at banana\n    Label B at 1,2 size 3x4\n    Label C size pear\n");
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Label Name=\"A\" Left=banana Top=1 />\n"
+            + "    <Label Name=\"B\" Left=1 Top=2 Width=3 Height=4 />\n"
+            + "    <Label Name=\"C\" Width=pear Height=1 />\n</Form>\n");
 
         Assert.Equal(2, findings.Count);
         Assert.Equal(2, findings[0].Line);
@@ -263,7 +315,9 @@ public class FormMarkupTests
     public void LintAnchorsADuplicateNameAtItsSecondMention()
     {
         var findings = FormMarkup.Lint(
-            "Form F size 100x100\n    Label Twin at 1,1 size 2x2\n    TextBox Twin at 9,9 size 2x2\n");
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Label Name=\"Twin\" Left=1 Top=1 Width=2 Height=2 />\n"
+            + "    <TextBox Name=\"Twin\" Left=9 Top=9 Width=2 Height=2 />\n</Form>\n");
 
         var duplicate = Assert.Single(findings);
         Assert.Equal(3, duplicate.Line);
@@ -274,11 +328,13 @@ public class FormMarkupTests
     [Fact]
     public void LintWarnsWhatAnApplyWouldSkip()
     {
-        // A foreign type with no ProgId line is the apply's documented skip-with-a-note case,
-        // so the lint says so BEFORE the apply. A stray Page beside it arrives as an ERROR -
-        // the parser refuses one structurally, and the lint never re-judges the grammar.
+        // A foreign type with no ProgId is the apply's documented skip-with-a-note case, so the
+        // lint says so BEFORE the apply. A stray Page beside it arrives as an ERROR - the parser
+        // refuses one structurally, and the lint never re-judges the grammar.
         var findings = FormMarkup.Lint(
-            "Form F size 100x100\n    Gadget Widget at 1,1 size 2x2\n    Page Stray \"P\"\n");
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Gadget Name=\"Widget\" Left=1 Top=1 Width=2 Height=2 />\n"
+            + "    <Page Name=\"Stray\" Caption=\"P\" />\n</Form>\n");
 
         Assert.Equal(2, findings.Count);
         var widget = findings.Single(finding => finding.Line == 2);
@@ -293,21 +349,22 @@ public class FormMarkupTests
     public void LintForgivesAForeignTypeThatNamesItsProgId()
     {
         Assert.Empty(FormMarkup.Lint(
-            "Form F size 100x100\n    Gadget Widget at 1,1 size 2x2\n        ProgId = \"Vendor.Widget.1\"\n"));
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Gadget Name=\"Widget\" Left=1 Top=1 Width=2 Height=2 ProgId=\"Vendor.Widget.1\" />\n</Form>\n"));
     }
 
     [Fact]
     public void LintRefusesANameMsFormsWouldNotTake()
     {
         // The model's own answer for one of these is `error 800a9c6c` and nothing else, so the
-        // squiggle is the difference between a typo and a mystery. A digit first, an underscore
-        // first, a space inside, a hyphen: all VBA identifiers this is not.
+        // squiggle is the difference between a typo and a mystery.
         var findings = FormMarkup.Lint(
-            "Form F size 100x100\n    Label _Leading at 1,1 size 2x2\n    Label 9Lives at 3,3 size 2x2\n");
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Label Name=\"_Leading\" Left=1 Top=1 Width=2 Height=2 />\n"
+            + "    <Label Name=\"9Lives\" Left=3 Top=3 Width=2 Height=2 />\n</Form>\n");
 
         Assert.Equal(2, findings.Count);
         Assert.All(findings, finding => Assert.Equal(FormMarkupSeverity.Error, finding.Severity));
-        Assert.All(findings, finding => Assert.Contains("starts with a letter", finding.Message));
     }
 
     [Fact]
@@ -325,19 +382,8 @@ public class FormMarkupTests
     public void AnOrdinaryNameIsNotSquiggled()
     {
         Assert.Empty(FormMarkup.Lint(
-            "Form F size 100x100\n    Label Name_2 at 1,1 size 2x2\n    TextBox b at 3,3 size 2x2\n"));
-    }
-
-    [Fact]
-    public void LintReportsOrphansOfARetiredContainerAsTheirOwnFindings()
-    {
-        // The Frame line is bad; once retired, its child is indented under nothing - which is
-        // true of the document as it stands, and both lines deserve their squiggle.
-        var findings = FormMarkup.Lint(
-            "Form F size 100x100\n    Frame Box at banana\n        Label Inner at 1,1 size 2x2\n");
-
-        Assert.Equal(2, findings.Count);
-        Assert.Equal(2, findings[0].Line);
-        Assert.Equal(3, findings[1].Line);
+            "<Form Name=\"F\" Width=100 Height=100>\n"
+            + "    <Label Name=\"Name_2\" Left=1 Top=1 Width=2 Height=2 />\n"
+            + "    <TextBox Name=\"b\" Left=3 Top=3 Width=2 Height=2 />\n</Form>\n"));
     }
 }
