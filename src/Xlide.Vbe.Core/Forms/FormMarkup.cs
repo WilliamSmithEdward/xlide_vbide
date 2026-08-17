@@ -165,19 +165,23 @@ public static class FormMarkup
     }
 
     /// <summary>
-    /// A colour as the document spells one: `#rrggbb`, or the VBA hex where there is no honest
-    /// `#` to give. A SYSTEM colour is not an RGB at all but a question - what does this machine
-    /// call a button face - so it keeps `&amp;H8000000F&amp;`, and a document that spelled it as
-    /// today's answer would freeze that answer into the form.
+    /// A colour as the document spells one: `#rrggbb`, always, which is the owner's call for the
+    /// tagged dialect (2026-08-17: "please translate into #000000 format for our xaml").
     ///
-    /// The document and the Properties panel agree about this on purpose (the owner, 2026-08-16),
-    /// which is why the conversion lives here rather than twice: the panel spells the same
-    /// values through the same arithmetic, and only its SYSTEM rows differ, where a panel can
-    /// afford a name and a document cannot.
+    /// WHAT THAT COSTS, because it was decided the other way first and the reason has not gone
+    /// away. A SYSTEM colour is not an RGB but a question - what does this machine call a button
+    /// face - and it used to keep `&amp;H8000000F&amp;` so the question stayed a question. Spelled
+    /// as `#c0c0c0` it becomes today's ANSWER, and a document round-tripped through an apply
+    /// writes that literal back, so the control stops following the theme. The resolution happens
+    /// in the shim's walk, through ColorRefOf and the live palette, because that is where the
+    /// machine can be asked; nothing reaches this printer still holding a system index.
+    ///
+    /// A document may still be WRITTEN with `&amp;H...&amp;` by hand and the parser takes it - the
+    /// dialect stays forgiving about VBA's own spelling on the way in, and canonical on the way
+    /// out.
     /// </summary>
-    public static string SpellColour(int ole) => (ole & SystemColourBit) != 0
-        ? $"&H{(uint)ole:X8}&"
-        : $"#{ole & 0xFF:x2}{(ole >> 8) & 0xFF:x2}{(ole >> 16) & 0xFF:x2}";
+    public static string SpellColour(int ole) =>
+        $"#{ole & 0xFF:x2}{(ole >> 8) & 0xFF:x2}{(ole >> 16) & 0xFF:x2}";
 
     /// <summary>
     /// A `#rrggbb` or `#rgb` as the number the model stores. OLE_COLOR keeps blue-green-red where
@@ -204,9 +208,6 @@ public static class FormMarkup
             ? ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF)
             : null;
     }
-
-    /// <summary>The bit that turns an OLE_COLOR from a colour into a question for the system.</summary>
-    private const int SystemColourBit = unchecked((int)0x80000000);
 
     private static string Quoted(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 

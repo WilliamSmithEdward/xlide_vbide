@@ -680,7 +680,7 @@ internal static partial class FormDesignService
                 return;
             }
 
-            lines.Add(new PropertySpec(name, Text(value), PropertyValueKind.Colour));
+            lines.Add(new PropertySpec(name, Text(ColorRefOf(value)), PropertyValueKind.Colour));
         }
 
         Colour("BackColor", form.BackColor);
