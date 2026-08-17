@@ -1261,12 +1261,11 @@ So a colour is the developer's only when it matches NEITHER: not what the form p
 not what the kind is born with. That is exact, and it is what ships - two lines appear when two
 colours are set, and both leave when the colours go back.
 
-**The rest of the properties wait on a truthful sited baseline**, and there are only two honest
-ways to get one. Probe a control of each kind onto the form and take it away again, which dirties
-a workbook nobody asked to dirty. Or read MSForms' own answer out of a `.frm` export, which is
-precisely the list of non-default properties per control - the same file a developer without xlide
-reads - at the cost of making this product a reader of the format's text half. Both change what
-xlide does to a developer's file, so the choice is the owner's rather than the walk's.
+**The rest of the properties wait on a truthful sited baseline.** Two ways looked honest at the
+time: probe a control of each kind onto the form and take it away again, which dirties a workbook
+nobody asked to dirty, or read MSForms' own answer out of a `.frm` export, at the cost of exporting
+during normal use. The owner chose a third that neither writes nor exports - read the storage Excel
+has already saved - and it is measured further down, in "The sited baseline".
 
 **The design rides SYNC as text, 2026-08-16** (the owner: add the markup to the import and export
 path). A UserForm exported as code alone cannot be put back - Excel writes every control into a
@@ -1394,27 +1393,47 @@ PropMask bitfield. So the mask alone answers the question this whole item asks -
 did the developer change - and the VALUES can still come from the live object model. Decoding
 values is unnecessary; decoding the mask is the job.
 
-**Stage one is done and the instrument is kept** as `tools\harness\vba-storage.mjs`. The road:
-the `.xlsm` is a ZIP, `xl/vbaProject.bin` inside it is a compound file, and that holds
-`/<FormName>/f` (the form and its site array), `/<FormName>/o` (each control's block) and
-`/<FormName>/iNN` storages for controls that need one. A hundred and ten lines of compound-file
-reader reaches all of it, with no COM and no Excel running, and ports cleanly to C#.
+**The format is documented, which retired the whole problem.** The spike stopped at the per-site
+record layout and called it days of reverse engineering. It is [MS-OFORMS], published by Microsoft
+under the Open Specifications programme, and it is on the open web: the record is
+`Version(2) cbSite(2) PropMask(4) DataBlock ExtraDataBlock`, so the mask sits four bytes into
+every site and the two mystery bytes before each name were `cbSite`. Reading the spec took an
+evening and replaced every guess with a citation.
 
-**Half of stage two is done.** The form's header parses - minor, major, `cbForm`, PropMask - and
-`cbForm` lands the site array exactly: **14 sites and 588 bytes** on the fixture, consuming the
-stream to its last byte, and 14 is precisely that form's top-level control count. Every control's
-name sits in the array at a measurable offset, records running 40 to 44 bytes.
+**The reader is `tools\harness\saved-design.mjs`** and it goes the whole way: the `.xlsm` is a ZIP,
+`xl/vbaProject.bin` is a compound file, `/<Form>/f` is a FormControl carrying the site array,
+`/<Form>/o` holds the controls' own blocks in site order, and a container gets its own storage
+named `i` plus its site ID - `Options` has ID 6 and lives in `i06`, `Page2` has ID 13 and lives in
+`i10/i13`. No export, no COM, no Excel.
 
-**Where it stops, and why.** The per-site record layout is not decoded, so neither is the
-SitePropMask inside it - and that mask is the point. Two bytes precede each name (`0x15` before
-`NameLabel`, `0x19` before `RegionPick`) and are not the record length. Getting further is
-MS-OFORMS section 2.2.10 rather than more inspection: the spec is not in this repository, and the
-pyOpenVBA checkout on this machine is at PR #14 with no OFORMS reader in it. Reverse-engineering
-a record layout by staring at 588 bytes is exactly the "days rather than hours" this item was
-flagged as, and guessing at it would be the worst of both.
+**Four independent things agree, which is what makes it believable.** Every site record consumes
+exactly its own `cbSite`. The sum of every `ObjectStreamSize` equals the `o` stream to the byte -
+394,080 on the fixture. All fifteen `ClsidCacheIndex` values name the kind the fixture actually
+put there. And the masks decode to what the fixture was built with: a Label to `Caption`, the OK
+button to `Caption, PicturePosition, Picture`, the Image to `PictureSizeMode, Picture`, the
+ScrollBar and SpinButton to `Orientation`.
 
-What remains after the layout: the bit-to-property tables per control kind, the C# port, and the
-projection printing a property when its bit is set. A form that has never been saved has no
+**A SET BIT DOES NOT MEAN THE DEVELOPER CHANGED IT**, and that is the finding that decides how
+this gets used. The mask says a property differs from the **file format** default. Where a control
+KIND is born with something other than that default, the bit is set on controls nobody touched.
+Measured: every control on the fixture carries `FontName`, because the form is Tahoma and the
+file's default is MS Sans Serif - the bytes say so plainly, `mask 0x35` and the word `Tahoma`
+sitting in the block. And every CheckBox, OptionButton and ToggleButton carries `BackColor` and
+`ForeColor`, though `form-plan.mjs` sets nothing but a `Caption` on any of them.
+
+So the baseline does not replace the walk's comparison against a bare coclass. **It narrows it.**
+The mask is the short list of properties that could possibly be non-default, read once per form
+and cached; the walk asks only those and compares as it already does, which is what filters the
+file-format noise back out. Reading fifty properties of every control on every projection is the
+cost that comparison was avoiding, and this is how it stops having to.
+
+**One thing the mask cannot say.** `VariousPropertyBits` is a single bit over a packed field
+holding Enabled, Locked, Visible, AutoSize, WordWrap and more. Set means one of them changed, not
+which. Telling them apart means decoding the DataBlock rather than the mask, so it is reported as
+itself and those properties keep the comparison they have.
+
+What remains: the C# port of ZIP + compound file + mask walk, cached per form and invalidated on
+save, and the projection asking the narrowed list. A form that has never been saved has no
 baseline in the file and keeps today's bare-coclass answer, which is honest and stays.
 
 ## What a sweep for dead and convoluted code found

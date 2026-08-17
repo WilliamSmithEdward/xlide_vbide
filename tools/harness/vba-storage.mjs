@@ -22,18 +22,14 @@
  *   for (const [path, entry] of cfb.paths) console.log(path, entry.size);
  *   const f = cfb.readStream(cfb.paths.get("/EntryForm/f"));
  *
- * WHAT IS PROVEN AND WHAT IS NOT. The reader reaches the bytes and the form's header parses:
- * `cbForm` lands the site array exactly - 14 sites and 588 bytes on the fixture, consuming the
- * stream to its last byte, and 14 is precisely that form's top-level control count. Every
- * control's name is in the array at a measurable offset, records running 40 to 44 bytes. What is
- * NOT decoded is the per-site record layout, and therefore not the SitePropMask inside it - the
- * bit whose being set is the whole point, because a set bit is a property the developer changed.
- * That needs MS-OFORMS section 2.2.10 rather than more inspection.
+ * This module is the compound file and nothing above it. What the streams MEAN - FormControl,
+ * the site array, the per-control PropMasks - is saved-design.mjs, against [MS-OFORMS].
  */
 import { readFileSync } from "node:fs";
 
-export function readCfb(path) {
-  const bytes = readFileSync(path);
+/** Takes a path, or the bytes themselves when the caller already has them out of a ZIP. */
+export function readCfb(pathOrBytes) {
+  const bytes = Buffer.isBuffer(pathOrBytes) ? pathOrBytes : readFileSync(pathOrBytes);
   const sig = bytes.readBigUInt64LE(0);
   if (sig !== 0xE11AB1A1E011CFD0n) throw new Error(`not a compound file: ${sig.toString(16)}`);
 
