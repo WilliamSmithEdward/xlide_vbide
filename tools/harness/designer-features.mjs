@@ -1608,63 +1608,61 @@ try {
     // them at one file - a misreading its author would make identically in both is exactly what
     // a single implementation cannot catch.
     //
-    // It asks about the FIXTURE'S form rather than this suite's. `form` is built through the api
-    // and removed at the end, so the file on disk has never seen it - which is the other half of
-    // the contract, checked immediately below.
-    if (fixtureFormStands) {
-      const baseline = await api.designerBaseline(PLANNED_FORM, project);
-      check("the saved workbook answers a baseline for the form it holds",
-        baseline.saved === true && baseline.controls.length > 0,
-        JSON.stringify({ saved: baseline.saved, workbook: baseline.workbook, rows: baseline.controls.length }));
+    // It asks about THIS suite's own form, which is on disk by now: the suite calls the host's
+    // save twice on its way here, and a save writes the VBA project. That matters because the
+    // gate runs this suite against DebugFixture, where the FormFixture's own form is not present
+    // at all - rows guarded on that would report not-exercisable for ever and check nothing.
+    const baseline = await api.designerBaseline(form, project);
+    check("the saved workbook answers a baseline for a form it has been saved with",
+      baseline.saved === true && baseline.controls.length > 0,
+      JSON.stringify({ saved: baseline.saved, workbook: baseline.workbook, rows: baseline.controls.length }));
 
-      if (baseline.saved && baseline.workbook) {
-        // Excel is holding the workbook open. The host reads it shared; this side uses plain
-        // readFileSync, so a lock is a reason the comparison cannot run rather than a failure of
-        // the thing being compared.
-        const { readSavedDesign } = await import("./saved-design.mjs");
-        let mine = null;
-        let locked = null;
-        try {
-          mine = readSavedDesign(baseline.workbook).get(PLANNED_FORM) ?? new Map();
-        } catch (why) {
-          locked = why.message;
-        }
-
-        const theirs = new Map(baseline.controls.map((one) => [one.path, one.changed.join(",")]));
-        const differ = mine === null ? [] : [...new Set([...mine.keys(), ...theirs.keys()])]
-          .filter((path) => (mine.get(path) ?? []).join(",") !== (theirs.get(path) ?? ""));
-        check("the host's reader and the harness's agree on every control",
-          differ.length === 0,
-          locked ? `not exercisable: Excel is holding the workbook (${locked})`
-            : differ.slice(0, 4).map((path) =>
-              `${path}: host [${theirs.get(path) ?? ""}] vs harness [${(mine.get(path) ?? []).join(",")}]`).join("; "));
-
-        // A set bit means "differs from the FILE FORMAT default", not "the developer changed it" -
-        // so a Tahoma form lists FontName under everything. The row pins that, because a later
-        // reader who forgets it would trust the list as a verdict and print choices nobody made.
-        const label = baseline.controls.find((one) => one.path === "NameLabel");
-        check("and a set bit is a candidate rather than a verdict - Tahoma puts FontName on a plain Label",
-          (label?.changed ?? []).includes("FontName") && (label?.changed ?? []).includes("Caption"),
-          JSON.stringify(label?.changed));
-
-        // Nothing structural: Size is MUST-be-1 in every mask and TabIndex is set on all but the
-        // first control, so either one surviving means the filter stopped working.
-        const structural = baseline.controls.filter((one) =>
-          one.changed.includes("Size") || one.changed.includes("TabIndex"));
-        check("nothing structural reaches the answer",
-          structural.length === 0, JSON.stringify(structural.slice(0, 3)));
+    if (baseline.saved && baseline.workbook) {
+      // Excel is holding the workbook open. The host reads it shared; this side uses plain
+      // readFileSync, so a lock is a reason the comparison cannot run rather than a failure of
+      // the thing being compared.
+      const { readSavedDesign } = await import("./saved-design.mjs");
+      let mine = null;
+      let locked = null;
+      try {
+        mine = readSavedDesign(baseline.workbook).get(form) ?? new Map();
+      } catch (why) {
+        locked = why.message;
       }
-    } else {
-      check("the saved workbook answers a baseline for the form it holds", true,
-        `not exercisable: ${PLANNED_FORM} is not in this session`);
+
+      const theirs = new Map(baseline.controls.map((one) => [one.path, one.changed.join(",")]));
+      const differ = mine === null ? [] : [...new Set([...mine.keys(), ...theirs.keys()])]
+        .filter((path) => (mine.get(path) ?? []).join(",") !== (theirs.get(path) ?? ""));
+      check("the host's reader and the harness's agree on every control",
+        differ.length === 0,
+        locked ? `not exercisable: Excel is holding the workbook (${locked})`
+          : differ.slice(0, 4).map((path) =>
+            `${path}: host [${theirs.get(path) ?? ""}] vs harness [${(mine.get(path) ?? []).join(",")}]`).join("; "));
+
+      // Nothing structural: Size is MUST-be-1 in every mask and TabIndex is set on all but the
+      // first control, so either one surviving means the filter stopped working - and a list that
+      // always says the same thing says nothing.
+      const structural = baseline.controls.filter((one) =>
+        one.changed.includes("Size") || one.changed.includes("TabIndex"));
+      check("nothing structural reaches the answer",
+        structural.length === 0, JSON.stringify(structural.slice(0, 3)));
+
+      // A SET BIT IS A CANDIDATE RATHER THAN A VERDICT, which is the one thing about this answer
+      // a later reader must not forget: the mask measures against the FILE FORMAT default, so a
+      // control nobody touched still lists what its KIND is born differing in. The suite sets
+      // nothing but a Caption on its CheckBox, and the file still records its colours.
+      const box = baseline.controls.find((one) => /Check/i.test(one.path));
+      check("a set bit is a candidate rather than a verdict - an untouched CheckBox still lists its colours",
+        box === undefined || box.changed.includes("BackColor"),
+        JSON.stringify(box ?? "no CheckBox in this form"));
     }
 
     // THE NEVER-SAVED CASE IS NOT CHECKABLE HERE, and saying so is better than a row that looks
     // like it checks it. `saved: false` is what a form the file has never seen must answer -
     // an empty list would tell the projection that every control is untouched, which for a form
-    // built five seconds ago is the opposite of the truth. But this suite calls the host's save
-    // twice on its way here, so its own form is on disk by the time anything could ask. The
-    // fallback is pinned in Core instead, where a workbook can simply not exist.
+    // built five seconds ago is the opposite of the truth. But everything in this session has
+    // been saved by now. The fallback is pinned in Core instead, where a workbook can simply not
+    // exist.
 
     const noSuchBaseline = await api.designerBaseline("NoSuchForm", project)
       .catch((why) => ({ refusal: why.message }));
