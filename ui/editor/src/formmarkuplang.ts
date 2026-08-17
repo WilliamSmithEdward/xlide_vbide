@@ -730,8 +730,10 @@ export function registerMarkupLanguage(): void {
         [/(<\/?)([A-Za-z_][\w]*)/, [
           "delimiter.angle",
           {
-            cases: { "@controlKinds": "type", "@default": "identifier" },
-            next: "@tag",
+            cases: {
+              "@controlKinds": { token: "type", next: "@tag" },
+              "@default": { token: "identifier", next: "@tag" },
+            },
           },
         ]],
         [/[<>]/, "delimiter.angle"],
