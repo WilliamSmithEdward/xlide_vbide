@@ -23,8 +23,6 @@ import type { FormMarkupKind, FormMarkupProperty } from "./bridge.js";
 /** The markup's own language id, for the designer tab's document. */
 export const FORM_MARKUP_LANGUAGE = "xlide-form";
 
-/** Four spaces a level, the printer's and the parser's. Indentation is containment. */
-const INDENT = 4;
 
 /**
  * The toolbox: the kinds a document can name, in the order the native palette lists them, each
@@ -112,65 +110,107 @@ interface Spot {
   words: number;
 }
 
-/** An unquoted occurrence, the way the parser looks for one: a quote toggles, so an `=` inside a
- * caption is text. */
-function unquotedIndexOf(text: string, wanted: string): number {
-  let quoted = false;
-  for (let at = 0; at < text.length; at++) {
-    if (text[at] === '"') {
-      quoted = !quoted;
-    } else if (text[at] === wanted && !quoted) {
-      return at;
+
+/**
+ * Where the caret stands, worked out by scanning from the top of the document rather than by
+ * counting spaces. Indentation is presentation in the tagged dialect - the parser reads tags - so
+ * the only way to know which element the caret is in is to keep the same stack the parser keeps,
+ * and the only way to know it is on an attribute is to notice a `<` that has no `>` yet.
+ *
+ * Positional and suggestion-only, exactly as the line version was: it never has to be right the
+ * way the parser has to be right, because nothing is written from it.
+ */
+function scanTo(text: string): { stack: string[]; inTag: string | null; tagText: string } {
+  const stack: string[] = [];
+  let at = 0;
+
+  while (at < text.length) {
+    const open = text.indexOf("<", at);
+    if (open < 0) {
+      break;
     }
-  }
-  return -1;
-}
 
-function depthOf(line: string): number {
-  return Math.max(0, Math.floor((line.length - line.trimStart().length) / INDENT));
-}
+    if (text.startsWith("<!--", open)) {
+      const end = text.indexOf("-->", open);
+      if (end < 0) {
+        return { stack, inTag: null, tagText: "" };
+      }
 
-/** The header this line sits under: the nearest line above with a shallower indent that is not
- * itself a property line. The Form line answers for everything at the top. */
-function ownerAt(model: monaco.editor.ITextModel, lineNumber: number, depth: number): string {
-  if (depth <= 0) {
-    return "Form";
-  }
-
-  for (let above = lineNumber - 1; above >= 1; above--) {
-    const text = model.getLineContent(above);
-    if (text.trim() === "" || text.trim().startsWith("'")) {
-      continue;
-    }
-    if (depthOf(text) >= depth || unquotedIndexOf(text, "=") >= 0) {
+      at = end + 3;
       continue;
     }
 
-    return text.trim().split(/\s+/)[0] ?? "Form";
+    // The end of this tag, with quoted stretches skipped so a `>` inside a caption is text.
+    let cursor = open + 1;
+    let quoted = false;
+    let end = -1;
+    while (cursor < text.length) {
+      const character = text[cursor];
+      if (character === '"') {
+        quoted = !quoted;
+      } else if (character === ">" && !quoted) {
+        end = cursor;
+        break;
+      }
+      cursor++;
+    }
+
+    const body = text.slice(open + 1, end < 0 ? text.length : end);
+    const name = body.replace(/^\//, "").trim().split(/[\s/>]/)[0] ?? "";
+
+    if (end < 0) {
+      // The caret is INSIDE this tag - it has no `>` yet - which is the attribute case.
+      return { stack, inTag: name, tagText: body };
+    }
+
+    if (body.startsWith("/")) {
+      stack.pop();
+    } else if (!body.trimEnd().endsWith("/")) {
+      stack.push(name);
+    }
+
+    at = end + 1;
   }
 
-  return "Form";
+  return { stack, inTag: null, tagText: "" };
 }
 
 function spotAt(model: monaco.editor.ITextModel, position: monaco.IPosition): Spot {
   const line = model.getLineContent(position.lineNumber);
   const before = line.slice(0, position.column - 1);
-  const equals = unquotedIndexOf(line, "=");
-  const path = equals >= 0 ? line.slice(0, equals).trim() : null;
-  const words = line.trim().split(/\s+/).filter((word) => word !== "");
-  const depth = depthOf(line);
+  const { stack, inTag, tagText } = scanTo(model.getValueInRange({
+    startLineNumber: 1,
+    startColumn: 1,
+    endLineNumber: position.lineNumber,
+    endColumn: position.column,
+  }));
+
+  // Inside a tag the vocabulary is that element's own; between tags it is the element the caret
+  // sits inside, which is the top of the stack, and the Form when the stack is empty.
+  const owner = inTag ?? stack[stack.length - 1] ?? "Form";
+
+  // The attribute being typed: the last `name=` in the tag so far. A value is still being typed
+  // while nothing follows the `=` or while its quote stands open; once the quote closes, the
+  // caret has moved on to where the next attribute goes.
+  const lastEquals = inTag === null ? -1 : tagText.lastIndexOf("=");
+  const path = lastEquals >= 0
+    ? (tagText.slice(0, lastEquals).trim().split(/\s+/).pop() ?? null)
+    : null;
+  const afterEquals = lastEquals >= 0 ? tagText.slice(lastEquals + 1) : "";
+  const onValue = lastEquals >= 0
+    && (afterEquals.trim() === "" || (afterEquals.match(/"/g)?.length ?? 0) % 2 === 1);
 
   return {
-    depth,
-    owner: ownerAt(model, position.lineNumber, depth),
+    depth: stack.length,
+    owner,
     line,
     before,
-    path,
-    onValue: equals >= 0 && position.column - 1 > equals,
-    header: path === null && words[0] !== undefined
-      ? { kind: words[0], name: words[1] ?? "" }
+    path: onValue ? path : null,
+    onValue,
+    header: inTag !== null
+      ? { kind: inTag, name: /\bName\s*=\s*"([^"]*)"/.exec(tagText)?.[1] ?? "" }
       : null,
-    words: before.trim() === "" ? 0 : before.trim().split(/\s+/).length,
+    words: lastEquals >= 0 ? 2 : 1,
   };
 }
 
@@ -648,32 +688,41 @@ export function registerMarkupLanguage(): void {
     ],
     tokenizer: {
       root: [
+        // A comment swallows everything to its close, across lines.
+        [/<!--/, "comment", "@comment"],
+        // An opening or closing tag hands the rest of the element to @tag, so an attribute list
+        // that wraps across lines keeps painting as attributes rather than as loose words.
+        [/(<\/?)([A-Za-z_][\w]*)/, [
+          "delimiter.angle",
+          { cases: { "@controlKinds": "type", "@default": "identifier" } },
+        ], "@tag"],
+        [/[<>]/, "delimiter.angle"],
+      ],
+      comment: [
+        [/-->/, "comment", "@pop"],
+        [/[^-]+/, "comment"],
+        [/./, "comment"],
+      ],
+      tag: [
+        [/\/?>/, "delimiter.angle", "@pop"],
         [/"(?:[^"]|"")*"/, "string"],
-        [/\b(?:at|size)\b/, "keyword"],
-        // The size pair is ONE value - "360x320.25" - or its x paints as an identifier.
-        [/-?\d+(?:\.\d+)?x-?\d+(?:\.\d+)?/, "number"],
-        [/-?\d+(?:\.\d+)?/, "number"],
         [/[A-Za-z_][\w.]*(?=\s*=)/, "attribute.name"],
-        [/[A-Za-z_][\w.]*/, {
-          cases: {
-            "@controlKinds": "type",
-            "@default": "identifier",
-          },
-        }],
-        [/[x,=]/, "delimiter"],
+        [/=/, "delimiter"],
+        [/[A-Za-z_][\w.]*/, "identifier"],
       ],
     },
   });
 
   monaco.languages.setLanguageConfiguration(FORM_MARKUP_LANGUAGE, {
-    // A container line opens a level, the way the printer indents its children.
+    // An unclosed container tag opens a level, the way the printer indents its children; a
+    // self-closing one does not, which is why the rule looks for a `>` that no `/` precedes.
     onEnterRules: [{
-      beforeText: /^\s*(?:Frame|MultiPage|Page)\b.*$/,
+      beforeText: /^\s*<(?:Frame|MultiPage|Page|TabStrip|Form)\b(?:[^>]|"[^"]*")*[^/]>\s*$/,
       action: { indentAction: monaco.languages.IndentAction.Indent },
     }],
     brackets: [],
     autoClosingPairs: [{ open: '"', close: '"' }],
-    comments: { lineComment: "'" },
+    comments: { blockComment: ["<!--", "-->"] },
   });
 
   monaco.languages.registerCompletionItemProvider(FORM_MARKUP_LANGUAGE, {

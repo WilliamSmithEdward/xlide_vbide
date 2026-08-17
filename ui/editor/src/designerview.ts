@@ -3295,8 +3295,10 @@ export class DesignerView {
   }
 
   /** The 1-based line that declares a control, or 0 when the document names it nowhere. */
+  /** The line an element's opening tag starts on, found by its `Name="..."` - which lands right
+   * even when the tag's attributes wrap over several lines, because the Name is on the first. */
   private headerLineOf(name: string): number {
-    const needle = new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(\\s|$)`);
+    const needle = new RegExp(`<[A-Za-z_]\\w*[^>]*\\bName\\s*=\\s*"${escapeForRegExp(name)}"`);
     return this.model.getLinesContent().findIndex((text) => needle.test(text)) + 1;
   }
 
@@ -3743,20 +3745,31 @@ export class DesignerView {
       return null;
     }
 
-    const indentOf = (text: string): number => text.length - text.trimStart().length;
-    const level = indentOf(lines[from - 1] ?? "");
-
-    let to = from;
-    while (to < lines.length) {
-      const next = lines[to] ?? "";
-      if (next.trim().length > 0 && indentOf(next) <= level) {
-        break;
+    // The element's RANGE: from its opening tag to whichever line closes it. A self-closing tag
+    // is its own end, and an element that wraps across lines ends where its `>` does - both of
+    // which the old indent walk could not see, because it measured spaces rather than tags.
+    let depth = 0;
+    let opened = false;
+    for (let at = from; at <= lines.length; at += 1) {
+      const text = lines[at - 1] ?? "";
+      for (const tag of text.matchAll(/<(\/?)([A-Za-z_][\w]*)((?:[^>"]|"[^"]*")*)>/g)) {
+        if (tag[1] === "/") {
+          depth -= 1;
+        } else if (!(tag[3] ?? "").trimEnd().endsWith("/")) {
+          depth += 1;
+          opened = true;
+        } else {
+          opened = true;
+        }
       }
 
-      to += 1;
+      // Opened and back to level: everything this element holds has been passed.
+      if (opened && depth <= 0) {
+        return { from, to: at };
+      }
     }
 
-    return { from, to };
+    return { from, to: Math.max(from, lines.length) };
   }
 
   /** What the canvas selection lights up in the document, cleared when nothing is selected. */
@@ -3800,27 +3813,79 @@ export class DesignerView {
    * form. Nothing is written: this is a selection, and the document is already what it is.
    */
   private selectFromMarkup(line: number): void {
-    const lines = this.model.getLinesContent();
-    const indentOf = (text: string): number => text.length - text.trimStart().length;
+    // THE ELEMENT THE CARET IS IN, not the line it is on. In the tagged dialect a control is a
+    // RANGE - an opening tag, its children, its close - so a caret three lines into a Frame's
+    // body belongs to whichever child element encloses it, and to the Frame when none does. The
+    // walk keeps the same stack the parser keeps, up to the caret, and the innermost still-open
+    // element is the answer.
+    const text = this.model.getValueInRange({
+      startLineNumber: 1,
+      startColumn: 1,
+      endLineNumber: line,
+      endColumn: this.model.getLineMaxColumn(line),
+    });
 
-    let found = "";
-    for (let at = Math.min(line, lines.length); at >= 1; at -= 1) {
-      const text = lines[at - 1] ?? "";
-      if (text.trim().length === 0) {
+    const stack: string[] = [];
+    let last = "";
+    let at = 0;
+    while (at < text.length) {
+      const open = text.indexOf("<", at);
+      if (open < 0) {
+        break;
+      }
+
+      if (text.startsWith("<!--", open)) {
+        const done = text.indexOf("-->", open);
+        if (done < 0) {
+          break;
+        }
+
+        at = done + 3;
         continue;
       }
 
-      // A header names its control in the second word; a property line's indent is deeper than
-      // its header's, so the walk upwards stops at the first line that can own this one.
-      const header = /^\s+\S+\s+(\S+)/.exec(text);
-      if (header && (at === line || indentOf(text) < indentOf(lines[line - 1] ?? ""))) {
-        found = header[1] ?? "";
+      let cursor = open + 1;
+      let quoted = false;
+      let end = -1;
+      while (cursor < text.length) {
+        const character = text[cursor];
+        if (character === '"') {
+          quoted = !quoted;
+        } else if (character === ">" && !quoted) {
+          end = cursor;
+          break;
+        }
+        cursor++;
+      }
+
+      const body = text.slice(open + 1, end < 0 ? text.length : end);
+      const named = /\bName\s*=\s*"([^"]*)"/.exec(body)?.[1] ?? "";
+
+      // An element that OPENS on the caret's own line is what the caret is on, self-closing or
+      // not - that is the click-on-a-control case, and it beats whatever encloses it.
+      const onCaretLine = text.slice(0, open).split("\n").length === line;
+      if (!body.startsWith("/") && named !== "" && onCaretLine) {
+        last = named;
+      }
+
+      if (end < 0) {
         break;
       }
 
-      if (/^Form\s+/.test(text)) {
-        break;
+      if (body.startsWith("/")) {
+        stack.pop();
+      } else if (!body.trimEnd().endsWith("/")) {
+        stack.push(named);
       }
+
+      at = end + 1;
+    }
+
+    // The innermost element still open at the caret, or the one that opened on its line. The
+    // Form's own tag sits at the bottom of the stack and answers as the empty name.
+    let found = last !== "" ? last : (stack[stack.length - 1] ?? "");
+    if (stack.length <= 1 && last === "") {
+      found = "";
     }
 
     // Against the PROJECTION rather than against the drawn elements: a control on a page that
