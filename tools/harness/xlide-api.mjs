@@ -598,6 +598,26 @@ function clientFor(entry) {
       call(`designer${query({ module, project, format: "markup" })}`).then((answer) => answer.markup),
 
     /**
+     * The SAVED baseline for a form: which properties the workbook's own storage records as not
+     * the file format default, per control path (`Options.PickGround`). Read out of band from the
+     * file on disk - no export, nothing written, and nothing crossing into the design.
+     *
+     * `saved` is false when there is nothing on disk to read: a workbook never saved, or a form
+     * added since the last save. Both mean the projection compares against a bare coclass, which
+     * is what it did before any of this existed.
+     *
+     * WORTH KNOWING before reading the answer: a listed property is one that differs from the
+     * FILE FORMAT default, which is not the same as one the developer chose. Every control on a
+     * Tahoma form lists FontName, because the file's default is MS Sans Serif. The list is a
+     * short list of candidates, not a verdict (docs/userform-designer.md, the sited baseline).
+     *
+     *   const baseline = await api.designerBaseline("EntryForm");
+     *   baseline.controls.find((one) => one.path === "OkButton").changed;
+     */
+    designerBaseline: (module, project) =>
+      call(`designer${query({ action: "baseline", module, project })}`),
+
+    /**
      * What a control of a KIND holds untouched: the inventory the markup projection compares
      * against to print only what a developer changed. Measured from a bare instance of the
      * coclass MSForms registers - no form, no workbook, nothing on screen - so it cannot drift
@@ -1367,12 +1387,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
       // designer EntryForm                        the control tree
       // designer EntryForm markup                 the same form as markup text
+      // designer EntryForm baseline               what the SAVED workbook says was changed
       // designer EntryForm add commandButton OkButton     and the other mutations by pairs:
       // designer EntryForm set name OkButton property Caption value Start as text
       case "designer": {
         if (rest[1] === "markup") {
           console.log(await api.designerMarkup(rest[0], rest[2]));
           process.exit(0);
+        }
+
+        if (rest[1] === "baseline") {
+          return api.designerBaseline(rest[0], rest[2]);
         }
 
         return rest.length <= 1

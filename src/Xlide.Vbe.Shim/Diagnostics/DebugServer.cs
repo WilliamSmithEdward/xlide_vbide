@@ -1316,6 +1316,27 @@ public sealed record DebugDesignerEditReply(
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("detail")] string? Detail);
 
+/// <summary>
+/// The SAVED baseline for one form: which properties the workbook's own storage records as not
+/// the file format default, per control. `saved` false means there is nothing on disk to read -
+/// a workbook never saved, or a form added since the last save - and the walk falls back to
+/// comparing against a bare coclass.
+///
+/// It exists so the two implementations of the same read can be pointed at one workbook and
+/// diffed: this one, and tools\harness\saved-design.mjs.
+/// </summary>
+public sealed record DebugDesignerBaselineReply(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("project")] string? Project,
+    [property: JsonPropertyName("workbook")] string? Workbook,
+    [property: JsonPropertyName("saved")] bool Saved,
+    [property: JsonPropertyName("controls")] DebugDesignerBaselineRow[] Controls);
+
+/// <summary>One control's path under the form, and what its masks name.</summary>
+public sealed record DebugDesignerBaselineRow(
+    [property: JsonPropertyName("path")] string Path,
+    [property: JsonPropertyName("changed")] string[] Changed);
+
 /// <summary>The form as markup: the same walk the JSON read makes, projected through Core's printer.</summary>
 public sealed record DebugDesignerMarkupReply(
     [property: JsonPropertyName("module")] string Module,
@@ -1406,6 +1427,9 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugDesignerControl[]))]
 [JsonSerializable(typeof(DebugDesignerFont))]
 [JsonSerializable(typeof(DebugDesignerEditReply))]
+[JsonSerializable(typeof(DebugDesignerBaselineReply))]
+[JsonSerializable(typeof(DebugDesignerBaselineRow))]
+[JsonSerializable(typeof(DebugDesignerBaselineRow[]))]
 [JsonSerializable(typeof(DebugDesignerMarkupReply))]
 [JsonSerializable(typeof(DebugDesignerApplyReply))]
 [JsonSerializable(typeof(DebugStatsReply))]

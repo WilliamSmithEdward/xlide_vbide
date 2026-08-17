@@ -3115,9 +3115,15 @@ internal sealed partial class AddInSession
                     case "liveness":
                         return DesignerLiveness();
 
+                    case "baseline":
+                        return designerModule is { Length: > 0 }
+                            ? DesignerBaseline(designerModule, designerProject)
+                            : HostError("baseline needs module=<form>");
+
                     default:
                         return HostError(
-                            $"designer action '{designerAction}' is not add, remove, set, zorder or liveness");
+                            $"designer action '{designerAction}' is not add, remove, set, zorder, "
+                            + "liveness or baseline");
                 }
             }
 

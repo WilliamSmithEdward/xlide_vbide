@@ -1524,6 +1524,35 @@ Driving it needs an outside edit, and the api's own routes are all inside the fu
 import of a `.form`: it applies through the markup diff without touching the tab, which is exactly
 the shape of a native edit. That is what the suite does.
 
+**WHAT THE SAVED WORKBOOK SAYS WAS CHANGED**, per control, read out of band from the file on disk:
+
+```bash
+node tools\harness\xlide-api.mjs designer EntryForm baseline
+```
+
+The `.xlsm` is a ZIP, `xl/vbaProject.bin` inside it is a compound file, and MSForms writes a
+PropMask naming every property that is not the file format default. No export, nothing written,
+and no COM crossing into the design - which is what makes it safe to ask on a developer's own
+workbook. `saved` is false when there is nothing on disk yet, and the projection then compares
+against a bare coclass exactly as it did before.
+
+READ IT KNOWING WHAT A SET BIT MEANS. The mask measures against the FILE FORMAT default, not
+against what the developer chose. Every control on a Tahoma form lists `FontName`, because the
+file's default is MS Sans Serif; every CheckBox, OptionButton and ToggleButton lists `BackColor`
+and `ForeColor` whatever was done to them. It is the short list of properties worth ASKING about,
+not the answer.
+
+The same walk lives twice on purpose - here, and in `tools\harness\saved-design.mjs`, which reads
+a workbook with no editor running at all:
+
+```bash
+node tools\harness\saved-design.mjs artifacts\fixtures\FormFixture.xlsm
+```
+
+Both were written against [MS-OFORMS] rather than against each other, so pointing them at one
+workbook and diffing is the check that catches a misreading their author would otherwise make
+identically in both. On the fixture they agree on all nineteen controls.
+
 **PICTURES load from a file and draw on the canvas** since 2026-08-16. There is no picture verb,
 deliberately: a picture is a property, so it goes through the property writes that already exist -
 the api's `set`, and the panel's `editProperty` for whichever control the panel is showing.

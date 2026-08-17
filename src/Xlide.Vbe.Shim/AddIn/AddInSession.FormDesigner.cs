@@ -359,6 +359,45 @@ internal sealed partial class AddInSession
     /// The floor between checks is stood down for it: a caller asking the question is not to be
     /// told the answer was worked out half a second ago.
     /// </summary>
+    /// <summary>
+    /// The SAVED baseline for one form: what the workbook's own storage records as not the file
+    /// format default, per control. Read out of band from the file on disk - no export, no COM
+    /// crossing into the design, nothing written.
+    ///
+    /// This route exists to be DIFFED. The same walk lives twice, here and in
+    /// tools\harness\saved-design.mjs, written against [MS-OFORMS] rather than against each
+    /// other, and pointing both at one workbook is the check that catches a misreading its author
+    /// would otherwise make identically in both.
+    /// </summary>
+    private string DesignerBaseline(string module, string? projectDisplay)
+    {
+        var projectId = ResolveNamedProject(projectDisplay, out var complaint);
+        if (complaint is not null)
+        {
+            return HostError(complaint);
+        }
+
+        using var component = FindComponent(module, projectId, out _);
+        if (component is null || component.GetInt32("Type") != 3)
+        {
+            return HostError($"{module} is not a UserForm of this project");
+        }
+
+        var workbook = FormDesignService.WorkbookOf(component);
+        var saved = Core.Forms.SavedDesign.For(workbook);
+        var rows = saved is null || !saved.Knows(module)
+            ? []
+            : saved.Controls(module)
+                .Select(path => new DebugDesignerBaselineRow(path, [.. saved.ChangedOn(module, path)]))
+                .OrderBy(row => row.Path, StringComparer.Ordinal)
+                .ToArray();
+
+        return JsonSerializer.Serialize(
+            new DebugDesignerBaselineReply(
+                module, projectDisplay, workbook, saved is not null && saved.Knows(module), rows),
+            DebugJsonContext.Default.DebugDesignerBaselineReply);
+    }
+
     private string DesignerLiveness()
     {
         var stale = CheckDesignerTabsForOutsideEdits(now: true);

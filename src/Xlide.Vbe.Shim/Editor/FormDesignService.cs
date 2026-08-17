@@ -28,6 +28,29 @@ internal static partial class FormDesignService
     }
 
     /// <summary>
+    /// The workbook a component lives in, by walking back up through its collection to the
+    /// project - or null, which is the honest answer for a project never saved to disk. Two
+    /// crossings, and the read behind it is cached by the file's own write time, so the cost of
+    /// asking is paid once per save rather than once per projection.
+    /// </summary>
+    internal static string? WorkbookOf(DispatchObject component)
+    {
+        try
+        {
+            using var collection = component.GetObject("Collection");
+            using var project = collection?.GetObject("Parent");
+            var path = project?.GetString("FileName");
+            return string.IsNullOrWhiteSpace(path) ? null : path;
+        }
+        catch
+        {
+            // A project with no file yet answers by throwing. That is a form with no saved
+            // baseline, which is a state this walk already knows how to be.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The projection itself, in ONE walk: what the designer tab's two halves both ride. The
     /// markup text is Print of this and the visual renders this, so the document and the
     /// canvas cannot disagree about a form they were read from at different moments.
