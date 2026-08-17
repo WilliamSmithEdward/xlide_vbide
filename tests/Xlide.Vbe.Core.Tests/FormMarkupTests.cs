@@ -188,8 +188,8 @@ public class FormMarkupTests
             [Control("Label", "L", null, null, null, null, null, null,
                 new PropertySpec("ForeColor", unchecked((int)0x8000000F).ToString(), PropertyValueKind.Colour))]));
 
-        Assert.Contains("BackColor=#c0dcc0", printed);
-        Assert.Contains("ForeColor=ButtonFace", printed);
+        Assert.Contains("BackColor=\"#c0dcc0\"", printed);
+        Assert.Contains("ForeColor=\"ButtonFace\"", printed);
 
         // And it round trips: what the printer wrote, the parser reads back to the same numbers.
         var back = FormMarkup.Parse(printed);
@@ -273,7 +273,7 @@ public class FormMarkupTests
         Assert.Null(hint.Left);
         Assert.Equal(10, hint.Width);
 
-        Assert.Contains("Width=10 Height=20", FormMarkup.Print(parsed));
+        Assert.Contains("Width=\"10\" Height=\"20\"", FormMarkup.Print(parsed));
         Assert.DoesNotContain("Left=", FormMarkup.Print(parsed));
     }
 

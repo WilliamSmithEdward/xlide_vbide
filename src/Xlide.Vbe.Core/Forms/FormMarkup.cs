@@ -55,7 +55,8 @@ public static class FormMarkup
 
         if (form.Width is { } width && form.Height is { } height)
         {
-            text.Append(" Width=").Append(Number(width)).Append(" Height=").Append(Number(height));
+            text.Append(" Width=").Append(Quoted(Number(width)))
+                .Append(" Height=").Append(Quoted(Number(height)));
         }
 
         foreach (var property in form.Properties)
@@ -116,12 +117,14 @@ public static class FormMarkup
 
         if (control.Left is { } left && control.Top is { } top)
         {
-            text.Append(" Left=").Append(Number(left)).Append(" Top=").Append(Number(top));
+            text.Append(" Left=").Append(Quoted(Number(left)))
+                .Append(" Top=").Append(Quoted(Number(top)));
         }
 
         if (control.Width is { } width && control.Height is { } height)
         {
-            text.Append(" Width=").Append(Number(width)).Append(" Height=").Append(Number(height));
+            text.Append(" Width=").Append(Quoted(Number(width)))
+                .Append(" Height=").Append(Quoted(Number(height)));
         }
 
         foreach (var property in control.Properties)
@@ -154,14 +157,13 @@ public static class FormMarkup
     /// </summary>
     private static void AppendAttribute(StringBuilder text, PropertySpec property)
     {
-        text.Append(' ').Append(property.Path).Append('=').Append(property.Kind switch
+        text.Append(' ').Append(property.Path).Append('=').Append(Quoted(property.Kind switch
         {
-            PropertyValueKind.Text => Quoted(property.Value),
             PropertyValueKind.Colour when int.TryParse(
                 property.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ole)
                 => SpellColour(ole),
             _ => property.Value,
-        });
+        }));
     }
 
     /// <summary>The bit that turns an OLE_COLOR from a colour into a question for the system.</summary>
@@ -649,15 +651,10 @@ public static class FormMarkup
     /// </summary>
     private static PropertySpec ReadValue(Attribute attribute)
     {
-        if (attribute.Quoted)
-        {
-            return new PropertySpec(attribute.Name, attribute.Value, PropertyValueKind.Text);
-        }
-
         var spelled = attribute.Value;
         if (spelled.Length == 0)
         {
-            throw new FormMarkupException(attribute.Line, $"{attribute.Name} is missing its value");
+            return new PropertySpec(attribute.Name, string.Empty, PropertyValueKind.Text);
         }
 
         if (bool.TryParse(spelled, out var flag))
@@ -702,10 +699,12 @@ public static class FormMarkup
                 attribute.Name, named.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour);
         }
 
-        throw new FormMarkupException(
-            attribute.Line,
-            $"{spelled} is not a value: quoted text, a number, True/False, #rrggbb, "
-            + "a system colour's name, or &H hex");
+        // Anything else is TEXT, which is the only honest default now that every attribute is
+        // quoted: `Caption="12"` and `MaxLength="12"` are spelled identically, so the document
+        // cannot carry the type and does not try to. The KIND read here is a good guess for the
+        // canvas and the printer; the APPLY does not rely on it, because it asks the property
+        // itself what it is (FormDesignService.InferKind) and a guess cannot mislead a write.
+        return new PropertySpec(attribute.Name, spelled, PropertyValueKind.Text);
     }
 
     // ------------------------------------------------------------------ the scanner

@@ -1200,7 +1200,7 @@ internal static partial class FormDesignService
 
             foreach (var property in wanted.Properties)
             {
-                SetControlProperty(component, designer, null, property.Path, property.Value, KindWord(property.Kind));
+                SetControlProperty(component, designer, null, property.Path, property.Value, null);
                 setCount++;
             }
 
@@ -1326,7 +1326,7 @@ internal static partial class FormDesignService
                         continue;
                     }
 
-                    SetControlProperty(component, designer, spec.Name, property.Path, property.Value, KindWord(property.Kind));
+                    SetControlProperty(component, designer, spec.Name, property.Path, property.Value, null);
                     setCount++;
                 }
             }
@@ -1357,12 +1357,6 @@ internal static partial class FormDesignService
     internal static string FormatNumber(double value) =>
         value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    private static string KindWord(PropertyValueKind kind) => kind switch
-    {
-        PropertyValueKind.Text => "text",
-        PropertyValueKind.Flag => "flag",
-        _ => "number",
-    };
 
     /// <summary>
     /// Writes one property of a control, or of the form itself when no control is named, and
@@ -1455,6 +1449,43 @@ internal static partial class FormDesignService
     /// before it is a double, and anything else is text - a caption of "123" wants as=text,
     /// which is why the override exists.
     /// </summary>
+    /// <summary>
+    /// The kind a write should use when the caller did not name one: the property's OWN current
+    /// variant, which is the only source that cannot be wrong. A numeric property handed
+    /// something that is not a number is being given a colour by name or by hash, which is the
+    /// one spelling the document uses for a value the model stores as an integer.
+    /// </summary>
+    private static string InferKind(DispatchObject target, string property, string value)
+    {
+        System.Runtime.InteropServices.VarEnum variant;
+        try
+        {
+            (variant, _) = target.ReadProperty(property);
+        }
+        catch
+        {
+            // A property that will not answer takes the value as text, which is what the dialect
+            // did before anything could ask.
+            return "text";
+        }
+
+        if (variant == System.Runtime.InteropServices.VarEnum.VT_BSTR)
+        {
+            return "text";
+        }
+
+        if (variant == System.Runtime.InteropServices.VarEnum.VT_BOOL)
+        {
+            return "flag";
+        }
+
+        return double.TryParse(
+            value, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out _)
+            ? "number"
+            : "colour";
+    }
+
     private static void WriteDesignerProperty(DispatchObject target, string property, string value, string? asKind)
     {
         // A PICTURE takes a file, not a value, and it is the one property in the panel whose
@@ -1477,13 +1508,28 @@ internal static partial class FormDesignService
             return;
         }
 
-        switch (asKind)
+        // WHAT THE PROPERTY ITSELF SAYS IT IS, when the caller does not say. A document cannot be
+        // trusted to carry the type - every attribute in the tagged dialect is quoted, so `12`
+        // and `"12"` look alike - and it does not have to: reading the property's CURRENT value
+        // gives its variant, which is the type the write has to match. This also makes a
+        // hand-typed document that spells a colour `#c0c0c0` land as the number MSForms stores.
+        var kind = asKind;
+        if (string.IsNullOrEmpty(kind))
+        {
+            kind = InferKind(target, property, value);
+        }
+
+        switch (kind)
         {
             case "text":
                 target.SetString(property, value);
                 return;
             case "flag":
                 target.SetBool(property, bool.Parse(value));
+                return;
+            case "colour":
+                target.SetInt32(property, SystemColours.Unspell(value)
+                    ?? throw new InvalidOperationException($"{value} is not a colour"));
                 return;
             case "number":
                 if (int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var asked))
