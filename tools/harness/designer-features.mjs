@@ -854,8 +854,30 @@ try {
     framedBlock === framedLines && framedBlock > 1,
     `${framedBlock} line(s) where the document indents ${framedLines} under the Frame`);
 
+  // A plain control's block is its header plus whatever PROPERTY lines the document gives it,
+  // and since 2026-08-17 that is no longer always zero: the saved baseline tells the projection
+  // which properties are worth printing, so a ComboBox arrives carrying MatchEntry and
+  // ShowDropButtonWhen. The claim being made is that the block is the control's OWN - it ends
+  // where the next header begins - so it is read off the document like the Frame's above rather
+  // than written down as a literal that the projection can falsify.
+  const plainLines = (() => {
+    const at = markupLines.findIndex((text) => /ComboBox\s+RegionPick/.test(text));
+    const indent = (text) => text.length - text.trimStart().length;
+    let last = at;
+    while (last + 1 < markupLines.length
+      && markupLines[last + 1].trim().length > 0
+      && indent(markupLines[last + 1]) > indent(markupLines[at])) {
+      last += 1;
+    }
+
+    return { count: last - at + 1, under: markupLines.slice(at + 1, last + 1) };
+  })();
+
   const plainBlock = await blockOn("RegionPick");
-  check("and a plain control covers its own line alone", plainBlock === 1, `${plainBlock} line(s)`);
+  check("and a plain control covers its own block, ending where the next control begins",
+    plainBlock === plainLines.count && plainLines.under.every((line) => line.includes("=")),
+    `${plainBlock} line(s), ${plainLines.count} in the document, `
+    + `under it: ${JSON.stringify(plainLines.under.map((line) => line.trim()))}`);
 
   check("and the wash is drawn on the lines the block names",
     Number(await api.ask(`${inViewAll(".designer-block-mark")}.length`)) >= 1,

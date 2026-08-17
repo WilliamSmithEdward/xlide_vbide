@@ -79,7 +79,13 @@ internal static partial class FormDesignService
         // A control's FONT is inherited from the form rather than defaulted per kind, so the
         // walk compares against the form's own: a bare Label answers "MS Sans Serif" and every
         // control on a Tahoma form would otherwise print a FontName it never chose.
-        Walk(designer, null, rows, seen, 0, new WalkContext(defaults, FormBaselineOf(component, designer)));
+        // The SAVED baseline narrows what the walk asks each control - see ChangedProperties.
+        // Only worth fetching when there is an inventory to compare against, because a walk
+        // without one prints identity alone and would pay for an answer it cannot use.
+        var saved = defaults is null ? null : Core.Forms.SavedDesign.For(WorkbookOf(component));
+
+        Walk(designer, null, string.Empty, rows, seen, 0,
+            new WalkContext(defaults, FormBaselineOf(component, designer), saved, module));
         var controls = rows.Select(row => row.Spec).ToList();
 
         // The form's own properties, from the component's Properties collection FIRST - the
@@ -265,7 +271,7 @@ internal static partial class FormDesignService
         // Names and kinds only: the analyzer wants the members a form's code can reach, and
         // reading every control's whole property set to answer that would be a walk paid for
         // on every seed.
-        Walk(designer, null, rows, seen, 0, default);
+        Walk(designer, null, string.Empty, rows, seen, 0, default);
         if (rows.Count == 0)
         {
             return null;
@@ -385,7 +391,11 @@ internal static partial class FormDesignService
     /// question. A default context (no inventory) walks identity and geometry alone, which is
     /// what the analyzer's member seed wants.
     /// </summary>
-    private readonly record struct WalkContext(ControlDefaults? Defaults, FormBaseline Form);
+    private readonly record struct WalkContext(
+        ControlDefaults? Defaults,
+        FormBaseline Form,
+        Core.Forms.SavedDesign? Saved = null,
+        string Module = "");
 
     /// <summary>
     /// What a control INHERITS from the form, and therefore what its own values are compared
@@ -425,9 +435,15 @@ internal static partial class FormDesignService
             PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor"));
     }
 
+    /// <summary>
+    /// `path` is the dotted chain of container names above this one - empty at the form,
+    /// `Options` inside a Frame, `Wizard.Page1` on a page. It exists for the saved baseline,
+    /// which is keyed that way because a workbook's storage nests the same way the form does;
+    /// `parentName` stays the immediate parent, which is what the dialect prints.
+    /// </summary>
     private static void Walk(
-        DispatchObject container, string? parentName, List<DesignRow> rows, HashSet<string> seen, int depth,
-        WalkContext context)
+        DispatchObject container, string? parentName, string path, List<DesignRow> rows,
+        HashSet<string> seen, int depth, WalkContext context)
     {
         if (depth > 8)
         {
@@ -450,6 +466,8 @@ internal static partial class FormDesignService
                     continue;
                 }
 
+                var where = path.Length == 0 ? name : $"{path}.{name}";
+
                 if (seen.Add(name))
                 {
                     string type;
@@ -466,12 +484,12 @@ internal static partial class FormDesignService
                         type, name, TryText(control, "Caption"),
                         TryNumber(control, "Left"), TryNumber(control, "Top"),
                         TryNumber(control, "Width"), TryNumber(control, "Height"),
-                        parentName, ChangedProperties(control, type, context)), context));
+                        parentName, ChangedProperties(control, type, where, context)), context));
                 }
 
                 if (control.GetDispId("Pages") != DispId.Unknown)
                 {
-                    WalkPages(control, name, rows, seen, depth + 1, context);
+                    WalkPages(control, name, where, rows, seen, depth + 1, context);
                 }
                 else if (control.GetDispId("Tabs") != DispId.Unknown)
                 {
@@ -481,7 +499,7 @@ internal static partial class FormDesignService
                 }
                 else if (control.GetDispId("Controls") != DispId.Unknown)
                 {
-                    Walk(control, name, rows, seen, depth + 1, context);
+                    Walk(control, name, where, rows, seen, depth + 1, context);
                 }
             }
         }
@@ -510,24 +528,123 @@ internal static partial class FormDesignService
      * standing right there to be read - so BackColor and ForeColor are compared against the
      * form's own and print exactly when a developer has changed them.
      *
-     * The rest waits on a truthful SITED baseline, and there are two honest ways to get one:
-     * probe a control of each kind onto the form and take it away again (which dirties a
-     * workbook nobody asked to dirty), or read MSForms' own answer out of a `.frm` export (which
-     * is precisely the list of non-default properties, and makes this product a reader of the
-     * format's text half). Both change what xlide does to a developer's file, so both are the
-     * owner's call rather than this walk's.
+     * AND THE REST ARRIVES BY A THIRD ROAD, 2026-08-17, which neither of the two honest options
+     * above is: the workbook Excel has ALREADY saved. MSForms persists only properties that
+     * differ from the file format default and names them in a PropMask, so
+     * Core.Forms.SavedDesign reads that list straight off the file - no export, nothing written,
+     * and no probe control put on anybody's form.
+     *
+     * IT DOES NOT ANSWER THE QUESTION, IT NARROWS IT. A set bit means "differs from the FILE
+     * FORMAT default", which is not "the developer chose this": every control on a Tahoma form
+     * carries FontName because the file's default is MS Sans Serif, and every CheckBox,
+     * OptionButton and ToggleButton carries BackColor whatever was done to it. So the mask is
+     * used as a SHORT LIST of properties worth asking about, and each one still has to beat the
+     * bare-coclass comparison to be printed. That is what keeps the file-format noise out, and it
+     * is why reading fifty properties of every control on every projection is not necessary.
      */
     private static List<PropertySpec> ChangedProperties(
-        DispatchObject control, string kind, WalkContext context)
+        DispatchObject control, string kind, string path, WalkContext context)
     {
         // A walk with no inventory is one that wants identity alone - the analyzer's member seed,
         // and the apply's own read of what is currently on the form.
         // The kind's own vocabulary, which is cached - `For` would rebuild a dictionary of forty
         // entries per control per walk to answer two questions about colour.
-        return context.Defaults is not { } defaults
-            ? []
-            : ColourDifferences(control, defaults.Describe(kind), context.Form);
+        if (context.Defaults is not { } defaults)
+        {
+            return [];
+        }
+
+        var vocabulary = defaults.Describe(kind);
+        var lines = ColourDifferences(control, vocabulary, context.Form);
+
+        if (context.Saved is { } saved && saved.Knows(context.Module))
+        {
+            foreach (var name in saved.ChangedOn(context.Module, path))
+            {
+                if (SavedNarrowing(control, vocabulary, name) is { } line)
+                {
+                    lines.Add(line);
+                }
+            }
+        }
+
+        return lines;
     }
+
+    /// <summary>
+    /// Properties the saved mask names that this walk deliberately does not take from it.
+    /// The two colours have a BETTER comparison already - against what the form passes down as
+    /// well as against the bare kind - and the fonts are inherited the same way, so both would be
+    /// printed on every control of a form that is not MS Sans Serif. A picture is binary and
+    /// rides its own face. The packed fields name many properties with one bit and cannot say
+    /// which, so their members keep the comparison they have.
+    /// </summary>
+    private static readonly HashSet<string> NotFromTheSavedMask = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "BackColor", "ForeColor", "Picture", "MouseIcon",
+        "VariousPropertyBits", "BooleanProperties",
+        "FontName", "FontHeight", "FontWeight", "FontEffects", "FontCharSet",
+        "FontPitchAndFamily", "ParagraphAlign",
+    };
+
+    /// <summary>
+    /// One property the saved file says is not the format's default, printed only if it also
+    /// differs from what this KIND is born with. Answers null for everything else - a name this
+    /// walk takes another way, a property the vocabulary does not offer or cannot write, one
+    /// with no measured default to compare against, and one whose live value equals it.
+    /// </summary>
+    private static PropertySpec? SavedNarrowing(
+        DispatchObject control, ControlDefaults.Vocabulary kind, string name)
+    {
+        if (NotFromTheSavedMask.Contains(name))
+        {
+            return null;
+        }
+
+        // The vocabulary has already dropped identity, geometry, caption, the runtime-only
+        // members and anything object-valued, so a name it does not carry is a name the document
+        // has no business printing.
+        var known = kind.Properties.FirstOrDefault(
+            one => string.Equals(one.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (known is not { Settable: true, Default: { } born })
+        {
+            return null;
+        }
+
+        var (variant, display) = ReadQuietly(control, name);
+        if (display is null || !ControlDefaults.Printable(variant) || display == born)
+        {
+            return null;
+        }
+
+        return new PropertySpec(name, display, KindOfValue(known, variant));
+    }
+
+    /// <summary>A property read that answers rather than throwing, because a control that will
+    /// not discuss one of its own members is an answer this walk already knows how to take.</summary>
+    private static (System.Runtime.InteropServices.VarEnum Variant, string? Display) ReadQuietly(
+        DispatchObject control, string name)
+    {
+        try
+        {
+            return control.GetDispId(name) == DispId.Unknown
+                ? (System.Runtime.InteropServices.VarEnum.VT_EMPTY, null)
+                : control.ReadProperty(name);
+        }
+        catch
+        {
+            return (System.Runtime.InteropServices.VarEnum.VT_EMPTY, null);
+        }
+    }
+
+    /// <summary>How the dialect spells this value: a colour in hex, a flag as True/False, a
+    /// number bare, everything else quoted.</summary>
+    private static PropertyValueKind KindOfValue(
+        ControlDefaults.Known known, System.Runtime.InteropServices.VarEnum variant) =>
+        known.Colour ? PropertyValueKind.Colour
+        : variant == System.Runtime.InteropServices.VarEnum.VT_BOOL ? PropertyValueKind.Flag
+        : variant == System.Runtime.InteropServices.VarEnum.VT_BSTR ? PropertyValueKind.Text
+        : PropertyValueKind.Number;
 
     /// <summary>
     /// The two colours, against BOTH baselines - and it takes both, measured 2026-08-16. A Label
@@ -727,8 +844,8 @@ internal static partial class FormDesignService
     }
 
     private static void WalkPages(
-        DispatchObject multiPage, string multiPageName, List<DesignRow> rows, HashSet<string> seen, int depth,
-        WalkContext context)
+        DispatchObject multiPage, string multiPageName, string path, List<DesignRow> rows,
+        HashSet<string> seen, int depth, WalkContext context)
     {
         if (depth > 8)
         {
@@ -751,15 +868,17 @@ internal static partial class FormDesignService
                     continue;
                 }
 
+                var where = $"{path}.{name}";
+
                 if (seen.Add(name))
                 {
                     rows.Add(RowOf(page, new ControlSpec(
                         "Page", name, TryText(page, "Caption"),
                         null, null, null, null, multiPageName,
-                        ChangedProperties(page, "Page", context)), context));
+                        ChangedProperties(page, "Page", where, context)), context));
                 }
 
-                Walk(page, name, rows, seen, depth + 1, context);
+                Walk(page, name, where, rows, seen, depth + 1, context);
             }
         }
     }
@@ -1020,7 +1139,7 @@ internal static partial class FormDesignService
         // walk whose answer the apply is about to overwrite.
         var walked = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, walked, seen, 0, default);
+        Walk(designer, null, string.Empty, walked, seen, 0, default);
         var current = walked.Select(row => row.Spec).ToList();
 
         var currentByName = current.ToDictionary(row => row.Name, StringComparer.OrdinalIgnoreCase);

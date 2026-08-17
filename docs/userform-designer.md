@@ -1433,9 +1433,39 @@ holding Enabled, Locked, Visible, AutoSize, WordWrap and more. Set means one of 
 which. Telling them apart means decoding the DataBlock rather than the mask, so it is reported as
 itself and those properties keep the comparison they have.
 
-What remains: the C# port of ZIP + compound file + mask walk, cached per form and invalidated on
-save, and the projection asking the narrowed list. A form that has never been saved has no
-baseline in the file and keeps today's bare-coclass answer, which is honest and stays.
+**THE PROJECTION ASKS THE NARROWED LIST, 2026-08-17, and that closes this item.** The reader is
+`Core.Forms.SavedDesign` over `Core.Forms.CompoundFile` - in Core rather than the shim because it
+reads a FILE and has no COM in it, which is what gives it tests that run in 72ms with no Excel on
+the machine. The walk carries a dotted control path (`Options.PickGround`) because the storage
+nests the way the form does, and each name the mask offers is looked up in the kind's vocabulary -
+which has already dropped identity, geometry, caption, the runtime-only members and anything
+object-valued - read off the live control, and printed only if it ALSO differs from what the kind
+is born with. Measured on a form built for the purpose:
+
+```text
+Form ProjProbeB "UserForm1" size 240x180
+    TextBox Box at 8,8 size 80x18
+        MaxLength = 12
+        SpecialEffect = 0
+    CommandButton Go "Go" at 8,40 size 60x20
+        MousePointer = 3
+```
+
+Seven names are taken from the mask and then deliberately dropped: `BackColor` and `ForeColor`
+have a better comparison already (against what the form passes down as well as the bare kind),
+the fonts are inherited the same way and would otherwise print under every control of a form that
+is not MS Sans Serif, a picture is binary and rides its own face, and the packed fields name many
+properties with one bit and cannot say which.
+
+**What it costs.** A markup print is **6.8ms** against the 8ms this walk cost before, so with the
+baseline cached it costs nothing measurable. A save invalidates the cache by write time, and the
+first print after one is **11.4ms** - about 4.6ms to re-read the workbook's storage, paid once per
+save rather than once per projection. An enum rides as its number, because the dialect has four
+value kinds and none of them is an enum name; the panel spells the member, the document carries
+what round-trips.
+
+A form that has never been saved has no baseline in the file and keeps the bare-coclass answer,
+which is honest and stays.
 
 ## What a sweep for dead and convoluted code found
 
