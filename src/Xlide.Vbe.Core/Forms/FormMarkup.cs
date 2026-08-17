@@ -425,140 +425,538 @@ public static class FormMarkup
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        FormHeader? form = null;
-        var formProperties = new List<PropertySpec>();
+        var tags = ScanTags(text);
+        if (tags.Count == 0)
+        {
+            throw new FormMarkupException(1, "the document is empty; it opens with a <Form> tag");
+        }
+
+        FormSpec? built = null;
         var controls = new List<ControlSpec>();
-        var properties = new Dictionary<string, List<PropertySpec>>(StringComparer.OrdinalIgnoreCase);
 
-        // The container each indentation level is inside of. [0] is the form itself.
+        // What each open element is, innermost last. [0] is the form.
         var stack = new List<(string Name, string Type)>();
+        var closed = false;
 
-        var lines = text.Split('\n');
-        for (var index = 0; index < lines.Length; index++)
+        foreach (var tag in tags)
         {
-            var lineNumber = index + 1;
-            var raw = lines[index].TrimEnd('\r');
-            var content = StripComment(raw, lineNumber);
-            if (content.TrimEnd().Length == 0)
+            if (closed)
             {
+                throw new FormMarkupException(tag.Line, "one Form per document; nothing follows </Form>");
+            }
+
+            if (tag.IsClose)
+            {
+                if (stack.Count == 0)
+                {
+                    throw new FormMarkupException(tag.Line, $"</{tag.Name}> closes nothing");
+                }
+
+                var open = stack[^1];
+                if (!string.Equals(open.Type, tag.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new FormMarkupException(
+                        tag.Line, $"</{tag.Name}> closes a <{open.Type}>; tags nest, they do not overlap");
+                }
+
+                stack.RemoveAt(stack.Count - 1);
+                closed = stack.Count == 0;
                 continue;
             }
 
-            if (content.Contains('\t'))
+            if (stack.Count == 0)
             {
-                throw new FormMarkupException(lineNumber, "indent with spaces; this host never stores a tab");
-            }
-
-            var indent = content.Length - content.TrimStart(' ').Length;
-            if (indent % IndentWidth != 0)
-            {
-                throw new FormMarkupException(lineNumber, $"indent by {IndentWidth} spaces per level");
-            }
-
-            var depth = indent / IndentWidth;
-            var body = content.Trim();
-
-            if (form is null)
-            {
-                if (depth != 0)
+                if (!string.Equals(tag.Name, "Form", StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new FormMarkupException(lineNumber, "the document opens with an unindented Form line");
+                    throw new FormMarkupException(tag.Line, "the document opens with a <Form> tag");
                 }
 
-                form = ParseFormHeader(body, lineNumber);
-                stack.Add((form.Name, "Form"));
+                var (formName, caption, _, _, width, height, properties) = ReadAttributes(tag, isForm: true);
+                built = new FormSpec(formName, caption, width, height, properties, controls);
+                if (tag.SelfCloses)
+                {
+                    closed = true;
+                    continue;
+                }
+
+                stack.Add((formName, "Form"));
                 continue;
             }
 
-            if (depth == 0)
+            if (string.Equals(tag.Name, "Form", StringComparison.OrdinalIgnoreCase))
             {
-                throw new FormMarkupException(lineNumber, "one Form per document; nothing else sits unindented");
+                throw new FormMarkupException(tag.Line, "one Form per document; a Form holds no Form");
             }
 
-            if (depth > stack.Count)
-            {
-                throw new FormMarkupException(lineNumber, "this line is indented under nothing");
-            }
+            var owner = stack[^1];
+            RefuseBadContainment(owner.Type, tag.Name, tag.Line);
 
-            // Stepping back out: the levels deeper than this line are done.
-            stack.RemoveRange(depth, stack.Count - depth);
-            var owner = stack[depth - 1];
+            var (name, ownCaption, left, top, ownWidth, ownHeight, ownProperties) =
+                ReadAttributes(tag, isForm: false);
 
-            if (IsProperty(body))
-            {
-                var property = ParseProperty(body, lineNumber);
-                if (depth == 1)
-                {
-                    formProperties.Add(property);
-                }
-                else if (owner.Type == "Form")
-                {
-                    throw new FormMarkupException(lineNumber, "a property line sits under the control it belongs to");
-                }
-                else
-                {
-                    properties[owner.Name].Add(property);
-                }
-
-                continue;
-            }
-
-            var control = ParseControlHeader(body, lineNumber);
-
-            if (string.Equals(owner.Type, "MultiPage", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(control.Type, "Page", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FormMarkupException(lineNumber, "a MultiPage holds Pages; controls go on a Page");
-            }
-
-            // A TabStrip holds TABS and nothing else: what sits over its face belongs to the form,
-            // because MSForms draws a strip over one set of controls and swaps them in code. The
-            // dialect learned tabs on 2026-08-16, when a strip's line stood with nothing indented
-            // under it while the canvas drew two tabs.
-            if (string.Equals(owner.Type, "TabStrip", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(control.Type, "Tab", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FormMarkupException(lineNumber,
-                    "a TabStrip holds Tabs; a control over its face belongs to the form");
-            }
-
-            if (string.Equals(control.Type, "Tab", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(owner.Type, "TabStrip", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FormMarkupException(lineNumber, "a Tab sits under a TabStrip");
-            }
-
-            if (string.Equals(control.Type, "Page", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(owner.Type, "MultiPage", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new FormMarkupException(lineNumber, "a Page sits under a MultiPage");
-            }
-
-            if (owner.Type != "Form" && !Containers.Contains(owner.Type))
-            {
-                throw new FormMarkupException(lineNumber,
-                    $"a {owner.Type} holds no controls; only Frame, MultiPage, Page and TabStrip contain");
-            }
-
-            var parent = depth == 1 ? null : owner.Name;
-            var ownProperties = new List<PropertySpec>();
-            properties[control.Name] = ownProperties;
             controls.Add(new ControlSpec(
-                control.Type, control.Name, control.Caption,
-                control.Left, control.Top, control.Width, control.Height,
-                parent, ownProperties));
+                tag.Name, name, ownCaption, left, top, ownWidth, ownHeight,
+                stack.Count == 1 ? null : owner.Name, ownProperties));
 
-            stack.Add((control.Name, control.Type));
+            if (!tag.SelfCloses)
+            {
+                stack.Add((name, tag.Name));
+            }
         }
 
-        if (form is null)
+        if (built is null)
         {
-            throw new FormMarkupException(1, "the document is empty; it opens with a Form line");
+            throw new FormMarkupException(1, "the document is empty; it opens with a <Form> tag");
         }
 
-        return new FormSpec(form.Name, form.Caption, form.Width, form.Height, formProperties, controls);
+        if (stack.Count > 0)
+        {
+            throw new FormMarkupException(
+                tags[^1].Line, $"<{stack[^1].Type}> is never closed");
+        }
+
+        return built;
     }
 
+    /// <summary>
+    /// The containment rules, unchanged by the move to tags because they are MSForms' rules
+    /// rather than the syntax's: a MultiPage holds Pages, a TabStrip holds Tabs, a Page sits on a
+    /// MultiPage and a Tab on a TabStrip, and nothing else contains anything.
+    /// </summary>
+    private static void RefuseBadContainment(string ownerType, string childType, int line)
+    {
+        if (string.Equals(ownerType, "MultiPage", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(childType, "Page", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormMarkupException(line, "a MultiPage holds Pages; controls go on a Page");
+        }
+
+        // A TabStrip holds TABS and nothing else: what sits over its face belongs to the form,
+        // because MSForms draws a strip over one set of controls and swaps them in code.
+        if (string.Equals(ownerType, "TabStrip", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(childType, "Tab", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormMarkupException(
+                line, "a TabStrip holds Tabs; a control over its face belongs to the form");
+        }
+
+        if (string.Equals(childType, "Tab", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(ownerType, "TabStrip", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormMarkupException(line, "a Tab sits under a TabStrip");
+        }
+
+        if (string.Equals(childType, "Page", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(ownerType, "MultiPage", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new FormMarkupException(line, "a Page sits under a MultiPage");
+        }
+
+        if (!string.Equals(ownerType, "Form", StringComparison.OrdinalIgnoreCase)
+            && !Containers.Contains(ownerType))
+        {
+            throw new FormMarkupException(
+                line, $"a {ownerType} holds no controls; only Frame, MultiPage, Page and TabStrip contain");
+        }
+    }
+
+    /// <summary>
+    /// One element's attributes, split into the six the header owns and the rest, which are
+    /// properties. `Name` is required and is the identity everything else keys on.
+    /// </summary>
+    private static (string Name, string? Caption, double? Left, double? Top,
+        double? Width, double? Height, List<PropertySpec> Properties) ReadAttributes(Tag tag, bool isForm)
+    {
+        string? name = null;
+        string? caption = null;
+        double? left = null;
+        double? top = null;
+        double? width = null;
+        double? height = null;
+        var properties = new List<PropertySpec>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var attribute in tag.Attributes)
+        {
+            if (!seen.Add(attribute.Name))
+            {
+                throw new FormMarkupException(
+                    attribute.Line, $"{attribute.Name} is set twice on this <{tag.Name}>");
+            }
+
+            switch (attribute.Name.ToUpperInvariant())
+            {
+                case "NAME":
+                    name = attribute.Value;
+                    continue;
+                case "CAPTION":
+                    caption = attribute.Value;
+                    continue;
+                case "LEFT" when !isForm:
+                    left = ReadNumber(attribute);
+                    continue;
+                case "TOP" when !isForm:
+                    top = ReadNumber(attribute);
+                    continue;
+                case "WIDTH":
+                    width = ReadNumber(attribute);
+                    continue;
+                case "HEIGHT":
+                    height = ReadNumber(attribute);
+                    continue;
+                default:
+                    properties.Add(ReadValue(attribute));
+                    continue;
+            }
+        }
+
+        if (name is null)
+        {
+            throw new FormMarkupException(tag.Line, $"a <{tag.Name}> needs a Name");
+        }
+
+        if (!IsIdentifier(name))
+        {
+            throw new FormMarkupException(
+                tag.Line, $"{name} is not a name a control can take; letters, digits and _, not starting with a digit");
+        }
+
+        if ((left is null) != (top is null))
+        {
+            throw new FormMarkupException(tag.Line, "Left and Top come together or not at all");
+        }
+
+        if ((width is null) != (height is null))
+        {
+            throw new FormMarkupException(tag.Line, "Width and Height come together or not at all");
+        }
+
+        return (name, caption, left, top, width, height, properties);
+    }
+
+    private static double ReadNumber(Attribute attribute) =>
+        double.TryParse(attribute.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : throw new FormMarkupException(attribute.Line, $"{attribute.Name} takes a number");
+
+    /// <summary>
+    /// One attribute as a property, with its KIND recovered from the spelling. Quoted is text and
+    /// nothing else is - which is the whole reason the printer leaves numbers bare, and the reason
+    /// `Caption="True"` is a caption while `Enabled=True` is a flag.
+    /// </summary>
+    private static PropertySpec ReadValue(Attribute attribute)
+    {
+        if (attribute.Quoted)
+        {
+            return new PropertySpec(attribute.Name, attribute.Value, PropertyValueKind.Text);
+        }
+
+        var spelled = attribute.Value;
+        if (spelled.Length == 0)
+        {
+            throw new FormMarkupException(attribute.Line, $"{attribute.Name} is missing its value");
+        }
+
+        if (bool.TryParse(spelled, out var flag))
+        {
+            return new PropertySpec(attribute.Name, flag ? "True" : "False", PropertyValueKind.Flag);
+        }
+
+        // #c0dcc0 - the spelling the Properties panel shows and every developer already knows.
+        // Carried onward as the decimal the designer model takes, like every other colour.
+        if (spelled[0] == '#')
+        {
+            return ReadColour(spelled) is { } rgb
+                ? new PropertySpec(attribute.Name, rgb.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour)
+                : throw new FormMarkupException(attribute.Line, $"{spelled} is not a #rrggbb colour");
+        }
+
+        // &H8000000F& - VBA's own spelling, still taken from a hand-written document even though
+        // the printer now writes a system colour's NAME.
+        if (spelled.StartsWith("&H", StringComparison.OrdinalIgnoreCase))
+        {
+            var digits = spelled.TrimEnd('&')[2..];
+            if (digits.Length is 0 or > 8
+                || !long.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hex))
+            {
+                throw new FormMarkupException(attribute.Line, $"{spelled} is not a &H hex number");
+            }
+
+            return new PropertySpec(
+                attribute.Name, ((int)(uint)hex).ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour);
+        }
+
+        if (double.TryParse(spelled, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
+        {
+            return new PropertySpec(attribute.Name, spelled, PropertyValueKind.Number);
+        }
+
+        // A bare word that names a system colour - `ButtonFace`, `Highlight`. Readable as a colour
+        // only because every other bare shape is taken and text is always quoted.
+        if (ReadColourName(spelled) is { } named)
+        {
+            return new PropertySpec(
+                attribute.Name, named.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour);
+        }
+
+        throw new FormMarkupException(
+            attribute.Line,
+            $"{spelled} is not a value: quoted text, a number, True/False, #rrggbb, "
+            + "a system colour's name, or &H hex");
+    }
+
+    // ------------------------------------------------------------------ the scanner
+
+    /// <summary>An element as the scanner found it. A close tag carries no attributes.</summary>
+    private readonly record struct Tag(
+        string Name, bool IsClose, bool SelfCloses, List<Attribute> Attributes, int Line);
+
+    /// <summary>One attribute. `Quoted` is what tells TEXT from everything else, which is why the
+    /// printer never quotes a number: the kind is recovered from the spelling.</summary>
+    private readonly record struct Attribute(string Name, string Value, bool Quoted, int Line);
+
+    /// <summary>
+    /// Every tag in the document, in order. Comments are skipped, whitespace between tags is
+    /// ignored, and anything ELSE between tags is refused - a value typed as element content
+    /// rather than as an attribute would otherwise vanish without a word.
+    /// </summary>
+    private static List<Tag> ScanTags(string text)
+    {
+        var tags = new List<Tag>();
+        var line = 1;
+        var at = 0;
+
+        while (at < text.Length)
+        {
+            var open = text.IndexOf('<', at);
+            if (open < 0)
+            {
+                RefuseStrayText(text, at, text.Length, ref line);
+                break;
+            }
+
+            RefuseStrayText(text, at, open, ref line);
+
+            if (text.AsSpan(open).StartsWith("<!--"))
+            {
+                var end = text.IndexOf("-->", open, StringComparison.Ordinal);
+                if (end < 0)
+                {
+                    throw new FormMarkupException(line, "a comment opens and never closes");
+                }
+
+                for (var i = open; i < end; i++)
+                {
+                    if (text[i] == '\n')
+                    {
+                        line++;
+                    }
+                }
+
+                at = end + 3;
+                continue;
+            }
+
+            var tagLine = line;
+            var body = new StringBuilder();
+            var inQuotes = false;
+            var cursor = open + 1;
+            var closedTag = false;
+            while (cursor < text.Length)
+            {
+                var character = text[cursor];
+                if (character == '\n')
+                {
+                    line++;
+                }
+
+                if (character == '"')
+                {
+                    // A doubled quote inside a quoted value is one quote, as it is in VBA.
+                    if (inQuotes && cursor + 1 < text.Length && text[cursor + 1] == '"')
+                    {
+                        body.Append("\"\"");
+                        cursor += 2;
+                        continue;
+                    }
+
+                    inQuotes = !inQuotes;
+                }
+                else if (character == '>' && !inQuotes)
+                {
+                    closedTag = true;
+                    cursor++;
+                    break;
+                }
+
+                body.Append(character);
+                cursor++;
+            }
+
+            if (!closedTag)
+            {
+                throw new FormMarkupException(tagLine, "a tag opens and never closes");
+            }
+
+            tags.Add(ReadTag(body.ToString(), tagLine));
+            at = cursor;
+        }
+
+        return tags;
+    }
+
+    private static void RefuseStrayText(string text, int from, int to, ref int line)
+    {
+        for (var i = from; i < to; i++)
+        {
+            if (text[i] == '\n')
+            {
+                line++;
+            }
+            else if (!char.IsWhiteSpace(text[i]))
+            {
+                throw new FormMarkupException(
+                    line, "text between tags says nothing here; a value belongs in an attribute");
+            }
+        }
+    }
+
+    /// <summary>The inside of one `&lt;...&gt;`: a name, then attributes.</summary>
+    private static Tag ReadTag(string body, int line)
+    {
+        var trimmed = body.Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new FormMarkupException(line, "an empty tag names nothing");
+        }
+
+        var isClose = trimmed[0] == '/';
+        if (isClose)
+        {
+            trimmed = trimmed[1..].Trim();
+        }
+
+        var selfCloses = !isClose && trimmed.EndsWith('/');
+        if (selfCloses)
+        {
+            trimmed = trimmed[..^1].TrimEnd();
+        }
+
+        var nameEnd = 0;
+        while (nameEnd < trimmed.Length && !char.IsWhiteSpace(trimmed[nameEnd]))
+        {
+            nameEnd++;
+        }
+
+        var name = trimmed[..nameEnd];
+        if (name.Length == 0 || !IsIdentifier(name))
+        {
+            throw new FormMarkupException(line, $"<{trimmed}> does not open with a control kind");
+        }
+
+        var attributes = new List<Attribute>();
+        var rest = trimmed[nameEnd..];
+        if (isClose)
+        {
+            if (rest.Trim().Length > 0)
+            {
+                throw new FormMarkupException(line, $"</{name}> takes no attributes");
+            }
+
+            return new Tag(name, true, false, attributes, line);
+        }
+
+        var at = 0;
+        while (at < rest.Length)
+        {
+            while (at < rest.Length && char.IsWhiteSpace(rest[at]))
+            {
+                at++;
+            }
+
+            if (at >= rest.Length)
+            {
+                break;
+            }
+
+            var start = at;
+            while (at < rest.Length && (char.IsLetterOrDigit(rest[at]) || rest[at] == '_' || rest[at] == '.'))
+            {
+                at++;
+            }
+
+            var attributeName = rest[start..at];
+            if (attributeName.Length == 0)
+            {
+                throw new FormMarkupException(line, $"{rest[at..].Trim()} is not an attribute");
+            }
+
+            while (at < rest.Length && char.IsWhiteSpace(rest[at]))
+            {
+                at++;
+            }
+
+            if (at >= rest.Length || rest[at] != '=')
+            {
+                throw new FormMarkupException(line, $"{attributeName} is missing its value");
+            }
+
+            at++;
+            while (at < rest.Length && char.IsWhiteSpace(rest[at]))
+            {
+                at++;
+            }
+
+            if (at >= rest.Length)
+            {
+                throw new FormMarkupException(line, $"{attributeName} is missing its value");
+            }
+
+            if (rest[at] == '"')
+            {
+                at++;
+                var value = new StringBuilder();
+                var done = false;
+                while (at < rest.Length)
+                {
+                    if (rest[at] == '"')
+                    {
+                        if (at + 1 < rest.Length && rest[at + 1] == '"')
+                        {
+                            value.Append('"');
+                            at += 2;
+                            continue;
+                        }
+
+                        at++;
+                        done = true;
+                        break;
+                    }
+
+                    value.Append(rest[at]);
+                    at++;
+                }
+
+                if (!done)
+                {
+                    throw new FormMarkupException(line, "a quote opens and never closes");
+                }
+
+                attributes.Add(new Attribute(attributeName, value.ToString(), true, line));
+                continue;
+            }
+
+            var bareStart = at;
+            while (at < rest.Length && !char.IsWhiteSpace(rest[at]))
+            {
+                at++;
+            }
+
+            attributes.Add(new Attribute(attributeName, rest[bareStart..at], false, line));
+        }
+
+        return new Tag(name, false, selfCloses, attributes, line);
+    }
     /// <summary>An apostrophe outside quotes starts a comment, exactly as it does in VBA.</summary>
     private static string StripComment(string line, int lineNumber)
     {
