@@ -723,10 +723,17 @@ export function registerMarkupLanguage(): void {
         [/<!--/, "comment", "@comment"],
         // An opening or closing tag hands the rest of the element to @tag, so an attribute list
         // that wraps across lines keeps painting as attributes rather than as loose words.
+        // The `next` rides the LAST GROUP rather than sitting as a third element: with an array
+        // action Monarch ignores a rule-level next, so @tag was never entered and every
+        // attribute and string fell through to root uncoloured while the kind alone painted
+        // (the owner, looking at the tab: "no colors").
         [/(<\/?)([A-Za-z_][\w]*)/, [
           "delimiter.angle",
-          { cases: { "@controlKinds": "type", "@default": "identifier" } },
-        ], "@tag"],
+          {
+            cases: { "@controlKinds": "type", "@default": "identifier" },
+            next: "@tag",
+          },
+        ]],
         [/[<>]/, "delimiter.angle"],
       ],
       comment: [
@@ -735,11 +742,20 @@ export function registerMarkupLanguage(): void {
         [/./, "comment"],
       ],
       tag: [
+        [/\s+/, ""],
         [/\/?>/, "delimiter.angle", "@pop"],
         [/"(?:[^"]|"")*"/, "string"],
+        [/"/, "string", "@value"],
         [/[A-Za-z_][\w.]*(?=\s*=)/, "attribute.name"],
         [/=/, "delimiter"],
         [/[A-Za-z_][\w.]*/, "identifier"],
+      ],
+      // A value whose closing quote is still to come - which is every value mid-typing, and the
+      // state that keeps the rest of the line from painting as attributes behind the widget.
+      value: [
+        [/""/, "string"],
+        [/"/, "string", "@pop"],
+        [/[^"]+/, "string"],
       ],
     },
   });

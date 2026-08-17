@@ -86,6 +86,43 @@ export function dressWithPicture(box: HTMLElement, picture: FormMarkupPicture): 
   image.alt = "";
   image.draggable = false;
 
+  /*
+   * A PICTURE TOO BIG FOR ITS CONTROL IS STRETCHED, not letterboxed and not clipped, because
+   * that is what MSForms does - measured off the running form twice (the owner: "see distortion
+   * of image over button in live form", then "native form is stretch, and xlide canvas is
+   * truncating"). The fixture's OK button is 72x24 points wearing a 256x256 icon, and the
+   * runtime squashes the whole logo into it.
+   *
+   * It cannot be said in CSS alone: `object-fit` needs a box, and the box is only over-large
+   * once the intrinsic size is known - which the payload does not carry and the IMG does. So the
+   * decision waits for the load and then only fires when the picture really does not fit. A
+   * picture that fits keeps its natural size, which is what PicturePosition is for.
+   */
+  const stretchIfOversized = (): void => {
+    const room = box.getBoundingClientRect();
+    if (room.width <= 0 || room.height <= 0 || image.naturalWidth === 0) {
+      return;
+    }
+
+    if (image.naturalWidth > room.width || image.naturalHeight > room.height) {
+      // It COVERS the control rather than sharing a flex line with the caption. Stretching it in
+      // place pushed the caption out the side and clipped it, which was a third wrong answer
+      // (the owner: "still a disparity in lower button"); the runtime paints the picture over the
+      // whole face and the caption goes under it, so the canvas takes it out of the flow.
+      box.style.position = "relative";
+      image.style.position = "absolute";
+      image.style.inset = "0";
+      image.style.width = "100%";
+      image.style.height = "100%";
+      image.style.objectFit = "fill";
+    }
+  };
+
+  image.addEventListener("load", stretchIfOversized);
+  if (image.complete) {
+    stretchIfOversized();
+  }
+
   box.classList.add("dc-with-picture");
   box.style.flexDirection = position <= 5 ? "row" : "column";
   box.style.alignItems = ["flex-start", "center", "flex-end"][position % 3] ?? "center";

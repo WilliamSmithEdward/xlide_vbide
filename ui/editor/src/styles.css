@@ -4082,11 +4082,14 @@ body.objbrowser-page #objbrowser-card {
   gap: 2px;
 }
 
+/* Natural size while it fits, and never wider than its control. A picture too big for the
+   control is STRETCHED to fill it, which is what MSForms does - dressWithPicture sets that on
+   the element once the image has loaded and its intrinsic size can be compared, because CSS
+   alone cannot ask "is this bigger than the box". */
 .dc-picture {
   flex: 0 0 auto;
   max-width: 100%;
   max-height: 100%;
-  object-fit: contain;
 }
 
 .dc:hover:not(:has(.dc:hover)) {
