@@ -4075,18 +4075,27 @@ body.objbrowser-page #objbrowser-card {
 
 /* A control wearing a picture BESIDE its caption. The direction and the cross alignment are the
    twelve fmPicturePosition values and are set inline; what belongs here is only that the box
-   becomes a flex line and the picture never outgrows it. */
+   becomes a flex line. */
 .dc-with-picture {
   display: flex;
   justify-content: center;
   gap: 2px;
 }
 
+/* NATURAL SIZE, AND CLIPPED IF IT DOES NOT FIT - because that is what MSForms does, and the
+   canvas's job is to draw what the runtime draws rather than what would look tidy.
+
+   This carried `max-width: 100%`, `max-height: 100%` and `object-fit: contain`, which quietly
+   shrank an oversized picture to fit its control. Measured 2026-08-17 (the owner: "see distortion
+   of image over button in live form"): the fixture's OK button is 72x24 points and wears
+   xlide.ico, whose largest frame - the one GDI+ takes - is 256x256. The running form drew a wide
+   clipped band of the logo with the caption pushed out of sight; the canvas drew a neat little
+   logo beside "Start". The canvas was the one that was wrong.
+
+   `.dc` already hides its overflow, so natural size clips rather than painting over neighbours,
+   and `flex-shrink: 0` keeps the flex line from doing the squashing the max-widths used to. */
 .dc-picture {
   flex: 0 0 auto;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
 }
 
 .dc:hover:not(:has(.dc:hover)) {
