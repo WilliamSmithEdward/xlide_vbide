@@ -164,24 +164,87 @@ public static class FormMarkup
         });
     }
 
+    /// <summary>The bit that turns an OLE_COLOR from a colour into a question for the system.</summary>
+    private const int SystemColourBit = unchecked((int)0x80000000);
+
     /// <summary>
-    /// A colour as the document spells one: `#rrggbb`, always, which is the owner's call for the
-    /// tagged dialect (2026-08-17: "please translate into #000000 format for our xaml").
+    /// Win32's COLOR_ constants in plain words - the one table here that cannot be measured,
+    /// because no call hands back a display name for COLOR_BTNFACE. The VALUE is always measured
+    /// through GetSysColor; only the wording is written down, and it is the wording the native
+    /// picker's System tab uses.
     ///
-    /// WHAT THAT COSTS, because it was decided the other way first and the reason has not gone
-    /// away. A SYSTEM colour is not an RGB but a question - what does this machine call a button
-    /// face - and it used to keep `&amp;H8000000F&amp;` so the question stayed a question. Spelled
-    /// as `#c0c0c0` it becomes today's ANSWER, and a document round-tripped through an apply
-    /// writes that literal back, so the control stops following the theme. The resolution happens
-    /// in the shim's walk, through ColorRefOf and the live palette, because that is where the
-    /// machine can be asked; nothing reaches this printer still holding a system index.
-    ///
-    /// A document may still be WRITTEN with `&amp;H...&amp;` by hand and the parser takes it - the
-    /// dialect stays forgiving about VBA's own spelling on the way in, and canonical on the way
-    /// out.
+    /// One list for both surfaces. The Properties panel shows these names with their spaces
+    /// ("Button Face") because a panel can afford them; the document spells the same colour with
+    /// the spaces closed up (`ButtonFace`) because an attribute value that is not quoted cannot
+    /// hold a space - and quoting it would make it indistinguishable from a caption.
     /// </summary>
-    public static string SpellColour(int ole) =>
-        $"#{ole & 0xFF:x2}{(ole >> 8) & 0xFF:x2}{(ole >> 16) & 0xFF:x2}";
+    public static readonly IReadOnlyList<(int Index, string Name)> SystemColourNames =
+    [
+        (0, "Scroll Bars"), (1, "Desktop"), (2, "Active Title Bar"), (3, "Inactive Title Bar"),
+        (4, "Menu Bar"), (5, "Window Background"), (6, "Window Frame"), (7, "Menu Text"),
+        (8, "Window Text"), (9, "Active Title Bar Text"), (10, "Active Border"),
+        (11, "Inactive Border"), (12, "Application Workspace"), (13, "Highlight"),
+        (14, "Highlight Text"), (15, "Button Face"), (16, "Button Shadow"), (17, "Disabled Text"),
+        (18, "Button Text"), (19, "Inactive Title Bar Text"), (20, "Button Highlight"),
+        (21, "Button Dark Shadow"), (22, "Button Light Shadow"), (23, "Tooltip Text"),
+        (24, "Tooltip"), (26, "Hot-Tracked Item"), (27, "Gradient Active Title Bar"),
+        (28, "Gradient Inactive Title Bar"), (29, "Menu Highlight"), (30, "Menu Bar Background"),
+    ];
+
+    /// <summary>A name as the document spells it: no spaces, no hyphens, so it is one bare token.</summary>
+    private static string Compact(string name) => name.Replace(" ", "").Replace("-", "");
+
+    /// <summary>
+    /// A colour as the document spells one: `#rrggbb` for a literal, and a NAME for a system
+    /// colour (the owner, 2026-08-17: "can we support both then? either hex, or by friendly
+    /// name?").
+    ///
+    /// The name is the point rather than decoration. A system colour is not an RGB but a question
+    /// - what does this machine call a button face - and `ButtonFace` keeps it a question, where
+    /// `#f0f0f0` would freeze today's answer into the form and stop it following the theme. So the
+    /// two spellings carry the two different things a colour can BE, and a round trip loses
+    /// neither.
+    ///
+    /// A system index with no name of its own keeps VBA's own hex, which is honest: a document
+    /// that cannot say what a value means says what it is.
+    /// </summary>
+    public static string SpellColour(int ole)
+    {
+        if ((ole & SystemColourBit) == 0)
+        {
+            return $"#{ole & 0xFF:x2}{(ole >> 8) & 0xFF:x2}{(ole >> 16) & 0xFF:x2}";
+        }
+
+        var index = ole & 0xFF;
+        foreach (var (known, name) in SystemColourNames)
+        {
+            if (known == index)
+            {
+                return Compact(name);
+            }
+        }
+
+        return $"&H{(uint)ole:X8}&";
+    }
+
+    /// <summary>
+    /// A system colour by name, or null when the word names none. Spaces, hyphens and case are all
+    /// forgiven, so `ButtonFace`, `Button Face` and `buttonface` are one colour - the document
+    /// writes the compact form and a developer may type whichever they remember.
+    /// </summary>
+    public static int? ReadColourName(string spelled)
+    {
+        var wanted = Compact(spelled.Trim());
+        foreach (var (index, name) in SystemColourNames)
+        {
+            if (string.Equals(Compact(name), wanted, StringComparison.OrdinalIgnoreCase))
+            {
+                return SystemColourBit | index;
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// A `#rrggbb` or `#rgb` as the number the model stores. OLE_COLOR keeps blue-green-red where
@@ -650,8 +713,19 @@ public static class FormMarkup
             return new PropertySpec(path, spelled, PropertyValueKind.Number);
         }
 
+        // A bare word that names a system colour - `ButtonFace`, `Highlight`. It can only be read
+        // as a colour because every other bare shape is already taken and TEXT is always quoted,
+        // so nothing here has to guess between a caption and a colour.
+        if (ReadColourName(spelled) is { } named)
+        {
+            return new PropertySpec(
+                path, named.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour);
+        }
+
         throw new FormMarkupException(
-            lineNumber, $"{spelled} is not a value: quoted text, a number, True/False, or &H hex");
+            lineNumber,
+            $"{spelled} is not a value: quoted text, a number, True/False, #rrggbb, "
+            + "a system colour's name, or &H hex");
     }
 
     private static int IndexOfUnquoted(string body, char wanted)

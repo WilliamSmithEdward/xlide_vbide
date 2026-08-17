@@ -27,39 +27,10 @@ internal static class SystemColours
     /// <summary>The bit that turns an OLE_COLOR from a colour into a question for the system.</summary>
     private const int SystemBit = unchecked((int)0x80000000);
 
-    private static readonly (int Index, string Name)[] Named =
-    [
-        (0, "Scroll Bars"),
-        (1, "Desktop"),
-        (2, "Active Title Bar"),
-        (3, "Inactive Title Bar"),
-        (4, "Menu Bar"),
-        (5, "Window Background"),
-        (6, "Window Frame"),
-        (7, "Menu Text"),
-        (8, "Window Text"),
-        (9, "Active Title Bar Text"),
-        (10, "Active Border"),
-        (11, "Inactive Border"),
-        (12, "Application Workspace"),
-        (13, "Highlight"),
-        (14, "Highlight Text"),
-        (15, "Button Face"),
-        (16, "Button Shadow"),
-        (17, "Disabled Text"),
-        (18, "Button Text"),
-        (19, "Inactive Title Bar Text"),
-        (20, "Button Highlight"),
-        (21, "Button Dark Shadow"),
-        (22, "Button Light Shadow"),
-        (23, "Tooltip Text"),
-        (24, "Tooltip"),
-        (26, "Hot-Tracked Item"),
-        (27, "Gradient Active Title Bar"),
-        (28, "Gradient Inactive Title Bar"),
-        (29, "Menu Highlight"),
-        (30, "Menu Bar Background"),
-    ];
+    /// <summary>The names live in Core beside the document's own speller, because the panel and
+    /// the markup must not be able to disagree about what a colour is called. The panel shows them
+    /// with their spaces; the document closes the spaces up so a name is one bare token.</summary>
+    private static IReadOnlyList<(int Index, string Name)> Named => Core.Forms.FormMarkup.SystemColourNames;
 
     /// <summary>Every system colour, with the value that ASKS for it and what the machine answers
     /// today - the System half of the picker, and the reason it can show colours at all.</summary>
@@ -107,11 +78,12 @@ internal static class SystemColours
             return Core.Forms.FormMarkup.ReadColour(text);
         }
 
-        var byName = Named.FirstOrDefault(one =>
-            string.Equals(one.Name, text, StringComparison.OrdinalIgnoreCase));
-        if (byName.Name is not null)
+        // The document's own reader, which forgives spaces and case - so a name picked in the
+        // panel ("Button Face") and the same name typed into a document (`ButtonFace`) are one
+        // colour, read by one function.
+        if (Core.Forms.FormMarkup.ReadColourName(text) is { } named)
         {
-            return SystemBit | byName.Index;
+            return named;
         }
 
         if (text.StartsWith("&H", StringComparison.OrdinalIgnoreCase))

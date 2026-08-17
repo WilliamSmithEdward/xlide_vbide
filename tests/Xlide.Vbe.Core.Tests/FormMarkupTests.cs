@@ -44,6 +44,36 @@ public class FormMarkupTests
                 Text("ControlTipText", "Runs the build")),
         ]);
 
+    /// <summary>
+    /// A colour is spelled two ways because it IS two things. A literal is `#rrggbb`; a system
+    /// colour is a question rather than a value - what does this machine call a button face - and
+    /// it keeps its NAME so the question survives a round trip. Spelling a system colour as
+    /// today's answer would freeze it and the control would stop following the theme.
+    /// </summary>
+    [Fact]
+    public void ASystemColourKeepsItsNameAndALiteralItsHex()
+    {
+        Assert.Equal("ButtonFace", FormMarkup.SpellColour(unchecked((int)0x8000000F)));
+        Assert.Equal("Highlight", FormMarkup.SpellColour(unchecked((int)0x8000000D)));
+        Assert.Equal("#c0c0c0", FormMarkup.SpellColour(0x00C0C0C0));
+
+        // Spaces, hyphens and case are forgiven, so the name the PANEL shows and the name the
+        // document writes are one colour read by one function.
+        Assert.Equal(unchecked((int)0x8000000F), FormMarkup.ReadColourName("ButtonFace"));
+        Assert.Equal(unchecked((int)0x8000000F), FormMarkup.ReadColourName("Button Face"));
+        Assert.Equal(unchecked((int)0x8000000F), FormMarkup.ReadColourName("buttonface"));
+        Assert.Equal(unchecked((int)0x80000008), FormMarkup.ReadColourName("WindowText"));
+        Assert.Equal(unchecked((int)0x8000001A), FormMarkup.ReadColourName("HotTrackedItem"));
+
+        // A word that names no colour is not one, which is what lets a bare word be read as a
+        // colour at all without ever swallowing something else.
+        Assert.Null(FormMarkup.ReadColourName("Chartreuse"));
+        Assert.Null(FormMarkup.ReadColourName(""));
+
+        // A system index Win32 gave no name to keeps VBA's own hex rather than inventing one.
+        Assert.Equal("&H80000019&", FormMarkup.SpellColour(unchecked((int)0x80000019)));
+    }
+
     [Fact]
     public void PrintingIsStableThroughAParse()
     {
