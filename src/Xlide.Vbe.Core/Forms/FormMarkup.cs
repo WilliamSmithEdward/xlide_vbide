@@ -47,23 +47,23 @@ public static class FormMarkup
         ArgumentNullException.ThrowIfNull(form);
 
         var text = new StringBuilder();
-        text.Append("Form ").Append(form.Name);
+        text.Append("<Form Name=\"").Append(form.Name).Append('"');
         if (form.Caption is not null)
         {
-            text.Append(' ').Append(Quoted(form.Caption));
+            text.Append(" Caption=").Append(Quoted(form.Caption));
         }
 
         if (form.Width is { } width && form.Height is { } height)
         {
-            text.Append(" size ").Append(Number(width)).Append('x').Append(Number(height));
+            text.Append(" Width=").Append(Number(width)).Append(" Height=").Append(Number(height));
         }
-
-        text.AppendLine();
 
         foreach (var property in form.Properties)
         {
-            AppendProperty(text, 1, property);
+            AppendAttribute(text, property);
         }
+
+        text.AppendLine(">");
 
         // Children under their container, containers in list order. Parent naming the form (or
         // nothing) means top level; the designer walk spells top level with the form's name.
@@ -92,48 +92,69 @@ public static class FormMarkup
             AppendControl(text, 1, control, byParent);
         }
 
+        text.AppendLine("</Form>");
         return text.ToString();
     }
 
+    /// <summary>
+    /// One control as an element: everything it HAS is an attribute, everything it CONTAINS is a
+    /// child element. That separation is the whole reason for the tags - under the old indented
+    /// dialect a container's own property and a control sitting inside it were both one level in,
+    /// and only the `=` told them apart.
+    ///
+    /// A control with no children closes itself, which keeps the common line to one line.
+    /// </summary>
     private static void AppendControl(
         StringBuilder text, int depth, ControlSpec control, Dictionary<string, List<ControlSpec>> byParent)
     {
-        text.Append(' ', depth * IndentWidth).Append(control.Type).Append(' ').Append(control.Name);
+        text.Append(' ', depth * IndentWidth)
+            .Append('<').Append(control.Type).Append(" Name=\"").Append(control.Name).Append('"');
         if (control.Caption is not null)
         {
-            text.Append(' ').Append(Quoted(control.Caption));
+            text.Append(" Caption=").Append(Quoted(control.Caption));
         }
 
         if (control.Left is { } left && control.Top is { } top)
         {
-            text.Append(" at ").Append(Number(left)).Append(',').Append(Number(top));
+            text.Append(" Left=").Append(Number(left)).Append(" Top=").Append(Number(top));
         }
 
         if (control.Width is { } width && control.Height is { } height)
         {
-            text.Append(" size ").Append(Number(width)).Append('x').Append(Number(height));
+            text.Append(" Width=").Append(Number(width)).Append(" Height=").Append(Number(height));
         }
-
-        text.AppendLine();
 
         foreach (var property in control.Properties)
         {
-            AppendProperty(text, depth + 1, property);
+            AppendAttribute(text, property);
         }
 
-        if (byParent.TryGetValue(control.Name, out var children))
+        var children = byParent.TryGetValue(control.Name, out var found) ? found : null;
+        if (children is null || children.Count == 0)
         {
-            foreach (var child in children)
-            {
-                AppendControl(text, depth + 1, child, byParent);
-            }
+            text.AppendLine(" />");
+            return;
         }
+
+        text.AppendLine(">");
+        foreach (var child in children)
+        {
+            AppendControl(text, depth + 1, child, byParent);
+        }
+
+        text.Append(' ', depth * IndentWidth).Append("</").Append(control.Type).AppendLine(">");
     }
 
-    private static void AppendProperty(StringBuilder text, int depth, PropertySpec property)
+    /// <summary>
+    /// A property as an attribute. TEXT IS QUOTED AND EVERYTHING ELSE IS BARE, which is the
+    /// owner's rule (2026-08-17) and the only spelling that survives a round trip: quoting a
+    /// number the way XML does would make `Caption="True"` and a real flag identical on the way
+    /// back, and the parser recovers the kind from the spelling rather than from a schema it does
+    /// not have.
+    /// </summary>
+    private static void AppendAttribute(StringBuilder text, PropertySpec property)
     {
-        text.Append(' ', depth * IndentWidth).Append(property.Path).Append(" = ");
-        text.AppendLine(property.Kind switch
+        text.Append(' ').Append(property.Path).Append('=').Append(property.Kind switch
         {
             PropertyValueKind.Text => Quoted(property.Value),
             PropertyValueKind.Colour when int.TryParse(
