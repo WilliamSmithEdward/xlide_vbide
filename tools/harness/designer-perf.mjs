@@ -20,6 +20,8 @@
  * a ScrollBar could not be resized, because the selection handles were painted under the
  * neighbour. Timing a surface makes you touch every part of it, which is its own kind of test.
  */
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { open } from "./xlide-api.mjs";
 
 const api = await open();
@@ -149,14 +151,108 @@ await walk("toolbox drop", async () => {
     + `${String(sorted[sorted.length - 1]).padStart(5)}ms   [${runs.join(", ")}]`);
 }
 
-// ---- typing: the debounced path, which SHOULD wait ----
-await walk("typed edit -> draft preview", async (round) => {
-  const source = await text();
-  const edited = source.replace(/ToggleButton HoldToggle "Hold" at \d+,\d+/,
-    `ToggleButton HoldToggle "Hold" at ${112 + (round % 2)},112`);
-  await api.act("designerSetMarkup", { module: form, markup: edited });
-  await until(async () => (await canvas()).draft === true);
+// ---- the container gestures: a page opened, and the strip's menu ----
+await reset();
+await walk("open a page on a MultiPage", async (round) => {
+  const want = round % 2 === 0 ? 2 : 1;
+  await api.act("designerOpenTab", { module: form, container: "Wizard", tab: want });
+  await until(async () => ((await canvas()).containers
+    .find((one) => one.name === "Wizard")?.open ?? -1) === want - 1);
 });
+
+await walk("the tab strip's menu", async () => {
+  const shown = await api.act("designerTabMenu", { module: form, container: "Wizard" });
+  if (!String(shown.detail ?? "").includes("New Page")) throw new Error("no menu");
+  await api.act("closeDialogs", {});
+});
+
+// ---- a GROUP: gathered by marquee, then lined up as one ----
+await reset();
+await walk("marquee over the form's ground", async () => {
+  await api.act("designerMarquee", { module: form, left: 6, top: 6, right: 210, bottom: 120 });
+  await until(async () => (await canvas()).group.length > 1);
+});
+
+// Each round needs controls that are NOT already lined up, and putting them back is not part of
+// what is being timed - the same shape the delete below uses for the same reason.
+{
+  const runs = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    await reset();
+    await api.act("designerMarquee", { module: form, left: 6, top: 6, right: 210, bottom: 120 });
+    await until(async () => (await canvas()).group.length > 1);
+    const before = await text();
+    const started = Date.now();
+    await api.act("designerArrange", { module: form, how: round % 2 === 0 ? "left" : "top" });
+    await until(async () => (await text()) !== before);
+    runs.push(Date.now() - started);
+    await wait(120);
+  }
+
+  const sorted = [...runs].sort((a, b) => a - b);
+  console.log(`${"align the group".padEnd(34)} median ${String(sorted[2]).padStart(5)}ms   worst `
+    + `${String(sorted[sorted.length - 1]).padStart(5)}ms   [${runs.join(", ")}]`);
+}
+
+// ---- depth, which writes the MODEL rather than the document ----
+await reset();
+await walk("bring to front", async (round) => {
+  await api.act("designerSelect", { module: form, control: "NameBox" });
+  const said = await api.act("designerZOrder", { module: form, front: round % 2 === 0 });
+  if (said.did !== true) throw new Error(String(said.detail));
+});
+
+// ---- zoom, which is a transform and should cost a frame ----
+await walk("zoom the canvas", async (round) => {
+  const to = round % 2 === 0 ? 200 : 100;
+  await api.act("designerZoom", { module: form, to });
+  await until(async () => (await api.act("designerZoom", { module: form })).data === to);
+});
+await api.act("designerZoom", { module: form, to: 100 });
+
+// ---- the liveness check: the one thing the surface ASKS rather than hears ----
+await walk("the liveness check", async () => {
+  await api.designerEdit("liveness", { module: form });
+});
+
+// ---- a PICTURE loaded from a file, which is GDI+ and an OLE wrap behind the property write ----
+await reset();
+{
+  const logo = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets", "images", "extension_logo.png");
+  await walk("load a picture onto a control", async (round) => {
+    await api.designerEdit("set", {
+      module: form, project, name: "Badge", property: "Picture", value: round % 2 === 0 ? logo : "",
+    });
+  });
+  await api.designerEdit("set", { module: form, project, name: "Badge", property: "Picture", value: logo });
+}
+
+// ---- typing: the debounced path, which SHOULD wait ----
+//
+// FROM A CLEAN DOCUMENT EVERY ROUND, and that is the whole measurement. Left dirty, the canvas
+// is already previewing a draft when the round starts, so `draft === true` is true before the
+// edit lands and the round times nothing: four rounds read 6-7ms against a first round of 390
+// (2026-08-16), which is the debounce being paid once and then measured away. What this line
+// should say is that a KEYSTROKE waits out the debounce on purpose, where a GESTURE does not.
+{
+  const runs = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    await reset();
+    await until(async () => (await canvas()).draft === false);
+    const source = await text();
+    const edited = source.replace(/ToggleButton HoldToggle "Hold" at \d+,\d+/,
+      `ToggleButton HoldToggle "Hold" at ${112 + round},112`);
+    const started = Date.now();
+    await api.act("designerSetMarkup", { module: form, markup: edited });
+    await until(async () => (await canvas()).draft === true);
+    runs.push(Date.now() - started);
+    await wait(120);
+  }
+
+  const sorted = [...runs].sort((a, b) => a - b);
+  console.log(`${"typed edit -> draft (debounced)".padEnd(34)} median ${String(sorted[2]).padStart(5)}ms   worst `
+    + `${String(sorted[sorted.length - 1]).padStart(5)}ms   [${runs.join(", ")}]`);
+}
 
 // ---- the apply, and the workbook save behind it. A nudge makes the change; the timing is of
 // the SAVE, from the keystroke to the form itself carrying it. ----
@@ -200,7 +296,19 @@ async function cost(label, times, once) {
 console.log("");
 await cost("COM cost: designer read", 10, () => api.designer(form, project));
 await cost("COM cost: markup print", 10, () => api.designerMarkup(form, project));
+// The liveness key against the walk it saves: it rides window events, so what matters is that
+// it is a fraction of a projection rather than another one.
+await cost("COM cost: the liveness key", 10, () => api.designerEdit("liveness", { module: form }));
 await cost("COM cost: an idle tick", 10, () => api.ui());
+
+// And what the PICTURES put on the wire, which is the cost this session's biggest read added:
+// a data URI per picture, on every projection, sent to the page as part of the payload.
+{
+  const drawn = (await api.act("designerCanvas", { module: form })).data?.pictures ?? [];
+  const bytes = drawn.reduce((sum, one) => sum + one.bytes, 0);
+  console.log(`${"pictures on the wire".padEnd(34)} ${String(drawn.length).padStart(5)} picture(s), `
+    + `${Math.round(bytes / 1024)}KB of base64 per projection`);
+}
 
 // The form goes back as found, saved, so the next run measures the shape this one did.
 await reset();

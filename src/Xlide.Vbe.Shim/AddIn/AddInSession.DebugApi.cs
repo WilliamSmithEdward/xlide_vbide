@@ -3023,6 +3023,24 @@ internal sealed partial class AddInSession
                     DebugJsonContext.Default.DebugDefaultsReply);
             }
 
+            // The markup language's whole vocabulary, exactly as the designer tab's completions
+            // and hovers hold it: one answer, two doors. `module` names a live form so the Form's
+            // own entry can be described; without it every other kind still answers.
+            case "vocabulary":
+            {
+                request.Query.TryGetValue("module", out var vocabularyModule);
+                request.Query.TryGetValue("project", out var vocabularyProject);
+
+                using var vocabularyForm = vocabularyModule is { Length: > 0 }
+                    ? FindComponent(vocabularyModule, ResolveNamedProject(vocabularyProject, out _), out _)
+                    : null;
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new FormMarkupVocabularyMessage(
+                        "formMarkupVocabulary",
+                        FormMarkupVocabulary.Of(_controlDefaults, _propertyTypes, vocabularyForm)),
+                    EditorMessageContext.Default.FormMarkupVocabularyMessage);
+            }
+
             case "designer" when request.Query.TryGetValue("module", out var designerModule) && designerModule.Length > 0:
             {
                 // A UserForm's design, read and mutated through the MSForms designer object
@@ -3084,8 +3102,22 @@ internal sealed partial class AddInSession
                             : HostError("set needs property= and value=; name= targets a control, omitted targets the form");
                     }
 
+                    case "zorder":
+                    {
+                        request.Query.TryGetValue("name", out var zName);
+                        request.Query.TryGetValue("to", out var zTo);
+                        return zName is { Length: > 0 }
+                            ? DesignerZOrder(designerModule, designerProject, zName,
+                                !string.Equals(zTo, "back", StringComparison.OrdinalIgnoreCase))
+                            : HostError("zorder needs name=<control> and to=front|back");
+                    }
+
+                    case "liveness":
+                        return DesignerLiveness();
+
                     default:
-                        return HostError($"designer action '{designerAction}' is not add, remove or set");
+                        return HostError(
+                            $"designer action '{designerAction}' is not add, remove, set, zorder or liveness");
                 }
             }
 

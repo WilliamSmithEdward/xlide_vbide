@@ -124,6 +124,14 @@ internal sealed class CodePaneTracker : IDisposable
     public Action? WindowDestroyed { get; set; }
 
     /// <summary>
+    /// Raised when a window in this process APPEARED or WENT - the rare events, the ones a full
+    /// pane refresh already rides. The session uses it to ask whether the native designer changed
+    /// a form behind the product's back: a native design session is bracketed by these, because
+    /// raising the designer window is a show and closing it is a hide or a destroy.
+    /// </summary>
+    public Action? SurfaceStirred { get; set; }
+
+    /// <summary>
     /// Raised when the editor's own frame or its document area moves or resizes.
     ///
     /// This is a different fact from <see cref="Changed"/>, and the difference bit: Changed
@@ -358,6 +366,17 @@ internal sealed class CodePaneTracker : IDisposable
             // once; what makes a close feel immediate is the fast resync poll the session runs
             // afterwards (see AddInSession.UpdatePolling, 2026-08-08).
             WindowDestroyed?.Invoke();
+        }
+
+        // A WINDOW APPEARING OR GOING is the cue for asking whether the native designer changed a
+        // form behind this product's back. Those three events are the rare ones - the comment
+        // above says so and a full pane refresh already rides them - and a native designer
+        // session is BRACKETED by them: raising the window is a show, closing it a hide or a
+        // destroy. Moves are not included, deliberately: a drag inside a form raises none (MSForms
+        // draws its controls windowless) and a frame resize raises thousands.
+        if (windowEvent.IsShow || windowEvent.IsHide || windowEvent.IsCreate || windowEvent.IsDestroy)
+        {
+            SurfaceStirred?.Invoke();
         }
     }
 

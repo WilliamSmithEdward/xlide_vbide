@@ -455,6 +455,10 @@ function boot(): void {
         dirtyChanged: (dirty) => workspace?.setFaceDirty(id, dirty),
         lint: (markup) => bridge.lintFormMarkup(id.module, id.project ?? null, markup),
         watchLint: (listener) => bridge.onFormMarkupLint(id.module, id.project ?? null, listener),
+        // The language's own vocabulary, not this form's: the module travels only so the host
+        // can describe the Form itself from a live one.
+        requestVocabulary: () => bridge.requestFormMarkupVocabulary(id.module, id.project ?? null),
+        watchVocabulary: (listener) => bridge.onFormMarkupVocabulary(listener),
         // The RAW File Save - "saveOnly" skips the host's designer branch, which is what
         // asked this view to apply in the first place; "save" here would loop forever. F5
         // comes back through the sibling that saves and then launches the form.
@@ -464,6 +468,9 @@ function boot(): void {
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
         eventStub: (control) => bridge.designerEventStub(id.module, id.project ?? null, control),
         selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),
+        zorder: (control, front) => bridge.designerZOrder(id.module, id.project ?? null, control, front),
+        setProperty: (control, property, value) =>
+          bridge.designerSetProperty(id.module, id.project ?? null, control, property, value),
         // The whole settings object with one field replaced, which is the call every control
         // in the settings dialog makes: the grid's switch on the canvas is one more of them.
         changeSetting: (key, value) => bridge.updateSettings({ ...currentSettings(), [key]: value }),
@@ -480,7 +487,36 @@ function boot(): void {
       return editor;
     },
     activate: (id) => bridge.activateModule(id.module, id.project ?? undefined, id.face),
-    close: (id, action) => bridge.closeModule(id.module, id.project ?? undefined, action, id.face),
+    /*
+     * A DESIGNER TAB'S UNAPPLIED EDITS GET THE SAME QUESTION a module's unsaved text gets.
+     *
+     * Closing one used to be unconditional, and the host's own comment said the page asked its
+     * own question - which it did not (found in the 2026-08-16 hunt). So a developer who moved
+     * three controls and pressed Ctrl+W lost the three moves with nothing said. The question is
+     * the page's because the state is: unapplied markup lives in the view, and nothing host-side
+     * can know to hold the close.
+     *
+     * Save means what Ctrl+S means on this tab - apply the document to the form, then save the
+     * workbook - which is `applyNow`, the same path the key takes. The close follows the apply
+     * rather than racing it.
+     */
+    close: (id, action) => {
+      const view = id.face === "design"
+        ? designerViews.get(docKeyOf(id.module, id.project, id.face))
+        : undefined;
+      if (view && !action && view.canvasSnapshot().dirty) {
+        shell?.confirmClose(id.module, id.project ?? null, (chosen) => {
+          if (chosen === "save") {
+            view.applyNow();
+          }
+
+          bridge.closeModule(id.module, id.project ?? undefined, "discard", id.face);
+        });
+        return;
+      }
+
+      bridge.closeModule(id.module, id.project ?? undefined, action, id.face);
+    },
     activeChanged: (id, editor) => {
       // The search widget floats over the active group and searches its editor.
       searchWidget.attachTo(editor.getContainerDomNode());
@@ -607,6 +643,7 @@ function boot(): void {
     menuExecute: (path) => bridge.executeMenu(path),
     menuClosed: () => workspace.activeEditor().focus(),
     editProperty: (component, name, value) => bridge.editProperty(component, name, value),
+    pickPicture: (component, name) => bridge.pickPicture(component, name),
     selectComponent: (name) => bridge.selectComponent(name),
     renameModule: (name, workbook, newName) => {
       void bridge.requestModuleRename(name, workbook, newName).then((answer) => {

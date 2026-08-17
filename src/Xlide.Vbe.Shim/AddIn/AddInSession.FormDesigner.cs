@@ -77,7 +77,8 @@ internal sealed partial class AddInSession
             TryNumber(designer, "InsideHeight"),
             FormDesignService.PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor"),
             FormDesignService.PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor"),
-            TryInt(designer, "Zoom"));
+            TryInt(designer, "Zoom"),
+            TryPicture(designer));
 
         var rows = new List<DebugDesignerControl>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -107,7 +108,7 @@ internal sealed partial class AddInSession
         // The PRODUCT projection, not a route-local one: the tab, the apply and this route
         // must all print the same document, form properties included, and two projections is
         // exactly the drift the service exists to end.
-        var markup = FormDesignService.MarkupOf(component, module, out var markupReason);
+        var markup = FormDesignService.MarkupOf(component, module, out var markupReason, _controlDefaults);
         if (markup is null)
         {
             return HostError(markupReason ?? $"{module} could not be projected");
@@ -262,6 +263,51 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
+    /// Brings a control to the front of its container or sends it to the back. MSForms' ZOrder is
+    /// a method rather than a property, so it has no other way in - and the order it changes is
+    /// the order the walk reads controls in, which is what makes it expressible as text.
+    /// </summary>
+    private string DesignerZOrder(string module, string? projectDisplay, string name, bool toFront)
+    {
+        var projectId = ResolveNamedProject(projectDisplay, out var complaint);
+        if (complaint is not null)
+        {
+            return HostError(complaint);
+        }
+
+        using var component = FindComponent(module, projectId, out _);
+        if (component is null || component.GetInt32("Type") != 3)
+        {
+            return HostError($"{module} is not a UserForm of this project");
+        }
+
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return HostError($"{module} has no designer");
+        }
+
+        try
+        {
+            if (!FormDesignService.ZOrderControl(designer, name, toFront))
+            {
+                return HostError($"no control named {name} on {module}");
+            }
+        }
+        catch (Exception ex)
+        {
+            return HostError(ex.Message);
+        }
+
+        Log.Info($"designer: {name} sent to the {(toFront ? "front" : "back")} on {module}");
+        FormDesignService.KeepDesignerDown(component);
+        RefreshDesignerTabFor(module);
+        return JsonSerializer.Serialize(
+            new DebugDesignerEditReply(true, "zorder", name, null, $"{name} is at the {(toFront ? "front" : "back")}"),
+            DebugJsonContext.Default.DebugDesignerEditReply);
+    }
+
+    /// <summary>
     /// Writes one property of a control, or of the form itself when no control is named, and
     /// answers what the property READS BACK - the Properties panel's convention, because the
     /// write proving only that it was asked for is the lie that route existed to end. One level
@@ -302,6 +348,27 @@ internal sealed partial class AddInSession
         {
             return HostError($"{targetLabel}.{property} refused the write ({ex.Message.Trim()})");
         }
+    }
+
+    /// <summary>
+    /// Runs the liveness check NOW and answers which open designer tabs it found changed behind
+    /// the product's back - the read side of the one thing in this surface that is asked rather
+    /// than announced. Every other designer route funnels through a re-projection, so this is the
+    /// only way a probe can drive the path a native edit takes.
+    ///
+    /// The floor between checks is stood down for it: a caller asking the question is not to be
+    /// told the answer was worked out half a second ago.
+    /// </summary>
+    private string DesignerLiveness()
+    {
+        var stale = CheckDesignerTabsForOutsideEdits(now: true);
+        return JsonSerializer.Serialize(
+            new DebugDesignerEditReply(
+                true, "liveness", null, null,
+                stale.Count == 0
+                    ? "every open designer tab already showed its form"
+                    : $"re-projected {string.Join(", ", stale)}"),
+            DebugJsonContext.Default.DebugDesignerEditReply);
     }
 
     /// <summary>A query number, invariant, or null when absent or not a number.</summary>
@@ -470,7 +537,36 @@ internal sealed partial class AddInSession
             TryInt(control, "BorderStyle"),
             TryInt(control, "SpecialEffect"),
             TryText(control, "GroupName"),
-            TryFont(control));
+            TryFont(control),
+            TryPicture(control));
+    }
+
+    /// <summary>
+    /// What a control's Picture holds, described rather than carried: the kind, the size in
+    /// pixels, and the placement properties. Null where there is no picture, which is the
+    /// answer for most controls and every control that cannot hold one.
+    /// </summary>
+    private static DebugDesignerPicture? TryPicture(DispatchObject control)
+    {
+        // An EMPTY Picture is still an object: MSForms hands back a picture holding nothing
+        // rather than Nothing, which is how every Label on the fixture came to report a picture
+        // block saying "(None)" (measured 2026-08-16). Nothing to see is nothing to report.
+        using var picture = PictureBytes.PictureOn(control, "Picture");
+        var kind = PictureBytes.Describe(picture);
+        if (picture is null || kind == "(None)")
+        {
+            return null;
+        }
+
+        var size = PictureBytes.SizeOf(picture);
+        return new DebugDesignerPicture(
+            kind,
+            size?.Width,
+            size?.Height,
+            TryInt(control, "PictureSizeMode"),
+            TryInt(control, "PictureAlignment"),
+            TryFlag(control, "PictureTiling"),
+            TryInt(control, "PicturePosition"));
     }
 
     // ------------------------------------------------------------------ finding

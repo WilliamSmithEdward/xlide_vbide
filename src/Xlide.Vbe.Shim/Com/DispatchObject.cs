@@ -620,6 +620,14 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Writes NOTHING to an object property - `Set x.Picture = Nothing`, which is how a picture
+    /// is taken off a control. By reference like any object assignment, because a null handed to
+    /// an ordinary put is a value the callee is asked to copy rather than a reference to clear.
+    /// </summary>
+    public void ClearObject(string name) =>
+        SetProperty(name, ComVariant.CreateRaw(VarEnum.VT_DISPATCH, nint.Zero), InvokeKind.PropertyPutRef);
+
+    /// <summary>
     /// Writes any property.
     ///
     /// A property assignment is the one call shape that carries a named argument: the value being

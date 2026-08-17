@@ -78,6 +78,53 @@ public sealed record DesignerApplySaveMessage(
     [property: JsonPropertyName("project")] string? Project,
     [property: JsonPropertyName("run")] bool Run = false);
 
+/// <summary>
+/// The markup language's whole vocabulary, answering the page's requestFormMarkupVocabulary:
+/// every kind a document can spell and every property each kind holds, with what it takes, what
+/// it holds untouched, and what its type library says about it.
+///
+/// MEASURED, never written down: each kind's is read from a bare instance of its coclass and its
+/// own ITypeInfo (ControlDefaults), so the completions offer what MSForms on THIS machine has
+/// rather than what a table of ours remembers. Sent once per session - a registered coclass does
+/// not change while Excel is up - and the page's providers answer from it without a round trip.
+/// </summary>
+public sealed record FormMarkupVocabularyMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("kinds")] FormMarkupKind[] Kinds);
+
+/// <summary>One kind a document can name: its ProgID, whether it holds children, and its
+/// properties. `Form` is here too, described from the live form rather than from a coclass,
+/// because a document always has exactly one and its lines are the first a developer types.</summary>
+public sealed record FormMarkupKind(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("progId")] string? ProgId,
+    [property: JsonPropertyName("container")] bool Container,
+    [property: JsonPropertyName("properties")] FormMarkupProperty[] Properties,
+    /// <summary>What the kind IS, in a line - the sentence a hover leads with. The wording is
+    /// this product's, because MSForms ships no help strings to read it out of.</summary>
+    [property: JsonPropertyName("doc")] string? Doc = null);
+
+/// <summary>One property line a document may carry: the path, the type it is declared as, the
+/// value an untouched control holds, the library's own sentence about it, and its enum's members
+/// where it has them. A colour says so, because the dialect spells one as &amp;Hbbggrr&amp;.</summary>
+public sealed record FormMarkupProperty(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("default")] string? Default,
+    [property: JsonPropertyName("doc")] string? Doc,
+    [property: JsonPropertyName("members")] FormMarkupEnumMember[]? Members,
+    [property: JsonPropertyName("colour")] bool Colour,
+    /// <summary>Values that are not an enum's members but are still worth offering, because the
+    /// machine can be asked what they are: a font's faces, today, which is the whole list. The
+    /// property still takes anything - MSForms stores a face as a plain string.</summary>
+    [property: JsonPropertyName("values")] string[]? Values = null);
+
+/// <summary>One member of a property's enum: the name the developer writes, and the number
+/// behind it - both, because the dialect takes either.</summary>
+public sealed record FormMarkupEnumMember(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("value")] int Value);
+
 /// <summary>One squiggle: 1-based line, the reason, and "error" or "warning".</summary>
 public sealed record FormMarkupLintFinding(
     [property: JsonPropertyName("line")] int Line,
@@ -95,7 +142,24 @@ public sealed record FormMarkupBox(
     [property: JsonPropertyName("backColor")] string? BackColor = null,
     [property: JsonPropertyName("foreColor")] string? ForeColor = null,
     [property: JsonPropertyName("insideWidth")] double? InsideWidth = null,
-    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null);
+    [property: JsonPropertyName("insideHeight")] double? InsideHeight = null,
+    [property: JsonPropertyName("picture")] FormMarkupPicture? Picture = null);
+
+/// <summary>
+/// A picture and how it sits, for the canvas to paint. Display truth of the purest kind: the
+/// dialect cannot speak a picture - it is binary in the form's .frx, and MSForms does not
+/// remember the file it came from - so it rides the projection or it is not drawn at all.
+///
+/// The two placements are the two families MSForms has, and a control has one or the other. A
+/// SURFACE picture (the form, an Image, a Frame, a Page) is placed by size mode, alignment and
+/// tiling; a CAPTION picture (a button, a Label, a check box) by its position around the caption.
+/// </summary>
+public sealed record FormMarkupPicture(
+    [property: JsonPropertyName("src")] string Source,
+    [property: JsonPropertyName("sizeMode")] int? SizeMode = null,
+    [property: JsonPropertyName("alignment")] int? Alignment = null,
+    [property: JsonPropertyName("tiling")] bool? Tiling = null,
+    [property: JsonPropertyName("position")] int? Position = null);
 
 /// <summary>
 /// One control of the projection, flat with a parent NAME - the walk's own shape. Bounds are
@@ -121,7 +185,12 @@ public sealed record FormMarkupControl(
     [property: JsonPropertyName("foreColor")] string? ForeColor = null,
     [property: JsonPropertyName("insideWidth")] double? InsideWidth = null,
     [property: JsonPropertyName("insideHeight")] double? InsideHeight = null,
-    [property: JsonPropertyName("tabs")] string[]? Tabs = null);
+    [property: JsonPropertyName("tabs")] string[]? Tabs = null,
+    /// <summary>Where the control sits in its container's TAB ORDER. Display truth, like the
+    /// fonts and the client areas beside it: the dialect does not print a tab index, and the
+    /// tab-order dialog reads it from the projection rather than walking the form again.</summary>
+    [property: JsonPropertyName("tabIndex")] int? TabIndex = null,
+    [property: JsonPropertyName("picture")] FormMarkupPicture? Picture = null);
 
 /// <summary>
 /// Tells the surface there is nothing to show: every pane is closed. The surface drops every
@@ -421,6 +490,27 @@ public sealed record SetInstallPathMessage(
     [property: JsonPropertyName("path")] string? Path);
 
 /// <summary>
+/// The system colours, for the colour picker's System half: what each one is called, the value
+/// that ASKS for it, and what this machine answers today. Sent once when the surface loads, like
+/// the install path - the names do not change and the values only change with the theme, which
+/// the picker can afford to learn on the next reload.
+///
+/// Only the host can answer the third field, which is the whole reason this message exists: a
+/// page has no way to ask Windows what a button face is, and a picker whose System list is grey
+/// squares is a list of words.
+/// </summary>
+public sealed record SetSystemColoursMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("colours")] SystemColourEntry[] Colours);
+
+/// <summary>One system colour: the name the panel shows, the value a property takes, and the
+/// CSS this machine resolves it to right now.</summary>
+public sealed record SystemColourEntry(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("value")] string Value,
+    [property: JsonPropertyName("css")] string Css);
+
+/// <summary>
 /// One property of the selected component, rendered for display. Writable says whether an edit
 /// will be attempted, not promised: the editor can still refuse one, and the refusal is reported.
 /// Boolean marks a value that offers True and False rather than free text.
@@ -439,7 +529,13 @@ public sealed record SurfacePropertyEntry(
     [property: JsonPropertyName("options")] string[]? Options = null,
     /// <summary>A colour property's value as CSS, system colours resolved - what a swatch
     /// paints, and what the picker opens on. Null for everything that is not a colour.</summary>
-    [property: JsonPropertyName("swatch")] string? Swatch = null);
+    [property: JsonPropertyName("swatch")] string? Swatch = null,
+    /// <summary>True for a PICTURE row, which is edited by choosing a file rather than by
+    /// typing: the row offers Browse and Clear instead of a text box.</summary>
+    [property: JsonPropertyName("picture")] bool Picture = false,
+    /// <summary>The picture itself as a data URI, for the row's thumbnail. Null when the
+    /// property holds nothing, or holds something this side cannot turn into pixels.</summary>
+    [property: JsonPropertyName("preview")] string? Preview = null);
 
 /// <summary>
 /// The properties of the selected component, with the class name shown in the panel's object
@@ -653,6 +749,10 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(FormMarkupLintMessage))]
 [JsonSerializable(typeof(DesignerApplySaveMessage))]
 [JsonSerializable(typeof(FormMarkupLintFinding))]
+[JsonSerializable(typeof(FormMarkupVocabularyMessage))]
+[JsonSerializable(typeof(FormMarkupKind))]
+[JsonSerializable(typeof(FormMarkupProperty))]
+[JsonSerializable(typeof(FormMarkupEnumMember))]
 [JsonSerializable(typeof(ClearDocumentMessage))]
 [JsonSerializable(typeof(SetDiagnosticsMessage))]
 [JsonSerializable(typeof(RevealLineMessage))]
@@ -684,6 +784,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SetMenuMessage))]
 [JsonSerializable(typeof(SetChromeMessage))]
 [JsonSerializable(typeof(SetInstallPathMessage))]
+[JsonSerializable(typeof(SetSystemColoursMessage))]
+[JsonSerializable(typeof(SystemColourEntry))]
 [JsonSerializable(typeof(SurfaceMenuItem))]
 [JsonSerializable(typeof(SetPropertiesMessage))]
 [JsonSerializable(typeof(SurfacePropertyEntry))]

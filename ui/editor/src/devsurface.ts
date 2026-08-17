@@ -24,7 +24,9 @@ import type * as monaco from "monaco-editor";
 // type-only import cannot call it.
 import * as monacoApi from "monaco-editor/editor/editor.api.js";
 
+import { openTabOrderDialog } from "./taborderdialog.js";
 import type { EditorBridge } from "./bridge.js";
+import { colourPickerState, pickColour } from "./colourpicker.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
@@ -68,7 +70,7 @@ export interface UiSnapshot {
   properties: {
     component: string;
     kind: string;
-    rows: { name: string; value: string; writable: boolean; boolean: boolean }[];
+    rows: { name: string; value: string; writable: boolean; boolean: boolean; options?: string[] | null; swatch?: string | null; picture?: boolean; previewBytes?: number }[];
   };
   /**
    * What the status line is saying right now, empty when it is saying nothing.
@@ -172,14 +174,35 @@ export interface DevSurfaceParts {
         selected: string | null;
         markupLine: number;
         markupBlock: { from: number; to: number } | null;
+        group: string[];
         controls: { name: string; left: number; top: number; width: number; height: number }[];
+        containers: { name: string; kind: string; tabs: string[]; open: number; page: string }[];
+        pictures: { name: string; bytes: number; where: string }[];
       };
-      select(name: string): void;
+      /** Whether the PROJECTION holds a control of this name, which is a different question
+       * from whether the canvas is drawing one: a control on a closed page is both real and
+       * undrawn, and selecting it is what opens the page. */
+      knows(name: string): boolean;
+      completions(line: number, column: number): {
+        label: string; detail: string | null; documentation: string | null; insert: string;
+        replaces: { from: number; to: number };
+      }[];
+      hover(line: number, column: number): string[];
+      headerHint(line: number, column: number): { label: string; active: number; parameter: string } | null;
+      select(name: string, extend?: boolean): void;
+      marqueeOver(left: number, top: number, right: number, bottom: number): string;
+      arrange(how: string): string;
+      zorder(names: string[], front: boolean): string;
+      showTabOrder(): string;
+      setZoom(what: number | "fit"): string;
+      zoomPercent(): number;
       requestEventStub(control: string | null): void;
       dragControl(name: string, dx: number, dy: number, alt?: boolean): string;
       resizeControl(name: string, edge: string, dx: number, dy: number, alt?: boolean): string;
       deleteControl(name: string): string;
       addFromToolbox(kind: string, left: number, top: number): string;
+      openTabOn(container: string, which: string): string;
+      openTabMenu(container: string, which: string): string;
     } | null;
   };
   search: {
@@ -253,7 +276,7 @@ export interface DevSurfaceParts {
    * the "(Name)" row - and until 2026-08-11 nothing in the api could drive it, read it, or even
    * name it. It was the only user-visible surface with no presence in either direction.
    */
-  properties(): { component: string; kind: string; round: number; rows: { name: string; value: string; writable: boolean; boolean: boolean }[] };
+  properties(): { component: string; kind: string; round: number; rows: { name: string; value: string; writable: boolean; boolean: boolean; options?: string[] | null; swatch?: string | null; picture?: boolean; preview?: string }[] };
   editProperty(name: string, value: string): boolean;
   /**
    * Changes one setting THROUGH THE PAGE, the way the dialog's own controls do.
@@ -566,6 +589,23 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     };
   };
 
+  /**
+   * The Properties rows with any picture's BYTES taken out and its size left behind.
+   *
+   * A thumbnail's data URI is a whole bitmap in base64 - kilobytes for an icon, megabytes for a
+   * photograph - and a snapshot is read on every wait in every suite. What a caller can actually
+   * check is that a row HAS a picture and that it changed, which `previewBytes` answers in eight
+   * characters. The pixels are proved where pixels belong: against the running form's photograph.
+   */
+  const withoutPictureBytes = (shown: ReturnType<typeof parts.properties>): ReturnType<typeof parts.properties> => ({
+    ...shown,
+    // `preview` arrives NULL rather than absent from the host's record, so the test is for
+    // either: reading `.length` off the null took the whole snapshot down with it, which is a
+    // failure every suite sees at once because every wait reads a snapshot.
+    rows: shown.rows.map(({ preview, ...row }) => (
+      preview ? { ...row, previewBytes: preview.length } : row)),
+  });
+
   const state = (at?: { lineNumber: number; column: number }): UiSnapshot => ({
     workspace: workspace.snapshot(),
     explorer: explorer.treeState(),
@@ -575,7 +615,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focus: editorFocus(),
     settings: { ...currentSettings() } as unknown as Record<string, unknown>,
     emptyViewShown: workspace.emptyViewShown(),
-    properties: parts.properties(),
+    properties: withoutPictureBytes(parts.properties()),
     statusNotice: parts.statusNotice(),
     statusPosition: parts.statusPosition(),
     statusModule: parts.statusModule(),
@@ -673,6 +713,74 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       return { did: true, detail: `${markup.length} char(s) set, not applied` };
     },
 
+    /*
+     * The markup language service, asked where a developer would ask it. Each of these places
+     * the CARET at the spot first, exactly as the gesture that raises the widget does, and then
+     * reads the real provider - there is no second copy of the answer for a probe to read.
+     */
+
+    /** What the completion widget offers at line/column, in `data`. */
+    designerComplete: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerComplete takes module, line and column" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const items = view.completions(Number(args.line ?? 1), Number(args.column ?? 1));
+      return {
+        did: true,
+        detail: items.length === 0
+          ? "nothing is offered here"
+          : `${items.length} suggestion(s): ${items.slice(0, 6).map((item) => item.label).join(", ")}`,
+        data: items,
+      };
+    },
+
+    /** What a hover at line/column says, block by block, in `data`. */
+    designerHover: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerHover takes module, line and column" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const blocks = view.hover(Number(args.line ?? 1), Number(args.column ?? 1));
+      return {
+        did: blocks.length > 0,
+        detail: blocks.length === 0 ? "nothing to say here" : `${blocks.length} block(s)`,
+        data: blocks,
+      };
+    },
+
+    /** The header hint at line/column: the grammar and the clause it points at, in `data`. */
+    designerHint: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerHint takes module, line and column" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const hint = view.headerHint(Number(args.line ?? 1), Number(args.column ?? 1));
+      return {
+        did: hint !== null,
+        detail: hint === null ? "no header hint here" : `${hint.label} - on ${hint.parameter}`,
+        data: hint,
+      };
+    },
+
     /** The markup document's current squiggles, in `data`. */
     designerLint: (args) => {
       const module = typeof args.module === "string" ? args.module : null;
@@ -721,8 +829,249 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
 
       const name = typeof args.control === "string" ? args.control : "";
-      view.select(name);
-      return { did: true, detail: name === "" ? "the form is selected" : `${name} is selected` };
+      // Against the PROJECTION rather than against the drawing. An act that names a control the
+      // form does not have answers false rather than setting a selection nothing can see - a row
+      // that went on to open the tab-order dialog for a control deleted three sections earlier
+      // was told the selection had taken. But a control on a page that is NOT OPEN is perfectly
+      // real, and selecting it is what opens that page: asking the canvas conflated the two and
+      // refused the second (2026-08-16).
+      if (!view.knows(name)) {
+        return { did: false, detail: `${name} is not on this form to select` };
+      }
+
+      // `extend` is Ctrl+click: it adds the control to the selection, or takes it back out, and
+      // leaves the anchor where it was. Read the whole group back through designerCanvas.
+      const extend = args.extend === true || args.extend === "1" || args.extend === "true";
+      view.select(name, extend);
+      return {
+        did: true,
+        detail: extend
+          ? `the selection is ${view.canvasSnapshot().group.join(", ") || "empty"}`
+          : name === "" ? "the form is selected" : `${name} is selected`,
+      };
+    },
+
+    /**
+     * The rubber band over the form's own ground: a real pointer drag from one corner to the
+     * other, in POINTS from the form's client origin, selecting every control of that ground it
+     * TOUCHES. The read side is designerCanvas's `group`, anchor first.
+     */
+    designerMarquee: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerMarquee takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const corners = ["left", "top", "right", "bottom"].map((one) => Number(args[one] ?? Number.NaN));
+      if (corners.some((one) => !Number.isFinite(one))) {
+        return { did: false, detail: "designerMarquee takes left, top, right and bottom in points" };
+      }
+
+      const [left, top, right, bottom] = corners as [number, number, number, number];
+      const outcome = view.marqueeOver(left, top, right, bottom);
+      return { did: outcome.startsWith("banded"), detail: outcome };
+    },
+
+    /**
+     * Lines the selection up on its ANCHOR, sizes it to the anchor, or spreads it evenly - the
+     * native Format menu's arrange group, which lives on this canvas's own context menu because
+     * the product has no menu bar and the editor's Format menu would act on the native
+     * designer's selection rather than ours.
+     *
+     * `how` is left, centreX, right, top, centreY, bottom, width, height, across or down. It
+     * writes the DOCUMENT as one undoable edit, like every other canvas gesture.
+     */
+    designerArrange: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const how = typeof args.how === "string" ? args.how : null;
+      if (!module || !how) {
+        return { did: false, detail: "designerArrange takes module and how" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = view.arrange(how);
+      return { did: outcome.startsWith(how), detail: outcome };
+    },
+
+    /**
+     * The Tab Order dialog: `open` shows it for the container the selection sits in, `move` sends
+     * one control a place up or down, and with neither it answers the order the list is showing.
+     *
+     * The rows are the container's controls in TAB order, which is not the order the canvas draws
+     * them in - the walk reads a container's collection in creation order. A move is a TabIndex
+     * write through the host's own SetControlProperty, and MSForms renumbers the rest, so read the
+     * result back off `designer` rather than trusting the list.
+     */
+    designerTabOrder: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerTabOrder takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      if (args.open === true || args.open === "1" || args.open === "true") {
+        const outcome = view.showTabOrder();
+        return { did: outcome.startsWith("tab order"), detail: outcome };
+      }
+
+      const open = openTabOrderDialog();
+      if (!open) {
+        return { did: false, detail: "no tab-order dialog is open" };
+      }
+
+      // Closed by its own Close button rather than by the handle, for the mirror rule - and
+      // because a modal left standing is a backdrop over the canvas that fails every row after
+      // it, which is how this verb came to exist.
+      if (args.close === true || args.close === "1" || args.close === "true") {
+        const button = document.querySelector<HTMLElement>("#taborder-card .modal-button.primary");
+        button?.click();
+        return { did: openTabOrderDialog() === null, detail: "the tab-order dialog is closed" };
+      }
+
+      const control = typeof args.control === "string" ? args.control : null;
+      if (control !== null) {
+        const by = String(args.move ?? "up") === "down" ? 1 : -1;
+        const moved = open.move(control, by);
+        return {
+          did: moved,
+          detail: moved
+            ? `${control} moved ${by === 1 ? "down" : "up"}: ${open.order().join(", ")}`
+            : `${control} cannot move ${by === 1 ? "down" : "up"}`,
+        };
+      }
+
+      return { did: true, detail: open.order().join(", "), data: open.order() };
+    },
+
+    /**
+     * How large the canvas draws the form: `to` is a percentage or `fit`, and with neither it
+     * answers the zoom that is showing.
+     *
+     * Everything a gesture does stays in POINTS whatever the zoom, which is the thing worth
+     * pinning: `designerDrag` by 12 points moves a control 12 points at 200% as it does at 100%,
+     * because only the screen boundary knows about the scale.
+     */
+    designerZoom: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerZoom takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      if (args.to === undefined) {
+        return { did: true, detail: `zoom ${view.zoomPercent()}%`, data: view.zoomPercent() };
+      }
+
+      const asked = String(args.to);
+      const outcome = asked.toLowerCase() === "fit"
+        ? view.setZoom("fit")
+        : view.setZoom(Number(asked) / 100);
+      return { did: outcome.startsWith("zoom"), detail: outcome };
+    },
+
+    /**
+     * Bring to Front / Send to Back on the whole selection - `front=1` for the front.
+     *
+     * The one canvas gesture that writes the MODEL rather than the document, so there is nothing
+     * in `designerMarkup` to read back and nothing on the canvas to see: MSForms' Controls
+     * collection is not in z-order and does not move when ZOrder is called (measured). The proof
+     * is the RUNNING form - launch it and photograph it, the way designer-parity.mjs does.
+     */
+    designerZOrder: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      if (!module) {
+        return { did: false, detail: "designerZOrder takes module" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const front = args.front === true || args.front === "1" || args.front === "true";
+      const control = typeof args.control === "string" && args.control.length > 0 ? args.control : null;
+      const outcome = control === null
+        ? view.zorder(view.canvasSnapshot().group.filter((one) => one !== ""), front)
+        : view.zorder([control], front);
+      return { did: !outcome.startsWith("nothing"), detail: outcome };
+    },
+
+    /**
+     * Opens a tab of a MultiPage or a TabStrip on the canvas - the real press on the real tab.
+     * `tab` is a page's name, the tab's label, or a 1-based position.
+     *
+     * A MultiPage draws that page's controls and selects the PAGE, as the native designer does.
+     * A TabStrip only marks the tab: its tabs are an index rather than containers, and the
+     * runtime draws the same controls under every one. Read it back through designerCanvas,
+     * whose `containers` say which tab each strip is showing.
+     */
+    designerOpenTab: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const container = typeof args.container === "string" ? args.container : null;
+      const tab = args.tab === undefined ? null : String(args.tab);
+      if (!module || !container || tab === null) {
+        return { did: false, detail: "designerOpenTab takes module, container and tab" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = view.openTabOn(container, tab);
+      return { did: outcome.startsWith("opened"), detail: outcome };
+    },
+
+    /**
+     * Right-clicks a MultiPage's tab strip and reports the menu it produced - New Page and
+     * Delete Page, the native designer's own pair. `tab` names the tab to right-click, or is
+     * omitted for the strip itself; a right-click on a tab opens that page first, so the item
+     * chosen acts on the page named. Pick an item with chooseMenuItem.
+     *
+     * A TabStrip opens NO menu, deliberately: its tabs are not in the markup dialect, so there
+     * is no line to add or take away and every item would be a claim this cannot keep.
+     */
+    designerTabMenu: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const container = typeof args.container === "string" ? args.container : null;
+      if (!module || !container) {
+        return { did: false, detail: "designerTabMenu takes module and container" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = view.openTabMenu(container, args.tab === undefined ? "" : String(args.tab));
+      if (!outcome.startsWith("right-clicked")) {
+        return { did: false, detail: outcome };
+      }
+
+      // Disabled items are SAID to be disabled: this menu greys Delete Page for a MultiPage
+      // with no pages, and a row that could not tell the two apart would pass either way.
+      const labels = [...document.querySelectorAll<HTMLElement>(".menu-dropdown .menu-item")]
+        .map((one) => (one.textContent ?? "").trim() + (one.classList.contains("disabled") ? " (disabled)" : ""));
+      return labels.length > 0
+        ? { did: true, detail: labels.join(" | ") }
+        : { did: false, detail: `${outcome} and no menu opened` };
     },
 
     /** Drags a control on the canvas by a delta in POINTS - the document's own unit - through
@@ -1508,6 +1857,55 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       });
 
       return settled();
+    },
+
+    /**
+     * The colour picker, through the swatch and the swatch's own click. `property` names the
+     * row, and `choose` - a `#rrggbb` from the palette or a system colour's NAME - presses that
+     * choice; without it the picker is left standing, which is how a probe reads what it offers.
+     *
+     * The picker is a page widget over a host value, so this act stops at the page: the write it
+     * causes is an ordinary property edit, and `editProperty`'s own wait is what proves the host
+     * took it.
+     */
+    colourPicker: (args) => {
+      const property = typeof args.property === "string" ? args.property : null;
+      const choose = typeof args.choose === "string" ? args.choose : null;
+
+      if (property) {
+        const swatch = document.querySelector<HTMLElement>(
+          `.prop-row[data-property="${CSS.escape(property)}"] .prop-swatch`);
+        if (!swatch) {
+          const shown = parts.properties();
+          const colours = shown.rows.filter((row) => row.swatch).map((row) => row.name);
+          return {
+            did: false,
+            detail: `no colour row named ${property}; the panel offers `
+              + (colours.length > 0 ? colours.join(", ") : "none"),
+          };
+        }
+
+        swatch.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+      }
+
+      const state = colourPickerState();
+      if (!state) {
+        return { did: false, detail: "no colour picker is open" };
+      }
+
+      if (choose === null) {
+        return {
+          did: true,
+          detail: `${state.property} is open on ${state.value}: `
+            + `${state.palette} palette colour(s), ${state.system} system colour(s)`,
+          data: state,
+        };
+      }
+
+      const picked = pickColour(choose);
+      return picked === null
+        ? { did: false, detail: `the picker offers no colour spelled ${choose}`, data: state }
+        : { did: true, detail: `picked ${picked} for ${state.property}`, data: { ...state, picked } };
     },
 
     // Every page dialog closes on Escape, and none of them expose a handle. This is the one

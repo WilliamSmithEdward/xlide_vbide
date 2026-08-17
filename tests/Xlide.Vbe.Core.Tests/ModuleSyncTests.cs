@@ -48,12 +48,16 @@ public class ModuleSyncTests
         """;
 
     [Fact]
-    public void AStandardModuleIsABasAndEverythingElseIsACls()
+    public void AStandardModuleIsABasAFormIsAFrmAndEverythingElseIsACls()
     {
         Assert.Equal("Helpers.bas", ModuleSync.FileNameFor("Helpers", "standard"));
         Assert.Equal("Account.cls", ModuleSync.FileNameFor("Account", "class"));
         Assert.Equal("Sheet1.cls", ModuleSync.FileNameFor("Sheet1", "document"));
-        Assert.Equal("FrmMain.cls", ModuleSync.FileNameFor("FrmMain", "userform"));
+
+        // A form is a .frm from 2026-08-16: the VBE's own exporter writes one, and only that file
+        // names the binary sidecar its controls live in. As a .cls it named a temporary path.
+        Assert.Equal("FrmMain.frm", ModuleSync.FileNameFor("FrmMain", "userform"));
+        Assert.Equal("FrmMain.form", ModuleSync.DesignFileNameFor("FrmMain"));
     }
 
     [Fact]
@@ -482,5 +486,176 @@ public class ModuleSyncTests
         // The shown comparison hides the header; the payload must not, or the exported file would
         // lose the attributes and come back as a different kind of module.
         Assert.Equal(full, Assert.Single(plan.Items).PayloadSource);
+    }
+
+    /*
+     * A FORM'S DESIGN IS A FILE OF ITS OWN.
+     *
+     * A UserForm exported as code alone cannot be put back - Excel writes its controls into a
+     * binary .frx - so a form in source control was half a form. The markup is the design as text,
+     * and it rides as a second row so the developer can see it, tick it and diff it.
+     */
+    private const string FormMarkup = "Form Entry \"Quarter\" size 360x320\r\n"
+        + "    CommandButton OkButton \"Start\" at 262,250 size 72x24\r\n";
+
+    private const string FormCode = "Option Explicit\r\n";
+
+    [Fact]
+    public void AFormExportsItsDesignBesideItsCode()
+    {
+        var plan = ModuleSync.PlanExport(
+            "p", "Book.xlsm", @"C:\out",
+            [new LiveModule("Entry", "userform", $"{ClassHeader}\r\n{FormCode}", FormMarkup)],
+            [],
+            ExportMode.ExportAll);
+
+        var code = Assert.Single(plan.Items, item => item.FileName == "Entry.frm");
+        var design = Assert.Single(plan.Items, item => item.FileName == "Entry.form");
+
+        Assert.False(code.IsDesign);
+        Assert.True(design.IsDesign);
+        Assert.Equal(SyncStatus.WillCreate, design.Status);
+        Assert.Equal(FormMarkup, design.PayloadSource);
+    }
+
+    [Fact]
+    public void ADesignAlreadyOnDiskIsUnchangedRatherThanRewritten()
+    {
+        var plan = ModuleSync.PlanExport(
+            "p", "Book.xlsm", @"C:\out",
+            [new LiveModule("Entry", "userform", $"{ClassHeader}\r\n{FormCode}", FormMarkup)],
+            [new RepoFile("Entry.form", FormMarkup)],
+            ExportMode.ExportAll);
+
+        Assert.Equal(SyncStatus.Unchanged, Assert.Single(plan.Items, one => one.IsDesign).Status);
+    }
+
+    [Fact]
+    public void ADesignFileImportsAsAnApplyToTheFormItNames()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\out",
+            [new LiveModule("Entry", "userform", $"{ClassHeader}\r\n{FormCode}", "Form Entry\r\n")],
+            [new RepoFile("Entry.form", FormMarkup)],
+            ImportMode.UpdateOnly);
+
+        var design = Assert.Single(plan.Items, one => one.IsDesign);
+        Assert.Equal(SyncStatus.WillUpdate, design.Status);
+        Assert.Equal("Entry", design.ModuleName);
+        Assert.Equal(FormMarkup, design.PayloadSource);
+    }
+
+    [Fact]
+    public void ADesignWhoseFormIsMissingIsRefusedRatherThanGuessedAt()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\out",
+            [],
+            [new RepoFile("Entry.form", FormMarkup)],
+            ImportMode.UpdateOnly);
+
+        var design = Assert.Single(plan.Items, one => one.IsDesign);
+        Assert.Equal(SyncStatus.SkippingImport, design.Status);
+        Assert.True(design.CannotBeCreated);
+        Assert.Contains("Add the form first", design.Warning);
+    }
+
+    /*
+     * IMPORT CREATES A FORM, 2026-08-16. The pair the VBE's own exporter writes is what its
+     * importer reads, so the refusal that stood here for months - "a UserForm's designer is not
+     * in this file" - was only ever true of the code file alone.
+     */
+    private const string ExportedForm = """
+        VERSION 5.00
+        Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} FrmMain
+           Caption         =   "Main"
+           OleObjectBlob   =   "FrmMain.frx":0000
+        End
+        Attribute VB_Name = "FrmMain"
+        Attribute VB_GlobalNameSpace = False
+        Option Explicit
+        """;
+
+    [Fact]
+    public void AFormArrivesWithItsSidecarAndIsCreatedRatherThanSkipped()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\in",
+            [],
+            [new RepoFile("FrmMain.frm", ExportedForm), new RepoFile("FrmMain.frx", string.Empty)],
+            ImportMode.UpdateOnly);
+
+        var item = Assert.Single(plan.Items);
+        Assert.Equal(SyncStatus.WillCreate, item.Status);
+        Assert.False(item.CannotBeCreated);
+        Assert.True(item.Checked);
+        Assert.Contains("binary sidecar", item.Warning);
+        Assert.Empty(plan.Warnings);
+    }
+
+    [Fact]
+    public void TheSharedPlannersClsNamingStillReadsAsAForm()
+    {
+        // The companion editor writes a form's code as `.cls` (xlide_vscode#21) where this product
+        // writes `.frm`. Same bytes, two names - so the TEXT decides, not the extension.
+        Assert.Equal("userform", ModuleSync.ClassifyFile("FrmMain.cls", ExportedForm));
+
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\in",
+            [],
+            [new RepoFile("FrmMain.cls", ExportedForm), new RepoFile("FrmMain.frx", string.Empty)],
+            ImportMode.UpdateOnly);
+
+        Assert.Equal(SyncStatus.WillCreate, Assert.Single(plan.Items).Status);
+    }
+
+    [Fact]
+    public void AFormWithoutItsSidecarIsRefusedByTheNameOfTheFileItWants()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\in",
+            [],
+            [new RepoFile("FrmMain.frm", ExportedForm)],
+            ImportMode.UpdateOnly);
+
+        var item = Assert.Single(plan.Items);
+        Assert.Equal(SyncStatus.SkippingImport, item.Status);
+        Assert.True(item.CannotBeCreated);
+        Assert.Contains("FrmMain.frx", item.Warning);
+        Assert.Contains("FrmMain.frx", Assert.Single(plan.Warnings));
+    }
+
+    [Fact]
+    public void ADesignBesideAnArrivingFormIsOfferedUntickedBecauseTheBinaryIsAuthoritative()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\in",
+            [],
+            [
+                new RepoFile("FrmMain.frm", ExportedForm),
+                new RepoFile("FrmMain.frx", string.Empty),
+                new RepoFile("FrmMain.form", FormMarkup),
+            ],
+            ImportMode.UpdateOnly);
+
+        var design = Assert.Single(plan.Items, one => one.IsDesign);
+        Assert.Equal(SyncStatus.WillUpdate, design.Status);
+
+        // The guard: the sidecar carries every control and the markup's list is TOTAL, so
+        // applying the text on top can only take things away when the two disagree.
+        Assert.False(design.Checked);
+        Assert.Contains("would be removed", design.Warning);
+    }
+
+    [Fact]
+    public void ASidecarIsNeverARowOfItsOwn()
+    {
+        var plan = ModuleSync.PlanImport(
+            "p", "Book.xlsm", @"C:\in",
+            [],
+            [new RepoFile("FrmMain.frm", ExportedForm), new RepoFile("FrmMain.frx", string.Empty)],
+            ImportMode.UpdateOnly);
+
+        Assert.DoesNotContain(plan.Items, one => one.FileName.EndsWith(".frx"));
     }
 }

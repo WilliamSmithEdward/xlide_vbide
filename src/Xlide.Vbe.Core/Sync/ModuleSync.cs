@@ -89,7 +89,7 @@ public sealed record SyncDiffLine(int? LeftNumber, int? RightNumber, string Left
 /// <param name="Name">The module's name in the project.</param>
 /// <param name="Kind">standard, class, document or userform.</param>
 /// <param name="Source">The full text INCLUDING the attribute header, so a file round-trips.</param>
-public sealed record LiveModule(string Name, string Kind, string Source);
+public sealed record LiveModule(string Name, string Kind, string Source, string? Design = null);
 
 /// <summary>A module file as the folder currently holds it.</summary>
 /// <param name="FileName">The file's own name, with its extension.</param>
@@ -128,6 +128,10 @@ public sealed record SyncItem
 
     /// <summary>A document or UserForm that the folder has and the project does not.</summary>
     public required bool CannotBeCreated { get; init; }
+
+    /// <summary>This row is a form's DESIGN rather than its code: on import it goes through the
+    /// markup apply, not through a module write.</summary>
+    public bool IsDesign { get; init; }
 
     public required string LeftTitle { get; init; }
 
@@ -218,9 +222,48 @@ public static class ModuleSync
         @"[<>:""/\\|?*\x00-\x1F]",
         RegexOptions.Compiled);
 
-    /// <summary>The extension a module of this kind is written as.</summary>
-    public static string ExtensionFor(string moduleKind) =>
-        string.Equals(moduleKind, "standard", StringComparison.OrdinalIgnoreCase) ? "bas" : "cls";
+    /// <summary>
+    /// The extension a module of this kind is written as.
+    ///
+    /// A UserForm is a `.frm`, which is what the VBE's own exporter writes and the only file that
+    /// can carry a form's controls: the binary sidecar beside it holds them, and the `.frm` names
+    /// it. Writing a form as a `.cls` - which this did until 2026-08-16 - produced a file whose
+    /// `OleObjectBlob` line pointed at the temporary export path, so it named a `.frx` that was
+    /// not there and changed on every export.
+    /// </summary>
+    public static string ExtensionFor(string moduleKind) => moduleKind.ToLowerInvariant() switch
+    {
+        "standard" => "bas",
+        "userform" => "frm",
+        _ => "cls",
+    };
+
+    /*
+     * A FORM'S DESIGN IS A FILE OF ITS OWN, and it is xlide's markup rather than anything Office
+     * writes (docs/userform-designer.md, the markup layer).
+     *
+     * A UserForm exported as code alone cannot be put back: Excel's own export writes the
+     * controls into a binary .frx and names it in an `OleObjectBlob` line, so a form in source
+     * control has always been half a form - the code diffable, the design a blob or nothing. The
+     * markup is the design as TEXT, in the same dialect the designer tab edits, so a form now
+     * round-trips through a folder the way a module does.
+     *
+     * `.form` rather than `.frm`: a `.frm` is the VBE's own format and a developer must not be
+     * able to hand this file to Excel expecting it to be read. Nothing but xlide reads a `.form`,
+     * and that is what the extension says.
+     */
+    public const string DesignExtension = "form";
+
+    /// <summary>The file a form's design is written to, beside the file its code goes to.</summary>
+    public static string DesignFileNameFor(string moduleName)
+    {
+        var safe = UnsafeFileNameCharacters.Replace(moduleName, "_").TrimEnd('.', ' ');
+        return $"{(safe.Length == 0 ? moduleName : safe)}.{DesignExtension}";
+    }
+
+    /// <summary>True for a file this product reads as a form's DESIGN rather than as code.</summary>
+    public static bool IsDesignFileName(string fileName) =>
+        fileName.EndsWith($".{DesignExtension}", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The file a module is written to. A module may be named things a file cannot be, so the unsafe
@@ -239,10 +282,52 @@ public static class ModuleSync
         return $"{safe}.{ExtensionFor(moduleKind)}";
     }
 
-    /// <summary>True for a file this product will read as a module.</summary>
+    /// <summary>True for a file this product will read as a module. A `.frx` is not one: it is a
+    /// form's binary sidecar, read by the VBE's importer and by nothing here.</summary>
     public static bool IsModuleFileName(string fileName) =>
         fileName.EndsWith(".bas", StringComparison.OrdinalIgnoreCase)
-        || fileName.EndsWith(".cls", StringComparison.OrdinalIgnoreCase);
+        || fileName.EndsWith(".cls", StringComparison.OrdinalIgnoreCase)
+        || fileName.EndsWith(".frm", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The extension of a form's binary sidecar - the controls, and everything the
+    /// markup does not print. Listed in the folder so the planner can see whether the pair is
+    /// whole; never read here, because it is binary and only the VBE's importer reads it.</summary>
+    public const string SidecarExtension = "frx";
+
+    public static bool IsSidecarFileName(string fileName) =>
+        fileName.EndsWith($".{SidecarExtension}", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The MSForms UserForm coclass, which is what the first `Begin` of an exported form names.
+    ///
+    /// CONTENT DECIDES WHAT A FILE IS, and it has to: the shared planner writes a form's code as
+    /// `.cls` (xlide_vscode#21) while this product writes `.frm`, so the same form arrives under
+    /// either name and the text is identical either way. Measured 2026-08-16 on this product's own
+    /// export: `EntryForm.cls` holding `VERSION 5.00` and this GUID, beside `EntryForm.frx`.
+    /// </summary>
+    private const string UserFormCoclass = "{C62A69F0-16DC-11CE-9E98-00AA00574A4F}";
+
+    /// <summary>True when the text is a FORM's exported file, whatever the file is called.</summary>
+    public static bool IsFormText(string source) =>
+        source.StartsWith("VERSION", StringComparison.OrdinalIgnoreCase)
+        && source.Contains(UserFormCoclass, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The sidecar an exported form NAMES, or null when it names none.
+    ///
+    /// A form's header carries `OleObjectBlob = "EntryForm.frx":0000`, and that name is the
+    /// contract between the two files: import the pair under any other pair of names and the
+    /// blob is not found. A form with nothing in it names no blob, and needs no sidecar.
+    /// </summary>
+    public static string? SidecarNamedBy(string source)
+    {
+        var match = OleObjectBlobPattern.Match(source);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static readonly Regex OleObjectBlobPattern = new(
+        @"OleObjectBlob\s*=\s*""([^""]+)""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// What kind of module a file holds.
@@ -258,6 +343,14 @@ public static class ModuleSync
         if (fileName.EndsWith(".bas", StringComparison.OrdinalIgnoreCase))
         {
             return "standard";
+        }
+
+        // A .frm says what it is without being read: the VBE writes one only for a form. So does
+        // the TEXT, whatever the file is called, and that matters because the shared planner
+        // writes a form's code as `.cls` where this product writes `.frm` - same bytes, two names.
+        if (fileName.EndsWith(".frm", StringComparison.OrdinalIgnoreCase) || IsFormText(source))
+        {
+            return "userform";
         }
 
         var moduleName = ModuleNameFromFileName(fileName);
@@ -654,6 +747,8 @@ public static class ModuleSync
             }
         }
 
+        items.AddRange(DesignRowsForExport(modules, byFileName, live));
+
         return new SyncPlan
         {
             Direction = SyncDirection.Export,
@@ -664,6 +759,190 @@ public static class ModuleSync
             Items = Sort(items),
             Warnings = [],
         };
+    }
+
+
+    /*
+     * A FORM'S DESIGN ROWS, for whichever planner drew the rest.
+     *
+     * Sync has two planners - the companion editor's, shared through the engine, and this one -
+     * and the shared one is the default because both products write into the same folders. It has
+     * no idea a form's design can be a file, and it should not: the markup is xlide_vbide's own.
+     * So the rows are built here and added to whichever plan came back, which keeps one
+     * implementation for both paths rather than a copy that agrees today.
+     */
+    public static IReadOnlyList<SyncItem> DesignRowsForExport(
+        IReadOnlyList<LiveModule> modules,
+        IReadOnlyDictionary<string, RepoFile> byFileName,
+        HashSet<string>? live = null)
+    {
+        var rows = new List<SyncItem>();
+        foreach (var module in modules)
+        {
+            if (module.Design is not { } design)
+            {
+                continue;
+            }
+
+            var designFile = DesignFileNameFor(module.Name);
+            live?.Add(designFile);
+            var onDisk = byFileName.GetValueOrDefault(designFile);
+            var same = onDisk is not null && SameText(design, onDisk.Source);
+            var status = same
+                ? SyncStatus.Unchanged
+                : onDisk is not null ? SyncStatus.WillWrite : SyncStatus.WillCreate;
+
+            rows.Add(new SyncItem
+            {
+                Id = $"export-design:{module.Name}",
+                ModuleName = module.Name,
+                ModuleKind = module.Kind,
+                FileName = designFile,
+                Status = status,
+                Checked = status is SyncStatus.WillWrite or SyncStatus.WillCreate,
+                Detail = DetailFor(status),
+                ExistsInProject = true,
+                ExistsInFolder = onDisk is not null,
+                CannotBeCreated = false,
+                IsDesign = true,
+                LeftTitle = $"{module.Name}'s design in the project",
+                RightTitle = status switch
+                {
+                    SyncStatus.WillCreate => $"{designFile} (new file)",
+                    SyncStatus.WillWrite => $"{designFile} (overwritten)",
+                    _ => designFile,
+                },
+                Diff = same ? Identical(design) : Diff(design, onDisk?.Source ?? string.Empty),
+                DiffWithHeaders = same ? Identical(design) : Diff(design, onDisk?.Source ?? string.Empty),
+                PayloadSource = design,
+            });
+        }
+
+        return rows;
+    }
+
+    /// <summary>The same rows the other way: a `.form` in the folder applies to the form it names,
+    /// through the markup's own name-keyed diff rather than through a module write.</summary>
+    public static IReadOnlyList<SyncItem> DesignRowsForImport(
+        IReadOnlyList<LiveModule> modules,
+        IReadOnlyList<RepoFile> folderFiles,
+        List<string>? warnings = null)
+    {
+        var byModuleName = modules.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
+        var rows = new List<SyncItem>();
+
+        foreach (var file in folderFiles.Where(one => IsDesignFileName(one.FileName)))
+        {
+            var moduleName = ModuleNameFromFileName(file.FileName);
+            var existing = byModuleName.GetValueOrDefault(moduleName);
+
+            // THE FORM MAY BE ARRIVING IN THE SAME IMPORT. A design row used to be skipped
+            // outright when the project held no such form; now that a form can be created from
+            // its own pair, the row that follows the create is a real row - the creates run
+            // first, because the module rows come first in the plan.
+            var arriving = existing is null && CreatableFormFor(moduleName, folderFiles);
+            var missing = existing is null && !arriving;
+            var status = file.ReadError is not null
+                ? SyncStatus.ReadError
+                : missing
+                    ? SyncStatus.SkippingImport
+                    : existing is not null && SameText(file.Source, existing.Design ?? string.Empty)
+                        ? SyncStatus.Unchanged
+                        : SyncStatus.WillUpdate;
+
+            if (missing)
+            {
+                warnings?.Add($"{moduleName}: skipped, because the form itself is not in the project.");
+            }
+
+            rows.Add(new SyncItem
+            {
+                Id = $"import-design:{file.FileName}",
+                ModuleName = moduleName,
+                ModuleKind = existing?.Kind ?? "userform",
+                FileName = file.FileName,
+                Status = status,
+                // UNTICKED ON A CREATE, and that is the foot-gun guard rather than an oversight.
+                // The binary sidecar the create imports is AUTHORITATIVE: it carries the whole
+                // form, including everything the markup does not print. Applying the text on top
+                // can therefore only take things away - a `.form` out of date with its `.frx`
+                // prunes controls the binary brought in, because the markup's control list is
+                // TOTAL. So the row is offered and left for the developer to tick, which makes
+                // pruning a choice rather than a surprise.
+                Checked = status == SyncStatus.WillUpdate && !arriving,
+                Detail = status == SyncStatus.WillUpdate ? "Apply the design" : DetailFor(status),
+                Warning = file.ReadError
+                    ?? (missing
+                        ? "This is a form's design. Add the form first and this will build its controls."
+                        : arriving
+                            ? "The form is being created from its own binary in this import, which already "
+                                + "carries every control. Tick this only to make the form match this file "
+                                + "exactly - a control the file does not name would be removed."
+                            : status == SyncStatus.WillUpdate
+                                ? "The controls this names are added, moved and set on the form itself. "
+                                    + "A control the file does not name is removed."
+                                : null),
+                ExistsInProject = existing is not null,
+                ExistsInFolder = true,
+                CannotBeCreated = missing,
+                IsDesign = true,
+                LeftTitle = file.FileName,
+                RightTitle = status switch
+                {
+                    SyncStatus.WillUpdate => $"{moduleName}'s design (applied)",
+                    SyncStatus.SkippingImport => $"{moduleName} (no such form)",
+                    _ => moduleName,
+                },
+                Diff = status == SyncStatus.Unchanged
+                    ? Identical(file.Source)
+                    : Diff(file.Source, existing?.Design ?? string.Empty),
+                DiffWithHeaders = status == SyncStatus.Unchanged
+                    ? Identical(file.Source)
+                    : Diff(file.Source, existing?.Design ?? string.Empty),
+                PayloadSource = file.Source,
+            });
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// True when the folder holds a whole form PAIR for this name - the exported text and the
+    /// sidecar it points at - which is what makes a design row for a form the project does not
+    /// hold a real row rather than a skip.
+    /// </summary>
+    private static bool CreatableFormFor(string moduleName, IReadOnlyList<RepoFile> folderFiles)
+    {
+        foreach (var file in folderFiles)
+        {
+            if (!IsModuleFileName(file.FileName)
+                || !string.Equals(ModuleNameFromFileName(file.FileName), moduleName, StringComparison.OrdinalIgnoreCase)
+                || !IsFormText(file.Source))
+            {
+                continue;
+            }
+
+            return SidecarMissingFor(file, folderFiles) is null;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The sidecar a form's file names and the folder does not hold, or null when the pair is
+    /// whole - which includes a form that names no sidecar at all, because a form with nothing
+    /// in it has no blob to point at.
+    /// </summary>
+    private static string? SidecarMissingFor(RepoFile file, IReadOnlyList<RepoFile> folderFiles)
+    {
+        if (SidecarNamedBy(file.Source) is not { Length: > 0 } named)
+        {
+            return null;
+        }
+
+        return folderFiles.Any(one => string.Equals(one.FileName, named, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : named;
     }
 
     /// <summary>Works out what reading the folder into the project would do.</summary>
@@ -690,7 +969,18 @@ public static class ModuleSync
             var moduleName = ModuleNameFromFileName(file.FileName);
             var existing = byModuleName.GetValueOrDefault(moduleName);
             var kind = existing?.Kind ?? ClassifyFile(file.FileName, file.Source);
-            var cannotBeCreated = existing is null && kind is "document" or "userform";
+            var missingSidecar = existing is null && kind == "userform"
+                ? SidecarMissingFor(file, folderFiles)
+                : null;
+            // A FORM CAN BE CREATED NOW, which is what changed on 2026-08-16. The pair the VBE's
+            // own exporter writes - the header text and the binary beside it - is what its
+            // importer reads, so a form round-trips through a folder the way a module does. What
+            // still cannot be created is a form whose SIDECAR is not there (the header names it
+            // and the import would find nothing) and a document module, which belongs to the
+            // workbook rather than to the project.
+            var cannotBeCreated = existing is null
+                && (kind == "document"
+                    || (kind == "userform" && (!IsFormText(file.Source) || missingSidecar is not null)));
             var projectSource = existing?.Source ?? string.Empty;
 
             var status = file.ReadError is not null
@@ -711,12 +1001,23 @@ public static class ModuleSync
                 warning = kind == "document"
                     ? "A worksheet or workbook module belongs to the workbook and cannot be created from a file. "
                         + "Add the sheet first and this will update its code."
-                    : "A UserForm's designer is not in this file, so the form cannot be created from it. "
-                        + "Add the form first and this will update its code.";
+                    : missingSidecar is not null
+                        ? $"This form names {missingSidecar}, which is not in the folder. That file holds its "
+                            + "controls, so the form cannot be created without it. Add the form first and this "
+                            + "will update its code."
+                        : "A UserForm's designer is not in this file, so the form cannot be created from it. "
+                            + "Add the form first and this will update its code.";
                 lock (warnings)
                 {
-                    warnings.Add($"{moduleName}: skipped, because a {kind} cannot be created from source.");
+                    warnings.Add(missingSidecar is not null
+                        ? $"{moduleName}: skipped, because {missingSidecar} is not in the folder."
+                        : $"{moduleName}: skipped, because a {kind} cannot be created from source.");
                 }
+            }
+            else if (existing is null && kind == "userform")
+            {
+                warning = "The form is created from the pair the VBE's own exporter writes - this file and its "
+                    + $"binary sidecar - so it arrives whole: controls, fonts, pictures and all.";
             }
             else if (existing is not null && kind is "document" or "userform")
             {
@@ -753,6 +1054,8 @@ public static class ModuleSync
                 PayloadSource = file.Source,
             };
         }).ToList();
+
+        items.AddRange(DesignRowsForImport(modules, folderFiles, warnings));
 
         if (mode == ImportMode.TrueUpStandardClass)
         {

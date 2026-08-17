@@ -26,7 +26,9 @@ Probed against a live session (RenameFixture.xlsm, `component add kind=3` throug
 - **Sync already meets the binary half.** Export writes the `.frm` with its `.frx` sidecar
   through the editor's own exporter; import updates a form's code and refuses to CREATE a form
   from source, answering `skipping-import` with the reason - a form's designer is not in the
-  file. The refusal is the right behaviour and stays.
+  file. The refusal is the right behaviour and stays. *(It did not stay: import creates a form
+  from its PAIR since 2026-08-16 - see the sync section below. The refusal was right about the
+  code file alone and wrong about the two files together.)*
 
 So the current contract is clean: the code half is fully served, the design half is
 deliberately unreachable rather than half-served, and nothing on the surface lies about it.
@@ -155,7 +157,11 @@ Form EntryForm "Quarter Entry" size 360x320
 ```
 
 The dialect is VBA's, deliberately: apostrophe comments, `True`/`False`, doubled quotes inside
-strings, `&H8000000F&` where a colour is spelled. A header line is
+strings. A COLOUR is the one place it is not (2026-08-16, at the owner's direction, when the
+Properties panel started spelling colours the same way): a plain colour is `#c0dcc0`, the
+spelling every developer already has, and `&H8000000F&` stays for a SYSTEM colour, which is a
+question about the machine rather than an RGB. Both spellings parse, one conversion in Core
+serves the parser, the printer and the panel, and the model still stores the decimal. A header line is
 `Type Name ["Caption"] [at left,top] [size width x height]` - identity and the universals
 inline, because every visual control has them - and anything else is an indented
 `Path = value` line, one level of dotting reaching a font. Indentation is containment: a
@@ -294,7 +300,7 @@ the host-owns-membership invariant survives.
     early: points scaled 4/3, children composed by NESTING inside their container's element
     (MSForms' own coordinate model), captions real, a foreign type drawn as bounds plus its
     name, never a guessed appearance. Page tabs render as headers with the first page's
-    content showing.
+    content showing - and a click on a tab opens any of them from 2026-08-16, under M5 below.
   - **The page half**: `DocumentId` grew an optional face (two tabs, one module, distinct
     keys); the workspace mounts a per-form `DesignerView` over the group's editor and
     reparents it as the tab moves, so the markup editor's scroll and undo ride along; the
@@ -338,8 +344,89 @@ the host-owns-membership invariant survives.
      appearing at their lines, warnings apart from errors, and clearing on canonical text.
      The same evening the language moved to FOUR-space indentation (the owner's call):
      printer, parser, editor tab size, every literal and sample.
-  3. *Completions and hover* - control types, `at`/`size` scaffolding, known property
-     paths per control kind; needs the language service shape of (2) to answer from.
+  3. *Completions, hover and the header hint* - **landed 2026-08-16** (the owner: "I'd like
+     full hover intellisense / completions / hints etc. in the markup section").
+
+     The vocabulary is MEASURED, and that is the whole design. A bare instance of each
+     control's coclass was already being created for the defaults inventory; it now answers a
+     second question while it is up - what each of those properties MEANS - read through the
+     same `ITypeInfo` the Properties panel spells its enums with. So a completion offers a
+     property MSForms on this machine actually has, a hover repeats the library's own sentence
+     rather than one written here, and the two panels and the document cannot hold different
+     ideas of what a Label is. `vocabulary` is the route, `FormMarkupVocabulary` shapes it, and
+     the page asks once per session and holds it: no keystroke waits on a round trip.
+
+     What it offers, by where the caret is. A line that can open a control offers the KINDS,
+     filtered by what the container takes - under a MultiPage only `Page`, and a Page only
+     under a MultiPage - each arriving as a whole scaffolded header with a free name, a
+     caption, a position and MSForms' own drop size as tab stops. A line under a control also
+     offers that control's PROPERTY names, and picking one opens the value list without a second
+     keystroke. Past a header's name the CLAUSES are offered, never twice on one line and never
+     inside a caption. On the value's side of an `=`, the property's enum members by the name a
+     developer writes.
+
+     **Hover answers what the line does not.** Over a KIND, what that class of control is; over a
+     control's NAME, the declaration VBA would write - `OkButton As MSForms.CommandButton` - with
+     the class described under it, which is the same sentence hovering that name in the CODE half
+     already gets. Over a property path, its declared type, untouched value and members; over an
+     enum member, the number behind it.
+
+     What it does not do is read the line's own geometry back. The first cut did, and it was
+     standing in the way of the text it was quoting (the owner: "the current hover information is
+     superfluous... that's obvious from the markdown"). The position and the size are on screen
+     under the pointer; the class of a `CommandButton` is not.
+
+     **The coclass went the same way, 2026-08-16** (the owner: "the part on class rollover that
+     says forms.optionbutton.1 says that on all of them... seems not helpful"). It was correct per
+     kind - each card carried its own - and that was the problem: for the standard fifteen the
+     ProgID is `Forms.` plus the word the pointer is already on plus `.1`, so every card spent a
+     line restating its own heading. It stays only where it cannot be worked out, which is the
+     third-party case it was there for, and the completion list drops it on the same rule.
+
+     The fifteen class descriptions are the second table in this product whose WORDING is ours
+     rather than measured, for the reason measured here: MSForms ships no help strings at all.
+     The first is the system colour names, for the same kind of reason.
+
+     The hint is the header's grammar with the clause the hand is on, followed by the clause
+     KEYWORD standing rather than by counting words - `at` takes two numbers and a caption takes
+     none, so word counting drifts immediately.
+
+     **The page reads structure, and that is not a second grammar.** Which container a line sits
+     in, whether it is a header or a property: positional, four spaces a level, suggestion-only.
+     It can be wrong about what to OFFER and never about what is valid, because it refuses
+     nothing - the squiggles keep coming from Core's tolerant parse, host-side, the apply's own.
+     That is the line this feature had to stay on the right side of, and it is why the language
+     moved into `formmarkuplang.ts` beside the grammar rather than into the view.
+
+     Four things measured on the way, each of which changed the code.
+
+     A font's Size is VT_CY - MSForms stores it as currency - and the printable filter did not
+     have the case, so `FontSize` came back with no default at all.
+
+     The DOTTED font paths were built and then deleted. The dialect spells `Font.Size = 12` and
+     the apply reaches it, so the first cut walked each bare control's font object; it offered
+     nothing, because an OLE font is a vtable interface whose getters declare their result as a
+     retval PARAMETER and the property walk reads a parameter as "indexed, skip it". Chasing that
+     was the wrong fix: a control's own extender already carries `FontName`, `FontSize`,
+     `FontBold` and `FontItalic` flat, they measure cleanly, and an apply writes them - so the
+     dotted spelling would have been a second way to say what the list already says. Two
+     spellings of one property is a worse completion list, not a richer one.
+
+     A bare MULTIPAGE throws out of its own type library rather than declining, which silenced
+     the entire vocabulary until each half of the read was guarded per kind. It answers one value
+     of its fifteen properties, and the other fourteen are offered without defaults - a property
+     an unsited control refuses is still a property a developer can set.
+
+     And MSForms carries NO help strings: every `doc` came back empty across all fifteen kinds,
+     so a hover shows the type, the untouched value and the members, and the field stays for the
+     libraries that do document themselves - a third-party control added by ProgID may.
+
+     The FORM is the one kind with no coclass to instantiate bare, so its entry is described from
+     a live form when the page names one, which is why the request carries a module at all.
+
+     `vocabulary`, `act designerComplete`, `act designerHover` and `act designerHint` are the
+     drive side; the suite compares what the page OFFERS against what the host MEASURED rather
+     than against a list written down twice.
 
   **Form properties joined the markup 2026-08-13, late** (the owner's ask): the projection
   prints the form's own property lines - `BackColor`, `ForeColor` to start - read from the
@@ -677,6 +764,155 @@ the host-owns-membership invariant survives.
   suite pins the palette against the ROUTE - the add route's own refusal names its kinds,
   so the two lists are compared rather than both being written down twice.
 
+  **A GROUP, and the arrange vocabulary, 2026-08-16** - the rest of M5's own sentence ("delete,
+  align and distribute"). Everything on the canvas assumed one selection, so there was no Align
+  Left, no Make Same Size and no Distribute, which is most of what the native Format menu carried.
+
+  The selection is an ANCHOR and the rest: `selectedName` keeps its meaning - the one the handles
+  dress, the one the Properties panel follows, the one an alignment lines the others up with -
+  and everything else rides beside it. That is the native designer's primary control, and keeping
+  it as the same field means every gesture written before groups existed still reads correctly.
+
+  Ctrl+click gathers one, a rubber band over a container's own ground gathers several - what it
+  TOUCHES rather than what it encloses, MSForms' own rule and the more forgiving one. A group is
+  one container's business: a control from another box starts a new selection instead, because
+  controls measured from different origins cannot be moved together or lined up in any way that
+  means something on screen. The rest of the group wears a boundary and no handles, because only
+  the anchor can be pulled.
+
+  A drag or a nudge moves them all by the same delta, a Delete takes them all out, and each is ONE
+  edit and one undo step - which is what the multi-line write exists for. Align, Same Size and
+  Space are the same commit again: they compute each control's box and write them together.
+
+  They live on the canvas's own CONTEXT MENU, and that is the answer to where the Format menu
+  went. This product has no menu bar; the editor's own Format menu stays suppressed and must,
+  because it would act on the native designer's selection rather than on ours. So the menu appears
+  on a group and not on a single control - an item that cannot run is worse than no menu when the
+  whole gesture is "do this to these".
+
+  **A drag carries a control OUT of its container, 2026-08-16** - the reparenting M5 deferred
+  ("dragging a control OUT of its Frame is reparenting, a later gesture, not a clamp failure").
+  Until this, a drag stopped at the container's edge and moving a control from a Frame to the
+  form could only be done by editing the markup by hand.
+
+  It happens WHILE the drag runs rather than at the drop, and that is the whole implementation:
+  every control box hides its overflow, so a control dragged past its parent's edge is simply
+  clipped away and the developer is dragging something invisible. The control is carried into
+  whatever container the pointer is over - the same hit test the toolbox drop uses - and the
+  gesture is rebased as it goes: the origin becomes the box's position in the new container's
+  coordinates and the press moves to here, which is exactly what the arithmetic measures from.
+  The clamp then keeps it inside its NEW home, because the clamp reads the element's parent.
+
+  Two guards, both of them the document's own logic rather than the picture's: a container
+  cannot be carried into itself or into anything it holds, and the drop refuses a move whose
+  destination is inside the block that is moving. Only a MOVE reparents - pulling a handle is a
+  statement about size, not about belonging - and the dragged control is transparent to the
+  pointer while it travels, or the hit test would answer "itself" and no drag could ever find
+  where it was going.
+
+  The drop rewrites the DOCUMENT: the whole block, re-indented a level under its new home and
+  appended at the end of it, as one undoable edit. It is a whole-document splice rather than two
+  ranges, because the two collide the moment the block being moved is the last one in the file.
+
+  **A reparented control is a NEW control, and that is measured**: the apply's name-keyed diff
+  calls a changed container a remove-and-add, which is the truth of what it means, so the control
+  MSForms builds afterwards carries only what the markup printed. Moving a control out of a frame
+  and saving, the fixture's option button came back with a fresh tab index (0 to 12) and the
+  form's own font in place of the frame's. Everything the projection prints survives; everything
+  it does not is born again at its default. That is the strongest argument yet for the sited
+  baseline this document keeps as an open item - the more the document says, the less a reparent
+  costs.
+
+  **The containers opened, 2026-08-16.** A MultiPage drew its first page and nothing reached
+  the second: page two's controls were in the document, invisible, and a drop always landed on
+  page one whatever the tabs said. Now a click on a tab opens that page - its controls draw,
+  the page is SELECTED (the Properties panel follows to it, the markup caret lands on its
+  line), and the next drop lands on the page being looked at.
+
+  What made it small is that **the page body IS the page**. It carries the page's identity now
+  rather than being an anonymous box inside the MultiPage, so a press on it selects the page
+  the way a press on the form's ground selects the form, a drop reads the page's name off the
+  thing it landed on, and the selection has something to dress. It is dressed in an outline
+  and no handles: a Page has neither a position nor a size of its own, and eight grips that
+  can pull nothing are a promise the canvas would not keep.
+
+  It runs both ways, which is the same rule as the markup caret's: **selecting anything inside
+  a page opens that page.** A caret on a line in page two's block used to select nothing at
+  all - the canvas had no element for a control it was not drawing, so the selection fell back
+  to the form - and now it opens the page and dresses the control.
+
+  **New Page and Delete Page sit on the tab strip's own context menu**, where the native
+  designer keeps them, and both write the DOCUMENT as one undoable edit: New Page appends
+  `Page PageN "PageN"` under the container and opens it, Delete Page takes the page's line and
+  everything under it, and one Ctrl+Z gives a whole page back with its children. Delete Page
+  acts on the page that is OPEN whether the right-click landed on a tab or on the empty end of
+  the strip, because what a developer means by "this page" is the one on screen; a MultiPage
+  the document has emptied draws as bare chrome and greys the item rather than offering to
+  delete nothing.
+
+  A TabStrip switches too and honestly shows nothing new, which is the whole truth about it:
+  its tabs are an INDEX rather than containers, and the runtime draws the same controls under
+  every one. It gets no page menu, because its tabs are not in the dialect - they ride the
+  walk as strings for painting, there is no line to add or remove, and every item would be a
+  claim the product cannot keep. That gap is the dialect's and is recorded here rather than
+  papered over in the menu.
+
+  **Which made the tab's own appearance the whole of the feedback, and it was not enough** (the
+  owner, 2026-08-16: "in the tab strip, there is no differentiation between tab 1 and tab 2").
+  On a MultiPage a click changes the content, so a faint mark on the tab is a confirmation; on a
+  TabStrip nothing else moves, and a 5% wash plus bold was all the difference there was. The open
+  tab is drawn the way the runtime draws one now - raised into the body, its ground undarkened,
+  the closed ones lower and darker - which is both clearer and closer to the surface a developer
+  without xlide sees.
+
+  **And the FIXTURE was telling a lie about the control** (the owner, the same evening: "there is
+  a button drawn over it, but changing the tabs doesn't visually do anything"). The fixture's
+  TabStrip was 86 points tall, which put its face under the OK button at 250, and it held nothing
+  of its own - so it read as a broken tab control rather than as the one control on the form that
+  needs code to mean anything. It is shorter than the MultiPage beside it now, it carries a label
+  on its face captioned "Views_Change fills this", and the code-behind has the handler that makes
+  the point. Nothing about the CONTROL was wrong; the demonstration was.
+
+  **Then the dialect learned tabs, 2026-08-16** (the owner, looking at the document: "in the
+  markdown, i dont see anything indented under the tab view"). The canvas drew two tabs and the
+  strip's line stood with nothing under it, because a TabStrip's tabs rode the walk as strings for
+  painting and were in no other way part of the projection.
+
+  A `Tab` is a line now, shaped like a `Page`'s - identity and a caption, nothing else to say -
+  and it goes the whole way: the walk emits one row per tab, the printer prints them under the
+  strip, the parser takes them back (a TabStrip contains Tabs and nothing else; a Tab sits under a
+  TabStrip and holds nothing), the apply adds and removes them through MSForms' own `Tabs.Add` and
+  `Tabs.Remove`, and the strip's menu offers New Tab and Delete Tab exactly as a MultiPage's
+  offers pages. Measured end to end: a tab added from the menu reaches the real form at Ctrl+S and
+  leaves it again the same way.
+
+  **And the two kinds with no coclass got their vocabulary.** A Page answered ZERO properties to
+  completion and hover, and a Tab was not in the vocabulary at all - both for the same reason the
+  Form was not: `ControlDefaults` measures a bare instance of a coclass, and neither has one. They
+  are described from a LIVE one on the open form now, through the same walk the Form entry uses:
+  24 properties for a Page, 5 for a Tab, measured rather than written down, and no form open means
+  an empty list rather than an invented one.
+
+  **The class hover leads with the type** (the owner: "can you add the class type to the class
+  hover?"), so hovering `CommandButton` answers `MSForms.CommandButton` and then what the class is
+  - the declaration a developer would write, which is the one thing about a kind that is not
+  already on the line under the pointer.
+
+  **Which page is open is VIEW state, and that is this canvas's one designated deviation from
+  the native designer**, which writes the container's `Value` and dirties the form. Reaching
+  page two must not rewrite the developer's form: the document is the transaction log, so a
+  switch that landed in it would make LOOKING a change and Ctrl+S would carry it to the form.
+  Navigation is not manipulation here, the way scrolling and selection are not. And the
+  dialect has no honest line for it anyway - a MultiPage's measured vocabulary is fifteen
+  properties and `Value` is not among them - so a form that should OPEN on a given page says
+  so where every other unprinted property is said, the Properties panel.
+
+  One bug paid for on the way, and it is a general one: **opening a tab redraws the canvas, so
+  the element the event arrived on is detached the moment the handler acts on it.** The strip
+  menu read which page was open off its own `strip` element after opening the right-clicked
+  tab, got the previous picture's answer, and deleted the page the developer had just left.
+  Anything reading the canvas after a redraw reads it again from the canvas.
+
   One measured trap sits under all of this: **a gesture's origin comes from the DOCUMENT,
   never from the painted box.** The first resize read `element.offsetWidth`, which carries
   whatever border the renderer drew, so a form pulled twenty points wider grew twenty-one.
@@ -730,6 +966,142 @@ the host-owns-membership invariant survives.
   suppressed menu entries return one by one, each unsuppressed in the same change that makes
   it true.
 
+  **Z-ORDER landed 2026-08-16, and the measurement is the design.** MSForms' ZOrder is a METHOD
+  rather than a property, so nothing in this product could reach it; now Bring to Front and Send
+  to Back sit on the canvas's own context menu, offered for one control as well as for a group.
+
+  Two things were measured before any of it was built, and both changed the shape:
+
+  - **The Controls collection is not in z-order.** Calling ZOrder front and back on a control
+    leaves the walk's order exactly as it was. So the projection cannot see depth, the markup has
+    no way to say it, and the canvas cannot draw it - it paints in collection order, which is
+    creation order, and that is now a recorded parity gap rather than an unexamined one.
+  - **ZOrder itself works, proved on the running form.** Two overlapping opaque labels, red under
+    blue: 3,669 red pixels against 8,040 blue before, and exactly the reverse after. That
+    photograph is the only instrument that can see this feature, and the suite takes it.
+
+  So depth is the ONE canvas gesture that writes the model rather than the document, and it is a
+  designated deviation with its reason: the dialect cannot express it, so there is nothing to
+  write. It behaves like a Properties panel edit - at once, no Ctrl+S - and the developer sees it
+  when the form runs.
+
+  **ZOOM landed 2026-08-16**, at the end of the palette row: a menu of the usual percentages and a
+  Fit, on a button wearing the percentage it is drawing at. Anything asked for is clamped to 25%
+  at the bottom and 400% at the top; Fit never goes past 200%, because a small form blown up to
+  fill a wide tab is not what Fit means.
+
+  The implementation is one decision. The picture is a CSS transform on the form itself, so
+  everything INSIDE it - every control's left and top, every guide, every snap - stays in the
+  form's own coordinates and knows nothing about the scale. Only the places where screen pixels
+  cross into points were touched, and they all go through two functions now. What that buys is
+  the property worth having: a drag of twelve points moves a control twelve points at 200% as it
+  does at 100%, which the suite pins by dragging at a zoom and reading the DOCUMENT.
+
+  The form rides a stage sized to the scaled dimensions, because a transform does not change
+  layout: without it the scroll bars would still describe a form at 100% and half of a zoomed one
+  would be unreachable. Fit measures the canvas as it stands, takes off the margin the stage
+  carries, and picks the smaller ratio - 78% for the fixture's form in a short tab.
+
+  It is VIEW state, not a setting, for the reason the open page is: it is about looking rather
+  than about behaviour, and a big form wants Fit where the one beside it wants 100%.
+
+  **TAB ORDER landed with it**, as a dialog of xlide's own on the canvas's context menu. The
+  native one (View > Tab Order, menu 469) stays suppressed for the reason every suppression here
+  has: it would act on the native designer's selection rather than on ours.
+
+  Why a dialog when the Properties panel already carries TabIndex and can already write it:
+  because that is exactly the part nobody can use. A tab order is a SEQUENCE, and a sequence is
+  edited by seeing all of it at once - typing 4 into one control's box while MSForms silently
+  renumbers the other eleven is a puzzle rather than an edit. The dialog lists one container's
+  controls in tab order with Move Up and Move Down, and each move is a single TabIndex write
+  through the same `SetControlProperty` the panel and the api use: the moved control takes the
+  index it is going to and MSForms pushes the other one along, which is the native dialog's own
+  behaviour and the reason the page never computes a new order.
+
+  Two things it gets right that are easy to get wrong. ONE CONTAINER at a time, because tab order
+  is per container in MSForms - a Frame's children have their own 0..n and Tab walks into the
+  frame and out again - so selecting a control inside a Frame opens the Frame's list, not the
+  form's. And a control with NO tab stop is left out entirely: an Image cannot take focus and
+  MSForms answers null rather than a number for it, so listing it would put a row in the sequence
+  that Tab never visits and number every row below it wrong.
+
+  The projection carries `tabIndex` for this - display truth, like the fonts and the client areas
+  beside it, not a line the dialect prints.
+
+  **PICTURES landed 2026-08-16**, which closes the oldest open risk in this document: M3 named
+  `IPictureDisp` extraction as the likely hard case, the risks table below guessed it might need
+  an OLE round trip through a temporary stream, and until now an Image control drew as a crossed
+  box whatever it held, a form with a picture painted without it, and the Properties panel dropped
+  the row entirely.
+
+  It needs no stream and no temporary file. The way in is the one part of an IPictureDisp that IS
+  on its dispatch interface - `Handle`, a GDI HBITMAP or HICON - and from there it stops being COM
+  and becomes Win32: `GetDIBits` for a bitmap, `DrawIconEx` onto a DIB section for an icon (an
+  icon is a colour bitmap and a mask, which `GetDIBits` cannot read at all), and a BMP is
+  fifty-four bytes of header around the pixels. Top-down 32-bit, so there is no row-padding
+  arithmetic to get wrong, and one repair that matters: GDI leaves the alpha byte zero for every
+  bitmap that has none of its own, and a browser given a 32-bit BMP whose alpha is zero throughout
+  may draw nothing at all - so a picture with no alpha ANYWHERE is made opaque, and one with real
+  alpha keeps every byte of it.
+
+  **The write needed two loaders, and finding that out is the measurement of this slice.**
+  `OleLoadPicturePath` is the obvious call and it answered `0x80004005` for a PNG - OLE's picture
+  loader reads what OLE has always read (BMP, GIF, JPEG, ICO, CUR, WMF, EMF) and PNG is not on the
+  list. So the refusal falls through to GDI+, which decodes anything this machine has a codec for,
+  and the bitmap it hands back is wrapped with `OleCreatePictureIndirect`. The ORDER is the design:
+  OLE first, because it keeps an icon an icon and a metafile a drawing, where GDI+ would flatten
+  both to pixels.
+
+  A flattened picture has one honest question in it - a PNG's transparent parts have to become
+  some colour, because an OLE picture is a bitmap and a bitmap has no alpha - and the answer is
+  **the control's own BackColor**, which is the colour that makes them disappear. Read at the
+  write site, resolved through the live system palette like every other colour here.
+
+  On the canvas the placement is exact rather than approximated, because MSForms' two placement
+  families map onto CSS without a remainder. A SURFACE picture (the form, an Image, a Frame's
+  client, a Page's body) is a background: size mode 0 clips, 1 stretches, 3 zooms, alignment is a
+  background-position and tiling is a repeat. A CAPTION picture (a button, a Label, a check box)
+  is an `<img>` in a flex line, and `fmPicturePosition`'s twelve values ARE four directions by
+  three cross alignments - so all twelve are drawn, not five, plus the thirteenth (Center) as a
+  background behind the caption. An `img` rather than a background for those, because a picture
+  beside a caption draws at its natural size and an `img` is the one element that knows what that
+  is.
+
+  The panel's row has no text box, which is the point rather than an omission: MSForms keeps the
+  pixels and forgets the file they came from, so a field showing a path would show a path that is
+  not true a moment later. It says what it HOLDS in the native designer's own words - `(None)`,
+  `(Bitmap)`, `(Icon)`, `(Metafile)` - shows a thumbnail over a transparency chequerboard, and
+  offers Browse and Clear. Browse raises the machine's own file dialog host-side, because a page
+  cannot hand back a path; that is the one place the two roads differ, and they meet again at the
+  write, which is the ordinary property write the api makes.
+
+  **The DIALECT says nothing about any of this, deliberately.** A picture is binary in the form's
+  `.frx` and MSForms does not remember where it came from, so a printed path would be a lie and a
+  printed bitmap is not a document. It rides the projection with the fonts and the colours - and
+  that is where the defect was: the DRAFT preview dresses a parsed document in the applied
+  projection's display extras by name, and the wardrobe carried fonts, colours, insides and tabs
+  but not pictures. So every image on the form blanked the moment a drag made the document dirty,
+  and came back at Ctrl+S. Measured, not reported: the model kept the picture and the canvas lost
+  it. One field.
+
+  **Cost, measured rather than assumed**, because a 256x256 logo is 350KB of base64 and this rides
+  every projection: a full gesture loop - drag, document rewrite, re-projection, canvas agreeing -
+  runs 5ms median with no pictures, 7ms with 700KB of them. Two milliseconds. No cache, therefore,
+  and no downscaling: both would be machinery bought for a cost that is not there.
+
+  **And the layout bug the work uncovered, which was making gestures land on the wrong half.**
+  The canvas's scroll box carried its 24px padding on the SCROLL PORT, and a padded port cannot
+  shrink below its own padding: on a short tab the port stayed 48px tall inside a half only 37px
+  high. Its parent clipped the paint, so the canvas looked right - and every gesture aimed by
+  coordinates went wrong, because `scrollIntoView` and `scrollToPoint` measure the port's own
+  rect and would happily place a pointer twenty pixels below the clip, where the markup editor
+  is. A toolbox drop there answered "nothing landed", which is how it was found; the refusal
+  says what the pointer actually hit now, and that one sentence is what turned a shrug into a
+  diagnosis. The gap is a margin on the form now, which belongs to the content and scrolls with
+  it. In the same pass the stacked split stopped starving the canvas: the document's half is
+  capped at what leaves the form 120px, with a 60px floor of its own, so a short tab cramps both
+  halves rather than making one of them unusable.
+
 ## The panel speaks the developer's language
 
 **Landed 2026-08-15** (the owner, looking at a form's rows: "can we get the actual enums
@@ -762,8 +1134,7 @@ Three decisions worth keeping:
   the True/False rows beside it, the list shows every member, and typing filters it only while
   the developer is typing something new. **A colour row gets a swatch** that paints the value
   the host resolved - system colours included, because only the host knows what the machine
-  calls a button face today - and opens the platform's picker, committing on `change` rather
-  than on every frame of a drag around the wheel.
+  calls a button face today - and opens a picker of xlide's own (below).
 - **A refusal is the host SAYING so**, not the row failing to echo the request. The
   `editProperty` act compared the two, which was right only while every value had one
   spelling; a written `0` that reads back `fmCycleAllForms` had it reporting an honest write
@@ -786,6 +1157,342 @@ VALUE, not with the thing it belongs to, so asking the first property in a works
 collection handed back Excel's Application - and the panel learned the enums of the wrong class
 entirely, quietly, because a wrong library still answers.
 
+**And the colour rows read like colours, 2026-08-16** (the owner: "for color pickers in
+properties, can you use #f0f0f0 format?"). A colour now reads `#rrggbb`, the spelling every
+developer already has, instead of the `&Hbbggrr&` a form's binary speaks.
+
+A SYSTEM colour does not, and that is the design decision in this slice rather than the feature.
+`&H8000000F&` is not a colour at all but a question - what does this machine call a button face -
+and spelling it `#f0f0f0` would answer that question permanently, freezing today's theme into the
+form. So those rows read the NAME (`Button Face`), the swatch paints what the machine answers
+now, and picking one writes the question back. The write takes all four spellings: `#rrggbb`, a
+system name, `&Hbbggrr&`, or the raw number.
+
+**And the rows that said `[object]` say something now, or nothing** (the owner, the same evening:
+"what about properties that say [object]?"). A form's panel was listing 51 rows, six of which
+read `[object]` and did nothing: `Font`, `Picture`, `MouseIcon`, `Controls`, `ActiveControl`,
+`Selected`. An object is not a value, and a row that says so is a row asking to be ignored.
+
+A FONT is the one object this panel can serve, and it serves it as its parts - `Font.Name`,
+`Font.Size`, `Font.Bold`, `Font.Italic` - which is what the CONTROL rows already did, so the two
+panels now build those rows from one place instead of one having them and the other not. The rest
+go: `Controls`, `ActiveControl` and `Selected` are runtime state the native panel does not show
+either. `Picture` and `MouseIcon` waited on the picture pipeline this document kept as an open
+risk, and since 2026-08-16 they are rows of their own - see PICTURES above. The font comes from
+the designer rather than from the VBE property wrapper around it, which
+hands back a font this side cannot read through - measured, after the first cut showed no font
+rows at all.
+
+Two more filters came with it, both MEASURED rather than listed. A leading underscore is the
+library's own business (`_Font_Reserved` was on screen), which is the rule the Object Browser and
+the defaults walk already keep. And a member the library marks hidden or restricted goes -
+`DesignMode` did. What survives is 42 rows.
+
+**Writable stopped being a guess in the same change.** The panel decided it from the VARIANT that
+came back, so `CanPaste` - a Boolean with no setter - drew as an editable row. It comes from the
+library's own PUT now, and everything else is writable because the type says so. The code name is
+the one exception, deliberately: `(Name)` is the VBE's rename gesture rather than a designer
+property, and the designer's library has no say over it.
+
+**And then those rows left entirely, 2026-08-16** (the owner, on why three of them read False and
+grey: "if theyre jot settable; dint suow them"). A panel is for setting properties. `CanPaste`,
+`CanUndo` and `CanRedo` are questions about the editing SESSION rather than about the form - what
+the clipboard holds, what the undo stack holds - which read False on a form nobody has touched and
+cannot be written at all; `InsideWidth` and `InsideHeight` are measurements the canvas reads for
+its parity and a developer cannot type into. Every row a UserForm's panel shows now can be set.
+
+**And the font rows became pickers, 2026-08-16** (the owner: "should font be a drop down selector
+for all properties?"). `Font.Name` had stayed a text box while every enum row beside it offered its
+members, which asked the developer to spell a face exactly right or get nothing.
+
+The list is MEASURED, like the system colours and for the same reason: no list written down here
+could be true on another machine. GDI's own family enumeration answers it - the call every native
+font picker makes - once per session, sorted, with the `@`-prefixed vertical variants of CJK
+families left out the way every native list leaves them. 274 faces on this machine.
+
+`Font.Size` gets the ramp every office application offers, and that one IS written down, because a
+point size is a number rather than a capability and there is nothing to ask. Both rows stay
+TYPEABLE around their lists, which is the panel's standing rule: MSForms stores a face as a plain
+string, and a form written on another machine may name a font this one has never had - offering
+the list must not turn that value into an error.
+
+The same list reaches the DOCUMENT, because it is the same measurement: `FontName` completes to
+this machine's faces in the markup, one walk feeding both surfaces so the panel and the document
+cannot hold different ideas of what fonts exist. That took one thing the completion had not needed
+before - a face is a STRING in the dialect, so what a suggestion REPLACES matters as much as what
+it inserts. Accepting one where the developer has already typed `"Tah` takes the quotes with it
+(`FontName = "Tahoma"`), where the word-shaped token range would have nested a second string inside
+the first. `designerComplete` answers `replaces` now for every suggestion, which is what let that
+be pinned rather than eyeballed.
+
+The picker is xlide's own for the same reason it is not `<input type="color">`: that opens
+Windows' colour dialog, in another visual language, in the middle of a surface built to replace
+exactly that - and it has nowhere to put a question. This one has a generated palette (a grey row
+and eight hues down seven lightnesses, written as a ramp so the grid cannot carry a typo) and a
+System half fed by `GetSysColor`. Only the wording of the thirty system names is written down,
+because no call hands back a display name for `COLOR_BTNFACE`; every value beside them is
+measured. `act colourPicker` drives it, `setSystemColours` carries it to the page at load, and
+the suite picks from what the palette actually offers rather than from a hex written twice.
+
+**A control's changed COLOURS ride the document, 2026-08-16** (the owner, after the panel work:
+a control's changed properties are invisible in the document). Until this, the projection carried
+identity, containment, geometry and caption and nothing else, so a colour set in the Properties
+panel lived only in the object model: absent from the text, absent from the draft preview, outside
+the document's undo, and lost when a Frame was copied between forms.
+
+What "changed" means took two baselines and a measurement to get right, and the measurement is the
+part worth keeping. The obvious baseline is the defaults inventory - a bare instance of the same
+coclass - and it is WRONG for a control that has been sited:
+
+| | bare instance | freshly added to a form |
+| --- | --- | --- |
+| `Frame.SpecialEffect` | 0 | 3 |
+| `ToggleButton.BackColor` | -2147483643 | -2147483633 |
+| any control's font | MS Sans Serif 8.25 | Tahoma 8 (a Frame: 8.34) |
+
+MSForms initialises a control differently when it joins a form, so a bare comparison prints
+choices nobody made: the first cut put a font line under every control on the fixture and a
+`SpecialEffect` under the Frame. The form's own values are not a baseline either - a Label
+inherits the form's button face, but a TextBox, a ComboBox and a ListBox are born with the WINDOW
+colours and keep them on any form, so comparing against the form printed a `BackColor` under every
+entry control instead.
+
+So a colour is the developer's only when it matches NEITHER: not what the form passes down, and
+not what the kind is born with. That is exact, and it is what ships - two lines appear when two
+colours are set, and both leave when the colours go back.
+
+**The rest of the properties wait on a truthful sited baseline**, and there are only two honest
+ways to get one. Probe a control of each kind onto the form and take it away again, which dirties
+a workbook nobody asked to dirty. Or read MSForms' own answer out of a `.frm` export, which is
+precisely the list of non-default properties per control - the same file a developer without xlide
+reads - at the cost of making this product a reader of the format's text half. Both change what
+xlide does to a developer's file, so the choice is the owner's rather than the walk's.
+
+**The design rides SYNC as text, 2026-08-16** (the owner: add the markup to the import and export
+path). A UserForm exported as code alone cannot be put back - Excel writes every control into a
+binary `.frx` and the text merely names it - so a form in source control has always been half a
+form: the code diffable, the design a blob. A form now exports as three files:
+
+```text
+EntryForm.cls    the VBE's own export, code and the form's own properties
+EntryForm.frx    the controls, in MSForms' binary
+EntryForm.form   the design as xlide's markup, the same projection the tab edits
+```
+
+The `.form` is a row of its own in the plan, so a developer sees it, ticks it and diffs it like
+any other file. On import it goes through the markup's own name-keyed diff - the apply Ctrl+S
+makes - so an edit made in a text file reaches the real control: the suite moves `OkButton` to
+40,40 by rewriting a line on disk and then reads 40,40 off the form. A `.form` whose form is not
+in the project is skipped, saying to add the form first, because the markup can build controls on
+a form and cannot conjure the form itself.
+
+**A form is exported BY THE VBE now**, rather than assembled from spliced text, and that fixed a
+defect the change uncovered: the exporter names the sidecar in an `OleObjectBlob` line, and a
+spliced file named the TEMPORARY path the header had been read from - a fresh GUID on every
+export, pointing at a file that was already deleted. The exported form now names `EntryForm.frx`,
+which is sitting beside it. The encoding compromise the sync service otherwise exists to avoid is
+accepted here deliberately: a `.frm` and its `.frx` must agree byte for byte, and only the
+exporter can promise that.
+
+**Two planners, and only one of them is ours.** Sync's default planner is the companion editor's,
+shared through the engine, because both products write into the same folders. It has never heard
+of a form's markup and should not, so the design rows are built in Core and added to whichever
+plan came back. The `.frm` extension for a form's CODE file is the opposite case - a shared
+convention - so it belongs upstream rather than as a local patch, and a form's code still exports
+as `.cls` here until that lands.
+
+**AND IMPORT CREATES THE FORM, 2026-08-16.** The refusal that stood here - "a UserForm's designer
+is not in this file" - was only ever true of the code file ALONE. The pair the VBE's own exporter
+writes is exactly what its importer reads, so the form comes back whole: nineteen controls, both
+pictures, and the code, into a workbook that had none. That is the last thing that stood between
+this product and a form living in source control.
+
+Which file wins was the open question, and the answer is the one this document already argued
+for: **the sidecar is authoritative on a create.** It carries everything the markup does not
+print, so the create is the binary and the `.form` applies on top - where the dialect's own rule
+keeps it safe, because an unspoken property is never touched.
+
+The foot-gun is real and it is GUARDED rather than accepted: the markup's control list is TOTAL,
+so a `.form` out of date with its `.frx` would prune controls the binary brought in. So the design
+row beside a create is offered UNTICKED, with the reason in its warning. Pruning stays possible -
+it is sometimes exactly what a developer wants, which is why the row is offered at all - and it is
+now a decision rather than a surprise. Ticked deliberately, the apply reports what it did:
+`+0 -0, 84 set` when the two files agree, which is the normal case.
+
+Three things the implementation had to get right, each of them measured rather than assumed:
+
+- **Content decides what a file is, not the extension.** The shared planner writes a form's code
+  as `.cls` where this product writes `.frm` (xlide_vscode#21) and the bytes are identical, so a
+  file beginning `VERSION 5.00` with the MSForms coclass in its first `Begin` is a form whatever
+  it is called. That un-blocked this slice: waiting for the upstream naming fix was never
+  necessary, because the naming was never the fact that mattered.
+- **The import stages a COPY.** The editor's importer decides what to make from the EXTENSION, so
+  a `.cls` imported as it stands becomes a class module holding a form's header - not a form, and
+  not undoable into one. The pair is copied to a temporary folder as `Name.frm` beside the
+  sidecar under exactly the name the `OleObjectBlob` line spells, which a copy can promise and a
+  developer's folder cannot.
+- **A refusal carries the editor's own log.** `Import` answers "Errors during load. Refer to
+  'C:\...\Name.log' for details" - and that log sits in the staging folder this side is about to
+  delete, so the reason used to die with it. It is read and quoted in the failure now. What it
+  said, the first time: a pair whose `Begin` line and `VB_Name` disagree is refused. Renaming a
+  form in source control is three edits to the header, not two.
+
+## What a hunt across the surface found
+
+**2026-08-16.** Every gesture and every route driven at its edges - an empty form, a zero-sized
+control, a control nine thousand points off the form, a negative position, a caption holding the
+dialect's own punctuation, ten undos on a document nobody edited, a resize past the opposite
+edge, zoom at 10% and 500%, an empty document, hovers and completions past the end of the text.
+Most of it held: the refusals said what they meant, the floors held, the quoted caption
+round-tripped, and a delete reached the canvas in 12-20ms rather than paying the typing debounce.
+Seven things did not.
+
+**Closing a designer tab with unapplied edits lost them, silently.** The worst of the seven,
+because it is data loss and it was invisible: the close was unconditional, and the host's own
+comment said the page asked its own question - which it did not. So a developer who moved three
+controls and pressed Ctrl+W lost the three moves with nothing said. The question is the PAGE's,
+because the state is: unapplied markup lives in the view, and nothing host-side can know to hold
+the close. It is the same modal a module's unsaved text raises, with the same three buttons, and
+Save means what Ctrl+S means on that tab - the document applied to the form, then the workbook.
+
+**A removed form left its designer tab standing**, and what stood in it was an overlay reading
+"EntryForm2 has no designer" (the owner: "sometimes i see an overlay that says entryform2 has no
+designer"). Two causes, both fixed. The component is still in the collection for a moment after a
+Remove, so a projection in that window finds a component whose Designer will not answer, which is
+indistinguishable from the first-touch flake this document already records - so the walk asks
+ONCE MORE before believing it, and a form that answers the same way twice has its tab collected.
+And the removal itself now collects the tab rather than leaving the next request to find out.
+
+**Selecting a control on a page that was not open was refused.** The act asked the CANVAS whether
+the control was there, and a control on a closed page is real and undrawn - so the refusal meant
+for a deleted control caught a living one, against a rule this document states two sections up.
+It asks the PROJECTION now.
+
+**The Properties panel kept a control that had been removed** - name, geometry, font and all -
+because a removal re-projected the tab and nothing told the panel. The panel's own publish
+already knew what to do when its target is gone; nothing was asking it.
+
+**An empty document squiggled twice.** The tolerant pass retires a refused line and parses again;
+retiring a line that is already empty makes no progress, so the same finding arrived twice. No
+progress now means stop.
+
+**A name MSForms will not take answered `error 800a9c6c` and nothing else** - measured by adding
+a control called `_Leading`. A control's name is a VBA identifier, and that rule is now a squiggle
+on the line before anything is written, with the same sentence on the model's refusal behind it.
+
+**A folder passed as a picture said "there is no file at ..."**, which is true and unhelpful when
+the folder is sitting right there. It says it is a folder.
+
+## The sited baseline: the path chosen, and how far it got
+
+**The owner chose it 2026-08-16**: read the storage Excel has ALREADY saved, out of band. No
+workbook is touched, nothing is exported during normal use, and the answer is exactly what Excel
+wrote rather than an approximation of it.
+
+What makes the path work at all is that **MSForms records only NON-DEFAULT properties**, as a
+PropMask bitfield. So the mask alone answers the question this whole item asks - which properties
+did the developer change - and the VALUES can still come from the live object model. Decoding
+values is unnecessary; decoding the mask is the job.
+
+**Stage one is done and the instrument is kept** as `tools\harness\vba-storage.mjs`. The road:
+the `.xlsm` is a ZIP, `xl/vbaProject.bin` inside it is a compound file, and that holds
+`/<FormName>/f` (the form and its site array), `/<FormName>/o` (each control's block) and
+`/<FormName>/iNN` storages for controls that need one. A hundred and ten lines of compound-file
+reader reaches all of it, with no COM and no Excel running, and ports cleanly to C#.
+
+**Half of stage two is done.** The form's header parses - minor, major, `cbForm`, PropMask - and
+`cbForm` lands the site array exactly: **14 sites and 588 bytes** on the fixture, consuming the
+stream to its last byte, and 14 is precisely that form's top-level control count. Every control's
+name sits in the array at a measurable offset, records running 40 to 44 bytes.
+
+**Where it stops, and why.** The per-site record layout is not decoded, so neither is the
+SitePropMask inside it - and that mask is the point. Two bytes precede each name (`0x15` before
+`NameLabel`, `0x19` before `RegionPick`) and are not the record length. Getting further is
+MS-OFORMS section 2.2.10 rather than more inspection: the spec is not in this repository, and the
+pyOpenVBA checkout on this machine is at PR #14 with no OFORMS reader in it. Reverse-engineering
+a record layout by staring at 588 bytes is exactly the "days rather than hours" this item was
+flagged as, and guessing at it would be the worst of both.
+
+What remains after the layout: the bit-to-property tables per control kind, the C# port, and the
+projection printing a property when its bit is set. A form that has never been saved has no
+baseline in the file and keeps today's bare-coclass answer, which is honest and stays.
+
+## What a sweep for dead and convoluted code found
+
+**2026-08-16**, after the hunt and the walk. Fast growth leaves fallbacks nothing reaches, and the
+designer grew fast: the view was past four thousand lines.
+
+**A fallback that could never be reached.** A MultiPage's tab band took `FRAME_INSET_TOP` - an
+honest ten-point inset for a model that declines to answer - and then clamped the result to a
+twenty-pixel floor two lines later. Ten is less than twenty, so the fallback branch and the
+measured branch had one outcome and the code read as though they had two. The constant is gone
+and the floor is the starting value.
+
+**A load-bearing branch disguised as a fallback.** `roomOfContainer` had three: the form, the
+container's own client, and a `closest(".dc-page-body")` off a name lookup. The third was not
+redundant, which is the part worth knowing - since a page body started carrying its own name, the
+SECOND branch finds the body and then searches inside it for a client, finds nothing, and the
+third quietly does every page's work. Two cases now, naming which is which: a Frame's client is
+inside it, a Page IS its client.
+
+**A module that was hiding in the view.** The picture painters - the two placement families, the
+alignment table, the layer type - hold no view state at all: they take a picture and an element.
+That is a boundary, so they are `formpicture.ts` now, beside `colourpicker.ts`,
+`formmarkuplang.ts` and `taborderdialog.ts`. A hundred lines out of the view, and the ones that
+were easiest to reason about on their own.
+
+**A dead overload from this session's own first cut.** `DataUriOf` took an owner and a property
+name; every caller ended up holding the picture object instead, because it wants the kind as well
+as the pixels. The convenience overload was never called from outside its own file.
+
+**And a tolerance that did not scale.** The z-order row compares pixel counts before and after,
+within 200 - a rule written when the labels painted about 8,000 pixels. They paint 18,000 now, so
+a 1.5% difference failed a check meant to allow 2.5%. It compares within a few PERCENT now, which
+is what "the counts swapped" actually means when the instrument is a photograph.
+
+What the sweep deliberately did NOT do: strip the `export` off some fifty types and constants
+that are only used inside their own file. It is over-export rather than dead code, the spec files
+reach for several of them, and churning fifty declarations to save nothing is how a sweep becomes
+a risk.
+
+## Liveness beyond the funnel
+
+**Landed 2026-08-16.** Every designer mutation this product makes re-projects the open tab: an api
+`set`, a Properties panel edit and a canvas gesture all funnel through one place, which is what
+keeps the document and the visual current without anyone re-activating the tab. What goes round
+all of it is an edit made OUTSIDE - in the native designer underneath, or by a sync import, which
+applies markup straight at the form.
+
+Nothing announces one. A form has no revision counter the way a code pane does, and MSForms raises
+no event for a control being moved. So it is ASKED rather than heard, and the whole design is in
+making the question cheap enough and rare enough to be free.
+
+**RARE: it rides the window events that already fire.** The pane tracker refreshes on a window
+appearing or going and explicitly not on one moving - a frame resize fires thousands of moves and
+a control dragged inside a form fires none, because MSForms draws its controls windowless. Those
+same appear-and-go events bracket a native designer session: the window is shown, edited, and
+hidden or destroyed, so the closing bracket is where an outside edit is caught. A floor of half a
+second between checks collapses the bursts (a tooltip appearing and dying is two events, a menu
+opening several).
+
+**CHEAP: the key is each control's name and its four bounds, and nothing else.** Measured on the
+fixture form: **49 wrappers and 3ms** against a full projection's 120 and 6ms. So a check that
+finds nothing - which is almost all of them - costs 40% of the walk it avoids, and a check that
+finds something pays for the projection it was right to make.
+
+What it catches is what a hand does in a designer: add, remove, rename, move, resize. What it does
+NOT catch is a property changed without any of those - a colour typed into the native Properties
+window - and that is a stated limit rather than an oversight, because the alternative is reading
+every property of every control twice a second.
+
+The ledger is level across it: 1,225 wrappers over 25 checks, all given back.
+
+`designer?action=liveness` is the read side, and it exists because everything else in this surface
+funnels through a re-projection: without it no probe could drive the path a native edit takes. It
+runs the check with the floor stood down and answers which tabs it re-projected. The suite uses a
+SYNC IMPORT as its outside edit, which is a real one a developer can make - and the same shape as
+the native designer's.
+
 ## What it costs, measured
 
 The owner felt a lag in two gestures and asked for a walk of the whole surface
@@ -793,28 +1500,83 @@ The owner felt a lag in two gestures and asked for a walk of the whole surface
 five times from the act to the moment the surface has ANSWERED - the canvas redrawn, the
 panel following, the form itself carrying it - against the eighteen-control fixture form.
 
+**Walked again 2026-08-16**, after this session's slices, against the fixture as it now stands:
+nineteen controls, two of them wearing pictures. Every number below is that run rather than
+August's, and the walk grew the gestures that landed since - the container tabs, the group, the
+depth, the zoom, the liveness check and a picture load.
+
 | interaction | median | worst |
 | --- | --- | --- |
-| designer route, 18 controls | 8ms | 8ms |
-| markup route | 6ms | 7ms |
-| open the designer tab | 12ms | 15ms |
-| select a control, panel follows | 5ms | 5ms |
-| nudge by an arrow key | 7ms | 10ms |
-| drag a control | 8ms | 9ms |
-| resize by a handle | 8ms | 8ms |
-| toolbox drop | 15ms | 16ms |
-| delete | 11ms | 13ms |
-| typed edit to draft preview | 6ms | 7ms |
-| Ctrl+S: apply and save | 128ms | 139ms |
+| designer route | 7ms | 8ms |
+| markup route | 10ms | 11ms |
+| open the designer tab | 14ms | 14ms |
+| select a control, panel follows | 8ms | 12ms |
+| nudge by an arrow key | 10ms | 11ms |
+| drag a control | 10ms | 12ms |
+| resize by a handle | 11ms | 12ms |
+| toolbox drop | 19ms | 23ms |
+| delete | 13ms | 20ms |
+| open a page on a MultiPage | 9ms | 11ms |
+| the tab strip's menu | 3ms | 4ms |
+| marquee over the form's ground | 8ms | 9ms |
+| align the group | 5ms | 8ms |
+| bring to front | 7ms | 9ms |
+| zoom the canvas | 4ms | 4ms |
+| the liveness check | 3ms | 5ms |
+| load a picture onto a control | 6ms | 8ms |
+| typed edit to draft (debounced) | 358ms | 360ms |
+| Ctrl+S: apply and save | 54ms | 59ms |
 
-Everything a hand does is single-digit or low-double-digit milliseconds. The one
-three-digit number is the save, and it is Excel writing the workbook: the host-thread
-marshal samples during those saves read 110-140ms while every other crossing reads 15-16ms,
-which is also the floor under every number above - one hop to the host thread costs about a
-frame, and the designer's own work disappears underneath it.
+Everything a hand does is single-digit or low-double-digit milliseconds, and the two three-digit
+numbers are both meant. The typed edit is the DEBOUNCE, paid on purpose: a keystroke waits 350ms
+before the canvas follows, where a gesture does not wait at all. The save is Excel writing the
+workbook, and it has more than halved since August (128ms then, 54ms now) - the host-thread
+marshal samples read 15-16ms with occasional 47-62ms, which is also the floor under every number
+above: one hop to the host thread costs about a frame, and the designer's own work disappears
+underneath it.
 
-Two things came out of the walk rather than out of the clock. The drop and the delete were
-paying the typing debounce (347ms and 348ms, now 4ms and 3ms - see M5 above). And timing a
+The COM side, which the risks table asks for by name: a `designer` read costs **120 wrappers and
+6ms**, the markup print **115 and 8ms**, the liveness key **63 and 6ms** - a little under half a
+projection, which is the point of it - and an idle tick **0 wrappers**. The ledger stayed level
+across 50,361 wrappers.
+
+And what the PICTURES put on the wire: **683KB of base64 per projection** for the fixture's two,
+which costs 2ms on a full gesture loop (measured against the same loop with none). That is why
+there is no cache and no downscaling - both would be machinery bought for a cost that is not
+there.
+
+**One measurement was lying and is fixed.** The typed-edit line read 6-7ms for four of its five
+rounds, because the canvas was already previewing a draft when the round started, so the wait it
+was timing was already over. Every round starts from a clean document now, and the line says what
+it should have said all along: 358ms, the debounce, by design.
+
+**And the rest of the surface, since the ask was the whole of it** - `tools\harness\surface-perf.mjs`,
+the same shape, against DebugFixture.xlsm:
+
+| interaction | median | worst |
+| --- | --- | --- |
+| open a module tab | 70ms | 83ms |
+| close a module tab | 37ms | 47ms |
+| switch between two tabs | 18ms | 19ms |
+| read a module's text | 2ms | 3ms |
+| completions where a hand asks | 16ms | 17ms |
+| hover | 16ms | 17ms |
+| the project tree | 13ms | 13ms |
+| a module-scope search | 6ms | 7ms |
+| activate, and the panel follows | 20ms | 34ms |
+| an idle snapshot | 3ms | 4ms |
+
+Nothing here reads three digits either. The highest is opening a module tab at 70ms, which is the
+native pane being created, its text published and monaco taking a model - consistent with the
+host-thread hops it makes at 15-16ms each, and the same order as a tab open in any editor. The
+PANEL costs about two milliseconds of the twenty beside it: the activate and the panel following
+it measure 20ms where the switch alone measures 18, which is a fair price for walking a
+component's whole property bag through its type library. Completions and hover are 16-17ms with
+the analyzer in another process, and the page's own main thread stalled once, for 63ms, at
+start-up - one stall in a whole session of driving.
+
+Two things came out of the earlier walk rather than out of the clock. The drop and the delete were
+paying that same typing debounce (347ms and 348ms, now 19ms and 13ms - see M5 above). And timing a
 surface means touching every part of it, which is how the handles were found to be
 unreachable wherever a neighbouring control overlapped them: a TextBox whose right edge met
 a ScrollBar could not be resized from that side at all, because the selection overlay is a
@@ -823,13 +1585,47 @@ the controls now, with a suite row on the adjacency that found it.
 
 ## Risks worth respecting
 
-- **Pictures.** `IPictureDisp` to bytes may need an OLE round trip through a temporary
-  stream; until it works, image-bearing controls render as honest bounds.
+- ~~**Pictures.**~~ **Closed 2026-08-16.** No stream and no temporary file: the picture's GDI
+  handle plus `GetDIBits`, or `DrawIconEx` onto a DIB section for an icon. The write took two
+  loaders rather than one, because OLE's own refuses PNG. What still renders as honest bounds is
+  a METAFILE - a drawing rather than pixels, with nothing to read out of it here - and any
+  picture past four megapixels, which is a photograph somebody pasted rather than a form's
+  decoration. Both answer null and the canvas draws the box, which is the architecture's rule.
+  Cost measured: 700KB of base64 on the wire adds 2ms to a full gesture loop.
 - **Third-party ActiveX.** Render bounds and identity, never guess an appearance; Additional
   Controls stays suppressed until add-by-ProgID is proven against at least one real
-  third-party control.
+  third-party control. **Still suppressed, and now for a measured reason (2026-08-16).** Twelve
+  real ProgIDs were tried against the fixture form and every one was refused, in two distinct
+  ways. `MSComctlLib.ProgressBar.2`, `MSComCtl2.DTPicker.2`, `MSCAL.Calendar.7` and
+  `MSForms.HTML:Text.1` answered `Invalid class string` - not registered on this machine at all.
+  `MSComctlLib.TreeCtrl.2`, `MSComctlLib.ListViewCtrl.2`, `MSComctlLib.Slider.2`,
+  `MSComctlLib.ProgCtrl.2`, `Shell.Explorer.2` and `RefEdit.Ctrl` all RESOLVE and all answered
+  `TRUST_E_SUBJECT_NOT_TRUSTED`. That is Office refusing rather than MSForms or this product:
+  `HKCU\Software\Microsoft\Office\Common\Security\DisableAllActiveX` is 1, the Trust Center's
+  "Disable all controls without notification", and while it is on nothing in a form can create a
+  non-MSForms control. So the condition this risk sets cannot be met on this machine without
+  changing a security setting that belongs to whoever owns the machine - **and the owner's answer,
+  given the measurement, is that third-party controls are out of scope for now** (2026-08-16).
+  Additional Controls stays suppressed by DECISION rather than by blocker, and the toolbox offers
+  the fifteen standard kinds it can create. The dialect keeps what it already had: a foreign
+  control prints under its raw type name and can be moved and set, because a form that arrives
+  holding one must not become unreadable.
+
+  What the slice DID land is the refusal saying where the refusal came from: "Office is refusing
+  to create ActiveX controls at all, which is the Trust Center's ActiveX Settings rather than
+  anything about this control", and "no control of that ProgID is registered on this machine" for
+  the other. Without that the message reads as a defect in xlide and the next hour goes into the
+  wrong place. The suite's row asserts whichever truth the machine it runs on has: a control that
+  arrives must walk under its own type, a control refused must be refused in those words.
 - **COM volume.** Every property is a crossing; the designer's read path gets its own
   counter beside `publishUs` and `hostReadMs` before anyone asserts it is cheap.
+  **Re-measured 2026-08-16** on the nineteen-control fixture, two of its controls wearing
+  pictures: a `designer` read costs **120 wrappers and 6ms**, the markup print **115 and 8ms**,
+  the liveness key **63 and 6ms**, an idle tick **0**. The ledger stayed level across 50,361
+  wrappers. The August figures below were taken on the eighteen-control form before pictures and
+  before this session's slices, and are kept because they are the baseline those were measured
+  against.
+
   **Measured 2026-08-15** by `tools\harness\designer-perf.mjs`, on the eighteen-control
   fixture form: a full projection costs **185 COM wrappers and 8ms**, the markup print
   152 and 6ms, an idle tick 0 and 2ms - about ten wrappers a control, which is the

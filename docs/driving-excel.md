@@ -231,13 +231,14 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `await` | `until(predicate, {waitMs})` | waits for a condition IN the page |
 | `bench` | `bench(what, {n})` | times a scenario: min, median, p95, max, raw samples |
 | `breakpoint` | `breakpoint(module, line, {project, state})` | set, clear or toggle |
-| `capture` | `capture(window, caption)` | a BMP of the window, through PrintWindow. `"form"` photographs a RUNNING form by caption |
+| `capture` | `capture(window, caption, { selector, pad })` | a BMP of the window, through PrintWindow. `"form"` photographs a RUNNING form by caption; `selector` crops to one element of the PAGE, which is how a widget gets looked at rather than measured |
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
-| `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass` |
+| `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass`. **A FORM CARRIES THREE FILES**: its code, the binary sidecar the VBE's own exporter writes beside it, and `Name.form` - the design as xlide's markup, a row of its own that diffs and applies like any other. On import a `.form` goes through the markup's name-keyed diff (the same apply Ctrl+S makes), so an edit made in a text file reaches the control; a `.form` whose form is not in the project is skipped saying to add the form first |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` |
 | `defaults` | `controlDefaults(type)` | what a control of a KIND holds UNTOUCHED, by property: the inventory the markup projection compares against to print only what a developer changed. Measured from a bare instance of the coclass MSForms registers - `Forms.CommandButton.1` and the rest, the same ProgIDs the add route takes - so no workbook is opened, no form is created, nothing appears on screen, and no table of ours can rot against the MSForms this machine actually has. Two honest gaps it reports rather than papers over: a control that will not come up outside a container answers few properties or none (a MultiPage answers one), and a bare control's FONT is not the font it would wear on a form, which inherits the form's - so fonts are compared against the form, never against this |
+| `vocabulary` | `markupVocabulary(module, project)` | the markup language's whole vocabulary: every kind a document can name, its ProgID, whether it holds children, and every property it offers - with the type it takes, what an untouched control holds, its enum's members, and the type library's own sentence about it. The table the designer tab's completions and hovers answer from, which is what makes it worth reading from a suite: compare what the page OFFERS (`act designerComplete`) against what the host MEASURED, rather than against a list written down twice. `module` names a live form so the FORM's own entry can be described; without it every other kind still answers |
 | `designer` | `designer(module, project)` / `designerEdit(action, args)` / `designerMarkup(module, project)` / `applyMarkup(module, text, project)` | a UserForm's design as data - every control with its type, container and geometry - and the three mutations that build one: `add` (by toolbox name or ProgID, into the form or a named Frame/Page), `remove`, `set` (answers what the property reads back; `Font.Size` dotting reaches the font; the form's own Width/Height go through the component's Properties). `designerMarkup` answers the same form as TEXT in the markup layer's language, and `applyMarkup` applies an edited document back as a name-keyed diff. The M1 and M2 instruments of [userform-designer.md](userform-designer.md); `form-plan.mjs` + `designer-features.mjs` build and verify a whole form with them |
 | `pane` | `pane(action, {module, project, answer, face})` | open or close a module's tab; an open that finds no such module throws rather than answering ok. `face: "design"` opens or closes a FORM's designer tab instead - the markup-beside-visual tab, product state rather than a mirror, since the native designer window stays down on purpose; a non-form is refused. `closeNative` closes the HOST's pane window through the editor's own pane list - the host-originated direction, no unwritten-edits question, because the native close box asks none |
 | `palette` | `paletteHide()` | puts the Object Browser palette away the way its close box does: hidden, state intact. The summons is `command("objectBrowser")`, which never meant toggle |
@@ -503,6 +504,40 @@ to republish - which it does whether it applied the write or refused it - before
 refusal answers `did: false` with the value the row actually holds and whatever the status line
 said. That distinction is not theoretical: the first version of this act reported
 `set to "not a legal name"` for a name VBA cannot store.
+
+**A colour row reads `#rrggbb`**, and a SYSTEM colour reads by name, because `&H8000000F&` is a
+question - what does this machine call a button face - and answering it with the RGB it resolves
+to today would freeze that answer into the form. The write takes any of the four spellings, and
+the swatch opens xlide's own picker:
+
+```js
+await api.act("designerSelect", { module: "EntryForm", control: "OkButton" });
+(await api.ui()).properties.rows.find((r) => r.name === "BackColor");
+// -> { name: "BackColor", value: "Button Face", swatch: "#f0f0f0", ... }
+
+await api.act("editProperty", { name: "BackColor", value: "#ff8000" });   // and #rrggbb writes
+await api.act("colourPicker", { property: "BackColor" });                 // opens on the row
+await api.act("colourPicker", { choose: "Highlight" });                   // or a palette #rrggbb
+```
+
+The palette is generated from a ramp rather than written down, so read `.colour-swatch` values
+and pick one of those instead of naming a hex a suite believes is in the grid.
+
+**A FONT row is a picker too**, and its list is measured the same way the system colours are:
+
+```js
+(await api.ui()).properties.rows.find((r) => r.name === "Font.Name");
+// -> { name: "Font.Name", value: "Tahoma", options: ["8514oem", "Agency FB", ... ] }   274 here
+await api.act("editProperty", { name: "Font.Name", value: "Courier New" });
+```
+
+`options` is GDI's own family enumeration, once per session, sorted, without the `@`-prefixed
+vertical variants; `Font.Size` carries the usual ramp, which is written down because a point size
+is a number rather than a capability. Both stay typeable, so a face this machine does not have
+still writes - which is why a probe should pick FROM `options` rather than naming a font, exactly
+as it picks a palette colour from the swatches. The markup's `FontName` completes from the same
+list, and each suggestion answers `replaces`, the columns accepting it would rewrite: a face
+offered where a string is already open takes the quotes with it.
 
 **`projectId` means two different things, and one of them used to be silently wrong.**
 
@@ -1177,7 +1212,7 @@ their planner is the one that draws them.
 | `will-update` | not applicable | the module is there and differs |
 | `will-remove` | a file naming no live module, and only with `mode=trueUp` | a module with no file, and only with `mode=trueUpStandardClass` |
 | `unchanged` | both sides already agree | both sides already agree |
-| `skipping-import` | not applicable | a worksheet or UserForm the project does not already have |
+| `skipping-import` | not applicable | a worksheet the project does not have, or a form whose binary sidecar is not beside it |
 | `read-error` | not applicable | the file would not read |
 
 ### Which planner decided it
@@ -1225,10 +1260,37 @@ modules could not be serialised to the engine and nothing said so.
 
 ### Some things worth knowing before driving it
 
-**A document module and a UserForm cannot be created from a file.** A sheet belongs to its
-workbook and a form's designer is not in its `.cls`. Those rows come back `skipping-import` with a
-warning rather than failing at apply time. When the module already exists, its code is replaced
-normally.
+**A document module cannot be created from a file.** A sheet belongs to its workbook. That row
+comes back `skipping-import` with a warning rather than failing at apply time; when the module
+already exists, its code is replaced normally.
+
+**A FORM CAN, since 2026-08-16, and it arrives whole.** This was the last refusal standing between
+the product and a form that round-trips through source control. A form exports as three files -
+the header text, the binary sidecar the VBE's exporter writes beside it, and xlide's own `.form`
+markup - and the first two are exactly what the VBE's IMPORTER reads, so the form comes back with
+its controls, its fonts, its pictures and its code.
+
+Three things worth knowing before driving it:
+
+- **The pair must be whole.** The header carries `OleObjectBlob = "Name.frx"`, and that name is
+  the contract between the two files. Without the sidecar the row is `skipping-import` and the
+  warning NAMES the file it wanted. (The built-in planner says so before the apply; the shared
+  planner has never heard of a form's sidecar, so its row fails at the apply instead, with the
+  editor's own log quoted in the failure.)
+- **The extension does not decide, the CONTENT does.** The shared planner writes a form's code as
+  `.cls` (xlide_vscode#21) where this product writes `.frm`, and the bytes are identical either
+  way, so a file beginning `VERSION 5.00` with the MSForms coclass in its first `Begin` is read as
+  a form whatever it is called. The import stages a copy named `.frm` regardless, because the
+  editor's importer decides what to make from the extension.
+- **The `.form` row beside a create is offered UNTICKED.** The sidecar is authoritative: it
+  carries the whole form, so applying the text on top can only take things away if the two
+  disagree - the markup's control list is TOTAL, and a `.form` out of date with its `.frx` would
+  prune controls the binary brought in. Ticking it is the developer's choice, and the apply then
+  reports exactly what it added and removed.
+
+Renaming a form in source control means three edits to the header, not one: the `Begin` line, the
+`Attribute VB_Name` line, and the `OleObjectBlob` line. Miss the first and the editor refuses the
+pair with "Errors during load" (measured 2026-08-16).
 
 **Removing is always opt-in and never touches a document.** `mode` defaults to the safe value in
 both directions, and import true-up only ever deletes standard and class modules.
@@ -1362,6 +1424,8 @@ node tools\harness\xlide-api.mjs act designerResize module EntryForm control Reg
 node tools\harness\xlide-api.mjs act designerResize module EntryForm edge se dx 20 dy 12
 node tools\harness\xlide-api.mjs act designerToolbox module EntryForm kind CommandButton left 230 top 120
 node tools\harness\xlide-api.mjs act designerDelete module EntryForm control RegionPick
+node tools\harness\xlide-api.mjs act designerOpenTab module EntryForm container Wizard tab Page2
+node tools\harness\xlide-api.mjs act designerTabMenu module EntryForm container Wizard
 node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
 node tools\harness\xlide-api.mjs command save
 ```
@@ -1375,7 +1439,14 @@ for the lines in view. A press on the canvas but OFF the form selects the form.
 
 `designerDrag` sends the REAL pointer sequence at the control - the press goes to whatever the
 hit test answers, which is how an invisible overlay over the canvas gets caught - and its
-deltas are POINTS, the document's own unit. `designerResize` does the same through a named
+deltas are POINTS, the document's own unit. **A drag that ends over another container REPARENTS**:
+the control is carried into whatever container the pointer is over as the gesture runs, and the
+drop moves its whole block under that container with its position in the new container's
+coordinates. What decides is where the pointer ENDS, not how far it went, so aim a short drag from
+a control near a container's edge rather than a long one from the middle - and remember the path
+has to be on screen, because a drag whose end point is outside the canvas box hits nothing and the
+control clamps at its parent's edge instead (a 640x409 window leaves the canvas about 48px tall,
+which is enough to move a control and not enough to move it anywhere else). `designerResize` does the same through a named
 handle (`edge` is `nw`, `n`, `ne`, `e`, `se`, `s`, `sw` or `w`), and with no `control` it pulls
 the FORM's own frame. Both scroll their target into view before aiming, because a hand does: on
 a narrow window the form is wider than the box that holds it, and a control clipped out of the
@@ -1386,8 +1457,177 @@ box, `designerMarkup` shows the rewritten line, and the form itself does not mov
 `command save`, which is the tab's Ctrl+S. One undo takes a whole gesture back, and
 `designerCanvas`'s `undoable` says whether the document still has one to give.
 
+**A GROUP is gathered and driven the same way a hand does it:**
+
+```bash
+node tools\harness\xlide-api.mjs act designerSelect module EntryForm control NameBox
+node tools\harness\xlide-api.mjs act designerSelect module EntryForm control Taxable extend 1
+node tools\harness\xlide-api.mjs act designerMarquee module EntryForm left 4 top 4 right 210 bottom 60
+node tools\harness\xlide-api.mjs act designerArrange module EntryForm how left
+```
+
+`extend` is Ctrl+click - it adds a control to the selection or takes it back out, leaving the
+ANCHOR where it is - and `designerMarquee` drags a rubber band over the form's own ground between
+two corners in POINTS, selecting every control of that ground it TOUCHES. `designerCanvas` answers
+the whole selection in `group`, anchor first, while `selected` stays the anchor's own name.
+
+`designerArrange` is the native Format menu's arrange group, which lives on this canvas's context
+menu because the product has no menu bar: `how` is `left`, `centreX`, `right`, `top`, `centreY`,
+`bottom`, `width`, `height`, `across` or `down`. The anchor is the reference and never moves; a
+drag, a nudge and a Delete all carry the whole group, and each is one edit and one undo step.
+
+**DEPTH and TAB ORDER are the two M6 gestures, and each has its own kind of proof:**
+
+```bash
+node tools\harness\xlide-api.mjs act designerZOrder module EntryForm control OkButton front 1
+node tools\harness\xlide-api.mjs act designerTabOrder module EntryForm open 1
+node tools\harness\xlide-api.mjs act designerTabOrder module EntryForm control OkButton move up
+node tools\harness\xlide-api.mjs act designerTabOrder module EntryForm close 1
+```
+
+`designerZOrder` writes the MODEL, not the document - the one canvas gesture that does. MSForms'
+Controls collection is not in z-order and does not move when ZOrder is called, so `designer` and
+`designerMarkup` cannot show the result and neither can the canvas: **the only instrument that
+sees this feature is a photograph of the running form.** The suite takes one, counting red against
+blue pixels of two overlapping labels.
+
+`designerTabOrder` drives the dialog: `open=1` for the container the selection sits in, `control`
+plus `move=up|down` for one place, `close=1` to press Close, and bare to read the list back. The
+write is one TabIndex through the host's own setter and MSForms renumbers the rest, so read the
+outcome off `designer` rather than off the list. A control with no tab stop of its own - an Image,
+whose `tabIndex` is null - is not in the list, and neither is a Page.
+
+`designerZoom` sets how large the canvas draws: `to` is a percentage or `fit`, and with neither it
+answers what is showing. A percentage is clamped to 25 at the bottom and 400 at the top, and Fit
+never goes past 200 - so `to=10` answers 25 and `to=500` answers 400, both `did: true`, because a
+clamp is not a refusal. Everything a gesture does stays in POINTS whatever the zoom - twelve
+points at 200% is twelve points in the document - because only the screen boundary knows about the
+scale. Fit measures the canvas as it stands, so it answers a different number in a different tab.
+
+**AN EDIT FROM OUTSIDE THE FUNNEL** is the one thing this surface asks about rather than hears.
+Every designer mutation xlide makes re-projects the open tab; an edit made in the native designer
+underneath - or by a sync import, which applies markup straight at the form - goes round all of
+it, and nothing in the object model announces one.
+
+```bash
+node tools\harness\xlide-api.mjs designer EntryForm liveness
+```
+
+It answers which open designer tabs it re-projected, or that they all already showed their forms.
+In the product it runs on the window events that already fire - a window appearing or going, never
+one moving, with a half-second floor between checks - because a native designer session is
+bracketed by exactly those. The key is each control's name and bounds and nothing else: **49
+wrappers and 3ms**, against a full projection's 120 and 6ms. So it catches add, remove, rename,
+move and resize, and deliberately not a property changed without one of those.
+
+Driving it needs an outside edit, and the api's own routes are all inside the funnel. Use a sync
+import of a `.form`: it applies through the markup diff without touching the tab, which is exactly
+the shape of a native edit. That is what the suite does.
+
+**PICTURES load from a file and draw on the canvas** since 2026-08-16. There is no picture verb,
+deliberately: a picture is a property, so it goes through the property writes that already exist -
+the api's `set`, and the panel's `editProperty` for whichever control the panel is showing.
+
+```bash
+node tools\harness\xlide-api.mjs designer EntryForm set name Badge property Picture value F:\GitHub\xlide\xlide_vbide\assets\images\extension_logo.png
+node tools\harness\xlide-api.mjs designer EntryForm set name Badge property PictureSizeMode value 3
+node tools\harness\xlide-api.mjs designer EntryForm
+node tools\harness\xlide-api.mjs act designerCanvas module EntryForm
+node tools\harness\xlide-api.mjs designer EntryForm set name Badge property Picture value ""
+```
+
+The value is an absolute PATH and an empty one clears the picture, which is `Set x.Picture =
+Nothing`. Two loaders in order, because one is not enough: OLE's own reads BMP, GIF, JPEG, ICO,
+CUR, WMF and EMF and keeps an icon an icon, and GDI+ catches what it refuses - PNG above all,
+which OLE has never read (measured 2026-08-16, `0x80004005` from the obvious call). A picture
+GDI+ decodes is flattened to a bitmap, so an alpha channel becomes a colour, and the colour it
+becomes is the control's own BackColor - the one that makes it disappear.
+
+Reading is two answers for two questions. `designer` DESCRIBES the picture - `kind`, the size in
+pixels, and the placement - and never carries it, because a bitmap in base64 is megabytes and that
+route is read in loops. `designerCanvas` answers `pictures`: what the canvas is actually drawing,
+by control, with the data URI's size and where it was placed. The PIXELS are proved the way
+z-order's are, against a photograph of the running form.
+
+**The panel's picture row is the UI half**, and it has no text box: MSForms keeps the pixels and
+forgets the file, so there is no path to show. It says what it holds in the native designer's own
+words - `(None)`, `(Bitmap)`, `(Icon)`, `(Metafile)` - shows a thumbnail, and offers Browse and
+Clear. Browse raises the machine's own file dialog HOST-side, because a page cannot produce a
+path; that is the one designated difference between the two roads, and they meet again at the
+write. `ui.properties` reports the row as `picture: true` with `previewBytes` for the thumbnail.
+
+**And a row nobody can set is no longer shown at all** (the owner, 2026-08-16), which on a
+UserForm's panel removes `CanPaste`, `CanUndo`, `CanRedo`, `InsideWidth` and `InsideHeight`.
+
+**A TabStrip's TABS are lines of the document** since 2026-08-16, indented under the strip exactly
+as a MultiPage's pages are:
+
+```text
+    TabStrip Views at 212,188 size 122x56
+        Tab Tab1 "Tab1"
+        Tab Tab2 "Tab2"
+```
+
+So `designerTabMenu` on a strip answers `New Tab | Delete Tab` where a MultiPage's answers
+`New Page | Delete Page`, and both write the document as one undoable edit that reaches the form
+at Ctrl+S - through MSForms' own `Tabs.Add` and `Tabs.Remove`. The parser states the containment
+both ways: a TabStrip holds Tabs and nothing else (a control over its face belongs to the FORM),
+and a Tab sits under a TabStrip and holds nothing. `Page` and `Tab` have vocabularies of their own
+now too, described from a live one on the open form because neither has a coclass to measure bare -
+so completions under either line offer real properties rather than nothing.
+
+The document half has a LANGUAGE SERVICE, and it is drivable at a spot rather than by opening a
+widget and scraping it:
+
+```bash
+node tools\harness\xlide-api.mjs vocabulary EntryForm
+node tools\harness\xlide-api.mjs act designerComplete module EntryForm line 12 column 9
+node tools\harness\xlide-api.mjs act designerHover module EntryForm line 12 column 6
+node tools\harness\xlide-api.mjs act designerHint module EntryForm line 12 column 40
+```
+
+`vocabulary` is what the three of them answer from: every kind, every property, measured from a
+bare instance of each coclass and its own type library, sent to the page once per session. So the
+useful assertion is a COMPARISON - what `designerComplete` offers against what `vocabulary`
+measured - rather than a list of property names written into a suite, which is the same list
+written down twice. The three acts call the real providers with the arguments monaco passes, and
+each puts the caret at the spot first, because a developer raising the widget has been there.
+
+What each answers: completions give the control kinds where a line can open one (scaffolded whole,
+with the drop size MSForms uses), the owning kind's property names where a line can set one, the
+`at` and `size` clauses once the name is behind the caret, and a property's enum members on the
+value's side of the `=`. Hover answers a kind's coclass, a control's placement in points, or a
+property's type, default, members and the library's own sentence. The hint is the header's grammar
+with the clause the hand is on. All three follow the CONTAINER: under a MultiPage the only kind
+offered is `Page`, and a non-container's indented lines offer properties alone.
+
+`designerOpenTab` opens a tab of a MultiPage or a TabStrip, `tab` being a page's name, the tab's
+label, or a 1-based position. A MultiPage draws that page's controls and selects the PAGE, which
+is the native designer's own gesture, so the Properties panel follows to the page and the markup
+caret lands on its line - and a drop then lands on the page you are looking at. A TabStrip only
+marks the tab: its tabs are an index rather than containers, and the runtime draws the same
+controls under every one of them. The read side is `designerCanvas`'s `containers`, one row per
+tabbed container with its `tabs`, the `open` index and the `page` that index names.
+
+**Which page is open is VIEW state, and that is a designated deviation**: the native designer
+writes the container's `Value` and dirties the form, and this canvas does not, because reaching
+page two must not rewrite the developer's form - `designerCanvas` reports `dirty: false` right
+after an open. A form that should OPEN on a given page says so through the Properties panel, where
+every other unprinted property is said.
+
+`designerTabMenu` right-clicks a MultiPage's tab strip and answers its items as a ` | ` separated
+list - `New Page | Delete Page`, the native designer's own pair - with a disabled item marked
+`(disabled)`, which is what Delete Page is for a MultiPage that has no pages. Pick one with
+`chooseMenuItem`. `tab` names a tab to right-click (which opens that page first, so the item acts
+on the page named) and is omitted for the strip itself, where Delete Page still acts on the page
+that is open. A TabStrip opens NO menu and the act answers `did: false`: its tabs are not in the
+markup dialect, so there is no line to add or take away and every item would be a claim the
+product cannot keep.
+
 `designerDelete` is the same shape with the Delete key: the control's line leaves the document
-with everything indented under it, and the form keeps the control until the save.
+with everything indented under it, and the form keeps the control until the save. It reaches a
+PAGE too - the page's line and its children go, one undoable edit, which is Delete Page's own
+commit under another name.
 `designerToolbox` drags a kind out of the xlide palette to a point in POINTS from the form's
 client origin, and the drop lands in whatever container is under it - aim inside a Frame and the
 new control is the Frame's, in the Frame's own coordinates. Its `detail` answers the name the
@@ -1421,20 +1661,35 @@ a row per control and names anything a point or more out. What it does NOT compa
 rectangle, which both surfaces have always agreed about and which is exactly why a four-point
 difference could sit on screen for a week.
 
-And when a gesture feels slow, `designer-perf.mjs` times the whole surface rather than guessing
-which part of it is at fault:
+And when a gesture feels slow, two walks time the surface rather than guessing which part of it
+is at fault:
 
 ```bash
 node tools\harness\designer-perf.mjs
+node tools\harness\surface-perf.mjs
 ```
 
-It walks every interaction five times - the read routes, opening a tab, selection, nudge, drag,
-resize, the toolbox drop, delete, the draft preview after a typed edit, and Ctrl+S - reporting
-median and worst for each, then what a projection costs in COM wrappers with an idle tick as the
-floor, and the leak ledger. It PRINTS rather than passing or failing: what counts as slow is a
-judgement about a person's patience, and a threshold nobody can defend is a number the next
-person raises. It resets the document between sections and puts the form back, saved, at the
-end, so two runs measure the same shape.
+`designer-perf.mjs` walks every designer interaction five times - the read routes, opening a tab,
+selection, nudge, drag, resize, the toolbox drop, delete, opening a page, the strip's menu, a
+marquee, an align, bring-to-front, zoom, the liveness check, a picture load, the draft preview
+after a typed edit, and Ctrl+S - reporting median and worst for each, then what a projection
+costs in COM wrappers with an idle tick as the floor, what the pictures put on the wire, and the
+leak ledger. `surface-perf.mjs` is the same shape for everything else: opening and closing a
+module tab, switching between two, reading text, completions, hover, the tree, a search, the
+Properties panel following an activate, and an idle snapshot - run it against DebugFixture.xlsm,
+which has real modules with real code so the language rows measure an answer rather than a miss.
+
+Both PRINT rather than passing or failing: what counts as slow is a judgement about a person's
+patience, and a threshold nobody can defend is a number the next person raises. The designer walk
+resets the document between sections and puts the form back, saved, at the end, so two runs
+measure the same shape.
+
+**Read a walk's own measurement critically.** One line of the designer's was lying for a session:
+the typed-edit row timed five rounds and four of them started with the canvas already previewing
+a draft, so the wait they were timing was already over - 6ms against a first round of 390. Every
+round starts from a clean document now and the line reads 358ms, which is the typing debounce
+being paid on purpose. A round that does not start from the same place as the others is not
+measuring what its label says.
 
 `tools\New-FormFixture.ps1` builds FormFixture.xlsm - every standard control, a Frame with
 children, a MultiPage with a control on Page1, and a code-behind that COMPILES against them.

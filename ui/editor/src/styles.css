@@ -694,8 +694,9 @@ input.prop-value:focus {
   background: var(--vscode-list-activeSelectionBackground, #04395e);
 }
 
-/* The colour picker's own button, shrunk to a swatch: the browser paints the value, which is
-   exactly what the row wants to show. */
+/* The row's swatch: it PAINTS the value - a system colour as the host resolved it - and opens
+   xlide's own picker. A plain button, because the platform's colour input brings the platform's
+   dialog with it and that dialog cannot say "button face". */
 .prop-swatch {
   position: absolute;
   right: 2px;
@@ -704,17 +705,122 @@ input.prop-value:focus {
   padding: 0;
   border: 1px solid var(--xl-border, #333);
   border-radius: 2px;
-  background: none;
   cursor: pointer;
 }
 
-.prop-swatch::-webkit-color-swatch-wrapper {
-  padding: 0;
+/* The picker itself. Fixed to the viewport like the options popup, for the same reason: the panel
+   it hangs off scrolls, and a popup that scrolls with its row half out of the panel is worse than
+   one that closes. */
+.colour-picker {
+  position: fixed;
+  z-index: 70;
+  width: 232px;
+  padding: 6px;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 4px;
+  background: var(--vscode-dropdown-background, #252526);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 
-.prop-swatch::-webkit-color-swatch {
+.colour-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+
+.colour-swatch {
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.colour-swatch:hover {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+}
+
+.colour-swatch.current,
+.colour-system-row.current {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+
+.colour-swatch:focus-visible,
+.colour-system-row:focus-visible,
+.colour-hex-field:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
+
+.colour-heading {
+  margin: 8px 2px 3px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+}
+
+.colour-system {
+  max-height: 148px;
+  overflow-y: auto;
+}
+
+.colour-system-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  width: 100%;
+  padding: 2px 4px;
   border: 0;
-  border-radius: 1px;
+  border-radius: 2px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.colour-system-row:hover {
+  background: var(--vscode-list-activeSelectionBackground, #04395e);
+}
+
+.colour-chip {
+  flex: none;
+  width: 14px;
+  height: 12px;
+  border: 1px solid rgba(128, 128, 128, 0.5);
+  border-radius: 2px;
+}
+
+.colour-system-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.colour-system-css {
+  flex: none;
+  opacity: 0.55;
+  font-size: 11px;
+}
+
+.colour-hex {
+  margin-top: 6px;
+}
+
+.colour-hex-field {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
 }
 
 select.prop-value {
@@ -745,6 +851,71 @@ span.prop-value.readonly {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A PICTURE row: a thumbnail, what it holds, and the two buttons a picture has. No text field,
+   because a picture has no spelling - MSForms keeps the pixels and forgets the file. */
+.prop-picture {
+  gap: 4px;
+}
+
+.prop-picture span.prop-value.readonly {
+  flex: 1 1 auto;
+  opacity: 0.75;
+}
+
+/* Empty, it is a dashed outline the size of a swatch - "a picture goes here". Filled, it shows
+   the picture itself, contained rather than stretched, over the chequerboard every image editor
+   uses for transparency, so a PNG with holes reads as one. */
+.prop-thumb {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 16px;
+  border: 1px dashed var(--xl-border, #333);
+  border-radius: 2px;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.prop-thumb.has-picture {
+  border-style: solid;
+  background-color: #ffffff;
+  background-image:
+    var(--prop-thumb-picture, none),
+    linear-gradient(45deg, rgba(128, 128, 128, 0.25) 25%, transparent 25%, transparent 75%, rgba(128, 128, 128, 0.25) 75%),
+    linear-gradient(45deg, rgba(128, 128, 128, 0.25) 25%, transparent 25%, transparent 75%, rgba(128, 128, 128, 0.25) 75%);
+  background-size: contain, 8px 8px, 8px 8px;
+  background-position: center, 0 0, 4px 4px;
+}
+
+/* Browse and Clear, sized to the 24px pointer target the rest of the panel keeps and styled as
+   the quiet buttons they are: the row's subject is the picture, not its chrome. */
+.prop-browse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.prop-browse:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.25));
+}
+
+.prop-browse:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
 }
 
 
@@ -2021,6 +2192,50 @@ body.live-resize .minimap {
 .modal-detail {
   margin-top: 6px;
   opacity: 0.7;
+  font-size: 12px;
+}
+
+/* The tab-order dialog's list: a rank, a name and a kind per row, in the order Tab walks them.
+   Scrolls rather than growing, because a form with forty controls is a form with forty rows. */
+.taborder-list {
+  margin-top: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 3px;
+}
+
+.taborder-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.taborder-row:hover {
+  background: var(--vscode-list-hoverBackground, #2a2d2e);
+}
+
+.taborder-row.current {
+  background: var(--vscode-list-activeSelectionBackground, #094771);
+  color: var(--vscode-list-activeSelectionForeground, #ffffff);
+}
+
+/* Fixed width and tabular, so the numbers line up as a column rather than drifting with the
+   name beside them. */
+.taborder-rank {
+  min-width: 20px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.taborder-name {
+  flex: 1 1 auto;
+}
+
+.taborder-kind {
+  opacity: 0.6;
   font-size: 12px;
 }
 
@@ -3495,12 +3710,18 @@ body.objbrowser-page #objbrowser-card {
   position: relative;
 }
 
+/* BORDER-BOX, and that is not a detail: with the default content-box, `min-height: 0` still
+   leaves the 48px of padding, so in a short tab the scroll box stayed 48px tall inside a half
+   only 37px high. Its parent clips the paint, so the canvas LOOKED right - and every gesture
+   aimed by coordinates went wrong, because scrollIntoView and scrollToPoint measure the scroll
+   box's own rect and happily placed a pointer 20px below the clip, where the markup editor is.
+   Found 2026-08-16 by a toolbox drop that answered "nothing landed" over an `mtk4` token. */
 .designer-canvas-scroll {
   position: relative;
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 24px;
+  box-sizing: border-box;
 }
 
 /* The `display: grid` here BEATS the browser's own `[hidden] { display: none }` - author
@@ -3525,7 +3746,21 @@ body.objbrowser-page #objbrowser-card {
 
 /* The form itself wears its OWN colours, not the theme's: a UserForm is a light-grey thing
    whatever the editor around it looks like, and painting it dark would be a guess. */
+/* The box the scaled form sits in. A transform does not change layout, so this is what tells the
+   scroll bars how far a zoomed form reaches - and it carries the gap around the form, which is
+   why the form's own margin went. */
+.dc-stage {
+  margin: 24px;
+  width: max-content;
+}
+
 .dc-form {
+  /* The gap around the form is a MARGIN on the form rather than padding on the scroll box: a
+     padded scroll port cannot shrink below its own padding, so on a short tab the box stayed 48px
+     tall inside a half of 37, its parent clipped the difference, and every gesture aimed by
+     coordinates trusted the unclipped rect (2026-08-16). A margin belongs to the content and
+     scrolls with it, which is also what it looked like all along. */
+  margin: 24px;
   position: relative;
   background: #ece9d8;
   color: #000;
@@ -3838,6 +4073,22 @@ body.objbrowser-page #objbrowser-card {
   cursor: move;
 }
 
+/* A control wearing a picture BESIDE its caption. The direction and the cross alignment are the
+   twelve fmPicturePosition values and are set inline; what belongs here is only that the box
+   becomes a flex line and the picture never outgrows it. */
+.dc-with-picture {
+  display: flex;
+  justify-content: center;
+  gap: 2px;
+}
+
+.dc-picture {
+  flex: 0 0 auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
 .dc:hover:not(:has(.dc:hover)) {
   outline: 1px solid rgba(74, 106, 157, 0.8);
   outline-offset: 1px;
@@ -3848,6 +4099,10 @@ body.objbrowser-page #objbrowser-card {
 .dc-dragging {
   z-index: 5;
   opacity: 0.85;
+  /* And transparent to the POINTER, because the drag asks what is underneath: a control being
+     carried sits under the pointer by definition, so a hit test that could see it would answer
+     "itself" and no drag could ever find the container it is heading for. */
+  pointer-events: none;
 }
 
 /* While a gesture runs, every child inherits the canvas's cursor - the pointer may travel over
@@ -3991,13 +4246,37 @@ body.objbrowser-page #objbrowser-card {
   border: 1px solid #a0a0a0;
   border-bottom: none;
   border-radius: 2px 2px 0 0;
-  background-image: linear-gradient(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.05));
+  /* The tabs that are NOT showing sit lower and darker - the runtime's own difference, and a
+     stronger one than the 5% wash this used to carry alone. */
+  margin-top: 2px;
+  background-image: linear-gradient(rgba(0, 0, 0, 0.14), rgba(0, 0, 0, 0.06));
+  /* A tab OPENS its page rather than picking the container up, and the hand says so: a
+     selected container wears the move cursor, and a tab must not read as one more inch of
+     the thing to drag. */
+  cursor: pointer;
 }
 
-/* The one that is showing: the ground undarkened, and bold, which is how the runtime marks it. */
-.dc-page-tab.first {
+/* The one that is showing, drawn the way the runtime draws it: raised into the body, its ground
+   undarkened, and the rule beneath it broken so the tab and the page read as one shape. Bold and
+   a touch lighter was all it had until 2026-08-16, and on a TabStrip - where the content does not
+   change with the tab, because MSForms swaps it in code - that was the ONLY difference between
+   one tab and another (the owner: "in the tab strip, there is no differentiation between tab 1
+   and tab 2"). */
+.dc-page-tab.current {
   background-image: none;
   font-weight: bold;
+  /* Half a pixel taller and pulled down over the rule: the join a tab control paints between the
+     open tab and its page. */
+  margin-top: -1px;
+  padding-bottom: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+/* The tab a click would open, lit the way the control under the pointer is. */
+.dc-page-tab:not(.current):hover {
+  outline: 1px solid rgba(74, 106, 157, 0.8);
+  outline-offset: -1px;
 }
 
 /* `top` is set per control, from the band the model describes; these are the fallbacks for a
@@ -4080,6 +4359,51 @@ body.objbrowser-page #objbrowser-card {
   inset: 0;
 }
 
+/* A selected PAGE is outlined where it lies: it has no box of its own to stand beside and
+   nothing to pull, so the boundary is the whole of its dress. */
+.dc-selection-page {
+  inset: 0;
+}
+
+/* The rest of a GROUP: a boundary and no handles, because only the anchor can be pulled. The
+   native designer says the same with hollow handles where the primary has white ones. */
+.dc-selection-extra {
+  border-style: solid;
+  border-color: rgba(74, 106, 157, 0.7);
+}
+
+/* The zoom control at the end of the palette row: a button wearing the percentage it draws at.
+   Tabular figures so 100% and 75% do not jiggle the row as they swap. */
+.designer-zoom {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  min-width: 46px;
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.designer-zoom:hover {
+  background: var(--vscode-toolbar-hoverBackground, #2a2d2e);
+}
+
+/* The rubber band: drawn inside the container whose children it can catch, so it never stretches
+   over ground its own selection could not cover. */
+.dc-marquee {
+  position: absolute;
+  z-index: 7;
+  pointer-events: none;
+  border: 1px dashed #4a6a9d;
+  background: rgba(74, 106, 157, 0.12);
+  box-sizing: border-box;
+}
+
 .dc-handle {
   position: absolute;
   width: 7px;
@@ -4135,10 +4459,15 @@ body.objbrowser-page #objbrowser-card {
 .designer-view.stacked .designer-splitter { order: 1; }
 .designer-view.stacked .designer-markup-half { order: 2; }
 
+/* The markup takes 40% and never more than what leaves the canvas a form's worth of room: a
+   short tab used to give the document its 80px floor and the canvas whatever was left, which on
+   a 123px tab was 37px - a designer with no room to design in. The canvas is the half that
+   cannot be scrolled through usefully at 37px; a document can. */
 .designer-view.stacked .designer-markup-half {
   flex: 0 0 40%;
   min-width: 0;
-  min-height: 80px;
+  min-height: 0;
+  max-height: max(60px, calc(100% - 120px));
 }
 
 .designer-view.stacked .designer-splitter {

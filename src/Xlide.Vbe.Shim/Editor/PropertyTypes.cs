@@ -25,6 +25,11 @@ namespace Xlide.Vbe.Shim.Editor;
 ///
 /// Read once per CLASS and cached: a form's type does not change while it is loaded, and the
 /// panel republishes on every selection.
+///
+/// The same walk answers the markup's language service (2026-08-16), which wants two things the
+/// panel never needed: the type each property is DECLARED as, and the help string the library
+/// carries for it. Collecting them costs nothing extra - both were already in hand and thrown
+/// away - so there is one walk, one cache, and two views of it.
 /// </summary>
 internal sealed unsafe class PropertyTypes
 {
@@ -34,13 +39,33 @@ internal sealed unsafe class PropertyTypes
     /// <summary>What is known about one property: its enum's members, or that it is a colour.</summary>
     public sealed record Shape(IReadOnlyList<EnumMember>? Members, bool Colour);
 
+    /// <summary>
+    /// Everything the library says about one property: the type it is declared as, its enum's
+    /// members where it has one, whether it is a colour, and the help string the library carries.
+    ///
+    /// The panel needs the middle two and gets them as <see cref="Shape"/>, projected from this;
+    /// the markup's language service needs all four, because a completion that offers a property
+    /// name without saying what it takes is a list of words. One walk answers both.
+    /// </summary>
+    public sealed record Described(
+        string? Type, IReadOnlyList<EnumMember>? Members, bool Colour, string? Doc,
+        bool Hidden = false, bool Settable = false);
+
     private const int InvokePropertyGet = 2;
+    private const int InvokePropertyPut = 4;
+    private const int InvokePropertyPutRef = 8;
     private const int TypeKindEnum = 0;
     private const int TypeKindAlias = 6;
     private const short VtI2 = 2;
     private const short VtI4 = 3;
     private const short VtInt = 22;
+    private const short VtPointer = 26;
     private const short VtUserDefined = 29;
+
+    /// <summary>FUNCFLAG_FRESTRICTED and FUNCFLAG_FHIDDEN: what a library marks as not for the
+    /// developer's eyes. The Object Browser filters on exactly these two.</summary>
+    private const short FunctionFlagRestricted = 0x1;
+    private const short FunctionFlagHidden = 0x40;
 
     /// <summary>How far an alias chain is followed before it is called a loop.</summary>
     private const int AliasDepth = 4;
@@ -48,13 +73,22 @@ internal sealed unsafe class PropertyTypes
     private static readonly IReadOnlyDictionary<string, Shape> Nothing =
         new Dictionary<string, Shape>(StringComparer.OrdinalIgnoreCase);
 
-    private readonly Dictionary<string, IReadOnlyDictionary<string, Shape>> _byClass =
+    private static readonly IReadOnlyDictionary<string, Described> NothingDescribed =
+        new Dictionary<string, Described>(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, IReadOnlyDictionary<string, Described>> _byClass =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, IReadOnlyDictionary<string, Shape>> _shapesByClass =
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// The shapes of one object's properties, by property name. Empty when the object has no type
     /// information to offer, which is an ordinary answer rather than a failure: a panel that shows
     /// the raw value is what this product did until today, and it is still honest.
+    ///
+    /// Only the properties that MEAN something beyond their number appear here - an enum's, a
+    /// colour's - because that is the question the panel asks: is there a name for this value.
     /// </summary>
     public IReadOnlyDictionary<string, Shape> Of(DispatchObject subject)
     {
@@ -64,6 +98,39 @@ internal sealed unsafe class PropertyTypes
         if (className is not { Length: > 0 })
         {
             return Nothing;
+        }
+
+        if (_shapesByClass.TryGetValue(className, out var known))
+        {
+            return known;
+        }
+
+        var shapes = new Dictionary<string, Shape>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, described) in Describe(subject))
+        {
+            if (described.Members is { Count: > 0 } || described.Colour)
+            {
+                shapes[name] = new Shape(described.Members, described.Colour);
+            }
+        }
+
+        _shapesByClass[className] = shapes;
+        return shapes;
+    }
+
+    /// <summary>
+    /// Everything the library says about every property the object answers, by name. The richer
+    /// read behind <see cref="Of"/>, and the vocabulary the markup's completions and hovers are
+    /// built from. Cached per class beside the shapes, off the same walk.
+    /// </summary>
+    public IReadOnlyDictionary<string, Described> Describe(DispatchObject subject)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+
+        var className = subject.TypeName();
+        if (className is not { Length: > 0 })
+        {
+            return NothingDescribed;
         }
 
         if (_byClass.TryGetValue(className, out var known))
@@ -186,10 +253,10 @@ internal sealed unsafe class PropertyTypes
             return members.FirstOrDefault(member => member.Value == value)?.Name ?? raw;
         }
 
-        // The VBE's own spelling for OLE_COLOR: eight hex digits, high bit set for a system
-        // colour, and the byte order is BGR because that is what the model stores.
+        // A colour reads the way a developer writes one - `#f0f0f0`, or a system colour's name
+        // where there is no honest hex to give (SystemColours has the why).
         return shape.Colour
-            ? $"&H{(uint)value:X8}&"
+            ? SystemColours.Spell(value)
             : raw;
     }
 
@@ -210,40 +277,51 @@ internal sealed unsafe class PropertyTypes
             return named is null ? shown : named.Value.ToString(CultureInfo.InvariantCulture);
         }
 
-        if (shape.Colour && shown.StartsWith("&H", StringComparison.OrdinalIgnoreCase))
+        // Every spelling a colour row can show, and the two the VBE speaks besides. Anything
+        // else goes to the model untouched, so a developer who types a number gets a number.
+        if (shape.Colour && SystemColours.Unspell(shown) is { } colour)
         {
-            var digits = shown.TrimEnd('&')[2..];
-            return uint.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var parsed)
-                ? ((int)parsed).ToString(CultureInfo.InvariantCulture)
-                : shown;
+            return colour.ToString(CultureInfo.InvariantCulture);
         }
 
         return shown;
     }
 
-    private static IReadOnlyDictionary<string, Shape> Read(DispatchObject subject, string className)
+    private static IReadOnlyDictionary<string, Described> Read(DispatchObject subject, string className)
     {
         using var info = subject.TypeInfo();
         if (info is null)
         {
-            return Nothing;
+            return NothingDescribed;
         }
 
-        var shapes = new Dictionary<string, Shape>(StringComparer.OrdinalIgnoreCase);
+        var described = new Dictionary<string, Described>(StringComparer.OrdinalIgnoreCase);
+        var settable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            ReadInto(info, shapes, depth: 0);
+            ReadInto(info, described, settable, depth: 0);
         }
         catch (Exception ex)
         {
             Log.Info($"property types: '{className}' could not be read ({ex.GetType().Name})");
         }
 
-        Log.Info($"property types: {className} carries {shapes.Count} named value(s)");
-        return shapes;
+        // A property is writable when the library declares a PUT for it, which is a fact about
+        // the type rather than about the value that came back: `CanPaste` reads as a Boolean and
+        // is no more settable for it.
+        foreach (var name in described.Keys.ToArray())
+        {
+            described[name] = described[name] with { Settable = settable.Contains(name) };
+        }
+
+        var named = described.Count(one => one.Value.Members is { Count: > 0 } || one.Value.Colour);
+        Log.Info($"property types: {className} carries {described.Count} property(s), {named} of them named value(s)");
+        return described;
     }
 
-    private static void ReadInto(ComHandle<ITypeInfo> info, Dictionary<string, Shape> shapes, int depth)
+    private static void ReadInto(
+        ComHandle<ITypeInfo> info, Dictionary<string, Described> described,
+        HashSet<string> settable, int depth)
     {
         if (info.Target.GetTypeAttr(out var attrPointer) < 0 || attrPointer == 0)
         {
@@ -271,7 +349,7 @@ internal sealed unsafe class PropertyTypes
                 using var implemented = ComHandle<ITypeInfo>.Own(implPointer);
                 if (implemented is not null)
                 {
-                    ReadInto(implemented, shapes, depth + 1);
+                    ReadInto(implemented, described, settable, depth + 1);
                 }
             }
 
@@ -288,20 +366,31 @@ internal sealed unsafe class PropertyTypes
             try
             {
                 var function = (FuncDesc*)funcPointer;
+                if (function->InvokeKind is InvokePropertyPut or InvokePropertyPutRef)
+                {
+                    if (NameOf(info, function->MemberId) is { Length: > 0 } putName)
+                    {
+                        settable.Add(putName);
+                    }
+
+                    continue;
+                }
+
                 if (function->InvokeKind != InvokePropertyGet)
                 {
                     continue;
                 }
 
-                if (NameOf(info, function->MemberId) is not { Length: > 0 } name || shapes.ContainsKey(name))
+                var (name, doc) = DocumentedOf(info, function->MemberId);
+                if (name is not { Length: > 0 } || described.ContainsKey(name))
                 {
                     continue;
                 }
 
-                if (ShapeOf(info, function->Return.Type, AliasDepth) is { } shape)
-                {
-                    shapes[name] = shape;
-                }
+                var (type, members, colour) = TypeOf(info, function->Return.Type, AliasDepth);
+                described[name] = new Described(
+                    type, members, colour, doc,
+                    (function->Flags & (FunctionFlagHidden | FunctionFlagRestricted)) != 0);
             }
             finally
             {
@@ -324,34 +413,54 @@ internal sealed unsafe class PropertyTypes
                 using var inherited = ComHandle<ITypeInfo>.Own(basePointer);
                 if (inherited is not null)
                 {
-                    ReadInto(inherited, shapes, depth + 1);
+                    ReadInto(inherited, described, settable, depth + 1);
                 }
             }
         }
     }
 
-    /// <summary>What a return type MEANS: an enum's members, a colour, or nothing worth saying.</summary>
-    private static Shape? ShapeOf(ComHandle<ITypeInfo> info, TypeDesc type, int depth)
+    /// <summary>
+    /// What a return type IS and what it MEANS: the name it is declared as, an enum's members
+    /// where it has them, and whether it is a colour. The name is the type's OWN - `fmBorderStyle`,
+    /// `OLE_COLOR` - because that is what a developer looking for the property's vocabulary would
+    /// search for; an alias is followed for its members but keeps its own spelling.
+    /// </summary>
+    private static (string? Type, IReadOnlyList<EnumMember>? Members, bool Colour) TypeOf(
+        ComHandle<ITypeInfo> info, TypeDesc type, int depth)
     {
-        if (depth <= 0 || type.VarType != VtUserDefined)
+        if (depth <= 0)
         {
-            return null;
+            return (null, null, false);
+        }
+
+        // A pointer to a type is that type as far as a property's spelling is concerned: an
+        // object-valued getter declares IFontDisp* and the developer writes Font.
+        if (type.VarType == VtPointer)
+        {
+            return type.Detail == 0
+                ? (null, null, false)
+                : TypeOf(info, *(TypeDesc*)type.Detail, depth - 1);
+        }
+
+        if (type.VarType != VtUserDefined)
+        {
+            return (Primitive(type.VarType), null, false);
         }
 
         if (info.Target.GetRefTypeInfo((int)type.Detail, out var referenced) < 0 || referenced == 0)
         {
-            return null;
+            return (null, null, false);
         }
 
         using var target = ComHandle<ITypeInfo>.Own(referenced);
         if (target is null)
         {
-            return null;
+            return (null, null, false);
         }
 
         if (target.Target.GetTypeAttr(out var attrPointer) < 0 || attrPointer == 0)
         {
-            return null;
+            return (null, null, false);
         }
 
         var attr = (TypeAttr*)attrPointer;
@@ -360,27 +469,49 @@ internal sealed unsafe class PropertyTypes
         var varCount = attr->VarCount;
         target.Target.ReleaseTypeAttr(attrPointer);
 
+        var name = NameOf(target, -1);
+
         if (kind == TypeKindEnum)
         {
             var members = MembersOf(target, varCount);
-            return members.Count == 0 ? null : new Shape(members, false);
+            return (name, members.Count == 0 ? null : members, false);
         }
 
         if (kind != TypeKindAlias)
         {
-            return null;
+            return (name, null, false);
         }
 
         // OLE_COLOR is an alias for a plain unsigned long, so only its NAME says what it is -
         // and this is the one place a name decides anything, because the type system has
         // nothing else to offer here.
-        if (string.Equals(NameOf(target, -1), "OLE_COLOR", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(name, "OLE_COLOR", StringComparison.OrdinalIgnoreCase))
         {
-            return new Shape(null, true);
+            return (name, null, true);
         }
 
-        return ShapeOf(target, alias, depth - 1);
+        var (_, aliasMembers, aliasColour) = TypeOf(target, alias, depth - 1);
+        return (name, aliasMembers, aliasColour);
     }
+
+    /// <summary>A variant tag as the language spells it, for the types that have no name of
+    /// their own. Null where a tag says nothing a developer would write.</summary>
+    private static string? Primitive(short varType) => varType switch
+    {
+        VtI2 => "Integer",
+        VtI4 or VtInt => "Long",
+        4 => "Single",
+        5 => "Double",
+        6 => "Currency",
+        7 => "Date",
+        8 => "String",
+        9 or 13 => "Object",
+        11 => "Boolean",
+        12 => "Variant",
+        17 => "Byte",
+        20 => "LongLong",
+        _ => null,
+    };
 
     private static List<EnumMember> MembersOf(ComHandle<ITypeInfo> info, short varCount)
     {
@@ -433,16 +564,23 @@ internal sealed unsafe class PropertyTypes
     }
 
     /// <summary>A member's name, or the type's own for MEMBERID_NIL.</summary>
-    private static string? NameOf(ComHandle<ITypeInfo> info, int memberId)
+    private static string? NameOf(ComHandle<ITypeInfo> info, int memberId) => DocumentedOf(info, memberId).Name;
+
+    /// <summary>A member's name and the help string its library carries, which is the sentence the
+    /// Object Browser's bottom strip shows. Often absent - MSForms describes some members and not
+    /// others - and an absent one is simply not said rather than invented.</summary>
+    private static (string? Name, string? Doc) DocumentedOf(ComHandle<ITypeInfo> info, int memberId)
     {
         if (info.Target.GetDocumentation(memberId, out var name, out var documentation, out _, out var helpFile) < 0)
         {
-            return null;
+            return (null, null);
         }
 
         try
         {
-            return name == 0 ? null : Marshal.PtrToStringBSTR(name);
+            return (
+                name == 0 ? null : Marshal.PtrToStringBSTR(name),
+                documentation == 0 ? null : Marshal.PtrToStringBSTR(documentation));
         }
         finally
         {

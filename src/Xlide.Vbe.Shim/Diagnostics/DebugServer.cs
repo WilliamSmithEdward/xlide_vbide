@@ -1262,7 +1262,8 @@ public sealed record DebugDesignerForm(
     [property: JsonPropertyName("insideHeight")] double? InsideHeight,
     [property: JsonPropertyName("backColor")] int? BackColor,
     [property: JsonPropertyName("foreColor")] int? ForeColor,
-    [property: JsonPropertyName("zoom")] int? Zoom);
+    [property: JsonPropertyName("zoom")] int? Zoom,
+    [property: JsonPropertyName("picture")] DebugDesignerPicture? Picture);
 
 public sealed record DebugDesignerControl(
     [property: JsonPropertyName("name")] string Name,
@@ -1281,7 +1282,25 @@ public sealed record DebugDesignerControl(
     [property: JsonPropertyName("borderStyle")] int? BorderStyle,
     [property: JsonPropertyName("specialEffect")] int? SpecialEffect,
     [property: JsonPropertyName("groupName")] string? GroupName,
-    [property: JsonPropertyName("font")] DebugDesignerFont? Font);
+    [property: JsonPropertyName("font")] DebugDesignerFont? Font,
+    /// <summary>What the control's Picture HOLDS, and how it is placed. The pixels are not
+    /// here on purpose - a bitmap in base64 is megabytes and this route is read in loops - so
+    /// it answers the kind, the size in pixels, and the placement properties.</summary>
+    [property: JsonPropertyName("picture")] DebugDesignerPicture? Picture);
+
+/// <summary>
+/// A picture as the api describes one: what it is, how big, and where it sits. Enough to assert
+/// that a picture arrived, that it is the one that was written, and that it was placed - without
+/// the bytes, which belong in a photograph of the running form rather than in a JSON reply.
+/// </summary>
+public sealed record DebugDesignerPicture(
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("width")] int? Width,
+    [property: JsonPropertyName("height")] int? Height,
+    [property: JsonPropertyName("sizeMode")] int? SizeMode,
+    [property: JsonPropertyName("alignment")] int? Alignment,
+    [property: JsonPropertyName("tiling")] bool? Tiling,
+    [property: JsonPropertyName("position")] int? Position);
 
 public sealed record DebugDesignerFont(
     [property: JsonPropertyName("name")] string? Name,

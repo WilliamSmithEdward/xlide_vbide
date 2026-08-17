@@ -2,6 +2,7 @@ using System.Text;
 using Xlide.Vbe.Core.Sync;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
+using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Engine;
 
 namespace Xlide.Vbe.Shim.Sync;
@@ -53,8 +54,10 @@ internal static class ModuleSyncService
     /// <summary>Files are written as UTF-8 with no mark, which is what the companion editor writes.</summary>
     private static readonly UTF8Encoding FileEncoding = new(encoderShouldEmitUTF8Identifier: false);
 
-    /// <summary>Reads every module of a project, with the full text a file needs.</summary>
-    public static List<LiveModule> ReadLiveModules(DispatchObject project)
+    /// <summary>Reads every module of a project, with the full text a file needs - and for a
+    /// UserForm, its DESIGN as markup, which is the half of a form that code alone cannot carry.
+    /// The inventory is optional: without it the walk is the code-only one it always was.</summary>
+    public static List<LiveModule> ReadLiveModules(DispatchObject project, ControlDefaults? defaults = null)
     {
         var modules = new List<LiveModule>();
 
@@ -81,7 +84,27 @@ internal static class ModuleSyncService
 
             var kind = ProjectReader.TypeName(component.GetInt32("Type"));
             var body = ProjectReader.ReadSource(component) ?? string.Empty;
-            modules.Add(new LiveModule(name, kind, FullSourceFor(component, name, kind, body)));
+
+            // The design rides beside the code for a form, and only for a form. The projection is
+            // the product's own - the same text the designer tab holds - so a file written here
+            // and a document edited there are the same thing.
+            string? design = null;
+            if (string.Equals(kind, "userform", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    design = FormDesignService.MarkupOf(component, name, out _, defaults);
+                }
+                catch (Exception ex)
+                {
+                    Log.Info($"sync: {name}'s design could not be projected ({ex.GetType().Name})");
+                }
+
+                Log.Info($"sync: {name} is a form; its design is "
+                    + (design is null ? "not available" : $"{design.Length} char(s)"));
+            }
+
+            modules.Add(new LiveModule(name, kind, FullSourceFor(component, name, kind, body), design));
         }
 
         return modules;
@@ -106,12 +129,24 @@ internal static class ModuleSyncService
         // file must not cost the developer the other twenty.
         return Directory.EnumerateFiles(folder)
             .Select(Path.GetFileName)
-            .Where(name => name is not null && ModuleSync.IsModuleFileName(name))
+            .Where(name => name is not null
+                && (ModuleSync.IsModuleFileName(name)
+                    || ModuleSync.IsDesignFileName(name)
+                    || ModuleSync.IsSidecarFileName(name)))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .AsParallel()
             .AsOrdered()
             .Select(name =>
             {
+                // A SIDECAR IS LISTED AND NEVER READ. It is a form's controls in binary, and the
+                // planner's only question about it is whether it is there - a form's pair has to
+                // be whole before an import can create the form. Reading it as text would hand
+                // the plan a megabyte of mojibake to diff.
+                if (ModuleSync.IsSidecarFileName(name!))
+                {
+                    return new RepoFile(name!, string.Empty);
+                }
+
                 try
                 {
                     return new RepoFile(name!, File.ReadAllText(Path.Combine(folder, name!), FileEncoding));
@@ -200,7 +235,7 @@ internal static class ModuleSyncService
                     // went wrong. Only the exception path below adds a name, because an exception
                     // message has none.
                     case SyncStatus.WillCreate when plan.Direction == SyncDirection.Import:
-                        if (CreateComponent(project, item, write, plan.ProjectId) is { } createRefused)
+                        if (CreateComponent(project, item, write, plan.ProjectId, plan.Folder) is { } createRefused)
                         {
                             failed.Add(createRefused);
                         }
@@ -210,6 +245,36 @@ internal static class ModuleSyncService
                         }
 
                         break;
+
+                    // A DESIGN goes through the markup apply, not through a module write: the file
+                    // is xlide's own text for the form's controls, and the apply that lands it is
+                    // the same name-keyed diff the designer tab's Ctrl+S makes. A document that
+                    // does not parse changes nothing and says which line stopped it.
+                    case SyncStatus.WillUpdate when item.IsDesign:
+                    {
+                        using var designComponents = project.GetObject("VBComponents");
+                        using var form = designComponents is null
+                            ? null
+                            : FindComponent(designComponents, item.ModuleName);
+                        if (form is null)
+                        {
+                            failed.Add($"{item.FileName} (no form named {item.ModuleName})");
+                            break;
+                        }
+
+                        var outcome = FormDesignService.ApplyMarkup(form, item.ModuleName, item.PayloadSource);
+                        if (outcome.Ok)
+                        {
+                            changed.Add($"{item.ModuleName} (design: +{outcome.Added.Count} "
+                                + $"-{outcome.Removed.Count}, {outcome.Set} set)");
+                        }
+                        else
+                        {
+                            failed.Add($"{item.FileName} ({outcome.Refused ?? "the design was refused"})");
+                        }
+
+                        break;
+                    }
 
                     case SyncStatus.WillUpdate:
                         if (write(item.ModuleName, ModuleSync.CodeWithoutHeader(item.PayloadSource), plan.ProjectId)
@@ -223,6 +288,39 @@ internal static class ModuleSyncService
                         }
 
                         break;
+
+                    // A FORM IS EXPORTED BY THE VBE, not assembled here. Its controls live in a
+                    // binary sidecar that only the exporter writes, and the .frm names that file -
+                    // so a form written from spliced text names a sidecar that does not exist.
+                    // The encoding compromise the rest of this class exists to avoid is accepted
+                    // for a form deliberately: the .frm and its .frx must agree byte for byte, and
+                    // only the exporter can promise that.
+                    case SyncStatus.WillCreate when IsFormCode(item):
+                    case SyncStatus.WillWrite when IsFormCode(item):
+                    {
+                        using var formComponents = project.GetObject("VBComponents");
+                        using var form = formComponents is null
+                            ? null
+                            : FindComponent(formComponents, item.ModuleName);
+                        if (form is null)
+                        {
+                            failed.Add($"{item.FileName} (no form named {item.ModuleName})");
+                            break;
+                        }
+
+                        var destination = Path.Combine(plan.Folder, item.FileName);
+                        form.Invoke("Export", destination);
+                        changed.Add(item.FileName);
+
+                        // The sidecar is written beside it by the exporter, under the same name.
+                        var sidecar = Path.ChangeExtension(item.FileName, ".frx");
+                        if (File.Exists(Path.Combine(plan.Folder, sidecar)))
+                        {
+                            changed.Add(sidecar);
+                        }
+
+                        break;
+                    }
 
                     case SyncStatus.WillCreate:
                     case SyncStatus.WillWrite:
@@ -437,10 +535,18 @@ internal static class ModuleSyncService
         DispatchObject project,
         SyncItem item,
         WriteModuleText write,
-        string projectId)
+        string projectId,
+        string folder)
     {
         using var components = project.GetObject("VBComponents")
             ?? throw new InvalidOperationException("the project would not list its components");
+
+        // A FORM IS CREATED FROM ITS PAIR, whole, and it is the one create that imports the file
+        // rather than a header made from it.
+        if (ModuleSync.IsFormText(item.PayloadSource))
+        {
+            return CreateFormFromPair(components, item, folder);
+        }
 
         var header = HeaderOf(item.PayloadSource, item.ModuleName);
         var temporary = Path.Combine(
@@ -496,6 +602,113 @@ internal static class ModuleSyncService
         return refused;
     }
 
+    /// <summary>
+    /// Creates a FORM from the pair the VBE's own exporter wrote: the header text, and the binary
+    /// sidecar it names. This is the whole reason import can make a form at all - the sidecar
+    /// carries the controls, and nothing this side can build one from text.
+    ///
+    /// THROUGH A TEMPORARY COPY, for two reasons that both matter. The importer decides what to
+    /// make from the file's EXTENSION, and the shared planner writes a form's code as `.cls`
+    /// (xlide_vscode#21) - imported under that name it becomes a class module holding a form's
+    /// header, which is not a form and cannot be undone into one. And the sidecar has to sit
+    /// beside it under exactly the name the `OleObjectBlob` line spells, which a copy can promise
+    /// and a developer's folder cannot.
+    ///
+    /// The encoding compromise the rest of this class avoids is accepted here for the reason the
+    /// EXPORT accepts it: the pair must agree byte for byte, so the bytes are copied rather than
+    /// the text.
+    /// </summary>
+    private static string? CreateFormFromPair(DispatchObject components, SyncItem item, string folder)
+    {
+        var source = Path.Combine(folder, item.FileName);
+        if (!File.Exists(source))
+        {
+            return $"{item.FileName} is not in the folder any more";
+        }
+
+        var staging = Path.Combine(Path.GetTempPath(), $"xlide-import-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(staging);
+        try
+        {
+            var imported = Path.Combine(staging, $"{item.ModuleName}.frm");
+            File.Copy(source, imported);
+
+            if (ModuleSync.SidecarNamedBy(item.PayloadSource) is { Length: > 0 } named)
+            {
+                var sidecar = Path.Combine(folder, named);
+                if (!File.Exists(sidecar))
+                {
+                    return $"{item.FileName} names {named}, which is not in the folder";
+                }
+
+                File.Copy(sidecar, Path.Combine(staging, Path.GetFileName(named)));
+            }
+
+            components.Invoke("Import", imported);
+        }
+        catch (Exception why)
+        {
+            // THE IMPORTER'S OWN LOG IS THE ONLY EXPLANATION IT GIVES. "Errors during load" names
+            // a `.log` file it writes beside the module - and that file is in the staging folder
+            // this method is about to delete, so the reason would die with it (2026-08-16, where
+            // it took a second run to find out that a pair whose `Begin` line and `VB_Name`
+            // disagree is refused). Whatever it says is carried out with the refusal.
+            var log = Path.Combine(staging, $"{item.ModuleName}.log");
+            var said = File.Exists(log) ? ReadLogQuietly(log) : null;
+            return said is { Length: > 0 }
+                ? $"{item.FileName} ({why.Message.Trim()}) - the editor's log says: {said}"
+                : $"{item.FileName} ({why.Message.Trim()})";
+        }
+        finally
+        {
+            TryDeleteFolder(staging);
+        }
+
+        // Import takes the name from VB_Name and appends a number when something already answers
+        // to it. Nothing should - a create row is a row the plan found missing - but a form named
+        // UserForm1 arriving where EntryForm was asked for is a silent wrong outcome, not an
+        // import, so it is reported and taken back out.
+        using var made = FindComponent(components, item.ModuleName);
+        if (made is null)
+        {
+            return $"the editor imported {item.FileName} but no form named {item.ModuleName} appeared";
+        }
+
+        FormDesignService.KeepDesignerDown(made);
+        return null;
+    }
+
+    /// <summary>The importer's log as one line, short enough to stand in a refusal. Its own
+    /// failure is nothing: a missing explanation is what this method exists to improve on.</summary>
+    private static string? ReadLogQuietly(string path)
+    {
+        try
+        {
+            var lines = File.ReadAllLines(path, FileEncoding)
+                .Select(line => line.Trim())
+                .Where(line => line.Length > 0)
+                .Take(4);
+            return string.Join(" / ", lines);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"sync: the editor's import log could not be read ({ex.Message})");
+            return null;
+        }
+    }
+
+    private static void TryDeleteFolder(string folder)
+    {
+        try
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"sync: the import staging folder could not be removed ({ex.Message})");
+        }
+    }
+
     private static void RemoveComponent(DispatchObject project, string moduleName)
     {
         using var components = project.GetObject("VBComponents")
@@ -535,6 +748,11 @@ internal static class ModuleSyncService
 
         return string.Join("\r\n", header);
     }
+
+    /// <summary>A form's CODE row - the .frm - as against its design row or any other module.</summary>
+    private static bool IsFormCode(SyncItem item) =>
+        !item.IsDesign
+        && string.Equals(item.ModuleKind, "userform", StringComparison.OrdinalIgnoreCase);
 
     private static DispatchObject? FindComponent(DispatchObject components, string name)
     {

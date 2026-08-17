@@ -9,6 +9,7 @@
  * concept of them.
  */
 
+import { closeColourPicker, openColourPicker } from "./colourpicker.js";
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
@@ -43,6 +44,12 @@ export interface ShellProperty {
   /** A colour property's value as CSS, system colours already resolved by the host: what the
    * swatch paints and what the picker opens on. */
   swatch?: string;
+  /** True for a PICTURE row, which is chosen from a file rather than typed: the row shows what
+   * it holds, a thumbnail of it, and the two gestures a picture has - Browse and Clear. */
+  picture?: boolean;
+  /** The picture itself as a data URI, for the thumbnail. Absent when the row holds nothing, or
+   * holds something the host cannot turn into pixels - a metafile is a drawing, not a bitmap. */
+  preview?: string;
 }
 
 export interface ShellHandlers {
@@ -79,6 +86,9 @@ export interface ShellHandlers {
   menuClosed(): void;
   /** The developer edited a property of the shown component. */
   editProperty(component: string, name: string, value: string): void;
+  /** The developer pressed Browse on a picture row. The HOST raises the file dialog, because a
+   * page cannot hand back a path, and writes the property with whatever they chose. */
+  pickPicture(component: string, name: string): void;
   /** The developer closed a module's tab, however they did it; the workbook when known. The
    * action carries their answer to the unsaved-changes question - "save" or "discard" - and
    * is absent on the plain close the host checks. */
@@ -104,6 +114,9 @@ const SEVERITY_MARK: Record<FindingSeverity, string> = {
 interface TabIdentity {
   name: string;
   project: string | null;
+  /** Set for a question the PAGE is asking on its own behalf - a designer tab's unapplied
+   * edits - where the answer goes back to the caller rather than to the host's held close. */
+  answer?: (chosen: "save" | "discard") => void;
 }
 
 /** The identity two tabs are the same by. Case-insensitive, the way the host compares names. */
@@ -474,6 +487,9 @@ export class Shell {
   }
 
   private renderProperties(): void {
+    // A picker belongs to a row that is about to be replaced; the host republishes on every
+    // edit, so leaving one open would leave it anchored to an element nothing owns.
+    closeColourPicker();
     this.propertiesList.replaceChildren();
 
     // The object header, naming the selection and its class the way the editor's own window does.
@@ -502,6 +518,9 @@ export class Shell {
       const row = document.createElement("div");
       row.className = "prop-row";
       row.setAttribute("role", "listitem");
+      // Named on the element, so a probe aims at the row a developer would click rather than
+      // counting children.
+      row.dataset.property = property.name;
 
       const name = document.createElement("span");
       name.className = "prop-name";
@@ -509,6 +528,14 @@ export class Shell {
       name.title = property.name;
 
       row.appendChild(name);
+
+      // A PICTURE has no value to type. The row says what it holds in the designer's own words,
+      // shows it where there are pixels to show, and offers the two gestures a picture has.
+      if (property.picture) {
+        row.appendChild(this.pictureCell(property));
+        this.propertiesList.appendChild(row);
+        continue;
+      }
 
       if (property.writable) {
         const input = document.createElement("input");
@@ -732,25 +759,108 @@ export class Shell {
   }
 
   /**
-   * A colour row: the swatch shows the colour the value MEANS - system colours resolved by the
-   * host, because only it knows what the machine calls a button face today - and opens the
-   * platform's picker. The field beside it still takes `&H8000000F&` or a number, which is the
-   * only way to say "the system's button face" rather than the RGB it happens to be now.
+   * A picture row: what it holds, a thumbnail of it, and the two gestures a picture has.
+   *
+   * There is no text box, unlike every other row in this panel, and that is the point rather
+   * than an omission: a picture has no spelling. MSForms stores the pixels in the form's .frx
+   * and does not remember the file they came from, so a field showing a path would show a path
+   * that is not true a moment later. Browse asks the HOST for the file - a page cannot produce
+   * a path - and Clear takes the picture off, which is the empty write.
+   */
+  private pictureCell(property: ShellProperty): HTMLElement {
+    const cell = document.createElement("div");
+    cell.className = "prop-cell prop-picture";
+
+    const thumb = document.createElement("span");
+    thumb.className = "prop-thumb";
+    if (property.preview) {
+      // Through a custom property rather than `background-image`, because the class layers the
+      // picture over a transparency chequerboard and an inline background-image would replace
+      // the whole stack rather than the top of it.
+      thumb.style.setProperty("--prop-thumb-picture", `url("${property.preview}")`);
+      thumb.classList.add("has-picture");
+    }
+
+    const held = document.createElement("span");
+    held.className = "prop-value readonly";
+    held.textContent = property.value;
+    held.title = property.preview ? `${property.name}: ${property.value}` : property.value;
+
+    const browse = document.createElement("button");
+    browse.type = "button";
+    browse.className = "prop-browse";
+    browse.textContent = "...";
+    browse.title = `Choose a picture for ${property.name}`;
+    browse.setAttribute("aria-label", browse.title);
+    browse.addEventListener("click", () => {
+      this.handlers.pickPicture(this.propertiesComponent, property.name);
+    });
+
+    cell.append(thumb, held, browse);
+
+    // Clear only where there is something to clear, because a button that does nothing is a
+    // button a developer has to try to find out about.
+    if (property.value !== "(None)") {
+      const clear = document.createElement("button");
+      clear.type = "button";
+      clear.className = "prop-browse prop-clear";
+      clear.innerHTML = '<svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">'
+        + '<path d="M2 2l6 6M8 2l-6 6" fill="none" stroke="currentColor" stroke-width="1.4" '
+        + 'stroke-linecap="round"/></svg>';
+      clear.title = `Remove the picture from ${property.name}`;
+      clear.setAttribute("aria-label", clear.title);
+      clear.addEventListener("click", () => {
+        this.handlers.editProperty(this.propertiesComponent, property.name, "");
+      });
+      cell.appendChild(clear);
+    }
+
+    return cell;
+  }
+
+  /**
+   * A colour row: the swatch paints what the value MEANS - system colours resolved by the host,
+   * because only it knows what the machine calls a button face today - and opens xlide's own
+   * picker rather than the platform's (colourpicker.ts says why). The field beside it stays
+   * typeable and takes every spelling the picker can produce, plus the two the VBE speaks.
    */
   private attachColour(cell: HTMLElement, input: HTMLInputElement, property: ShellProperty): void {
-    const swatch = document.createElement("input");
-    swatch.type = "color";
+    const swatch = document.createElement("button");
+    swatch.type = "button";
     swatch.className = "prop-swatch";
-    swatch.value = property.swatch ?? "#000000";
+    swatch.style.background = property.swatch ?? "#000000";
     swatch.tabIndex = -1;
     swatch.title = `Pick a colour for ${property.name}`;
     swatch.setAttribute("aria-label", swatch.title);
 
-    // CHANGE, not input: the picker fires as the developer drags around the wheel, and a write
-    // per frame is a COM crossing per frame. This commits when they are done choosing.
-    swatch.addEventListener("change", () => {
-      input.value = swatch.value;
-      this.commitProperty(property, input);
+    const pick = (focusFirst: boolean): void => {
+      openColourPicker({
+        anchor: swatch,
+        property: property.name,
+        value: input.value,
+        focusFirst,
+        onPick: (spelling) => {
+          input.value = spelling;
+          this.commitProperty(property, input);
+        },
+      });
+    };
+
+    swatch.addEventListener("pointerdown", (event) => {
+      // Before the field's blur, which would otherwise commit an unchanged value and close the
+      // picker in the same gesture that opened it.
+      event.preventDefault();
+      pick(false);
+    });
+
+    // ArrowDown from the field opens it, exactly as it opens the list on an enum row: the swatch
+    // is a mouse target, and a colour row that can only be picked with a pointer is a row half
+    // the keyboard cannot reach. Typing a value into the field still works and always did.
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        pick(true);
+      }
     });
 
     cell.appendChild(swatch);
@@ -1121,7 +1231,7 @@ export class Shell {
    * queue one at a time - a Close Others across several dirty modules asks about each in
    * turn, the way answering one file at a time reads everywhere else.
    */
-  confirmClose(name: string, project: string | null): void {
+  confirmClose(name: string, project: string | null, answer?: (chosen: "save" | "discard") => void): void {
     // Asking twice about the same tab answers nothing twice: a repeated Ctrl+W while the
     // question is up would otherwise queue the same question behind itself.
     const mine = tabKey({ name, project });
@@ -1130,7 +1240,11 @@ export class Shell {
       return;
     }
 
-    this.closeConfirms.push({ name, project });
+    // `answer` is the DESIGNER tab's road. A module's unsaved text is the host's business - it
+    // holds the close and asks back - but a designer document's unapplied edits live in the
+    // page, so nothing host-side can know to ask. Same question, same three buttons, and the
+    // caller says what Save means for the thing being closed.
+    this.closeConfirms.push(answer ? { name, project, answer } : { name, project });
     this.showNextCloseConfirm();
   }
 
@@ -1157,7 +1271,11 @@ export class Shell {
         this.askedCloseConfirm = null;
 
         if (action) {
-          this.handlers.closeModule(asked.name, asked.project ?? undefined, action);
+          if (asked.answer) {
+            asked.answer(action);
+          } else {
+            this.handlers.closeModule(asked.name, asked.project ?? undefined, action);
+          }
         }
 
         if (this.closeConfirms.length > 0) {

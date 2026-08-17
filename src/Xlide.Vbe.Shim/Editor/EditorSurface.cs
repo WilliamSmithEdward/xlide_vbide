@@ -160,6 +160,11 @@ internal sealed class EditorSurface : IDisposable
     /// (module, workbook display or null, the document as it stands).</summary>
     public Action<string, string?, string>? FormMarkupLintRequested { get; set; }
 
+    /// <summary>Raised when the markup tab wants the language's vocabulary - the kinds and their
+    /// properties its completions and hovers answer from: (module, workbook display or null).
+    /// The module names a live form, which is what lets the Form's own entry be described.</summary>
+    public Action<string, string?>? FormMarkupVocabularyRequested { get; set; }
+
     /// <summary>Raised by a double-click on the canvas: (module, workbook display or null,
     /// control name or null for the form itself). The host writes or shows the default
     /// event handler, the native designer's own gesture.</summary>
@@ -168,6 +173,22 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the canvas selection changes: (module, workbook display or
     /// null, control name or null for the form itself). The Properties panel follows.</summary>
     public Action<string, string?, string?>? DesignerSelectionRequested { get; set; }
+
+    /// <summary>
+    /// Raised by Bring to Front / Send to Back on the canvas: (module, workbook display or null,
+    /// control, true for the front). This one writes the MODEL rather than the document, and
+    /// deliberately: MSForms' Controls collection does not follow ZOrder (measured), so the walk
+    /// cannot see a control's depth and the markup has no way to say it.
+    /// </summary>
+    public Action<string, string?, string, bool>? DesignerZOrderRequested { get; set; }
+
+    /// <summary>
+    /// Raised when a designer surface writes one of a control's properties straight at the model:
+    /// (module, workbook display or null, control, property, value). The tab-order dialog is what
+    /// asks - reordering is a TabIndex write, and MSForms renumbers the rest of the container
+    /// itself - and it goes through the same SetControlProperty the panel and the api use.
+    /// </summary>
+    public Action<string, string?, string, string, string>? DesignerSetPropertyRequested { get; set; }
 
     /// <summary>Raised with the panel that is showing, and whether the panel is open.</summary>
     public Action<string, bool>? PanelChanged { get; set; }
@@ -180,6 +201,10 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised when the developer edits a property: component, property name, new value.</summary>
     public Action<string, string, string>? PropertyEditRequested { get; set; }
+
+    /// <summary>Raised when the developer presses Browse on a PICTURE row: component, property.
+    /// The host raises the machine's file dialog, because a page cannot hand back a path.</summary>
+    public Action<string, string>? PicturePickRequested { get; set; }
 
     /// <summary>Raised when the developer selects a component in the explorer without opening it.</summary>
     public Action<string>? ComponentSelected { get; set; }
@@ -757,7 +782,8 @@ internal sealed class EditorSurface : IDisposable
             FormDesignService.lastWalkFormBack is { } fb ? FormDesignService.OleColorToCss(fb) : null,
             FormDesignService.lastWalkFormFore is { } ff ? FormDesignService.OleColorToCss(ff) : null,
             FormDesignService.lastWalkFormInsideWidth,
-            FormDesignService.lastWalkFormInsideHeight);
+            FormDesignService.lastWalkFormInsideHeight,
+            Painted(FormDesignService.lastWalkFormPicture));
         var controls = spec is null ? null : spec.Controls
             .Select(control =>
             {
@@ -769,7 +795,9 @@ internal sealed class EditorSurface : IDisposable
                     row?.BackColor is { } bc ? FormDesignService.OleColorToCss(bc) : null,
                     row?.ForeColor is { } fc ? FormDesignService.OleColorToCss(fc) : null,
                     row?.InsideWidth, row?.InsideHeight,
-                    row?.Tabs is { Count: > 0 } tabs ? [.. tabs] : null);
+                    row?.Tabs is { Count: > 0 } tabs ? [.. tabs] : null,
+                    row?.TabIndex,
+                    Painted(row?.Picture));
             })
             .ToArray();
 
@@ -777,6 +805,12 @@ internal sealed class EditorSurface : IDisposable
             new FormMarkupMessage("formMarkup", moduleName, project, markup, reason, form, controls),
             EditorMessageContext.Default.FormMarkupMessage));
     }
+
+    /// <summary>The walk's picture as the wire's, which is the same record one layer out: the
+    /// DTOs restate the walk rather than serialising it, for the reason above.</summary>
+    private static FormMarkupPicture? Painted(FormDesignService.PictureFace? face) =>
+        face is null ? null : new FormMarkupPicture(
+            face.DataUri, face.SizeMode, face.Alignment, face.Tiling, face.Position);
 
     /// <summary>Asks the designer tab's view to apply its document and call back for the raw
     /// save - the designer's half of the host's Ctrl+S. With <paramref name="run"/> the callback
@@ -823,6 +857,21 @@ internal sealed class EditorSurface : IDisposable
                     finding.Severity == Core.Forms.FormMarkupSeverity.Error ? "error" : "warning"))],
                 draftForm, draftControls),
             EditorMessageContext.Default.FormMarkupLintMessage));
+    }
+
+    /// <summary>The markup language's vocabulary: what the tab's completions and hovers answer
+    /// from. Sent once per session - measured from coclasses and type libraries that do not
+    /// change while Excel is up - so no keystroke ever waits on a round trip.</summary>
+    public void PublishFormMarkupVocabulary(FormMarkupKind[] kinds)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new FormMarkupVocabularyMessage("formMarkupVocabulary", kinds),
+            EditorMessageContext.Default.FormMarkupVocabularyMessage));
     }
 
     /// <summary>A colour property line's value as CSS, when the draft speaks it.</summary>
@@ -1072,6 +1121,18 @@ internal sealed class EditorSurface : IDisposable
         Send("setInstallPath", JsonSerializer.Serialize(
             new SetInstallPathMessage("setInstallPath", path),
             EditorMessageContext.Default.SetInstallPathMessage));
+    }
+
+    /// <summary>Tells the surface what this machine's system colours are, for the colour
+    /// picker's System half. Sent with the install path, at load, for the same reason: it is a
+    /// fact about the machine that the page cannot ask for itself.</summary>
+    public void ShowSystemColours()
+    {
+        Send("setSystemColours", JsonSerializer.Serialize(
+            new SetSystemColoursMessage(
+                "setSystemColours",
+                [.. SystemColours.All.Select(one => new SystemColourEntry(one.Name, one.Value, one.Css))]),
+            EditorMessageContext.Default.SetSystemColoursMessage));
     }
 
     /// <summary>Replaces the properties panel's contents with the selected component's properties.</summary>
@@ -1746,6 +1807,19 @@ internal sealed class EditorSurface : IDisposable
 
                     break;
 
+                case "requestFormMarkupVocabulary":
+                    if (document.RootElement.TryGetProperty("module", out var vocabularyModule)
+                        && vocabularyModule.GetString() is { Length: > 0 } vocabularyAsked)
+                    {
+                        FormMarkupVocabularyRequested?.Invoke(
+                            vocabularyAsked,
+                            document.RootElement.TryGetProperty("project", out var vocabularyOwner)
+                                ? vocabularyOwner.GetString()
+                                : null);
+                    }
+
+                    break;
+
                 case "lintFormMarkup":
                     if (document.RootElement.TryGetProperty("module", out var lintModule)
                         && lintModule.GetString() is { Length: > 0 } lintAsked
@@ -1790,6 +1864,44 @@ internal sealed class EditorSurface : IDisposable
                             document.RootElement.TryGetProperty("control", out var stubControl)
                                 ? stubControl.GetString()
                                 : null);
+                    }
+
+                    break;
+
+                case "designerZOrder":
+                    if (document.RootElement.TryGetProperty("module", out var zModule)
+                        && zModule.GetString() is { Length: > 0 } zAsked
+                        && document.RootElement.TryGetProperty("control", out var zControl)
+                        && zControl.GetString() is { Length: > 0 } zNamed)
+                    {
+                        DesignerZOrderRequested?.Invoke(
+                            zAsked,
+                            document.RootElement.TryGetProperty("project", out var zOwner)
+                                ? zOwner.GetString()
+                                : null,
+                            zNamed,
+                            document.RootElement.TryGetProperty("front", out var zFront)
+                                && zFront.ValueKind == JsonValueKind.True);
+                    }
+
+                    break;
+
+                case "designerSetProperty":
+                    if (document.RootElement.TryGetProperty("module", out var setModule)
+                        && setModule.GetString() is { Length: > 0 } setAsked
+                        && document.RootElement.TryGetProperty("control", out var setControl)
+                        && setControl.GetString() is { Length: > 0 } setNamed
+                        && document.RootElement.TryGetProperty("property", out var setWhich)
+                        && setWhich.GetString() is { Length: > 0 } setProperty
+                        && document.RootElement.TryGetProperty("value", out var setTo)
+                        && setTo.GetString() is { } setValue)
+                    {
+                        DesignerSetPropertyRequested?.Invoke(
+                            setAsked,
+                            document.RootElement.TryGetProperty("project", out var setOwner)
+                                ? setOwner.GetString()
+                                : null,
+                            setNamed, setProperty, setValue);
                     }
 
                     break;
@@ -2229,6 +2341,17 @@ internal sealed class EditorSurface : IDisposable
                         && newValue.GetString() is { } value)
                     {
                         PropertyEditRequested?.Invoke(ownerName, property, value);
+                    }
+
+                    break;
+
+                case "pickPicture":
+                    if (document.RootElement.TryGetProperty("component", out var pictureOwner)
+                        && pictureOwner.GetString() is { Length: > 0 } pictureOwnerName
+                        && document.RootElement.TryGetProperty("name", out var pictureProperty)
+                        && pictureProperty.GetString() is { Length: > 0 } pictureName)
+                    {
+                        PicturePickRequested?.Invoke(pictureOwnerName, pictureName);
                     }
 
                     break;

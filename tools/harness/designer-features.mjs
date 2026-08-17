@@ -11,8 +11,11 @@
  * later designer claim is measured against, and this suite is what keeps the instrument
  * honest.
  */
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { open, reporter, waitFor } from "./xlide-api.mjs";
-import { FORM_CONTROLS, FORM_MODULE as PLANNED_FORM, FORM_PROPERTIES, buildForm } from "./form-plan.mjs";
+import { FORM_CONTROLS, FORM_MODULE as PLANNED_FORM, FORM_PICTURES, FORM_PROPERTIES, buildForm } from "./form-plan.mjs";
 
 const api = await open();
 // projectId is the workbook display name, which is what the routes resolve; `project` is the
@@ -25,6 +28,51 @@ const { check, done } = reporter();
 const plainModule = components.find((component) => component.kind !== "form")?.name;
 
 const near = (a, b) => a !== null && a !== undefined && Math.abs(a - b) < 0.01;
+
+/**
+ * A CLASSIC icon file - the kind whose frames are BMPs rather than PNGs, which is the kind OLE's
+ * own picture loader reads and hands back as an icon rather than as a bitmap.
+ *
+ * Written rather than committed because nothing in the repository is one (the product's own .ico
+ * is PNG-framed throughout, so it loads through GDI+ and arrives flattened), and because the
+ * ICON road in the shim - DrawIconEx onto a DIB section, which is a different piece of code from
+ * the bitmap road's GetDIBits - is worth proving on purpose rather than by luck.
+ *
+ * The layout is the format's own: a directory of one entry, then a BITMAPINFOHEADER whose height
+ * is DOUBLED because an icon stacks its image over its mask, the pixels bottom-up, and the mask
+ * left at zero, which means "show every pixel".
+ */
+function classicIcon(side, bgra) {
+  const pixels = side * side * 4;
+  const mask = side * 4;
+  const file = Buffer.alloc(6 + 16 + 40 + pixels + mask);
+
+  file.writeUInt16LE(0, 0);
+  file.writeUInt16LE(1, 2);
+  file.writeUInt16LE(1, 4);
+  file[6] = side;
+  file[7] = side;
+  file.writeUInt16LE(1, 10);
+  file.writeUInt16LE(32, 12);
+  file.writeUInt32LE(40 + pixels + mask, 14);
+  file.writeUInt32LE(22, 18);
+
+  file.writeUInt32LE(40, 22);
+  file.writeInt32LE(side, 26);
+  file.writeInt32LE(side * 2, 30);
+  file.writeUInt16LE(1, 34);
+  file.writeUInt16LE(32, 36);
+  file.writeUInt32LE(pixels, 42);
+
+  for (let at = 0; at < pixels; at += 4) {
+    file[62 + at] = bgra[0];
+    file[63 + at] = bgra[1];
+    file[64 + at] = bgra[2];
+    file[65 + at] = bgra[3];
+  }
+
+  return file;
+}
 
 console.log(`the designer route, against ${project}\n`);
 
@@ -91,6 +139,14 @@ let written = null;
 const inView = (selector) => `document.querySelector('.designer-view[data-module="${form}"] ${selector}')`;
 const inViewAll = (selector) => `[...document.querySelectorAll('.designer-view[data-module="${form}"] ${selector}')]`;
 
+/*
+ * The FORM's own text as it stands NOW - what a restore has to write to leave the document
+ * clean. The projection captured at the top of the run is not it: rows since have moved
+ * controls and saved them, so writing that back leaves a document that differs from the form
+ * and a dirty dot nothing can clear (three rows waited fifteen seconds for that, 2026-08-16).
+ */
+const canonicalNow = async () => await api.designerMarkup(form, project);
+
 /**
  * A real keydown on THIS view's canvas: the gestures the keyboard owns - nudge, resize, undo,
  * delete - all arrive this way, through the listener a developer's own key would reach.
@@ -149,6 +205,23 @@ try {
     if (askedCaption) {
       check(`  ...captioned "${askedCaption}"`, found.caption === askedCaption, found.caption);
     }
+
+    // The picture the plan hung on it, described rather than carried: what it is, that it has
+    // real pixels, and that the placement property went in beside it.
+    if (wanted.picture) {
+      // (Bitmap) for both, ICO included - form-plan says why: a PNG-framed icon is not a classic
+      // icon and comes back through GDI+ as pixels. The icon road is proved further down, on an
+      // icon built to be one.
+      check("  ...holding a picture that reads (Bitmap)",
+        found.picture?.kind === "(Bitmap)", JSON.stringify(found.picture ?? null));
+      check("  ...with real pixels behind it",
+        (found.picture?.width ?? 0) > 0 && (found.picture?.height ?? 0) > 0,
+        `${found.picture?.width}x${found.picture?.height}`);
+      for (const [property, value] of Object.entries(wanted.picture.place ?? {})) {
+        const shown = property === "PictureSizeMode" ? found.picture?.sizeMode : found.picture?.position;
+        check(`  ...placed with ${property} ${value}`, shown === value, String(shown));
+      }
+    }
   }
 
   const pages = design.controls.filter((control) => control.type === "Page");
@@ -203,30 +276,46 @@ try {
   await api.writeModule(form, FORM_CODE, project);
   await api.pane("open", { module: form, project });
 
-  // FORM_CODE line 4 is `    RegionPick.AddItem "North"`; column 16 sits after the dot.
+  /*
+   * Where a receiver's dot is, found in the plan's own text rather than counted by hand.
+   *
+   * These were four hard-coded line numbers until 2026-08-16, when the fixture grew a
+   * Views_Change handler and two of them quietly pointed at blank lines - the rows then failed
+   * saying the seed carried no members, which is a true statement about the wrong line.
+   */
+  const afterDot = (receiver) => {
+    const lines = FORM_CODE.split(/\r?\n/);
+    const at = lines.findIndex((line) => line.includes(`${receiver}.`));
+    return {
+      line: at + 1,
+      column: (lines[at] ?? "").indexOf(`${receiver}.`) + receiver.length + 2,
+    };
+  };
+
+  const comboSpot = afterDot("RegionPick");
   await waitFor("the seed to carry the controls into completion", async () =>
-    ((await api.act("completions", { line: 4, column: 16 })).data ?? []).length > 0,
+    ((await api.act("completions", comboSpot)).data ?? []).length > 0,
     { budgetMs: 20000 });
 
-  const comboMembers = ((await api.act("completions", { line: 4, column: 16 })).data ?? [])
+  const comboMembers = ((await api.act("completions", comboSpot)).data ?? [])
     .map((item) => item.label ?? item.insertText);
   check("a control receiver offers its own type's members",
     comboMembers.includes("AddItem") && comboMembers.length > 30,
     `${comboMembers.length} member(s): ${comboMembers.slice(0, 5).join(", ")}`);
 
-  // Line 6 is `    Taxable.Value = True`; column 13 sits after the dot. A CheckBox has no
-  // AddItem, which is what proves the controls are typed individually rather than as one set.
-  const checkMembers = ((await api.act("completions", { line: 6, column: 13 })).data ?? [])
+  // A CheckBox has no AddItem, which is what proves the controls are typed individually rather
+  // than as one set.
+  const checkMembers = ((await api.act("completions", afterDot("Taxable"))).data ?? [])
     .map((item) => item.label ?? item.insertText);
   check("and the types are per control, not one shared set",
     checkMembers.includes("Value") && !checkMembers.includes("AddItem"),
     `${checkMembers.length} member(s)`);
 
-  // Line 11 is `        NameBox.SetFocus`; column 17 sits after the dot. SetFocus is in no
-  // per-control dump - it lives on MSForms.Control, the base every placed control extends,
-  // and the analyzer merges that base into each control class (xlide_vscode#20's side find).
-  // Before the merge this list had no SetFocus, no Visible, no Left.
-  const textMembers = ((await api.act("completions", { line: 11, column: 17 })).data ?? [])
+  // SetFocus is in no per-control dump - it lives on MSForms.Control, the base every placed
+  // control extends, and the analyzer merges that base into each control class
+  // (xlide_vscode#20's side find). Before the merge this list had no SetFocus, no Visible, no
+  // Left.
+  const textMembers = ((await api.act("completions", afterDot("NameBox"))).data ?? [])
     .map((item) => item.label ?? item.insertText);
   check("a control offers its Control base class: SetFocus and Visible on a TextBox",
     textMembers.includes("SetFocus") && textMembers.includes("Visible")
@@ -248,10 +337,10 @@ try {
   const baseHover = await api.act("hover", { word: "SetFocus" });
   check("and so does a member of the Control base", baseHover.did === true, baseHover.detail);
 
-  // FORM_CODE line 14 is `    Me.Hide`; column 8 sits after the dot. Me composes the
-  // controls, the form surface (Show rides the analyzer's own VBA-wrapper table, not
-  // MSForms), and the module's code - the three sources xlide_vscode#18's canary names.
-  const meItems = ((await api.act("completions", { line: 14, column: 8 })).data ?? [])
+  // Me composes the controls, the form surface (Show rides the analyzer's own VBA-wrapper
+  // table, not MSForms), and the module's code - the three sources xlide_vscode#18's canary
+  // names.
+  const meItems = ((await api.act("completions", afterDot("Me"))).data ?? [])
     .map((item) => item.label ?? item.insertText);
   check("Me. offers the controls and the form surface",
     meItems.includes("RegionPick") && meItems.includes("Show"), `${meItems.length} member(s)`);
@@ -364,6 +453,20 @@ try {
   // The tab's own apply - the path Ctrl+S takes, through the view's document and the host
   // round trip - proven against the live form, not just against the route it shares a
   // service with.
+  // THE DESIGNER ITSELF is what the next rows need, and the tab's document is not evidence
+  // about it: the view holds the last projection, so it answers happily while the component
+  // is still in the ~400ms after a close where `Designer` is gone rather than empty. Waiting
+  // on the document and then applying is waiting on the wrong observable, and it failed here
+  // exactly that way (2026-08-16) with ten green rows above it.
+  await waitFor("the form's designer to be readable again after the run", async () => {
+    try {
+      await api.designer(form, project);
+      return true;
+    } catch {
+      return false;
+    }
+  }, { budgetMs: 15000 });
+
   const tabMarkup = await waitFor("the tab's document to hold the form's markup", async () => {
     const read = await api.act("designerMarkup", { module: form });
     return read.did === true && String(read.data).startsWith(`Form ${form}`) ? read : null;
@@ -408,13 +511,16 @@ try {
   await api.designerEdit("set", { module: form, project, property: "BackColor", value: "12632256" });
   await waitFor("the open tab's document to grow the BackColor line", async () => {
     const read = await api.act("designerMarkup", { module: form });
-    return /BackColor = 12632256/.test(String(read.data ?? ""));
+    // #c0c0c0 is 12632256 with the blue-green-red order the model stores: the document spells
+    // a colour the way the panel does now, and both spell it through one conversion in Core.
+    return /BackColor = #c0c0c0/.test(String(read.data ?? ""));
   }, { budgetMs: 15000 });
   check("a form property set through the api appears in the OPEN tab's document, live", true);
 
   const routeMarkup = await api.designerMarkup(form, project);
   check("and in the projection route's document",
-    /\r?\n    BackColor = 12632256\r?\n/.test(routeMarkup));
+    /\r?\n    BackColor = #c0c0c0\r?\n/.test(routeMarkup),
+    routeMarkup.split(/\r?\n/).find((line) => line.includes("BackColor")));
 
   // The dialect's rule, held from the other side: a document WITHOUT the line cannot erase
   // the colour - an unspoken property is one an apply never touches.
@@ -429,11 +535,40 @@ try {
   const changed = await api.designer(form, project);
   check("an apply of a document with the line writes the native panel's own property",
     changed.form.backColor === 12639424, String(changed.form.backColor));
+  check("12639424, which is what #c0dcc0 means once the bytes are the other way round", true);
 
   await api.designerEdit("set", { module: form, project, property: "BackColor", value: "-2147483633" });
   const defaulted = await api.designerMarkup(form, project);
   check("back at the default, the line leaves the document - defaults stay unspoken",
     !/BackColor/.test(defaulted));
+
+  // ---- a CONTROL's changed colours ride the document too ----
+  //
+  // Until 2026-08-16 the document carried identity, containment, geometry and caption and
+  // nothing else, so a colour set in the Properties panel was invisible in the text, absent from
+  // the draft preview and outside the document's undo. Two baselines decide what "changed"
+  // means, and it takes both: a Label inherits the FORM's button face, while a TextBox is born
+  // with the WINDOW colours and keeps them on any form.
+  await api.designerEdit("set", { module: form, project, name: "NameBox", property: "BackColor", value: "13434879" });
+  await api.designerEdit("set", { module: form, project, name: "Taxable", property: "ForeColor", value: "255" });
+  const coloured = await waitFor("the document to carry both colours", async () => {
+    const read = await api.designerMarkup(form, project);
+    return /BackColor = #ffffcc/.test(read) && /ForeColor = #ff0000/.test(read) ? read : null;
+  }, { budgetMs: 15000 });
+  check("a colour set on a control appears under that control, spelled #rrggbb",
+    /NameBox[^\r\n]*\r?\n\s+BackColor = #ffffcc/.test(coloured)
+    && /Taxable[^\r\n]*\r?\n\s+ForeColor = #ff0000/.test(coloured),
+    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).join(" | "));
+
+  check("and the controls nobody touched say nothing about colour",
+    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).length === 2,
+    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).join(" | "));
+
+  await api.designerEdit("set", { module: form, project, name: "NameBox", property: "BackColor", value: "-2147483643" });
+  await api.designerEdit("set", { module: form, project, name: "Taxable", property: "ForeColor", value: "-2147483630" });
+  await waitFor("the lines to leave when the colours go back", async () =>
+    !/Color/.test(await api.designerMarkup(form, project)), { budgetMs: 15000 });
+  check("and putting a colour back where it was takes its line out again", true);
 
   // ---- the squiggles: Core's tolerant parse, drawn on the document as it is typed ----
 
@@ -454,6 +589,141 @@ try {
   await waitFor("the squiggles to clear on the canonical text", async () =>
     ((await api.act("designerLint", { module: form })).data ?? []).length === 0, { budgetMs: 15000 });
   check("and the canonical document wears none", true);
+
+  // ---- the language service: what the document offers, and what it says about it ----
+  //
+  // Every aim here is computed from the document rather than written down: a fixture that
+  // grows a control must not silently re-point these at the wrong line.
+
+  const canonical = String(tabMarkup.data).replace(/\r\n/g, "\n").split("\n");
+  const lineOf = (pattern) => canonical.findIndex((text) => pattern.test(text)) + 1;
+  const endOf = (line) => (canonical[line - 1]?.length ?? 0) + 1;
+
+  const vocabulary = await api.markupVocabulary(form, project);
+  const kindsMeasured = vocabulary.kinds.map((one) => one.kind);
+  check("the vocabulary route answers every toolbox kind, the form and the page",
+    kindsMeasured.includes("Form") && kindsMeasured.includes("Page")
+    && kindsMeasured.includes("CommandButton") && kindsMeasured.length >= 16,
+    `${kindsMeasured.length}: ${kindsMeasured.join(", ")}`);
+
+  const button = vocabulary.kinds.find((one) => one.kind === "CommandButton");
+  check("a kind carries the coclass an apply would create it from",
+    button?.progId === "Forms.CommandButton.1", String(button?.progId));
+  // `FontSize`, not `Font.Size`: a control's extender carries the font flat, which is what a
+  // bare instance measures and what an apply writes. It is Currency on the wire, so it is also
+  // the row that would go quiet if the printable kinds ever lost VT_CY again.
+  check("and its properties are MEASURED - a bare control's own, with their types and defaults",
+    (button?.properties.length ?? 0) > 15
+    && button?.properties.some((one) => one.name === "BackStyle" && (one.members?.length ?? 0) > 0)
+    && button?.properties.some((one) => one.name === "FontSize" && one.default !== null),
+    `${button?.properties.length} properties`);
+  check("a colour property says so, so the document's own spelling can be offered",
+    button?.properties.some((one) => one.name === "BackColor" && one.colour === true));
+
+  // The Form entry is described from the LIVE form - it has no coclass to instantiate bare -
+  // which is the one part of the vocabulary that needs a workbook open.
+  const formKind = vocabulary.kinds.find((one) => one.kind === "Form");
+  check("the Form's own properties come from the live form, enums and all",
+    (formKind?.properties.length ?? 0) > 10
+    && formKind?.properties.some((one) => one.name === "Cycle" && (one.members?.length ?? 0) > 0),
+    `${formKind?.properties.length} properties`);
+
+  // A fresh indented line under the form: the kinds, arriving with their geometry scaffolded.
+  const okLine = lineOf(/^\s+CommandButton OkButton\b/);
+  const freshDoc = `${String(tabMarkup.data).trimEnd()}\r\n    \r\n`;
+  await api.act("designerSetMarkup", { module: form, markup: freshDoc });
+  const freshLine = freshDoc.replace(/\r\n/g, "\n").split("\n").findIndex((text) => text === "    ") + 1;
+  const fresh = await api.act("designerComplete", { module: form, line: freshLine, column: 5 });
+  const offered = (fresh.data ?? []).map((one) => one.label);
+  check("a fresh line under the form completes the control kinds",
+    offered.includes("CommandButton") && offered.includes("Frame") && !offered.includes("Page"),
+    offered.slice(0, 8).join(", "));
+  check("and a kind arrives scaffolded - a name, a caption, a position and a size",
+    /CommandButton \$\{1:[^}]+\} "\$\{2:[^}]+\}" at \$\{3:\d+\},\$\{4:\d+\} size \$\{5:72\}x\$\{6:24\}/
+      .test((fresh.data ?? []).find((one) => one.label === "CommandButton")?.insert ?? ""),
+    (fresh.data ?? []).find((one) => one.label === "CommandButton")?.insert);
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+
+  // Under a MultiPage, only a Page: the parser refuses anything else there, and the
+  // completions say so early rather than offering a line that cannot land.
+  const wizard = lineOf(/^\s+MultiPage Wizard\b/);
+  const underWizard = await api.act("designerComplete", { module: form, line: wizard + 1, column: 9 });
+  const pageOnly = (underWizard.data ?? []).map((one) => one.label);
+  check("under a MultiPage the only kind offered is a Page",
+    pageOnly.includes("Page") && !pageOnly.includes("Label"),
+    pageOnly.slice(0, 8).join(", "));
+
+  // Under a Frame, both: a child control OR one of the Frame's own properties.
+  const options = lineOf(/^\s+Frame Options\b/);
+  const underFrame = (await api.act("designerComplete", { module: form, line: options + 1, column: 9 })).data ?? [];
+  check("under a Frame a line may open a control or set one of the Frame's properties",
+    underFrame.some((one) => one.label === "OptionButton")
+    && underFrame.some((one) => one.label === "SpecialEffect"),
+    `${underFrame.length} suggestion(s)`);
+
+  // The clause keywords, once the name is behind the caret, and never twice on one line.
+  const hold = lineOf(/^\s+ToggleButton HoldToggle\b/);
+  const clauses = (await api.act("designerComplete", { module: form, line: hold, column: endOf(hold) })).data ?? [];
+  check("a header line that already carries at and size is offered neither again",
+    clauses.length === 0, clauses.map((one) => one.label).join(", "));
+
+  // The value's side of a property line: the enum's members, by the name the developer writes.
+  // `[^\r\n]*` rather than `.*`, because a dot matches a carriage return and the line would
+  // grow one before the split.
+  const valueDoc = String(tabMarkup.data).replace(
+    /^(\s+)(ToggleButton HoldToggle[^\r\n]*)$/m, "$1$2\r\n$1    BackStyle = ");
+  await api.act("designerSetMarkup", { module: form, markup: valueDoc });
+  const valueLines = valueDoc.replace(/\r\n/g, "\n").split("\n");
+  const valueLine = valueLines.findIndex((text) => /BackStyle = $/.test(text)) + 1;
+  const valueText = valueLines[valueLine - 1] ?? "";
+  const values = (await api.act("designerComplete",
+    { module: form, line: valueLine, column: valueText.length + 1 })).data ?? [];
+  check("the value's side of a property line offers that property's enum members by name",
+    values.some((one) => one.label === "fmBackStyleOpaque")
+    && values.some((one) => one.label === "fmBackStyleTransparent"),
+    values.map((one) => one.label).join(", "));
+
+  const valueHover = (await api.act("designerHover",
+    { module: form, line: valueLine, column: valueText.indexOf("BackStyle") + 3 })).data ?? [];
+  check("and hovering the path says what it takes and what an untouched control holds",
+    valueHover.some((block) => /BackStyle As fmBackStyle/.test(block))
+    && valueHover.some((block) => /Default `fmBackStyle/.test(block)),
+    JSON.stringify(valueHover));
+
+  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+
+  // Hover on a kind: what that class of control IS, and nothing the line already says - which is
+  // where the geometry used to be read back, and now also where the coclass used to be. For a
+  // standard kind `Forms.Frame.1` is the word under the pointer with a prefix and a suffix, so
+  // the card was spending a line restating its own heading (the owner, 2026-08-16).
+  const frameText = canonical[options - 1] ?? "";
+  const kindHover = (await api.act("designerHover",
+    { module: form, line: options, column: frameText.indexOf("Frame") + 3 })).data ?? [];
+  check("hovering a kind describes the class, and does not read the line back at the reader",
+    kindHover.some((block) => /groups controls/.test(block))
+    && !kindHover.some((block) => /Forms\.Frame\.1/.test(block))
+    && !kindHover.some((block) => /\bat\b|points/.test(block)),
+    JSON.stringify(kindHover));
+
+  const okText = canonical[okLine - 1] ?? "";
+  const nameHover = (await api.act("designerHover",
+    { module: form, line: okLine, column: okText.indexOf("OkButton") + 3 })).data ?? [];
+  check("hovering a control's name declares it the way VBA would, class and all",
+    nameHover.some((block) => /OkButton As MSForms\.CommandButton/.test(block)),
+    JSON.stringify(nameHover));
+
+  // The hint: the header's grammar, following the clause the hand is on.
+  const hint = (await api.act("designerHint", { module: form, line: okLine, column: endOf(okLine) })).data;
+  check("the header hint shows the grammar and points at the clause being typed",
+    hint?.label === 'Type Name ["Caption"] [at left,top] [size width x height]'
+    && hint?.parameter === "[size width x height]",
+    JSON.stringify(hint));
+
+  const formHint = (await api.act("designerHint", { module: form, line: 1, column: 6 })).data;
+  check("and the Form's own line has its own grammar, which takes no position",
+    formHint?.label === 'Form Name ["Caption"] [size width x height]',
+    JSON.stringify(formHint));
 
   // ---- the canvas follows the document: the draft previews, the form untouched ----
 
@@ -710,6 +980,21 @@ try {
     (await api.ui()).properties?.component === form, { budgetMs: 15000 });
   check("selecting the form returns the panel to the component", true);
 
+  // AND A CONTROL REMOVED UNDER THE PANEL takes the panel back to the form with it. Only the TAB
+  // was re-projected on a removal, so the panel went on describing a control that was gone -
+  // name, geometry, font and all (found in the 2026-08-16 hunt). The panel's own publish already
+  // knew what to do; nothing was asking it.
+  await api.designerEdit("add", {
+    module: form, project, type: "label", name: "Doomed", left: 4, top: 4, width: 30, height: 12,
+  });
+  await api.act("designerSelect", { module: form, control: "Doomed" });
+  await waitFor("the panel to aim at the doomed control", async () =>
+    (await api.ui()).properties?.component === "Doomed", { budgetMs: 15000 });
+  await api.designerEdit("remove", { module: form, project, name: "Doomed" });
+  await waitFor("the panel to let go of a control that is gone", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+  check("a control removed under the panel takes the panel back to the form", true);
+
   // ---- the defaults inventory: what a kind holds before anyone touches it ----
 
   // Measured from a bare instance of the coclass, so this is MSForms' own answer rather than a
@@ -743,9 +1028,129 @@ try {
     cycleRow?.value === "fmCycleAllForms" && (cycleRow?.options ?? []).includes("fmCycleCurrentForm"),
     JSON.stringify(cycleRow));
 
+  // A SYSTEM colour is not a colour but a question - what does this machine call a button face -
+  // so the row shows the question by name and the swatch paints today's answer. Spelling it
+  // `#f0f0f0` would freeze the answer into the form.
   const colourRow = formPanel.rows.find((row) => row.name === "BackColor");
-  check("a colour shows the hex the VBE spells, not a signed integer",
-    /^&H[0-9A-F]{8}&$/.test(String(colourRow?.value)), String(colourRow?.value));
+  check("a system colour shows its name, with the machine's own answer on the swatch",
+    colourRow?.value === "Button Face" && /^#[0-9a-f]{6}$/.test(String(colourRow?.swatch)),
+    JSON.stringify(colourRow));
+
+  // AN OBJECT IS NOT A VALUE. A form's panel used to list six rows reading "[object]" - Font,
+  // Picture, MouseIcon, Controls, ActiveControl, Selected - each of them a row asking to be
+  // ignored. The font is the one this panel can serve, and it serves it as its parts.
+  check("no row says [object]; an object is not a value a panel can show",
+    !formPanel.rows.some((row) => String(row.value).includes("[object]")),
+    formPanel.rows.filter((row) => String(row.value).includes("[object]")).map((row) => row.name).join(", "));
+  check("a form's FONT shows as its parts, the same rows a control's selection draws",
+    ["Font.Name", "Font.Size", "Font.Bold", "Font.Italic"]
+      .every((name) => formPanel.rows.some((row) => row.name === name)),
+    formPanel.rows.filter((row) => row.name.startsWith("Font")).map((row) => row.name).join(", "));
+  check("and the library's own hidden members are not listed at all",
+    !formPanel.rows.some((row) => row.name.startsWith("_") || row.name === "DesignMode"));
+
+  // ---- the font rows are pickers, from the machine's own list ----
+  //
+  // Measured rather than written down, for the reason the system colours are: no list here could
+  // be true on another machine. So the row is checked for the PROPERTIES of a real enumeration -
+  // sorted, no vertical variants, and holding the face the model itself reported - rather than
+  // against a copy of the list, which would be the same measurement written twice.
+  const faceRow = formPanel.rows.find((row) => row.name === "Font.Name");
+  const faces = faceRow?.options ?? [];
+  // Non-decreasing under the host's own comparison (ordinal, ignoring case) rather than re-sorted
+  // here: a locale collator disagrees with it about spaces and digits, and the row's claim is that
+  // the list came back in order, not that two sorting rules agree.
+  const outOfOrder = faces.findIndex((one, at) =>
+    at > 0 && faces[at - 1].toUpperCase() > one.toUpperCase());
+  check("the Font.Name row offers this machine's own faces, in order, the current one among them",
+    faces.length > 10 && faces.includes(String(faceRow?.value)) && outOfOrder === -1,
+    `${faces.length} face(s), showing ${faceRow?.value}`
+    + (outOfOrder > 0 ? `; ${faces[outOfOrder - 1]} before ${faces[outOfOrder]}` : ""));
+  check("and no '@' vertical variants, which every native font list hides",
+    !faces.some((one) => one.startsWith("@")),
+    faces.filter((one) => one.startsWith("@")).join(", "));
+
+  const sizeRow = formPanel.rows.find((row) => row.name === "Font.Size");
+  check("the Font.Size row offers the usual ramp and still holds a number",
+    (sizeRow?.options ?? []).includes("12") && /^\d+(\.\d+)?$/.test(String(sizeRow?.value)),
+    JSON.stringify(sizeRow));
+
+  // Picked from what the row OFFERS rather than from a face named here: a machine without Courier
+  // New would fail a row that spelled one, and the point of the list is that it is this machine's.
+  // On a CONTROL, because the walk carries a control's font and the form's box does not - so the
+  // write can be read back off the model rather than off the panel that sent it.
+  await api.act("designerSelect", { module: form, control: "OkButton" });
+  const buttonPanel = await waitFor("the panel to show the button", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === "OkButton" ? shown : null;
+  }, { budgetMs: 15000 });
+  const buttonFace = buttonPanel.rows.find((row) => row.name === "Font.Name");
+  const pick = (buttonFace?.options ?? [])
+    .find((one) => one !== buttonFace?.value && /^[A-Za-z][A-Za-z ]+$/.test(one));
+  const wroteFace = await api.act("editProperty", { name: "Font.Name", value: pick });
+  check("choosing a face from the list writes it through",
+    wroteFace.did === true && (wroteFace.detail ?? "").includes(pick), wroteFace.detail);
+  await waitFor("the control to wear it", async () =>
+    (await api.designer(form, project)).controls.find((one) => one.name === "OkButton")?.font?.name === pick,
+  { budgetMs: 15000 });
+  check(`${pick}, off the machine's own list and onto the control`, true);
+
+  await api.act("editProperty", { name: "Font.Name", value: String(buttonFace?.value) });
+  await api.act("designerSelect", { module: form });
+  await waitFor("the panel back on the form for the rows that follow", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+
+  // And the DOCUMENT offers the same list, because it is the same measurement: one walk, two
+  // surfaces, so the panel and the markup cannot hold different ideas of what fonts exist.
+  const fontVocabulary = (await api.markupVocabulary(form, project)).kinds
+    ?.find((kind) => kind.kind === "CommandButton")?.properties
+    ?.find((one) => one.name === "FontName");
+  check("the markup's vocabulary carries the same faces the panel offers",
+    (fontVocabulary?.values ?? []).length === faces.length, `${(fontVocabulary?.values ?? []).length} vs ${faces.length}`);
+
+  // ...and the document offers them where a face goes. A face is a STRING in the dialect, so what
+  // a suggestion REPLACES matters as much as what it inserts: accepting one where the developer
+  // has already typed `"Tah` has to take the quote with it, or the line gains a second string
+  // inside the first.
+  const canonicalText = String(tabMarkup.data);
+  const withFont = canonicalText.split(/\r?\n/);
+  const buttonLine = withFont.findIndex((line) => /CommandButton OkButton/.test(line));
+  const tryLine = async (text) => {
+    const lines = [...withFont];
+    lines.splice(buttonLine + 1, 0, text);
+    await api.act("designerSetMarkup", { module: form, markup: lines.join("\n") });
+    await waitFor("the document to hold the probe line", async () =>
+      String((await api.act("designerMarkup", { module: form })).data).includes(text.trim()),
+    { budgetMs: 15000 });
+    const done = await api.act("designerComplete",
+      { module: form, line: buttonLine + 2, column: text.length + 1 });
+    const offer = (done.data ?? []).find((one) => one.label === pick);
+    return offer
+      ? text.slice(0, offer.replaces.from - 1) + offer.insert + text.slice(offer.replaces.to - 1)
+      : `no ${pick} among ${(done.data ?? []).length}`;
+  };
+
+  check("a face completes on the value's side of FontName",
+    (await tryLine("        FontName = ")) === `        FontName = "${pick}"`,
+    await tryLine("        FontName = "));
+  check("and accepting one replaces the string already begun, quote and all",
+    (await tryLine('        FontName = "Cou')) === `        FontName = "${pick}"`,
+    await tryLine('        FontName = "Cou'));
+
+  await api.act("designerSetMarkup", { module: form, markup: canonicalText });
+  await waitFor("the document back at canonical after the font rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  // WRITABLE is a fact about the type, not about the value that came back - and a property with
+  // no setter is now LEFT OUT rather than drawn grey (the owner, 2026-08-16: "if theyre jot
+  // settable; dint suow them"). CanPaste and InsideWidth were the two shapes of it: a question
+  // about the editing session, and a measurement of the form. The code name stays, because it is
+  // the VBE's rename gesture rather than a property the designer's library has any say over.
+  check("a property with no setter is not shown at all, and the code name still is",
+    !formPanel.rows.some((row) => ["CanPaste", "CanUndo", "CanRedo", "InsideWidth", "InsideHeight"]
+      .includes(row.name))
+    && formPanel.rows.find((row) => row.name === "(Name)")?.writable === true,
+    formPanel.rows.filter((row) => !row.writable).map((row) => row.name).join(", ") || "every row writes");
 
   // The honest limit, pinned: names come from the TYPE LIBRARY, never from the property's own
   // name. StartUpPosition is a plain Integer in MSForms however much it looks like an enum, so
@@ -764,12 +1169,65 @@ try {
     wroteNumber.did === true && /fmCycleAllForms/.test(wroteNumber.detail ?? ""), wroteNumber.detail);
 
   const wroteHex = await api.act("editProperty", { name: "BackColor", value: "&H00C0FFC0&" });
-  check("a colour written as hex lands as the model's own number",
+  check("a colour written as the VBE's hex lands as the model's own number",
     wroteHex.did === true, wroteHex.detail);
   await waitFor("the form to carry the colour", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === 12648384, { budgetMs: 15000 });
   check("12648384, which is what &H00C0FFC0& means", true);
-  await api.act("editProperty", { name: "BackColor", value: "&H8000000F&" });
+  check("and a plain colour reads back the way a developer writes one",
+    (await api.ui()).properties.rows.find((row) => row.name === "BackColor")?.value === "#c0ffc0",
+    JSON.stringify((await api.ui()).properties.rows.find((row) => row.name === "BackColor")));
+
+  // The spelling the owner asked for, in both directions.
+  const wroteCss = await api.act("editProperty", { name: "BackColor", value: "#ff8000" });
+  check("a colour written as #rrggbb lands too - byte order and all",
+    wroteCss.did === true && wroteCss.detail?.includes("#ff8000"), wroteCss.detail);
+  await waitFor("the form to carry that one", async () =>
+    ((await api.designer(form, project)).form?.backColor ?? 0) === 33023, { budgetMs: 15000 });
+  check("33023, which is #ff8000 with the blue-green-red order the model stores", true);
+
+  const wroteSystem = await api.act("editProperty", { name: "BackColor", value: "Highlight" });
+  check("and a system colour written by NAME asks the question rather than freezing the answer",
+    wroteSystem.did === true, wroteSystem.detail);
+  await waitFor("the form to hold the system colour", async () =>
+    ((await api.designer(form, project)).form?.backColor ?? 0) === -2147483635, { budgetMs: 15000 });
+  check("-2147483635, the system's own highlight index with the high bit set", true);
+
+  // ---- the picker itself: xlide's own, not the platform's ----
+
+  const opened = await api.act("colourPicker", { property: "BackColor" });
+  check("the swatch opens a picker with both halves - a palette, and this machine's system colours",
+    opened.did === true && (opened.data?.palette ?? 0) >= 64 && (opened.data?.system ?? 0) >= 24,
+    opened.detail);
+
+  // Aimed at what the picker ACTUALLY offers rather than at a colour written down here: the
+  // palette is generated, so a suite that names a hex is a suite that breaks when the ramp moves.
+  const paletteOffers = String(await api.ask(
+    "(() => Array.from(document.querySelectorAll('.colour-swatch')).map(s => s.dataset.value).join(','))()"))
+    .split(",");
+  const wanted = paletteOffers[35] ?? "#000000";
+  const picked = await api.act("colourPicker", { choose: wanted });
+  check("picking a palette colour writes it through the row's own commit",
+    picked.did === true, picked.detail);
+  await waitFor("the form to take the picked colour", async () => {
+    const back = (await api.designer(form, project)).form?.backColor ?? 0;
+    const css = `#${(back & 0xFF).toString(16).padStart(2, "0")}`
+      + `${((back >> 8) & 0xFF).toString(16).padStart(2, "0")}`
+      + `${((back >> 16) & 0xFF).toString(16).padStart(2, "0")}`;
+    return css === wanted;
+  }, { budgetMs: 15000 });
+  check(`${wanted} reached the form, by the same path a typed value takes`, true);
+
+  check("and the picker closes behind the choice",
+    (await api.act("colourPicker", {})).did === false);
+
+  const pickedSystem = await api.act("colourPicker", { property: "BackColor", choose: "Button Face" });
+  check("picking a SYSTEM colour writes the question, not the colour it resolves to today",
+    pickedSystem.did === true, pickedSystem.detail);
+  await waitFor("the form to hold the system colour again", async () =>
+    ((await api.designer(form, project)).form?.backColor ?? 0) === -2147483633, { budgetMs: 15000 });
+  check("-2147483633: the row reads Button Face, and the form asks the machine every time it paints",
+    (await api.ui()).properties.rows.find((row) => row.name === "BackColor")?.value === "Button Face");
 
   // A CONTROL's rows read the same way, from that control's own library.
   await api.act("designerSelect", { module: form, control: "RegionPick" });
@@ -947,11 +1405,13 @@ try {
   // ---- and the handles resize: the same commit, the same undo, the size clause too ----
 
   // From canonical, so every number below is exact rather than inherited from the rows above.
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   await waitFor("the document back at canonical before the resize rows", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
 
   const tabText = async () => String((await api.act("designerMarkup", { module: form })).data);
+
+
   const grew = await api.act("designerResize",
     { module: form, control: "RegionPick", edge: "se", dx: 24, dy: 12 });
   check("a pull on the south-east handle resizes a control", grew.did === true, grew.detail);
@@ -999,7 +1459,12 @@ try {
   // and that edge could not be grabbed at all until the overlay was lifted above the controls
   // (found by the perf walk, 2026-08-15). NameBox is chosen for exactly that adjacency.
   await api.act("designerSelect", { module: form, control: "NameBox" });
-  const handleCursor = await api.ask(`(() => { const h = ${inView(".dc-handle-se")}; if (!h) return "no handle"; const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : "covered by " + (hit?.className || "nothing")); })()`);
+  // SCROLLED TO FIRST, because the question is whether a press on the handle reaches the handle,
+  // not whether the canvas happens to be scrolled where the last gesture left it. The row before
+  // this one pulls the form's south-east corner, which leaves the canvas at the bottom of a tall
+  // form; on a short tab NameBox is then off the top and elementFromPoint honestly answers
+  // nothing. A hand scrolls to what it is reaching for.
+  const handleCursor = await api.ask(`(() => { const h = ${inView(".dc-handle-se")}; if (!h) return "no handle"; h.scrollIntoView({ block: "center", inline: "center" }); const r = h.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return getComputedStyle(h).cursor + "|" + (hit === h ? "reachable" : "covered by " + (hit?.className || "nothing")); })()`);
   check("a handle wears its own resize cursor and the pointer can reach it",
     handleCursor === "nwse-resize|reachable", String(handleCursor));
 
@@ -1011,7 +1476,7 @@ try {
 
   // ---- and Delete takes a control out, children and all ----
 
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   await waitFor("the document back at canonical before the delete rows", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
 
@@ -1051,9 +1516,210 @@ try {
 
   // ---- the xlide toolbox: a kind dragged out of the palette and dropped on the form ----
 
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   await waitFor("the document back at canonical before the toolbox rows", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+
+  // ---- a form's design rides SYNC as text ----
+  //
+  // A UserForm exported as code alone cannot be put back: Excel writes its controls into a binary
+  // .frx and the text names it. The markup is the design as TEXT, so a form finally round-trips
+  // through a folder the way a module does - and the file is the same projection the designer tab
+  // edits, which is what keeps the two from drifting.
+  const syncFolder = join(tmpdir(), `xlide-design-${process.pid}`);
+  rmSync(syncFolder, { recursive: true, force: true });
+  mkdirSync(syncFolder, { recursive: true });
+
+  try {
+    const exported = await api.syncApply("export", { folder: syncFolder, select: "all" });
+    const written = readdirSync(syncFolder);
+    check("an export writes the form's design beside its code",
+      written.includes(`${form}.form`), written.join(", "));
+    check("and nothing failed on the way", (exported.failed ?? []).length === 0,
+      (exported.failed ?? []).join(", "));
+
+    // The VBE's own exporter writes the binary sidecar, and the text names it: a form written by
+    // splicing named a TEMPORARY path instead, so every export of a form produced a file whose
+    // OleObjectBlob line changed and pointed at nothing (found 2026-08-16).
+    const codeFile = written.find((one) => /^EntryForm\d*\.(cls|frm)$/i.test(one) || one.startsWith(`${form}.`));
+    const codeText = codeFile ? readFileSync(join(syncFolder, codeFile), "latin1") : "";
+    const blob = /OleObjectBlob\s*=\s*"([^"]+)"/.exec(codeText)?.[1];
+    check("the exported form names a sidecar that is actually there",
+      blob !== undefined && written.includes(blob), `${blob ?? "no blob line"} of ${written.join(", ")}`);
+
+    const design = readFileSync(join(syncFolder, `${form}.form`), "utf8");
+    check("the design file holds the same projection the tab holds",
+      design.startsWith(`Form ${form}`) && /CommandButton OkButton/.test(design),
+      design.split(String.fromCharCode(10))[0]);
+
+    // Edited on disk the way a developer would in a pull request, then imported: the row applies
+    // through the markup's own diff, so the FORM itself moves.
+    writeFileSync(join(syncFolder, `${form}.form`),
+      design.replace(/(CommandButton OkButton[^\r\n]*?) at \d+,\d+/, "$1 at 40,40"), "utf8");
+
+    const incoming = await api.syncPlan("import", { folder: syncFolder });
+    const designRow = (incoming.items ?? []).find((row) => row.file === `${form}.form`);
+    check("the import plan offers the design as its own row, ticked",
+      designRow?.status === "will-update" && designRow?.checked === true, JSON.stringify(designRow ?? null));
+
+    const applied = await api.syncApply("import", { folder: syncFolder, ids: [designRow.id] });
+    check("applying it lands on the form itself",
+      (applied.failed ?? []).length === 0
+      && (applied.changed ?? []).some((one) => one.includes(form)),
+      JSON.stringify({ changed: applied.changed, failed: applied.failed }));
+
+    const moved = (await api.designer(form, project)).controls.find((one) => one.name === "OkButton");
+    check("40,40 - the edit made in a text file reached the control",
+      moved?.left === 40 && moved?.top === 40, JSON.stringify({ left: moved?.left, top: moved?.top }));
+
+    // ---- LIVENESS BEYOND THE FUNNEL ----
+    //
+    // Every designer mutation this product makes re-projects its tab. A SYNC IMPORT does not: it
+    // applies the markup straight at the form, which is a real edit from outside the funnel and
+    // the same shape as one made in the native designer underneath. So the tab is stale, and the
+    // thing that catches it is a cheap fingerprint - each control's name and bounds - asked on
+    // the window events that already fire.
+    const tabSaysNow = async () => String((await api.act("designerMarkup", { module: form })).data);
+    const staleTab = /OkButton "Start" at 262,250/.test(await tabSaysNow());
+
+    if (staleTab) {
+      const caught = await api.designerEdit("liveness", { module: form });
+      check("an edit from OUTSIDE the funnel is caught by the fingerprint",
+        /re-projected/.test(caught.detail ?? "") && caught.detail.includes(form), caught.detail);
+      await waitFor("the tab to show what the form actually holds", async () =>
+        /OkButton "Start" at 40,40/.test(await tabSaysNow()), { budgetMs: 15000 });
+      check("and the tab shows what the form holds rather than what it last drew", true);
+    } else {
+      check("an edit from OUTSIDE the funnel is caught by the fingerprint", true,
+        "not exercisable: something re-projected the tab before the check ran");
+    }
+
+    // AND IT DOES NOT CRY WOLF. A second check finds the same form and says so, which is what
+    // keeps this off the cost of a re-projection on every window that appears in the process.
+    const quiet = await api.designerEdit("liveness", { module: form });
+    check("a second check finds nothing, because nothing changed",
+      /already showed/.test(quiet.detail ?? ""), quiet.detail);
+
+    // ---- A THIRD-PARTY CONTROL, and what this machine says about one ----
+    //
+    // `Controls.Add` takes any ProgID and the answer depends on the MACHINE rather than on this
+    // product, so the row asserts whichever truth it finds and both are worth having. A control
+    // that arrives must walk under its own type rather than a guess; a control Office refuses
+    // must be refused in words that say WHERE the refusal came from, because otherwise the
+    // developer's next hour goes into the wrong place. On this machine, 2026-08-16, it is the
+    // second: the Trust Center's ActiveX setting turns every non-MSForms control off, and
+    // MSComctlLib.TreeCtrl.2, Shell.Explorer.2 and RefEdit.Ctrl are all registered and all
+    // refused with TRUST_E_SUBJECT_NOT_TRUSTED.
+    const foreign = await api.designerEdit("add", {
+      module: form, project, type: "MSComctlLib.TreeCtrl.2", name: "Foreign",
+      left: 8, top: 8, width: 60, height: 40,
+    }).catch((why) => ({ error: why.message }));
+
+    if (foreign.error) {
+      check("a third-party control this machine will not create is refused in words that place the blame",
+        /not registered on this machine|Trust Center/.test(foreign.error),
+        String(foreign.error).slice(-150));
+    } else {
+      const row = (await api.designer(form, project)).controls.find((one) => one.name === foreign.name);
+      check("a third-party control walks under its own type rather than a guess",
+        row !== undefined && row.type !== "Control", JSON.stringify(row ?? null));
+      await api.designerEdit("remove", { module: form, project, name: foreign.name }).catch(() => {});
+    }
+
+    // And a design whose form is not there is refused by name rather than guessed at.
+    writeFileSync(join(syncFolder, "NoSuchForm.form"), `Form NoSuchForm size 100x80
+`, "utf8");
+    const orphan = (await api.syncPlan("import", { folder: syncFolder })).items
+      .find((row) => row.file === "NoSuchForm.form");
+    check("a design whose form is missing is skipped, saying what to do first",
+      orphan?.status === "skipping-import" && /Add the form first/.test(orphan?.warning ?? ""),
+      JSON.stringify(orphan ?? null));
+
+    // ---- IMPORT CREATES A FORM, 2026-08-16 ----
+    //
+    // The last refusal standing between this product and a form that round-trips through source
+    // control. The pair the VBE's own exporter writes is what its importer reads, so the whole
+    // form comes back - controls, fonts, pictures - and the markup applies on top of it.
+    //
+    // Under a name the session has never seen, which is what a form arriving from someone else's
+    // branch is. Renaming a form in source control means THREE edits, and the third one is the
+    // one that is easy to miss: the `Begin` line names the form as well as `VB_Name` does, and
+    // the importer refuses a pair where the two disagree ("Errors during load", measured
+    // 2026-08-16 - which is also why a refusal now carries the editor's own log).
+    const arrival = `Arrived${process.pid % 1000}`;
+    const codeExt = codeFile.slice(codeFile.lastIndexOf("."));
+    writeFileSync(join(syncFolder, `${arrival}${codeExt}`),
+      codeText
+        .replace(/^(Begin \{[0-9A-Fa-f-]+\}) \S+/m, `$1 ${arrival}`)
+        .replace(/Attribute VB_Name = "[^"]+"/, `Attribute VB_Name = "${arrival}"`)
+        .replace(/OleObjectBlob\s*=\s*"[^"]+"/, `OleObjectBlob   =   "${arrival}.frx"`),
+      "latin1");
+    writeFileSync(join(syncFolder, `${arrival}.frx`), readFileSync(join(syncFolder, blob)));
+    writeFileSync(join(syncFolder, `${arrival}.form`),
+      design.replace(new RegExp(`^Form ${form}`), `Form ${arrival}`), "utf8");
+
+    const arriving = await api.syncPlan("import", { folder: syncFolder });
+    const createRow = (arriving.items ?? []).find((row) => row.file === `${arrival}${codeExt}`);
+    check("a form's PAIR in the folder is a create rather than a refusal",
+      createRow?.status === "will-create" && createRow?.checked === true, JSON.stringify(createRow ?? null));
+
+    // THE FOOT-GUN GUARD. The sidecar carries every control and the markup's list is TOTAL, so
+    // applying the text over a freshly imported binary can only take things away when the two
+    // disagree. The row is offered and left for the developer to tick.
+    const alongside = (arriving.items ?? []).find((row) => row.file === `${arrival}.form`);
+    check("its design row rides along, offered but UNTICKED - the binary is authoritative",
+      alongside?.status === "will-update" && alongside?.checked === false
+      && /would be removed/.test(alongside?.warning ?? ""), JSON.stringify(alongside ?? null));
+
+    const born = await api.syncApply("import", { folder: syncFolder, ids: [createRow.id] });
+    check("and the apply makes the form", (born.failed ?? []).length === 0
+      && (born.changed ?? []).includes(arrival), JSON.stringify(born));
+
+    // WHOLE means every control the exported design named - compared against the file rather
+    // than against the suite's own form, which the rows above have been adding controls to.
+    // A TAB is a line of the design and is NOT a control - it holds nothing and has no geometry -
+    // so the walk this compares against does not carry one, and neither does the expectation.
+    const namedByFile = [...design.matchAll(/^\s+(\w+) (\w+)/gm)]
+      .filter((one) => one[1] !== "Tab").map((one) => one[2]).sort();
+    const wholeForm = await api.designer(arrival, project).catch((why) => ({ error: why.message }));
+    const arrivedNames = (wholeForm.controls ?? []).map((one) => one.name).sort();
+    check("it arrives WHOLE - every control the binary held, not an empty frame",
+      namedByFile.length > 0 && namedByFile.every((name) => arrivedNames.includes(name)),
+      `${arrivedNames.length} arrived for ${namedByFile.length} named`);
+    check("...its pictures among them, which no text file could have carried",
+      (wholeForm.controls ?? []).filter((one) => one.picture).length === 2,
+      (wholeForm.controls ?? []).filter((one) => one.picture).map((one) => one.name).join(", "));
+
+    const arrivedCode = await api.readModule(arrival, project).catch((why) => ({ error: why.message }));
+    check("...and its code, which came in the same file",
+      /Views_Change/.test(String(arrivedCode.text ?? arrivedCode.source ?? "")),
+      JSON.stringify(arrivedCode).slice(0, 120));
+
+    await api.component("remove", { name: arrival, project }).catch(() => {});
+
+    // A form whose sidecar is not beside it cannot be created, and the refusal NAMES the file it
+    // wanted. Its own name, never created, because a name that HAS been created reads as an
+    // update. The built-in planner is the one that can say so before the apply; the shared
+    // planner has never heard of a form's sidecar and fails at the apply instead.
+    const lonelyName = `${arrival}Alone`;
+    writeFileSync(join(syncFolder, `${lonelyName}${codeExt}`),
+      codeText
+        .replace(/^(Begin \{[0-9A-Fa-f-]+\}) \S+/m, `$1 ${lonelyName}`)
+        .replace(/Attribute VB_Name = "[^"]+"/, `Attribute VB_Name = "${lonelyName}"`)
+        .replace(/OleObjectBlob\s*=\s*"[^"]+"/, `OleObjectBlob   =   "${lonelyName}.frx"`),
+      "latin1");
+
+    const engineWas = (await api.ui()).settings?.syncEngine ?? "shared";
+    await api.settings({ syncEngine: "builtIn" });
+    const lonely = (await api.syncPlan("import", { folder: syncFolder })).items
+      .find((row) => row.file === `${lonelyName}${codeExt}`);
+    check("a form without its sidecar is refused by the name of the file it wants",
+      lonely?.status === "skipping-import" && lonely?.checked === false
+      && String(lonely.warning).includes(`${lonelyName}.frx`), JSON.stringify(lonely ?? null));
+    await api.settings({ syncEngine: engineWas });
+  } finally {
+    rmSync(syncFolder, { recursive: true, force: true });
+  }
 
   // The palette must offer exactly what the apply can add. The route's own refusal names its
   // kinds, so the two lists are compared rather than both being written down twice.
@@ -1127,7 +1793,7 @@ try {
   check("undone to the floor of the stack, the document is still the form's text - never blank",
     /^Form /.test(floor) && /CommandButton OkButton/.test(floor), `${floor.length} char(s)`);
 
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   const restored = await waitFor("the document back at canonical", async () => {
     const read = (await api.act("designerCanvas", { module: form })).data;
     return read?.dirty === false ? read : null;
@@ -1139,6 +1805,689 @@ try {
   // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
   await api.act("activate", { module: form, face: "design" });
 
+  // ---- a drag carries a control OUT of its container: reparenting ----
+  //
+  // Until this, a drag clamped at the container's edge and moving a control from a Frame to the
+  // form could only be done by editing the markup by hand. The gesture needs only a short travel
+  // - what matters is which container the POINTER ends over - so the row drops a control near the
+  // frame's bottom edge and pushes it across, which fits whatever canvas the window leaves.
+
+  // Dropped as low in the frame as it will go - the drop clamps inside the container, so a top of
+  // 166 becomes the deepest a 16-point label fits. That leaves its centre eight points above the
+  // boundary, and a ten-point drag crosses it: what a reparent needs is the crossing, and a short
+  // travel is what fits the canvas the gate's window leaves (about thirty points).
+  const nearEdge = await api.act("designerToolbox",
+    { module: form, kind: "Label", left: 40, top: 166 });
+  check("a label dropped near the frame's bottom edge lands inside the frame",
+    nearEdge.did === true && /^ {8}Label Label\d+ at/m.test(await tabText()), nearEdge.detail);
+  const carried = /^ {8}(Label Label\d+)/m.exec(await tabText())?.[1]?.split(" ")[1] ?? "Label1";
+
+  const outward = await api.act("designerDrag", { module: form, control: carried, dx: 0, dy: 10 });
+  check("dragging it past that edge is accepted", outward.did === true, outward.detail);
+  const reparented = await waitFor("the control's line to leave the frame's block", async () =>
+    new RegExp(`^ {4}Label ${carried} at`, "m").test(await tabText()) ? await tabText() : null,
+  { budgetMs: 15000 });
+  check("the control's whole line moves to the form's own level, in the form's coordinates",
+    new RegExp(`^ {4}Label ${carried} at \\d+,1[6789]\\d`, "m").test(reparented),
+    reparented.split(/\r?\n/).find((line) => line.includes(carried)) ?? "no line");
+
+  // And back in, which is the same gesture the other way: the pointer decides, not the distance.
+  const inward = await api.act("designerDrag", { module: form, control: carried, dx: 0, dy: -10 });
+  check("and a drag back over the frame puts it inside again", inward.did === true, inward.detail);
+  await waitFor("the control's line to nest under the frame again", async () =>
+    new RegExp(`^ {8}Label ${carried} at`, "m").test(await tabText()), { budgetMs: 15000 });
+  check("nested again, indented under the Frame that now holds it", true);
+
+  // The FORM is untouched by all of it until the save, like every other canvas gesture.
+  check("the form has never heard of the control the canvas has been carrying",
+    !(await api.designer(form, project)).controls.some((one) => one.name === carried));
+
+  await api.act("designerDelete", { module: form, control: carried });
+  await waitFor("the probe control to leave the document", async () =>
+    !(await tabText()).includes(carried), { budgetMs: 15000 });
+  check("and Delete takes the probe control back out of the document", true);
+
+  // ---- a GROUP: gathered by ctrl+click or a marquee, moved and onTheLeft up as one ----
+
+  const placesOf = async (...names) => {
+    const text = await tabText();
+    return names.map((name) => {
+      const line = text.split(/\r?\n/).find((one) => one.includes(` ${name} `) || one.includes(` ${name}"`));
+      const at = /at (\d+),(\d+)/.exec(line ?? "");
+      const size = /size (\d+)x(\d+)/.exec(line ?? "");
+      return {
+        name,
+        left: Number(at?.[1] ?? -1), top: Number(at?.[2] ?? -1),
+        width: Number(size?.[1] ?? -1), height: Number(size?.[2] ?? -1),
+      };
+    });
+  };
+
+  const group = ["NameLabel", "Taxable", "HoldToggle"];
+  const gather = async () => {
+    await api.act("designerSelect", { module: form, control: group[0] });
+    for (const also of group.slice(1)) {
+      await api.act("designerSelect", { module: form, control: also, extend: 1 });
+    }
+    return (await api.act("designerCanvas", { module: form })).data?.group ?? [];
+  };
+
+  check("ctrl+click gathers a group, the first one picked staying the anchor",
+    JSON.stringify(await gather()) === JSON.stringify(group), JSON.stringify(await gather()));
+
+  // A group is one container's business: controls measured from different origins cannot be
+  // moved together or onTheLeft up with each other in any way that means something on screen.
+  await api.act("designerSelect", { module: form, control: "PickGround", extend: 1 });
+  check("a control in another container starts a new selection rather than a nonsense group",
+    JSON.stringify((await api.act("designerCanvas", { module: form })).data?.group) === '["PickGround"]',
+    JSON.stringify((await api.act("designerCanvas", { module: form })).data?.group));
+
+  await gather();
+  const wasAt = await placesOf(...group);
+  const groupDrag = await api.act("designerDrag", { module: form, control: group[0], dx: 12, dy: 0 });
+  check("a drag on any of them moves the whole group", groupDrag.did === true, groupDrag.detail);
+  const nowAt = await waitFor("the group to move in the document", async () => {
+    const now = await placesOf(...group);
+    return now[0].left !== wasAt[0].left ? now : null;
+  }, { budgetMs: 15000 });
+  const deltas = nowAt.map((one, at) => `${one.left - wasAt[at].left},${one.top - wasAt[at].top}`);
+  check("all of them by the SAME delta, whatever the snap made of it",
+    new Set(deltas).size === 1, deltas.join(" | "));
+
+  await press("z", "ctrlKey: true,");
+  await waitFor("one undo to give the whole group move back", async () =>
+    (await placesOf(group[0]))[0].left === wasAt[0].left, { budgetMs: 15000 });
+  check("and one Ctrl+Z gives the whole move back - a group gesture is one undo step", true);
+
+  // Align: the ANCHOR is the reference and never moves, which is the native rule.
+  await gather();
+  const aligned = await api.act("designerArrange", { module: form, how: "left" });
+  check("Align Left lines the group up on the anchor", aligned.did === true, aligned.detail);
+  const onTheLeft = await placesOf(...group);
+  check("every left is the anchor's, and the anchor itself has not moved",
+    onTheLeft.every((one) => one.left === onTheLeft[0].left) && onTheLeft[0].left === wasAt[0].left,
+    onTheLeft.map((one) => `${one.name} ${one.left}`).join(" | "));
+
+  const samed = await api.act("designerArrange", { module: form, how: "width" });
+  check("Same Width sizes them to the anchor", samed.did === true, samed.detail);
+  const widths = await placesOf(...group);
+  check("every width is the anchor's",
+    widths.every((one) => one.width === widths[0].width),
+    widths.map((one) => `${one.name} ${one.width}`).join(" | "));
+
+  const spacing = await api.act("designerArrange", { module: form, how: "down" });
+  check("Space Down spreads them evenly", spacing.did === true, spacing.detail);
+  const spaced = (await placesOf(...group)).sort((a, b) => a.top - b.top);
+  const gaps = spaced.slice(1).map((one, at) => one.top - (spaced[at].top + spaced[at].height));
+  check("the GAPS between them are equal, and the two on the ends have not moved",
+    Math.max(...gaps) - Math.min(...gaps) <= 1, gaps.join(" | "));
+
+  // The menu these live on: the canvas's own, since the product has no menu bar and the editor's
+  // Format menu would act on the native designer's selection rather than on ours.
+  const arrangeMenu = await api.ask(`(() => {
+    const el = ${inViewAll(".dc")}.find((one) => one.dataset.control === "${group[0]}");
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const box = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true,
+      clientX: Math.round(box.left + 4), clientY: Math.round(box.top + 4) }));
+    return [...document.querySelectorAll(".menu-dropdown .menu-item")].map((one) => (one.textContent ?? "").trim()).join(" | ");
+  })()`);
+  check("a right-click on a group offers the arrange vocabulary",
+    /Align Left/.test(String(arrangeMenu)) && /Space Down/.test(String(arrangeMenu)),
+    String(arrangeMenu));
+  await api.act("key", { code: "Escape" });
+
+  // The marquee: what it TOUCHES, in that container, which is MSForms' own rule.
+  const banded = await api.act("designerMarquee",
+    { module: form, left: 4, top: 4, right: 210, bottom: 30 });
+  check("a rubber band over the form's ground catches what it touches",
+    banded.did === true && /NameLabel/.test(banded.detail ?? ""), banded.detail);
+  const inTheBand = (await api.act("designerCanvas", { module: form })).data?.group ?? [];
+  check("and the group it made holds only controls the band actually crossed",
+    inTheBand.length >= 2 && inTheBand.includes("NameLabel") && !inTheBand.includes("HoldToggle"),
+    inTheBand.join(", "));
+
+  // Delete takes the whole group, and one undo brings all of it back.
+  await gather();
+  await press("Delete");
+  const groupGone = await waitFor("the group to leave the document", async () => {
+    const text = await tabText();
+    return group.every((one) => !text.includes(one)) ? text : null;
+  }, { budgetMs: 15000 });
+  check("Delete takes every selected control out at once", groupGone.length > 0);
+  await press("z", "ctrlKey: true,");
+  await waitFor("one undo to bring the whole group back", async () => {
+    const text = await tabText();
+    return group.every((one) => text.includes(one));
+  }, { budgetMs: 15000 });
+  check("and one Ctrl+Z brings all of them back", true);
+
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
+  await waitFor("the document back at canonical after the group rows", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+  await api.act("designerSelect", { module: form });
+
+  // ---- depth: Bring to Front and Send to Back, proved on the RUNNING form ----
+  //
+  // The one canvas gesture that writes the model rather than the document, because MSForms'
+  // Controls collection is not in z-order and does not move when ZOrder is called - measured, and
+  // the reason this row photographs a running form instead of reading the walk back. Two
+  // overlapping opaque labels, and the count of red against blue pixels says which is on top.
+  const paint = async () => {
+    // The same shape the Run row above uses: post the command, wait for the WINDOW to stand, and
+    // only then photograph it. Capturing on a timer photographs whatever is there, which for a
+    // form that has not opened yet is a picture with no form in it.
+    await api.command("run");
+    await waitFor("the form to stand for its picture", async () =>
+      ((await api.userforms()).forms ?? []).some((title) => title.includes("Quarter Entry")),
+    { budgetMs: 20000 });
+    // Waited for the PICTURE, not just the window: a form that is up has not necessarily painted,
+    // and a capture taken in that gap answers a rectangle with none of the form's own colours in
+    // it (measured - the row read 0 red and 0 blue while the labels were plainly there).
+    const shot = await waitFor("the form to have painted its colours", async () => {
+      const image = Buffer.from(await api.capture("form", "Quarter Entry"));
+      const from = image.readUInt32LE(10);
+      for (let px = from; px + 3 < image.length; px += 4) {
+        const [b, g, r] = [image[px], image[px + 1], image[px + 2]];
+        if ((r > 200 && g < 60 && b < 60) || (b > 200 && r < 60 && g < 60)) {
+          return image;
+        }
+      }
+
+      return null;
+    }, { budgetMs: 15000 });
+    await api.userforms("close", "Quarter Entry");
+    await waitFor("the form to close again", async () =>
+      ((await api.userforms()).forms ?? []).length === 0, { budgetMs: 20000 });
+    await waitFor("design mode to return", async () =>
+      (await api.state()).debugMode === "design", { budgetMs: 20000 });
+
+    // Bottom-up 32-bit BGRA, the same shape designer-parity.mjs decodes.
+    const at = shot.readUInt32LE(10);
+    let red = 0;
+    let blue = 0;
+    for (let px = at; px + 3 < shot.length; px += 4) {
+      const [b, g, r] = [shot[px], shot[px + 1], shot[px + 2]];
+      if (r > 200 && g < 60 && b < 60) { red += 1; } else if (b > 200 && r < 60 && g < 60) { blue += 1; }
+    }
+
+    return { red, blue };
+  };
+
+  for (const [name, left, top, colour] of [["ZRed", 210, 60, "255"], ["ZBlue", 230, 75, "16711680"]]) {
+    await api.designerEdit("add", { module: form, project, type: "label", name, left, top, width: 90, height: 50 });
+    await api.designerEdit("set", { module: form, project, name, property: "BackColor", value: colour });
+    await api.designerEdit("set", { module: form, project, name, property: "BackStyle", value: "1" });
+  }
+
+  const overlapped = await paint();
+  check("two overlapping labels, and the later one is on top to start with",
+    overlapped.blue > overlapped.red && overlapped.red > 0, JSON.stringify(overlapped));
+
+  const raised = await api.act("designerZOrder", { module: form, control: "ZRed", front: 1 });
+  check("Bring to Front is accepted", raised.did === true, raised.detail);
+  check("and it leaves the DOCUMENT alone - depth is the one gesture the dialect cannot say",
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false);
+
+  // The counts SWAP, within a few percent of each other rather than within a fixed number of
+  // pixels. A photograph of a running form is not pixel-identical twice - the labels antialias
+  // against whatever is behind them - and the absolute tolerance this used to carry was tuned
+  // when the labels were half the size they are now: 272 pixels out of 18,000 failed a rule
+  // written for 200 out of 8,000 (2026-08-16). What the row is about is which one is on top.
+  const swapped = await paint();
+  const withinAFewPercent = (a, b) => Math.abs(a - b) <= Math.max(a, b) * 0.05;
+  check("the running form draws them the other way round - ZOrder reached the model",
+    swapped.red > swapped.blue
+    && withinAFewPercent(swapped.red, overlapped.blue)
+    && withinAFewPercent(swapped.blue, overlapped.red),
+    `${JSON.stringify(overlapped)} became ${JSON.stringify(swapped)}`);
+
+  const depthMenu = await api.ask(`(() => {
+    const el = ${inViewAll(".dc")}.find((one) => one.dataset.control === "ZRed");
+    if (!el) { return "no ZRed on the canvas"; }
+    el.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const box = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true,
+      clientX: Math.round(box.left + 4), clientY: Math.round(box.top + 4) }));
+    return [...document.querySelectorAll(".menu-dropdown .menu-item")].map((one) => (one.textContent ?? "").trim()).join(" | ");
+  })()`);
+  check("one control's menu offers depth and nothing that needs a group",
+    String(depthMenu) === "Bring to Front | Send to Back | Tab Order...", String(depthMenu));
+  await api.act("key", { code: "Escape" });
+
+  await api.designerEdit("remove", { module: form, project, name: "ZRed" });
+  await api.designerEdit("remove", { module: form, project, name: "ZBlue" });
+  await waitFor("the two probe labels to leave the form", async () =>
+    !(await api.designer(form, project)).controls.some((one) => one.name.startsWith("Z")),
+  { budgetMs: 15000 });
+  check("and the probe labels are off the form again", true);
+
+  // ---- tab order: the dialog the native View menu keeps, on our own surface ----
+
+  await api.act("designerSelect", { module: form });
+  const orderOpened = await api.act("designerTabOrder", { module: form, open: 1 });
+  check("the tab-order dialog opens for the form's own controls",
+    orderOpened.did === true, orderOpened.detail);
+
+  const inOrder = (await api.act("designerTabOrder", { module: form })).detail ?? "";
+  const walkRows = (await api.designer(form, project)).controls.filter((one) => one.parent === form);
+  const stops = walkRows.filter((one) => typeof one.tabIndex === "number");
+  check("it lists them in TAB order, which is not the order the walk reads them in",
+    inOrder.split(", ").length === stops.length
+    && inOrder.split(", ").join() === [...stops]
+      .sort((a, b) => a.tabIndex - b.tabIndex).map((one) => one.name).join(),
+    inOrder);
+  check("and a control with no tab stop of its own is not in the list at all",
+    walkRows.some((one) => one.tabIndex === null) && !inOrder.includes("Badge"),
+    walkRows.filter((one) => one.tabIndex === null).map((one) => one.name).join(", ") || "every control has one");
+
+  const wereAt = Object.fromEntries(stops.map((one) => [one.name, one.tabIndex]));
+  const lastStop = [...stops].sort((a, b) => a.tabIndex - b.tabIndex).at(-1);
+  const aboveIt = [...stops].sort((a, b) => a.tabIndex - b.tabIndex).at(-2);
+  const movedUp = await api.act("designerTabOrder", { module: form, control: lastStop.name, move: "up" });
+  check("a Move Up is accepted", movedUp.did === true, movedUp.detail);
+  await waitFor("the form to carry the new tab order", async () =>
+    ((await api.designer(form, project)).controls.find((one) => one.name === lastStop.name)?.tabIndex)
+      === wereAt[aboveIt.name], { budgetMs: 15000 });
+  const areAt = (await api.designer(form, project)).controls;
+  check("the control took the index above it, and MSForms pushed the other one down",
+    areAt.find((one) => one.name === lastStop.name)?.tabIndex === wereAt[aboveIt.name]
+    && areAt.find((one) => one.name === aboveIt.name)?.tabIndex === wereAt[lastStop.name],
+    `${lastStop.name} ${wereAt[lastStop.name]}->${areAt.find((one) => one.name === lastStop.name)?.tabIndex}, `
+    + `${aboveIt.name} ${wereAt[aboveIt.name]}->${areAt.find((one) => one.name === aboveIt.name)?.tabIndex}`);
+
+  await api.act("designerTabOrder", { module: form, control: lastStop.name, move: "down" });
+  await waitFor("the order to go back the way it was", async () =>
+    ((await api.designer(form, project)).controls.find((one) => one.name === lastStop.name)?.tabIndex)
+      === wereAt[lastStop.name], { budgetMs: 15000 });
+  check("and a Move Down puts it back - the write is one TabIndex either way", true);
+  await api.act("designerTabOrder", { module: form, close: 1 });
+
+  // ONE container at a time, because tab order is per container in MSForms: a Frame's children
+  // have their own 0..n and Tab walks into the frame and out again.
+  // The document back to the form's own text first: the rows above have carried controls between
+  // containers, and this one is about which container a control belongs to. Waited for rather
+  // than assumed after that, because the dialog reads the selection at the moment it opens and a
+  // projection landing in between - or a hand clicking in the same live session, which is what
+  // this suite runs in - moves it.
+  // The FORM's own text as it stands now, not the projection captured at the top of the run: the
+  // rows between have moved controls and saved them, so the old canonical is a different form.
+  await api.act("designerSetMarkup", { module: form, markup: await api.designerMarkup(form, project) });
+  await waitFor("the document back at canonical before the container's own order", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+  // A control of the FRAME as the canvas has it now, rather than a name written here: the rows
+  // above delete and restore controls, and a name that is gone selects nothing while the act
+  // cheerfully reports otherwise (which is fixed too - designerSelect refuses a name the canvas
+  // does not draw).
+  const framed = (await api.designerMarkup(form, project)).split(/\r?\n/)
+    .filter((line) => /^ {8}OptionButton /.test(line))
+    .map((line) => line.trim().split(/\s+/)[1]);
+  await api.act("designerSelect", { module: form, control: framed[0] });
+  await waitFor("the canvas to hold the selection the dialog will read", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.selected) === framed[0],
+  { budgetMs: 15000 });
+  const frameOrder = await api.act("designerTabOrder", { module: form, open: 1 });
+  const inFrame = (await api.act("designerTabOrder", { module: form })).detail ?? "";
+  check("a control inside a Frame opens the FRAME's own order, not the form's",
+    inFrame === framed.join(", "), `${frameOrder.detail} -> ${inFrame}`);
+  await api.act("designerTabOrder", { module: form, close: 1 });
+  await api.act("designerSelect", { module: form });
+
+  // ---- containers: a page opens on the canvas, and the strip's menu adds and removes one ----
+  //
+  // Until this, a MultiPage drew its first page and nothing reached the second: its controls
+  // were in the document and invisible, and a drop always landed on page one whatever the tabs
+  // said. Which page is OPEN is view state deliberately - see the field's own note - so the
+  // rows below check that opening one changes the picture and NOT the document.
+
+  const canvasNow = async () => (await api.act("designerCanvas", { module: form })).data;
+  const containerNow = async (name) =>
+    (await canvasNow()).containers.find((one) => one.name === name) ?? null;
+  const isDrawn = async (name) => (await canvasNow()).controls.some((one) => one.name === name);
+
+  const bothStrips = (await canvasNow()).containers;
+  check("both tabbed containers draw their tabs, the first one open",
+    bothStrips.length === 2
+    && bothStrips.every((one) => one.tabs.length === 2 && one.open === 0),
+    JSON.stringify(bothStrips));
+
+  const openedTwo = await api.act("designerOpenTab", { module: form, container: "Wizard", tab: "Page2" });
+  check("a click on a tab opens that page", openedTwo.did === true, openedTwo.detail);
+  check("the canvas draws the open page and not the one behind it",
+    (await containerNow("Wizard"))?.page === "Page2" && !(await isDrawn("Agree")),
+    JSON.stringify(await containerNow("Wizard")));
+
+  const onPage = await canvasNow();
+  check("and the PAGE is selected, with the markup caret on its own line - the native gesture",
+    onPage.selected === "Page2" && /^\s+Page Page2/.test((await tabText()).split(/\r?\n/)[onPage.markupLine - 1] ?? ""),
+    `${onPage.selected} at line ${onPage.markupLine}`);
+  check("opening a page leaves the DOCUMENT alone - looking is not an edit",
+    onPage.dirty === false);
+
+  const pagePanel = await waitFor("the panel to follow the page", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === "Page2" ? shown : null;
+  }, { budgetMs: 15000 });
+  check("the Properties panel targets the page, as the native designer's click does",
+    pagePanel.kind === "Page" && pagePanel.rows.some((row) => row.name === "Caption"),
+    `${pagePanel.kind}: ${pagePanel.rows.map((row) => row.name).join(", ")}`);
+
+  // The other direction: a caret in page one's block opens page one. Without this a click on a
+  // line inside a hidden page selected nothing at all, because the canvas had no element for it.
+  const agreeLine = (await tabText()).split(/\r?\n/).findIndex((line) => /CheckBox Agree/.test(line)) + 1;
+  await api.act("designerCaret", { module: form, line: agreeLine });
+  const backToOne = await canvasNow();
+  check("a caret on a control inside a hidden page opens that page and selects it",
+    backToOne.selected === "Agree" && (await isDrawn("Agree"))
+    && (await containerNow("Wizard"))?.page === "Page1",
+    `${backToOne.selected}, showing ${(await containerNow("Wizard"))?.page}`);
+
+  // AND SO DOES SELECTING IT BY NAME, which is the same link and was refused for a while: the
+  // act asked the CANVAS whether the control was there, and a control on a page that is not open
+  // is real and undrawn (found in the 2026-08-16 hunt). The refusal it was meant for - a name
+  // the form does not hold at all - still stands, and now asks the projection instead.
+  await api.act("designerOpenTab", { module: form, container: "Wizard", tab: 2 });
+  const pickedByName = await api.act("designerSelect", { module: form, control: "Agree" });
+  check("selecting a control on a page that is NOT OPEN opens that page too",
+    pickedByName.did === true && (await canvasNow()).selected === "Agree"
+    && (await containerNow("Wizard"))?.page === "Page1",
+    `${pickedByName.detail}, showing ${(await containerNow("Wizard"))?.page}`);
+
+  const nobody = await api.act("designerSelect", { module: form, control: "NoSuchControl" });
+  check("...while a name the form does not hold is still refused",
+    nobody.did === false && /not on this form/.test(nobody.detail ?? ""), nobody.detail);
+
+  // A drop lands on the page the developer is LOOKING at, which is the whole point of opening it.
+  await api.act("designerOpenTab", { module: form, container: "Wizard", tab: "Page2" });
+  const ontoPage = await api.act("designerToolbox", { module: form, kind: "CheckBox", left: 60, top: 230 });
+  check("a drop on the open page lands on it", ontoPage.did === true, ontoPage.detail);
+  const withPageDrop = await tabText();
+  check("and its line is indented under THAT page, not under the first",
+    /Page Page2 "Page2"\r?\n {12}CheckBox CheckBox1/.test(withPageDrop),
+    withPageDrop.split(/\r?\n/).slice(-6).join(" / "));
+
+  // New Page and Delete Page, where the native designer keeps them: the strip's own menu.
+  const stripMenu = await api.act("designerTabMenu", { module: form, container: "Wizard" });
+  check("the tab strip's menu offers the native designer's own pair",
+    stripMenu.detail === "New Page | Delete Page", stripMenu.detail);
+
+  await api.act("chooseMenuItem", { label: "New Page" });
+  const added = await waitFor("the new page to reach the document", async () =>
+    /^ {8}Page Page3 "Page3"$/m.test(await tabText()) ? await canvasNow() : null, { budgetMs: 15000 });
+  check("New Page writes the line MSForms would name and opens it",
+    added.selected === "Page3" && added.containers.find((one) => one.name === "Wizard")?.page === "Page3",
+    JSON.stringify(added.containers.find((one) => one.name === "Wizard")));
+
+  // Delete Page acts on the page that is OPEN, whether the right-click landed on a tab or on
+  // the empty end of the strip: "this page" means the one on screen.
+  await api.act("designerTabMenu", { module: form, container: "Wizard", tab: "Page2" });
+  await api.act("chooseMenuItem", { label: "Delete Page" });
+  const pageGone = await waitFor("the page to leave the document", async () =>
+    /Page Page2/.test(await tabText()) ? null : await tabText(), { budgetMs: 15000 });
+  check("Delete Page takes the page AND everything on it",
+    !/CheckBox CheckBox1/.test(pageGone) && /Page Page1/.test(pageGone) && /Page Page3/.test(pageGone),
+    pageGone.split(/\r?\n/).filter((line) => /Page/.test(line)).join(" / "));
+
+  await press("z", "ctrlKey: true,");
+  const undonePage = await waitFor("one undo to give the page back", async () =>
+    /Page Page2/.test(await tabText()) ? await tabText() : null, { budgetMs: 15000 });
+  check("and one Ctrl+Z gives the whole page back, child and all",
+    /CheckBox CheckBox1/.test(undonePage));
+
+  // A page's ground only became double-clickable when the body took the page's identity, and a
+  // PAGE has an event of its own: it raises Click, the VBE's own object list carries pages beside
+  // the controls, and the host writes `Page1_Click` for one - measured on a fresh form, after a
+  // first reading that said otherwise and was a read taken too early.
+  const doubled = await api.ask(`(() => {
+    const body = ${inViewAll(".dc")}.find((one) => one.dataset.kind === "Page");
+    if (!body) { return "no page body"; }
+    body.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const box = body.getBoundingClientRect();
+    body.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true,
+      clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) }));
+    return body.dataset.control;
+  })()`);
+  const pageHandler = new RegExp(`Private Sub ${doubled}_Click\\(\\)`);
+  await waitFor("the page's own handler to land in the code-behind", async () =>
+    pageHandler.test((await api.readModule(form, project)).text ?? ""), { budgetMs: 15000 });
+  check("a double-click on a page's ground writes that page's own Click handler",
+    true, `double-clicked ${doubled}`);
+  await api.act("activate", { module: form, face: "design" });
+
+  // A MultiPage the document leaves empty is a document the dialect allows, and the menu says
+  // what it can do about it rather than offering an item that would delete nothing.
+  await api.act("designerDelete", { module: form, control: "Page1" });
+  await api.act("designerDelete", { module: form, control: "Page2" });
+  await api.act("designerDelete", { module: form, control: "Page3" });
+  const emptied = await waitFor("the MultiPage to be drawn with no tabs at all", async () => {
+    const one = await containerNow("Wizard");
+    return one?.tabs.length === 0 ? one : null;
+  }, { budgetMs: 15000 });
+  check("a MultiPage with no pages draws as bare chrome", emptied.open === -1, JSON.stringify(emptied));
+  const emptyMenu = await api.act("designerTabMenu", { module: form, container: "Wizard" });
+  check("and its menu greys Delete Page rather than offering to delete nothing",
+    emptyMenu.detail === "New Page | Delete Page (disabled)", emptyMenu.detail);
+  await api.act("key", { code: "Escape" });
+
+  // A TabStrip switches too, and honestly shows nothing new: its tabs are an index rather than
+  // containers, and the runtime draws the same controls under every one of them.
+  const viewsTab = await api.act("designerOpenTab", { module: form, container: "Views", tab: 2 });
+  check("a TabStrip's tab is picked up too", viewsTab.did === true, viewsTab.detail);
+  const views = await containerNow("Views");
+  check("it marks the tab, names no page, and selects the control itself",
+    views?.open === 1 && views?.page === "" && (await canvasNow()).selected === "Views",
+    JSON.stringify(views));
+  // A TABSTRIP'S TABS are in the dialect since 2026-08-16: printed under the strip, parsed back,
+  // added and removed by the same diff, and drawn from the projection rather than from a list of
+  // strings that rode beside it. Before that the strip's line stood with nothing indented under
+  // it while the canvas drew two tabs (the owner: "in the markdown, i dont see anything indented
+  // under the tab view").
+  const stripTabs = (text) => text.split(/\r?\n/)
+    .filter((line) => /^\s+Tab /.test(line))
+    .map((line) => line.trim()).join(" | ");
+  check("the strip's tabs are lines of the document, indented under it",
+    stripTabs(await tabText()) === 'Tab Tab1 "Tab1" | Tab Tab2 "Tab2"', stripTabs(await tabText()));
+
+  const tabMenu = await api.act("designerTabMenu", { module: form, container: "Views" });
+  check("and its menu offers the pair a strip can keep - tabs, not pages",
+    tabMenu.detail === "New Tab | Delete Tab", tabMenu.detail);
+
+  await api.act("chooseMenuItem", { label: "New Tab" });
+  const grown = await waitFor("the new tab to reach the document", async () =>
+    /Tab Tab3 "Tab3"/.test(await tabText()) ? await canvasNow() : null, { budgetMs: 15000 });
+  check("New Tab writes a line and the canvas draws it, open",
+    grown.containers.find((one) => one.name === "Views")?.tabs.length === 3
+    && grown.containers.find((one) => one.name === "Views")?.open === 2,
+    JSON.stringify(grown.containers.find((one) => one.name === "Views")));
+
+  await api.command("save");
+  await waitFor("the tab to reach the FORM", async () =>
+    /Tab Tab3/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
+  check("and Ctrl+S puts it on the form itself - MSForms' own Tabs.Add", true);
+
+  await api.act("designerTabMenu", { module: form, container: "Views", tab: 3 });
+  await api.act("chooseMenuItem", { label: "Delete Tab" });
+  await api.command("save");
+  await waitFor("the tab to leave the form again", async () =>
+    !/Tab Tab3/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
+  check("Delete Tab takes it back off, through the same diff", true);
+
+  check("the FORM kept all of its pages throughout: none of this reached it",
+    (await api.designer(form, project)).controls.filter((one) => one.type === "Page").length === 2,
+    JSON.stringify((await api.designer(form, project)).controls
+      .filter((one) => one.type === "Page").map((one) => one.name)));
+
+  await api.act("designerSetMarkup", { module: form, markup: await api.designerMarkup(form, project) });
+  await waitFor("the document back at canonical after the container rows", async () =>
+    ((await canvasNow())?.dirty) === false, { budgetMs: 15000 });
+
+  // ---- zoom: the picture scales, the points do not ----
+  //
+  // The whole design of this one is that only the SCREEN boundary knows about the scale, so the
+  // row that matters is the drag: twelve points at 200% has to be twelve points in the document.
+
+  const zoomAt = async () => (await api.act("designerZoom", { module: form })).data;
+  const formBox = async () => api.ask(`(() => {
+    const el = ${inView(".dc-form")};
+    const box = el.getBoundingClientRect();
+    return Math.round(box.width) + "x" + Math.round(box.height);
+  })()`);
+
+  check("the canvas opens at 100%", (await zoomAt()) === 100, String(await zoomAt()));
+  const drawnAt100 = String(await formBox());
+
+  const twiceSize = await api.act("designerZoom", { module: form, to: 200 });
+  check("and takes a zoom", twiceSize.did === true, twiceSize.detail);
+  const drawnAt200 = String(await formBox());
+  check("the form is drawn twice the size, and the DOCUMENT has not moved",
+    Math.abs(Number(drawnAt200.split("x")[0]) - Number(drawnAt100.split("x")[0]) * 2) < 4
+    && ((await api.act("designerCanvas", { module: form })).data?.dirty) === false,
+    `${drawnAt100} became ${drawnAt200}`);
+
+  const zoomedPlace = async () =>
+    /HoldToggle .* at (\d+),(\d+)/.exec(await tabText())?.slice(1).map(Number) ?? [];
+
+  // The snap OFF while the zoom is measured, so the row reads the gesture rather than the grid -
+  // and put back the way it was found, because the grid rows below open by measuring an unsnapped
+  // drag and a section that changes a setting owes the next one what it borrowed.
+  const snapWas = (await api.ui()).settings?.designerSnap ?? "grid";
+  await api.settings({ designerSnap: "off" });
+  await waitFor("the snap off for the zoom rows", async () =>
+    (await api.ui()).settings?.designerSnap === "off", { budgetMs: 15000 });
+
+  const zoomedFrom = await zoomedPlace();
+  await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 12, dy: 0 });
+  await waitFor("the drag at 200% to land", async () =>
+    (await zoomedPlace())[0] !== zoomedFrom[0], { budgetMs: 15000 });
+  const zoomedTo = await zoomedPlace();
+  check("a drag of twelve POINTS moves twelve points, whatever the zoom is drawing",
+    zoomedTo[0] === zoomedFrom[0] + 12 && zoomedTo[1] === zoomedFrom[1],
+    `${zoomedFrom.join(",")} + 12,0 at 200% is ${zoomedTo.join(",")}`);
+
+  const toFit = await api.act("designerZoom", { module: form, to: "fit" });
+  check("Fit picks the largest scale that shows the whole form",
+    toFit.did === true && /zoom \d+%/.test(toFit.detail ?? ""), toFit.detail);
+  const fitPercent = await zoomAt();
+  check("and it is a scale that fits, not one that was asked for",
+    fitPercent >= 25 && fitPercent <= 200, String(fitPercent));
+
+  await api.act("designerZoom", { module: form, to: 100 });
+  check("back to 100% for the rows that follow", (await zoomAt()) === 100, String(await zoomAt()));
+  await api.settings({ designerSnap: snapWas });
+  await waitFor("the snap back the way the zoom rows found it", async () =>
+    (await api.ui()).settings?.designerSnap === snapWas, { budgetMs: 15000 });
+
+  // ---- pictures: an IPictureDisp becomes pixels the canvas can draw, and back ----
+  //
+  // The read is GDI rather than COM - the handle off the picture, GetDIBits for a bitmap and
+  // DrawIconEx onto a DIB section for an icon - so both halves are exercised: the fixture's
+  // Badge wears a PNG (a bitmap once loaded) and its OK button an ICO.
+
+  const canvasPictures = async () =>
+    (await api.act("designerCanvas", { module: form })).data?.pictures ?? [];
+
+  const drawnPictures = await canvasPictures();
+  const badgeDrawn = drawnPictures.find((one) => one.name === "Badge");
+  check("the canvas draws the Image control's picture instead of a crossed box",
+    (badgeDrawn?.bytes ?? 0) > 1000, JSON.stringify(badgeDrawn ?? null));
+  check("and places it the way PictureSizeMode says - zoomed, centred",
+    badgeDrawn?.where === "contain center center", badgeDrawn?.where);
+
+  const buttonDrawn = drawnPictures.find((one) => one.name === "OkButton");
+  check("a picture BESIDE a caption is drawn beside it, where PicturePosition says",
+    (buttonDrawn?.bytes ?? 0) > 100 && buttonDrawn?.where === "row center",
+    JSON.stringify(buttonDrawn ?? null));
+
+  // The PANEL: a picture row says what it holds rather than showing a path, because MSForms
+  // keeps the pixels and forgets the file they came from.
+  await api.act("designerSelect", { module: form, control: "Badge" });
+  const badgePanel = await waitFor("the panel to show the Image control", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === "Badge" ? shown : null;
+  }, { budgetMs: 15000 });
+
+  const badgeRow = badgePanel.rows.find((row) => row.name === "Picture");
+  check("the panel's Picture row says what it holds, with a thumbnail behind it",
+    badgeRow?.picture === true && badgeRow?.value === "(Bitmap)" && (badgeRow?.previewBytes ?? 0) > 1000,
+    JSON.stringify(badgeRow ?? null));
+  check("and the placement rows are there, named the way every enum row is",
+    badgePanel.rows.find((row) => row.name === "PictureSizeMode")?.value === "fmPictureSizeModeZoom",
+    badgePanel.rows.find((row) => row.name === "PictureSizeMode")?.value);
+
+  // Cleared through the panel's own Clear, which is the empty write - and the canvas follows.
+  await api.act("editProperty", { name: "Picture", value: "" });
+  await waitFor("the cleared picture to leave the canvas", async () =>
+    (await canvasPictures()).every((one) => one.name !== "Badge"), { budgetMs: 15000 });
+  check("Clear takes the picture off, and the crossed box comes back", true);
+
+  const emptyRow = (await api.ui()).properties?.rows?.find((row) => row.name === "Picture");
+  check("the row says (None) with nothing to preview",
+    emptyRow?.value === "(None)" && emptyRow?.previewBytes === undefined, JSON.stringify(emptyRow ?? null));
+
+  // Written back through the api, by PATH - the one place the two paths differ, and a
+  // designated deviation: the panel's Browse raises the machine's file dialog to PRODUCE a
+  // path, and then takes exactly this road.
+  const rewritten = await api.designerEdit("set", {
+    module: form, project, name: "Badge", property: "Picture", value: FORM_PICTURES.bitmap,
+  });
+  check("set Picture takes a file path and answers what the control now holds",
+    rewritten.ok === true && /Picture is \(Bitmap\)/.test(rewritten.detail ?? ""), rewritten.detail);
+  await waitFor("the canvas to draw the picture that was just written", async () =>
+    (await canvasPictures()).some((one) => one.name === "Badge"), { budgetMs: 15000 });
+  check("liveness carries a picture like any other edit", true);
+
+  await api.designerEdit("set", {
+    module: form, project, name: "Badge", property: "PictureSizeMode", value: "3",
+  });
+
+  // THE ICON ROAD, on an icon built to be one: OLE's loader reads classic icons, whose frames
+  // are BMPs, and hands back a picture of kind Icon - which GetDIBits cannot read at all, so the
+  // canvas has to draw it onto a DIB section instead. Nothing in the repository is a classic
+  // icon (see form-plan), so the suite writes one: sixteen by sixteen, solid red, opaque.
+  const iconPath = join(tmpdir(), "xlide-suite-classic.ico");
+  writeFileSync(iconPath, classicIcon(16, [0x00, 0x00, 0xFF, 0xFF]));
+
+  const asIcon = await api.designerEdit("set", {
+    module: form, project, name: "Badge", property: "Picture", value: iconPath,
+  });
+  check("a classic icon loads as an ICON, not as a flattened bitmap",
+    /Picture is \(Icon\)/.test(asIcon.detail ?? ""), asIcon.detail);
+  await waitFor("the icon to reach the canvas, drawn rather than read", async () =>
+    (await canvasPictures()).some((one) => one.name === "Badge" && one.bytes > 1000), { budgetMs: 15000 });
+  check("and an icon becomes pixels the canvas can draw - the DrawIconEx road", true);
+
+  rmSync(iconPath, { force: true });
+  await api.designerEdit("set", {
+    module: form, project, name: "Badge", property: "Picture", value: FORM_PICTURES.bitmap,
+  });
+
+  const refused = await api.designerEdit("set", {
+    module: form, project, name: "Badge", property: "Picture",
+    value: join(tmpdir(), "xlide-there-is-no-such-picture.png"),
+  }).catch((why) => ({ refusal: why.message }));
+  check("a picture that is not there is refused by name, and nothing is written",
+    /there is no file at/i.test(refused.refusal ?? refused.detail ?? ""),
+    refused.refusal ?? refused.detail);
+  check("and the control keeps the picture it had",
+    (await api.designer(form, project)).controls
+      .find((one) => one.name === "Badge")?.picture?.kind === "(Bitmap)");
+
+  // A ROW NOBODY CAN SET IS NOT A PROPERTY OF THE DESIGN (the owner, 2026-08-16). The form's
+  // panel listed CanPaste, CanUndo and CanRedo - questions about the editing session, False on
+  // a form nobody has touched, and unwritable by their nature.
+  await api.act("designerSelect", { module: form });
+  const settableOnly = await waitFor("the panel back on the form", async () => {
+    const shown = (await api.ui()).properties;
+    return shown?.component === form ? shown : null;
+  }, { budgetMs: 15000 });
+  check("the panel shows no row it cannot write",
+    settableOnly.rows.every((row) => row.writable),
+    settableOnly.rows.filter((row) => !row.writable).map((row) => row.name).join(",") || "none");
+  check("so the session-state rows are gone",
+    !settableOnly.rows.some((row) => ["CanPaste", "CanUndo", "CanRedo"].includes(row.name)));
+  check("and a form's own Picture row is there to be set",
+    settableOnly.rows.some((row) => row.name === "Picture" && row.picture === true));
+
   // ---- the grid: pointer gestures land on it, the keyboard never does ----
 
   // The caption sits between the name and the position - `ToggleButton HoldToggle "Hold" at
@@ -1147,7 +2496,7 @@ try {
   const gridPlace = async () =>
     /HoldToggle .* at ([0-9]+),([0-9]+)/.exec(await tabText())?.slice(1).map(Number) ?? [];
 
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
+  await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   await waitFor("the document back at canonical before the grid rows", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
 
@@ -1311,13 +2660,99 @@ try {
     (await designTabs()).find((tab) => tab.module === form), { budgetMs: 15000 });
   check("and back once more through the panel", true);
 
+  // ---- CLOSING A DESIGNER TAB WITH UNAPPLIED EDITS ASKS ----
+  //
+  // It did not until 2026-08-16: the close was unconditional and a Ctrl+W after three moves lost
+  // the three moves with nothing said (found in the hunt). The question is the PAGE's, because
+  // the state is - unapplied markup lives in the view, and nothing host-side can know to hold
+  // the close - but it is the same modal, the same three buttons, and `closeActive` reports the
+  // outcome rather than the request, exactly as a module's does.
+  const designerTabNow = async () => ((await api.ui()).workspace?.groups ?? [])
+    .flatMap((group) => group.tabs).find((tab) => tab.module === form && tab.face === "design");
+
+  await api.act("activate", { module: form, face: "design" });
+  await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 6, dy: 0 });
+  await waitFor("the document to go dirty before the close", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === true, { budgetMs: 15000 });
+
+  const held = await api.act("closeActive", {});
+  check("closing a designer tab with unapplied edits is HELD, not done",
+    held.did === false && /Unsaved changes/.test(held.detail ?? ""), held.detail);
+  check("...and the question standing is the one a module's unsaved text raises",
+    ((await api.ui()).dialogs ?? []).some((one) => one.id === "close-confirm-card"),
+    JSON.stringify((await api.ui()).dialogs ?? []));
+
+  await api.act("answerCloseConfirm", { answer: "cancel" });
+  await waitFor("the question to go", async () =>
+    ((await api.ui()).dialogs ?? []).length === 0, { budgetMs: 15000 });
+  check("Cancel leaves the tab open with its edits",
+    (await designerTabNow()) !== undefined
+    && ((await api.act("designerCanvas", { module: form })).data?.dirty) === true);
+
+  await api.act("closeActive", {});
+  await api.act("answerCloseConfirm", { answer: "discard" });
+  await waitFor("the designer tab to leave on Don't Save", async () =>
+    (await designerTabNow()) === undefined, { budgetMs: 15000 });
+  const afterDiscard = (await api.designer(form, project)).controls
+    .find((one) => one.name === "HoldToggle");
+  check("Don't Save closes it and the FORM never moved",
+    afterDiscard?.left === 112, String(afterDiscard?.left));
+
+  await api.pane("open", { module: form, face: "design" });
+  await waitFor("the tab back for the Save half", async () =>
+    (await designerTabNow()) !== undefined, { budgetMs: 15000 });
+  await waitFor("its document to arrive", async () =>
+    /HoldToggle/.test(String((await api.act("designerMarkup", { module: form })).data)), { budgetMs: 15000 });
+  await api.act("designerDrag", { module: form, control: "HoldToggle", dx: 6, dy: 0 });
+  await waitFor("the document dirty again", async () =>
+    ((await api.act("designerCanvas", { module: form })).data?.dirty) === true, { budgetMs: 15000 });
+  await api.act("closeActive", {});
+  await api.act("answerCloseConfirm", { answer: "save" });
+  await waitFor("Save to reach the form itself", async () =>
+    ((await api.designer(form, project)).controls.find((one) => one.name === "HoldToggle")?.left ?? 0) > 112,
+  { budgetMs: 20000 });
+  check("Save means what Ctrl+S means here - the document applied, then the workbook", true);
+  await waitFor("and the tab goes after the save", async () =>
+    (await designerTabNow()) === undefined, { budgetMs: 15000 });
+  check("and the tab goes with it", true);
+
+  await api.designerEdit("set", { module: form, project, name: "HoldToggle", property: "Left", value: "112" });
+
+  await api.pane("open", { module: form, face: "design" });
+  await waitFor("the tab back for the rows below", async () =>
+    (await designerTabNow()) !== undefined, { budgetMs: 15000 });
   await api.pane("close", { module: form, face: "design" });
   await waitFor("the designer tab to leave the strip", async () =>
     !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
       .some((tab) => tab.module === form && tab.face === "design"), { budgetMs: 15000 });
-  check("and its close takes only the designer face, not the code tab",
+  check("and a CLEAN designer tab still closes without a question",
     ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
       .some((tab) => tab.module === form && !tab.face));
+
+  // ---- A REMOVED FORM TAKES ITS DESIGNER TAB WITH IT ----
+  //
+  // It did not, and what stood in its place was an overlay reading "<form> has no designer" -
+  // which is what a form mid-teardown answers, because the component is still in the collection
+  // for a moment after a Remove (the owner, 2026-08-16: "sometimes i see an overlay that says
+  // entryform2 has no designer"). A tab over a form that is gone is a corpse; the removal knows,
+  // so it collects it rather than leaving the next request to find out.
+  const ghost = `Ghost${process.pid % 1000}`;
+  await api.component("add", { kind: 3, name: ghost, project });
+  await api.pane("open", { module: ghost, face: "design" });
+  await waitFor("the ghost's designer tab to stand", async () =>
+    ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .some((tab) => tab.module === ghost && tab.face === "design"), { budgetMs: 15000 });
+
+  await api.component("remove", { name: ghost, project });
+  await waitFor("the tab to go with the form", async () =>
+    !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .some((tab) => tab.module === ghost), { budgetMs: 15000 });
+  check("a removed form takes its designer tab, leaving no overlay behind", true);
+
+  const leftover = await api.ask('(() => { const el = document.querySelector(".designer-notice");'
+    + ' return el && !el.hidden ? (el.textContent || "").trim() : ""; })()');
+  check("...and no canvas is left saying a form has no designer",
+    String(leftover) === "", String(leftover).slice(0, 90));
 
   const notFormTab = await api.pane("open", { module: plainModule, face: "design" })
     .catch((why) => why.message);

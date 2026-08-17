@@ -1,0 +1,695 @@
+/*
+ * The markup language, as monaco sees it: its grammar, its indentation rules, and the language
+ * service behind the designer tab's document half - completions, hover, and the header hint
+ * (docs/userform-designer.md, the language service, step 3).
+ *
+ * WHAT IT ANSWERS FROM. Nothing here is a table of the language's own vocabulary. The host
+ * measures it - a bare instance of each control's coclass, read through its own type library -
+ * and sends it once per session; these providers offer exactly that, so a completion names a
+ * property MSForms on this machine actually has, and a hover repeats what the Object Browser
+ * would say. Until the answer arrives the providers offer the grammar alone, which is the honest
+ * degradation: the shape of a line is page knowledge, its vocabulary is not.
+ *
+ * AND WHAT IT DOES NOT DECIDE. There is ONE grammar for this language and it is Core's parser,
+ * host-side, the apply's own. The reading here - which container a line sits in, whether it is a
+ * header or a property - is positional and suggestion-only: it can be wrong about what to OFFER,
+ * never about what is valid, because it never refuses anything. The squiggles keep coming from
+ * the host's tolerant parse.
+ */
+
+import * as monaco from "monaco-editor/editor/editor.api.js";
+import type { FormMarkupKind, FormMarkupProperty } from "./bridge.js";
+
+/** The markup's own language id, for the designer tab's document. */
+export const FORM_MARKUP_LANGUAGE = "xlide-form";
+
+/** Four spaces a level, the printer's and the parser's. Indentation is containment. */
+const INDENT = 4;
+
+/**
+ * The toolbox: the kinds a document can name, in the order the native palette lists them, each
+ * with the size MSForms gives a control dropped rather than drawn. The palette draws from this
+ * and a completion scaffolds from it, because "what a new Label looks like" is one fact.
+ *
+ * A Page is not here: a page is added to a MultiPage, not dropped on a form. It still completes -
+ * the vocabulary carries it - but with no size, because a Page has no geometry of its own.
+ */
+export const TOOLBOX: readonly { kind: string; width: number; height: number }[] = [
+  { kind: "Label", width: 66, height: 16 },
+  { kind: "TextBox", width: 120, height: 20 },
+  { kind: "ComboBox", width: 120, height: 20 },
+  { kind: "ListBox", width: 120, height: 42 },
+  { kind: "CheckBox", width: 66, height: 16 },
+  { kind: "OptionButton", width: 76, height: 16 },
+  { kind: "ToggleButton", width: 92, height: 22 },
+  { kind: "Frame", width: 92, height: 66 },
+  { kind: "CommandButton", width: 72, height: 24 },
+  { kind: "TabStrip", width: 122, height: 86 },
+  { kind: "MultiPage", width: 192, height: 86 },
+  { kind: "ScrollBar", width: 14, height: 96 },
+  { kind: "SpinButton", width: 14, height: 42 },
+  { kind: "Image", width: 76, height: 42 },
+];
+
+/** The kinds that hold children, until the host's vocabulary says otherwise - it carries the
+ * same fact, measured, and replaces this the moment it arrives. */
+const CONTAINERS = new Set(["Frame", "MultiPage", "Page"]);
+
+/* -------------------------------------------------------------- the vocabulary */
+
+let vocabulary: FormMarkupKind[] = [];
+
+/** The host's answer, held for the page's life. Kinds are few and the answer is measured from
+ * coclasses that do not change while Excel is up, so one request per session is the whole
+ * traffic - no keystroke ever waits on a round trip. */
+export function setMarkupVocabulary(kinds: FormMarkupKind[]): void {
+  vocabulary = kinds;
+}
+
+/** What the language service knows, for a probe that wants to check it against the route. */
+export function markupVocabulary(): FormMarkupKind[] {
+  return vocabulary;
+}
+
+function kindNamed(name: string): FormMarkupKind | null {
+  return vocabulary.find((one) => one.kind.toLowerCase() === name.toLowerCase()) ?? null;
+}
+
+function propertyNamed(kind: string, path: string): FormMarkupProperty | null {
+  return kindNamed(kind)?.properties.find((one) => one.name.toLowerCase() === path.toLowerCase()) ?? null;
+}
+
+/** Every kind a header line may name, vocabulary first and the toolbox as the floor: the
+ * completions work before the host has answered, with the shape but not the meanings. */
+function everyKind(): string[] {
+  const names = vocabulary.filter((one) => one.kind !== "Form").map((one) => one.kind);
+  return names.length > 0 ? names : [...TOOLBOX.map((one) => one.kind), "Page"];
+}
+
+function contains(kind: string): boolean {
+  return kindNamed(kind)?.container ?? CONTAINERS.has(kind);
+}
+
+/* -------------------------------------------------------------- reading a place in the document */
+
+/** Where the caret is, in the document's own terms. Positional, suggestion-only - see the
+ * header of this file for why that is not a second grammar. */
+interface Spot {
+  /** 0 is the Form line and everything unindented; 1 its properties and the top-level controls. */
+  depth: number;
+  /** The kind whose vocabulary owns this line: the header above it, or Form at the top. */
+  owner: string;
+  /** The line as it stands, and the part of it before the caret. */
+  line: string;
+  before: string;
+  /** The property path left of `=`, when this line carries one. */
+  path: string | null;
+  /** True once the caret is past the `=`: the value's side of a property line. */
+  onValue: boolean;
+  /** A header line's own words - the kind it names and the name it gives. */
+  header: { kind: string; name: string } | null;
+  /** How many words of the header stand before the caret, which is what the hint follows. */
+  words: number;
+}
+
+/** An unquoted occurrence, the way the parser looks for one: a quote toggles, so an `=` inside a
+ * caption is text. */
+function unquotedIndexOf(text: string, wanted: string): number {
+  let quoted = false;
+  for (let at = 0; at < text.length; at++) {
+    if (text[at] === '"') {
+      quoted = !quoted;
+    } else if (text[at] === wanted && !quoted) {
+      return at;
+    }
+  }
+  return -1;
+}
+
+function depthOf(line: string): number {
+  return Math.max(0, Math.floor((line.length - line.trimStart().length) / INDENT));
+}
+
+/** The header this line sits under: the nearest line above with a shallower indent that is not
+ * itself a property line. The Form line answers for everything at the top. */
+function ownerAt(model: monaco.editor.ITextModel, lineNumber: number, depth: number): string {
+  if (depth <= 0) {
+    return "Form";
+  }
+
+  for (let above = lineNumber - 1; above >= 1; above--) {
+    const text = model.getLineContent(above);
+    if (text.trim() === "" || text.trim().startsWith("'")) {
+      continue;
+    }
+    if (depthOf(text) >= depth || unquotedIndexOf(text, "=") >= 0) {
+      continue;
+    }
+
+    return text.trim().split(/\s+/)[0] ?? "Form";
+  }
+
+  return "Form";
+}
+
+function spotAt(model: monaco.editor.ITextModel, position: monaco.IPosition): Spot {
+  const line = model.getLineContent(position.lineNumber);
+  const before = line.slice(0, position.column - 1);
+  const equals = unquotedIndexOf(line, "=");
+  const path = equals >= 0 ? line.slice(0, equals).trim() : null;
+  const words = line.trim().split(/\s+/).filter((word) => word !== "");
+  const depth = depthOf(line);
+
+  return {
+    depth,
+    owner: ownerAt(model, position.lineNumber, depth),
+    line,
+    before,
+    path,
+    onValue: equals >= 0 && position.column - 1 > equals,
+    header: path === null && words[0] !== undefined
+      ? { kind: words[0], name: words[1] ?? "" }
+      : null,
+    words: before.trim() === "" ? 0 : before.trim().split(/\s+/).length,
+  };
+}
+
+/** The range a completion replaces when the token may carry dots - a `Font.Si` is one path, not
+ * a word called `Si`, and monaco's own word rules split it. */
+function tokenRange(model: monaco.editor.ITextModel, position: monaco.IPosition): monaco.Range {
+  const line = model.getLineContent(position.lineNumber);
+  let start = position.column - 1;
+  while (start > 0 && /[\w.&]/.test(line[start - 1] ?? "")) {
+    start--;
+  }
+
+  let end = position.column - 1;
+  while (end < line.length && /[\w.&]/.test(line[end] ?? "")) {
+    end++;
+  }
+
+  return new monaco.Range(position.lineNumber, start + 1, position.lineNumber, end + 1);
+}
+
+/**
+ * The STRING already standing on the value's side of a property line, quotes included, so
+ * accepting a value the developer has begun REPLACES it rather than nesting a second string
+ * inside it: without this, completing at `FontName = "Tah` writes `FontName = ""Tahoma"`, because
+ * a quote is not a word character and the token range stops short of it.
+ *
+ * The whole run, not the part before the caret, so picking a face with the caret sitting after a
+ * finished value replaces the value rather than appending to it. Null when the value side holds
+ * no string at all, where the plain token range is right.
+ */
+function valueStringRange(model: monaco.editor.ITextModel, position: monaco.IPosition): monaco.Range | null {
+  const line = model.getLineContent(position.lineNumber);
+
+  // The property path cannot hold a quote, so the first `=` is the one that splits the line.
+  const equals = line.indexOf("=");
+  if (equals < 0) {
+    return null;
+  }
+
+  const open = line.indexOf('"', equals + 1);
+  if (open < 0) {
+    return null;
+  }
+
+  let close = open + 1;
+  while (close < line.length && line[close] !== '"') {
+    close++;
+  }
+
+  return new monaco.Range(
+    position.lineNumber, open + 1,
+    position.lineNumber, (close < line.length ? close + 1 : line.length) + 1);
+}
+
+/** The name the native toolbox would give a new control of this kind: the kind plus the first
+ * free number, counted off the document itself. */
+function freeName(model: monaco.editor.ITextModel, kind: string): string {
+  const text = model.getValue();
+  for (let number = 1; number < 1000; number++) {
+    const candidate = `${kind}${number}`;
+    if (!new RegExp(`\\b${candidate}\\b`, "i").test(text)) {
+      return candidate;
+    }
+  }
+
+  return `${kind}1`;
+}
+
+/* -------------------------------------------------------------- how a value is spelled */
+
+/** A colour as the DOCUMENT spells one, which is what Core's printer writes and its parser
+ * reads: `#rrggbb` for a plain colour, and the VBA hex for a system colour, which is a question
+ * about the machine rather than an RGB. The same rule the Properties panel keeps. */
+function spellColour(value: number): string {
+  return (value & 0x80000000) !== 0
+    ? `&H${(value >>> 0).toString(16).toUpperCase().padStart(8, "0")}&`
+    : `#${(value & 0xFF).toString(16).padStart(2, "0")}`
+      + `${((value >> 8) & 0xFF).toString(16).padStart(2, "0")}`
+      + `${((value >> 16) & 0xFF).toString(16).padStart(2, "0")}`;
+}
+
+function asNumber(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** What a property's untouched value looks like in a document, for a hover and for the one
+ * completion that offers it back. */
+function spelledDefault(property: FormMarkupProperty): string | null {
+  if (property.default === null) {
+    return null;
+  }
+
+  const number = asNumber(property.default);
+  if (property.members && number !== null) {
+    return property.members.find((member) => member.value === number)?.name ?? property.default;
+  }
+
+  if (property.colour && number !== null) {
+    return spellColour(number);
+  }
+
+  return property.default;
+}
+
+/** The line a hover leads with: the path, and the type it takes. */
+function signatureOf(owner: string, property: FormMarkupProperty): string {
+  const type = property.type ?? (property.colour ? "OLE_COLOR" : "Variant");
+  return `${owner}.${property.name} As ${type}`;
+}
+
+function documentationOf(property: FormMarkupProperty): string[] {
+  const lines: string[] = [];
+  if (property.doc) {
+    lines.push(property.doc);
+  }
+
+  const untouched = spelledDefault(property);
+  if (untouched !== null) {
+    lines.push(`Default \`${untouched}\`.`);
+  }
+
+  if (property.members && property.members.length > 0) {
+    lines.push(property.members.map((member) => `- \`${member.name}\` = ${member.value}`).join("\n"));
+  } else if (property.colour) {
+    lines.push("A colour: `#rrggbb`, or a system colour like `&H8000000F&`.");
+  }
+
+  return lines;
+}
+
+/* -------------------------------------------------------------- completions */
+
+/** The clause keywords, with the scaffolding the doc's language service asked for: a clause
+ * arrives with its numbers as tab stops rather than as a word to finish by hand. */
+const CLAUSES: Readonly<Record<string, { insert: string; detail: string }>> = {
+  at: { insert: "at ${1:0},${2:0}", detail: "at left,top in points" },
+  size: { insert: "size ${1:60}x${2:20}", detail: "size width x height in points" },
+};
+
+export function completionsAt(
+  model: monaco.editor.ITextModel, position: monaco.IPosition,
+): monaco.languages.CompletionList {
+  const spot = spotAt(model, position);
+  const range = tokenRange(model, position);
+  const items: monaco.languages.CompletionItem[] = [];
+
+  // The value's side of a property line: what this property can hold, by name.
+  if (spot.onValue && spot.path !== null) {
+    const property = propertyNamed(spot.owner, spot.path);
+    if (property) {
+      for (const member of property.members ?? []) {
+        items.push({
+          label: member.name,
+          kind: monaco.languages.CompletionItemKind.EnumMember,
+          detail: `${member.value}`,
+          ...(property.doc ? { documentation: property.doc } : {}),
+          insertText: member.name,
+          range,
+        });
+      }
+
+      // Values the machine was asked for rather than the type library - a font's faces. Offered
+      // the same way and no more binding: the property takes anything typed instead, which is why
+      // these are a plain Value rather than an EnumMember.
+      //
+      // A face is a STRING in the dialect, so the whole quoted run is what gets replaced when the
+      // developer has already opened one, and the filter text carries the quote with it - monaco
+      // filters on the text from the range's start to the caret, and `"Tah` matches nothing at all
+      // against a bare `Tahoma`.
+      const inString = valueStringRange(model, position);
+      for (const value of property.values ?? []) {
+        items.push({
+          label: value,
+          kind: monaco.languages.CompletionItemKind.Value,
+          insertText: `"${value}"`,
+          ...(inString ? { filterText: `"${value}"` } : {}),
+          range: inString ?? range,
+        });
+      }
+
+      if ((property.type ?? "") === "Boolean") {
+        for (const flag of ["True", "False"]) {
+          items.push({
+            label: flag,
+            kind: monaco.languages.CompletionItemKind.Value,
+            insertText: flag,
+            range,
+          });
+        }
+      }
+
+      const untouched = spelledDefault(property);
+      if (untouched !== null && !items.some((item) => item.label === untouched)) {
+        items.push({
+          label: untouched,
+          kind: monaco.languages.CompletionItemKind.Value,
+          detail: "default",
+          insertText: untouched,
+          range,
+        });
+      }
+    }
+
+    return { suggestions: items };
+  }
+
+  // Inside a caption nothing is offered: the text between quotes is the developer's, and a
+  // completion widget over it is noise. An odd number of quotes behind the caret means one
+  // is still open, which is the same test the parser's comment stripper makes.
+  if ((spot.before.match(/"/g)?.length ?? 0) % 2 === 1) {
+    return { suggestions: items };
+  }
+
+  // Past a header's name: the clauses it can still take, and only those - a line already
+  // carrying `at` is not offered another one. The name itself is the developer's to choose,
+  // so nothing is offered until a space says they are done with it.
+  const pastName = spot.words > 2 || (spot.words === 2 && /\s$/.test(spot.before));
+  if (spot.header !== null && pastName) {
+    for (const [word, clause] of Object.entries(CLAUSES)) {
+      if (new RegExp(`\\b${word}\\b`, "i").test(spot.before)) {
+        continue;
+      }
+
+      items.push({
+        label: word,
+        kind: monaco.languages.CompletionItemKind.Keyword,
+        detail: clause.detail,
+        insertText: clause.insert,
+        insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        range,
+      });
+    }
+
+    return { suggestions: items };
+  }
+
+  // The first word of an indented line, which can open either a control or a property of the
+  // control above - so both are offered, and the parser is the one that says which is legal
+  // where. The Form line itself is the projection's; nothing completes at depth zero.
+  if (spot.depth === 0) {
+    return { suggestions: items };
+  }
+
+  if (contains(spot.owner) || spot.owner === "Form") {
+    for (const kind of kindsUnder(spot.owner)) {
+      items.push(kindCompletion(model, kind, range));
+    }
+  }
+
+  for (const property of kindNamed(spot.owner)?.properties ?? []) {
+    items.push({
+      label: property.name,
+      kind: monaco.languages.CompletionItemKind.Property,
+      ...(property.type ? { detail: property.type } : {}),
+      documentation: { value: documentationOf(property).join("\n\n") },
+      insertText: `${property.name} = `,
+      // The value list follows the `=` without a second keystroke: a property is a line, not
+      // a word, and the point of picking one is to say what it holds.
+      command: { id: "editor.action.triggerSuggest", title: "values" },
+      range,
+    });
+  }
+
+  return { suggestions: items };
+}
+
+/** Which kinds may open a line inside this owner: a MultiPage holds Pages and nothing else, and
+ * a Page belongs to nothing else. The parser refuses the rest; this says so early. */
+function kindsUnder(owner: string): string[] {
+  if (owner.toLowerCase() === "multipage") {
+    return ["Page"];
+  }
+
+  return everyKind().filter((kind) => kind.toLowerCase() !== "page");
+}
+
+function kindCompletion(
+  model: monaco.editor.ITextModel, kind: string, range: monaco.Range,
+): monaco.languages.CompletionItem {
+  const size = TOOLBOX.find((one) => one.kind === kind);
+  const name = freeName(model, kind);
+  const known = kindNamed(kind);
+
+  // A Page has no geometry of its own; everything else arrives placed and sized, which is the
+  // scaffolding half of this feature - a header a developer can run without finishing it.
+  const insertText = size
+    ? `${kind} \${1:${name}} "\${2:${name}}" at \${3:12},\${4:12} size \${5:${size.width}}x\${6:${size.height}}`
+    : `${kind} \${1:${name}} "\${2:${name}}"`;
+
+  // The coclass only where it is not simply `Forms.` plus this kind, for the hover's own reason:
+  // a card that restates the word being completed is a card in the way.
+  const documentation = [
+    known?.doc ?? null,
+    known?.progId && known.progId !== `Forms.${known.kind}.1` ? `\`${known.progId}\`` : null,
+  ].filter((line): line is string => line !== null);
+
+  return {
+    label: kind,
+    kind: monaco.languages.CompletionItemKind.Class,
+    ...(size ? { detail: `${size.width}x${size.height} points` } : {}),
+    ...(documentation.length > 0 ? { documentation: { value: documentation.join("  \n") } } : {}),
+    insertText,
+    insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+    range,
+  };
+}
+
+/* -------------------------------------------------------------- hover */
+
+export function hoverAt(
+  model: monaco.editor.ITextModel, position: monaco.IPosition,
+): monaco.languages.Hover | null {
+  const spot = spotAt(model, position);
+  const range = tokenRange(model, position);
+  const token = model.getValueInRange(range);
+  if (token === "") {
+    return null;
+  }
+
+  const contents = (...values: (string | null)[]): monaco.languages.Hover => ({
+    range,
+    contents: values
+      .filter((value): value is string => value !== null && value !== "")
+      .map((value) => ({ value })),
+  });
+
+  // A property line: the path, or a value that names an enum member.
+  if (spot.path !== null) {
+    const property = propertyNamed(spot.owner, spot.path);
+    if (property === null) {
+      return null;
+    }
+
+    if (spot.onValue) {
+      const member = property.members?.find((one) => one.name.toLowerCase() === token.toLowerCase());
+      return member
+        ? contents("```vba\n" + `${member.name} = ${member.value}` + "\n```", property.doc)
+        : contents("```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
+    }
+
+    return contents("```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
+  }
+
+  if (spot.header === null) {
+    return null;
+  }
+
+  // The clause words, which are the grammar rather than the vocabulary.
+  const clause = CLAUSES[token.toLowerCase()];
+  if (clause && token.toLowerCase() !== spot.header.kind.toLowerCase()) {
+    return contents(`\`${token.toLowerCase()}\` - ${clause.detail}`);
+  }
+
+  /*
+   * THE KIND: what that class of control IS. Not what the line already says - a card that reads
+   * `at 12,110 size 92x66` back as "at 12,110, 92 by 66 points" is standing in the way of the
+   * text it is quoting (the owner, of the first cut: "the current hover information is
+   * superfluous... that's obvious from the markdown").
+   *
+   * The coclass rode along here for a while and went the same way (the owner, 2026-08-16: "the
+   * part on class rollover that says forms.optionbutton.1 says that on all of them... seems not
+   * helpful"). For the fifteen standard kinds the ProgID IS the kind - `Forms.` plus the word
+   * under the pointer plus `.1` - so every card carried a line that restated its own heading. It
+   * stays only where it cannot be worked out, which is the case it was there for.
+   */
+  if (token.toLowerCase() === spot.header.kind.toLowerCase()) {
+    const known = kindNamed(token);
+    if (known === null) {
+      return contents("Not a toolbox kind. An apply needs a `ProgId = \"...\"` line to create one.");
+    }
+
+    // The TYPE first, the way the name hover leads with a declaration (the owner, 2026-08-16:
+    // "can you add the class type to the class hover?"). It is what a developer writes in a Dim,
+    // and it is the one line about a kind that is not already on screen - unlike the ProgID,
+    // which for the standard fifteen is this same word with a prefix and a suffix.
+    const derivable = known.progId === `Forms.${known.kind}.1`;
+    return contents(
+      "```vba\n" + (known.kind === "Form" ? "MSForms.UserForm" : `MSForms.${known.kind}`) + "\n```",
+      known.doc ?? null,
+      known.progId && !derivable ? `\`${known.progId}\`` : null);
+  }
+
+  // THE NAME: the control declared the way VBA declares it, which is also what hovering the same
+  // name in the code-behind answers - one identifier, one sentence about it, whichever half of
+  // the tab the pointer is in.
+  if (token.toLowerCase() === spot.header.name.toLowerCase()) {
+    const known = kindNamed(spot.header.kind);
+    const type = known === null ? spot.header.kind : `MSForms.${known.kind}`;
+    return contents(
+      "```vba\n" + `${spot.header.name} As ${type}` + "\n```",
+      known?.doc ?? null);
+  }
+
+  return null;
+}
+
+/* -------------------------------------------------------------- the header hint */
+
+/** The header's grammar, one clause per parameter, which is what the hint walks along. The
+ * brackets are the documented spelling of "optional" and stay in the labels, so the hint reads
+ * as the grammar rather than as a demand. */
+const HEADER_PARAMETERS = ["Type", "Name", '["Caption"]', "[at left,top]", "[size width x height]"];
+const FORM_PARAMETERS = ["Form", "Name", '["Caption"]', "[size width x height]"];
+
+export function headerHintAt(
+  model: monaco.editor.ITextModel, position: monaco.IPosition,
+): monaco.languages.SignatureHelpResult | null {
+  const spot = spotAt(model, position);
+  if (spot.header === null) {
+    return null;
+  }
+
+  const form = spot.depth === 0;
+  const parameters = form ? FORM_PARAMETERS : HEADER_PARAMETERS;
+
+  // Which clause the hand is on: the words typed so far, plus one while a space is open.
+  const typed = spot.words + (/\s$/.test(spot.before) ? 1 : 0);
+  let active = Math.min(Math.max(typed, 1) - 1, parameters.length - 1);
+
+  // Once a clause keyword is standing, the hint follows it rather than counting words: `at`
+  // takes two numbers and a caption takes none, so word counting alone drifts immediately.
+  const beforeCaret = spot.before.toLowerCase();
+  if (/\bsize\s+[^\s]*$/.test(beforeCaret)) {
+    active = parameters.length - 1;
+  } else if (!form && /\bat\s+[^\s]*$/.test(beforeCaret)) {
+    active = 3;
+  } else if (/"[^"]*$/.test(spot.before)) {
+    active = 2;
+  }
+
+  return {
+    value: {
+      // No documentation line: the label IS the grammar, and a sentence under it explaining
+      // that a Form line is a form line is the kind of filler a hint has no room for.
+      signatures: [{
+        label: parameters.join(" "),
+        parameters: parameters.map((parameter) => ({ label: parameter })),
+      }],
+      activeSignature: 0,
+      activeParameter: active,
+    },
+    dispose: () => { },
+  };
+}
+
+/* -------------------------------------------------------------- registration */
+
+let registered = false;
+
+/**
+ * The language, once per page: its grammar, its indentation, and its service. Called by every
+ * designer view's constructor and guarded, because the second form to open must not register a
+ * second set of providers - monaco would ask both and merge the answers.
+ */
+export function registerMarkupLanguage(): void {
+  if (registered) {
+    return;
+  }
+  registered = true;
+
+  monaco.languages.register({ id: FORM_MARKUP_LANGUAGE });
+
+  monaco.languages.setMonarchTokensProvider(FORM_MARKUP_LANGUAGE, {
+    // The toolbox kinds plus the two structural words; a type outside this list still reads
+    // as an identifier, which is honest - the apply treats it as foreign too.
+    controlKinds: [
+      "Form", "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton",
+      "ToggleButton", "Frame", "CommandButton", "TabStrip", "MultiPage", "Page",
+      "ScrollBar", "SpinButton", "Image",
+    ],
+    tokenizer: {
+      root: [
+        [/"(?:[^"]|"")*"/, "string"],
+        [/\b(?:at|size)\b/, "keyword"],
+        // The size pair is ONE value - "360x320.25" - or its x paints as an identifier.
+        [/-?\d+(?:\.\d+)?x-?\d+(?:\.\d+)?/, "number"],
+        [/-?\d+(?:\.\d+)?/, "number"],
+        [/[A-Za-z_][\w.]*(?=\s*=)/, "attribute.name"],
+        [/[A-Za-z_][\w.]*/, {
+          cases: {
+            "@controlKinds": "type",
+            "@default": "identifier",
+          },
+        }],
+        [/[x,=]/, "delimiter"],
+      ],
+    },
+  });
+
+  monaco.languages.setLanguageConfiguration(FORM_MARKUP_LANGUAGE, {
+    // A container line opens a level, the way the printer indents its children.
+    onEnterRules: [{
+      beforeText: /^\s*(?:Frame|MultiPage|Page)\b.*$/,
+      action: { indentAction: monaco.languages.IndentAction.Indent },
+    }],
+    brackets: [],
+    autoClosingPairs: [{ open: '"', close: '"' }],
+    comments: { lineComment: "'" },
+  });
+
+  monaco.languages.registerCompletionItemProvider(FORM_MARKUP_LANGUAGE, {
+    // A dot reaches a font's members, an equals opens the value's side, and a space is where
+    // a clause or a value begins. Typing a word triggers the widget on its own.
+    triggerCharacters: [".", "=", " "],
+    provideCompletionItems: (model, position) => completionsAt(model, position),
+  });
+
+  monaco.languages.registerHoverProvider(FORM_MARKUP_LANGUAGE, {
+    provideHover: (model, position) => hoverAt(model, position),
+  });
+
+  monaco.languages.registerSignatureHelpProvider(FORM_MARKUP_LANGUAGE, {
+    signatureHelpTriggerCharacters: [" ", ","],
+    signatureHelpRetriggerCharacters: [" ", ",", "x"],
+    provideSignatureHelp: (model, position) => headerHintAt(model, position),
+  });
+}

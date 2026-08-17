@@ -21,74 +21,23 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
-import type { FormMarkupApplied, FormMarkupControl, FormMarkupDraft, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
+import type { FormMarkupApplied, FormMarkupControl, FormMarkupDraft, FormMarkupKind, FormMarkupLintFinding, FormMarkupPayload } from "./bridge.js";
+import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import type { DocumentId } from "./documents.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
+import {
+  FORM_MARKUP_LANGUAGE, TOOLBOX, completionsAt, headerHintAt, hoverAt,
+  markupVocabulary, registerMarkupLanguage, setMarkupVocabulary,
+} from "./formmarkuplang.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
+import {
+  dressWithPicture, paintPictureSurface, pictureLayer,
+  SURFACE_PICTURE_TYPES, type PictureLayer,
+} from "./formpicture.js";
+import { showTabOrder } from "./taborderdialog.js";
 
 /** Points to CSS pixels at 96dpi: the designer's own unit, made visible at 100%. */
 const PT = 4 / 3;
-
-/** The markup's own language id, for the tab's document. */
-const FORM_MARKUP_LANGUAGE = "xlide-form";
-
-/**
- * The markup's grammar, once per page. STANDARD token names on purpose - keyword, type,
- * string, number, identifier - so the existing themes colour it with no theme edits; and a
- * page-side grammar is for PAINT ONLY. The language's truth is Core's parser: linting will
- * be a tolerant parse host-side (docs/userform-designer.md, the language service), never a
- * second grammar here that can drift.
- */
-let markupLanguageRegistered = false;
-function registerMarkupLanguage(): void {
-  if (markupLanguageRegistered) {
-    return;
-  }
-  markupLanguageRegistered = true;
-
-  monaco.languages.register({ id: FORM_MARKUP_LANGUAGE });
-
-  monaco.languages.setMonarchTokensProvider(FORM_MARKUP_LANGUAGE, {
-    // The toolbox kinds plus the two structural words; a type outside this list still reads
-    // as an identifier, which is honest - the apply treats it as foreign too.
-    controlKinds: [
-      "Form", "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton",
-      "ToggleButton", "Frame", "CommandButton", "TabStrip", "MultiPage", "Page",
-      "ScrollBar", "SpinButton", "Image",
-    ],
-    tokenizer: {
-      root: [
-        [/"(?:[^"]|"")*"/, "string"],
-        [/\b(?:at|size)\b/, "keyword"],
-        // The size pair is ONE value - "360x320.25" - or its x paints as an identifier.
-        [/-?\d+(?:\.\d+)?x-?\d+(?:\.\d+)?/, "number"],
-        [/-?\d+(?:\.\d+)?/, "number"],
-        [/[A-Za-z_][\w.]*(?=\s*=)/, "attribute.name"],
-        [/[A-Za-z_][\w.]*/, {
-          cases: {
-            "@controlKinds": "type",
-            "@default": "identifier",
-          },
-        }],
-        [/[x,=]/, "delimiter"],
-      ],
-    },
-  });
-
-  monaco.languages.setLanguageConfiguration(FORM_MARKUP_LANGUAGE, {
-    // A container line opens a level, the way the printer indents its children.
-    onEnterRules: [{
-      beforeText: /^\s*(?:Frame|MultiPage|Page)\b.*$/,
-      action: { indentAction: monaco.languages.IndentAction.Indent },
-    }],
-    brackets: [],
-    autoClosingPairs: [{ open: '"', close: '"' }],
-  });
-}
-
-/** The frame's caption strip eats this much of its client area's top, approximately - an
- * honest inset rather than a measured one, used only when the model declines to say. */
-const FRAME_INSET_TOP = 10 * PT;
 
 /*
  * A FRAME'S CAPTION BAND, measured off the running form rather than reasoned about.
@@ -176,6 +125,16 @@ interface CanvasDrag {
   startY: number;
   origin: Box;
   moved: boolean;
+  /** The container the element sits in right now, by name - "" for the form's own ground. A move
+   * that crosses into another container carries the element there as it goes, so this changes
+   * mid-gesture and `where` is what it started as. */
+  parent: string;
+  where: string;
+  /** Where inside the control the press landed, in CSS pixels. A reparent puts the control back
+   * under the pointer by this offset, which is what a hand carrying something expects - and the
+   * only way to place it that does not depend on how far the last pointer event jumped. */
+  grabX: number;
+  grabY: number;
 }
 
 /** The smallest a gesture may make something, in points. A control can be tiny - the renderer
@@ -184,31 +143,11 @@ interface CanvasDrag {
 const MIN_CONTROL = 4;
 const MIN_FORM = 24;
 
-/**
- * The toolbox: the kinds a drag can add, in the order the native palette lists them, each with
- * the size MSForms gives a control dropped rather than drawn. The sizes are the fixture plan's
- * own, which is where this product's idea of an ordinary control already lives.
- *
- * A Page is not here: a page is added to a MultiPage, not dropped on a form, and the gesture for
- * that is the MultiPage's own (M6). Nor is anything third-party - Additional Controls stays
- * suppressed until add-by-ProgID is proven against a real one.
+/*
+ * The palette's kinds and their drop sizes moved to formmarkuplang.ts, because the language
+ * service scaffolds a header from the same numbers: what a new Label looks like is one fact,
+ * whether it arrives by a drag from the palette or by accepting a completion.
  */
-const TOOLBOX: readonly { kind: string; width: number; height: number }[] = [
-  { kind: "Label", width: 66, height: 16 },
-  { kind: "TextBox", width: 120, height: 20 },
-  { kind: "ComboBox", width: 120, height: 20 },
-  { kind: "ListBox", width: 120, height: 42 },
-  { kind: "CheckBox", width: 66, height: 16 },
-  { kind: "OptionButton", width: 76, height: 16 },
-  { kind: "ToggleButton", width: 92, height: 22 },
-  { kind: "Frame", width: 92, height: 66 },
-  { kind: "CommandButton", width: 72, height: 24 },
-  { kind: "TabStrip", width: 122, height: 86 },
-  { kind: "MultiPage", width: 192, height: 86 },
-  { kind: "ScrollBar", width: 14, height: 96 },
-  { kind: "SpinButton", width: 14, height: 42 },
-  { kind: "Image", width: 76, height: 42 },
-];
 
 /**
  * The palette's icons, 16x16, drawn for the palette rather than borrowed from the canvas.
@@ -276,6 +215,20 @@ export interface DesignerViewDeps {
   /** Subscribe to the form's lint answers - squiggles, and the DRAFT the document parsed
    * to, which the canvas previews while the document is dirty; returns the unwatch. */
   watchLint(listener: (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void): () => void;
+  /** Bring to Front / Send to Back: the one canvas gesture that writes the MODEL rather than the
+   * document, because MSForms' collection order is not z-order and the dialect cannot say it. */
+  zorder(control: string, front: boolean): void;
+
+  /** Writes one of a control's properties straight at the model, through the same host call the
+   * Properties panel makes. The tab-order dialog's Move Up is a TabIndex write and nothing else. */
+  setProperty(control: string, property: string, value: string): void;
+
+  /** Asks the host for the markup language's vocabulary: the kinds and their properties, which
+   * the document's completions and hovers answer from. Once per session is enough. */
+  requestVocabulary(): void;
+  /** Subscribe to the vocabulary; returns the unwatch. Not keyed by form - the language is the
+   * same in every document, so whichever tab asked, every tab is answered. */
+  watchVocabulary(listener: (kinds: FormMarkupKind[]) => void): () => void;
   /** Save the workbook, the host's own File Save - the second half of the designer's
    * Ctrl+S, after a successful apply. With `run`, the host launches the form after the
    * save, which is what F5 over a designer tab asks for. */
@@ -334,6 +287,7 @@ export class DesignerView {
   private readonly unwatchApplied: () => void;
   private readonly unwatchLint: () => void;
   private readonly unwatchApplySave: () => void;
+  private readonly unwatchVocabulary: () => void;
   private lintTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly deps: DesignerViewDeps;
 
@@ -341,11 +295,74 @@ export class DesignerView {
    * borrows its display extras from. */
   private lastPayload: FormMarkupPayload | null = null;
 
+  /** The projection the canvas is DRAWING - the draft while one stands, the applied one
+   * otherwise - so a gesture that only changes which page is open can redraw the picture
+   * without asking the host for it again. */
+  private shownPayload: FormMarkupPayload | null = null;
+
+  /**
+   * Which page each MultiPage is showing, by the page's own NAME, and which tab each TabStrip
+   * has selected, by index. The two are keyed differently because the two things are: a
+   * MultiPage's pages are controls with names, and a TabStrip's tabs are not controls at all.
+   *
+   * VIEW state, and that is the one place this canvas departs from the native designer, which
+   * writes the container's `Value` and dirties the form. Reaching page 2 must not rewrite the
+   * developer's form: the document is the transaction log, so a switch that landed in it would
+   * make LOOKING a change and Ctrl+S would carry it to the form. Navigation is not manipulation
+   * here, the way scrolling and selection are not. A developer who wants the form to OPEN on a
+   * page says so where every other unprinted property is said - the Properties panel.
+   */
+  private readonly shownPage = new Map<string, string>();
+  private readonly shownTab = new Map<string, number>();
+
+  /**
+   * How large the canvas draws the form, 1 being MSForms' own points at 96dpi.
+   *
+   * VIEW state rather than a setting, like which page is open: it is about looking, not about
+   * behaviour, and a big form wants Fit where the one beside it wants 100%. The picture is a CSS
+   * transform on the form itself, so everything INSIDE it stays in the form's own coordinates -
+   * only the places where screen pixels cross into points know about this at all, and they go
+   * through `toPoints` and `toPixels`.
+   */
+  private zoom = 1;
+
+  /** The FORM's own picture as a background layer, held rather than painted straight on: the
+   * grid paints on the same element, and showGrid composes the two so that a form wearing a
+   * picture still shows its grid and a grid toggle does not wipe the picture. */
+  private formGround: PictureLayer | null = null;
+
+  /** Screen pixels to the form's own points, at whatever zoom is showing. */
+  private toPoints(pixels: number): number {
+    return pixels / (PT * this.zoom);
+  }
+
+  /** The form's own points to screen pixels, the same conversion the other way. */
+  private toPixels(points: number): number {
+    return points * PT * this.zoom;
+  }
+
   /** Whether the canvas is currently showing the DOCUMENT's draft rather than the form. */
   private draftShown = false;
 
-  /** The selected control's name, "" for the FORM itself, null for no selection. */
+  /** The selected control's name, "" for the FORM itself, null for no selection. With more than
+   * one selected this is the ANCHOR - the native designer's primary control: the one the handles
+   * dress, the one the Properties panel follows, and the one an alignment lines the rest up
+   * with. */
   private selectedName: string | null = null;
+
+  /** The rest of the selection, by name, never holding the anchor. Empty for the ordinary case
+   * of one selected thing, which is what every gesture still reads as `selectedName`. */
+  private readonly extras = new Set<string>();
+
+  /** The rubber band in flight: a press on a container's own ground that has started to travel. */
+  private band: {
+    pointerId: number;
+    host: HTMLElement;
+    parent: string;
+    startX: number;
+    startY: number;
+    element: HTMLElement | null;
+  } | null = null;
 
   /** The press in flight, once it has grabbed something movable. */
   private drag: CanvasDrag | null = null;
@@ -359,6 +376,9 @@ export class DesignerView {
    * follows: the button shows what the setting says rather than what it was last clicked to. */
   private readonly snapToggle: HTMLButtonElement;
   private readonly alignToggle: HTMLButtonElement;
+
+  /** The zoom control at the end of the palette row: it wears the percentage it is showing. */
+  private readonly zoomButton: HTMLButtonElement;
   private readonly unwatchSettings: () => void;
 
   /** The last text known to BE the form - what dirty is measured against. Null before the
@@ -496,6 +516,31 @@ export class DesignerView {
     this.alignToggle = switchFor("objects",
       '<path d="M3 1.5v13"/><path d="M13 1.5v13"/><rect x="5.5" y="5" width="5" height="6" rx="1"/>');
 
+    /*
+     * The ZOOM, at the end of the row beside the snap switches: a button wearing the percentage,
+     * opening the same menu the rest of this product's menus use. A control, not a setting -
+     * which page is open is view state for the same reason, and a big form wants Fit where the
+     * one beside it wants 100%.
+     */
+    this.zoomButton = document.createElement("button");
+    this.zoomButton.type = "button";
+    this.zoomButton.className = "designer-zoom";
+    this.zoomButton.title = "How large the form is drawn";
+    this.zoomButton.textContent = "100%";
+    this.zoomButton.addEventListener("click", (event) => {
+      const box = this.zoomButton.getBoundingClientRect();
+      showContextMenu(Math.round(box.left), Math.round(box.bottom + 2), [
+        ...[0.5, 0.75, 1, 1.5, 2].map((factor) => ({
+          label: `${Math.round(factor * 100)}%`,
+          run: () => { this.setZoom(factor); },
+        })),
+        {},
+        { label: "Fit", run: () => { this.setZoom("fit"); } },
+      ]);
+      event.preventDefault();
+    });
+    toolboxRow.appendChild(this.zoomButton);
+
     canvasHalf.appendChild(toolboxRow);
     this.toolbox = toolbox;
     // Inserted into the strip's own parent, which is why the row exists: the arrows sit beside
@@ -531,9 +576,14 @@ export class DesignerView {
     this.canvasScroll.addEventListener("pointerup", (event) => this.onCanvasDrop(event));
     this.canvasScroll.addEventListener("pointercancel", () => this.cancelDrag());
     this.canvasScroll.addEventListener("keydown", (event) => this.onCanvasKey(event));
+    this.canvasScroll.addEventListener("contextmenu", (event) => this.onCanvasMenu(event));
     this.canvasScroll.addEventListener("dblclick", (event) => {
       const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
       if (control?.dataset.control) {
+        // A PAGE gets its own handler, and that is measured rather than assumed: a page raises
+        // Click, the host writes `Page1_Click` for one, and the VBE's own object list carries
+        // pages beside the controls. So the page's ground - double-clickable since the body took
+        // the page's identity - asks for the page's handler, exactly as the native designer does.
         this.deps.eventStub(control.dataset.control);
       } else if ((event.target as HTMLElement).closest(".dc-form")) {
         this.deps.eventStub(null);
@@ -638,6 +688,15 @@ export class DesignerView {
     // The REAL Ctrl+S: a host accelerator the page never sees as a key. The host's Save,
     // finding this tab active, asks for the apply-then-save here.
     this.unwatchApplySave = deps.watchApplySave((run) => this.applyNow(run));
+
+    // The language's vocabulary: the host measures it, the page holds it for its whole life,
+    // and no keystroke waits on it. Asked for only while the table is empty - the language is
+    // the same in every document, so the second form to open inherits the first one's answer,
+    // and an ask that went unanswered is retried by the next tab rather than never again.
+    this.unwatchVocabulary = deps.watchVocabulary((kinds) => setMarkupVocabulary(kinds));
+    if (markupVocabulary().length === 0) {
+      deps.requestVocabulary();
+    }
 
     // The grid follows the SETTING, from wherever it was changed: this tab's switch, the
     // settings dialog, the api, another designer tab. One fact, several views of it.
@@ -747,6 +806,77 @@ export class DesignerView {
     this.model.setValue(markup);
   }
 
+  /*
+   * The language service, read at a place in the document. Each of these puts the CARET there
+   * first, because that is what a developer asking the same question has done - Ctrl+Space and
+   * a hover both happen somewhere - and then asks the real provider. No copy of the answer
+   * exists for probes to read: what comes back is what the widget would show.
+   */
+
+  /** An aim inside the document, whatever a caller asked for: monaco throws on a line past the
+   * end, and a probe that mistyped a number deserves an answer about the nearest real place
+   * rather than a stack trace from the surface. */
+  private aim(line: number, column: number): monaco.IPosition {
+    const lineNumber = Math.min(Math.max(1, Math.trunc(line) || 1), this.model.getLineCount());
+    return {
+      lineNumber,
+      column: Math.min(Math.max(1, Math.trunc(column) || 1), this.model.getLineMaxColumn(lineNumber)),
+    };
+  }
+
+  /** What the completion widget would offer here. */
+  completions(line: number, column: number): {
+    label: string; detail: string | null; documentation: string | null; insert: string;
+    replaces: { from: number; to: number };
+  }[] {
+    const position = this.aim(line, column);
+    this.editor.setPosition(position);
+    return completionsAt(this.model, position).suggestions.map((item) => {
+      // What accepting would REPLACE, in columns. A suggestion is an insert and a range, and the
+      // range is half the answer: a font face offered where the developer has already typed
+      // `"Tah` has to take the quote with it or the line gains a second one.
+      const range = "startColumn" in item.range
+        ? item.range
+        : item.range.insert;
+      return {
+        label: typeof item.label === "string" ? item.label : item.label.label,
+        detail: item.detail ?? null,
+        documentation: typeof item.documentation === "string"
+          ? item.documentation
+          : item.documentation?.value ?? null,
+        insert: item.insertText,
+        replaces: { from: range.startColumn, to: range.endColumn },
+      };
+    });
+  }
+
+  /** What a hover here would say, one entry per block of the card. */
+  hover(line: number, column: number): string[] {
+    const position = this.aim(line, column);
+    this.editor.setPosition(position);
+    const answer = hoverAt(this.model, position);
+    return (answer?.contents ?? []).map((content) => content.value);
+  }
+
+  /** The header hint here: the grammar it shows, and which clause it is pointing at. */
+  headerHint(line: number, column: number): { label: string; active: number; parameter: string } | null {
+    const position = this.aim(line, column);
+    this.editor.setPosition(position);
+    const help = headerHintAt(this.model, position);
+    const signature = help?.value.signatures[0];
+    if (!help || !signature) {
+      return null;
+    }
+
+    const active = help.value.activeParameter ?? 0;
+    const parameter = signature.parameters[active]?.label;
+    return {
+      label: signature.label,
+      active,
+      parameter: typeof parameter === "string" ? parameter : "",
+    };
+  }
+
   private onApplied(outcome: FormMarkupApplied): void {
     this.pendingActOutcome?.(outcome);
     this.pendingActOutcome = null;
@@ -812,6 +942,21 @@ export class DesignerView {
     this.canonical = payload.markup;
 
     if (adopt && this.model.getValue() !== payload.markup) {
+      /*
+       * THE PROJECTION MUST NOT MOVE THE SELECTION.
+       *
+       * Replacing the text moves the caret - monaco restores it by POSITION, and a form whose
+       * lines have shifted puts that position on somebody else's line - and a caret landing on
+       * another control's block selects that control. So a projection arriving while a developer
+       * had a control selected quietly re-selected whatever was now at that line: measured on the
+       * suite's own form, where the tab-order dialog opened on the form after a row had selected
+       * a control inside a Frame.
+       *
+       * The guard is the one the caret-follow already respects, and the caret is put back on the
+       * selected thing's own line afterwards.
+       */
+      const held = this.selectedName;
+      this.followingSelection = true;
       const state = this.editor.saveViewState();
       if (first) {
         // The FIRST projection fills an empty document, and it lands by setValue - which
@@ -835,6 +980,14 @@ export class DesignerView {
       if (state) {
         this.editor.restoreViewState(state);
       }
+
+      // Back on the selected thing's own line, whatever the restore made of the position, and
+      // only then does the caret start choosing selections again.
+      if (held !== null && held !== "") {
+        this.revealInMarkup(held);
+      }
+
+      this.followingSelection = false;
     }
 
     const nowDirty = this.model.getValue() !== this.canonical;
@@ -903,6 +1056,11 @@ export class DesignerView {
           insideWidth: worn.insideWidth ?? null,
           insideHeight: worn.insideHeight ?? null,
           tabs: worn.tabs ?? null,
+          // The PICTURE is worn like the rest of them, and it has to be: a drag makes the
+          // document dirty, the draft renders in place of the applied projection, and a draft
+          // that does not carry a picture blanks every image on the form for as long as the
+          // document is unsaved (measured 2026-08-16 - the model kept it, the canvas lost it).
+          picture: worn.picture ?? null,
         }
         : row;
     });
@@ -921,6 +1079,7 @@ export class DesignerView {
         foreColor: draft.form.foreColor ?? appliedForm?.foreColor ?? null,
         insideWidth: sameSize ? appliedForm?.insideWidth ?? null : null,
         insideHeight: sameSize ? appliedForm?.insideHeight ?? null : null,
+        picture: appliedForm?.picture ?? null,
       }
       : appliedForm;
 
@@ -938,9 +1097,26 @@ export class DesignerView {
     selected: string | null;
     markupLine: number;
     markupBlock: { from: number; to: number } | null;
+    group: string[];
     controls: { name: string; left: number; top: number; width: number; height: number }[];
+    containers: { name: string; kind: string; tabs: string[]; open: number; page: string }[];
+    pictures: { name: string; bytes: number; where: string }[];
   } {
     return {
+      // Every tabbed container the canvas drew, its tabs as the strip labels them, and which
+      // one is OPEN - read off the strip rather than off the map behind it, so a row sees what
+      // the developer sees rather than what the view intended.
+      containers: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc-page-strip")].map((strip) => {
+        const tabs = [...strip.querySelectorAll<HTMLElement>(".dc-page-tab")];
+        const open = tabs.findIndex((tab) => tab.classList.contains("current"));
+        return {
+          name: strip.dataset.container ?? "",
+          kind: strip.dataset.kind ?? "",
+          tabs: tabs.map((tab) => tab.textContent ?? ""),
+          open,
+          page: tabs[open]?.dataset.page ?? "",
+        };
+      }),
       draft: this.draftShown,
       dirty: this.dirty,
       // Whether the DOCUMENT has a gesture to give back. The canvas's own Ctrl+Z is only as
@@ -954,6 +1130,9 @@ export class DesignerView {
       // in view, so a DOM count measures its renderer and the scroll position (which is how
       // the first version of this row read two lines for a three-line block).
       markupBlock: this.selectedName === null ? null : this.blockOf(this.selectedName),
+      // The whole selection, anchor first. `selected` stays the anchor's own name, because that
+      // is what every row written before groups existed asks about - and what the panel follows.
+      group: this.selection(),
       controls: [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc")].map((el) => ({
         name: el.dataset.control ?? "",
         ...this.inPoints({
@@ -963,7 +1142,53 @@ export class DesignerView {
           height: el.offsetHeight,
         }),
       })),
+      pictures: this.picturesDrawn(),
     };
+  }
+
+  /**
+   * Every picture the canvas is actually drawing, by the control wearing it.
+   *
+   * SIZE rather than the bytes, for the reason the properties snapshot gives: a data URI is a
+   * whole bitmap in base64 and a snapshot is read on every wait. The size proves a picture is
+   * there and that it CHANGED, `where` proves it was placed rather than dropped in the middle,
+   * and the pixels themselves are proved against the running form's photograph, which is the
+   * only place that can prove them at all.
+   *
+   * The form's own picture answers to the empty name, the way the form does everywhere else.
+   */
+  private picturesDrawn(): { name: string; bytes: number; where: string }[] {
+    const drawn: { name: string; bytes: number; where: string }[] = [];
+
+    const surfaces = this.canvasScroll.querySelectorAll<HTMLElement>(
+      ".dc-form-client, .dc-frame-client, .dc-page-body, .dc");
+    for (const element of surfaces) {
+      const source = element.style.backgroundImage;
+      if (!source.startsWith("url(")) {
+        continue;
+      }
+
+      drawn.push({
+        name: element.classList.contains("dc-form-client")
+          ? ""
+          : element.dataset.control ?? element.closest<HTMLElement>(".dc")?.dataset.control ?? "",
+        bytes: source.length,
+        where: `${element.style.backgroundSize} ${element.style.backgroundPosition}`.trim(),
+      });
+    }
+
+    // The caption pictures are elements rather than backgrounds, and the control they belong to
+    // is the box they sit in.
+    for (const image of this.canvasScroll.querySelectorAll<HTMLImageElement>("img.dc-picture")) {
+      const box = image.closest<HTMLElement>(".dc");
+      drawn.push({
+        name: box?.dataset.control ?? "",
+        bytes: image.src.length,
+        where: `${box?.style.flexDirection ?? ""} ${box?.style.alignItems ?? ""}`.trim(),
+      });
+    }
+
+    return drawn;
   }
 
   /** Selects a control by name - "" is the FORM itself - dresses it in the native handles,
@@ -973,9 +1198,22 @@ export class DesignerView {
    * bounce straight back as a fresh selection. */
   private followingSelection = false;
 
-  select(name: string): void {
+  select(name: string, extend = false): void {
+    if (extend) {
+      this.extendSelection(name);
+      return;
+    }
+
+    this.extras.clear();
     this.selectedName = name;
-    this.dressSelection();
+
+    // Opening the page first, because the element the selection dresses only exists once the
+    // page holding it is the one being drawn - and the redraw dresses it on the way out.
+    if (name !== "" && this.openPagesFor(name)) {
+      this.redraw();
+    } else {
+      this.dressSelection();
+    }
 
     this.followingSelection = true;
     try {
@@ -986,6 +1224,63 @@ export class DesignerView {
 
     // The Properties panel follows the selection host-side - M4's bridgehead.
     this.deps.selection(name === "" ? null : name);
+  }
+
+  /**
+   * Ctrl+click: adds a control to the selection, or takes it back out.
+   *
+   * The FORM is never part of a group - it is the ground the group stands on, and every gesture
+   * a group offers (move them together, line them up, size them alike) means nothing applied to
+   * it. Taking the anchor out promotes one of the others, so a selection that still holds
+   * something always has a primary.
+   */
+  private extendSelection(name: string): void {
+    const anchor = this.selectedName;
+    if (name === "" || anchor === null || anchor === "") {
+      this.select(name);
+      return;
+    }
+
+    const key = name.toLowerCase();
+    const held = [...this.extras].find((one) => one.toLowerCase() === key);
+    if (held !== undefined) {
+      this.extras.delete(held);
+    } else if (anchor.toLowerCase() === key) {
+      const next = [...this.extras][0];
+      if (next === undefined) {
+        return;
+      }
+
+      this.extras.delete(next);
+      this.selectedName = next;
+    } else {
+      // A group is one container's business: controls in different boxes are measured from
+      // different origins, so moving them together or lining them up would mean nothing on
+      // screen. Selecting across containers starts a new selection instead of a nonsense group.
+      if (this.parentOf(name).toLowerCase() !== this.parentOf(anchor).toLowerCase()) {
+        this.select(name);
+        return;
+      }
+
+      this.extras.add(name);
+    }
+
+    this.dressSelection();
+    this.deps.selection(this.selectedName === "" ? null : this.selectedName);
+  }
+
+  /** Everything selected, anchor first. One name is the ordinary case; the form answers as
+   * itself and is never in a group. */
+  private selection(): string[] {
+    return this.selectedName === null ? [] : [this.selectedName, ...this.extras];
+  }
+
+  /** Which container a control belongs to in the drawn projection, by name - "" for the form's
+   * own ground. Spelled as the projection spells it; callers comparing two of them fold the case
+   * themselves. */
+  private parentOf(name: string): string {
+    return (this.shownPayload?.controls ?? [])
+      .find((one) => one.name.toLowerCase() === name.toLowerCase())?.parent ?? "";
   }
 
   /** A canvas double-click, for the debug surface: the host's event-stub gesture. */
@@ -1013,8 +1308,8 @@ export class DesignerView {
     event.preventDefault();
     const ghost = document.createElement("div");
     ghost.className = "designer-tool-ghost";
-    ghost.style.width = `${tool.width * PT}px`;
-    ghost.style.height = `${tool.height * PT}px`;
+    ghost.style.width = `${this.toPixels(tool.width)}px`;
+    ghost.style.height = `${this.toPixels(tool.height)}px`;
     ghost.textContent = tool.kind;
     document.body.appendChild(ghost);
     this.carrying = { kind: tool.kind, width: tool.width, height: tool.height, ghost };
@@ -1057,44 +1352,501 @@ export class DesignerView {
       return null;
     }
 
-    // A Frame's client belongs to the Frame; a page body belongs to the PAGE whose content it
-    // draws, which is the parent the markup names; the form's client belongs to the form.
+    // A Frame's client belongs to the Frame; a page body IS the page whose content it draws and
+    // says so on itself, so a drop lands on the page the developer is LOOKING at; the form's
+    // client belongs to the form.
     const box = client.getBoundingClientRect();
-    const owner = client.closest<HTMLElement>(".dc");
     const parent = client.classList.contains("dc-page-body")
-      ? this.firstPageOf(owner?.dataset.control ?? "")
-      : owner?.dataset.control ?? "";
-    return { parent, left: (x - box.left) / PT, top: (y - box.top) / PT };
+      ? client.dataset.control ?? ""
+      : client.closest<HTMLElement>(".dc")?.dataset.control ?? "";
+    return { parent, left: this.toPoints(x - box.left), top: this.toPoints(y - box.top) };
   }
 
-  /** The page a MultiPage is showing - the canvas draws the first one - by the document's own
-   * order, because a control dropped on that body belongs to that page and not to the frame. */
-  private firstPageOf(multiPage: string): string {
-    if (!multiPage) {
-      return "";
+  /** Which of a container's tabs is open, as an index into its headers: the page the developer
+   * opened while it is still there, the tab they picked while the strip is still that long, and
+   * the first one otherwise. */
+  private openTabOf(row: FormMarkupControl, pages: FormMarkupControl[], count: number): number {
+    const key = row.name.toLowerCase();
+    if (row.type === "TabStrip") {
+      return Math.min(Math.max(0, this.shownTab.get(key) ?? 0), Math.max(0, count - 1));
     }
 
-    const own = this.headerOf(multiPage);
-    if (!own) {
-      return multiPage;
+    const wanted = (this.shownPage.get(key) ?? "").toLowerCase();
+    return Math.max(0, pages.findIndex((page) => page.name.toLowerCase() === wanted));
+  }
+
+  /**
+   * Paints the current zoom: the form scaled from its top-left corner, and a stage sized to what
+   * that comes to, so the canvas scrolls over the whole of it.
+   */
+  private applyZoom(): void {
+    const form = this.canvasScroll.querySelector<HTMLElement>(".dc-form");
+    const stage = this.canvasScroll.querySelector<HTMLElement>(".dc-stage");
+    if (!form || !stage) {
+      return;
+    }
+
+    form.style.transformOrigin = "top left";
+    form.style.transform = this.zoom === 1 ? "" : `scale(${this.zoom})`;
+    stage.style.width = `${form.offsetWidth * this.zoom}px`;
+    stage.style.height = `${form.offsetHeight * this.zoom}px`;
+    this.zoomButton.textContent = `${Math.round(this.zoom * 100)}%`;
+  }
+
+  /**
+   * Sets the zoom - a factor, or "fit" for the largest that shows the whole form in the canvas as
+   * it stands. Answers what it settled on, which for Fit is the only way to know.
+   */
+  setZoom(what: number | "fit"): string {
+    const form = this.canvasScroll.querySelector<HTMLElement>(".dc-form");
+    if (!form) {
+      return "the canvas is not showing a form";
+    }
+
+    if (what === "fit") {
+      const room = this.canvasScroll.getBoundingClientRect();
+      // The margin the stage carries, both sides, taken off before the ratio - a form fitted to
+      // the raw box would sit with its right edge under the scroll bar.
+      const margin = 48 + 16;
+      const wide = (room.width - margin) / Math.max(1, form.offsetWidth);
+      const tall = (room.height - margin) / Math.max(1, form.offsetHeight);
+      this.zoom = Math.max(0.25, Math.min(2, Math.min(wide, tall)));
+    } else {
+      this.zoom = Math.max(0.25, Math.min(4, what));
+    }
+
+    this.applyZoom();
+    return `zoom ${Math.round(this.zoom * 100)}%`;
+  }
+
+  /** The zoom the canvas is drawing at, as a percentage - for the harness and the button. */
+  zoomPercent(): number {
+    return Math.round(this.zoom * 100);
+  }
+
+  /** Re-draws the picture that is up - the draft while one stands, the applied projection
+   * otherwise - with no round trip: opening a page changes what is DRAWN, never what the form
+   * or the document holds. */
+  private redraw(): void {
+    if (this.shownPayload) {
+      this.renderCanvas(this.shownPayload);
+    }
+  }
+
+  /**
+   * Opens whatever pages a thing sits inside, so that selecting it shows it - a control on page
+   * two of a MultiPage nested in page one of another opens both. Answers whether anything
+   * changed, because the caller has to redraw if it did.
+   *
+   * This is what keeps the two halves pointing at one thing (the markup caret and the canvas):
+   * a caret landing in page two's block opens page two rather than selecting nothing, which is
+   * what happened while the canvas only ever drew the first.
+   */
+  private openPagesFor(name: string): boolean {
+    const rows = this.shownPayload?.controls ?? [];
+    const byName = new Map(rows.map((row) => [row.name.toLowerCase(), row]));
+
+    let changed = false;
+    let row = byName.get(name.toLowerCase());
+    // Bounded by the chain itself: every step moves to a parent, and a cycle would have to be
+    // in the projection, which is a tree by construction.
+    for (let guard = 0; row && guard < 32; guard++) {
+      const parent = row.parent ? byName.get(row.parent.toLowerCase()) : undefined;
+      if (row.type === "Page" && parent) {
+        const key = parent.name.toLowerCase();
+        if ((this.shownPage.get(key) ?? "").toLowerCase() !== row.name.toLowerCase()) {
+          this.shownPage.set(key, row.name);
+          changed = true;
+        }
+      }
+
+      row = parent;
+    }
+
+    return changed;
+  }
+
+  /**
+   * Opens the page a tab stands for, and selects it - which is the native designer's own
+   * gesture: clicking a tab shows that page and puts the PAGE in the Properties window.
+   *
+   * A TabStrip's tab selects the TabStrip instead, because there is no page object behind it,
+   * and shows nothing new: the runtime draws the same controls under every tab of a TabStrip,
+   * so a canvas that swapped content there would be inventing a control it does not have.
+   */
+  private openTab(tab: HTMLElement): string {
+    const strip = tab.closest<HTMLElement>(".dc-page-strip");
+    const container = strip?.dataset.container;
+    if (!container) {
+      return "that tab belongs to nothing on the canvas";
+    }
+
+    const page = tab.dataset.page;
+    if (page) {
+      this.shownPage.set(container.toLowerCase(), page);
+    } else {
+      this.shownTab.set(container.toLowerCase(), Number(tab.dataset.tab ?? 0));
+    }
+
+    this.redraw();
+    this.select(page ?? container);
+    return `opened ${page ?? `tab ${Number(tab.dataset.tab ?? 0) + 1} of ${container}`}`;
+  }
+
+  /**
+   * The tab strip's own menu, where the native designer keeps New Page and Delete Page.
+   *
+   * A TabStrip gets no menu at all: its tabs are not in the dialect - they ride the walk as
+   * strings for painting and there is no line in the document to add or take away - so every
+   * item would be a lie about what this can do. The gap is the dialect's, not the menu's.
+   */
+  private onCanvasMenu(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    const strip = target.closest<HTMLElement>(".dc-page-strip");
+    if (!strip?.dataset.container) {
+      this.showArrangeMenu(event);
+      return;
+    }
+
+    event.preventDefault();
+    const container = strip.dataset.container;
+
+    // The right-click OPENS the tab under it first, the way every menu in this product acts on
+    // the thing it marked: Delete Page then names the page the developer is looking at.
+    const tab = target.closest<HTMLElement>(".dc-page-tab");
+    if (tab?.dataset.tab !== undefined) {
+      this.openTab(tab);
+    }
+
+    // Delete Page acts on the page that is OPEN, whether the right-click landed on its tab or
+    // on the empty end of the strip: what a developer means by "this page" is the one they can
+    // see. Disabled only for a MultiPage that has no pages at all, which is a document the
+    // dialect allows and the canvas draws as bare chrome.
+    //
+    // Read off the canvas AFTER the open above, never off `strip`: opening a tab redraws, which
+    // leaves the element this event arrived on detached and still wearing the old picture's
+    // marks - so the menu named the previously open page and deleted that one instead.
+    // A MultiPage holds PAGES and a TabStrip holds TABS, and since the dialect learned both they
+    // are one gesture with two words: a line of the child's kind under the container's, one
+    // undoable edit, on the form at Ctrl+S through the apply's own diff.
+    const what = strip.dataset.kind === "TabStrip" ? "Tab" : "Page";
+    const open = this.openChildOf(container);
+    showContextMenu(event.clientX, event.clientY, [
+      { label: `New ${what}`, run: () => { this.addChild(container, what); } },
+      {
+        label: `Delete ${what}`,
+        enabled: open !== "",
+        run: () => { this.deleteFromDocument(open); },
+      },
+    ]);
+  }
+
+  /**
+   * The canvas's own menu over a selection: the native Format menu's arrange group, which has no
+   * other home here - this product has no menu bar, and the editor's own Format menu stays
+   * suppressed because it would act on the NATIVE designer's selection rather than on ours.
+   *
+   * Offered only where it means something. One control cannot be lined up with anything, so the
+   * menu does not appear for it: an item that cannot run is worse than no menu at all when the
+   * whole gesture is "do this to these".
+   */
+  private showArrangeMenu(event: MouseEvent): void {
+    const target = event.target as HTMLElement;
+    const control = target.closest<HTMLElement>(".dc")?.dataset.control;
+    if (control !== undefined
+      && !this.selection().some((one) => one.toLowerCase() === control.toLowerCase())) {
+      // A right-click somewhere else in the form picks that control first, the way every menu in
+      // this product acts on the thing it marked.
+      this.select(control);
+    }
+
+    const chosen = this.selection().filter((one) => one !== "");
+    if (chosen.length === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const item = (label: string, how: string): ContextMenuItem =>
+      ({ label, run: () => { this.arrange(how); } });
+
+    // DEPTH is offered for one control as well as for a group, and it is the one item here that
+    // does not write the document: MSForms' collection is not in z-order, so the dialect has no
+    // way to say this and the model takes it directly. See the bridge call's own note.
+    const depth: ContextMenuItem[] = [
+      {
+        label: "Bring to Front",
+        run: () => { this.zorder(chosen, true); },
+      },
+      {
+        label: "Send to Back",
+        run: () => { this.zorder(chosen, false); },
+      },
+    ];
+
+    const order: ContextMenuItem[] = [
+      {},
+      { label: "Tab Order...", run: () => { this.showTabOrder(); } },
+    ];
+
+    if (chosen.length < 2) {
+      showContextMenu(event.clientX, event.clientY, [...depth, ...order]);
+      return;
+    }
+
+    showContextMenu(event.clientX, event.clientY, [
+      ...depth,
+      ...order,
+      {},
+      item("Align Left", "left"),
+      item("Align Centre", "centreX"),
+      item("Align Right", "right"),
+      item("Align Top", "top"),
+      item("Align Middle", "centreY"),
+      item("Align Bottom", "bottom"),
+      {},
+      item("Same Width", "width"),
+      item("Same Height", "height"),
+      {},
+      item("Space Across", "across"),
+      item("Space Down", "down"),
+    ]);
+  }
+
+  /**
+   * The tab-order dialog for the container the selection sits in - the form's own controls when
+   * nothing or the form is selected.
+   *
+   * ONE container at a time, because tab order is per container in MSForms: a Frame's children
+   * have their own 0..n and the Tab key walks into the frame and out again. Showing a form's
+   * whole tree in one list would be a list whose numbers repeat.
+   */
+  showTabOrder(): string {
+    const anchor = this.selectedName;
+    const container = anchor === null || anchor === ""
+      ? ""
+      : this.kindOf(anchor) === "Page" || this.isContainer(anchor)
+        ? anchor
+        : this.parentOf(anchor);
+
+    // A control with NO TabIndex is not in the tab order at all - an Image cannot take focus, and
+    // MSForms answers null rather than a number for one. Listing it would put a row in the
+    // sequence that the Tab key never visits, and every row below it would be numbered wrong.
+    const controls = (this.shownPayload?.controls ?? [])
+      .filter((row) => (row.parent ?? "").toLowerCase() === container.toLowerCase()
+        && row.type !== "Page"
+        && typeof row.tabIndex === "number")
+      .map((row) => ({ name: row.name, type: row.type, tabIndex: row.tabIndex ?? 0 }));
+
+    if (controls.length === 0) {
+      return `${container === "" ? "the form" : container} holds nothing to order`;
+    }
+
+    // Which container this decided on, and from what: a row that expected a Frame's list and got
+    // the form's has no way to tell whether the selection or the projection was the surprise.
+    const from = anchor === null || anchor === ""
+      ? "the form is selected"
+      : `${anchor} is a ${this.kindOf(anchor) || "control the canvas does not know"}`;
+
+    showTabOrder({
+      container,
+      controls,
+      setIndex: (control, index) => { this.deps.setProperty(control, "TabIndex", String(index)); },
+    });
+    return `tab order for ${container === "" ? "the form" : container}: ${controls.length} control(s)`
+      + ` (${from})`;
+  }
+
+  /** Whether the drawn projection calls this a container - a Frame or a MultiPage. */
+  private isContainer(name: string): boolean {
+    const kind = this.kindOf(name);
+    return kind === "Frame" || kind === "MultiPage";
+  }
+
+  /**
+   * Bring to Front / Send to Back, straight at the MODEL.
+   *
+   * Every other canvas gesture writes the document and waits for Ctrl+S. This one cannot: the
+   * Controls collection a projection walks is not in z-order and does not move when ZOrder is
+   * called (measured 2026-08-16 - two overlapping labels swapped which was on top on the running
+   * form, while the walk's order never changed), so there is nothing for the dialect to print and
+   * nothing for the canvas to draw. It behaves like a Properties panel edit instead: the model
+   * takes it at once, and the developer sees it when the form runs.
+   */
+  zorder(names: string[], front: boolean): string {
+    if (names.length === 0) {
+      return "nothing is selected";
+    }
+
+    // Front-most last, so a group keeps its own order when it arrives at the front - and the
+    // reverse when it goes to the back, for the same reason.
+    for (const name of front ? names : [...names].reverse()) {
+      this.deps.zorder(name, front);
+    }
+
+    return `${names.join(", ")} to the ${front ? "front" : "back"}`;
+  }
+
+  /**
+   * Lines a selection up on its ANCHOR, sizes it to the anchor, or spreads it evenly - the
+   * native designer's arrange vocabulary, applied to the DOCUMENT as one undoable edit like
+   * every other canvas gesture.
+   *
+   * The anchor is the reference and never moves, which is the native rule: what a developer
+   * means by "align left" is "line these up with THAT one", and the one they mean is the one
+   * they picked first (or the one the marquee caught first).
+   */
+  arrange(how: string): string {
+    const names = this.selection().filter((one) => one !== "");
+    if (names.length < 2) {
+      return "lining up takes two or more controls";
+    }
+
+    const placed = names.map((name) => {
+      const header = this.headerOf(name);
+      const element = this.elementFor(name);
+      return header && element ? { name, box: this.baseBox(header, element), element } : null;
+    });
+    if (placed.some((one) => one === null)) {
+      return "a line in the selection is not one this can rewrite";
+    }
+
+    const all = placed as { name: string; box: Box; element: HTMLElement }[];
+    const anchor = all[0]?.box;
+    if (!anchor) {
+      return "lining up takes two or more controls";
+    }
+
+    const sized = how === "width" || how === "height";
+
+    const moves = all.map(({ name, box, element }) => {
+      const wanted = { ...box };
+      switch (how) {
+        case "left": wanted.left = anchor.left; break;
+        case "right": wanted.left = anchor.left + anchor.width - box.width; break;
+        case "centreX": wanted.left = anchor.left + (anchor.width - box.width) / 2; break;
+        case "top": wanted.top = anchor.top; break;
+        case "bottom": wanted.top = anchor.top + anchor.height - box.height; break;
+        case "centreY": wanted.top = anchor.top + (anchor.height - box.height) / 2; break;
+        case "width": wanted.width = anchor.width; break;
+        case "height": wanted.height = anchor.height; break;
+        default: break;
+      }
+
+      return {
+        name,
+        box: this.clamp(wanted, this.roomFor(element), MIN_CONTROL),
+        sized,
+      };
+    });
+
+    if (how === "across" || how === "down") {
+      const across = how === "across";
+      // Equal GAPS between the boxes, which is what "make spacing equal" means: the two on the
+      // ends stay where they are and everything between them is spread across what is left over.
+      const order = [...all].sort((a, b) =>
+        across ? a.box.left - b.box.left : a.box.top - b.box.top);
+      const first = order[0]?.box ?? anchor;
+      const last = order[order.length - 1]?.box ?? anchor;
+      const span = across
+        ? (last.left + last.width) - first.left
+        : (last.top + last.height) - first.top;
+      const filled = order.reduce((sum, one) => sum + (across ? one.box.width : one.box.height), 0);
+      const gap = (span - filled) / Math.max(1, order.length - 1);
+
+      let run = across ? first.left : first.top;
+      for (const one of order) {
+        const move = moves.find((each) => each.name === one.name);
+        if (move) {
+          move.box = across
+            ? { ...one.box, left: run }
+            : { ...one.box, top: run };
+        }
+
+        run += (across ? one.box.width : one.box.height) + gap;
+      }
+    }
+
+    if (!this.writeBoxes(moves)) {
+      return "the document refused the move";
+    }
+
+    this.dressSelection();
+    return `${how} across ${names.length} control(s)`;
+  }
+
+  /** The page or tab a container is showing, by NAME, read off the canvas as it stands now. */
+  private openChildOf(container: string): string {
+    const strip = [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc-page-strip")]
+      .find((one) => (one.dataset.container ?? "").toLowerCase() === container.toLowerCase());
+    return strip?.querySelector<HTMLElement>(".dc-page-tab.current")?.dataset.name ?? "";
+  }
+
+  /** What the drawn projection calls a thing - the canvas's own answer, not the document's. */
+  private kindOf(name: string): string {
+    return (this.shownPayload?.controls ?? [])
+      .find((row) => row.name.toLowerCase() === name.toLowerCase())?.type ?? "";
+  }
+
+  /**
+   * Whether the PROJECTION holds a control of this name - which is a different question from
+   * whether the canvas is drawing one.
+   *
+   * A control on a page that is not open is perfectly real and selecting it is what OPENS that
+   * page; a control deleted three gestures ago is not, and selecting it must be refused. Asking
+   * the drawing conflated the two, and the refusal that was meant for the second case caught the
+   * first (measured 2026-08-16: selecting `Agree` while page two was showing answered "not on the
+   * canvas to select", where a click on its markup line opens page one and selects it).
+   */
+  knows(name: string): boolean {
+    return name === "" || this.kindOf(name) !== "";
+  }
+
+  /**
+   * A new Page under a MultiPage, or a new Tab under a TabStrip: one line at the end of the
+   * container's block, named and captioned the way MSForms names one, as a single undoable edit -
+   * the same text a hand would have typed, which is what every canvas gesture writes.
+   *
+   * Opened and selected on arrival, because a page nobody can see is not what New Page means.
+   * The container does not have it until Ctrl+S carries the document through the apply.
+   */
+  private addChild(container: string, what: "Page" | "Tab"): string {
+    const kind = this.kindOf(container);
+    if (what === "Page" ? kind !== "MultiPage" : kind !== "TabStrip") {
+      return `${container} is not a ${what === "Page" ? "MultiPage" : "TabStrip"}`;
+    }
+
+    const host = this.headerOf(container);
+    if (!host) {
+      return `${container} is not a line this can add to`;
     }
 
     const lines = this.model.getLinesContent();
     const indent = (text: string): number => text.length - text.trimStart().length;
-    const level = indent(lines[own.line - 1] ?? "");
-    for (let at = own.line; at < lines.length; at++) {
-      const text = lines[at] ?? "";
-      if (indent(text) <= level) {
-        break;
-      }
-
-      const page = /^\s+Page\s+(\S+)/.exec(text);
-      if (page?.[1]) {
-        return page[1];
-      }
+    const level = indent(lines[host.line - 1] ?? "");
+    let after = host.line;
+    while (after < lines.length && indent(lines[after] ?? "") > level) {
+      after += 1;
     }
 
-    return multiPage;
+    const name = this.freeName(what);
+    const column = this.model.getLineMaxColumn(after);
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: new monaco.Range(after, column, after, column),
+      text: `\n${" ".repeat(level + 4)}${what} ${name} "${name}"`,
+    }], () => null);
+
+    // Marked open before it is drawn: the child does not exist in the picture until the lint
+    // round trip brings the parsed draft back, and the render then finds it already chosen. A
+    // TabStrip is opened by index rather than by name, and the new tab is the last one.
+    if (what === "Page") {
+      this.shownPage.set(container.toLowerCase(), name);
+    } else {
+      this.shownTab.set(container.toLowerCase(), Number.MAX_SAFE_INTEGER);
+    }
+    this.select(name);
+    this.lintNow();
+    return `added ${name}`;
   }
 
   /** A press on the canvas: a HANDLE resizes what is already selected, anything else picks
@@ -1115,6 +1867,15 @@ export class DesignerView {
       return;
     }
 
+    // A TAB is a switch and never a pick-up: the press opens that page and no drag is armed,
+    // so a container is carried by its body or by the empty end of its strip rather than by
+    // the tab a click means to open.
+    const tab = target.closest<HTMLElement>(".dc-page-tab");
+    if (tab?.dataset.tab !== undefined) {
+      this.openTab(tab);
+      return;
+    }
+
     const control = target.closest<HTMLElement>(".dc");
     if (!control?.dataset.control) {
       // ANYWHERE on the canvas selects the FORM, not just the form's own ground. A press on the
@@ -1123,11 +1884,28 @@ export class DesignerView {
       // from - and there was no way to get back to the form's own properties except to find a
       // bare patch of it (the owner, 2026-08-16: "if I click inside of the designer canvas, but
       // not on the form, I'd like the form to be selected").
-      this.select("");
+      //
+      // A press on a container's own ground also ARMS A RUBBER BAND: travel makes it a marquee
+      // over that container's children, and a press that never travels is still the click that
+      // selects the form.
+      this.armBand(event);
       return;
     }
 
-    this.select(control.dataset.control);
+    const name = control.dataset.control;
+    const extend = event.ctrlKey || event.metaKey;
+    // A press on something already selected KEEPS the group, which is what lets a group be
+    // dragged by any of its members - re-selecting would throw the rest away on the way to
+    // moving them.
+    if (extend || !this.selection().some((one) => one.toLowerCase() === name.toLowerCase())) {
+      this.select(name, extend);
+    }
+
+    // Ctrl+click is a selection gesture and nothing else: no drag arms behind it, so a hand
+    // gathering a group cannot nudge one of them by accident.
+    if (extend) {
+      return;
+    }
 
     // A Page is not placed by coordinates - it fills its MultiPage - so there is nothing to
     // drag it by. Everything else only ARMS here: the gesture begins past the threshold, which
@@ -1136,7 +1914,124 @@ export class DesignerView {
       return;
     }
 
-    this.arm(control.dataset.control, null, event);
+    this.arm(name, null, event);
+  }
+
+  /**
+   * A press on a container's own ground: the rubber band the native designer draws, which
+   * selects what it touches when it is let go.
+   *
+   * Armed rather than begun, like every other gesture here - below the threshold this is the
+   * click that selects the form, and the band only exists once the hand has travelled.
+   */
+  private armBand(event: PointerEvent): void {
+    const host = (event.target as HTMLElement)
+      .closest<HTMLElement>(".dc-frame-client, .dc-page-body, .dc-form-client");
+    if (!host || !this.canvasScroll.contains(host)) {
+      this.select("");
+      return;
+    }
+
+    this.band = {
+      pointerId: event.pointerId,
+      host,
+      parent: host.classList.contains("dc-page-body")
+        ? host.dataset.control ?? ""
+        : host.closest<HTMLElement>(".dc")?.dataset.control ?? "",
+      startX: event.clientX,
+      startY: event.clientY,
+      element: null,
+    };
+
+    try {
+      this.canvasScroll.setPointerCapture(event.pointerId);
+    } catch {
+      // A synthesised pointer has no capture to take; bubbling carries the rest.
+    }
+  }
+
+  /** The band follows the pointer, drawn inside the container it belongs to so it cannot stretch
+   * over ground its own selection could never cover. */
+  private trackBand(event: PointerEvent): void {
+    const band = this.band;
+    if (!band) {
+      return;
+    }
+
+    const travelled = Math.abs(event.clientX - band.startX) >= DRAG_THRESHOLD
+      || Math.abs(event.clientY - band.startY) >= DRAG_THRESHOLD;
+    if (!band.element && !travelled) {
+      return;
+    }
+
+    if (!band.element) {
+      band.element = document.createElement("div");
+      band.element.className = "dc-marquee";
+      band.host.appendChild(band.element);
+    }
+
+    const room = band.host.getBoundingClientRect();
+    const left = Math.min(band.startX, event.clientX) - room.left;
+    const top = Math.min(band.startY, event.clientY) - room.top;
+    band.element.style.left = `${left}px`;
+    band.element.style.top = `${top}px`;
+    band.element.style.width = `${Math.abs(event.clientX - band.startX)}px`;
+    band.element.style.height = `${Math.abs(event.clientY - band.startY)}px`;
+    event.preventDefault();
+  }
+
+  /**
+   * The band is let go: everything of that container's own children the band TOUCHES is
+   * selected, in the order the document holds them, and the first is the anchor.
+   *
+   * Touching rather than enclosing, which is MSForms' own rule and the more forgiving one - a
+   * band that has to swallow a control whole cannot pick up a row of them without also swallowing
+   * whatever sits below.
+   */
+  private dropBand(event: PointerEvent): void {
+    const band = this.band;
+    this.band = null;
+    if (!band) {
+      return;
+    }
+
+    try {
+      this.canvasScroll.releasePointerCapture(band.pointerId);
+    } catch {
+      // Nothing was captured; nothing to give back.
+    }
+
+    if (!band.element) {
+      this.select("");
+      return;
+    }
+
+    const box = band.element.getBoundingClientRect();
+    band.element.remove();
+
+    const caught = [...band.host.children]
+      .filter((one): one is HTMLElement => one instanceof HTMLElement
+        && one.classList.contains("dc") && one.dataset.control !== undefined
+        && one.dataset.kind !== "Page")
+      .filter((one) => {
+        const at = one.getBoundingClientRect();
+        return at.left < box.right && at.right > box.left
+          && at.top < box.bottom && at.bottom > box.top;
+      })
+      .map((one) => one.dataset.control ?? "");
+
+    if (caught.length === 0) {
+      this.select("");
+      return;
+    }
+
+    this.select(caught[0] ?? "");
+    for (const also of caught.slice(1)) {
+      this.extras.add(also);
+    }
+
+    this.dressSelection();
+    event.preventDefault();
   }
 
   /** Arms a gesture on a named thing - a move with no edge, a resize with one - recording the
@@ -1149,6 +2044,8 @@ export class DesignerView {
       return;
     }
 
+    const parent = this.hostNameOf(element);
+    const grabbed = element.getBoundingClientRect();
     this.drag = {
       name,
       element,
@@ -1161,6 +2058,10 @@ export class DesignerView {
       // because its element is two pixels bigger than the size its own line spells.
       origin: this.baseBox(header, element),
       moved: false,
+      parent,
+      where: parent,
+      grabX: event.clientX - grabbed.left,
+      grabY: event.clientY - grabbed.top,
     };
 
     try {
@@ -1174,6 +2075,11 @@ export class DesignerView {
   /** The thing follows the pointer, in the picture only - the document is written once, at the
    * drop, so a whole gesture is one undo step rather than one per pixel. */
   private onCanvasDragMove(event: PointerEvent): void {
+    if (this.band && event.pointerId === this.band.pointerId) {
+      this.trackBand(event);
+      return;
+    }
+
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) {
       return;
@@ -1194,12 +2100,107 @@ export class DesignerView {
       this.canvasScroll.style.cursor = drag.edge ? EDGE_CURSOR[drag.edge] ?? "move" : "move";
     }
 
-    this.paintBox(drag.element, this.proposal(drag, dx / PT, dy / PT, event.altKey));
+    // Reparenting happens WHILE the drag runs, not at the drop: the control has to be carried
+    // into the container it is heading for, or a box that has left its parent is simply clipped
+    // away (every control box hides its overflow) and the developer drags something invisible.
+    this.carryInto(drag, event);
+
+    this.paintBox(drag.element, this.proposal(drag, this.toPoints(dx), this.toPoints(dy), event.altKey));
     event.preventDefault();
+  }
+
+  /**
+   * Moves the dragged control into whatever container the pointer is over, rebasing the gesture
+   * on the way so the arithmetic carries on unbroken: the origin becomes the box's position in
+   * the NEW container's coordinates and the press moves to here, which is exactly what
+   * `proposal` measures from.
+   *
+   * Only a MOVE reparents. A resize by a handle stays where it is - pulling an edge is a
+   * statement about size, not about belonging - and the form has nowhere to go.
+   */
+  private carryInto(drag: CanvasDrag, event: PointerEvent): void {
+    if (drag.edge !== null || drag.name === "") {
+      return;
+    }
+
+    const over = this.containerAt(event.clientX, event.clientY);
+    if (over === null || over.parent.toLowerCase() === drag.parent.toLowerCase()) {
+      return;
+    }
+
+    const host = this.clientOf(over.parent);
+    // A container cannot be carried into itself or into anything it holds: that is a document
+    // whose own parent is inside it, which the parser would take and the model never could.
+    if (!host || drag.element.contains(host)) {
+      return;
+    }
+
+    // Placed by the POINTER and the grab offset rather than by where the box had got to: the box
+    // is wherever the old container's clamp left it, which for a gesture that crosses on its last
+    // move is the edge it was pressed against - the control would land at the boundary instead of
+    // under the hand. This is the same arithmetic a hand feels: the control stays where it was
+    // picked up, relative to the pointer.
+    const room = host.getBoundingClientRect();
+    const left = event.clientX - drag.grabX - room.left;
+    const top = event.clientY - drag.grabY - room.top;
+    drag.element.style.left = `${left}px`;
+    drag.element.style.top = `${top}px`;
+    host.appendChild(drag.element);
+
+    // The overlay is a SIBLING of the control it dresses, so it travels with it or dresses an
+    // empty patch of the container the control just left.
+    const overlay = this.canvasScroll.querySelector<HTMLElement>(".dc-selection");
+    if (overlay) {
+      drag.element.insertAdjacentElement("afterend", overlay);
+    }
+
+    drag.parent = over.parent;
+    drag.origin = { ...drag.origin, left: this.toPoints(left), top: this.toPoints(top) };
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+  }
+
+  /** The element that holds a container's children - a Frame's client, a page's body, the form's
+   * own ground for "" - which is where a control carried into it belongs in the DOM. */
+  private clientOf(parent: string): HTMLElement | null {
+    if (parent === "") {
+      return this.canvasScroll.querySelector<HTMLElement>(".dc-form-client");
+    }
+
+    const element = this.elementFor(parent);
+    if (!element) {
+      return null;
+    }
+
+    return element.classList.contains("dc-page-body")
+      ? element
+      : element.querySelector<HTMLElement>(":scope > .dc-frame-client");
+  }
+
+  /** Which container an element sits in, by name: the page whose body holds it, the Frame whose
+   * client does, or "" for the form's own ground. */
+  private hostNameOf(element: HTMLElement): string {
+    const host = element.parentElement;
+    if (!host) {
+      return "";
+    }
+
+    if (host.classList.contains("dc-page-body")) {
+      return host.dataset.control ?? "";
+    }
+
+    return host.classList.contains("dc-frame-client")
+      ? host.closest<HTMLElement>(".dc")?.dataset.control ?? ""
+      : "";
   }
 
   /** The drop writes the document: the box the gesture ended on, in points, as one edit. */
   private onCanvasDrop(event: PointerEvent): void {
+    if (this.band && event.pointerId === this.band.pointerId) {
+      this.dropBand(event);
+      return;
+    }
+
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) {
       return;
@@ -1213,10 +2214,99 @@ export class DesignerView {
     // A drop the document refuses - a line this cannot rewrite - puts the thing back the way
     // the document still describes it, rather than leaving a picture nothing agrees with.
     const box = this.proposal(
-      drag, (event.clientX - drag.startX) / PT, (event.clientY - drag.startY) / PT, event.altKey);
-    if (!this.writeBox(drag.name, box, drag.edge !== null)) {
+      drag, this.toPoints(event.clientX - drag.startX), this.toPoints(event.clientY - drag.startY),
+      event.altKey);
+
+    // A control that ended up somewhere else is REPARENTED: its whole block moves under the new
+    // container and its position is read in that container's coordinates. A refusal redraws from
+    // the document, because the element has already been carried across the DOM and putting it
+    // back by hand would be a second, worse copy of the renderer.
+    if (drag.parent.toLowerCase() !== drag.where.toLowerCase()) {
+      if (!this.reparentInDocument(drag.name, drag.parent, box)) {
+        this.redraw();
+      }
+
+      return;
+    }
+
+    // A GROUP moves together: the anchor takes the gesture's box and everything else takes the
+    // distance the anchor actually travelled, all in one edit and one undo step. A resize is the
+    // anchor's alone - eight handles cannot promise anything about the others.
+    const moves = this.extras.size > 0 && drag.edge === null
+      ? this.groupMoves(drag.name, box, drag.origin)
+      : [{ name: drag.name, box, sized: drag.edge !== null }];
+
+    if (!this.writeBoxes(moves)) {
       this.paintBox(drag.element, drag.origin);
     }
+  }
+
+  /**
+   * Moves a control's whole BLOCK under another container: the header with its new position, its
+   * property lines and, for a container, its children, re-indented a level under their new home
+   * and appended at the end of it - which is where the model appends, and the markup's order is
+   * the model's.
+   *
+   * One undoable edit, like every other canvas gesture, and it writes only the DOCUMENT: the
+   * apply's name-keyed diff calls a changed container a remove-and-add, "which is also the truth
+   * of what it means" (the dialect's own rule), so the form catches up at Ctrl+S.
+   */
+  private reparentInDocument(name: string, parent: string, box: Box): boolean {
+    const header = this.headerOf(name);
+    const host = this.headerOf(parent);
+    if (!header || !host || parent.toLowerCase() === name.toLowerCase()) {
+      return false;
+    }
+
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+    const own = indent(lines[header.line - 1] ?? "");
+    let last = header.line;
+    while (last < lines.length && indent(lines[last] ?? "") > own) {
+      last += 1;
+    }
+
+    // Refused rather than mangled: a container cannot move inside its own block, and the lines
+    // that would have to move are the ones it would move into.
+    if (host.line >= header.line && host.line <= last) {
+      return false;
+    }
+
+    // The header, rewritten where it lands. A line that spelled no size still spells none: a
+    // move is a move, in a new box or the old one.
+    const level = parent === "" ? 0 : indent(lines[host.line - 1] ?? "");
+    const shift = (level + 4) - own;
+    const block = lines.slice(header.line - 1, last).map((line, at) => at === 0
+      ? `${" ".repeat(level + 4)}${header.head.trimStart()}`
+        + ` at ${Math.round(box.left)},${Math.round(box.top)}`
+        + (header.size !== null ? ` size ${Math.round(box.width)}x${Math.round(box.height)}` : "")
+      : shift >= 0 ? " ".repeat(shift) + line : line.slice(Math.min(-shift, indent(line))));
+
+    // The whole document, spliced, as ONE edit: the block leaves and arrives in the same
+    // operation, which is one undo step. Two ranges would be fewer characters and would collide
+    // the moment the block being moved is the last one in the document - the end of the host's
+    // block and the start of the deletion are then the same line.
+    const rest = [...lines.slice(0, header.line - 1), ...lines.slice(last)];
+
+    // Where it goes: the end of the new parent's block, which is where the model appends. Found
+    // in the text WITHOUT the block, so the arithmetic cannot be thrown by lines that are on
+    // their way out.
+    const hostLine = parent === ""
+      ? 0
+      : rest.findIndex((line) => line === lines[host.line - 1]);
+    let after = hostLine + 1;
+    while (after < rest.length && (parent === "" || indent(rest[after] ?? "") > level)) {
+      after += 1;
+    }
+
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: this.model.getFullModelRange(),
+      text: [...rest.slice(0, after), ...block, ...rest.slice(after)].join("\n"),
+    }], () => null);
+
+    this.lintNow();
+    return true;
   }
 
   /**
@@ -1443,40 +2533,66 @@ export class DesignerView {
     const base = this.baseBox(header, element);
     const room = this.roomFor(element);
     const floor = this.selectedName === "" ? MIN_FORM : MIN_CONTROL;
-    const box = event.shiftKey
+    const box = this.clamp(event.shiftKey
       ? { ...base, width: base.width + step.dx, height: base.height + step.dy }
-      : { ...base, left: base.left + step.dx, top: base.top + step.dy };
-    this.writeBox(this.selectedName, this.clamp(box, room, floor), event.shiftKey);
+      : { ...base, left: base.left + step.dx, top: base.top + step.dy }, room, floor);
+
+    // A nudge carries the whole group, like a drag; a Shift+arrow resizes the anchor alone, for
+    // the same reason its handles do.
+    this.writeBoxes(this.extras.size > 0 && !event.shiftKey
+      ? this.groupMoves(this.selectedName, box, base)
+      : [{ name: this.selectedName, box, sized: event.shiftKey }]);
   }
 
   /**
-   * Writes a box into the document: the thing's own line rewritten with the position and size
-   * it now has, rounded to whole points, as ONE undoable edit, and painted at once so the
-   * gesture lands before the round trip answers.
+   * Writes boxes into the document: each thing's own line rewritten with the position and size it
+   * now has, rounded to whole points, as ONE undoable edit, and painted at once so the gesture
+   * lands before the round trip answers.
    *
-   * This is the single commit every canvas gesture takes - drag, resize, nudge, and the
+   * This is the single commit every canvas gesture takes - drag, resize, nudge, align, and the
    * harness's acts - and it writes the DOCUMENT, never the form: the draft preview shows it
    * immediately, the dot says it has not reached the form yet, and Ctrl+S is still the only
-   * apply. Whole points because a hand-placed control wants round numbers; the 6-point grid the
-   * native designer snaps to is M6's. The FORM's line takes a size and never a position.
+   * apply. Whole points because a hand-placed control wants round numbers. The FORM's line takes
+   * a size and never a position.
+   *
+   * Several at once is what makes a GROUP gesture one undo step rather than one per control. Each
+   * is a different line, so the ranges cannot overlap and monaco applies them in one operation.
+   * All or nothing: a line this cannot rewrite - half-typed, a caption whose quote never closes -
+   * refuses the whole gesture rather than moving the controls it happened to understand.
    */
-  private writeBox(name: string, box: Box, sized: boolean): boolean {
-    const element = this.elementOf(name);
-    const header = this.headerOf(name);
-    if (!element || !header) {
-      return false;
+  private writeBoxes(moves: { name: string; box: Box; sized: boolean }[]): boolean {
+    const edits: monaco.editor.IIdentifiedSingleEditOperation[] = [];
+    const painted: { element: HTMLElement; box: Box }[] = [];
+
+    for (const move of moves) {
+      const element = this.elementOf(move.name);
+      const header = this.headerOf(move.name);
+      if (!element || !header) {
+        return false;
+      }
+
+      const box = {
+        left: Math.round(move.box.left),
+        top: Math.round(move.box.top),
+        width: Math.round(move.box.width),
+        height: Math.round(move.box.height),
+      };
+
+      // A line that spelled no size keeps spelling none unless this gesture is a resize: a move
+      // must not quietly pin a size the developer left to the control.
+      const spellSize = move.sized || header.size !== null;
+      edits.push({
+        range: new monaco.Range(header.line, 1, header.line, this.model.getLineMaxColumn(header.line)),
+        text: header.head
+          + (header.form ? "" : ` at ${box.left},${box.top}`)
+          + (spellSize ? ` size ${box.width}x${box.height}` : ""),
+      });
+      painted.push({ element, box });
     }
 
-    const left = Math.round(box.left);
-    const top = Math.round(box.top);
-    const width = Math.round(box.width);
-    const height = Math.round(box.height);
-    // A line that spelled no size keeps spelling none unless this gesture is a resize: a move
-    // must not quietly pin a size the developer left to the control.
-    const spellSize = sized || header.size !== null;
-    const text = header.head
-      + (header.form ? "" : ` at ${left},${top}`)
-      + (spellSize ? ` size ${width}x${height}` : "");
+    if (edits.length === 0) {
+      return false;
+    }
 
     // A stack stop BEFORE the edit and none after. Monaco appends edits to whichever element is
     // open, so the stop is what keeps one gesture from joining the gesture before it; leaving
@@ -1485,13 +2601,43 @@ export class DesignerView {
     // reaches the text from before the move rather than a step that only differs by the
     // machine's own rounding (both halves measured live, 2026-08-15).
     this.model.pushStackElement();
-    this.model.pushEditOperations([], [{
-      range: new monaco.Range(header.line, 1, header.line, this.model.getLineMaxColumn(header.line)),
-      text,
-    }], () => null);
-    this.paintBox(element, { left, top, width, height });
+    this.model.pushEditOperations([], edits, () => null);
+    for (const { element, box } of painted) {
+      this.paintBox(element, box);
+    }
+
     this.lintNow();
     return true;
+  }
+
+  /**
+   * The same delta applied to everything else in the selection, each clamped inside its own
+   * container - the group move. The anchor's own box is the gesture's; the rest follow it by the
+   * distance it actually travelled, which is what keeps a snapped group in formation.
+   */
+  private groupMoves(anchor: string, box: Box, from: Box): { name: string; box: Box; sized: boolean }[] {
+    const dLeft = box.left - from.left;
+    const dTop = box.top - from.top;
+    const moves = [{ name: anchor, box, sized: false }];
+
+    for (const name of this.extras) {
+      const header = this.headerOf(name);
+      const element = this.elementFor(name);
+      if (!header || !element) {
+        continue;
+      }
+
+      const base = this.baseBox(header, element);
+      moves.push({
+        name,
+        box: this.clamp(
+          { ...base, left: base.left + dLeft, top: base.top + dTop },
+          this.roomFor(element), MIN_CONTROL),
+        sized: false,
+      });
+    }
+
+    return moves;
   }
 
   /**
@@ -1567,12 +2713,26 @@ export class DesignerView {
   }
 
   /** The inside of a container, in points, for a drop that has no element to measure yet. */
+  /**
+   * TWO CASES, because a container's client is either INSIDE it or IS it.
+   *
+   * A Frame draws a `.dc-frame-client` within its own rectangle. A PAGE is its own client - the
+   * body element carries the page's name and kind, which is what lets a press on it select the
+   * page and a drop land in it - so there is nothing inside it to look for.
+   *
+   * This was three branches until 2026-08-16, the third a `closest(".dc-page-body")` off a
+   * `data-control` lookup. It was not redundant, which is the interesting part: since the body
+   * started carrying its own identity, the second branch found the body and then searched INSIDE
+   * it for a client, found nothing, and the third branch quietly did every page's work. Two
+   * cases that say which is which beat three where the load-bearing one looks like a fallback.
+   */
   private roomOfContainer(parent: string): { width: number; height: number } | null {
+    const element = parent === "" ? null : this.elementFor(parent);
     const client = parent === ""
       ? this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")
-      : this.elementFor(parent)?.querySelector<HTMLElement>(".dc-frame-client, .dc-page-body")
-        ?? this.canvasScroll.querySelector<HTMLElement>(`.dc[data-control="${CSS.escape(parent)}"]`)
-          ?.closest<HTMLElement>(".dc-page-body");
+      : element?.classList.contains("dc-page-body")
+        ? element
+        : element?.querySelector<HTMLElement>(".dc-frame-client");
     return client ? { width: client.clientWidth / PT, height: client.clientHeight / PT } : null;
   }
 
@@ -1602,7 +2762,55 @@ export class DesignerView {
    * where the native designer leaves it and what returns the Properties panel to the component.
    */
   private deleteSelection(): boolean {
-    const name = this.selectedName;
+    const names = this.selection().filter((one) => one !== "");
+    if (names.length === 0) {
+      return false;
+    }
+
+    return names.length === 1
+      ? this.deleteFromDocument(names[0] ?? "")
+      : this.deleteGroup(names);
+  }
+
+  /**
+   * A whole selection out of the document at once - every block, one edit, one undo step.
+   *
+   * Spliced out of the line array rather than removed range by range: the ranges of several
+   * blocks are easy to compute and awkward to apply, because each removal moves the ones after
+   * it, and a group can hold a container whose children are blocks of their own.
+   */
+  private deleteGroup(names: string[]): boolean {
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+    const doomed = new Set<number>();
+
+    for (const name of names) {
+      const header = this.headerOf(name);
+      if (!header) {
+        return false;
+      }
+
+      const own = indent(lines[header.line - 1] ?? "");
+      doomed.add(header.line);
+      for (let at = header.line; at < lines.length && indent(lines[at] ?? "") > own; at++) {
+        doomed.add(at + 1);
+      }
+    }
+
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: this.model.getFullModelRange(),
+      text: lines.filter((_, at) => !doomed.has(at + 1)).join("\n"),
+    }], () => null);
+
+    this.select("");
+    this.lintNow();
+    return true;
+  }
+
+  /** The commit behind Delete, by name, so the tab strip's Delete Page and the Delete key are
+   * one edit rather than two spellings of it. */
+  private deleteFromDocument(name: string): boolean {
     if (!name) {
       return false;
     }
@@ -1745,11 +2953,29 @@ export class DesignerView {
     // is where a control's Left and Top are measured from too.
     const step = Math.max(2, settings.designerGridSize) * PT;
     const half = -step / 2;
-    client.style.backgroundImage = on
-      ? "radial-gradient(color-mix(in srgb, currentColor 16%, transparent) 0.5px, transparent 0.5px)"
-      : "";
-    client.style.backgroundSize = on ? `${step}px ${step}px` : "";
-    client.style.backgroundPosition = on ? `${half}px ${half}px` : "";
+
+    // TWO LAYERS, composed rather than one overwriting the other: the grid on top, the form's
+    // own picture under it. They share an element, and until 2026-08-16 there was only ever one
+    // of them to draw - a form with a picture would have lost it to the next grid toggle, or
+    // painted over the grid, depending on which ran last.
+    const layers: PictureLayer[] = [];
+    if (on) {
+      layers.push({
+        image: "radial-gradient(color-mix(in srgb, currentColor 16%, transparent) 0.5px, transparent 0.5px)",
+        size: `${step}px ${step}px`,
+        position: `${half}px ${half}px`,
+        repeat: "repeat",
+      });
+    }
+
+    if (this.formGround) {
+      layers.push(this.formGround);
+    }
+
+    client.style.backgroundImage = layers.map((layer) => layer.image).join(", ");
+    client.style.backgroundSize = layers.map((layer) => layer.size).join(", ");
+    client.style.backgroundPosition = layers.map((layer) => layer.position).join(", ");
+    client.style.backgroundRepeat = layers.map((layer) => layer.repeat).join(", ");
   }
 
   /**
@@ -2090,7 +3316,12 @@ export class DesignerView {
     // form wider than the box it sits in, and a hit test aimed at a clipped control answers
     // whatever paints at those coordinates instead - a dock strip, on a 704px window. A rect is
     // reported whether or not the element is visible, so nothing about the arithmetic says so.
-    element.scrollIntoView({ block: "nearest", inline: "nearest" });
+    //
+    // CENTRED rather than merely visible, because a drag TRAVELS: a control scrolled to the edge
+    // of a 48-point canvas has no room on the side the gesture is heading for, and the pointer
+    // ends outside the box - where it hits nothing and no container answers, so a drag that meant
+    // to reparent simply clamps. Centring gives the gesture the whole canvas either way.
+    element.scrollIntoView({ block: "center", inline: "center" });
 
     const box = element.getBoundingClientRect();
     // The centre first, the way a hand aims; a CONTAINER's centre belongs to its children, so
@@ -2132,8 +3363,17 @@ export class DesignerView {
 
     // Into view first, the way a hand reaches a handle past the edge of the canvas: on a narrow
     // tab the form is wider than the box that holds it, and a hit test aimed off-screen answers
-    // nothing - which is a true answer to the wrong question.
+    // nothing - which is a true answer to the wrong question. `nearest` alone leaves the handle
+    // flush against the edge, where a 7px target is still half outside, so the scroll finishes
+    // by pulling its centre a margin clear.
     handle.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const reach = handle.getBoundingClientRect();
+    const face = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")?.getBoundingClientRect();
+    if (face) {
+      this.scrollToPoint(
+        this.toPoints(reach.left + reach.width / 2 - face.left),
+        this.toPoints(reach.top + reach.height / 2 - face.top));
+    }
 
     const box = handle.getBoundingClientRect();
     const spot = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
@@ -2145,6 +3385,37 @@ export class DesignerView {
     this.lastGuides = [];
     this.sendGesture(reached, spot, dx, dy, alt);
     return `resized ${name === "" ? "the form" : name}${this.guideNote()}`;
+  }
+
+  /**
+   * Brings a point of the FORM - in points from its client origin - inside the canvas's visible
+   * box, with a margin so it is not flush against an edge. What a hand does by scrolling before
+   * it reaches, and what any gesture aimed by coordinates has to do first on a tab too short to
+   * show the whole form.
+   */
+  private scrollToPoint(left: number, top: number): void {
+    const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client");
+    if (!client) {
+      return;
+    }
+
+    const face = client.getBoundingClientRect();
+    const box = this.canvasScroll.getBoundingClientRect();
+    const margin = 20;
+    const x = face.left + this.toPixels(left);
+    const y = face.top + this.toPixels(top);
+
+    if (y < box.top + margin) {
+      this.canvasScroll.scrollTop -= box.top + margin - y;
+    } else if (y > box.bottom - margin) {
+      this.canvasScroll.scrollTop += y - (box.bottom - margin);
+    }
+
+    if (x < box.left + margin) {
+      this.canvasScroll.scrollLeft -= box.left + margin - x;
+    } else if (x > box.right - margin) {
+      this.canvasScroll.scrollLeft += x - (box.right - margin);
+    }
   }
 
   /**
@@ -2165,9 +3436,15 @@ export class DesignerView {
       return "the form's client area is not drawn";
     }
 
+    // A drop lands wherever the POINTER is, and a pointer cannot be somewhere the canvas is not
+    // showing: on a short tab the form is taller than the box that holds it and the drop point
+    // is off the bottom, where the hit test finds nothing at all. So the canvas is scrolled to
+    // the point first, which is also what a hand does before it lets go.
+    this.scrollToPoint(left, top);
+
     const from = button.getBoundingClientRect();
     const face = client.getBoundingClientRect();
-    const to = { x: face.left + left * PT, y: face.top + top * PT };
+    const to = { x: face.left + this.toPixels(left), y: face.top + this.toPixels(top) };
     const send = (target: EventTarget, type: string, x: number, y: number): void => {
       target.dispatchEvent(new PointerEvent(type, {
         bubbles: true,
@@ -2190,7 +3467,19 @@ export class DesignerView {
 
     const added = this.model.getLinesContent().find((line) => !before.has(line));
     const named = added ? /^\s+\S+\s+(\S+)/.exec(added)?.[1] : undefined;
-    return named ? `added ${named}` : `nothing landed at ${left},${top}`;
+    if (named) {
+      return `added ${named}`;
+    }
+
+    // A refusal says WHAT the pointer found, because "nothing landed" is true of a point off the
+    // form, a point over another pane, and a point the canvas could not scroll to - three
+    // different faults with one sentence between them until now.
+    const under = document.elementFromPoint(Math.round(to.x), Math.round(to.y));
+    const room = this.canvasScroll.getBoundingClientRect();
+    return `nothing landed at ${left},${top}: the pointer was at `
+      + `${Math.round(to.x)},${Math.round(to.y)} over ${under?.className || under?.tagName || "nothing"}`
+      + `, and the canvas is ${Math.round(room.left)},${Math.round(room.top)}`
+      + ` to ${Math.round(room.right)},${Math.round(room.bottom)}`;
   }
 
   /**
@@ -2213,6 +3502,117 @@ export class DesignerView {
       cancelable: true,
     }));
     return this.headerLineOf(name) === 0 ? `deleted ${name}` : `${name} is still in the document`;
+  }
+
+  /**
+   * A rubber band dragged over the form's own ground, for the debug surface: the real pointer
+   * sequence on the real client, so the act exercises the marquee rather than the selection it
+   * would have produced. Corners are POINTS from the form's client origin.
+   */
+  marqueeOver(left: number, top: number, right: number, bottom: number): string {
+    const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client");
+    if (!client) {
+      return "the canvas is not showing a form";
+    }
+
+    const room = client.getBoundingClientRect();
+    const from = { x: Math.round(room.left + this.toPixels(left)), y: Math.round(room.top + this.toPixels(top)) };
+    const to = { x: Math.round(room.left + this.toPixels(right)), y: Math.round(room.top + this.toPixels(bottom)) };
+    const send = (target: EventTarget, type: string, x: number, y: number): void => {
+      target.dispatchEvent(new PointerEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        isPrimary: true,
+        button: 0,
+        buttons: type === "pointerup" ? 0 : 1,
+        clientX: x,
+        clientY: y,
+      }));
+    };
+
+    send(client, "pointerdown", from.x, from.y);
+    send(this.canvasScroll, "pointermove", from.x + DRAG_THRESHOLD + 1, from.y + DRAG_THRESHOLD + 1);
+    send(this.canvasScroll, "pointermove", to.x, to.y);
+    send(this.canvasScroll, "pointerup", to.x, to.y);
+    return `banded ${left},${top} to ${right},${bottom}: ${this.selection().join(", ") || "nothing"}`;
+  }
+
+  /**
+   * A tab opened from the debug surface: the REAL press on the real tab, through the canvas's
+   * one press path, so the act cannot pass on a route a pointer does not take.
+   *
+   * `which` is a page's name, a tab's label, or a 1-based position - whichever the caller has.
+   * A TabStrip has only the last two, since its tabs have no names.
+   */
+  openTabOn(container: string, which: string): string {
+    const strip = [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc-page-strip")]
+      .find((one) => (one.dataset.container ?? "").toLowerCase() === container.toLowerCase());
+    if (!strip) {
+      return `the canvas draws no tabbed container called ${container}`;
+    }
+
+    const tabs = [...strip.querySelectorAll<HTMLElement>(".dc-page-tab")];
+    const at = Number(which);
+    const tab = Number.isInteger(at) && at >= 1
+      ? tabs[at - 1]
+      : tabs.find((one) => (one.dataset.page ?? "").toLowerCase() === which.toLowerCase())
+        ?? tabs.find((one) => (one.textContent ?? "").toLowerCase() === which.toLowerCase());
+    if (!tab) {
+      return `${container} has no tab ${which} (it has ${tabs.length})`;
+    }
+
+    const box = tab.getBoundingClientRect();
+    tab.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true,
+      cancelable: true,
+      pointerId: 1,
+      isPrimary: true,
+      button: 0,
+      buttons: 1,
+      clientX: Math.round(box.left + box.width / 2),
+      clientY: Math.round(box.top + box.height / 2),
+    }));
+    return `opened ${which} on ${container}`;
+  }
+
+  /**
+   * Right-clicks a tab strip, the way the menu is actually reached: a real `contextmenu` event
+   * on the tab, since the menu hangs off a listener rather than off a method. The caller reads
+   * the items off the menu and picks one with chooseMenuItem.
+   */
+  openTabMenu(container: string, which: string): string {
+    const strip = [...this.canvasScroll.querySelectorAll<HTMLElement>(".dc-page-strip")]
+      .find((one) => (one.dataset.container ?? "").toLowerCase() === container.toLowerCase());
+    if (!strip) {
+      return `the canvas draws no tabbed container called ${container}`;
+    }
+
+    const tabs = [...strip.querySelectorAll<HTMLElement>(".dc-page-tab")];
+    const at = Number(which);
+    const aim = which === ""
+      ? strip
+      : Number.isInteger(at) && at >= 1
+        ? tabs[at - 1]
+        : tabs.find((one) => (one.dataset.page ?? "").toLowerCase() === which.toLowerCase());
+    if (!aim) {
+      return `${container} has no tab ${which} (it has ${tabs.length})`;
+    }
+
+    const box = aim.getBoundingClientRect();
+    const x = Math.round(box.left + box.width / 2);
+    const y = Math.round(box.top + box.height / 2);
+
+    // The PRESS as well as the menu event, because a real right-click is both and the second
+    // button's press is what dismisses a menu already standing. Without it, a right-click that
+    // opens NOTHING - a TabStrip's strip - leaves the last menu on screen and a caller reading
+    // the items back is told about a menu it did not open.
+    aim.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 2, buttons: 2,
+      clientX: x, clientY: y,
+    }));
+    aim.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    return `right-clicked ${which === "" ? `the strip of ${container}` : which}`;
   }
 
   /** The pointer sequence both instruments send: press where the hit test answered, one move
@@ -2239,13 +3639,36 @@ export class DesignerView {
 
     send(target, "pointerdown", from.x, from.y);
     send(this.canvasScroll, "pointermove", from.x + DRAG_THRESHOLD + 1, from.y);
-    send(this.canvasScroll, "pointermove", from.x + dx * PT, from.y + dy * PT);
-    send(this.canvasScroll, "pointerup", from.x + dx * PT, from.y + dy * PT);
+    send(this.canvasScroll, "pointermove", from.x + this.toPixels(dx), from.y + this.toPixels(dy));
+    send(this.canvasScroll, "pointerup", from.x + this.toPixels(dx), from.y + this.toPixels(dy));
   }
 
   private dressSelection(): void {
-    this.canvasScroll.querySelector(".dc-selection")?.remove();
-    this.canvasScroll.querySelector(".dc-selected")?.classList.remove("dc-selected");
+    for (const dressed of this.canvasScroll.querySelectorAll(".dc-selection")) {
+      dressed.remove();
+    }
+    for (const marked of this.canvasScroll.querySelectorAll(".dc-selected")) {
+      marked.classList.remove("dc-selected");
+    }
+
+    // The rest of a group wears a boundary and no handles: only the anchor can be pulled, and a
+    // grip on a control that will not answer it is a promise the canvas would not keep. The
+    // native designer says the same thing with hollow handles rather than white ones.
+    for (const extra of this.extras) {
+      const element = this.elementFor(extra);
+      if (!element) {
+        continue;
+      }
+
+      const mark = document.createElement("div");
+      mark.className = "dc-selection dc-selection-extra";
+      mark.style.left = element.style.left;
+      mark.style.top = element.style.top;
+      mark.style.width = element.style.width;
+      mark.style.height = element.style.height;
+      element.insertAdjacentElement("afterend", mark);
+      element.classList.add("dc-selected");
+    }
 
     const name = this.selectedName;
     if (name === null) {
@@ -2265,17 +3688,23 @@ export class DesignerView {
     const overlay = document.createElement("div");
     overlay.className = "dc-selection";
 
-    for (const spot of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
-      const handle = document.createElement("span");
-      handle.className = `dc-handle dc-handle-${spot}`;
-      // The edge rides the element: a press reads which way to pull from what it grabbed.
-      handle.dataset.edge = spot;
-      overlay.appendChild(handle);
+    // A PAGE wears no handles: it has neither a position nor a size of its own - the MultiPage
+    // gives it both - so eight grips that can pull nothing would be a promise the canvas cannot
+    // keep. Its outline lies over the page itself, the way the form's does over the form.
+    const page = target.dataset.kind === "Page";
+    if (!page) {
+      for (const spot of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+        const handle = document.createElement("span");
+        handle.className = `dc-handle dc-handle-${spot}`;
+        // The edge rides the element: a press reads which way to pull from what it grabbed.
+        handle.dataset.edge = spot;
+        overlay.appendChild(handle);
+      }
     }
 
-    if (name === "") {
-      // The form does not clip, so its overlay lives inside it, over the whole face.
-      overlay.classList.add("dc-selection-form");
+    if (name === "" || page) {
+      // Neither the form nor a page clips, so the overlay lives inside, over the whole face.
+      overlay.classList.add(page ? "dc-selection-page" : "dc-selection-form");
       target.appendChild(overlay);
     } else {
       overlay.style.left = target.style.left;
@@ -2285,11 +3714,10 @@ export class DesignerView {
       target.insertAdjacentElement("afterend", overlay);
 
       // A SELECTED control offers the move, and says so with the cursor (the owner's rule,
-      // 2026-08-15). Only the selected one, and only a control that has a position to change:
-      // the form is where the canvas puts it, and a Page fills its MultiPage.
-      if (target.dataset.kind !== "Page") {
-        target.classList.add("dc-selected");
-      }
+      // 2026-08-15). Only the selected one, and only a control that has a position to change -
+      // the form is where the canvas puts it, and a Page fills its MultiPage, so neither
+      // reaches here.
+      target.classList.add("dc-selected");
     }
   }
 
@@ -2395,7 +3823,11 @@ export class DesignerView {
       }
     }
 
-    if (found !== "" && !this.elementFor(found)) {
+    // Against the PROJECTION rather than against the drawn elements: a control on a page that
+    // is not open has no element and is still perfectly real, and selecting it is what opens
+    // its page. Only a name the canvas does not know at all - a half-typed line, a control
+    // added since the last parse - falls back to the form.
+    if (found !== "" && this.kindOf(found) === "") {
       found = "";
     }
 
@@ -2405,6 +3837,7 @@ export class DesignerView {
   }
 
   private renderCanvas(payload: FormMarkupPayload): void {
+    this.shownPayload = payload;
     this.canvasScroll.replaceChildren();
 
     const form = document.createElement("div");
@@ -2450,6 +3883,10 @@ export class DesignerView {
       titlebar.style.height = `${top}px`;
       form.classList.add("chromed");
     }
+    // The form's own picture is held rather than painted here: the GRID paints on this same
+    // element, and showGrid composes the two so neither wipes the other.
+    this.formGround = payload.form?.picture ? pictureLayer(payload.form.picture) : null;
+
     form.appendChild(client);
 
     // Flat rows into a tree by parent NAME, the walk's own shape. A parent the rows never
@@ -2472,7 +3909,14 @@ export class DesignerView {
     };
     renderInto(client, "");
 
-    this.canvasScroll.appendChild(form);
+    // The form rides a STAGE: a transform does not change layout, so without a box of the SCALED
+    // size the scroll bars would still describe the form at 100% and half of a zoomed form would
+    // be unreachable. The margin lives here too, for the reason it left the scroll port.
+    const stage = document.createElement("div");
+    stage.className = "dc-stage";
+    stage.appendChild(form);
+    this.canvasScroll.appendChild(stage);
+    this.applyZoom();
 
     // A re-render replaces every element, so the selection is dressed again onto the new
     // ones; a selected control the new picture no longer holds simply loses its handles.
@@ -2566,6 +4010,12 @@ export class DesignerView {
         legend.style.top = "0px";
         box.appendChild(legend);
 
+        // A Frame's picture paints on its CLIENT, not on the whole rectangle: the caption band
+        // belongs to the frame's chrome, and the runtime does not paint the picture behind it.
+        if (row.picture) {
+          paintPictureSurface(inner, row.picture);
+        }
+
         box.appendChild(inner);
         renderInto(inner, row.name.toLowerCase());
         break;
@@ -2581,40 +4031,66 @@ export class DesignerView {
 
         const strip = document.createElement("div");
         strip.className = "dc-page-strip";
-        const pages = byParent.get(row.name.toLowerCase()) ?? [];
-        // A MultiPage's headers are its Page children; a TabStrip's are its own Tabs, which
-        // are not controls and ride the row instead - without them the strip drew as a bare
-        // box (the owner's side-by-side, 2026-08-13).
-        const headers = row.type === "TabStrip" && row.tabs?.length
-          ? row.tabs
-          : pages.map((page) => page.caption ?? page.name);
+        // The strip carries the container it belongs to, because a tab's press and its menu
+        // both ask which MultiPage they are about and a tab has no other way to say.
+        strip.dataset.container = row.name;
+        strip.dataset.kind = row.type;
+        // A MultiPage's headers are its Page children and a TabStrip's are its Tab children -
+        // both in the projection since 2026-08-16, so the canvas follows a tab TYPED into the
+        // document the same way it follows a page. `row.tabs` is the older road, kept for a
+        // draft whose strip has no child rows yet.
+        const kin = byParent.get(row.name.toLowerCase()) ?? [];
+        const pages = kin.filter((one) => one.type !== "Tab");
+        const headers = kin.length > 0
+          ? kin.map((one) => one.caption ?? one.name)
+          : row.tabs ?? [];
+
+        // Which one is OPEN: the developer's own choice while it still exists, and the first
+        // otherwise - a page deleted or renamed away puts the picture back at the front rather
+        // than leaving the container blank.
+        const open = this.openTabOf(row, pages, headers.length);
         for (const [index, header] of headers.entries()) {
           const tab = document.createElement("span");
-          tab.className = "dc-page-tab" + (index === 0 ? " first" : "");
+          tab.className = "dc-page-tab" + (index === open ? " current" : "");
           tab.textContent = header;
+          tab.dataset.tab = String(index);
+          // The tab carries its own row's NAME - a Page's for a MultiPage, a Tab's for a strip -
+          // so the menu and the acts can name what they are acting on. `data-page` stays the
+          // attribute for a page's body, which only a MultiPage has.
+          const own = kin[index];
+          if (own) {
+            tab.dataset.name = own.name;
+            if (row.type !== "TabStrip") {
+              tab.dataset.page = own.name;
+            }
+          }
           strip.appendChild(tab);
         }
         box.appendChild(strip);
 
-        // The FIRST page's content shows, the way the control itself opens; the others are
-        // headers only until selection lands with the canvas milestone.
-        const first = pages[0];
+        // The OPEN page's content shows. A TabStrip has no page to show and never will: its
+        // tabs are an index, not a container, and the runtime draws the same controls under
+        // every one of them.
+        const first = row.type === "TabStrip" ? undefined : pages[open];
 
-        // The MultiPage's own client area, when the model says it: what is not client,
-        // above, is the tab strip plus chrome - derived like the Frame's.
-        let strung = FRAME_INSET_TOP;
+        // The MultiPage's own client area, when the model says it: what is not client, above,
+        // is the tab strip plus chrome - derived like the Frame's, and NEVER less than the strip
+        // the canvas actually draws. A MultiPage's InsideHeight describes its PAGE, and the
+        // difference it leaves is the borders rather than the whole tab band, so the model's
+        // number put the rule through the middle of the tabs and left them hanging below the
+        // line (the owner, 2026-08-16). The runtime's band measures 14 points against this 13.5,
+        // which is the closer of the two by far.
+        //
+        // The floor is why there is no fallback here. One stood until 2026-08-16 - an honest
+        // ten-point inset for a model that declines to answer - and it could never be reached:
+        // it is smaller than the floor clamped over it, so the two branches had one outcome and
+        // read as though they had two.
+        let strung = PAGE_STRIP_HEIGHT;
         let flank = 0;
         if (row.insideWidth && row.insideHeight && row.width && row.height) {
           flank = Math.max(0, (row.width - row.insideWidth) / 2) * PT;
-          strung = Math.max(0, (row.height - row.insideHeight) * PT - flank);
+          strung = Math.max(PAGE_STRIP_HEIGHT, (row.height - row.insideHeight) * PT - flank);
         }
-
-        // Never less than the strip the canvas actually draws. A MultiPage's InsideHeight
-        // describes its PAGE, and the difference it leaves is the borders rather than the
-        // whole tab band - so the model's number put the rule through the middle of the tabs
-        // and left them hanging below the line (the owner, 2026-08-16). The runtime's band
-        // measures 14 points against this 13.5, which is the closer of the two by far.
-        strung = Math.max(strung, PAGE_STRIP_HEIGHT);
 
         // The rectangle starts at the BODY, for the frame's reason: the runtime draws no
         // border above or beside the tabs, and the canvas drew one all the way round - so a
@@ -2624,13 +4100,27 @@ export class DesignerView {
         edge.style.top = `${Math.max(0, strung - 1)}px`;
 
         if (first) {
+          // The body IS the page, so it wears the page's identity: a press on it selects the
+          // page the way a press on the form's ground selects the form, a drop on it lands in
+          // that page, and the selection has something to dress. It is a `.dc` for all three
+          // of those reasons and takes no geometry from the class - a Page is placed by its
+          // MultiPage, not by coordinates.
           const body = document.createElement("div");
-          body.className = "dc-page-body";
+          body.className = "dc dc-Page dc-page-body";
+          body.dataset.control = first.name;
+          body.dataset.kind = "Page";
+          body.title = `${first.name} (Page)`;
           body.style.top = `${strung}px`;
           if (flank > 0) {
             body.style.left = `${flank}px`;
             body.style.right = `${flank}px`;
             body.style.bottom = `${flank}px`;
+          }
+
+          // The open PAGE's own picture, which is the page's rather than the MultiPage's: each
+          // page carries one, and the one showing is the one drawn.
+          if (first.picture) {
+            paintPictureSurface(body, first.picture);
           }
 
           box.appendChild(body);
@@ -2671,7 +4161,13 @@ export class DesignerView {
       }
 
       case "Image": {
-        // A crossed box: the honest "an image lives here" without pretending to know it.
+        // The picture itself since 2026-08-16, where there is one to draw - and it replaces the
+        // stylesheet's crossed box, which is what "nothing to draw" looks like. Without one the
+        // cross stands: the honest "an image lives here" without pretending to know it.
+        if (row.picture) {
+          paintPictureSurface(box, row.picture);
+        }
+
         break;
       }
 
@@ -2680,6 +4176,13 @@ export class DesignerView {
           box.appendChild(document.createTextNode(caption));
         }
         break;
+    }
+
+    // A picture that sits WITH a caption - on a button, a Label, a check box - rather than
+    // being the control's whole face. The surface kinds handled their own above, because each
+    // paints on a different part of itself.
+    if (row.picture && !SURFACE_PICTURE_TYPES.has(row.type)) {
+      dressWithPicture(box, row.picture);
     }
 
     // A type outside the toolbox keeps its identity visible: honest bounds, named kind.
@@ -2767,6 +4270,7 @@ export class DesignerView {
     this.unwatchApplied();
     this.unwatchLint();
     this.unwatchApplySave();
+    this.unwatchVocabulary();
     this.unwatchSettings();
     this.toolboxEdges.dispose();
     this.editor.dispose();
@@ -2779,3 +4283,4 @@ const KNOWN_TYPES = new Set([
   "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton",
   "Frame", "CommandButton", "TabStrip", "MultiPage", "Page", "ScrollBar", "SpinButton", "Image",
 ]);
+

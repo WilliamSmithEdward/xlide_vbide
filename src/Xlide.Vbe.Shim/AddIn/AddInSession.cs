@@ -177,7 +177,7 @@ internal sealed partial class AddInSession : IDisposable
             // Timed because the plan's cost decides what is worth moving off this thread, and a
             // guess about which half is slow is how the wrong half gets optimised.
             var readingAt = System.Diagnostics.Stopwatch.StartNew();
-            var live = ModuleSyncService.ReadLiveModules(target);
+            var live = ModuleSyncService.ReadLiveModules(target, _controlDefaults);
             Log.Verbose($"sync: read {live.Count} module(s) from the editor in {readingAt.ElapsedMilliseconds}ms");
 
             inputs = new SyncInputs(
@@ -244,6 +244,32 @@ internal sealed partial class AddInSession : IDisposable
             : ModuleSync.PlanExport(
                 inputs.ProjectId, inputs.DisplayName, inputs.Folder, inputs.Live, onDisk,
                 ModuleSync.ExportModeFrom(inputs.Mode)));
+
+        // A FORM'S DESIGN is this product's own row, and the SHARED planner cannot know about it:
+        // the markup belongs to xlide_vbide and the companion editor has never heard of it. So the
+        // rows are added to whichever plan came back, from the one implementation Core holds.
+        if (shared is not null)
+        {
+            var designs = inputs.Importing
+                ? ModuleSync.DesignRowsForImport(inputs.Live, onDisk)
+                : ModuleSync.DesignRowsForExport(
+                    inputs.Live, onDisk.ToDictionary(one => one.FileName, StringComparer.OrdinalIgnoreCase));
+
+            if (designs.Count > 0)
+            {
+                plan = new SyncPlan
+                {
+                    Direction = plan.Direction,
+                    ProjectId = plan.ProjectId,
+                    ProjectName = plan.ProjectName,
+                    Folder = plan.Folder,
+                    ExportMode = plan.ExportMode,
+                    ImportMode = plan.ImportMode,
+                    Items = [.. plan.Items, .. designs],
+                    Warnings = plan.Warnings,
+                };
+            }
+        }
 
         Log.Verbose($"sync: worked out {plan.Items.Count} row(s) in {planningAt.ElapsedMilliseconds}ms"
             + $" ({(shared is null ? "built in" : "shared")})");
@@ -318,7 +344,7 @@ internal sealed partial class AddInSession : IDisposable
                         SyncJsonContext.Default.SyncErrorReply);
                 }
 
-                var live = ModuleSyncService.ReadLiveModules(syncTarget);
+                var live = ModuleSyncService.ReadLiveModules(syncTarget, _controlDefaults);
                 var displayName = DisplayFromProjectId(syncProjectId) ?? syncProjectId;
 
                 // WHICH PLANNER, and only the planner.
@@ -885,6 +911,11 @@ internal sealed partial class AddInSession : IDisposable
     {
         _editor = editor;
         _addIn = addIn;
+
+        // The inventory reads each bare control's type library through the panel's own reader, so
+        // a class is walked once for both. A field initializer cannot say this - it may not name
+        // another field - which is the only reason it is here.
+        _controlDefaults = new ControlDefaults(_propertyTypes);
     }
 
     /// <summary>Automation object for the editor itself.</summary>
@@ -1174,6 +1205,8 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.FormMarkupRequested = PublishFormMarkup;
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
         _editorSurface.DesignerEventStubRequested = OnDesignerEventStub;
+        _editorSurface.DesignerZOrderRequested = OnDesignerZOrder;
+        _editorSurface.DesignerSetPropertyRequested = OnDesignerSetProperty;
         _editorSurface.DesignerSelectionRequested = (module, project, control) =>
             _editorSurface?.RunOnHostThread(() =>
             {
@@ -1204,17 +1237,23 @@ internal sealed partial class AddInSession : IDisposable
 
             _editorSurface?.PublishFormMarkupLint(module, project, Core.Forms.FormMarkup.Lint(markup), draft);
         };
+        _editorSurface.FormMarkupVocabularyRequested = (module, project) =>
+            _editorSurface?.RunOnHostThread(() => PublishFormMarkupVocabulary(module, project));
         _editorSurface.PanelChanged = OnPanelChanged;
         _editorSurface.MenuRequested = OnMenuRequested;
         _editorSurface.MenuExecuteRequested = OnMenuExecuteRequested;
         _editorSurface.PropertyEditRequested = OnPropertyEdit;
+        _editorSurface.PicturePickRequested = OnPicturePick;
         _editorSurface.ComponentSelected = OnComponentSelected;
         // The tab's X does not read the outcome: it sees its tab go, or sees the question. The
         // debug api's caller has neither, so the method answers and this discards.
         _editorSurface.ModuleCloseRequested = (component, project, action, face) =>
         {
-            // A designer tab holds no unsaved text of its own (unapplied markup lives in the
-            // page and the page asks its own question), so closing one is unconditional.
+            // A designer tab's unapplied edits live in the PAGE, so nothing here can know to
+            // hold the close - and the page asks its own question before sending one, which it
+            // did not until 2026-08-16 (this comment claimed it did; the hunt found the claim
+            // false and a Ctrl+W losing three moves with nothing said). By the time a close for
+            // a designer tab arrives here it has been answered, so it is unconditional.
             if (face == "design")
             {
                 CloseDesignerTab(component, project);
@@ -1297,6 +1336,7 @@ internal sealed partial class AddInSession : IDisposable
             _lastModulesKey = null;
             _lastLanguageFactsKey = null;
             _editorSurface?.ShowInstallPath(Interop.ShimModule.Directory);
+            _editorSurface?.ShowSystemColours();
             _hostChrome ??= HostChrome.Install(CodePaneTracker.MainWindow(), Interop.ShimModule.Directory);
             PublishModules();
             PublishProjects();
@@ -3389,11 +3429,34 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>
     /// What each control KIND holds untouched, measured once per kind from a bare instance of
-    /// its coclass. The inventory the markup projection will compare against to print only what
-    /// a developer changed; readable today through `defaults?type=`, which is how the claim gets
-    /// checked before anything depends on it.
+    /// its coclass, and what each of those properties means. The inventory the markup projection
+    /// will compare against to print only what a developer changed, and the vocabulary the markup
+    /// tab's completions and hovers answer from; readable through `defaults?type=` and
+    /// `vocabulary`, which is how the claims get checked before anything depends on them.
     /// </summary>
-    private readonly ControlDefaults _controlDefaults = new();
+    private readonly ControlDefaults _controlDefaults;
+
+    /// <summary>
+    /// The markup language's vocabulary, sent to the page for its completions and hovers. Measured
+    /// from coclasses and type libraries, so the only per-form part is the Form entry itself - the
+    /// module names the live form that describes it.
+    /// </summary>
+    private void PublishFormMarkupVocabulary(string module, string? projectDisplay)
+    {
+        try
+        {
+            using var component = FindComponent(
+                module, ProjectIdFromDisplay(projectDisplay) ?? _shownProject, out _);
+            _editorSurface?.PublishFormMarkupVocabulary(
+                FormMarkupVocabulary.Of(_controlDefaults, _propertyTypes, component));
+        }
+        catch (Exception ex)
+        {
+            // A vocabulary that cannot be read leaves the tab's completions empty, which is the
+            // surface this product had yesterday - not a reason to take the tab down.
+            Log.Info($"markup vocabulary: {module} could not be described ({ex.GetType().Name}: {ex.Message.Trim()})");
+        }
+    }
 
     private void PublishProperties()
     {
@@ -3438,9 +3501,11 @@ internal sealed partial class AddInSession : IDisposable
             var componentType = found.GetInt32("Type");
             var count = properties.GetInt32("Count");
 
-            // What the values MEAN, from the type library of the thing that owns them.
+            // What the values MEAN, from the type library of the thing that owns them - and what
+            // the library says is not the developer's business, which is how the panel knows to
+            // leave a row out rather than draw it as "[object]".
             using var typed = TypeSourceOf(found, target, foundIn);
-            var shapes = typed is null ? null : _propertyTypes.Of(typed);
+            var described = typed is null ? null : _propertyTypes.Describe(typed);
 
             // Names first, values second. Enumerating names runs nothing; it is the value reads
             // that must be limited to what is known to be safe.
@@ -3501,20 +3566,70 @@ internal sealed partial class AddInSession : IDisposable
                     continue;
                 }
 
+                // A leading underscore is a library's own business, the same rule the Object
+                // Browser and the defaults walk already keep - `_Font_Reserved` is nobody's
+                // property. So is anything the library marks hidden or restricted.
+                PropertyTypes.Described? meaning = null;
+                described?.TryGetValue(name, out meaning);
+                if (name.StartsWith('_') || meaning is { Hidden: true })
+                {
+                    continue;
+                }
+
                 using var property = properties.GetItem(name);
                 if (property is null)
                 {
                     continue;
                 }
 
-                var shownName = componentType != DocumentComponent
-                    && string.Equals(name, "Name", StringComparison.OrdinalIgnoreCase)
-                    ? "(Name)"
-                    : name;
+                var isCodeName = componentType != DocumentComponent
+                    && string.Equals(name, "Name", StringComparison.OrdinalIgnoreCase);
+                var shownName = isCodeName ? "(Name)" : name;
 
-                PropertyTypes.Shape? shape = null;
-                shapes?.TryGetValue(name, out shape);
-                entries.Add(DescribeProperty(shownName, property, shape));
+                // The code name is the VBE's, not the designer library's, so the library has no
+                // say in whether it can be written: it is the rename gesture, and it stays.
+                var row = DescribeProperty(shownName, property, isCodeName ? null : meaning);
+
+                // AN OBJECT IS NOT A VALUE, and a row that says so helps nobody (the owner,
+                // 2026-08-16: "what about properties that say [object]?"). A FONT is the one
+                // object this panel serves as its parts, the way the control rows do, and a
+                // PICTURE is the one it serves as itself. The rest go: `Controls` and
+                // `ActiveControl` are runtime state the native panel does not show either.
+                if (row.Value == ObjectValue)
+                {
+                    // The object comes from the DESIGNER, not from the VBE property wrapper
+                    // around it: a Property's own `Value` hands back a font this side cannot
+                    // read through, where the designer answers the same font the control rows
+                    // read - and the same picture the canvas paints.
+                    if (string.Equals(name, "Font", StringComparison.OrdinalIgnoreCase)
+                        && typed is not null)
+                    {
+                        using var font = typed.GetDispId("Font") != DispId.Unknown
+                            ? typed.GetObject("Font")
+                            : null;
+                        entries.AddRange(FontRows(font));
+                    }
+                    else if (FormDesignService.IsPictureSlot(name) && typed is not null)
+                    {
+                        entries.Add(PictureRow(typed, name));
+                    }
+
+                    continue;
+                }
+
+                // A ROW NOBODY CAN SET IS NOT A PROPERTY OF THE DESIGN (the owner, 2026-08-16:
+                // "if theyre jot settable; dint suow them"). On a UserForm that is `CanPaste`,
+                // `CanUndo` and `CanRedo` - questions about the editing session rather than
+                // about the form, which read False on a form nobody has touched and cannot be
+                // written at all - plus `InsideWidth` and `InsideHeight`, which the canvas
+                // reads for its parity but which a developer cannot type into. A panel is for
+                // setting properties, and everything left in it now can be set.
+                if (!row.Writable)
+                {
+                    continue;
+                }
+
+                entries.Add(row);
             }
 
             // Alphabetical, which puts "(Name)" first: the parenthesis sorts before any letter,
@@ -3808,33 +3923,33 @@ internal sealed partial class AddInSession : IDisposable
             try
             {
                 using var font = control.GetDispId("Font") != DispId.Unknown ? control.GetObject("Font") : null;
-                if (font is not null)
-                {
-                    if (FormDesignService.TryText(font, "Name") is { } fontName)
-                    {
-                        entries.Add(new SurfacePropertyEntry("Font.Name", fontName, true, false));
-                    }
-
-                    if (FormDesignService.TryNumber(font, "Size") is { } fontSize)
-                    {
-                        entries.Add(new SurfacePropertyEntry("Font.Size", FormDesignService.FormatNumber(fontSize), true, false));
-                    }
-
-                    if (FormDesignService.TryFlag(font, "Bold") is { } bold)
-                    {
-                        entries.Add(new SurfacePropertyEntry("Font.Bold", bold ? "True" : "False", true, true));
-                    }
-
-                    if (FormDesignService.TryFlag(font, "Italic") is { } italic)
-                    {
-                        entries.Add(new SurfacePropertyEntry("Font.Italic", italic ? "True" : "False", true, true));
-                    }
-                }
+                entries.AddRange(FontRows(font));
             }
             catch
             {
                 // A control without a font shows none.
             }
+
+            // The picture rows, where the control HAS them: an Image and a Frame carry a
+            // surface picture, a button carries one beside its caption, a Label either - and a
+            // TextBox carries none at all, so nothing is offered on one.
+            foreach (var slot in new[] { "Picture", "MouseIcon" })
+            {
+                if (control.GetDispId(slot) != DispId.Unknown)
+                {
+                    entries.Add(PictureRow(control, slot));
+                }
+            }
+
+            // How the picture SITS: a surface control takes a size mode and an alignment, a
+            // caption control a position relative to its caption, and `Named` adds nothing to a
+            // control that has neither. Offered whether or not a picture is loaded, because that
+            // is what the FORM's panel does one method over and what the native window does -
+            // they are settings about pictures, not about this picture.
+            Named("PictureSizeMode");
+            Named("PictureAlignment");
+            Named("PicturePosition");
+            Flag("PictureTiling");
 
             FormDesignService.KeepDesignerDown(component);
 
@@ -3853,15 +3968,97 @@ internal sealed partial class AddInSession : IDisposable
     /// it currently holds: values of simple types are editable, objects and the unreadable are not.
     /// The editor can still refuse an edit, and that refusal is reported when it happens.
     /// </summary>
-    private static SurfacePropertyEntry DescribeProperty(
-        string shownName, DispatchObject property, PropertyTypes.Shape? shape)
+    /// <summary>
+    /// A font as the panel shows one: its parts, each a row a developer can edit, because a font
+    /// is the one object-valued property this panel can serve. Both panels build them here - the
+    /// control's, and now the component's - so a form's font rows and a button's are the same
+    /// rows rather than two lists that agree today.
+    /// </summary>
+    /// <summary>
+    /// The sizes a font list offers. This one is WRITTEN DOWN rather than measured, unlike the
+    /// faces beside it and unlike everything else in this panel: a point size is a number, not a
+    /// capability, so there is nothing to ask the machine. It is the ramp every office
+    /// application offers, and the row still takes any number typed into it.
+    /// </summary>
+    private static readonly string[] FontSizes =
+        ["8", "9", "10", "11", "12", "14", "16", "18", "20", "22", "24", "28", "36", "48", "72"];
+
+    private static List<SurfacePropertyEntry> FontRows(DispatchObject? font)
     {
+        var rows = new List<SurfacePropertyEntry>(4);
+        if (font is null)
+        {
+            return rows;
+        }
+
+        if (FormDesignService.TryText(font, "Name") is { } fontName)
+        {
+            // The machine's own faces, offered beside the field rather than instead of it (the
+            // owner, 2026-08-16: "should font be a drop down selector for all properties?"). The
+            // row keeps taking free text, because MSForms stores a face as a string and a form
+            // written elsewhere may name a font this machine has never had.
+            rows.Add(new SurfacePropertyEntry(
+                "Font.Name", fontName, true, false, [.. InstalledFonts.All]));
+        }
+
+        if (FormDesignService.TryNumber(font, "Size") is { } fontSize)
+        {
+            rows.Add(new SurfacePropertyEntry(
+                "Font.Size", FormDesignService.FormatNumber(fontSize), true, false, FontSizes));
+        }
+
+        if (FormDesignService.TryFlag(font, "Bold") is { } bold)
+        {
+            rows.Add(new SurfacePropertyEntry("Font.Bold", bold ? "True" : "False", true, true));
+        }
+
+        if (FormDesignService.TryFlag(font, "Italic") is { } italic)
+        {
+            rows.Add(new SurfacePropertyEntry("Font.Italic", italic ? "True" : "False", true, true));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// A picture as the panel shows one: what it HOLDS in the native designer's own words
+    /// (`(None)`, `(Bitmap)`, `(Icon)`, `(Metafile)`) and the picture itself as a thumbnail
+    /// where there are pixels to show. Writable, because the row's Browse is the write - a
+    /// picture is chosen from a file rather than typed.
+    /// </summary>
+    private static SurfacePropertyEntry PictureRow(DispatchObject owner, string property)
+    {
+        using var picture = PictureBytes.PictureOn(owner, property);
+        return new SurfacePropertyEntry(
+            property, PictureBytes.Describe(picture), true, false, null, null,
+            true, picture is null ? null : PictureBytes.DataUriOf(picture));
+    }
+
+    /// <summary>What a VBE Property whose value is an object reads as, which is the signal the
+    /// panel drops the row on.</summary>
+    private const string ObjectValue = "[object]";
+
+    private static SurfacePropertyEntry DescribeProperty(
+        string shownName, DispatchObject property, PropertyTypes.Described? meaning)
+    {
+        var shape = meaning is null || (meaning.Members is null && !meaning.Colour)
+            ? null
+            : new PropertyTypes.Shape(meaning.Members, meaning.Colour);
+
         try
         {
             var (kind, display) = property.ReadProperty("Value");
-            var writable = kind is VarEnum.VT_BSTR or VarEnum.VT_BOOL
+
+            // WRITABLE is a fact about the type, not about the value that came back. The variant
+            // rule below was all this had, and it reads `CanPaste` as an editable Boolean - it is
+            // a Boolean, and it has no setter (the owner, 2026-08-16, on the rows that say
+            // "[object]"; this is the same defect one row over). The library's own PUT is the
+            // answer where there is a library; the variant rule stays as the fallback for a
+            // component whose type nothing here can reach.
+            var takesAValue = kind is VarEnum.VT_BSTR or VarEnum.VT_BOOL
                 or VarEnum.VT_I2 or VarEnum.VT_I4 or VarEnum.VT_INT
                 or VarEnum.VT_R4 or VarEnum.VT_R8 or VarEnum.VT_EMPTY;
+            var writable = takesAValue && (meaning is null || meaning.Settable);
 
             // The value as the developer WRITES it - fmCycleAllForms rather than 0, &H8000000F&
             // rather than -2147483633 - with the enum's members offered as the row's choices,
@@ -3944,6 +4141,26 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
+            // A PICTURE is a file rather than a value, so it goes through the designer service -
+            // the one place that knows a path becomes an IPictureDisp, and the same call the
+            // control rows and the api route make.
+            if (FormDesignService.IsPictureSlot(name))
+            {
+                using var designer = found.GetObject("Designer");
+                if (designer is null)
+                {
+                    _editorSurface?.Notify($"{component} has no designer to write a picture to");
+                    return;
+                }
+
+                var held = FormDesignService.SetControlProperty(found, designer, null, name, value, null);
+                FormDesignService.KeepDesignerDown(found);
+                Log.Info($"properties: {component}.{name} is {held}");
+                RefreshDesignerTabFor(component);
+                PublishProperties();
+                return;
+            }
+
             using var properties = found.GetObject("Properties");
             using var property = properties?.GetItem(name);
             if (property is null)
@@ -4005,6 +4222,55 @@ internal sealed partial class AddInSession : IDisposable
             PublishProperties();
         }
     }
+
+    /// <summary>
+    /// Browse, on a picture row: the machine's own file dialog, and then the ordinary property
+    /// edit with the path it answered.
+    ///
+    /// The dialog is the HOST's because a page cannot raise one that hands back a path - the same
+    /// reason the sync dialog's folder button asks this side. It is modal to the editor's own
+    /// window, so it cannot end up behind what the developer is looking at, and closing it
+    /// without choosing writes nothing at all.
+    /// </summary>
+    private void OnPicturePick(string component, string property)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        surface.RunOnHostThread(() =>
+        {
+            var chosen = FilePicker.Choose(
+                CodePaneTracker.MainWindow(),
+                $"Choose a picture for {property}",
+                // The kinds OleLoadPicturePath reads, which is the set the native designer's own
+                // dialog offers. Listed apart as well as together, because a developer looking
+                // for one icon among four hundred bitmaps wants the list narrowed.
+                [
+                    ("Pictures", "*.bmp;*.dib;*.gif;*.jpg;*.jpeg;*.png;*.ico;*.cur;*.wmf;*.emf"),
+                    ("Bitmaps", "*.bmp;*.dib"),
+                    ("Icons", "*.ico;*.cur"),
+                    ("Metafiles", "*.wmf;*.emf"),
+                    ("All files", "*.*"),
+                ],
+                _lastPictureFolder);
+
+            if (chosen is null)
+            {
+                return;
+            }
+
+            // Where they were last, so the next picture is chosen from the same folder rather
+            // than from wherever the dialog would open on its own.
+            _lastPictureFolder = Path.GetDirectoryName(chosen);
+            OnPropertyEdit(component, property, chosen);
+        });
+    }
+
+    /// <summary>The folder the last picture came from, so the dialog opens there again. Session
+    /// state rather than a setting: it follows the work, and nothing should outlive the session.</summary>
+    private string? _lastPictureFolder;
 
     /// <summary>
     /// Writes a value into a property in the type the property holds now. False with a complaint
@@ -4950,10 +5216,8 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// An open designer tab follows every xlide-side change to its form: the designer routes
     /// funnel through here after a successful mutation and the tab re-projects, which is what
-    /// keeps the markup and the visual current without anyone re-activating the tab. Native
-    /// -side edits have no event to hook - and the native designer window stays DOWN in this
-    /// product, so the only edits outside this funnel are a poll-fingerprint concern for the
-    /// liveness milestone (docs/userform-designer.md).
+    /// keeps the markup and the visual current without anyone re-activating the tab. What comes
+    /// from OUTSIDE the funnel is caught by the fingerprint below instead.
     /// </summary>
     private void RefreshDesignerTabFor(string moduleName)
     {
@@ -4961,8 +5225,126 @@ internal sealed partial class AddInSession : IDisposable
             string.Equals(t.Module, moduleName, StringComparison.OrdinalIgnoreCase));
         if (tab != default)
         {
+            // The tab now shows whatever the form holds, so the liveness key is stale by
+            // definition. Forgotten rather than recomputed: the next check re-seeds it silently,
+            // where a stale one would report this product's own edit as somebody else's.
+            _designerFingerprints.Remove(moduleName);
             PublishFormMarkup(tab.Module, DisplayFromProjectId(tab.ProjectId));
+
+            // AND THE PANEL IS THE OTHER HALF OF THE SAME PICTURE. A control removed through the
+            // api left the panel describing it - name, geometry, font and all - because only the
+            // TAB was re-projected (found in the 2026-08-16 hunt). The panel's own publish
+            // already falls back to the form when the control it is aimed at is gone, so this
+            // needs to ask it rather than to duplicate the check.
+            if (_propertiesControl is { Length: > 0 }
+                && string.Equals(_propertiesTarget, moduleName, StringComparison.OrdinalIgnoreCase))
+            {
+                PublishProperties();
+            }
         }
+    }
+
+    /// <summary>
+    /// The last cheap key each open designer tab's form answered, so an edit made OUTSIDE this
+    /// product's funnel can be noticed. Keyed by module name, the same key the tabs are.
+    /// </summary>
+    private readonly Dictionary<string, string> _designerFingerprints = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>When the liveness check last ran, and the shortest gap between two of them.</summary>
+    private long _lastDesignerCheck;
+
+    private const int DesignerCheckFloorMilliseconds = 500;
+
+    /// <summary>
+    /// Asks whether a form changed behind the product's back, and re-projects the tab if it did.
+    ///
+    /// THE ONE EDIT THE FUNNEL CANNOT SEE. Every designer mutation xlide makes re-projects its
+    /// tab; a change made in the native designer underneath goes round all of it, and no event in
+    /// the object model announces one - a form has no revision counter the way a code pane does.
+    /// So it is ASKED, and the question has to be cheap enough and rare enough to be free.
+    ///
+    /// RARE: this runs on a window appearing or going, which is what the pane tracker already
+    /// refreshes on, and NOT on a move, which is the event a resize drag fires thousands of. A
+    /// native designer session is bracketed by exactly those events - the window is shown, edited,
+    /// and hidden or destroyed - so the closing bracket is where an outside edit is caught. What
+    /// is deliberately NOT covered: an edit made while the xlide tab is on screen, which cannot
+    /// happen, because the surface covers the frame the native designer would draw in.
+    ///
+    /// CHEAP: the key is each control's name and bounds, nothing else - see FingerprintOf - so a
+    /// check is about half a projection and only pays for a re-projection when it differs. With
+    /// no designer tab open it costs one dictionary lookup and returns.
+    /// </summary>
+    private void CheckDesignerTabsForOutsideEdits() => CheckDesignerTabsForOutsideEdits(false);
+
+    /// <summary>
+    /// The check, with the floor optionally stood down - which is what an api caller wants: a
+    /// probe asking "is the tab current" must not be told "checked half a second ago".
+    /// Answers the modules it found changed.
+    /// </summary>
+    internal List<string> CheckDesignerTabsForOutsideEdits(bool now)
+    {
+        var stale = new List<string>();
+        if (_designerTabs.Count == 0 || _stopped)
+        {
+            return stale;
+        }
+
+        // A FLOOR BETWEEN CHECKS, because these events arrive in bursts: a tooltip appearing and
+        // dying is two of them, and a menu opening is several. Half a second means a burst costs
+        // one check, and it costs nothing that matters to the thing being watched - a native
+        // designer session lasts seconds at least, and its closing bracket is what catches it.
+        var at = Environment.TickCount64;
+        if (!now && at - _lastDesignerCheck < DesignerCheckFloorMilliseconds)
+        {
+            return stale;
+        }
+
+        _lastDesignerCheck = at;
+
+        foreach (var tab in _designerTabs.ToArray())
+        {
+            try
+            {
+                using var component = FindComponent(tab.Module, tab.ProjectId, out _);
+                using var designer = component?.GetObject("Designer");
+                if (component is null || designer is null)
+                {
+                    continue;
+                }
+
+                var shape = FormDesignService.FingerprintOf(designer);
+                FormDesignService.KeepDesignerDown(component);
+                if (shape is null)
+                {
+                    // A form that would not answer is not a form that changed. Treating a failed
+                    // read as a difference would re-project for ever on a form mid-teardown.
+                    continue;
+                }
+
+                if (_designerFingerprints.TryGetValue(tab.Module, out var before) && before == shape)
+                {
+                    continue;
+                }
+
+                _designerFingerprints[tab.Module] = shape;
+                if (before is not null)
+                {
+                    Log.Info($"designer: {tab.Module} changed outside xlide, re-projecting its tab");
+                    stale.Add(tab.Module);
+
+                    // The key is put back AFTER the refresh, which forgets it: this check already
+                    // knows the answer, and re-seeding it here saves the next check a walk.
+                    RefreshDesignerTabFor(tab.Module);
+                    _designerFingerprints[tab.Module] = shape;
+                }
+            }
+            catch (Exception why)
+            {
+                Log.Verbose($"designer: {tab.Module} would not answer a liveness check ({why.Message.Trim()})");
+            }
+        }
+
+        return stale;
     }
 
     /// <summary>
@@ -4971,6 +5353,93 @@ internal sealed partial class AddInSession : IDisposable
     /// gesture. The form's own handlers answer to "UserForm" whatever the form is called,
     /// which is VBA's convention rather than ours.
     /// </summary>
+    /// <summary>
+    /// Bring to Front / Send to Back from the canvas: MSForms' own ZOrder, on the model.
+    ///
+    /// The one canvas gesture that does NOT write the document, because the dialect cannot say
+    /// what it does: the Controls collection a projection walks is not in z-order and does not
+    /// move when ZOrder is called (measured 2026-08-16, proved on the running form by two
+    /// overlapping labels swapping which was on top). So this is a property-panel-shaped edit -
+    /// straight at the model, effective at once, no Ctrl+S in between - and the canvas cannot
+    /// draw the result, which is recorded rather than papered over.
+    /// </summary>
+    private void OnDesignerZOrder(string moduleName, string? projectDisplay, string controlName, bool toFront)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out _);
+                using var designer = component?.GetObject("Designer");
+                if (component is null || designer is null)
+                {
+                    surface.Notify($"{moduleName} has no designer to reorder");
+                    return;
+                }
+
+                if (!FormDesignService.ZOrderControl(designer, controlName, toFront))
+                {
+                    surface.Notify($"no control named {controlName} on {moduleName}");
+                    return;
+                }
+
+                FormDesignService.KeepDesignerDown(component);
+                surface.Notify($"{controlName} moved to the {(toFront ? "front" : "back")}");
+                Log.Info($"designer: {controlName} to the {(toFront ? "front" : "back")} on {moduleName}");
+            }
+            catch (Exception why)
+            {
+                surface.Notify($"{controlName} could not be reordered ({why.Message.Trim()})");
+            }
+        });
+    }
+
+    /// <summary>
+    /// One property of one control, written from a designer surface - today the tab-order dialog,
+    /// whose Move Up is a TabIndex write and nothing else. It goes through the same
+    /// SetControlProperty the Properties panel and the api route use, so a reorder cannot be a
+    /// third way of writing a control's property, and the open tab re-projects afterwards.
+    /// </summary>
+    private void OnDesignerSetProperty(
+        string moduleName, string? projectDisplay, string controlName, string property, string value)
+    {
+        if (_editorSurface is not { } surface)
+        {
+            return;
+        }
+
+        var projectId = ProjectIdFromDisplay(projectDisplay) ?? _shownProject;
+        surface.RunOnHostThread(() =>
+        {
+            try
+            {
+                using var component = FindComponent(moduleName, projectId, out _);
+                using var designer = component?.GetObject("Designer");
+                if (component is null || designer is null)
+                {
+                    surface.Notify($"{moduleName} has no designer to write to");
+                    return;
+                }
+
+                var shown = FormDesignService.SetControlProperty(
+                    component, designer, controlName, property, value, null);
+                FormDesignService.KeepDesignerDown(component);
+                Log.Info($"designer: {controlName}.{property} is {shown} on {moduleName}");
+                RefreshDesignerTabFor(moduleName);
+            }
+            catch (Exception why)
+            {
+                surface.Notify($"{controlName}.{property} refused the write ({why.Message.Trim()})");
+            }
+        });
+    }
+
     private void OnDesignerEventStub(string moduleName, string? projectDisplay, string? controlName)
     {
         if (_editorSurface is not { } surface)
@@ -5158,8 +5627,41 @@ internal sealed partial class AddInSession : IDisposable
 
                 // ONE walk feeds both halves of the designer tab: the text is Print of the
                 // spec the visual renders, so they cannot describe two moments of the form.
-                var spec = FormDesignService.SpecOf(component, moduleName, out var reason);
-                var markup = spec is null ? null : Core.Forms.FormMarkup.Print(spec);
+                var spec = FormDesignService.SpecOf(component, moduleName, out var reason, _controlDefaults);
+
+                /*
+                 * A FORM MID-TEARDOWN ANSWERS "HAS NO DESIGNER", and the reason used to go
+                 * straight onto the canvas and stay there (the owner, 2026-08-16: "sometimes I
+                 * see an overlay that says entryform2 has no designer" - EntryForm2 being a
+                 * suite's form, removed while its tab was open).
+                 *
+                 * The component is still in the collection for a moment after a Remove, so the
+                 * corpse check above does not catch it; what the walk finds is a component whose
+                 * Designer will not answer. That is indistinguishable HERE from the first-touch
+                 * flake the suite has a row for, so it is asked once more before being believed:
+                 * a form that is going answers the same way twice and its tab is collected, and
+                 * a form that was merely slow answers properly the second time and nothing is
+                 * said at all.
+                 */
+                if (spec is null)
+                {
+                    using var again = FindComponent(moduleName, projectId, out var stillOwned);
+                    spec = again is null
+                        ? null
+                        : FormDesignService.SpecOf(again, moduleName, out reason, _controlDefaults);
+
+                    if (spec is null)
+                    {
+                        Log.Info($"form markup: {moduleName} would not project twice ({reason}); collecting its tab");
+                        surface.PublishFormMarkup(moduleName, projectDisplay, null, reason);
+                        CloseDesignerTab(moduleName, projectDisplay);
+                        return;
+                    }
+
+                    owner = stillOwned ?? owner;
+                }
+
+                var markup = Core.Forms.FormMarkup.Print(spec);
                 Log.Info($"form markup: publishing {moduleName}, {(markup?.Length ?? 0)} char(s), "
                     + $"{spec?.Controls.Count ?? 0} control(s){(reason is null ? "" : $" ({reason})")}");
                 surface.PublishFormMarkup(moduleName, DisplayFromProjectId(owner ?? projectId), markup, reason, spec);
@@ -8029,6 +8531,14 @@ internal sealed partial class AddInSession : IDisposable
 
             Log.Info($"project: removed {removed}" + (owner is null ? string.Empty : $" from {owner}"));
 
+            // A FORM'S DESIGNER TAB GOES WITH THE FORM. Nothing collected it here, so a removed
+            // form left its tab standing over a canvas describing something that no longer
+            // exists - and the next request for it published a reason onto the canvas instead
+            // ("EntryForm2 has no designer", reported by the owner 2026-08-16, which is what a
+            // form mid-teardown answers). The collector already exists for the case where a
+            // request FINDS OUT; a removal knows, so it says so.
+            CloseDesignerTab(removed, owner);
+
             // The strip, the tree, the analyzer and the Properties panel, the same four that an
             // insert has to tell. The panel used to be cleared by hand right here, which covered
             // this route and no other: PublishProperties drops a missing aim itself now, so a
@@ -8834,6 +9344,8 @@ internal sealed partial class AddInSession : IDisposable
                 _pollsRemaining = Math.Max(_pollsRemaining, (int)(1_000 / DebugPollMilliseconds));
                 UpdatePolling();
             };
+
+            _codePanes.SurfaceStirred = CheckDesignerTabsForOutsideEdits;
 
             _codePanes.Start();
         }

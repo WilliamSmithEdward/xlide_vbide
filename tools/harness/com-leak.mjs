@@ -359,6 +359,17 @@ await repeat("building, reading and removing a form", 0, async () => {
   await wait(400);
 }, changing);
 
+// The markup language's vocabulary creates a BARE INSTANCE of every control coclass and walks
+// each one's type library - fourteen objects this door MAKES rather than borrows, which is a
+// shape nothing else here covers. Named without a module on purpose: the Form entry's designer
+// walk is the row above's business, and this one is about the instances. They are cached per
+// kind, so the rounds after the first create nothing at all, and the row asks both halves of the
+// question - did the first round give its instances back, and does asking again cost anything
+// (route new 2026-08-16).
+await repeat("reading the markup vocabulary", 0, async () => {
+  await api.markupVocabulary();
+}, changing);
+
 await repeat("changing a setting", 0, async () => {
   const was = (await api.settings()).formatIndentSize;
   await api.settings({ formatIndentSize: was === 4 ? 2 : 4 });

@@ -476,7 +476,8 @@ function clientFor(entry) {
      * work the object model cannot give - MSForms draws its controls windowless, and the
      * designer's own collection describes the STORED form rather than the one on screen.
      */
-    capture: (window, caption) => call(`capture${query({ window, caption })}`, { raw: true, timeout: 20000 }),
+    capture: (window, caption, { selector, pad } = {}) =>
+      call(`capture${query({ window, caption, selector, pad })}`, { raw: true, timeout: 20000 }),
 
     command: (name) => call(`command${query({ name })}`, { method: "POST" }),
     placement: () => call("placement", { method: "POST" }),
@@ -584,8 +585,8 @@ function clientFor(entry) {
      * reaches an object-valued property's member: `property: "Font.Bold"`. `as` (text, number,
      * flag) overrides the value heuristic - a caption of "123" wants as=text.
      */
-    designerEdit: (action, { module, project, type, name, parent, left, top, width, height, property, value, as } = {}) =>
-      call(`designer${query({ action, module, project, type, name, parent, left, top, width, height, property, value, as })}`,
+    designerEdit: (action, { module, project, type, name, parent, left, top, width, height, property, value, as, to } = {}) =>
+      call(`designer${query({ action, module, project, type, name, parent, left, top, width, height, property, value, as, to })}`,
         { method: "POST" }),
 
     /**
@@ -604,6 +605,18 @@ function clientFor(entry) {
      * coclass will not come up, answers zero properties rather than a guess.
      */
     controlDefaults: (type) => call(`defaults${query({ type })}`),
+
+    /**
+     * The markup language's whole vocabulary: every kind a document can name, its ProgID,
+     * whether it holds children, and every property it offers - with the type it takes, what an
+     * untouched control holds, the type library's own sentence about it, and its enum's members.
+     *
+     * This is exactly the table the designer tab's completions and hovers answer from, which is
+     * what makes it worth reading: a suite can compare what the page offers against what the
+     * host measured rather than against a list written down twice. A module names a live form so
+     * the Form's own entry can be described; without one every other kind still answers.
+     */
+    markupVocabulary: (module, project) => call(`vocabulary${query({ module, project })}`),
 
     /**
      * Applies a markup document to the live form as a NAME-KEYED DIFF: controls only in the
@@ -1293,6 +1306,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         : { module: rest[1], project: rest[2], answer: rest[3] });
       // xlide-api.mjs defaults commandButton      what one holds untouched
       case "defaults": return api.controlDefaults(rest[0]);
+      // xlide-api.mjs vocabulary EntryForm        what the markup tab completes and hovers from
+      case "vocabulary": return api.markupVocabulary(rest[0], rest[1]);
       case "outline": return api.outline(rest[0], rest[1]);
       case "caret": return api.caret(Number(rest[0] ?? 1), { module: rest[1], project: rest[2] });
       case "breakpoints": return api.breakpoints();

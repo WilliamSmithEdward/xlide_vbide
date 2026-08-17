@@ -1,6 +1,7 @@
 import * as monaco from "monaco-editor/editor/editor.api.js";
 import { DocumentStore, docKeyOf, type DocumentId } from "./documents.js";
 import type { ExplorerProject } from "./explorer.js";
+import { setSystemColours, type SystemColour } from "./colourpicker.js";
 import { setInstallPath } from "./helpdialog.js";
 import type { MenuItem } from "./menubar.js";
 import type { Shell, ShellFinding, ShellProperty } from "./shell.js";
@@ -65,12 +66,14 @@ export type HostMessage =
   | { type: "formMarkup"; moduleName: string; project?: string | null; markup: string | null; reason: string | null; form?: FormMarkupBox | null; controls?: FormMarkupControl[] | null }
   | { type: "formMarkupApplied"; moduleName: string; project?: string | null; ok: boolean; added: string[]; removed: string[]; set: number; refused?: string | null }
   | { type: "formMarkupLint"; moduleName: string; project?: string | null; findings: FormMarkupLintFinding[]; draftForm?: FormMarkupBox | null; draft?: FormMarkupControl[] | null }
+  | { type: "formMarkupVocabulary"; kinds: FormMarkupKind[] }
   | { type: "designerApplySave"; moduleName: string; project?: string | null; run?: boolean }
   | { type: "revealLine"; line: number }
   | { type: "setCaret"; line: number; column: number }
   | { type: "setMenu"; path: number[]; items: MenuItem[] }
   | { type: "setChrome"; menuBar: boolean }
   | { type: "setInstallPath"; path: string | null }
+  | { type: "setSystemColours"; colours: SystemColour[] }
   | { type: "setProperties"; component: string; kind: string; properties: ShellProperty[] }
   | { type: "completionResult"; id: number; items: HostCompletionItem[] }
   | { type: "hoverResult"; id: number; hover: HostHoverPayload | null }
@@ -131,6 +134,24 @@ export interface FormMarkupBox {
   foreColor?: string | null;
   insideWidth?: number | null;
   insideHeight?: number | null;
+  picture?: FormMarkupPicture | null;
+}
+
+/**
+ * A picture and how it sits. Display truth of the purest kind: the dialect cannot speak a
+ * picture - it is binary in the form's .frx and MSForms does not remember the file it came
+ * from - so it rides the projection or the canvas draws bounds where the developer put an image.
+ *
+ * The two placements are the two MSForms has, and a control has one or the other: a SURFACE
+ * picture (the form, an Image, a Frame, a Page) is placed by size mode, alignment and tiling; a
+ * CAPTION picture (a button, a Label, a check box) by its position around the caption.
+ */
+export interface FormMarkupPicture {
+  src: string;
+  sizeMode?: number | null;
+  alignment?: number | null;
+  tiling?: boolean | null;
+  position?: number | null;
 }
 
 /**
@@ -156,6 +177,10 @@ export interface FormMarkupControl {
   insideWidth?: number | null;
   insideHeight?: number | null;
   tabs?: string[] | null;
+  /** Where the control sits in its container's TAB ORDER - display truth, like the fonts and the
+   * client areas: the dialect prints no tab index, and the tab-order dialog reads it here. */
+  tabIndex?: number | null;
+  picture?: FormMarkupPicture | null;
 }
 
 /** A form's projection as one answer: the markup text and the spec it prints. */
@@ -178,6 +203,34 @@ export interface FormMarkupLintFinding {
 export interface FormMarkupDraft {
   form: FormMarkupBox | null;
   controls: FormMarkupControl[];
+}
+
+/**
+ * One kind the markup language knows, as the host measured it: a bare instance of its coclass,
+ * read through its own type library. The vocabulary the designer tab's completions and hovers
+ * answer from - `Form` rides here too, described from the live form rather than from a coclass.
+ */
+export interface FormMarkupKind {
+  kind: string;
+  progId: string | null;
+  container: boolean;
+  properties: FormMarkupProperty[];
+  /** What the kind is, in a line. The wording is the product's: MSForms ships no help strings. */
+  doc?: string | null;
+}
+
+/** One property a document line may set: what it takes, what an untouched control holds, what
+ * the type library says about it, and its enum's members where it has them. */
+export interface FormMarkupProperty {
+  name: string;
+  type: string | null;
+  default: string | null;
+  doc: string | null;
+  members: { name: string; value: number }[] | null;
+  colour: boolean;
+  /** Values worth offering that are not an enum's members, because the machine can be asked what
+   * they are: a font's faces. The property still takes anything typed instead. */
+  values?: string[] | null;
 }
 
 /** How an apply of the designer tab's document ended; the fresh projection follows it. */
@@ -339,12 +392,16 @@ export type ClientMessage =
   | { type: "menu"; path: number[] }
   | { type: "menuExecute"; path: number[] }
   | { type: "editProperty"; component: string; name: string; value: string }
+  | { type: "pickPicture"; component: string; name: string }
   | { type: "selectComponent"; name: string }
   | { type: "closeModule"; name: string; project?: string; action?: string; face?: string }
   | { type: "requestFormMarkup"; module: string; project?: string }
   | { type: "applyFormMarkup"; module: string; project?: string; markup: string }
   | { type: "lintFormMarkup"; module: string; project?: string; markup: string }
+  | { type: "requestFormMarkupVocabulary"; module: string; project?: string }
   | { type: "designerEventStub"; module: string; project?: string; control?: string }
+  | { type: "designerZOrder"; module: string; project?: string; control: string; front: boolean }
+  | { type: "designerSetProperty"; module: string; project?: string; control: string; property: string; value: string }
   | { type: "designerSelection"; module: string; project?: string; control?: string }
   | { type: "insertComponent"; kind: number; project?: string }
   | { type: "removeComponent"; name: string; project?: string }
@@ -657,6 +714,24 @@ export class EditorBridge {
     this.transport.post({ type: "lintFormMarkup", module, ...(project ? { project } : {}), markup });
   }
 
+  /** Asks for the markup language's vocabulary - every kind and its properties, measured. Not
+   * keyed by form: the answer is the same for every document, and the module travels only so
+   * the host can describe the Form itself from a live one. */
+  requestFormMarkupVocabulary(module: string, project: string | null): void {
+    this.transport.post({ type: "requestFormMarkupVocabulary", module, ...(project ? { project } : {}) });
+  }
+
+  /** Watches for the vocabulary; returns the unwatch. Every designer view listens, because any
+   * of them may be the one whose request is answered. */
+  onFormMarkupVocabulary(watcher: (kinds: FormMarkupKind[]) => void): () => void {
+    this.formMarkupVocabularyWatchers.add(watcher);
+    return () => {
+      this.formMarkupVocabularyWatchers.delete(watcher);
+    };
+  }
+
+  private readonly formMarkupVocabularyWatchers = new Set<(kinds: FormMarkupKind[]) => void>();
+
   /** A canvas double-click: the host writes or shows the control's default event handler.
    * A null control means the form itself. */
   designerEventStub(module: string, project: string | null, control: string | null): void {
@@ -665,6 +740,38 @@ export class EditorBridge {
       module,
       ...(project ? { project } : {}),
       ...(control ? { control } : {}),
+    });
+  }
+
+  /**
+   * Bring to Front / Send to Back: MSForms' ZOrder, on the MODEL rather than on the document.
+   *
+   * The one canvas gesture that does not go through the text, because the dialect cannot say
+   * what it does - the Controls collection a projection walks is not in z-order and does not
+   * move when ZOrder is called. So this lands like a Properties panel edit: at once, with no
+   * Ctrl+S in between.
+   */
+  designerZOrder(module: string, project: string | null, control: string, front: boolean): void {
+    this.transport.post({
+      type: "designerZOrder",
+      module,
+      ...(project ? { project } : {}),
+      control,
+      front,
+    });
+  }
+
+  /** One of a control's properties, written straight at the model through the host's own
+   * SetControlProperty - the same call the Properties panel and the api route make. The tab-order
+   * dialog is what asks: a Move Up is a TabIndex write, and MSForms renumbers the rest. */
+  designerSetProperty(module: string, project: string | null, control: string, property: string, value: string): void {
+    this.transport.post({
+      type: "designerSetProperty",
+      module,
+      ...(project ? { project } : {}),
+      control,
+      property,
+      value,
     });
   }
 
@@ -794,6 +901,12 @@ export class EditorBridge {
   /** Asks the host to write a property the developer edited. */
   editProperty(component: string, name: string, value: string): void {
     this.transport.post({ type: "editProperty", component, name, value });
+  }
+
+  /** Asks the host to raise the machine's file dialog for a picture row, and to write whatever
+   * the developer chooses. A page cannot produce a path, so this is the host's to do. */
+  pickPicture(component: string, name: string): void {
+    this.transport.post({ type: "pickPicture", component, name });
   }
 
   /** Tells the host the explorer's selection changed, which the properties panel follows. */
@@ -1228,6 +1341,13 @@ export class EditorBridge {
           message.findings,
           message.draft ? { form: message.draftForm ?? null, controls: message.draft } : null);
         return;
+      case "formMarkupVocabulary":
+        // Not keyed by form: the vocabulary is the LANGUAGE's, so every listener hears it and
+        // the first designer tab to open pays for all of them.
+        for (const watcher of this.formMarkupVocabularyWatchers) {
+          watcher(message.kinds);
+        }
+        return;
       case "designerApplySave":
         this.designerApplySaveWatchers.get(docKeyOf(message.moduleName, message.project ?? null))?.(
           message.run === true);
@@ -1250,6 +1370,11 @@ export class EditorBridge {
         return;
       case "setInstallPath":
         setInstallPath(message.path);
+        return;
+      case "setSystemColours":
+        // What this machine calls a button face today: the colour picker's System half, which
+        // only the host can answer.
+        setSystemColours(message.colours);
         return;
       case "setProperties":
         this.shell?.setProperties(message.component, message.kind, message.properties);

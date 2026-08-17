@@ -20,9 +20,10 @@ namespace Xlide.Vbe.Shim.Editor;
 internal static partial class FormDesignService
 {
     /// <summary>The form's markup, or null with a reason when the component has no designer.</summary>
-    public static string? MarkupOf(DispatchObject component, string module, out string? reason)
+    public static string? MarkupOf(
+        DispatchObject component, string module, out string? reason, ControlDefaults? defaults = null)
     {
-        var spec = SpecOf(component, module, out reason);
+        var spec = SpecOf(component, module, out reason, defaults);
         return spec is null ? null : FormMarkup.Print(spec);
     }
 
@@ -31,7 +32,8 @@ internal static partial class FormDesignService
     /// markup text is Print of this and the visual renders this, so the document and the
     /// canvas cannot disagree about a form they were read from at different moments.
     /// </summary>
-    public static FormSpec? SpecOf(DispatchObject component, string module, out string? reason)
+    public static FormSpec? SpecOf(
+        DispatchObject component, string module, out string? reason, ControlDefaults? defaults = null)
     {
         reason = null;
 
@@ -50,7 +52,11 @@ internal static partial class FormDesignService
 
         var rows = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, rows, seen, 0);
+
+        // A control's FONT is inherited from the form rather than defaulted per kind, so the
+        // walk compares against the form's own: a bare Label answers "MS Sans Serif" and every
+        // control on a Tahoma form would otherwise print a FontName it never chose.
+        Walk(designer, null, rows, seen, 0, new WalkContext(defaults, FormBaselineOf(component, designer)));
         var controls = rows.Select(row => row.Spec).ToList();
 
         // The form's own properties, from the component's Properties collection FIRST - the
@@ -64,13 +70,13 @@ internal static partial class FormDesignService
         if ((PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor")) is { } backColor
             && backColor != DefaultFormBackColor)
         {
-            properties.Add(new PropertySpec("BackColor", backColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
+            properties.Add(new PropertySpec("BackColor", backColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Colour));
         }
 
         if ((PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor")) is { } foreColor
             && foreColor != DefaultFormForeColor)
         {
-            properties.Add(new PropertySpec("ForeColor", foreColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Number));
+            properties.Add(new PropertySpec("ForeColor", foreColor.ToString(System.Globalization.CultureInfo.InvariantCulture), PropertyValueKind.Colour));
         }
 
         var spec = new FormSpec(
@@ -87,6 +93,7 @@ internal static partial class FormDesignService
         lastWalkFormFore = PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor");
         lastWalkFormInsideWidth = TryNumber(designer, "InsideWidth");
         lastWalkFormInsideHeight = TryNumber(designer, "InsideHeight");
+        lastWalkFormPicture = PictureFaceOf(designer);
         return spec;
     }
 
@@ -101,13 +108,27 @@ internal static partial class FormDesignService
     [ThreadStatic] internal static int? lastWalkFormFore;
     [ThreadStatic] internal static double? lastWalkFormInsideWidth;
     [ThreadStatic] internal static double? lastWalkFormInsideHeight;
+    [ThreadStatic] internal static PictureFace? lastWalkFormPicture;
 
     /// <summary>An OLE colour as CSS: system indexes through the live system palette, the
     /// rest as the BGR they are. The canvas paints what the machine would.</summary>
     internal static string OleColorToCss(int ole)
     {
-        var colorRef = (ole & unchecked((int)0x80000000)) != 0 ? GetSysColor(ole & 0xFF) : ole;
+        var colorRef = ColorRefOf(ole);
         return $"#{colorRef & 0xFF:x2}{(colorRef >> 8) & 0xFF:x2}{(colorRef >> 16) & 0xFF:x2}";
+    }
+
+    /// <summary>An OLE colour as plain 0x00bbggrr, system indexes resolved through the live
+    /// palette. The one place that asks "what colour IS this, on this machine, now".</summary>
+    internal static int ColorRefOf(int ole) =>
+        (ole & unchecked((int)0x80000000)) != 0 ? GetSysColor(ole & 0xFF) : ole;
+
+    /// <summary>The same colour as 0x00rrggbb, which is the order everything outside GDI wants -
+    /// GDI+'s background argument, and the RGB half of an ARGB.</summary>
+    internal static int ColorRefToRgb(int ole)
+    {
+        var colorRef = ColorRefOf(ole);
+        return ((colorRef & 0xFF) << 16) | (colorRef & 0xFF00) | ((colorRef >> 16) & 0xFF);
     }
 
     [LibraryImport("user32.dll")]
@@ -116,6 +137,85 @@ internal static partial class FormDesignService
     /// <summary>COLOR_BTNFACE and COLOR_BTNTEXT as OLE colours: what a fresh form carries.</summary>
     private const int DefaultFormBackColor = unchecked((int)0x8000000F);
     private const int DefaultFormForeColor = unchecked((int)0x80000012);
+
+    /// <summary>
+    /// A CHEAP KEY for "has this form's design changed", for the one kind of edit the liveness
+    /// funnel cannot see: one made outside this product, in the native designer underneath.
+    ///
+    /// Every mutation xlide makes re-projects the open tab, so the document and the canvas follow
+    /// an api set, a panel edit and a canvas gesture. A native edit goes round all of that, and
+    /// nothing in the object model announces one - a designer raises no event a code pane's
+    /// revision counter is the equivalent of.
+    ///
+    /// So it is asked rather than announced, and the question has to be cheap enough to ask on
+    /// the events that already fire. This reads NAME and the four bounds per control and nothing
+    /// else: no fonts, no colours, no pictures, no containers walked twice. It therefore catches
+    /// what a hand does in a designer - add, remove, rename, move, resize - and deliberately not
+    /// a property nobody can change without one of those (a colour typed into the native
+    /// Properties window is not caught, and that is a stated limit rather than an oversight).
+    ///
+    /// Null when the form cannot be read, which is not the same as "no controls": the caller must
+    /// not treat a failed read as a change, or a form mid-teardown re-projects for ever.
+    /// </summary>
+    public static string? FingerprintOf(DispatchObject designer)
+    {
+        try
+        {
+            var key = new System.Text.StringBuilder();
+            AppendFingerprint(designer, key, 0);
+            return key.ToString();
+        }
+        catch (Exception why)
+        {
+            Log.Verbose($"designer: a form would not fingerprint ({why.Message.Trim()})");
+            return null;
+        }
+    }
+
+    private static void AppendFingerprint(DispatchObject container, System.Text.StringBuilder key, int depth)
+    {
+        if (depth > 8)
+        {
+            return;
+        }
+
+        using var controls = container.GetObject("Controls");
+        if (controls is null)
+        {
+            return;
+        }
+
+        foreach (var control in ItemsOf(controls))
+        {
+            using (control)
+            {
+                key.Append(TryText(control, "Name")).Append(' ')
+                    .Append(TryNumber(control, "Left")).Append(',')
+                    .Append(TryNumber(control, "Top")).Append(' ')
+                    .Append(TryNumber(control, "Width")).Append('x')
+                    .Append(TryNumber(control, "Height")).Append(';');
+
+                // A container's children are part of its form's shape. Pages are walked through
+                // their own collection, which is the only way to reach what sits on page two.
+                if (control.GetDispId("Pages") != DispId.Unknown)
+                {
+                    using var pages = control.GetObject("Pages");
+                    foreach (var page in pages is null ? [] : ItemsOf(pages))
+                    {
+                        using (page)
+                        {
+                            key.Append(TryText(page, "Name")).Append(';');
+                            AppendFingerprint(page, key, depth + 1);
+                        }
+                    }
+                }
+                else if (control.GetDispId("Controls") != DispId.Unknown)
+                {
+                    AppendFingerprint(control, key, depth + 1);
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// The controls as the analyzer's implicit members: name plus the type completion resolves
@@ -138,7 +238,11 @@ internal static partial class FormDesignService
 
         var rows = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, rows, seen, 0);
+
+        // Names and kinds only: the analyzer wants the members a form's code can reach, and
+        // reading every control's whole property set to answer that would be a walk paid for
+        // on every seed.
+        Walk(designer, null, rows, seen, 0, default);
         if (rows.Count == 0)
         {
             return null;
@@ -231,10 +335,76 @@ internal static partial class FormDesignService
         bool? FontItalic,
         int? BackColor,
         int? ForeColor,
-        IReadOnlyList<string>? Tabs);
+        IReadOnlyList<string>? Tabs,
+        /// <summary>Where this control sits in its container's TAB ORDER. Display truth rather
+        /// than dialect: the markup does not print it, and the tab-order dialog reads it from
+        /// here rather than walking the form a second time.</summary>
+        int? TabIndex,
+        /// <summary>The control's picture as a data URI, and how it sits. Display truth of the
+        /// purest kind: the dialect cannot speak a picture at all - it is binary in the form's
+        /// .frx and MSForms does not remember where it came from - so it rides here or the
+        /// canvas draws a box where the developer put an image.</summary>
+        PictureFace? Picture = null);
+
+    /// <summary>
+    /// A picture and its placement, as the canvas needs them. The two families of placement are
+    /// both here because a control has one or the other, never both: a SURFACE picture (a form,
+    /// an Image, a Frame, a Page) has a size mode, an alignment and a tiling flag, and a CAPTION
+    /// picture (a button, a Label, a check box) has a position relative to its caption.
+    /// </summary>
+    internal sealed record PictureFace(
+        string DataUri, int? SizeMode, int? Alignment, bool? Tiling, int? Position);
+
+    /// <summary>
+    /// What the walk needs beyond the controls themselves: the measured inventory it compares
+    /// against to find CHANGED properties, and the form's own font, which is the baseline for a
+    /// control's - a control inherits the form's font, so a bare instance's is the wrong
+    /// question. A default context (no inventory) walks identity and geometry alone, which is
+    /// what the analyzer's member seed wants.
+    /// </summary>
+    private readonly record struct WalkContext(ControlDefaults? Defaults, FormBaseline Form);
+
+    /// <summary>
+    /// What a control INHERITS from the form, and therefore what its own values are compared
+    /// against. Measured, not assumed: a Toggle freshly added to a form reads BackColor
+    /// -2147483633 where a bare instance of the same coclass reads -2147483643, and its font is
+    /// the form's Tahoma rather than the bare "MS Sans Serif" (2026-08-16). Comparing an
+    /// inherited value against a bare one prints a choice nobody made, on every control.
+    /// </summary>
+    private readonly record struct FormBaseline(
+        string? FontName, double? FontSize, bool? FontBold, bool? FontItalic, int? BackColor, int? ForeColor);
+
+    private static FormBaseline FormBaselineOf(DispatchObject component, DispatchObject designer)
+    {
+        string? name = null;
+        double? size = null;
+        bool? bold = null;
+        bool? italic = null;
+        try
+        {
+            using var font = designer.GetDispId("Font") != DispId.Unknown ? designer.GetObject("Font") : null;
+            if (font is not null)
+            {
+                name = TryText(font, "Name");
+                size = TryNumber(font, "Size");
+                bold = TryFlag(font, "Bold");
+                italic = TryFlag(font, "Italic");
+            }
+        }
+        catch
+        {
+            // A form whose font will not answer compares its controls against their own kinds.
+        }
+
+        return new FormBaseline(
+            name, size, bold, italic,
+            PropertyInt(component, "BackColor") ?? TryInt(designer, "BackColor"),
+            PropertyInt(component, "ForeColor") ?? TryInt(designer, "ForeColor"));
+    }
 
     private static void Walk(
-        DispatchObject container, string? parentName, List<DesignRow> rows, HashSet<string> seen, int depth)
+        DispatchObject container, string? parentName, List<DesignRow> rows, HashSet<string> seen, int depth,
+        WalkContext context)
     {
         if (depth > 8)
         {
@@ -273,24 +443,117 @@ internal static partial class FormDesignService
                         type, name, TryText(control, "Caption"),
                         TryNumber(control, "Left"), TryNumber(control, "Top"),
                         TryNumber(control, "Width"), TryNumber(control, "Height"),
-                        parentName, [])));
+                        parentName, ChangedProperties(control, type, context)), context));
                 }
 
                 if (control.GetDispId("Pages") != DispId.Unknown)
                 {
-                    WalkPages(control, name, rows, seen, depth + 1);
+                    WalkPages(control, name, rows, seen, depth + 1, context);
+                }
+                else if (control.GetDispId("Tabs") != DispId.Unknown)
+                {
+                    // A TabStrip: its tabs are rows, and it holds no controls of its own - what
+                    // sits over its face belongs to the form.
+                    WalkTabs(control, name, rows, seen, context);
                 }
                 else if (control.GetDispId("Controls") != DispId.Unknown)
                 {
-                    Walk(control, name, rows, seen, depth + 1);
+                    Walk(control, name, rows, seen, depth + 1, context);
                 }
             }
         }
     }
 
+    /*
+     * WHAT THIS CONTROL HAS THAT AN UNTOUCHED ONE DOES NOT.
+     *
+     * The document had been carrying identity, containment, geometry and caption and nothing
+     * else, so a colour set through the Properties panel lived only in the object model: absent
+     * from the text, absent from the draft preview, outside the document's undo, and lost when a
+     * Frame was copied between forms. The document calls itself the transaction log; this is the
+     * first instalment of making that true of more than shape.
+     *
+     * COLOURS ONLY, and the measurement is why. The obvious baseline - a bare instance of the
+     * same coclass, which ControlDefaults already measures - is the wrong one for a control that
+     * has been SITED. Probed 2026-08-16 by adding a control to a real form and reading it back:
+     *
+     *     Frame.SpecialEffect      bare 0                 sited 3
+     *     ToggleButton.BackColor   bare -2147483643       sited -2147483633
+     *     any control's font       bare MS Sans Serif 8.25    sited Tahoma 8 (a Frame: 8.34)
+     *
+     * MSForms initialises a control differently when it joins a form, so a bare comparison prints
+     * choices nobody made: on the fixture it put a font line under every control and a
+     * SpecialEffect under the Frame. What a control INHERITS is comparable, because the form is
+     * standing right there to be read - so BackColor and ForeColor are compared against the
+     * form's own and print exactly when a developer has changed them.
+     *
+     * The rest waits on a truthful SITED baseline, and there are two honest ways to get one:
+     * probe a control of each kind onto the form and take it away again (which dirties a
+     * workbook nobody asked to dirty), or read MSForms' own answer out of a `.frm` export (which
+     * is precisely the list of non-default properties, and makes this product a reader of the
+     * format's text half). Both change what xlide does to a developer's file, so both are the
+     * owner's call rather than this walk's.
+     */
+    private static List<PropertySpec> ChangedProperties(
+        DispatchObject control, string kind, WalkContext context)
+    {
+        // A walk with no inventory is one that wants identity alone - the analyzer's member seed,
+        // and the apply's own read of what is currently on the form.
+        // The kind's own vocabulary, which is cached - `For` would rebuild a dictionary of forty
+        // entries per control per walk to answer two questions about colour.
+        return context.Defaults is not { } defaults
+            ? []
+            : ColourDifferences(control, defaults.Describe(kind), context.Form);
+    }
+
+    /// <summary>
+    /// The two colours, against BOTH baselines - and it takes both, measured 2026-08-16. A Label
+    /// or a Toggle inherits the FORM's button face; a TextBox, a ComboBox and a ListBox take the
+    /// WINDOW colours from their own kind and keep them on any form. Comparing against the form
+    /// alone printed `BackColor = &amp;H80000005&amp;` under every entry control on the fixture, and
+    /// comparing against the kind alone printed one under every button.
+    ///
+    /// So a colour is the developer's only when it matches neither: not what this form passes
+    /// down, and not what this kind is born with. A value that equals either is unspoken, which
+    /// is the dialect's own rule for a property nobody changed.
+    /// </summary>
+    private static List<PropertySpec> ColourDifferences(
+        DispatchObject control, ControlDefaults.Vocabulary kind, FormBaseline form)
+    {
+        var lines = new List<PropertySpec>();
+
+        void Colour(string name, int? inherited)
+        {
+            if (TryInt(control, name) is not { } value || value == inherited)
+            {
+                return;
+            }
+
+            var bare = kind.Properties
+                .FirstOrDefault(one => string.Equals(one.Name, name, StringComparison.OrdinalIgnoreCase))?
+                .Default;
+            if (bare is not null
+                && int.TryParse(bare, System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out var born)
+                && born == value)
+            {
+                return;
+            }
+
+            lines.Add(new PropertySpec(name, Text(value), PropertyValueKind.Colour));
+        }
+
+        Colour("BackColor", form.BackColor);
+        Colour("ForeColor", form.ForeColor);
+        return lines;
+    }
+
+    private static string Text(int value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>The display truths, read tolerantly like everything else: a control without a
     /// Font is a row with null fonts, never a failure.</summary>
-    private static DesignRow RowOf(DispatchObject control, ControlSpec spec)
+    private static DesignRow RowOf(DispatchObject control, ControlSpec spec, WalkContext context)
     {
         string? fontName = null;
         double? fontSize = null;
@@ -344,11 +607,105 @@ internal static partial class FormDesignService
             fontName, fontSize, fontBold, fontItalic,
             TryInt(control, "BackColor"),
             TryInt(control, "ForeColor"),
-            tabs);
+            tabs,
+            TryInt(control, "TabIndex"),
+            CanCarryPicture(spec.Type) ? PictureFaceOf(control) : null);
+    }
+
+    /// <summary>
+    /// Which KINDS can hold a picture, asked before the control is - because asking the control
+    /// costs two crossings and most controls on most forms cannot. A TextBox, a ComboBox, a
+    /// ListBox, a ScrollBar, a SpinButton, a MultiPage and a TabStrip have no Picture at all.
+    /// A type outside the toolbox is asked, because a third-party control might.
+    /// </summary>
+    /// <summary>The properties whose value is a picture, and which are therefore written from a
+    /// FILE. Both panels, both write paths and the api all ask here, so there is one answer.</summary>
+    internal static bool IsPictureSlot(string property) =>
+        string.Equals(property, "Picture", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(property, "MouseIcon", StringComparison.OrdinalIgnoreCase);
+
+    private static bool CanCarryPicture(string type) => type is not (
+        "TextBox" or "ComboBox" or "ListBox" or "ScrollBar" or "SpinButton"
+        or "MultiPage" or "TabStrip" or "Tab" or "RefEdit");
+
+    /// <summary>
+    /// The picture a control is wearing, or null - which is the answer for most controls, and
+    /// the cheap one: an absent or empty Picture costs the read that found it out and nothing
+    /// more. The placement properties are only asked once there is something to place.
+    /// </summary>
+    private static PictureFace? PictureFaceOf(DispatchObject control)
+    {
+        try
+        {
+            using var picture = PictureBytes.PictureOn(control, "Picture");
+            if (picture is null || PictureBytes.DataUriOf(picture) is not { } uri)
+            {
+                return null;
+            }
+
+            return new PictureFace(
+                uri,
+                TryInt(control, "PictureSizeMode"),
+                TryInt(control, "PictureAlignment"),
+                TryFlag(control, "PictureTiling"),
+                TryInt(control, "PicturePosition"));
+        }
+        catch
+        {
+            // A control whose picture will not answer draws the bounds it drew before.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A TabStrip's TABS as rows of their own, so the document can carry them.
+    ///
+    /// They are not controls - a tab holds nothing and has no geometry - but they are the only
+    /// thing about a TabStrip a developer edits, and until 2026-08-16 the markup said nothing
+    /// about them at all: the canvas drew two tabs and the document showed a bare line with
+    /// nothing indented under it (the owner: "in the markdown, i dont see anything indented under
+    /// the tab view"). A Tab line is shaped like a Page's, for the same reason - identity and a
+    /// caption, nothing else to say.
+    /// </summary>
+    private static void WalkTabs(
+        DispatchObject strip, string stripName, List<DesignRow> rows, HashSet<string> seen,
+        WalkContext context)
+    {
+        using var tabs = strip.GetDispId("Tabs") != DispId.Unknown ? strip.GetObject("Tabs") : null;
+        if (tabs is null)
+        {
+            return;
+        }
+
+        var count = 0;
+        try
+        {
+            count = tabs.GetInt32("Count");
+        }
+        catch
+        {
+            // A strip whose tabs will not answer keeps the bare line it had.
+            return;
+        }
+
+        for (var index = 0; index < count; index++)
+        {
+            using var tab = tabs.GetItem(index);
+            var name = tab is null ? null : TryText(tab, "Name");
+            if (tab is null || name is null || !seen.Add(name))
+            {
+                continue;
+            }
+
+            rows.Add(new DesignRow(
+                new ControlSpec("Tab", name, TryText(tab, "Caption"), null, null, null, null, stripName, []),
+                null, null, null, null, null, null, null, null, null, null, null));
+        }
     }
 
     private static void WalkPages(
-        DispatchObject multiPage, string multiPageName, List<DesignRow> rows, HashSet<string> seen, int depth)
+        DispatchObject multiPage, string multiPageName, List<DesignRow> rows, HashSet<string> seen, int depth,
+        WalkContext context)
     {
         if (depth > 8)
         {
@@ -375,10 +732,11 @@ internal static partial class FormDesignService
                 {
                     rows.Add(RowOf(page, new ControlSpec(
                         "Page", name, TryText(page, "Caption"),
-                        null, null, null, null, multiPageName, [])));
+                        null, null, null, null, multiPageName,
+                        ChangedProperties(page, "Page", context)), context));
                 }
 
-                Walk(page, name, rows, seen, depth + 1);
+                Walk(page, name, rows, seen, depth + 1, context);
             }
         }
     }
@@ -400,7 +758,7 @@ internal static partial class FormDesignService
         }
     }
 
-    private static IEnumerable<DispatchObject> ItemsOf(DispatchObject collection)
+    internal static IEnumerable<DispatchObject> ItemsOf(DispatchObject collection)
     {
         int count;
         try
@@ -634,18 +992,48 @@ internal static partial class FormDesignService
             return new ApplyOutcome(false, [], [], 0, $"{module} has no designer", [], false);
         }
 
+        // Identity and containment only: the diff matches by NAME and writes the document's own
+        // property lines, so reading what the form currently holds for each of them would be a
+        // walk whose answer the apply is about to overwrite.
         var walked = new List<DesignRow>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(designer, null, walked, seen, 0);
+        Walk(designer, null, walked, seen, 0, default);
         var current = walked.Select(row => row.Spec).ToList();
 
         var currentByName = current.ToDictionary(row => row.Name, StringComparer.OrdinalIgnoreCase);
-        var wantedByName = wanted.Controls.ToDictionary(spec => spec.Name, StringComparer.OrdinalIgnoreCase);
 
         var added = new List<string>();
         var removed = new List<string>();
         var setCount = 0;
         var notes = new List<string>();
+
+        /*
+         * A NAME IS ONE CONTROL, and a document that says otherwise is refused here rather than
+         * by the dictionary underneath.
+         *
+         * The whole diff is keyed by name, so two controls of one name have no meaning: the
+         * document cannot say which of them a later line describes, and MSForms would not take
+         * the second anyway. The lint already marks it at the second mention ("the name 'X' is
+         * already taken on this form"); before this the apply threw its dictionary's own words at
+         * the developer instead - `An item with the same key has already been added. Key:
+         * OkButton` reached the tab's error strip on Ctrl+S (measured 2026-08-16, the owner
+         * asking whether the markup checks for collisions at all).
+         *
+         * Refused whole rather than applied past: an apply that dropped the duplicate would leave
+         * a form that matches neither the document nor what the developer meant.
+         */
+        var clash = wanted.Controls
+            .GroupBy(spec => spec.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (clash is not null)
+        {
+            return new ApplyOutcome(false, [], [], 0,
+                $"the name '{clash.Key}' is used {clash.Count()} times, so nothing was applied"
+                + " - a name is one control on a form",
+                [], true);
+        }
+
+        var wantedByName = wanted.Controls.ToDictionary(spec => spec.Name, StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -695,6 +1083,18 @@ internal static partial class FormDesignService
                     continue;
                 }
 
+                // A TAB leaves its strip's own Tabs collection - it is not in any Controls
+                // collection, so the ordinary removal cannot find it.
+                if (string.Equals(row.Type, "Tab", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!stays && RemoveTab(designer, row.Parent, row.Name))
+                    {
+                        removed.Add(row.Name);
+                    }
+
+                    continue;
+                }
+
                 if (!stays)
                 {
                     if (RemoveControl(designer, row.Name))
@@ -717,6 +1117,27 @@ internal static partial class FormDesignService
                 if (isPage && match is null)
                 {
                     notes.Add($"{spec.Name}: pages belong to their MultiPage; the diff does not add one");
+                    continue;
+                }
+
+                // A TAB is its strip's, and unlike a page the diff DOES make one: Tabs.Add takes
+                // a name and a caption, which is the whole of what a tab is.
+                if (string.Equals(spec.Type, "Tab", StringComparison.OrdinalIgnoreCase))
+                {
+                    var landed = ApplyTab(designer, spec, survived);
+                    if (landed && !survived)
+                    {
+                        added.Add(spec.Name);
+                    }
+                    else if (!landed)
+                    {
+                        notes.Add($"{spec.Name}: no TabStrip named {spec.Parent}, so the tab was not added");
+                    }
+                    else
+                    {
+                        setCount++;
+                    }
+
                     continue;
                 }
 
@@ -831,6 +1252,18 @@ internal static partial class FormDesignService
             tail = property[(dot + 1)..];
         }
 
+        // A PICTURE never goes through the property bag, whatever it belongs to. The bag hands
+        // out a VBE `Property` wrapper whose own `Value` takes a variant, and a picture assigned
+        // through one is a value copy of an interface pointer rather than the reference put the
+        // control wants. The designer answers the picture the canvas paints, so it is also the
+        // slot the write belongs in.
+        if (tail is null && IsPictureSlot(property))
+        {
+            WriteDesignerProperty(target, property, value, asKind);
+            using var written = PictureBytes.PictureOn(target, property);
+            return PictureBytes.Describe(written);
+        }
+
         if (tail is null && found is null)
         {
             // THE BAG FIRST for a form-level property, the designer dispatch only when the
@@ -882,6 +1315,26 @@ internal static partial class FormDesignService
     /// </summary>
     private static void WriteDesignerProperty(DispatchObject target, string property, string value, string? asKind)
     {
+        // A PICTURE takes a file, not a value, and it is the one property in the panel whose
+        // written text is not what it ends up holding: the developer chooses `logo.png` and the
+        // control holds a picture object. An empty string takes it off, which is the panel's
+        // Clear and the api's way of saying Nothing.
+        if (IsPictureSlot(property))
+        {
+            if (value.Trim().Length == 0)
+            {
+                target.ClearObject(property);
+                return;
+            }
+
+            // The control's own BackColor goes with it, for what a transparent PNG's holes
+            // become: an OLE picture is a bitmap and a bitmap has no alpha, so they become a
+            // colour, and the colour that makes them disappear is the one behind them.
+            using var picture = PictureBytes.FromPath(value.Trim(), TryInt(target, "BackColor"));
+            target.SetObject(property, picture);
+            return;
+        }
+
         switch (asKind)
         {
             case "text":
@@ -922,6 +1375,50 @@ internal static partial class FormDesignService
     }
 
     /// <summary>
+    /// The SENTENCE AFTER THE REFUSAL, for the two failures a developer can do something about.
+    ///
+    /// Measured 2026-08-16, adding a dozen real third-party ProgIDs to the fixture form. Every
+    /// one of them came back with one of two messages and neither says what to do:
+    ///
+    ///   - `Invalid class string` - the control is not registered on this machine at all. The
+    ///     ProgID is a spelling, and a spelling nothing answers to is a typo or a missing OCX.
+    ///   - `The subject is not trusted for the specified action` - TRUST_E_SUBJECT_NOT_TRUSTED,
+    ///     and the control IS registered: `MSComctlLib.TreeCtrl.2`, `Shell.Explorer.2` and
+    ///     `RefEdit.Ctrl` all resolve on this machine and all are refused. That is OFFICE
+    ///     refusing, not MSForms and not this product - the Trust Center's ActiveX setting turns
+    ///     every non-MSForms control off, and nothing in a form can create one while it is on.
+    ///
+    /// Naming the second one matters more than it looks. Without it the refusal reads as a defect
+    /// in xlide, and the developer's next hour goes into the wrong place entirely.
+    /// </summary>
+    private static string WhyAddFailed(Exception ex, string? name)
+    {
+        const int SubjectNotTrusted = unchecked((int)0x800B0004);
+
+        if (ex.HResult == SubjectNotTrusted
+            || ex.Message.Contains("not trusted", StringComparison.OrdinalIgnoreCase))
+        {
+            return " - Office is refusing to create ActiveX controls at all, which is the Trust"
+                + " Center's ActiveX Settings rather than anything about this control";
+        }
+
+        if (ex.Message.Contains("Invalid class string", StringComparison.OrdinalIgnoreCase))
+        {
+            return " - no control of that ProgID is registered on this machine";
+        }
+
+        // MSForms answers `error 800a9c6c` and nothing else for a NAME it will not take, which
+        // teaches a developer nothing at all (measured 2026-08-16, adding a control called
+        // `_Leading`). A control's name is a VBA identifier, and the rule is worth stating.
+        // The same rule the markup's lint squiggles with, from the same place: one answer to
+        // "is this a name MSForms will take", whichever end of the product asks.
+        return name is { Length: > 0 } && !FormMarkup.IsIdentifier(name)
+            ? $" - '{name}' is not a name MSForms will take: a control's name is a VBA identifier,"
+                + " so it starts with a letter and holds only letters, digits and underscores"
+            : string.Empty;
+    }
+
+    /// <summary>
     /// The add itself, against a resolved Controls collection: the control asked for, placed -
     /// or nothing, because an add that cannot then take its geometry is taken back out. Throws
     /// rather than answering, for the same reason the property write does.
@@ -937,7 +1434,8 @@ internal static partial class FormDesignService
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"the designer refused to add a {progId} ({ex.Message.Trim()})");
+            throw new InvalidOperationException(
+                $"the designer refused to add a {progId} ({ex.Message.Trim()}){WhyAddFailed(ex, name)}");
         }
 
         if (added is null)
@@ -988,6 +1486,126 @@ internal static partial class FormDesignService
         catch (Exception ex)
         {
             throw new InvalidOperationException($"the designer refused to remove {name} ({ex.Message.Trim()})");
+        }
+
+        return true;
+    }
+
+    /// <summary>A TabStrip's Tabs collection, by the strip's name. Null when the name is not a
+    /// strip, which is how a Tab line under the wrong parent becomes a note rather than a
+    /// failure.</summary>
+    private static DispatchObject? TabsOf(DispatchObject designer, string? stripName)
+    {
+        if (stripName is not { Length: > 0 })
+        {
+            return null;
+        }
+
+        using var strip = FindControlNamed(designer, stripName, 0);
+        return strip is not null && strip.GetDispId("Tabs") != DispId.Unknown
+            ? strip.GetObject("Tabs")
+            : null;
+    }
+
+    /// <summary>
+    /// A tab the document names: made if the strip has no such tab, and its caption written
+    /// either way. Answers false only when there is no strip of that name to work on.
+    /// </summary>
+    private static bool ApplyTab(DispatchObject designer, ControlSpec spec, bool survived)
+    {
+        using var tabs = TabsOf(designer, spec.Parent);
+        if (tabs is null)
+        {
+            return false;
+        }
+
+        if (!survived)
+        {
+            // The NAME alone: MSForms takes a caption too, but the caption line below sets it
+            // anyway and a tab created with only its name is captioned with it, which is the
+            // same default the native New Page gives.
+            tabs.Invoke("Add", spec.Name);
+        }
+
+        if (spec.Caption is { } caption)
+        {
+            using var tab = TabNamed(tabs, spec.Name);
+            tab?.SetString("Caption", caption);
+        }
+
+        return true;
+    }
+
+    /// <summary>Takes a tab out of its strip, by name.</summary>
+    private static bool RemoveTab(DispatchObject designer, string? stripName, string name)
+    {
+        using var tabs = TabsOf(designer, stripName);
+        if (tabs is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            tabs.Invoke("Remove", name);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"the strip refused to remove {name} ({ex.Message.Trim()})");
+        }
+    }
+
+    /// <summary>One tab of a strip, by name - the collection indexes by name as well as by
+    /// number, but a walk is the honest way to answer "is there one".</summary>
+    private static DispatchObject? TabNamed(DispatchObject tabs, string name)
+    {
+        var count = 0;
+        try
+        {
+            count = tabs.GetInt32("Count");
+        }
+        catch
+        {
+            return null;
+        }
+
+        for (var index = 0; index < count; index++)
+        {
+            var tab = tabs.GetItem(index);
+            if (tab is not null && string.Equals(TryText(tab, "Name"), name, StringComparison.OrdinalIgnoreCase))
+            {
+                return tab;
+            }
+
+            tab?.Dispose();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Brings a control to the front of its container or sends it to the back - MSForms' own
+    /// ZOrder, which is a METHOD rather than a property and so is reachable through none of the
+    /// property paths this service otherwise uses.
+    /// </summary>
+    internal static bool ZOrderControl(DispatchObject designer, string name, bool toFront)
+    {
+        using var control = FindControlNamed(designer, name, 0);
+        if (control is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            // fmZOrderFront is 0 and fmZOrderBack is 1, which is the one place in this file where
+            // a bare number is the API rather than a value we chose.
+            control.Invoke("ZOrder", toFront ? 0 : 1);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"the designer refused to reorder {name} ({ex.Message.Trim()})");
         }
 
         return true;
@@ -1218,25 +1836,33 @@ internal static partial class FormDesignService
         return null;
     }
 
+    /// <summary>
+    /// The standard toolbox: the everyday name a document spells, and the coclass an apply creates
+    /// for it. ONE list - `ProgIdFor` answers from it, the defaults inventory measures each entry,
+    /// and the language service offers exactly these kinds - so a kind a document can be given is
+    /// a kind a completion can suggest, by construction rather than by two lists agreeing.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> Toolbox =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Label"] = "Forms.Label.1",
+            ["TextBox"] = "Forms.TextBox.1",
+            ["ComboBox"] = "Forms.ComboBox.1",
+            ["ListBox"] = "Forms.ListBox.1",
+            ["CheckBox"] = "Forms.CheckBox.1",
+            ["OptionButton"] = "Forms.OptionButton.1",
+            ["ToggleButton"] = "Forms.ToggleButton.1",
+            ["Frame"] = "Forms.Frame.1",
+            ["CommandButton"] = "Forms.CommandButton.1",
+            ["TabStrip"] = "Forms.TabStrip.1",
+            ["MultiPage"] = "Forms.MultiPage.1",
+            ["ScrollBar"] = "Forms.ScrollBar.1",
+            ["SpinButton"] = "Forms.SpinButton.1",
+            ["Image"] = "Forms.Image.1",
+        };
+
     /// <summary>The standard toolbox by its everyday names, or any ProgID a caller spells whole.</summary>
     internal static string? ProgIdFor(string type) => type.Contains('.')
         ? type
-        : type.ToLowerInvariant() switch
-        {
-            "label" => "Forms.Label.1",
-            "textbox" => "Forms.TextBox.1",
-            "combobox" => "Forms.ComboBox.1",
-            "listbox" => "Forms.ListBox.1",
-            "checkbox" => "Forms.CheckBox.1",
-            "optionbutton" => "Forms.OptionButton.1",
-            "togglebutton" => "Forms.ToggleButton.1",
-            "frame" => "Forms.Frame.1",
-            "commandbutton" => "Forms.CommandButton.1",
-            "tabstrip" => "Forms.TabStrip.1",
-            "multipage" => "Forms.MultiPage.1",
-            "scrollbar" => "Forms.ScrollBar.1",
-            "spinbutton" => "Forms.SpinButton.1",
-            "image" => "Forms.Image.1",
-            _ => null,
-        };
+        : Toolbox.TryGetValue(type, out var progId) ? progId : null;
 }

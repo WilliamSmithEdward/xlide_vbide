@@ -34,7 +34,7 @@ public static class FormMarkup
     /// Case-insensitive membership, because the dialect is VBA's.
     /// </summary>
     private static readonly HashSet<string> Containers =
-        new(StringComparer.OrdinalIgnoreCase) { "Frame", "MultiPage", "Page" };
+        new(StringComparer.OrdinalIgnoreCase) { "Frame", "MultiPage", "Page", "TabStrip" };
 
     // ------------------------------------------------------------------ printing
 
@@ -136,9 +136,56 @@ public static class FormMarkup
         text.AppendLine(property.Kind switch
         {
             PropertyValueKind.Text => Quoted(property.Value),
+            PropertyValueKind.Colour when int.TryParse(
+                property.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var ole)
+                => SpellColour(ole),
             _ => property.Value,
         });
     }
+
+    /// <summary>
+    /// A colour as the document spells one: `#rrggbb`, or the VBA hex where there is no honest
+    /// `#` to give. A SYSTEM colour is not an RGB at all but a question - what does this machine
+    /// call a button face - so it keeps `&amp;H8000000F&amp;`, and a document that spelled it as
+    /// today's answer would freeze that answer into the form.
+    ///
+    /// The document and the Properties panel agree about this on purpose (the owner, 2026-08-16),
+    /// which is why the conversion lives here rather than twice: the panel spells the same
+    /// values through the same arithmetic, and only its SYSTEM rows differ, where a panel can
+    /// afford a name and a document cannot.
+    /// </summary>
+    public static string SpellColour(int ole) => (ole & SystemColourBit) != 0
+        ? $"&H{(uint)ole:X8}&"
+        : $"#{ole & 0xFF:x2}{(ole >> 8) & 0xFF:x2}{(ole >> 16) & 0xFF:x2}";
+
+    /// <summary>
+    /// A `#rrggbb` or `#rgb` as the number the model stores. OLE_COLOR keeps blue-green-red where
+    /// CSS reads red-green-blue, which is the whole of the arithmetic and the whole of the reason
+    /// nobody should write it twice. Null when the text is not a `#` colour at all.
+    /// </summary>
+    public static int? ReadColour(string spelled)
+    {
+        var text = spelled.Trim();
+        if (text.Length < 4 || text[0] != '#')
+        {
+            return null;
+        }
+
+        var digits = text[1..];
+        if (digits.Length == 3)
+        {
+            // #abc is #aabbcc, the shorthand every stylesheet takes.
+            digits = string.Concat(digits.Select(character => new string(character, 2)));
+        }
+
+        return digits.Length == 6
+            && int.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rgb)
+            ? ((rgb & 0xFF) << 16) | (rgb & 0xFF00) | ((rgb >> 16) & 0xFF)
+            : null;
+    }
+
+    /// <summary>The bit that turns an OLE_COLOR from a colour into a question for the system.</summary>
+    private const int SystemColourBit = unchecked((int)0x80000000);
 
     private static string Quoted(string value) => $"\"{value.Replace("\"", "\"\"")}\"";
 
@@ -175,6 +222,15 @@ public static class FormMarkup
             {
                 findings.Add(new FormMarkupFinding(refused.Line, refused.Reason, FormMarkupSeverity.Error));
                 if (refused.Line < 1 || refused.Line > lines.Length)
+                {
+                    break;
+                }
+
+                // NO PROGRESS MEANS STOP. Retiring a line that is already empty parses the same
+                // text again and refuses it again, so an EMPTY document squiggled "the document
+                // is empty" twice on line 1 (found in the 2026-08-16 hunt). The round only
+                // continues when it has actually taken a line out of the way.
+                if (lines[refused.Line - 1].Length == 0)
                 {
                     break;
                 }
@@ -228,6 +284,18 @@ public static class FormMarkup
             {
                 typeOf[control.Name] = control.Type;
             }
+
+            // A NAME MSFORMS WILL NOT TAKE, said here rather than left to the apply. A control's
+            // name is a VBA identifier, and the model's own answer for one that is not is
+            // `error 800a9c6c` and nothing else (measured 2026-08-16) - a squiggle on the line,
+            // before anything is written, is the difference between a typo and a mystery.
+            if (!IsIdentifier(control.Name))
+            {
+                findings.Add(new FormMarkupFinding(LineOf(control.Name),
+                    $"'{control.Name}' is not a name MSForms will take: a control's name starts with a "
+                        + "letter and holds only letters, digits and underscores",
+                    FormMarkupSeverity.Error));
+            }
         }
 
         // A stray Page needs no row here: the parser refuses one structurally, so it arrives
@@ -247,12 +315,21 @@ public static class FormMarkup
         return [.. findings.OrderBy(finding => finding.Line)];
     }
 
+    /// <summary>
+    /// A name MSForms will take for a control, which is VBA's own identifier rule: a letter
+    /// first, then letters, digits and underscores, up to forty characters.
+    /// </summary>
+    public static bool IsIdentifier(string name) =>
+        name.Length is > 0 and <= 40
+        && char.IsLetter(name[0])
+        && name.All(letter => char.IsLetterOrDigit(letter) || letter == '_');
+
     /// <summary>The toolbox spellings the dialect commits to - the same set the printer
     /// writes and an apply resolves without a ProgId line.</summary>
     private static readonly HashSet<string> ToolboxTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         "Label", "TextBox", "ComboBox", "ListBox", "CheckBox", "OptionButton", "ToggleButton",
-        "Frame", "CommandButton", "TabStrip", "MultiPage", "Page", "ScrollBar", "SpinButton", "Image",
+        "Frame", "CommandButton", "TabStrip", "MultiPage", "Page", "Tab", "ScrollBar", "SpinButton", "Image",
     };
 
     /// <summary>
@@ -349,6 +426,23 @@ public static class FormMarkup
                 throw new FormMarkupException(lineNumber, "a MultiPage holds Pages; controls go on a Page");
             }
 
+            // A TabStrip holds TABS and nothing else: what sits over its face belongs to the form,
+            // because MSForms draws a strip over one set of controls and swaps them in code. The
+            // dialect learned tabs on 2026-08-16, when a strip's line stood with nothing indented
+            // under it while the canvas drew two tabs.
+            if (string.Equals(owner.Type, "TabStrip", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(control.Type, "Tab", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new FormMarkupException(lineNumber,
+                    "a TabStrip holds Tabs; a control over its face belongs to the form");
+            }
+
+            if (string.Equals(control.Type, "Tab", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(owner.Type, "TabStrip", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new FormMarkupException(lineNumber, "a Tab sits under a TabStrip");
+            }
+
             if (string.Equals(control.Type, "Page", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(owner.Type, "MultiPage", StringComparison.OrdinalIgnoreCase))
             {
@@ -357,7 +451,8 @@ public static class FormMarkup
 
             if (owner.Type != "Form" && !Containers.Contains(owner.Type))
             {
-                throw new FormMarkupException(lineNumber, $"a {owner.Type} holds no controls; only Frame, MultiPage and Page contain");
+                throw new FormMarkupException(lineNumber,
+                    $"a {owner.Type} holds no controls; only Frame, MultiPage, Page and TabStrip contain");
             }
 
             var parent = depth == 1 ? null : owner.Name;
@@ -505,8 +600,17 @@ public static class FormMarkup
             return new PropertySpec(path, flag ? "True" : "False", PropertyValueKind.Flag);
         }
 
-        // &H8000000F& - VBA's own spelling for a colour. Carried onward as the decimal the
-        // designer model actually takes, signed through the OLE_COLOR bit.
+        // #c0dcc0 - the spelling the Properties panel shows and every developer already knows.
+        // Carried onward as the decimal the designer model takes, like every other colour.
+        if (spelled[0] == '#')
+        {
+            return ReadColour(spelled) is { } rgb
+                ? new PropertySpec(path, rgb.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour)
+                : throw new FormMarkupException(lineNumber, $"{spelled} is not a #rrggbb colour");
+        }
+
+        // &H8000000F& - VBA's own spelling, and the only one a SYSTEM colour has. Carried onward
+        // as the decimal the designer model actually takes, signed through the OLE_COLOR bit.
         if (spelled.StartsWith("&H", StringComparison.OrdinalIgnoreCase))
         {
             var digits = spelled.TrimEnd('&')[2..];
@@ -516,7 +620,7 @@ public static class FormMarkup
                 throw new FormMarkupException(lineNumber, $"{spelled} is not a &H hex number");
             }
 
-            return new PropertySpec(path, ((int)(uint)hex).ToString(CultureInfo.InvariantCulture), PropertyValueKind.Number);
+            return new PropertySpec(path, ((int)(uint)hex).ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour);
         }
 
         if (double.TryParse(spelled, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
@@ -709,6 +813,11 @@ public enum PropertyValueKind
     Text,
     Number,
     Flag,
+
+    /// <summary>A colour: carried as the decimal the model stores, spelled `#rrggbb` - or the
+    /// VBA hex where the value is a system colour, which has no honest `#`. It applies as a
+    /// number like any other; the kind exists so the PRINTER knows to spell it.</summary>
+    Colour,
 }
 
 /// <summary>A refusal with the line that earned it. Parsing is all-or-nothing, so an apply

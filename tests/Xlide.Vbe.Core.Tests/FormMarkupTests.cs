@@ -98,8 +98,57 @@ public class FormMarkupTests
         var hint = Assert.Single(parsed.Controls);
         Assert.Equal("say ' nothing", hint.Caption);
         Assert.Equal(unchecked((int)0x8000000F).ToString(), hint.Properties[0].Value);
-        Assert.Equal(PropertyValueKind.Number, hint.Properties[0].Kind);
+        Assert.Equal(PropertyValueKind.Colour, hint.Properties[0].Kind);
         Assert.Equal("False", hint.Properties[1].Value);
+    }
+
+    /// <summary>
+    /// A colour is spelled the way the Properties panel spells it, and read back the same - one
+    /// conversion for both surfaces (the owner, 2026-08-16). A SYSTEM colour keeps the VBA hex,
+    /// because it is a question about the machine rather than an RGB, and a document that spelled
+    /// today's answer would freeze it into the form.
+    /// </summary>
+    [Theory]
+    [InlineData("#c0dcc0", 12639424)]
+    [InlineData("#ff8000", 33023)]
+    [InlineData("#000000", 0)]
+    [InlineData("#fff", 16777215)]
+    [InlineData("&H8000000F&", unchecked((int)0x8000000F))]
+    public void AColourIsReadFromEitherSpelling(string spelled, int stored)
+    {
+        var parsed = FormMarkup.Parse($"Form F\n    Label L\n        BackColor = {spelled}\n");
+
+        var colour = Assert.Single(Assert.Single(parsed.Controls).Properties);
+        Assert.Equal(stored.ToString(), colour.Value);
+        Assert.Equal(PropertyValueKind.Colour, colour.Kind);
+    }
+
+    [Fact]
+    public void AColourPrintsAsCssAndASystemColourAsHex()
+    {
+        var printed = FormMarkup.Print(new FormSpec(
+            "F", null, null, null,
+            [new PropertySpec("BackColor", "12639424", PropertyValueKind.Colour)],
+            [Control("Label", "L", null, null, null, null, null, null,
+                new PropertySpec("ForeColor", unchecked((int)0x8000000F).ToString(), PropertyValueKind.Colour))]));
+
+        Assert.Contains("BackColor = #c0dcc0", printed);
+        Assert.Contains("ForeColor = &H8000000F&", printed);
+
+        // And it round trips: what the printer wrote, the parser reads back to the same numbers.
+        var back = FormMarkup.Parse(printed);
+        Assert.Equal("12639424", back.Properties[0].Value);
+        Assert.Equal(unchecked((int)0x8000000F).ToString(), back.Controls[0].Properties[0].Value);
+    }
+
+    [Fact]
+    public void AColourThatIsNotOneIsRefusedByItsLine()
+    {
+        var refused = Assert.Throws<FormMarkupException>(() =>
+            FormMarkup.Parse("Form F\n    Label L\n        BackColor = #ggg\n"));
+
+        Assert.Equal(3, refused.Line);
+        Assert.Contains("#rrggbb", refused.Reason);
     }
 
     [Theory]
@@ -215,6 +264,38 @@ public class FormMarkupTests
     {
         Assert.Empty(FormMarkup.Lint(
             "Form F size 100x100\n    Gadget Widget at 1,1 size 2x2\n        ProgId = \"Vendor.Widget.1\"\n"));
+    }
+
+    [Fact]
+    public void LintRefusesANameMsFormsWouldNotTake()
+    {
+        // The model's own answer for one of these is `error 800a9c6c` and nothing else, so the
+        // squiggle is the difference between a typo and a mystery. A digit first, an underscore
+        // first, a space inside, a hyphen: all VBA identifiers this is not.
+        var findings = FormMarkup.Lint(
+            "Form F size 100x100\n    Label _Leading at 1,1 size 2x2\n    Label 9Lives at 3,3 size 2x2\n");
+
+        Assert.Equal(2, findings.Count);
+        Assert.All(findings, finding => Assert.Equal(FormMarkupSeverity.Error, finding.Severity));
+        Assert.All(findings, finding => Assert.Contains("starts with a letter", finding.Message));
+    }
+
+    [Fact]
+    public void AnEmptyDocumentSaysSoOnce()
+    {
+        // The tolerant pass retires a refused line and parses again. Retiring a line that is
+        // already empty makes no progress, so an empty document refused, blanked nothing, and
+        // refused again - two identical squiggles on line 1 (found in the 2026-08-16 hunt).
+        var finding = Assert.Single(FormMarkup.Lint(string.Empty));
+        Assert.Equal(1, finding.Line);
+        Assert.Contains("empty", finding.Message);
+    }
+
+    [Fact]
+    public void AnOrdinaryNameIsNotSquiggled()
+    {
+        Assert.Empty(FormMarkup.Lint(
+            "Form F size 100x100\n    Label Name_2 at 1,1 size 2x2\n    TextBox b at 3,3 size 2x2\n"));
     }
 
     [Fact]
