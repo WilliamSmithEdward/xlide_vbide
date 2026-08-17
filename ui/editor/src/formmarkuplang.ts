@@ -348,13 +348,6 @@ function documentationOf(property: FormMarkupProperty): string[] {
 
 /* -------------------------------------------------------------- completions */
 
-/** The clause keywords, with the scaffolding the doc's language service asked for: a clause
- * arrives with its numbers as tab stops rather than as a word to finish by hand. */
-const CLAUSES: Readonly<Record<string, { insert: string; detail: string }>> = {
-  at: { insert: "at ${1:0},${2:0}", detail: "at left,top in points" },
-  size: { insert: "size ${1:60}x${2:20}", detail: "size width x height in points" },
-};
-
 export function completionsAt(
   model: monaco.editor.ITextModel, position: monaco.IPosition,
 ): monaco.languages.CompletionList {
@@ -429,22 +422,39 @@ export function completionsAt(
     return { suggestions: items };
   }
 
-  // Past a header's name: the clauses it can still take, and only those - a line already
-  // carrying `at` is not offered another one. The name itself is the developer's to choose,
-  // so nothing is offered until a space says they are done with it.
-  const pastName = spot.words > 2 || (spot.words === 2 && /\s$/.test(spot.before));
-  if (spot.header !== null && pastName) {
-    for (const [word, clause] of Object.entries(CLAUSES)) {
-      if (new RegExp(`\\b${word}\\b`, "i").test(spot.before)) {
+  // INSIDE A TAG the offer is ATTRIBUTES, never control kinds: an element's own properties plus
+  // the universals it does not carry yet. A tag already spelling `Left=` is not offered a second
+  // one, which is the same "only what this can still take" rule the clauses had.
+  if (spot.header !== null) {
+    const already = (name: string) => new RegExp(`\\b${name}\\s*=`, "i").test(spot.before);
+    for (const universal of ["Name", "Caption", "Left", "Top", "Width", "Height"]) {
+      if (!already(universal)) {
+        items.push({
+          label: universal,
+          kind: monaco.languages.CompletionItemKind.Property,
+          detail: universal === "Name" || universal === "Caption" ? "text" : "points",
+          insertText: `${universal}="$1"`,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          range,
+        });
+      }
+    }
+
+    for (const property of kindNamed(spot.header.kind)?.properties ?? []) {
+      if (already(property.name)) {
         continue;
       }
 
       items.push({
-        label: word,
-        kind: monaco.languages.CompletionItemKind.Keyword,
-        detail: clause.detail,
-        insertText: clause.insert,
+        label: property.name,
+        kind: monaco.languages.CompletionItemKind.Property,
+        ...(property.type ? { detail: property.type } : {}),
+        documentation: { value: documentationOf(property).join("\n\n") },
+        insertText: `${property.name}="$1"`,
         insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+        // The value list follows without a second keystroke: the point of picking a property
+        // is to say what it holds.
+        command: { id: "editor.action.triggerSuggest", title: "values" },
         range,
       });
     }
@@ -452,9 +462,8 @@ export function completionsAt(
     return { suggestions: items };
   }
 
-  // The first word of an indented line, which can open either a control or a property of the
-  // control above - so both are offered, and the parser is the one that says which is legal
-  // where. The Form line itself is the projection's; nothing completes at depth zero.
+  // BETWEEN TAGS the offer is the control KINDS this container takes, as whole elements. Outside
+  // the Form's own tag there is nothing to add, because a document holds one Form.
   if (spot.depth === 0) {
     return { suggestions: items };
   }
@@ -463,20 +472,6 @@ export function completionsAt(
     for (const kind of kindsUnder(spot.owner)) {
       items.push(kindCompletion(model, kind, range));
     }
-  }
-
-  for (const property of kindNamed(spot.owner)?.properties ?? []) {
-    items.push({
-      label: property.name,
-      kind: monaco.languages.CompletionItemKind.Property,
-      ...(property.type ? { detail: property.type } : {}),
-      documentation: { value: documentationOf(property).join("\n\n") },
-      insertText: `${property.name} = `,
-      // The value list follows the `=` without a second keystroke: a property is a line, not
-      // a word, and the point of picking one is to say what it holds.
-      command: { id: "editor.action.triggerSuggest", title: "values" },
-      range,
-    });
   }
 
   return { suggestions: items };
@@ -499,11 +494,13 @@ function kindCompletion(
   const name = freeName(model, kind);
   const known = kindNamed(kind);
 
-  // A Page has no geometry of its own; everything else arrives placed and sized, which is the
-  // scaffolding half of this feature - a header a developer can run without finishing it.
+  // A whole ELEMENT, self-closing, because that is what a control is now. A Page has no geometry
+  // of its own; everything else arrives placed and sized at MSForms' own drop size, which is the
+  // scaffolding half of this feature - an element a developer can apply without finishing it.
   const insertText = size
-    ? `${kind} \${1:${name}} "\${2:${name}}" at \${3:12},\${4:12} size \${5:${size.width}}x\${6:${size.height}}`
-    : `${kind} \${1:${name}} "\${2:${name}}"`;
+    ? `<${kind} Name="\${1:${name}}" Caption="\${2:${name}}" Left="\${3:12}" Top="\${4:12}" `
+      + `Width="\${5:${size.width}}" Height="\${6:${size.height}}" />`
+    : `<${kind} Name="\${1:${name}}" Caption="\${2:${name}}" />`;
 
   // The coclass only where it is not simply `Forms.` plus this kind, for the hover's own reason:
   // a card that restates the word being completed is a card in the way.
@@ -522,6 +519,17 @@ function kindCompletion(
     range,
   };
 }
+
+/** The six every element carries, which no type library describes because they are the
+ * document's own scaffolding rather than MSForms properties. */
+const UNIVERSAL_ATTRIBUTES: Readonly<Record<string, string>> = {
+  name: "The control's identity, and how the code-behind reaches it.",
+  caption: "The text the control shows.",
+  left: "Points from the container's left edge.",
+  top: "Points from the container's top edge.",
+  width: "Width in points.",
+  height: "Height in points.",
+};
 
 /* -------------------------------------------------------------- hover */
 
@@ -545,28 +553,46 @@ export function hoverAt(
   // A property line: the path, or a value that names an enum member.
   if (spot.path !== null) {
     const property = propertyNamed(spot.owner, spot.path);
-    if (property === null) {
-      return null;
-    }
 
-    if (spot.onValue) {
-      const member = property.members?.find((one) => one.name.toLowerCase() === token.toLowerCase());
-      return member
-        ? contents("```vba\n" + `${member.name} = ${member.value}` + "\n```", property.doc)
-        : contents("```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
-    }
+    // FALL THROUGH rather than answering nothing. `Name` and `Caption` are attributes the type
+    // library never lists - the vocabulary drops them - so returning null here swallowed the
+    // hover for a control's own name, which is the one a developer points at most.
+    if (property !== null) {
+      if (spot.onValue) {
+        const member = property.members?.find((one) => one.name.toLowerCase() === token.toLowerCase());
+        return member
+          ? contents("```vba\n" + `${member.name} = ${member.value}` + "\n```", property.doc)
+          : contents("```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
+      }
 
-    return contents("```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
+      return contents(
+        "```vba\n" + signatureOf(spot.owner, property) + "\n```", ...documentationOf(property));
+    }
   }
 
   if (spot.header === null) {
     return null;
   }
 
-  // The clause words, which are the grammar rather than the vocabulary.
-  const clause = CLAUSES[token.toLowerCase()];
-  if (clause && token.toLowerCase() !== spot.header.kind.toLowerCase()) {
-    return contents(`\`${token.toLowerCase()}\` - ${clause.detail}`);
+  // AN ATTRIBUTE NAME, which is where most of a tagged document's hovering happens: the token is
+  // neither the kind nor the control's name, so it is looked up as a property of this element.
+  // `spot.path` only fills once the caret is past the `=`, and the pointer over `MatchEntry` is
+  // not - which is why this asks the vocabulary rather than the spot.
+  if (token.toLowerCase() !== spot.header.kind.toLowerCase()
+    && token.toLowerCase() !== spot.header.name.toLowerCase()) {
+    const attribute = propertyNamed(spot.header.kind, token);
+    if (attribute) {
+      return contents(
+        "```vba\n" + signatureOf(spot.header.kind, attribute) + "\n```",
+        ...documentationOf(attribute));
+    }
+
+    // The universals carry no type library entry of their own, and saying nothing about `Left`
+    // would leave the hole where the commonest attributes are.
+    const said = UNIVERSAL_ATTRIBUTES[token.toLowerCase()];
+    if (said !== undefined) {
+      return contents("```vba\n" + `${spot.header.name || spot.header.kind}.${token}` + "\n```", said);
+    }
   }
 
   /*
@@ -581,7 +607,10 @@ export function hoverAt(
    * under the pointer plus `.1` - so every card carried a line that restated its own heading. It
    * stays only where it cannot be worked out, which is the case it was there for.
    */
-  if (token.toLowerCase() === spot.header.kind.toLowerCase()) {
+  // Matched against the TOKEN rather than against the scanned kind, because the scan stops at the
+  // caret: with the pointer in the middle of `<Frame` the element's name so far is "Fra", and
+  // comparing to that answered nothing over the very word being hovered.
+  if (kindNamed(token) !== null && !/"[^"]*$/.test(spot.before)) {
     const known = kindNamed(token);
     if (known === null) {
       return contents("Not a toolbox kind. An apply needs a `ProgId = \"...\"` line to create one.");
@@ -601,12 +630,13 @@ export function hoverAt(
   // THE NAME: the control declared the way VBA declares it, which is also what hovering the same
   // name in the code-behind answers - one identifier, one sentence about it, whichever half of
   // the tab the pointer is in.
-  if (token.toLowerCase() === spot.header.name.toLowerCase()) {
-    const known = kindNamed(spot.header.kind);
-    const type = known === null ? spot.header.kind : `MSForms.${known.kind}`;
-    return contents(
-      "```vba\n" + `${spot.header.name} As ${type}` + "\n```",
-      known?.doc ?? null);
+  // Inside the Name attribute's own value. Same reason as the kind above: the scan cannot have
+  // read the closing quote yet, so the element's name is still "" while the pointer is on it.
+  if (/\bName\s*=\s*"[^"]*$/i.test(spot.before)) {
+    const spelled = /<\s*([A-Za-z_]\w*)/.exec(spot.line)?.[1] ?? spot.header.kind;
+    const known = kindNamed(spelled);
+    const type = known === null ? spelled : `MSForms.${known.kind}`;
+    return contents("```vba\n" + `${token} As ${type}` + "\n```", known?.doc ?? null);
   }
 
   return null;
@@ -614,11 +644,13 @@ export function hoverAt(
 
 /* -------------------------------------------------------------- the header hint */
 
-/** The header's grammar, one clause per parameter, which is what the hint walks along. The
+/** The element's shape, one attribute per parameter, which is what the hint walks along. The
  * brackets are the documented spelling of "optional" and stay in the labels, so the hint reads
- * as the grammar rather than as a demand. */
-const HEADER_PARAMETERS = ["Type", "Name", '["Caption"]', "[at left,top]", "[size width x height]"];
-const FORM_PARAMETERS = ["Form", "Name", '["Caption"]', "[size width x height]"];
+ * as the grammar rather than as a demand. A Form has no position of its own. */
+const HEADER_PARAMETERS = [
+  'Name="..."', '[Caption="..."]', '[Left="0" Top="0"]', '[Width="60" Height="20"]',
+];
+const FORM_PARAMETERS = ['Name="..."', '[Caption="..."]', '[Width="240" Height="180"]'];
 
 export function headerHintAt(
   model: monaco.editor.ITextModel, position: monaco.IPosition,
@@ -628,22 +660,21 @@ export function headerHintAt(
     return null;
   }
 
-  const form = spot.depth === 0;
+  const form = spot.header.kind.toLowerCase() === "form";
   const parameters = form ? FORM_PARAMETERS : HEADER_PARAMETERS;
 
-  // Which clause the hand is on: the words typed so far, plus one while a space is open.
-  const typed = spot.words + (/\s$/.test(spot.before) ? 1 : 0);
-  let active = Math.min(Math.max(typed, 1) - 1, parameters.length - 1);
-
-  // Once a clause keyword is standing, the hint follows it rather than counting words: `at`
-  // takes two numbers and a caption takes none, so word counting alone drifts immediately.
+  // Which attribute the hand is on, followed by the attribute NAME standing rather than by
+  // counting words: attributes may be typed in any order, so a count would drift the moment a
+  // developer writes Width before Left.
   const beforeCaret = spot.before.toLowerCase();
-  if (/\bsize\s+[^\s]*$/.test(beforeCaret)) {
+  const wrote = (name: string) => new RegExp(`\\b${name}\\s*=[^=]*$`).test(beforeCaret);
+  let active = 0;
+  if (wrote("width") || wrote("height")) {
     active = parameters.length - 1;
-  } else if (!form && /\bat\s+[^\s]*$/.test(beforeCaret)) {
-    active = 3;
-  } else if (/"[^"]*$/.test(spot.before)) {
+  } else if (!form && (wrote("left") || wrote("top"))) {
     active = 2;
+  } else if (wrote("caption")) {
+    active = 1;
   }
 
   return {
