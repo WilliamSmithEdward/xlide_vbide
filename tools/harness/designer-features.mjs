@@ -351,10 +351,12 @@ try {
   check("the markup opens with the form line",
     markup.startsWith(`<Form Name="${form}"`), markup.split("\n")[0]);
   check("a nested control prints inside its container",
-    /\r?\n    Frame Options "Freight" at 12,112 size 92x66\r?\n        OptionButton PickGround/.test(markup),
+    /<Frame Name="Options"[^>]*>\r?\n\s+<OptionButton Name="PickGround"/.test(markup)
+    && /<\/Frame>/.test(markup),
     markup.slice(0, 400));
   check("a page prints under its MultiPage, a control under the page",
-    /\r?\n    MultiPage Wizard[^\r\n]*\r?\n        Page Page1 "Page1"\r?\n            CheckBox Agree/.test(markup));
+    /<MultiPage Name="Wizard"[^>]*>\r?\n\s+<Page Name="Page1"[^>]*>\r?\n\s+<CheckBox Name="Agree"/
+      .test(markup));
 
   const idempotent = await api.applyMarkup(form, markup, project);
   check("applying the form's own markup adds and removes nothing",
@@ -382,7 +384,8 @@ try {
   check("re-applying the original document removes it again",
     backAgain.ok === true && backAgain.removed.includes("MarkupBtn"), JSON.stringify(backAgain));
 
-  const refusedMarkup = await api.applyMarkup(form, "Form X\n  Label L at banana\n", project)
+  const refusedMarkup = await api.applyMarkup(
+    form, '<Form Name="X">\n    <Label Name="L" Left="banana" Top="1" />\n</Form>\n', project)
     .catch((why) => why.message);
   check("a document that does not parse applies nothing, naming the line",
     /did not parse/.test(String(refusedMarkup)) && /line 2/.test(String(refusedMarkup)),
@@ -497,7 +500,10 @@ try {
     putBack.did === true && (putBack.data?.removed ?? []).includes("TabBtn"),
     JSON.stringify(putBack.data));
 
-  const refusedTab = await api.act("designerApply", { module: form, markup: "Form X\n  Label L at banana\n" });
+  const refusedTab = await api.act("designerApply", {
+    module: form,
+    markup: '<Form Name="X">\n    <Label Name="L" Left="banana" Top="1" />\n</Form>\n',
+  });
   check("a document that does not parse is refused at the tab, naming the line",
     refusedTab.did === false && /line 2/.test(refusedTab.detail ?? ""), refusedTab.detail);
   const untouchedByTab = await api.designer(form, project);
@@ -519,13 +525,13 @@ try {
     const read = await api.act("designerMarkup", { module: form });
     // #c0c0c0 is 12632256 with the blue-green-red order the model stores: the document spells
     // a colour the way the panel does now, and both spell it through one conversion in Core.
-    return /BackColor = #c0c0c0/.test(String(read.data ?? ""));
+    return /BackColor="#c0c0c0"/.test(String(read.data ?? ""));
   }, { budgetMs: 15000 });
   check("a form property set through the api appears in the OPEN tab's document, live", true);
 
   const routeMarkup = await api.designerMarkup(form, project);
   check("and in the projection route's document",
-    /\r?\n    BackColor = #c0c0c0\r?\n/.test(routeMarkup),
+    /<Form [^>]*BackColor="#c0c0c0"/.test(routeMarkup),
     routeMarkup.split(/\r?\n/).find((line) => line.includes("BackColor")));
 
   // The dialect's rule, held from the other side: a document WITHOUT the line cannot erase
