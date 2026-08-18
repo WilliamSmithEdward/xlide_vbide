@@ -179,6 +179,11 @@ internal sealed class EngineClient : IAsyncDisposable
             ["projectId"] = projectId,
             ["generation"] = generation,
             ["modules"] = modules,
+            // WHICH OFFICE APPLICATION, so the engine stops asserting Excel in the ones that are
+            // not it. Sent with the project rather than at startup because the engine is a child
+            // process that may outlive a project and be re-seeded; the host cannot change under
+            // it, but the seeding is the one message guaranteed to carry the fact.
+            ["host"] = HostApp.Name,
         };
 
         var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);

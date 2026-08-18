@@ -6,6 +6,7 @@
 // same contract with a different transport, so it is reused rather than reimplemented, which keeps
 // one analysis path shared with the editor extension instead of two that can disagree.
 
+import { setHostApp } from './hostApp.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
@@ -394,6 +395,10 @@ export class Dispatcher {
     }
     private openProject(params: ProjectOpenParams): { modules: number; types: string[]; procedures: string[] } {
         this.requireInitialized();
+
+        // Which Office application the add-in is loaded into, before anything is asked about a
+        // module: it decides whether a document module gets a host type at all.
+        setHostApp(params.host);
 
         this.analysis.handle({
             kind: 'seed',

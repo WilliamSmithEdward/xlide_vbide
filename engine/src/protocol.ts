@@ -70,6 +70,15 @@ export interface ProjectOpenParams {
      */
     generation: number;
     modules: ModulePayload[];
+    /**
+     * Which Office application the add-in is loaded into: `excel`, `word`, `powerpoint`,
+     * `access`, `outlook`, `visio`, `project`, or `other`.
+     *
+     * The VBE is shared and this product runs in all of them. Absent is treated as `excel`, which
+     * is what every caller before 2026-08-18 meant and keeps an older shim working against a
+     * newer engine.
+     */
+    host?: string;
 }
 
 /** textDocument/diagnostics: analyse one module. */

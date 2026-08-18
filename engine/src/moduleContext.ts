@@ -18,6 +18,7 @@ import {
     type VbaProjectAnalysisOptions,
     type VbaProjectModuleInput,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
+import { hostModelIsKnown } from './hostApp.js';
 import type { ModulePayload } from './protocol';
 
 type SharedProjectIndex = ReturnType<typeof buildLiveVbaProjectIndex>;
@@ -218,6 +219,24 @@ function meTypeFor(entry: ModuleEntry | undefined): string | undefined {
     if (entry.type !== 'document') {
         return undefined;
     }
+
+    /*
+     * NOTHING, IN A HOST WHOSE OBJECT MODEL WE CANNOT SPEAK.
+     *
+     * These three types are Excel's, and this ran in every Office application: the VBE is shared,
+     * so in Word `ThisDocument` was told it was an Excel.Worksheet and offered a worksheet's
+     * members (the owner, 2026-08-18, having run it there). Being confidently wrong is worse than
+     * being silent - a developer can work around no completions and cannot work around completions
+     * for the wrong application.
+     *
+     * So a document module in Word or PowerPoint gets NO host type until there is a model to give
+     * it one. It loses the bogus members rather than gaining Word's own, which is the honest state
+     * and the one to hold until those models exist.
+     */
+    if (!hostModelIsKnown()) {
+        return undefined;
+    }
+
     switch (documentTypeFor(entry)) {
         case 'workbook':
             return WORKBOOK;
@@ -250,7 +269,14 @@ function codeNamesFor(entries: ModuleEntry[]): Record<string, string> {
     const out: Record<string, string> = {};
     for (const entry of entries) {
         if (entry.type === 'document') {
-            out[entry.name.toLowerCase()] = meTypeFor(entry) ?? WORKSHEET;
+            // The `?? WORKSHEET` this used to carry is what typed Word's ThisDocument as an Excel
+            // worksheet: it applied to EVERY document module in every host. A code name with no
+            // type is left out entirely now, so a receiver that cannot be typed resolves to
+            // nothing rather than to the wrong application's members.
+            const type = meTypeFor(entry);
+            if (type !== undefined) {
+                out[entry.name.toLowerCase()] = type;
+            }
         }
     }
     return out;
