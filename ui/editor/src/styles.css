@@ -4669,6 +4669,9 @@ body.objbrowser-page #objbrowser-card {
      its colour is the correct relationship rather than a fight with it. */
   color: #dcdcaa !important;
   cursor: pointer;
+  /* The gap between the tag and the annotation is a MARGIN rather than leading spaces in the
+     text, so the hover underline draws under the name and not under the run-up to it. */
+  margin-left: 1.5ch;
 }
 
 .designer-handler-mark:hover {

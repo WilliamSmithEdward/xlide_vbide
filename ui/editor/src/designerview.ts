@@ -4634,8 +4634,25 @@ export class DesignerView {
     const lines = this.model.getLinesContent();
     for (const [at, text] of lines.entries()) {
       const name = /\bName="([^"]*)"/.exec(text)?.[1];
-      const found = name === undefined ? undefined : byControl.get(name.toLowerCase());
-      if (!found || found.length === 0) {
+      if (name === undefined) {
+        continue;
+      }
+
+      /*
+       * THE FORM'S OWN HANDLERS ARE SPELLED `UserForm_`, whatever the form is called.
+       *
+       * `UserForm_Initialize` on a form named EntryForm is MSForms' convention, not a control
+       * called UserForm - so a lookup by the element's Name finds nothing and the form's own line
+       * was the one line in the document with no annotation, which is the line a developer most
+       * expects one on (the owner, 2026-08-18). The Form element answers to both: its own name,
+       * for anything written against it by name, and the literal the runtime uses.
+       */
+      const isForm = /^\s*<Form\b/.test(text);
+      const found = [
+        ...(byControl.get(name.toLowerCase()) ?? []),
+        ...(isForm ? byControl.get("userform") ?? [] : []),
+      ];
+      if (found.length === 0) {
         continue;
       }
 
@@ -4648,7 +4665,13 @@ export class DesignerView {
             // THE HANDLER'S OWN NAME, not just the event: `OkButton_Click` is what the developer
             // will search for, what the code half calls it, and what makes the annotation
             // self-explaining rather than a hint that needs decoding.
-            content: `  ${found.map((one) => one.name).join("  ")}`,
+            //
+            // LABELLED, so the yellow run is never mistaken for something the tag itself carries;
+            // and NO LEADING SPACES, because they are part of the clickable run and the hover
+            // underline drew itself under the gap as well as the name. The gap is a margin on the
+            // class instead, which sits outside the text decoration.
+            content: `${found.length > 1 ? "Events" : "Event"}: `
+              + found.map((one) => one.name).join(", "),
             inlineClassName: "designer-handler-mark",
           },
           showIfCollapsed: true,
