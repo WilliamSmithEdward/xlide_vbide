@@ -477,6 +477,10 @@ function boot(): void {
         // Read at CALL time, not captured: `shell` is built after the views' factory is
         // declared, so binding it here would bind the undefined it holds now.
         handlers: () => bridge.requestOutline(id.module, id.project ?? undefined),
+        // The handler is in this form's OWN code half, so the navigation names the same module.
+        // It lands on the code face because a navigation takes the slot from a designer tab -
+        // which is the fix that made clicking a Sub in the tree work at all.
+        openHandler: (line) => bridge.navigate(id.module, line, 1, true, id.project ?? undefined),
         autoSize: (control) => bridge.requestDesignerAutoSize(id.module, id.project ?? null, control),
         notify: (text) => { shell?.notify(text); },
       });

@@ -276,6 +276,9 @@ export interface DesignerViewDeps {
    * so the grid's switch here and its row there are two views of one fact. */
   changeSetting(key: string, value: unknown): void;
 
+  /** Opens this form's code half at a line - the Sub an annotated handler is defined on. */
+  openHandler(line: number): void;
+
   /** The form's own procedures, for showing which controls have handlers written against them.
    * Answers null when the host cannot say, which is a shrug rather than "there are none". */
   handlers(): Promise<{ name: string; kind: string; line: number }[] | null>;
@@ -727,6 +730,7 @@ export class DesignerView {
      * loop. Monaco names the reason, so the loop is cut by asking rather than by a flag that
      * has to be cleared on every path out.
      */
+    this.editor.onMouseDown((event) => this.onMarkupClick(event));
     this.editor.onDidChangeCursorPosition((event) => {
       const byHand = event.reason === monaco.editor.CursorChangeReason.Explicit
         || event.reason === monaco.editor.CursorChangeReason.NotSet;
@@ -4563,6 +4567,36 @@ export class DesignerView {
    * definition: something asked again after it, against a document it has not seen. */
   private handlerRead = 0;
 
+  /** Markup line -> the handlers annotated on it, so a click can say where to go. */
+  private readonly handlerLines = new Map<number, { name: string; line: number }[]>();
+
+  /**
+   * A CLICK ON THE ANNOTATION OPENS THE HANDLER, in the code half, at its Sub.
+   *
+   * Monaco reports a click on injected text as a content click PAST the end of the line - the
+   * annotation is not in the model, so there is no column of the document under the pointer. That
+   * is the whole test: a press at or beyond the last column of a line that carries an annotation
+   * is a press on the annotation, and nothing else can be.
+   *
+   * With several handlers on one control the first is taken. Splitting the injected text into
+   * separately clickable runs needs a decoration each and a column arithmetic that guesses at
+   * glyph widths; going to the first of a control's handlers is one keystroke from the rest, and
+   * the code half's own outline is beside it.
+   */
+  private onMarkupClick(event: monaco.editor.IEditorMouseEvent): void {
+    const at = event.target.position;
+    if (!at || event.event.rightButton) {
+      return;
+    }
+
+    const found = this.handlerLines.get(at.lineNumber);
+    if (!found || found.length === 0 || at.column < this.model.getLineMaxColumn(at.lineNumber)) {
+      return;
+    }
+
+    this.deps.openHandler(found[0]!.line);
+  }
+
   private async paintHandlers(): Promise<void> {
     const ticket = ++this.handlerRead;
     const procedures = await this.deps.handlers();
@@ -4577,7 +4611,7 @@ export class DesignerView {
 
     // `OkButton_Click` is OkButton's Click. Split at the LAST underscore, because a control may
     // hold one in its own name and an event never does.
-    const byControl = new Map<string, string[]>();
+    const byControl = new Map<string, { name: string; line: number }[]>();
     for (const procedure of procedures) {
       const at = procedure.name.lastIndexOf("_");
       if (at <= 0) {
@@ -4585,25 +4619,36 @@ export class DesignerView {
       }
 
       const control = procedure.name.slice(0, at).toLowerCase();
-      const event = procedure.name.slice(at + 1);
-      byControl.set(control, [...(byControl.get(control) ?? []), event]);
+      byControl.set(control, [
+        ...(byControl.get(control) ?? []),
+        { name: procedure.name, line: procedure.line },
+      ]);
     }
+
+    // Which handler sits on which markup line, so a CLICK on the annotation knows where to go.
+    // Rebuilt with the decorations rather than kept in step with them, because two tables of the
+    // same fact is how one of them goes stale.
+    this.handlerLines.clear();
 
     const marks: monaco.editor.IModelDeltaDecoration[] = [];
     const lines = this.model.getLinesContent();
     for (const [at, text] of lines.entries()) {
       const name = /\bName="([^"]*)"/.exec(text)?.[1];
-      const events = name === undefined ? undefined : byControl.get(name.toLowerCase());
-      if (!events || events.length === 0) {
+      const found = name === undefined ? undefined : byControl.get(name.toLowerCase());
+      if (!found || found.length === 0) {
         continue;
       }
 
+      this.handlerLines.set(at + 1, found);
       const column = this.model.getLineMaxColumn(at + 1);
       marks.push({
         range: new monaco.Range(at + 1, column, at + 1, column),
         options: {
           after: {
-            content: `  ${events.join(", ")}`,
+            // THE HANDLER'S OWN NAME, not just the event: `OkButton_Click` is what the developer
+            // will search for, what the code half calls it, and what makes the annotation
+            // self-explaining rather than a hint that needs decoding.
+            content: `  ${found.map((one) => one.name).join("  ")}`,
             inlineClassName: "designer-handler-mark",
           },
           showIfCollapsed: true,

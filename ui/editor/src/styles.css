@@ -4654,11 +4654,23 @@ body.objbrowser-page #objbrowser-card {
 
 /* WHICH CONTROLS HAVE CODE BEHIND THEM, written after their tag in the markup half.
 
-   Muted and italic on purpose: it is an annotation rather than part of the document - the parser
-   never sees it, and it must not read as text a developer could edit. The same weight the
-   inlay hints beside it carry, for the same reason. */
+   THE SAME YELLOW A RESOLVED CALL WEARS - `dcdcaa`, what `Len` and `OkButton_Click` are painted in
+   the code half - because it names the same thing they do. An annotation in a colour of its own
+   would be one more thing to learn; in the colour the code already uses, a developer reads it as
+   "that Sub" without being told (the owner, 2026-08-18).
+
+   It is still not part of the document: the parser never sees it, it cannot be typed in, and the
+   pointer says so by becoming a hand. */
 .designer-handler-mark {
-  opacity: 0.55;
-  font-style: italic;
-  color: var(--vscode-editorCodeLens-foreground, #999999);
+  /* `!important` because Monaco paints injected text with its own token class - `.mtk1` and the
+     rest - and that is a single class like this one, so whichever the bundler emits last would
+     win. Measured: without it the annotation came out rgb(212,212,212), the default foreground,
+     rather than the yellow. This is a decoration on text the tokenizer never saw, so overriding
+     its colour is the correct relationship rather than a fight with it. */
+  color: #dcdcaa !important;
+  cursor: pointer;
+}
+
+.designer-handler-mark:hover {
+  text-decoration: underline;
 }
