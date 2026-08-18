@@ -109,6 +109,10 @@ export interface ExplorerHandlers {
   outline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A procedure was picked: go to its line in its module, in its workbook. */
   openProcedure(module: string, line: number, workbook?: string): void;
+
+  /** A form's designer was picked in the tree: open its design face, the way the tab's own menu
+   * does. */
+  openDesigner(module: string, workbook?: string): void;
   /**
    * A row is being dragged toward the editor: a module, or a procedure carrying its line.
    * `became` fires if the press turns into a real drag, so the click it would otherwise be
@@ -235,6 +239,14 @@ export class Explorer {
         // opened it however it was opened - including from the keyboard, where there is no pointer
         // and a click reports 0,0.
         this.handlers.projectAdd(add.dataset.addProject, Math.round(box.left), Math.round(box.bottom));
+        return;
+      }
+
+      // Before the procedure test, because a designer row is not one and both are children of
+      // the same component.
+      const designer = (event.target as HTMLElement).closest("[data-designer-module]") as HTMLElement | null;
+      if (designer?.dataset.designerModule) {
+        this.handlers.openDesigner(designer.dataset.designerModule, designer.dataset.designerWorkbook);
         return;
       }
 
@@ -755,6 +767,15 @@ export class Explorer {
         // the workbook whose row was opened.
         if (component.name === this.expandedModule
           && (this.expandedModuleWorkbook === null || this.expandedModuleWorkbook === project.name)) {
+          // A FORM'S DESIGNER, ALWAYS FIRST. It is the thing a developer opens a form for, and
+          // until now the only ways in were the tab's own menu and a keyboard command - neither
+          // of which announces itself (the owner, 2026-08-18). Its siblings are the handlers,
+          // so it sits above them: the design comes before the code that answers it, and a fixed
+          // position means the row never moves as procedures are added and renamed.
+          if (component.kind === ComponentKind.Form) {
+            this.root.appendChild(this.designerRow(component.name, project.name));
+          }
+
           for (const procedure of this.outlines.get(component.name) ?? []) {
             this.root.appendChild(this.procedureRow(component.name, procedure, project.name));
           }
@@ -861,6 +882,28 @@ export class Explorer {
       button.appendChild(badge);
     }
 
+    return button;
+  }
+
+  /**
+   * The designer, as a child of its form. Carries its own data attribute rather than reusing the
+   * procedure's, because it is not a line in a file: clicking it opens the design FACE of the
+   * form's document, where a procedure row navigates to a line of its code.
+   */
+  private designerRow(module: string, workbook: string): HTMLElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tree-item tree-proc tree-designer";
+    button.dataset.designerModule = module;
+    button.dataset.designerWorkbook = workbook;
+    button.title = `Open the designer for ${module}`;
+    button.setAttribute("role", "treeitem");
+
+    const glyph = document.createElement("span");
+    glyph.className = "codicon codicon-symbol-color";
+    glyph.setAttribute("aria-hidden", "true");
+
+    button.append(glyph, document.createTextNode("Designer"));
     return button;
   }
 

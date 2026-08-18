@@ -29,6 +29,20 @@
  */
 import { open, waitFor } from "./xlide-api.mjs";
 
+/*
+ * NAME CONTROLS TO SEE THE PIXELS THE TABLE IS READING:
+ *
+ *   node tools\harness\designer-parity.mjs NameLabel PickGround
+ *
+ * The table reduces a column of the capture to one number, and one number cannot say WHAT the
+ * edge detector found - a border, a bevel, the top of a letterform. That difference decides
+ * whether a delta is a defect in the canvas or the instrument comparing two unlike things, and
+ * getting it wrong is how four wrong picture fixes shipped in one day. So the profile is here
+ * rather than in a throwaway probe: the next person asking "what is it actually seeing" should
+ * find the answer in the tool that raised the question.
+ */
+const PROFILE = new Set(process.argv.slice(2).filter((one) => !one.startsWith("-")));
+
 const api = await open();
 const project = await api.project();
 const FORM = "EntryForm";
@@ -265,6 +279,7 @@ try {
   console.log("-".repeat(70));
 
   const findings = [];
+  const profiles = [];
   for (const control of form.controls) {
     if (control.top === null || control.left === null || control.width < 6) {
       continue;
@@ -272,6 +287,34 @@ try {
 
     const drawn = painted[control.name];
     if (!drawn) {
+      continue;
+    }
+
+    /*
+     * A LABEL HAS NO EDGE TO COMPARE, and this table said it had one four points out.
+     *
+     * Profiled 2026-08-18 (`designer-parity.mjs NameLabel`): the runtime's column through
+     * NameLabel is the form's ground - luminance 240 - from 11.25pt all the way to 17.27, and the
+     * first thing that is not ground is at 18.03, running to 21.79 and back to ground. That is
+     * the anti-aliased text of "Customer". There is no border and no fill: a Label's background
+     * is the form's own, so the only ink in the column is the caption, four points below the
+     * control's top because that is where the cap height of 8.25pt Tahoma starts in a 16pt box.
+     *
+     * The canvas's landmark for a Label is its RECTANGLE, so the table was subtracting a
+     * rectangle from some lettering and reporting the leading as a defect. Both Labels sat in the
+     * findings list for weeks looking like the worst rows in it.
+     *
+     * So a Label is excused the way a ScrollBar and a SpinButton already are - said out loud
+     * rather than dropped, because a table that quietly skips a control is a table nobody can
+     * check. What it would take to measure a Label honestly is a like-for-like comparison of INK
+     * against INK, cropping the same rectangle off both surfaces; that is a bigger instrument
+     * than this one and it is not pretended at here.
+     */
+    if (drawn.kind === "Label") {
+      console.log(control.name.padEnd(16) + String(control.type ?? drawn.kind).padEnd(14)
+        + String(control.parent?.toLowerCase() === FORM.toLowerCase() ? "form" : control.parent).padEnd(10)
+        + String(drawn.top).padStart(7) + "  no edge".padStart(10)
+        + "   caption ink only".padStart(8));
       continue;
     }
 
@@ -324,6 +367,10 @@ try {
       findings.push(`${control.name} (${drawn.kind}): the canvas paints its top edge `
         + `${delta > 0 ? `${delta}pt lower` : `${-delta}pt higher`} than the form does`);
     }
+
+    if (PROFILE.has(control.name)) {
+      profiles.push({ name: control.name, kind: drawn.kind, x, drawn, ceiling });
+    }
   }
 
   console.log();
@@ -338,6 +385,30 @@ try {
 
   console.log("\nA point is about a device pixel and a half here, so under one is noise in the\n"
     + "edge detector rather than a difference anybody can see. Two or more is a real one.");
+
+  /*
+   * WHAT THE COLUMN ACTUALLY HOLDS, for a control named on the command line.
+   *
+   * The number in the table is the first row in this column that is not the form's ground, and it
+   * cannot say what that row IS. A border, a bevel and the top of a letterform all read as "not
+   * ground", and which one it found decides whether a delta is the canvas painting in the wrong
+   * place or the table comparing a rectangle against some ink inside it.
+   */
+  for (const one of profiles) {
+    const from = Math.round(originY + (one.drawn.boxTop - 3) * scale);
+    const to = Math.round(originY + (one.drawn.boxTop + 14) * scale);
+    console.log(`\n${one.name} (${one.kind}), the runtime's column at x=${one.x}`);
+    console.log(`the canvas paints its landmark at ${one.drawn.top}pt; its BOX starts at ${one.drawn.boxTop}pt`);
+    console.log("   pt    lum  ");
+    for (const row of column(image, one.x, Math.max(0, from), to)) {
+      const at = asPoints(row.y);
+      const bar = "#".repeat(Math.max(0, Math.round((255 - row.lum) / 12)));
+      console.log(`${at.toFixed(2).padStart(7)}${Math.round(row.lum).toString().padStart(7)}  ${bar}`
+        + (Math.abs(at - one.drawn.boxTop) < 0.4 ? "   <- the canvas's box top" : "")
+        + (Math.abs(at - one.drawn.top) < 0.4 && one.drawn.top !== one.drawn.boxTop
+          ? "   <- the canvas's landmark" : ""));
+    }
+  }
 
   // ---- and the same button's PICTURE, off both surfaces ----
   const pictured = painted[PICTURED];

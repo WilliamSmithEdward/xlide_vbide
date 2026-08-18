@@ -1274,6 +1274,11 @@ public sealed record DebugDesignerControl(
     [property: JsonPropertyName("width")] double? Width,
     [property: JsonPropertyName("height")] double? Height,
     [property: JsonPropertyName("tabIndex")] int? TabIndex,
+    /// <summary>Whether Tab STOPS here, which is a different question from whether the control
+    /// holds a place in the order. A Label is in the sequence with this false - Tab walks past it
+    /// and its accelerator moves focus to the control after it - and an Image, which has no
+    /// TabStop at all, answers null beside a null TabIndex.</summary>
+    [property: JsonPropertyName("tabStop")] bool? TabStop,
     [property: JsonPropertyName("visible")] bool? Visible,
     [property: JsonPropertyName("enabled")] bool? Enabled,
     [property: JsonPropertyName("caption")] string? Caption,

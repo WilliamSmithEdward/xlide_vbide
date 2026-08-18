@@ -3131,6 +3131,14 @@ internal sealed partial class AddInSession
                             : HostError("zorder needs name=<control> and to=front|back");
                     }
 
+                    case "autosize":
+                    {
+                        request.Query.TryGetValue("name", out var fitName);
+                        return designerModule is { Length: > 0 } && fitName is { Length: > 0 }
+                            ? DesignerAutoSize(designerModule, designerProject, fitName)
+                            : HostError("autosize needs module=<form> and name=<control>");
+                    }
+
                     case "liveness":
                         return DesignerLiveness();
 

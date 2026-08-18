@@ -684,7 +684,7 @@ public static class FormMarkup
         {
             return ReadColour(spelled) is { } rgb
                 ? new PropertySpec(attribute.Name, rgb.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour)
-                : throw new FormMarkupException(attribute.Line, $"{spelled} is not a #rrggbb colour");
+                : throw new FormMarkupException(attribute.Line, $"{spelled} is not a #rrggbb color");
         }
 
         // &H8000000F& - VBA's own spelling, still taken from a hand-written document even though
@@ -1107,7 +1107,7 @@ public static class FormMarkup
         {
             return ReadColour(spelled) is { } rgb
                 ? new PropertySpec(path, rgb.ToString(CultureInfo.InvariantCulture), PropertyValueKind.Colour)
-                : throw new FormMarkupException(lineNumber, $"{spelled} is not a #rrggbb colour");
+                : throw new FormMarkupException(lineNumber, $"{spelled} is not a #rrggbb color");
         }
 
         // &H8000000F& - VBA's own spelling, and the only one a SYSTEM colour has. Carried onward
@@ -1141,7 +1141,7 @@ public static class FormMarkup
         throw new FormMarkupException(
             lineNumber,
             $"{spelled} is not a value: quoted text, a number, True/False, #rrggbb, "
-            + "a system colour's name, or &H hex");
+            + "a system color's name, or &H hex");
     }
 
     private static int IndexOfUnquoted(string body, char wanted)

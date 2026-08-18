@@ -398,6 +398,55 @@ internal sealed partial class AddInSession
             DebugJsonContext.Default.DebugDesignerBaselineReply);
     }
 
+    /// <summary>
+    /// WHAT MSFORMS' OWN AutoSize WOULD MAKE THIS CONTROL, measured and put straight back.
+    ///
+    /// "Size to Fit" cannot be computed on the page and the measurements are why (2026-08-18).
+    /// A page-side read of the caption's ink agrees with the runtime for a Label - 35 against
+    /// 35.25 - and is wrong for everything else it was tried on:
+    ///
+    ///     Label NameLabel      page 35x10    AutoSize 35.25x9.75
+    ///     CheckBox Taxable     page 39x10    AutoSize 48.75x17.25
+    ///     ToggleButton Hold    page 18x11    AutoSize 28.5x21.75
+    ///     CommandButton Ok     page 72x24    AutoSize 220.5x198.1
+    ///
+    /// The glyph and gap of a check box, the chrome a button draws round its caption, and above
+    /// all a PICTURE - the OK button sizes to a 256-square logo at natural size, which the canvas
+    /// draws scaled down and therefore cannot measure. A table of per-kind allowances written
+    /// down here would be a guess that reads right on one machine and one font.
+    ///
+    /// So the gesture asks the authority. AutoSize is set, the box read, and BOTH put back - the
+    /// flag and the geometry - so the form is exactly as it was found and the page writes the
+    /// measured size into the DOCUMENT, where every other gesture writes. The form is touched to
+    /// measure and not to change, which is the narrowest thing that can answer this honestly.
+    /// </summary>
+    /// <summary>The debug route over FormDesignService's measurement, which the canvas's own
+    /// "Size to Fit" also goes through - one measurement, not two that agree today.</summary>
+    private string DesignerAutoSize(string module, string? projectDisplay, string control)
+    {
+        var projectId = ResolveNamedProject(projectDisplay, out var complaint);
+        if (complaint is not null)
+        {
+            return HostError(complaint);
+        }
+
+        using var component = FindComponent(module, projectId, out _);
+        if (component is null)
+        {
+            return HostError($"no component named {module}");
+        }
+
+        var (width, height, refused) = FormDesignService.MeasureAutoSize(component, module, control);
+        return refused is not null
+            ? HostError(refused)
+            : JsonSerializer.Serialize(
+                new DebugDesignerEditReply(
+                    true, "autosize", control, null,
+                    $"{width!.Value.ToString(CultureInfo.InvariantCulture)}x"
+                    + height!.Value.ToString(CultureInfo.InvariantCulture)),
+                DebugJsonContext.Default.DebugDesignerEditReply);
+    }
+
     private string DesignerLiveness()
     {
         var stale = CheckDesignerTabsForOutsideEdits(now: true);
@@ -568,6 +617,7 @@ internal sealed partial class AddInSession
             TryNumber(control, "Width"),
             TryNumber(control, "Height"),
             TryInt(control, "TabIndex"),
+            TryFlag(control, "TabStop"),
             TryFlag(control, "Visible"),
             TryFlag(control, "Enabled"),
             TryText(control, "Caption"),

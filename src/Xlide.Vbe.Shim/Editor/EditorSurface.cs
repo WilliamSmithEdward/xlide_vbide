@@ -265,6 +265,10 @@ internal sealed class EditorSurface : IDisposable
     /// workbook or null).</summary>
     public Action<int, string, string?>? OutlineRequested { get; set; }
 
+    /// <summary>The canvas asking what AutoSize would make a control: (request id, form, workbook
+    /// display name or null, control). Answered through <see cref="ShowDesignerAutoSize"/>.</summary>
+    public Action<int, string, string?, string>? DesignerAutoSizeRequested { get; set; }
+
     /// <summary>Raised when the page asks for a module's colouring: (requestId, moduleName,
     /// workbook or null).</summary>
     public Action<int, string, string?>? SemanticTokensRequested { get; set; }
@@ -456,6 +460,20 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new OutlineResultMessage("outlineResult", requestId, procedures, failed),
             EditorMessageContext.Default.OutlineResultMessage));
+    }
+
+    /// <summary>The measured AutoSize back to whoever asked, nulls included: a control with no
+    /// AutoSize has no natural size, and the page says so rather than resizing it to nothing.</summary>
+    public void ShowDesignerAutoSize(int requestId, double? width, double? height)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new DesignerAutoSizeResultMessage("designerAutoSizeResult", requestId, width, height),
+            EditorMessageContext.Default.DesignerAutoSizeResultMessage));
     }
 
     /// <summary>Answers an import/export request with the service's own JSON, verbatim.</summary>
@@ -2283,6 +2301,22 @@ internal sealed class EditorSurface : IDisposable
                             ? outlineOwner.GetString()
                             : null;
                         OutlineRequested?.Invoke(outlineRequestId, outlineModule, outlineProject);
+                    }
+
+                    break;
+
+                case "designerAutoSize":
+                    if (document.RootElement.TryGetProperty("id", out var fitId)
+                        && fitId.TryGetInt32(out var fitRequestId)
+                        && document.RootElement.TryGetProperty("module", out var fitModuleElement)
+                        && fitModuleElement.GetString() is { Length: > 0 } fitModule
+                        && document.RootElement.TryGetProperty("control", out var fitControlElement)
+                        && fitControlElement.GetString() is { Length: > 0 } fitControl)
+                    {
+                        var fitProject = document.RootElement.TryGetProperty("project", out var fitOwner)
+                            ? fitOwner.GetString()
+                            : null;
+                        DesignerAutoSizeRequested?.Invoke(fitRequestId, fitModule, fitProject, fitControl);
                     }
 
                     break;

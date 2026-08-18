@@ -1435,7 +1435,23 @@ export class Workspace {
 
     strip.addEventListener("contextmenu", (event) => {
       const id = tabIdOf(event.target as HTMLElement);
+
+      /*
+       * THE EMPTY END OF THE STRIP IS STILL THE STRIP, and it used to fall straight through to
+       * the BROWSER's own menu - Back, Refresh, Save as, Print, Send tab to your devices, Inspect
+       * (the owner, 2026-08-18, with the screenshot). None of those mean anything here and two of
+       * them would take the developer out of the editor entirely.
+       *
+       * A right-click there has no tab to act on, so it gets the one item that needs none.
+       */
       if (!id) {
+        event.preventDefault();
+        const every = this.groups.flatMap((g) => [...g.tabs]);
+        showContextMenu(event.clientX, event.clientY, [{
+          label: "Close All",
+          enabled: every.length > 0,
+          run: () => every.forEach((tab) => this.handlers.close(tab.id)),
+        }]);
         return;
       }
 

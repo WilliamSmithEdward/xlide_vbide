@@ -2227,6 +2227,24 @@ body.live-resize .minimap {
   user-select: none;
 }
 
+/* A row Tab walks PAST - a Label, or anything with TabStop off. Dimmed rather than dropped,
+   because its place in the sequence is real: an accelerator moves focus to whatever follows it.
+   Dimming alone would be colour carrying the meaning on its own, so the rank column gets a
+   bracket around the number as well, and the row carries the sentence as a title. */
+.taborder-row.passed-over .taborder-name,
+.taborder-row.passed-over .taborder-kind {
+  opacity: 0.55;
+  font-style: italic;
+}
+
+.taborder-row.passed-over .taborder-rank::before {
+  content: "(";
+}
+
+.taborder-row.passed-over .taborder-rank::after {
+  content: ")";
+}
+
 /* The row under the hand while it is being carried: still legible, plainly not where it belongs
    yet. The insertion line below is what says where it WILL belong. */
 .taborder-row.lifting {
@@ -2257,8 +2275,10 @@ body.live-resize .minimap {
 
 /* Fixed width and tabular, so the numbers line up as a column rather than drifting with the
    name beside them. */
+/* Wide enough for a two-digit rank WITH the brackets a passed-over row wears, so the names stay
+   in one column whether or not the row above is one Tab stops on. */
 .taborder-rank {
-  min-width: 20px;
+  min-width: 30px;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
 }
@@ -4631,3 +4651,14 @@ body.objbrowser-page #objbrowser-card {
 .designer-view.stacked.hide-canvas .designer-collapse-canvas svg { transform: rotate(180deg); }
 .designer-view.hide-markup .designer-splitter,
 .designer-view.hide-canvas .designer-splitter { cursor: default; }
+
+/* WHICH CONTROLS HAVE CODE BEHIND THEM, written after their tag in the markup half.
+
+   Muted and italic on purpose: it is an annotation rather than part of the document - the parser
+   never sees it, and it must not read as text a developer could edit. The same weight the
+   inlay hints beside it carry, for the same reason. */
+.designer-handler-mark {
+  opacity: 0.55;
+  font-style: italic;
+  color: var(--vscode-editorCodeLens-foreground, #999999);
+}

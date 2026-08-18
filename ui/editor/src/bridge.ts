@@ -84,6 +84,7 @@ export type HostMessage =
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
+  | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -180,6 +181,11 @@ export interface FormMarkupControl {
   /** Where the control sits in its container's TAB ORDER - display truth, like the fonts and the
    * client areas: the dialect prints no tab index, and the tab-order dialog reads it here. */
   tabIndex?: number | null;
+  /** Whether Tab STOPS here, which is a different question from holding a place in the order:
+   * a Label is in the sequence with this false, so Tab walks past it while its accelerator still
+   * moves focus to the control after it. Null for a control with no TabStop at all - an Image,
+   * which has no TabIndex either. */
+  tabStop?: boolean | null;
   picture?: FormMarkupPicture | null;
 }
 
@@ -401,6 +407,7 @@ export type ClientMessage =
   | { type: "requestFormMarkupVocabulary"; module: string; project?: string }
   | { type: "designerEventStub"; module: string; project?: string; control?: string }
   | { type: "designerZOrder"; module: string; project?: string; control: string; front: boolean }
+  | { type: "designerAutoSize"; id: number; module: string; project?: string; control: string }
   | { type: "designerSetProperty"; module: string; project?: string; control: string; property: string; value: string }
   | { type: "designerSelection"; module: string; project?: string; control?: string }
   | { type: "insertComponent"; kind: number; project?: string }
@@ -578,6 +585,7 @@ export class EditorBridge {
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
+  private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
@@ -1047,6 +1055,22 @@ export class EditorBridge {
   }
 
   /**
+   * What MSForms' own AutoSize would make a control, for the canvas's "Size to Fit".
+   *
+   * The host measures and puts the control straight back; nothing is changed by asking. Null is
+   * a control with no natural size - an AutoSize it does not have, or one it would not answer -
+   * and the caller says so rather than resizing anything to nothing.
+   */
+  requestDesignerAutoSize(
+    module: string, project: string | null, control: string,
+  ): Promise<{ width: number; height: number } | null> {
+    return this.pendingAutoSize.ask(() => null, 8000, (id) =>
+      this.transport.post({
+        type: "designerAutoSize", id, module, control, ...(project ? { project } : {}),
+      }));
+  }
+
+  /**
    * Asks the host where the symbol at an offset is declared, or everywhere in the workbook it is
    * used. Resolves empty rather than rejecting: navigation that fails is a click that does not
    * move the cursor.
@@ -1421,6 +1445,13 @@ export class EditorBridge {
       case "outlineResult":
         // A failed answer is a shrug, not a statement of emptiness.
         this.pendingOutlines.settle(message.id, message.failed ? null : message.procedures);
+        return;
+      case "designerAutoSizeResult":
+        this.pendingAutoSize.settle(
+          message.id,
+          message.width === null || message.height === null
+            ? null
+            : { width: message.width, height: message.height });
         return;
       case "setLanguageFacts":
         updateVbaLanguageFacts(message.types, message.procedures);

@@ -714,6 +714,20 @@ public sealed record OutlineResultMessage(
     [property: JsonPropertyName("failed")] bool Failed = false);
 
 /// <summary>
+/// What MSForms' own AutoSize makes a control, answered for "Size to Fit".
+///
+/// The size cannot be worked out on the page - a check box's glyph, a button's chrome and above
+/// all a picture drawn at natural size are not in the caption's ink - so the gesture asks the
+/// host, which measures and puts the control straight back. Null width and height are a control
+/// with no AutoSize to ask about, which is an answer rather than a failure.
+/// </summary>
+public sealed record DesignerAutoSizeResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("width")] double? Width,
+    [property: JsonPropertyName("height")] double? Height);
+
+/// <summary>
 /// The answer to an import/export request, carried as the JSON the service produced rather than as
 /// a shape of its own.
 ///
@@ -809,6 +823,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]
 [JsonSerializable(typeof(OutlineResultMessage))]
+[JsonSerializable(typeof(DesignerAutoSizeResultMessage))]
 [JsonSerializable(typeof(SyncResultMessage))]
 [JsonSerializable(typeof(SetLanguageFactsMessage))]
 [JsonSerializable(typeof(SurfaceProject))]

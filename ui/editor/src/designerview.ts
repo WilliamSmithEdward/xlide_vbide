@@ -40,19 +40,31 @@ import { showTabOrder } from "./taborderdialog.js";
 const PT = 4 / 3;
 
 /*
- * A FRAME'S CAPTION BAND, measured off the running form rather than reasoned about.
+ * A FRAME'S CAPTION BAND: TWO measurements, because it answers two questions.
  *
  * MSForms draws a group box the way Windows does: the caption occupies a band at the top of
  * the control's own rectangle, the rule runs through the MIDDLE of that band, and the client
  * area begins BELOW it. So a frame at top 112 shows its line at about 116 and its first child
- * sits from about 121 - which is why a button placed level with the frame looks level in a
- * designer that draws the line at 112 and is not (the owner's side-by-side, 2026-08-16).
+ * lower still - which is why a button placed level with the frame looks level in a designer that
+ * draws the line at 112 and is not (the owner's side-by-side, 2026-08-16).
  *
- * The band is the caption's line box, which the stylesheet sets and this matches. The model's
- * InsideHeight was tried first and reads about two and a half points short of the runtime;
- * designer-parity.mjs is what told the difference, comparing glyph against glyph.
+ * ONE CONSTANT WAS ANSWERING BOTH, and that is what left the children out (2026-08-18). The rule
+ * was drawn at half the band and the client at the whole of it, which ties the two together at a
+ * ratio the runtime does not keep: measured against the running form, the rule sits 4.69pt below
+ * the control's top and the client begins 6.05pt below it - a gap of 1.36pt, not a factor of two.
+ * With one number they could not both be right, and the client was 2.9pt low, so every control
+ * inside a Frame sat almost three points below where it runs.
+ *
+ * HOW THEY WERE MEASURED, since the next person will want to redo it. designer-parity.mjs names
+ * a control and prints the runtime's own column of pixels through it. An OptionButton was added
+ * to the FORM to get the kind's own glyph offset with no container in the way - `ParityProbe` at
+ * top 120 put its first ink at 124.22, so an OptionButton's glyph starts 4.22pt below its top.
+ * PickGround, the same kind inside the Frame, put its ink at 136.27, so its control top is
+ * 132.05; its Top is 14 within the frame, so the frame's client begins at 118.05 on a frame whose
+ * own top is 112. The rule came off the same table. Neither number is reasoned about.
  */
-const FRAME_CAPTION_LINE = 12;
+const FRAME_RULE_TOP = 6.25;
+const FRAME_CLIENT_TOP = 8;
 
 /** How near an edge has to be, in POINTS, before a gesture lines up with it. Three is about
  * four device pixels at 100%: close enough that a hand aiming at an edge finds it, far enough
@@ -70,6 +82,19 @@ interface Guide {
  * higher than this or the tabs hang through the line, and the runtime's band measures within
  * a point of it - so it is also the truer of the two numbers available. */
 const PAGE_STRIP_HEIGHT = 20;
+
+/*
+ * AND HOW FAR INSIDE THE BODY A PAGE'S CHILDREN BEGIN, which is not where the body's edge is.
+ *
+ * The MultiPage had the Frame's defect in its own dialect (2026-08-18): the body's visible top
+ * and the origin its children are placed from were one number, and the runtime keeps them about
+ * two points apart. Measured the same way - a CheckBox on the FORM to get the kind's glyph offset
+ * with no container in the way (Taxable, top 40, ink at 42.88, so 2.88pt), then the same kind on
+ * a Page (Agree, ink at 216.1, so its top is 213.22; its Top is 8 within the page, so the page's
+ * client begins at 205.22 on a MultiPage whose own top is 188). That is 17.22pt, against a body
+ * edge measured at 15.3pt. The difference is the body's own inset and it is what this carries.
+ */
+const PAGE_CLIENT_INSET = 3;
 
 /** How far a press must travel before it is a DRAG rather than a click, in CSS pixels. Below
  * it a press is a selection and nothing moves, which is what keeps a click a click. */
@@ -250,6 +275,21 @@ export interface DesignerViewDeps {
   /** Writes one setting through the host - the same call the settings dialog's controls make,
    * so the grid's switch here and its row there are two views of one fact. */
   changeSetting(key: string, value: unknown): void;
+
+  /** The form's own procedures, for showing which controls have handlers written against them.
+   * Answers null when the host cannot say, which is a shrug rather than "there are none". */
+  handlers(): Promise<{ name: string; kind: string; line: number }[] | null>;
+
+  /** What MSForms' own AutoSize would make a control - the only thing that knows a control's
+   * natural size, since a check box's glyph, a button's chrome and a picture at natural size are
+   * none of them in the caption's ink. The host measures and puts the control back; null is a
+   * control that has no natural size to give. */
+  autoSize(control: string): Promise<{ width: number; height: number } | null>;
+
+  /** Says something on the status line - the same place a refused host write says its piece.
+   * For gestures that can decline: Ctrl+V with nothing copied, a Page pasted where no MultiPage
+   * is. A gesture that silently does nothing is indistinguishable from one that is unwired. */
+  notify(text: string): void;
 }
 
 export class DesignerView {
@@ -737,6 +777,12 @@ export class DesignerView {
 
     this.request = deps.request;
 
+    // A tab that is ALREADY OPEN gets no projection just because the page reloaded under it,
+    // which is precisely the state a developer is in after a deploy. The ticket above is what
+    // makes this safe to fire alongside the one `update` starts.
+    this.refreshHandlers();
+
+
     // LAST, because it lays the editor out and the editor must exist: the first version ran
     // this beside the DOM build and the constructor died reaching for an editor not yet
     // created - a designer tab that stood in the strip and mounted nothing.
@@ -1093,6 +1139,12 @@ export class DesignerView {
    * dirty document is then measured against the NEW canonical, so typing the form's own text
    * back clears the dot honestly. */
   update(payload: FormMarkupPayload): void {
+    // The handlers are re-asked on EVERY projection, not only when the controls change: a
+    // projection is what arrives after a rename, an add, a delete and an apply, and a Sub written
+    // in the code half lands on the next one. Cheap enough to be unconditional - the outline is
+    // the same call the tree's unfolded list makes, and the answer is a list of names.
+    void this.paintHandlers();
+
     if (payload.markup === null) {
       this.notice.textContent = payload.reason ?? "the form could not be read";
       this.notice.hidden = false;
@@ -1801,22 +1853,55 @@ export class DesignerView {
       },
     ];
 
+    /*
+     * THE CLIPBOARD FOUR, on the menu as well as on the keys.
+     *
+     * This menu offered depth, tab order and the align set and none of these, and Delete was on
+     * the keyboard alone - the same discoverability problem the tab-order strip button had, and
+     * the owner named both in one breath. A gesture reachable only by a key a developer has to
+     * already know is a gesture most developers never find.
+     */
+    const clipboard: ContextMenuItem[] = [
+      {},
+      { label: "Cut", run: () => { this.say(this.cutSelection()); } },
+      { label: "Copy", run: () => { this.say(this.copySelection()); } },
+      {
+        label: "Paste",
+        enabled: this.clipboard !== null,
+        run: () => { this.say(this.pasteClipboard()); },
+      },
+      { label: "Duplicate", run: () => { this.say(this.duplicateSelection()); } },
+      { label: "Delete", run: () => { this.deleteSelection(); } },
+    ];
+
+    // The three that act on each control on its own, so they are offered for ONE as much as for
+    // a group - unlike align and distribute below, which need something to line up against.
+    const shaping: ContextMenuItem[] = [
+      {},
+      { label: "Center in Container (across)", run: () => { void this.sayLater(this.format("centreX")); } },
+      { label: "Center in Container (down)", run: () => { void this.sayLater(this.format("centreY")); } },
+      { label: "Size to Fit", run: () => { void this.sayLater(this.format("fit")); } },
+      { label: "Size to Grid", run: () => { void this.sayLater(this.format("grid")); } },
+    ];
+
     const order: ContextMenuItem[] = [
       {},
       { label: "Tab Order...", run: () => { this.showTabOrder(); } },
     ];
 
     if (chosen.length < 2) {
-      showContextMenu(event.clientX, event.clientY, [...depth, ...order]);
+      showContextMenu(event.clientX, event.clientY, [...depth, ...clipboard, ...shaping, ...order]);
       return;
     }
 
     showContextMenu(event.clientX, event.clientY, [
       ...depth,
+      ...clipboard,
+      ...shaping,
       ...order,
       {},
       item("Align Left", "left"),
-      item("Align Centre", "centreX"),
+      item("Align Center", "centreX"),
       item("Align Right", "right"),
       item("Align Top", "top"),
       item("Align Middle", "centreY"),
@@ -1853,7 +1938,16 @@ export class DesignerView {
       .filter((row) => (row.parent ?? "").toLowerCase() === container.toLowerCase()
         && row.type !== "Page"
         && typeof row.tabIndex === "number")
-      .map((row) => ({ name: row.name, type: row.type, tabIndex: row.tabIndex ?? 0 }));
+      .map((row) => ({
+        name: row.name,
+        type: row.type,
+        tabIndex: row.tabIndex ?? 0,
+        // A control in the order that Tab does not STOP on - a Label, or anything the developer
+        // has set TabStop false on to take it out of the walk without taking it out of the
+        // sequence. The dialog dims it rather than dropping it, because the place is real: an
+        // accelerator moves focus to whatever comes after.
+        stops: row.tabStop !== false,
+      }));
 
     if (controls.length === 0) {
       return `${container === "" ? "the form" : container} holds nothing to order`;
@@ -1913,6 +2007,105 @@ export class DesignerView {
    * means by "align left" is "line these up with THAT one", and the one they mean is the one
    * they picked first (or the one the marquee caught first).
    */
+  /**
+   * The three Format gestures that are not about lining controls up WITH EACH OTHER, and so are
+   * not `arrange`: each acts on every selected control independently, and each is meaningful for
+   * ONE (2026-08-18 - the native Format menu has all three and this had none of them).
+   *
+   *   centreX / centreY  centres within the control's own CONTAINER's client area, which for a
+   *                      control inside a Frame is the Frame - the same containment rule align
+   *                      and distribute keep, and the reason this is not "centre in the form".
+   *   fit                the control's size to what it DRAWS. Measured off the canvas's own
+   *                      rendering with a Range over the element's contents, which catches the
+   *                      glyph of a check box as well as the caption beside it, plus the padding
+   *                      and border the kind wears. MSForms calls this AutoSize; going through
+   *                      the host to ask it would take the gesture out of the document, so the
+   *                      picture the canvas already draws in the right font is what answers.
+   *   grid               rounds the box out to the grid the snap setting sizes, whether or not
+   *                      snapping is switched ON - the grid has a size either way, and "size to
+   *                      grid" is a gesture rather than a mode.
+   */
+  async format(how: string): Promise<string> {
+    const names = this.selection().filter((one) => one !== "");
+    if (names.length === 0) {
+      return "nothing is selected";
+    }
+
+    const step = Math.max(1, currentSettings().designerGridSize);
+    const moves: { name: string; box: Box; sized: boolean }[] = [];
+
+    for (const name of names) {
+      const header = this.headerOf(name);
+      const element = this.elementFor(name);
+      if (!header || !element) {
+        return "a line in the selection is not one this can rewrite";
+      }
+
+      const box = this.baseBox(header, element);
+      const wanted = { ...box };
+
+      if (how === "centreX" || how === "centreY") {
+        const room = this.roomFor(element);
+        if (!room) {
+          return `${name} is not inside anything to centre it in`;
+        }
+
+        if (how === "centreX") {
+          wanted.left = Math.max(0, (room.width - box.width) / 2);
+        } else {
+          wanted.top = Math.max(0, (room.height - box.height) / 2);
+        }
+      } else if (how === "fit") {
+        /*
+         * THE HOST MEASURES THIS ONE, and the numbers are why. A page-side read of the caption's
+         * ink was written first and driven against MSForms' own AutoSize; it agreed for exactly
+         * one kind, put "Hold" at 18pt wide - narrower than its own caption - and could not see a
+         * picture at all, because the canvas draws an oversized one scaled down. See
+         * FormDesignService.MeasureAutoSize for the table.
+         *
+         * IT COPIES THE RUNTIME EXACTLY, including where the runtime is absurd: the OK button
+         * with its 256-square logo becomes 220.5x198.1, and that is the answer this writes. The
+         * owner chose that over fitting the caption instead (2026-08-18), on the grounds that
+         * settled the icon frame - a surface faithful in one place and clever in another is one
+         * nobody can predict.
+         */
+        const natural = await this.deps.autoSize(name);
+        if (!natural) {
+          return `${name} has no natural size to fit to`;
+        }
+
+        wanted.width = Math.max(MIN_CONTROL, natural.width);
+        wanted.height = Math.max(MIN_CONTROL, natural.height);
+      } else if (how === "grid") {
+        // OUT to the grid rather than to the nearest line, so a control never shrinks under a
+        // gesture whose name says nothing about making it smaller.
+        wanted.left = Math.floor(box.left / step) * step;
+        wanted.top = Math.floor(box.top / step) * step;
+        wanted.width = Math.max(step, Math.ceil((box.left + box.width) / step) * step - wanted.left);
+        wanted.height = Math.max(step, Math.ceil((box.top + box.height) / step) * step - wanted.top);
+      } else {
+        return `${how} is not a format this knows`;
+      }
+
+      moves.push({
+        name,
+        // A FIT IS NOT CLAMPED TO THE CONTAINER. Every other gesture keeps a control inside the
+        // thing that holds it, and this one must not: the whole point of copying the runtime is
+        // that a button sizing to a 256-square picture comes out bigger than the form, and a
+        // clamp would quietly turn the faithful answer back into a plausible one.
+        box: how === "fit" ? wanted : this.clamp(wanted, this.roomFor(element), MIN_CONTROL),
+        sized: how !== "centreX" && how !== "centreY",
+      });
+    }
+
+    if (!this.writeBoxes(moves)) {
+      return "the document refused the change";
+    }
+
+    this.lintNow();
+    return `${how} on ${names.join(", ")}`;
+  }
+
   arrange(how: string): string {
     const names = this.selection().filter((one) => one !== "");
     if (names.length < 2) {
@@ -2720,6 +2913,24 @@ export class DesignerView {
         event.preventDefault();
       }
 
+      // The clipboard four, on the keys every designer uses for them. Ctrl+D duplicates without
+      // touching what Ctrl+C last took, which is the whole reason it is a separate key.
+      if (key === "c" || key === "x" || key === "v" || key === "d") {
+        const said = key === "c"
+          ? this.copySelection()
+          : key === "x"
+            ? this.cutSelection()
+            : key === "v" ? this.pasteClipboard() : this.duplicateSelection();
+
+        // A refusal is said on the status line rather than swallowed: Ctrl+V with an empty
+        // clipboard doing nothing at all is indistinguishable from Ctrl+V being unwired.
+        if (!/^(copied|cut|pasted)/.test(said)) {
+          this.deps.notify(said);
+        }
+
+        event.preventDefault();
+      }
+
       return;
     }
 
@@ -2899,7 +3110,7 @@ export class DesignerView {
     const room = this.roomOfContainer(where.parent);
     const dropBand = carrying.kind === "Frame" || carrying.kind === "MultiPage"
       || carrying.kind === "TabStrip"
-      ? (carrying.kind === "Frame" ? FRAME_CAPTION_LINE / 2 : PAGE_STRIP_HEIGHT) / PT
+      ? (carrying.kind === "Frame" ? FRAME_RULE_TOP : PAGE_STRIP_HEIGHT) / PT
       : 0;
     const box = this.clamp(
       this.snapped(
@@ -2993,21 +3204,267 @@ export class DesignerView {
   /** The name the native toolbox would give: the kind, then the first number the document is
    * not already using - counted across the WHOLE document, because a form's names are one
    * namespace however deeply a control is nested. */
-  private freeName(kind: string): string {
+  /** The same, for a gesture that has to ask the host before it knows. */
+  private async sayLater(said: Promise<string>): Promise<void> {
+    this.say(await said);
+  }
+
+  /** A gesture's answer, on the status line when it is a refusal and nowhere when it worked -
+   * the canvas itself is the report for a paste that landed or a control that resized. */
+  private say(said: string): void {
+    if (!/^(copied|cut|pasted|centreX|centreY|fit|grid)/.test(said)) {
+      this.deps.notify(said);
+    }
+  }
+
+  /** Every name the document currently spells, lowercased, for allocating ones that are free. */
+  private takenNames(): Set<string> {
+    return new Set(this.model.getLinesContent()
+      .map((text) => /\bName="([^"]*)"/.exec(text)?.[1]?.toLowerCase())
+      .filter((name): name is string => name !== undefined));
+  }
+
+  private freeName(kind: string, taken: Set<string> = this.takenNames()): string {
     // THE NAMES THE DOCUMENT SPELLS, read off the attribute that carries them. This matched the
     // second word of a line - `Kind Name` in the old dialect - and under tags that word is
     // `Name="Page1"` itself, so nothing ever counted as taken and every new control came back as
     // `Kind1`. New Page on a MultiPage that already had Page1 and Page2 produced a second Page1
     // (2026-08-17), and the apply then had two elements of one name.
-    const taken = new Set(this.model.getLinesContent()
-      .map((text) => /\bName="([^"]*)"/.exec(text)?.[1]?.toLowerCase())
-      .filter((name): name is string => name !== undefined));
     for (let at = 1; ; at++) {
       const name = `${kind}${at}`;
       if (!taken.has(name.toLowerCase())) {
+        // Claimed as it is handed out, so a caller allocating SEVERAL against one set - a paste
+        // renaming a container and all of its children - does not get one name twice.
+        taken.add(name.toLowerCase());
         return name;
       }
     }
+  }
+
+  /**
+   * COPY, PASTE, CUT AND DUPLICATE, on the document rather than on the model.
+   *
+   * Laying out a form is making one OptionButton and then making five more like it, and until
+   * 2026-08-18 that was five trips to the toolbox: there was no clipboard on this canvas at all
+   * (the owner, having been shown the gap: "please fix these gaps").
+   *
+   * It rides the transaction log like every other gesture - a paste is new element lines, one
+   * undoable edit, reaching the form at Ctrl+S - so nothing touches MSForms until the apply and
+   * a mistaken paste is one Ctrl+Z away.
+   *
+   * The clipboard is THIS PRODUCT'S, not the system's. A system clipboard would carry the markup
+   * between forms and even between machines, which sounds better until a paste of some text a
+   * developer copied out of a mail lands as controls. The document is already the thing that can
+   * be copied as text, by selecting it in the markup half and using the editor's own clipboard.
+   */
+  private clipboard: string[] | null = null;
+
+  /**
+   * How far a pasted copy lands from its original, in POINTS.
+   *
+   * OURS, not measured off the native designer: its own offset cannot be read without driving a
+   * designer window this product keeps shut. What it has to achieve is that a copy is visibly a
+   * copy - a paste that lands exactly on the original reads as nothing having happened, and the
+   * developer drags the wrong one.
+   */
+  private static readonly PASTE_OFFSET = 6;
+
+  /** The selection's blocks, as the lines they are written on. Answers null when the selection
+   * holds nothing that has a block - the form itself, above all, which cannot be copied. */
+  private selectionBlocks(): string[] | null {
+    const names = this.selection().filter((one) => one !== "");
+    if (names.length === 0) {
+      return null;
+    }
+
+    const lines = this.model.getLinesContent();
+    const blocks: string[] = [];
+    for (const name of names) {
+      const span = this.blockOf(name);
+      if (!span) {
+        return null;
+      }
+
+      blocks.push(lines.slice(span.from - 1, span.to).join("\n"));
+    }
+
+    return blocks;
+  }
+
+  /** Copies the selection. The document is untouched, so this is the one gesture here that is
+   * not an edit. */
+  copySelection(): string {
+    const blocks = this.selectionBlocks();
+    if (!blocks) {
+      return "nothing is selected that can be copied";
+    }
+
+    this.clipboard = blocks;
+    const names = this.selection().filter((one) => one !== "");
+    return `copied ${names.join(", ")}`;
+  }
+
+  /** Copy, then delete: one clipboard load and one undoable edit. */
+  cutSelection(): string {
+    const copied = this.copySelection();
+    if (!copied.startsWith("copied")) {
+      return copied;
+    }
+
+    return this.deleteSelection() ? copied.replace("copied", "cut") : "the document would not take the removal";
+  }
+
+  /** Copy and paste in one gesture, without disturbing what the clipboard already holds - which
+   * is what Ctrl+D means everywhere else and what makes it a different key from Ctrl+C Ctrl+V. */
+  duplicateSelection(): string {
+    const blocks = this.selectionBlocks();
+    if (!blocks) {
+      return "nothing is selected that can be duplicated";
+    }
+
+    return this.pasteBlocks(blocks);
+  }
+
+  /** Pastes whatever the last Copy or Cut took. */
+  pasteClipboard(): string {
+    return this.clipboard === null
+      ? "nothing has been copied yet"
+      : this.pasteBlocks(this.clipboard);
+  }
+
+  /**
+   * The write behind Paste and Duplicate both.
+   *
+   * WHERE IT LANDS is the container the selection sits in, which is how the toolbox drop resolves
+   * its host too: with a control selected the copy joins it as a sibling, and with a CONTAINER
+   * selected the copy goes inside. Nothing selected means the form.
+   *
+   * EVERY name in a block is renamed, not just the top one, because a Frame carries its children
+   * and two controls of one name is a document the apply refuses. They are allocated against a
+   * single growing set so a container and its three children cannot be handed the same name.
+   *
+   * ONLY the top-level element is offset. A child's Left and Top are its parent's coordinates, so
+   * moving those as well would shift the children twice and take them out of the copy.
+   */
+  private pasteBlocks(blocks: string[]): string {
+    const anchor = this.selectedName;
+
+    /*
+     * COPYING A CONTAINER LEAVES IT SELECTED, so "paste into the selected container" put the copy
+     * INSIDE the original - select a Frame, Ctrl+C, Ctrl+V, and the Frame grows a Frame. Caught
+     * by driving it (2026-08-18) rather than by reading the rule, which sounded right.
+     *
+     * So the container rule holds for pasting something ELSE into a container, and a paste of the
+     * selected thing itself lands beside it. Which is what the gesture means: Ctrl+C then Ctrl+V
+     * asks for another one of these, not for one of these inside this one.
+     */
+    const copyingItself = anchor !== null && anchor !== ""
+      && blocks.some((block) => (/\bName="([^"]*)"/.exec(block)?.[1] ?? "").toLowerCase() === anchor.toLowerCase());
+
+    const host = anchor === null || anchor === ""
+      ? ""
+      : copyingItself
+        ? this.parentOf(anchor)
+        : this.kindOf(anchor) === "Page" || this.isContainer(anchor)
+          ? anchor
+          : this.parentOf(anchor);
+
+    // A Page belongs to a MultiPage and a Tab to a TabStrip, and nowhere else. The parser would
+    // refuse the document and the canvas would stop previewing, so the refusal is said here where
+    // it can name the reason.
+    const hostKind = host === "" ? "Form" : this.kindOf(host);
+    for (const block of blocks) {
+      const kind = /^\s*<([A-Za-z][\w.]*)/.exec(block)?.[1] ?? "";
+      const wants = kind === "Page" ? "MultiPage" : kind === "Tab" ? "TabStrip" : null;
+      if (wants !== null && hostKind !== wants) {
+        return `a ${kind} can only be pasted into a ${wants}`;
+      }
+
+      if (wants === null && (hostKind === "MultiPage" || hostKind === "TabStrip")) {
+        return `a ${hostKind} holds only ${hostKind === "MultiPage" ? "Pages" : "Tabs"}`;
+      }
+    }
+
+    const lines = this.model.getLinesContent();
+    const indent = (text: string): number => text.length - text.trimStart().length;
+
+    // The insertion point: the end of the host's body, which for the form is the line before
+    // `</Form>` and for a container the last line indented under it.
+    let after: number;
+    let level: number;
+    if (host === "") {
+      const closing = lines.findIndex((text) => /^\s*<\/Form\s*>/.test(text));
+      after = closing < 0 ? lines.length : closing;
+      level = 4;
+    } else {
+      const header = this.headerOf(host);
+      if (!header) {
+        return `${host} is not a line this can paste into`;
+      }
+
+      level = indent(lines[header.line - 1] ?? "");
+      after = header.line;
+      while (after < lines.length && indent(lines[after] ?? "") > level) {
+        after += 1;
+      }
+
+      // A container written self-closing has no body to paste into; it has to be opened first,
+      // the same courtesy the toolbox drop gives an empty page.
+      if (/\/>\s*$/.test(lines[header.line - 1] ?? "")) {
+        return `${host} is empty and self-closed; drop a control into it first`;
+      }
+
+      level += 4;
+    }
+
+    const taken = this.takenNames();
+    const landed: string[] = [];
+    const written: string[] = [];
+
+    for (const block of blocks) {
+      const rows = block.split("\n");
+      const base = indent(rows[0] ?? "");
+      const renamed = rows.map((row, at) => {
+        let text = " ".repeat(Math.max(0, indent(row) - base) + level) + row.trimStart();
+
+        text = text.replace(/\bName="([^"]*)"/, (whole, was: string) => {
+          const kind = /^\s*<([A-Za-z][\w.]*)/.exec(row)?.[1] ?? "Control";
+          const now = this.freeName(kind, taken);
+          if (at === 0) {
+            landed.push(now);
+          }
+
+          return whole.replace(`"${was}"`, `"${now}"`);
+        });
+
+        if (at === 0) {
+          for (const axis of ["Left", "Top"] as const) {
+            text = text.replace(new RegExp(`\\b${axis}="(-?[\\d.]+)"`), (whole, value: string) =>
+              whole.replace(`"${value}"`, `"${Number(value) + DesignerView.PASTE_OFFSET}"`));
+          }
+        }
+
+        return text;
+      });
+
+      written.push(renamed.join("\n"));
+    }
+
+    const column = this.model.getLineMaxColumn(after);
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: new monaco.Range(after, column, after, column),
+      text: `\n${written.join("\n")}`,
+    }], () => null);
+
+    // The copies are what is selected afterwards, which is what makes a paste-then-drag one
+    // motion rather than two, and what every other designer does.
+    for (const [at, name] of landed.entries()) {
+      this.select(name, at > 0);
+    }
+
+    this.lintNow();
+    return `pasted ${landed.join(", ")}`;
   }
 
   /**
@@ -3210,9 +3667,9 @@ export class DesignerView {
         + "always move by one point."
       : "Snap to grid: place controls on an even grid.");
     dress(this.alignToggle, lining, lining
-      ? "Lining up with the other controls - their edges and centres, with a guide where it "
+      ? "Lining up with the other controls - their edges and centers, with a guide where it "
         + "lands. Alt overrides it."
-      : "Snap to the other controls: line up with a neighbour's edge or centre.");
+      : "Snap to the other controls: line up with a neighbor's edge or center.");
 
     const client = this.canvasScroll.querySelector<HTMLElement>(".dc-form-client")
       ?? this.canvasScroll.querySelector<HTMLElement>(".dc-form");
@@ -4072,6 +4529,91 @@ export class DesignerView {
   /** What the canvas selection lights up in the document, cleared when nothing is selected. */
   private blockMarks: string[] = [];
 
+  /** The handler decorations, kept apart from the selection's so neither clears the other. */
+  private handlerMarks: string[] = [];
+
+  /**
+   * WHICH CONTROLS HAVE CODE BEHIND THEM, shown against them in the document.
+   *
+   * A form is two halves and the markup only ever showed one. `OkButton_Click` exists in the
+   * code-behind and nothing on the design side said so, which is the question a developer asks
+   * constantly - is anything listening to this button (the owner, 2026-08-18).
+   *
+   * AN ANNOTATION, NOT AN ATTRIBUTE, and the distinction is the dialect's own rule: the document
+   * spells what an apply can WRITE, and a handler is code. Spelling `Click="OkButton_Click"` would
+   * invite an apply to create or delete a Sub, which is not what this language does. So it rides
+   * as a decoration - visible, not editable, and absent from anything the parser reads.
+   *
+   * The names come from the outline route, which is what the tree's own unfolded list uses, so
+   * there is one answer about a module's procedures rather than two that agree today.
+   */
+  /**
+   * Re-reads the handlers. Safe to call from anywhere and as often as anything likes.
+   *
+   * TWO CALLERS RACED THE FIRST TIME THIS SHIPPED, and the symptom was the feature appearing for
+   * a tab opened fresh and vanishing on a page reload: the constructor started a read against an
+   * empty model, `update` started another against the real one, and whichever host answer came
+   * back LAST won. So a read carries a ticket, and an answer that is not the newest is dropped.
+   */
+  refreshHandlers(): void {
+    void this.paintHandlers();
+  }
+
+  /** The ticket of the newest handler read. An answer holding an older one is stale by
+   * definition: something asked again after it, against a document it has not seen. */
+  private handlerRead = 0;
+
+  private async paintHandlers(): Promise<void> {
+    const ticket = ++this.handlerRead;
+    const procedures = await this.deps.handlers();
+    if (ticket !== this.handlerRead) {
+      return;
+    }
+
+    if (procedures === null) {
+      // A shrug: keep whatever is already shown rather than claiming there are none.
+      return;
+    }
+
+    // `OkButton_Click` is OkButton's Click. Split at the LAST underscore, because a control may
+    // hold one in its own name and an event never does.
+    const byControl = new Map<string, string[]>();
+    for (const procedure of procedures) {
+      const at = procedure.name.lastIndexOf("_");
+      if (at <= 0) {
+        continue;
+      }
+
+      const control = procedure.name.slice(0, at).toLowerCase();
+      const event = procedure.name.slice(at + 1);
+      byControl.set(control, [...(byControl.get(control) ?? []), event]);
+    }
+
+    const marks: monaco.editor.IModelDeltaDecoration[] = [];
+    const lines = this.model.getLinesContent();
+    for (const [at, text] of lines.entries()) {
+      const name = /\bName="([^"]*)"/.exec(text)?.[1];
+      const events = name === undefined ? undefined : byControl.get(name.toLowerCase());
+      if (!events || events.length === 0) {
+        continue;
+      }
+
+      const column = this.model.getLineMaxColumn(at + 1);
+      marks.push({
+        range: new monaco.Range(at + 1, column, at + 1, column),
+        options: {
+          after: {
+            content: `  ${events.join(", ")}`,
+            inlineClassName: "designer-handler-mark",
+          },
+          showIfCollapsed: true,
+        },
+      });
+    }
+
+    this.handlerMarks = this.editor.deltaDecorations(this.handlerMarks, marks);
+  }
+
   /** @param moveCaret See `select`. The WASH always follows the selection - a highlight is a
    * picture of what is selected and is never in anybody's way - and only the caret is held back. */
   private revealInMarkup(name: string, moveCaret = true): void {
@@ -4353,8 +4895,7 @@ export class DesignerView {
           inner.style.bottom = `${side}px`;
         }
 
-        const band = FRAME_CAPTION_LINE;
-        inner.style.top = `${band}px`;
+        inner.style.top = `${FRAME_CLIENT_TOP}px`;
 
         /*
          * THE RULE IS DRAWN THROUGH THE CAPTION, NOT AT THE CONTROL'S TOP.
@@ -4368,7 +4909,7 @@ export class DesignerView {
          */
         const rule = document.createElement("div");
         rule.className = "dc-frame-rule";
-        rule.style.top = `${Math.round(band / 2) - 1}px`;
+        rule.style.top = `${FRAME_RULE_TOP}px`;
         box.appendChild(rule);
 
         // Straddling the rule: the band is the caption's own line box, so putting the caption
@@ -4466,7 +5007,10 @@ export class DesignerView {
         // control placed level with the tab strip looked enclosed by a box that is not there
         // (measured on the running form, 2026-08-16: nothing at all above the body's top
         // edge, which sits 14 points below the control's).
-        edge.style.top = `${Math.max(0, strung - 1)}px`;
+        // AT the strip rather than a pixel above it: the runtime's body edge measures 15.3pt
+        // below the control's top against the 14.25pt this drew, which is the whole of the
+        // MultiPage's and the TabStrip's own point of error in the parity table.
+        edge.style.top = `${Math.max(0, strung)}px`;
 
         if (first) {
           // The body IS the page, so it wears the page's identity: a press on it selects the
@@ -4480,6 +5024,13 @@ export class DesignerView {
           body.dataset.kind = "Page";
           body.title = `${first.name} (Page)`;
           body.style.top = `${strung}px`;
+          // ITS CHILDREN BEGIN INSIDE IT, not at its edge - see PAGE_CLIENT_INSET for the
+          // measurement. A BORDER rather than padding, and the difference is the whole reason
+          // this needs a note: an absolutely positioned child is placed from its containing
+          // block's PADDING box, and the padding box INCLUDES the padding, so padding-top moves
+          // a child not at all. The border is what the padding box starts below. Transparent,
+          // because the line is already drawn by `edge` above and two would be two.
+          body.style.borderTop = `${PAGE_CLIENT_INSET}px solid transparent`;
           if (flank > 0) {
             body.style.left = `${flank}px`;
             body.style.right = `${flank}px`;

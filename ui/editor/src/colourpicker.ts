@@ -151,7 +151,7 @@ export function openColourPicker(options: {
   const root = document.createElement("div");
   root.className = "colour-picker";
   root.setAttribute("role", "dialog");
-  root.setAttribute("aria-label", `Colour for ${options.property}`);
+  root.setAttribute("aria-label", `Color for ${options.property}`);
 
   // The palette: a grid the arrow keys walk, where every cell says its own colour out loud for
   // anyone who cannot see it.
@@ -186,7 +186,7 @@ export function openColourPicker(options: {
   const system = document.createElement("div");
   system.className = "colour-system";
   system.setAttribute("role", "listbox");
-  system.setAttribute("aria-label", "System colours");
+  system.setAttribute("aria-label", "System colors");
 
   for (const colour of systemList) {
     const row = document.createElement("button");
@@ -233,7 +233,7 @@ export function openColourPicker(options: {
   hex.className = "colour-hex-field";
   hex.value = options.value;
   hex.spellcheck = false;
-  hex.setAttribute("aria-label", `Colour value for ${options.property}`);
+  hex.setAttribute("aria-label", `Color value for ${options.property}`);
   hex.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();

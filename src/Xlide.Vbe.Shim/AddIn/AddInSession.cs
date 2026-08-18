@@ -1206,6 +1206,30 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
         _editorSurface.DesignerEventStubRequested = OnDesignerEventStub;
         _editorSurface.DesignerZOrderRequested = OnDesignerZOrder;
+
+        // "Size to Fit" on the canvas. The measurement is the host's because MSForms' AutoSize is
+        // the only thing that knows what a control's natural size is - see MeasureAutoSize - and
+        // the ANSWER goes back to the page, which writes it into the document. So the form is
+        // touched to measure and never to change: the size reaches it at Ctrl+S like every other
+        // gesture, and a Ctrl+Z before that leaves nothing behind.
+        _editorSurface.DesignerAutoSizeRequested = (id, module, project, control) =>
+            _editorSurface?.RunOnHostThread(() =>
+            {
+                using var component = FindComponent(module, ProjectIdFromDisplay(project), out _);
+                if (component is null)
+                {
+                    _editorSurface?.ShowDesignerAutoSize(id, null, null);
+                    return;
+                }
+
+                var (width, height, refused) = FormDesignService.MeasureAutoSize(component, module, control);
+                if (refused is not null)
+                {
+                    Log.Info($"designer: autosize for {module}.{control} answered nothing ({refused})");
+                }
+
+                _editorSurface?.ShowDesignerAutoSize(id, width, height);
+            });
         _editorSurface.DesignerSetPropertyRequested = OnDesignerSetProperty;
         _editorSurface.DesignerSelectionRequested = (module, project, control) =>
             _editorSurface?.RunOnHostThread(() =>
@@ -3939,6 +3963,15 @@ internal sealed partial class AddInSession : IDisposable
             {
                 entries.Add(new SurfacePropertyEntry("TabIndex", tabIndex.ToString(System.Globalization.CultureInfo.InvariantCulture), true, false));
             }
+
+            // TABSTOP, which is how a control is taken OUT of the tab order without being taken
+            // out of the sequence (the owner, 2026-08-18: "is there a way to take a control out
+            // of the tab order?"). It was reachable from nothing: the native Properties window
+            // offers it, this panel did not, and the dialect cannot spell it - MSForms packs it
+            // into VariousPropertyBits, the one saved-mask field that names many properties with
+            // one bit, so the projection deliberately never reads the document's word for it.
+            // `Flag` adds nothing it cannot read, which is what keeps it off an Image.
+            Flag("TabStop");
 
             Colour("BackColor");
             Colour("ForeColor");

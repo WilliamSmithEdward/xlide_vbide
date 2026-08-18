@@ -23,6 +23,11 @@ export interface TabOrderControl {
   name: string;
   type: string;
   tabIndex: number;
+
+  /** False for a row that holds a place in the order but that Tab walks past - a Label, or
+   * anything with TabStop turned off. Absent is treated as true, so a caller that does not know
+   * gets the old behaviour rather than a list of dimmed rows. */
+  stops?: boolean;
 }
 
 export interface TabOrderOptions {
@@ -80,11 +85,27 @@ export function showTabOrder(options: TabOrderOptions): OpenTabOrder {
   heading.className = "modal-title";
   heading.textContent = "Tab Order";
 
+  /*
+   * "IN TAB ORDER", not "in the order Tab reaches them", which is what this said until the owner
+   * asked whether Labels belong here at all (2026-08-18).
+   *
+   * They do, and the sentence was the thing that was wrong. Being IN the order and being a tab
+   * STOP are two facts, and MSForms keeps them apart: a Label has a TabIndex and a TabStop that
+   * defaults false, so it holds a place in the sequence that Tab walks straight past. The place
+   * is not decoration - a Label's Accelerator moves focus to the control AFTER it, which is the
+   * whole `&Name:` label-then-field idiom, so where a Label sits decides which field its Alt+key
+   * reaches. Drop Labels from this list and that becomes unreachable, and every number below
+   * them stops matching what the model holds.
+   *
+   * An Image, by contrast, is not in the order at all: MSForms answers null for its TabIndex and
+   * refuses TabStop outright. That is the line the filter draws, and it is the model's own.
+   */
   const where = document.createElement("p");
   where.className = "modal-detail";
-  where.textContent = options.container === ""
-    ? "The controls on the form, in the order Tab reaches them."
-    : `The controls in ${options.container}, in the order Tab reaches them.`;
+  where.textContent = (options.container === ""
+    ? "The controls on the form, in tab order."
+    : `The controls in ${options.container}, in tab order.`)
+    + " Tab skips a Label; its accelerator moves to the control after it.";
 
   const list = document.createElement("div");
   list.className = "taborder-list";
@@ -155,7 +176,12 @@ export function showTabOrder(options: TabOrderOptions): OpenTabOrder {
     list.replaceChildren();
     for (const [at, row] of rows.entries()) {
       const item = document.createElement("div");
-      item.className = "taborder-row" + (row.name === selected ? " current" : "");
+      item.className = "taborder-row" + (row.name === selected ? " current" : "")
+        + (row.stops === false ? " passed-over" : "");
+      if (row.stops === false) {
+        item.title = `Tab does not stop on ${row.name}; its place in the order is what an `
+          + "accelerator moves from. TabStop turns this on and off.";
+      }
       item.setAttribute("role", "option");
       item.setAttribute("aria-selected", String(row.name === selected));
       item.dataset.control = row.name;

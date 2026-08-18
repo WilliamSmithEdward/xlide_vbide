@@ -206,6 +206,11 @@ export interface DevSurfaceParts {
       addFromToolbox(kind: string, left: number, top: number): string;
       openTabOn(container: string, which: string): string;
       openTabMenu(container: string, which: string): string;
+      format(how: string): Promise<string>;
+      copySelection(): string;
+      cutSelection(): string;
+      pasteClipboard(): string;
+      duplicateSelection(): string;
     } | null;
   };
   search: {
@@ -906,6 +911,30 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * The Format gestures that act on each control ALONE rather than lining them up with each
+     * other: `act("designerFormat", { module, how: "centreX"|"centreY"|"fit"|"grid" })`.
+     *
+     * Separate from designerArrange because these are meaningful for one control - arrange
+     * refuses a selection smaller than two, and refusing "Size to Fit" on one button would be
+     * refusing the case it is for.
+     */
+    designerFormat: async (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const how = typeof args.how === "string" ? args.how : null;
+      if (!module || !how) {
+        return { did: false, detail: "designerFormat takes module and how" };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const outcome = await view.format(how);
+      return { did: outcome.startsWith(how), detail: outcome };
+    },
+
+    /**
      * The Tab Order dialog: `open` shows it for the container the selection sits in, `move` sends
      * one control a place up or down, and with neither it answers the order the list is showing.
      *
@@ -1170,6 +1199,36 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * canvas. The control's line - and everything indented under it, its properties and a
      * container's children - leaves the DOCUMENT as one undoable edit; the form itself keeps
      * the control until the tab's Ctrl+S carries the removal through the apply. */
+    /**
+     * The canvas clipboard: `act("designerClipboard", { module, how: "copy" | "cut" |
+     * "paste" | "duplicate" })`.
+     *
+     * All four write the DOCUMENT and none of them touch the form until Ctrl+S, so read the
+     * result through `designerMarkup` rather than through `designer`. The detail names what
+     * landed, which is what a row wants to assert against - a paste allocates free names and the
+     * caller cannot know them in advance.
+     */
+    designerClipboard: (args) => {
+      const module = typeof args.module === "string" ? args.module : null;
+      const how = String(args.how ?? "").toLowerCase();
+      if (!module || !["copy", "cut", "paste", "duplicate"].includes(how)) {
+        return { did: false, detail: 'designerClipboard takes module and how: copy|cut|paste|duplicate' };
+      }
+
+      const view = designer.viewFor(module, typeof args.project === "string" ? args.project : null);
+      if (!view) {
+        return { did: false, detail: `no designer tab is open for ${module}` };
+      }
+
+      const said = how === "copy"
+        ? view.copySelection()
+        : how === "cut"
+          ? view.cutSelection()
+          : how === "paste" ? view.pasteClipboard() : view.duplicateSelection();
+
+      return { did: /^(copied|cut|pasted)/.test(said), detail: said };
+    },
+
     designerDelete: (args) => {
       const module = typeof args.module === "string" ? args.module : null;
       const control = typeof args.control === "string" ? args.control : null;
@@ -1915,7 +1974,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       const state = colourPickerState();
       if (!state) {
-        return { did: false, detail: "no colour picker is open" };
+        return { did: false, detail: "no color picker is open" };
       }
 
       if (choose === null) {

@@ -409,6 +409,13 @@ internal static partial class FormDesignService
         /// than dialect: the markup does not print it, and the tab-order dialog reads it from
         /// here rather than walking the form a second time.</summary>
         int? TabIndex,
+        /// <summary>Whether Tab actually STOPS here, which is not the same question as whether
+        /// the control is in the order. A Label holds a place in the sequence with TabStop false,
+        /// so Tab walks past it while its accelerator still moves focus to the control after it -
+        /// and the tab-order dialog listed every row alike until it could tell the two apart
+        /// (the owner, 2026-08-18: "should labels be in the tab order list?"). Null for a control
+        /// that has no TabStop at all, which is how an Image answers.</summary>
+        bool? TabStop,
         /// <summary>The control's picture as a data URI, and how it sits. Display truth of the
         /// purest kind: the dialect cannot speak a picture at all - it is binary in the form's
         /// .frx and MSForms does not remember where it came from - so it rides here or the
@@ -789,6 +796,7 @@ internal static partial class FormDesignService
             TryInt(control, "ForeColor"),
             tabs,
             TryInt(control, "TabIndex"),
+            TryFlag(control, "TabStop"),
             CanCarryPicture(spec.Type) ? PictureFaceOf(control) : null);
     }
 
@@ -1507,6 +1515,84 @@ internal static partial class FormDesignService
     /// </summary>
     private static readonly PropertyTypes Library = new();
 
+    /// <summary>
+    /// WHAT MSFORMS' OWN AutoSize WOULD MAKE A CONTROL, measured and put straight back.
+    ///
+    /// "Size to Fit" cannot be computed on the page and the measurements are why (2026-08-18).
+    /// A page-side read of the caption's ink agrees with the runtime for a Label - 35 against
+    /// 35.25 - and is wrong for everything else it was tried on:
+    ///
+    ///     Label NameLabel      page 35x10    AutoSize 35.25x9.75
+    ///     CheckBox Taxable     page 39x10    AutoSize 48.75x17.25
+    ///     ToggleButton Hold    page 18x11    AutoSize 28.5x21.75
+    ///     CommandButton Ok     page 72x24    AutoSize 220.5x198.1
+    ///
+    /// The glyph and gap of a check box, the chrome a button draws round its caption, and above
+    /// all a PICTURE - the OK button sizes to a 256-square logo at natural size, which the canvas
+    /// draws scaled down and therefore cannot measure. A table of per-kind allowances written
+    /// down here would be a guess that reads right on one machine and one font.
+    ///
+    /// So the gesture asks the authority. AutoSize is set, the box read, and BOTH put back - the
+    /// flag and the geometry - so the form is exactly as it was found, and the page writes the
+    /// measured size into the DOCUMENT where every other gesture writes. The form is touched to
+    /// measure and not to change, which is the narrowest thing that can answer this honestly.
+    ///
+    /// Product-side rather than in the debug half, because the canvas gesture ships in Release
+    /// and the debug route is the second caller, not the first.
+    /// </summary>
+    internal static (double? Width, double? Height, string? Complaint) MeasureAutoSize(
+        DispatchObject component, string module, string control)
+    {
+        using var designer = component.GetObject("Designer");
+        if (designer is null)
+        {
+            return (null, null, $"{module} has no designer to measure");
+        }
+
+        using var found = FindControlNamed(designer, control, 0);
+        if (found is null)
+        {
+            KeepDesignerDown(component);
+            return (null, null, $"{module} has no control named {control}");
+        }
+
+        var wasWidth = TryNumber(found, "Width");
+        var wasHeight = TryNumber(found, "Height");
+        var wasAuto = TryFlag(found, "AutoSize");
+        if (wasAuto is null)
+        {
+            KeepDesignerDown(component);
+            return (null, null, $"{control} has no AutoSize, so it has no natural size to fit to");
+        }
+
+        double? width = null;
+        double? height = null;
+        try
+        {
+            found.SetBool("AutoSize", true);
+            width = TryNumber(found, "Width");
+            height = TryNumber(found, "Height");
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"designer: {control} would not autosize ({ex.GetType().Name}: {ex.Message.Trim()})");
+        }
+        finally
+        {
+            // PUT BACK IN THE OPPOSITE ORDER IT WAS TAKEN, and unconditionally: AutoSize first,
+            // because while it is on the control refuses a size, and the geometry after it. A
+            // measurement that leaves the form changed is not a measurement.
+            try { found.SetBool("AutoSize", wasAuto.Value); } catch { /* nothing left to undo */ }
+            if (wasWidth is { } backWidth) { try { found.SetDouble("Width", backWidth); } catch { } }
+            if (wasHeight is { } backHeight) { try { found.SetDouble("Height", backHeight); } catch { } }
+        }
+
+        KeepDesignerDown(component);
+        return width is null || height is null
+            ? (null, null, $"{control} did not answer a size with AutoSize on")
+            : (width, height, null);
+    }
+
     private static string InferKind(DispatchObject target, string property, string value)
     {
         System.Runtime.InteropServices.VarEnum variant;
@@ -1627,7 +1713,7 @@ internal static partial class FormDesignService
                 return;
             case "colour":
                 target.SetInt32(property, SystemColours.Unspell(value)
-                    ?? throw new InvalidOperationException($"{value} is not a colour"));
+                    ?? throw new InvalidOperationException($"{value} is not a color"));
                 return;
             case "number":
                 if (int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var asked))

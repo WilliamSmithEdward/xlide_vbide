@@ -239,6 +239,7 @@ export class Shell {
       projectAdd: (project, x, y) => showContextMenu(x, y, this.newComponentItems(project)),
       outline: (module, workbook) => handlers.requestOutline(module, workbook),
       openProcedure: (module, line, workbook) => handlers.navigate(module, line, 1, true, workbook),
+      openDesigner: (module, workbook) => handlers.openDesigner(module, workbook),
       dragRow: (payload, start, became) => handlers.dragFromTree(payload, start, became),
       trace: (text) => handlers.trace(text),
     });
@@ -830,7 +831,7 @@ export class Shell {
     swatch.className = "prop-swatch";
     swatch.style.background = property.swatch ?? "#000000";
     swatch.tabIndex = -1;
-    swatch.title = `Pick a colour for ${property.name}`;
+    swatch.title = `Pick a color for ${property.name}`;
     swatch.setAttribute("aria-label", swatch.title);
 
     const pick = (focusFirst: boolean): void => {

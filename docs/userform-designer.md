@@ -1647,6 +1647,137 @@ wreckage of previous runs. The suite now SAVES after building its form, and pins
 (absent before the save, present after) so the dependency is a measured row rather than a
 condition that has to hold by luck.
 
+## The gaps closed after the milestones, 2026-08-18
+
+M1 to M6 had all landed, so these are not backlog: they are what a walk of the surface against
+the native designer's own gesture set turned up, and what the owner then asked for.
+
+**THE CANVAS AND THE RUNNING FORM NOW AGREE, everywhere.** `designer-parity.mjs` had seven
+controls a point or more out against its own stated threshold and now reports none. One constant
+was answering two questions, in both containers: a container's visible EDGE and the origin its
+CHILDREN are placed from are different distances, and the canvas derived both from one number.
+
+```text
+Frame      rule 4.69pt below the control's top, client 6.05pt below   (gap 1.36)
+MultiPage  body edge 15.3pt below, children begin 17.22pt below       (gap 1.92)
+```
+
+So every control inside a Frame painted 2.9pt low and every control on a Page 2.2pt high. The
+isolation is the part worth copying: a CheckBox on the form measured +0.61 against the same kind
+on a Page at -1.62, and a temporary OptionButton added to the form measured -0.73 against the same
+kind inside the Frame at +2.21. Same kind, same landmark, different container - which rules out
+per-kind glyph rendering without arguing about it. The cross-check afterwards is what says the fix
+is real rather than curve-fitted: the Page's CheckBox came back to +0.63 against the form's +0.61,
+and the Frame's OptionButtons to -0.79 and -0.37 against the probe's -0.73.
+
+**The inset had to be a BORDER, not padding**, and the first attempt got it wrong. An absolutely
+positioned child is placed from its containing block's PADDING box, and the padding box INCLUDES
+the padding - so `padding-top` moved the children not at all and the delta did not budge until it
+became a transparent border.
+
+**And two of the seven were the INSTRUMENT.** The Labels looked like the worst rows in the table
+at 4.04 and 4.59pt. Profiled with the parity script's new `<control>` mode, the runtime's column
+through NameLabel is the form's ground - luminance 240 - from 11.25pt to 17.27, and the first ink
+is at 18.03 running to 21.79: the anti-aliased text of "Customer". A Label paints no border and no
+fill, so the table was subtracting a rectangle from some lettering and reporting the font's
+leading as a defect. Labels are excused out loud now, the way ScrollBar and SpinButton were.
+
+**A CLIPBOARD ON THE CANVAS**, which there had never been - laying out a form is making one
+OptionButton and then five more like it, and that was five trips to the toolbox. Cut, Copy, Paste,
+Duplicate and Delete, on the keys and on the context menu, all writing the DOCUMENT so a mistaken
+paste is one Ctrl+Z away. Two things the driving found that the rule did not: copying a container
+leaves it SELECTED, so "paste into the selected container" put the copy inside the original and a
+Frame grew a Frame; and every name in a copied block needs reallocating, not just the top one,
+against a single growing set so a container and its children cannot be handed one name twice. The
+6pt paste offset is ours - the native designer's cannot be read without driving a window this
+product keeps shut - and it exists so a copy is visibly a copy.
+
+**CENTRE IN CONTAINER AND SIZE TO GRID**, the two Format gestures that can be answered from the
+document. Both act on each control alone, so they are offered for one as much as for a group.
+
+**SIZE TO FIT IS REFUSED, and the measurement is the reason.** A page-side read of the caption's
+ink was written and driven against MSForms' own AutoSize, and agreed for exactly one kind:
+
+```text
+Label NameLabel      page 35x10    AutoSize 35.25x9.75
+CheckBox Taxable     page 39x10    AutoSize 48.75x17.25
+ToggleButton Hold    page 18x11    AutoSize 28.5x21.75
+CommandButton Ok     page 72x24    AutoSize 220.5x198.1
+```
+
+"Hold" at 18pt clips its own caption; a check box's glyph and gap and a button's chrome are not in
+the ink; and a button with a picture sizes to the picture at natural size, which the canvas draws
+scaled and cannot measure at all. Per-kind allowances written down here would be the guess #64
+exists to warn about, so the approximation was deleted rather than shipped. What replaced it is
+`designer?action=autosize`, which asks the authority - sets AutoSize, reads the box, and puts both
+the flag and the geometry back in the opposite order they were taken. The page's half of that
+round trip is what remains, and until it exists the menu does not offer the item.
+
+**And it will copy the runtime EXACTLY, including where the runtime is absurd** - the owner's
+call, given the numbers. The OK button's own AutoSize is 220.5x198.1, because it sizes to a
+256-square logo rather than to the word "Start", and the gesture will produce that. Fitting the
+caption instead was the tempting option and was declined for the reason that settled the icon
+frame: this product matches the native designer, and a surface that is faithful in one place and
+clever in another is a surface nobody can predict. It is the same picture, the same decision and
+the same paragraph as #63.
+
+**SIZE TO FIT LANDED, and it copies the runtime exactly** - the owner's call, given the numbers.
+The page asks the host, which sets AutoSize, reads the box and puts both the flag and the geometry
+back; the answer is written into the DOCUMENT, so it reaches the form at Ctrl+S like every other
+gesture. `HoldToggle` fits to 29x22 against the page's own guess of 18x11, and `OkButton` to
+**221x198**, because it sizes to the 256-square logo rather than to the word "Start". Not capped
+and NOT clamped to its container: the whole point of copying the runtime is that this happens, and
+a clamp would quietly turn the faithful answer back into a plausible one. The round trip is built
+on the `RequestTable` the bridge already had for completions and hovers, and the measurement lives
+in FormDesignService rather than the debug half, because the gesture ships in Release.
+
+**A FORM'S DESIGNER IS IN THE TREE**, first under the form and above its handlers - the design
+comes before the code that answers it, and a fixed position means the row never moves as
+procedures are added and renamed. It was reachable only from a tab menu and a keyboard command
+before, neither of which announces itself.
+
+**AND WHICH CONTROLS HAVE CODE BEHIND THEM, in the markup.** `Views` carries `Change`, `OkButton`
+carries `Click`, written after the tag in muted italic. A form is two halves and the document only
+ever showed one; whether anything is listening to a button is a question a developer asks
+constantly.
+
+**AN ANNOTATION, NOT AN ATTRIBUTE, and the distinction is the dialect's own rule**: the document
+spells what an apply can WRITE, and a handler is code. `Click="OkButton_Click"` would invite an
+apply to create or delete a Sub, which is not what this language does - so it rides as a
+decoration the parser never sees. The names come from the outline route, the same call the tree's
+unfolded list makes, so there is one answer about a module's procedures rather than two that agree
+today. It repaints on every projection - which is what arrives after a rename, an add, a delete
+and an apply - and again when the tab is brought forward, which catches a Sub written while
+another tab was up.
+
+**THE BROWSER'S OWN CONTEXT MENU IS GONE FROM EVERY SURFACE.** Right-clicking the empty end of a
+tab strip fell through to Chromium - Back, Refresh, Save as, Print, Send tab to your devices,
+Inspect - and the same hole was open anywhere nobody had written a handler. One document-level
+backstop rather than a handler per surface: everything with something to offer already claims the
+event first, and this catches the rest. A text field was carved out on the theory that the
+browser at least brings Cut, Copy and Paste, until the owner right-clicked a Properties value and
+found IMPORT PASSWORDS sitting above them. Fields get their own four instead, with Paste through
+`navigator.clipboard.readText` - measured working in this host before being offered.
+
+**GROUP AND UNGROUP CANNOT BE MIRRORED, measured rather than attempted.** [MS-OFORMS] carries
+grouping - `GroupID` on every site record, `GroupCnt` on the form - so a group made in the native
+designer IS persisted. The object model carries none: the only "group" MSForms exposes anywhere is
+`GroupName` on CheckBox, OptionButton and ToggleButton, which is the mutually-exclusive-radio
+concept. Every write this product makes goes through the object model, so a Group gesture here
+could not produce one MSForms would keep - it would vanish at the save, or look as though it had
+worked until then. Left to the owner rather than built.
+
+**TABSTOP, and a dialog that stopped overstating itself.** "Is there a way to take a control out
+of the tab order?" - there is, and it was reachable from nothing: the native Properties window
+offers TabStop, ours did not, and the dialect cannot spell it because MSForms packs it into
+`VariousPropertyBits`, the one saved-mask field that names many properties with one bit. It is a
+panel row now, and it rides the projection so the tab-order dialog can dim the rows Tab walks
+past. Which exposed the real defect in that dialog: it said "in the order Tab reaches them", and
+Tab does not reach a Label. Being IN the order and being a tab STOP are two facts. A Label holds a
+place with TabStop false, and the place is load-bearing - its Accelerator moves focus to the
+control AFTER it, which is the whole `&Name:` label-then-field idiom - while an Image is not in
+the order at all, answering null for TabIndex and refusing TabStop outright.
+
 ## What a sweep for dead and convoluted code found
 
 **2026-08-16**, after the hunt and the walk. Fast growth leaves fallbacks nothing reaches, and the

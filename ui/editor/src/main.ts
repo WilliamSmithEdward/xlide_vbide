@@ -474,6 +474,11 @@ function boot(): void {
         // The whole settings object with one field replaced, which is the call every control
         // in the settings dialog makes: the grid's switch on the canvas is one more of them.
         changeSetting: (key, value) => bridge.updateSettings({ ...currentSettings(), [key]: value }),
+        // Read at CALL time, not captured: `shell` is built after the views' factory is
+        // declared, so binding it here would bind the undefined it holds now.
+        handlers: () => bridge.requestOutline(id.module, id.project ?? undefined),
+        autoSize: (control) => bridge.requestDesignerAutoSize(id.module, id.project ?? null, control),
+        notify: (text) => { shell?.notify(text); },
       });
       designerViews.set(key, view);
     }
@@ -688,6 +693,75 @@ function boot(): void {
   bridge.shell = shell;
 
   // Ctrl+W closes the active group's active tab from anywhere in the surface. The host's key
+  /*
+   * NO SURFACE FALLS THROUGH TO THE BROWSER'S OWN CONTEXT MENU.
+   *
+   * This page is an EDITOR, and the menu the host would otherwise show offers Back, Refresh,
+   * Save as, Print, Send tab to your devices and Inspect. Refresh and Back throw the developer
+   * out of what they were doing; the rest are meaningless here. It surfaced on the empty end of a
+   * tab strip (the owner, 2026-08-18) and the same hole was open on every surface that had not
+   * thought to write a handler - a panel's background, a status bar, the gap between two docks.
+   *
+   * ONE BACKSTOP RATHER THAN A HANDLER PER SURFACE. Every place with something to offer already
+   * calls preventDefault and shows its own menu, and this runs after them on the way up; it does
+   * not replace them, it catches everything they do not claim. A surface that grows a menu later
+   * needs nothing from here.
+   *
+   * A TEXT FIELD IS NOT AN EXCEPTION, though it was for one build. The thought was that the
+   * browser's menu at least carries Cut, Copy and Paste - and then the owner right-clicked a
+   * Properties value and got Emoji, IMPORT PASSWORDS, Writing direction, Send tab to your devices
+   * and Inspect above them. A password importer in a VBA editor is not a convenience. So the
+   * field gets the four items it actually needs, ours, and nothing else.
+   *
+   * Paste is the only one that cannot be done with `execCommand`, which browsers block for
+   * reading: it goes through `navigator.clipboard.readText`, measured working in this host before
+   * being offered, and says so rather than failing silently if it is ever refused. The text is
+   * put in through `setRangeText` and an `input` event, because the row's own listener is what
+   * commits a property edit - inserting the characters without it would show a value the model
+   * never heard about.
+   *
+   * Monaco is a real exception and needs nothing: it brings its own menu and claims the event
+   * before this ever runs.
+   */
+  document.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+
+    const field = (event.target as HTMLElement | null)
+      ?.closest<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+    if (!field || field.disabled || field.readOnly) {
+      return;
+    }
+
+    const has = field.selectionStart !== field.selectionEnd;
+    const run = (command: string): void => {
+      field.focus();
+      document.execCommand(command);
+    };
+
+    showContextMenu(event.clientX, event.clientY, [
+      { label: "Undo", run: () => { run("undo"); } },
+      {},
+      { label: "Cut", enabled: has, run: () => { run("cut"); } },
+      { label: "Copy", enabled: has, run: () => { run("copy"); } },
+      {
+        label: "Paste",
+        run: () => {
+          field.focus();
+          navigator.clipboard.readText().then((text) => {
+            const from = field.selectionStart ?? field.value.length;
+            const to = field.selectionEnd ?? from;
+            field.setRangeText(text, from, to, "end");
+            field.dispatchEvent(new Event("input", { bubbles: true }));
+          }, () => {
+            shell?.notify("This host will not let the page read the clipboard; Ctrl+V still will.");
+          });
+        },
+      },
+      {},
+      { label: "Select All", run: () => { run("selectAll"); } },
+    ]);
+  });
+
   // hook claims it first when it is listening; this is the page's own answer for every moment
   // it is not, so the shortcut never depends on which corner of the surface has focus.
   document.addEventListener("keydown", (event) => {

@@ -224,12 +224,21 @@ try {
     !/PicturePosition=/.test(beforeSaving) && !/SpecialEffect=/.test(beforeSaving),
     beforeSaving.split(/\r?\n/).find((line) => /OkButton/.test(line))?.trim());
 
+  // WAITED FOR, not read in the same breath as the save. The baseline is re-read off the
+  // WORKBOOK FILE, and the file is not readable the instant the command returns: measured
+  // 2026-08-18, a markup print immediately after a save still spells nothing and the same print
+  // 1.5s later has the attributes. This row read at once and passed twice before failing twice,
+  // which is what a race looks like from the outside. The wait is also the honest statement of
+  // the behaviour - a developer's document grows these a beat after Ctrl+S, not during it.
   await api.command("save");
-  const afterSaving = await api.designerMarkup(form, project);
+  const afterSaving = await waitFor("the saved mask to reach the document", async () => {
+    const text = await api.designerMarkup(form, project);
+    return /<CommandButton\b[^>]*\bName="OkButton"[^>]*\bPicturePosition="1"/.test(text)
+      && /<Frame\b[^>]*\bName="Options"[^>]*\bSpecialEffect="3"/.test(text) ? text : null;
+  }, { budgetMs: 20000 }).catch(() => null);
   check("and the save is what puts them there - the mask is read off the workbook",
-    /<CommandButton\b[^>]*\bName="OkButton"[^>]*\bPicturePosition="1"/.test(afterSaving)
-    && /<Frame\b[^>]*\bName="Options"[^>]*\bSpecialEffect="3"/.test(afterSaving),
-    afterSaving.split(/\r?\n/).find((line) => /OkButton/.test(line))?.trim());
+    afterSaving !== null,
+    (await api.designerMarkup(form, project)).split(/\r?\n/).find((line) => /OkButton/.test(line))?.trim());
 
   // ---- built through the model, as the fixture generator builds it ----
 
@@ -2070,6 +2079,51 @@ try {
   check("the FORM does not have it until the save",
     !(await api.designer(form, project)).controls.some((c) => c.name === "CommandButton1"));
 
+  /*
+   * ---- WHERE A CONTAINER'S CLIENT BEGINS, which is not where its edge is drawn ----
+   *
+   * Two numbers per container and they are NOT the same number, which is the whole of the defect
+   * this pins (2026-08-18). A Frame's rule sits 4.69pt below the control's top and its client
+   * begins 6.05pt below it; a MultiPage's body edge sits 15.3pt below and its children begin
+   * 17.22pt below. The canvas derived each pair from ONE constant - half the band for the rule,
+   * the whole of it for the client - which ties them at a ratio the runtime does not keep. Every
+   * control inside a Frame therefore painted 2.9pt low and every control on a Page 2.2pt high.
+   *
+   * designer-parity.mjs is what measured it, against the RUNNING form, and it went from seven
+   * controls a point or more out to none. This row is the cheap guard that the constants behind
+   * that do not drift back: it reads what the canvas actually lays out, in points, so a change
+   * to either number fails here without needing a form to be launched and photographed.
+   */
+  const clientOrigins = await api.ask(`(() => {
+    const view = document.querySelector('.designer-view[data-module=${JSON.stringify(form)}]');
+    const PT = 4 / 3;
+    const at = (element) => element.getBoundingClientRect();
+    const frame = view.querySelector('.dc[data-control="Options"]');
+    const rule = frame.querySelector('.dc-frame-rule');
+    const client = frame.querySelector('.dc-frame-client');
+    const multi = view.querySelector('.dc[data-control="Wizard"]');
+    const body = view.querySelector('.dc-page-body');
+    // A child is placed from its container's PADDING box, which starts below the border - so the
+    // border is where a Page's children actually begin, and padding would have moved nothing.
+    const inset = parseFloat(getComputedStyle(body).borderTopWidth) || 0;
+    return JSON.stringify({
+      frameRule: +((at(rule).top - at(frame).top) / PT).toFixed(2),
+      frameClient: +((at(client).top - at(frame).top) / PT).toFixed(2),
+      pageEdge: +((at(body).top - at(multi).top) / PT).toFixed(2),
+      pageClient: +((at(body).top + inset - at(multi).top) / PT).toFixed(2),
+    });
+  })()`);
+  {
+    const seen = typeof clientOrigins === "string" ? JSON.parse(clientOrigins) : clientOrigins;
+    const near = (a, b) => Math.abs(a - b) < 0.6;
+    check("a Frame's rule and its CLIENT are two different distances, both as measured",
+      near(seen.frameRule, 4.69) && near(seen.frameClient, 6.05), JSON.stringify(seen));
+    check("and a MultiPage keeps the same pair apart - its body edge, then where children begin",
+      near(seen.pageEdge, 15) && near(seen.pageClient, 17.22), JSON.stringify(seen));
+    check("...and the client is BELOW the edge in both, which is the relation that was collapsed",
+      seen.frameClient > seen.frameRule && seen.pageClient > seen.pageEdge, JSON.stringify(seen));
+  }
+
   // Dropped INSIDE a Frame, the container under the pointer wins: the line nests under it and
   // its position is the frame's own, not the form's.
   const nestedDrop = await api.act("designerToolbox",
@@ -2132,6 +2186,74 @@ try {
   // The stub gesture pulled the CODE tab active; the rename rows below need the face back.
   await api.act("activate", { module: form, face: "design" });
 
+  // ---- COPY, PASTE, CUT AND DUPLICATE ----
+  //
+  // There was no clipboard on this canvas at all until 2026-08-18, so laying out six alike
+  // controls was six trips to the toolbox. All four write the DOCUMENT and none of them touch the
+  // form until Ctrl+S, which is what makes a mistaken paste one Ctrl+Z away.
+  // The document as THIS section found it, so the restore below puts back what this section
+  // changed rather than what the suite looked like several sections ago - by here the form has
+  // legitimately grown and lost controls, and a stale snapshot never goes clean again.
+  const beforeClipboard = await tabText();
+
+  await api.act("designerSelect", { module: form, control: "OkButton" });
+  const copied = await api.act("designerClipboard", { module: form, how: "copy" });
+  check("a control can be copied", copied.did === true && /OkButton/.test(copied.detail ?? ""),
+    copied.detail);
+
+  const pasted = await api.act("designerClipboard", { module: form, how: "paste" });
+  const pastedName = /pasted (\w+)/.exec(pasted.detail ?? "")?.[1] ?? "";
+  check("and pasted under a name the document did not already hold",
+    pasted.did === true && pastedName !== "" && pastedName !== "OkButton", pasted.detail);
+  // Offset, so a copy is visibly a copy rather than hiding exactly under its original.
+  const original = await placed("OkButton");
+  const copy = await placed(pastedName);
+  check("...offset from the original, and carrying its properties",
+    copy.left === original.left + 6 && copy.top === original.top + 6
+    && /PicturePosition="1"/.test(copy.line),
+    `${await placedAt("OkButton")} -> ${await placedAt(pastedName)}`);
+  check("and the FORM does not have it until the save",
+    !(await api.designer(form, project)).controls.some((one) => one.name === pastedName));
+
+  // A CONTAINER carries its children, and every one of them needs a free name too - two controls
+  // of one name is a document the apply refuses.
+  await api.act("designerSelect", { module: form, control: "Options" });
+  await api.act("designerClipboard", { module: form, how: "copy" });
+  const frame = await api.act("designerClipboard", { module: form, how: "paste" });
+  const frameName = /pasted (\w+)/.exec(frame.detail ?? "")?.[1] ?? "";
+  const withFrame = await tabText();
+  const names = [...withFrame.matchAll(/\bName="([^"]*)"/g)].map((one) => one[1]);
+  check("a container is copied with its children, all of them renamed",
+    frame.did === true && names.length === new Set(names).size
+    && new RegExp(`<Frame\\b[^>]*\\bName="${frameName}"[^>]*>`).test(withFrame),
+    `${frame.detail}; ${names.length} names, ${new Set(names).size} distinct`);
+
+  // COPYING A CONTAINER LEAVES IT SELECTED, and "paste into the selected container" then put the
+  // copy inside the original - a Frame growing a Frame. A paste of the thing that IS selected
+  // lands beside it; the container rule is for pasting something else IN.
+  const pastedFrameLine = withFrame.split(/\r?\n/)
+    .find((line) => new RegExp(`\\bName="${frameName}"`).test(line)) ?? "";
+  check("...and a container pasted from its own selection lands BESIDE it, not inside it",
+    pastedFrameLine.length - pastedFrameLine.trimStart().length === 4,
+    JSON.stringify(pastedFrameLine));
+
+  const cut = await api.act("designerClipboard", { module: form, how: "cut" });
+  check("cut takes it back out", cut.did === true && !(await tabText()).includes(frameName), cut.detail);
+
+  // A Page belongs to a MultiPage and nowhere else. The parser would refuse the document and the
+  // canvas would stop previewing, so the refusal is said where it can name the reason.
+  await api.act("designerSelect", { module: form, control: "Page1" });
+  await api.act("designerClipboard", { module: form, how: "copy" });
+  await api.act("designerSelect", { module: form });
+  const pageRefused = await api.act("designerClipboard", { module: form, how: "paste" });
+  check("a Page pasted onto the form is refused, saying what it needs",
+    pageRefused.did === false && /only be pasted into a MultiPage/.test(pageRefused.detail ?? ""),
+    pageRefused.detail);
+
+  await api.act("designerSetMarkup", { module: form, markup: beforeClipboard });
+  await waitFor("the document back where the clipboard rows found it", async () =>
+    (await tabText()) === beforeClipboard, { budgetMs: 15000 });
+
   // ---- a drag carries a control OUT of its container: reparenting ----
   //
   // Until this, a drag clamped at the container's edge and moving a control from a Frame to the
@@ -2139,10 +2261,11 @@ try {
   // - what matters is which container the POINTER ends over - so the row drops a control near the
   // frame's bottom edge and pushes it across, which fits whatever canvas the window leaves.
 
-  // Dropped as low in the frame as it will go - the drop clamps inside the container, so a top of
-  // 166 becomes the deepest a 16-point label fits. That leaves its centre eight points above the
-  // boundary, and a ten-point drag crosses it: what a reparent needs is the crossing, and a short
-  // travel is what fits the canvas the gate's window leaves (about thirty points).
+  // Dropped as low in the frame as it will go - the drop clamps inside the container, so this is
+  // the deepest a 16-point label fits. That leaves its centre a few points above the boundary and
+  // a ten-point drag crosses it: what a reparent needs is the crossing, and a short travel is
+  // what fits the canvas the gate's window leaves (about thirty points).
+  //
   const nearEdge = await api.act("designerToolbox",
     { module: form, kind: "Label", left: 40, top: 166 });
   // Eight spaces of indent is inside the Frame, four is the form's own level - the nesting is what
@@ -2397,8 +2520,19 @@ try {
       clientX: Math.round(box.left + 4), clientY: Math.round(box.top + 4) }));
     return [...document.querySelectorAll(".menu-dropdown .menu-item")].map((one) => (one.textContent ?? "").trim()).join(" | ");
   })()`);
-  check("one control's menu offers depth and nothing that needs a group",
-    String(depthMenu) === "Bring to Front | Send to Back | Tab Order...", String(depthMenu));
+  // The clipboard four joined this menu on 2026-08-18 and belong on it for ONE control as much
+  // as for a group - it is a copy of this that a developer wants, and Delete had been on the
+  // keyboard alone. What still needs a group is align, distribute and same-size, and their
+  // absence here is what this row is really pinning.
+  // The clipboard four and the two centring gestures joined this menu on 2026-08-18 and belong
+  // on it for ONE control as much as for a group: it is a copy of THIS that a developer wants,
+  // Delete had been on the keyboard alone, and centring a single control in its container is the
+  // case those gestures are for. What still needs a group is align, distribute and same-size, and
+  // their absence here is what this row is really pinning.
+  check("one control's menu offers depth, the clipboard and shaping, and nothing that needs a group",
+    String(depthMenu) === "Bring to Front | Send to Back | Cut | Copy | Paste | Duplicate"
+      + " | Delete | Center in Container (across) | Center in Container (down) | Size to Fit"
+      + " | Size to Grid | Tab Order...", String(depthMenu));
   await api.act("key", { code: "Escape" });
 
   await api.designerEdit("remove", { module: form, project, name: "ZRed" });
@@ -3073,6 +3207,38 @@ try {
   }, { budgetMs: 15000 }).catch(() => null);
   check("a navigation into a form's code takes the active slot from its designer tab",
     tookTheSlot !== null, JSON.stringify((await api.ui()).workspace?.active));
+
+  // ---- SIZE TO FIT COPIES THE RUNTIME, INCLUDING WHERE THE RUNTIME IS ABSURD ----
+  //
+  // The size cannot be worked out on the page: a check box's glyph, a button's chrome and a
+  // picture drawn at natural size are none of them in the caption's ink, and a page-side read put
+  // "Hold" at 18pt - narrower than its own caption. So the gesture asks the host, which sets
+  // AutoSize, reads the box and puts BOTH the flag and the geometry back.
+  //
+  // The picture row is the one that pins the owner's decision (2026-08-18): a CommandButton
+  // wearing a 256-square logo autosizes to 220.5x198.1, bigger than the form that holds it, and
+  // that is the answer this writes. Not capped, not clamped to the container, not quietly
+  // replaced by the caption's width.
+  const beforeFit = await tabText();
+  await api.act("designerSelect", { module: form, control: "HoldToggle" });
+  const fitToggle = await api.act("designerFormat", { module: form, how: "fit" });
+  const toggleBox = await placed("HoldToggle");
+  check("Size to Fit takes MSForms' own AutoSize, not the caption's ink",
+    fitToggle.did === true && toggleBox.width === 29 && toggleBox.height === 22,
+    `${fitToggle.detail}; ${await placedAt("HoldToggle")}`);
+
+  await api.act("designerSelect", { module: form, control: "OkButton" });
+  await api.act("designerFormat", { module: form, how: "fit" });
+  const fitted = await placed("OkButton");
+  check("...and a button wearing an oversized picture fits to the PICTURE, uncapped",
+    fitted.width > 200 && fitted.height > 180, await placedAt("OkButton"));
+  check("...which is an order larger than the 72x24 it started at, and is not capped",
+    fitted.width > 200 && fitted.height > 180 && fitted.width > 360 - 200,
+    `${fitted.width}x${fitted.height} from 72x24`);
+
+  await api.act("designerSetMarkup", { module: form, markup: beforeFit });
+  await waitFor("the document back after the fit rows", async () =>
+    (await tabText()) === beforeFit, { budgetMs: 15000 });
 
   // ---- CLOSING A DESIGNER TAB WITH UNAPPLIED EDITS ASKS ----
   //
