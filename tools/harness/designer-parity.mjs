@@ -78,7 +78,53 @@ function decodeBmp(bytes) {
       const at = offset + row * stride + x * 4;
       return 0.299 * bytes[at + 2] + 0.587 * bytes[at + 1] + 0.114 * bytes[at];
     },
+    /** The three channels at a pixel. Luminance cannot separate the logo's navy from the
+     * black field behind it - `#002963` reads 35 and black reads 0 - and that separation is
+     * the whole of the picture comparison below. */
+    rgb(x, y) {
+      const row = upward ? rows - 1 - y : y;
+      const at = offset + row * stride + x * 4;
+      return { r: bytes[at + 2], g: bytes[at + 1], b: bytes[at] };
+    },
   };
+}
+
+/**
+ * How a rectangle of a capture is MADE UP, in three buckets, as fractions of its area.
+ *
+ * Two surfaces photograph the same button at different scales - the runtime at the monitor's,
+ * the canvas at the page's - so nothing can be compared pixel to pixel. What CAN be compared is
+ * the mix, and for this defect the mix is the whole question: a black field drawn solid and the
+ * same field keyed out differ by tens of percent of the button's area, which no amount of
+ * rescaling hides.
+ *
+ *   black   the artwork's own background, opaque and unkeyed
+ *   light   button face showing through, or around, the picture
+ *   ink     everything else: the logo's colours, the caption's glyphs, the bevel's mid greys
+ */
+function pictureMix(image, x0, y0, w, h) {
+  let black = 0;
+  let light = 0;
+  let counted = 0;
+
+  for (let y = Math.max(0, y0); y < Math.min(y0 + h, image.height); y++) {
+    for (let x = Math.max(0, x0); x < Math.min(x0 + w, image.width); x++) {
+      const { r, g, b } = image.rgb(x, y);
+      counted++;
+      if (Math.max(r, g, b) < 24) {
+        black++;
+      } else if (0.299 * r + 0.587 * g + 0.114 * b > 200) {
+        light++;
+      }
+    }
+  }
+
+  if (counted === 0) {
+    return null;
+  }
+
+  const share = (n) => +(100 * n / counted).toFixed(1);
+  return { black: share(black), light: share(light), ink: share(counted - black - light), counted };
 }
 
 /** The luminance profile down one column, as `{y, lum}` rows. */
@@ -154,6 +200,31 @@ try {
     }
     return JSON.stringify(out);
   })()`));
+
+  /*
+   * THE PICTURE, NOT THE GEOMETRY - photographed BEFORE the launch, because the canvas does not
+   * change when the form stands and a crop wants the element on screen.
+   *
+   * A caption picture and a surface picture are drawn two different ways by MSForms out of the
+   * same pixels: on a button the runtime keys the artwork's background out and the button face
+   * shows through, on an Image control it draws that same background solid. The canvas drew both
+   * opaque, and FOUR fixes went at the wrong half of it - clipping, letterboxing, stretch in
+   * place, absolute inset - each one read off a screenshot and inferred. Nothing here could catch
+   * one, which is why four of them shipped. This is the row that can.
+   */
+  const PICTURED = "OkButton";
+  const pictureAt = `.designer-view[data-module=${JSON.stringify(FORM)}] `
+    + `.dc[data-control=${JSON.stringify(PICTURED)}]`;
+  await api.ask(`(() => {
+    const el = document.querySelector(${JSON.stringify(pictureAt)});
+    if (el) { el.scrollIntoView({ block: "center", inline: "center" }); }
+    return el ? "shown" : "missing";
+  })()`);
+  const canvasShot = await api.capture(undefined, undefined, { selector: pictureAt, pad: 0 })
+    .then(decodeBmp, (why) => {
+      console.log(`the canvas would not photograph ${PICTURED}: ${why.message}\n`);
+      return null;
+    });
 
   // The model, read BEFORE the launch: a loaded form has no designer to ask (the object goes
   // with the run and comes back a few hundred milliseconds after the close), and this is the
@@ -267,6 +338,57 @@ try {
 
   console.log("\nA point is about a device pixel and a half here, so under one is noise in the\n"
     + "edge detector rather than a difference anybody can see. Two or more is a real one.");
+
+  // ---- and the same button's PICTURE, off both surfaces ----
+  const pictured = painted[PICTURED];
+  const runtimeMix = pictured === undefined ? null : pictureMix(
+    image,
+    Math.round(originX + pictured.left * scale),
+    Math.round(originY + pictured.boxTop * scale),
+    Math.round(pictured.width * scale),
+    Math.round((pictured.bottom - pictured.boxTop) * scale));
+  const canvasMix = canvasShot === null
+    ? null
+    : pictureMix(canvasShot, 0, 0, canvasShot.width, canvasShot.height);
+
+  console.log(`\n${PICTURED}'s picture, as each surface draws it\n` + "-".repeat(70));
+  if (runtimeMix === null || canvasMix === null) {
+    console.log("one of the two surfaces did not photograph, so there is nothing to compare.");
+  } else {
+    console.log("surface     black   light     ink   pixels");
+    console.log(`runtime  ${String(runtimeMix.black).padStart(7)}`
+      + `${String(runtimeMix.light).padStart(8)}${String(runtimeMix.ink).padStart(8)}`
+      + `${String(runtimeMix.counted).padStart(9)}`);
+    console.log(`canvas   ${String(canvasMix.black).padStart(7)}`
+      + `${String(canvasMix.light).padStart(8)}${String(canvasMix.ink).padStart(8)}`
+      + `${String(canvasMix.counted).padStart(9)}`);
+
+    /*
+     * WHICH BUCKET MOVED SAYS WHICH DEFECT IT IS, and that is the whole value of three buckets
+     * rather than one number.
+     *
+     * BLACK is the artwork's own field. A canvas painting it where the runtime keys it out - the
+     * defect four fixes chased - puts the canvas TENS of points above the runtime here, and no
+     * amount of resampling does that.
+     *
+     * LIGHT and INK move together and the other way: the runtime downsamples 256x256 into 96x32
+     * nearest-neighbour, which keeps every pixel either button face or logo, while the browser
+     * interpolates and blends the two into mid greys. So a canvas that is short on LIGHT and long
+     * on INK by the same amount is the same picture through a smoother filter, not a different
+     * picture.
+     */
+    const gap = (bucket) => +(canvasMix[bucket] - runtimeMix[bucket]).toFixed(1);
+    const signed = (n) => `${n > 0 ? "+" : ""}${n}`;
+    console.log(`\nblack ${signed(gap("black"))}   light ${signed(gap("light"))}`
+      + `   ink ${signed(gap("ink"))}  (points of the button's area, canvas less runtime)`);
+    console.log(gap("black") >= 10
+      ? "  THE BACKGROUND ITSELF: the canvas is painting the artwork's field where the runtime\n"
+        + "  keys it out. Look at the two crops before touching fit, size or inset."
+      : Math.abs(gap("light")) >= 10 || Math.abs(gap("ink")) >= 10
+        ? "  RESAMPLING, not composition: light lost to ink is the browser interpolating where\n"
+          + "  the runtime takes nearest-neighbour. Same picture, smoother filter."
+        : "  The two surfaces draw this button the same way, to within the filter.");
+  }
 } finally {
   await api.userforms("close", CAPTION).catch(() => {});
   await waitFor("the form to unload and give its designer back", async () =>

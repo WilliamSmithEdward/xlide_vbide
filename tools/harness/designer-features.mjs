@@ -139,6 +139,42 @@ let written = null;
 const inView = (selector) => `document.querySelector('.designer-view[data-module="${form}"] ${selector}')`;
 const inViewAll = (selector) => `[...document.querySelectorAll('.designer-view[data-module="${form}"] ${selector}')]`;
 
+/**
+ * A control's placed geometry, read out of the DOCUMENT's own attributes.
+ *
+ * Every gesture row used to match the line whole - `/RegionPick at 85,38/` - which the tagged
+ * dialect made impossible twice over: the four numbers are attributes now, and their ORDER is the
+ * printer's business rather than anything a row should pin. Reading them by name says what the
+ * row means and survives the next thing the printer decides to put first.
+ */
+const placed = async (name) => {
+  const doc = String((await api.act("designerMarkup", { module: form })).data);
+  const line = doc.split(/\r?\n/).find((text) => new RegExp(`\\bName="${name}"`).test(text)) ?? "";
+  const number = (attribute) => {
+    const found = new RegExp(`\\b${attribute}="(-?[\\d.]+)"`).exec(line);
+    return found === null ? null : Number(found[1]);
+  };
+
+  return {
+    left: number("Left"), top: number("Top"),
+    width: number("Width"), height: number("Height"),
+    line: line.trim(),
+  };
+};
+
+/** `placed`, as the "84,38 size 144x32" a row wants to print when it fails. */
+const placedAt = async (name) => {
+  const box = await placed(name);
+  return `${box.left},${box.top} size ${box.width}x${box.height}`;
+};
+
+/** All four at once, for the resize rows: a gesture that moves an edge changes an origin AND an
+ * extent, and a wait that watched only one of them would pass halfway through. */
+const sizedAt = async (name, left, top, width, height) => {
+  const box = await placed(name);
+  return box.left === left && box.top === top && box.width === width && box.height === height;
+};
+
 /*
  * The FORM's own text as it stands NOW - what a restore has to write to leave the document
  * clean. The projection captured at the top of the run is not it: rows since have moved
@@ -169,6 +205,32 @@ const press = async (key, extra = "") => {
 };
 
 try {
+  // ---- A FORM'S DOCUMENT IS ONLY COMPLETE ONCE THE WORKBOOK HAS BEEN SAVED ----
+  //
+  // Everything past identity, geometry and the two inherited colours reaches the document by
+  // reading what MSForms PERSISTED - the PropMask in the saved workbook, off the file, with
+  // nothing exported (FormDesignService.ChangedProperties says why that road was taken). A form
+  // built in this session is not in the file yet, so it has no mask, so those properties are
+  // absent from its markup however plainly they are set on the control.
+  //
+  // This is pinned rather than merely worked around, because three language-service rows below
+  // aim at `PicturePosition` and `SpecialEffect` on THIS form and had been passing on a stale
+  // artifact: a run that dies between building the form and the cleanup leaves its design in the
+  // fixture FILE, and the next run's fresh form then finds the dead run's mask under its own
+  // name. They passed for a year of runs and failed the first time the file was clean
+  // (2026-08-18). A row that only passes when a previous run crashed is worse than no row.
+  const beforeSaving = await api.designerMarkup(form, project);
+  check("a form built this session spells nothing the saved file has not seen yet",
+    !/PicturePosition=/.test(beforeSaving) && !/SpecialEffect=/.test(beforeSaving),
+    beforeSaving.split(/\r?\n/).find((line) => /OkButton/.test(line))?.trim());
+
+  await api.command("save");
+  const afterSaving = await api.designerMarkup(form, project);
+  check("and the save is what puts them there - the mask is read off the workbook",
+    /<CommandButton\b[^>]*\bName="OkButton"[^>]*\bPicturePosition="1"/.test(afterSaving)
+    && /<Frame\b[^>]*\bName="Options"[^>]*\bSpecialEffect="3"/.test(afterSaving),
+    afterSaving.split(/\r?\n/).find((line) => /OkButton/.test(line))?.trim());
+
   // ---- built through the model, as the fixture generator builds it ----
 
   const design = await api.designer(form, project);
@@ -541,8 +603,11 @@ try {
   check("an apply of a document without the property line leaves the colour standing",
     kept.form.backColor === 12632256, String(kept.form.backColor));
 
-  // A document WITH the line changes it - the write goes where the native panel's would.
-  const recoloured = `${String(tabMarkup.data).replace(/\r?\n/, "\r\n    BackColor = 12639424\r\n")}`;
+  // A document WITH the property changes it - the write goes where the native panel's would.
+  // An ATTRIBUTE on the Form's own tag, which is where the tagged dialect puts it: the old line
+  // form (`BackColor = 12639424` under the header) is not a thing the parser will take, and a
+  // document it refuses applies nothing at all - which is how this row sat failing.
+  const recoloured = String(tabMarkup.data).replace(/^(<Form\b[^>]*?)(\s*>)/, '$1 BackColor="12639424"$2');
   await api.act("designerApply", { module: form, markup: recoloured });
   const changed = await api.designer(form, project);
   check("an apply of a document with the line writes the native panel's own property",
@@ -561,26 +626,35 @@ try {
   // the draft preview and outside the document's undo. Two baselines decide what "changed"
   // means, and it takes both: a Label inherits the FORM's button face, while a TextBox is born
   // with the WINDOW colours and keeps them on any form.
+  // What the document said about colour BEFORE either edit, so the row below measures what these
+  // two added rather than assuming the form arrived saying nothing. A control can carry a colour
+  // honestly - the saved-design baseline narrows on what the .frx records as changed - and an
+  // absolute count would then be reporting the fixture rather than this gesture.
+  const colourLines = (text) => text.split(/\r?\n/).filter((line) => /Color=/.test(line));
+  const beforeColours = colourLines(await api.designerMarkup(form, project)).length;
   await api.designerEdit("set", { module: form, project, name: "NameBox", property: "BackColor", value: "13434879" });
   await api.designerEdit("set", { module: form, project, name: "Taxable", property: "ForeColor", value: "255" });
   const coloured = await waitFor("the document to carry both colours", async () => {
     const read = await api.designerMarkup(form, project);
-    return /BackColor = #ffffcc/.test(read) && /ForeColor = #ff0000/.test(read) ? read : null;
+    return /BackColor="#ffffcc"/.test(read) && /ForeColor="#ff0000"/.test(read) ? read : null;
   }, { budgetMs: 15000 });
-  check("a colour set on a control appears under that control, spelled #rrggbb",
-    /NameBox[^\r\n]*\r?\n\s+BackColor = #ffffcc/.test(coloured)
-    && /Taxable[^\r\n]*\r?\n\s+ForeColor = #ff0000/.test(coloured),
-    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).join(" | "));
+  // ON the control's own tag now, not on a line beneath it: an attribute belongs to the element
+  // it is written in, which is the whole reason for the tagged dialect.
+  check("a colour set on a control appears on that control, spelled #rrggbb",
+    /<[A-Za-z]+\b[^>]*\bName="NameBox"[^>]*\bBackColor="#ffffcc"/.test(coloured)
+    && /<[A-Za-z]+\b[^>]*\bName="Taxable"[^>]*\bForeColor="#ff0000"/.test(coloured),
+    coloured.split(/\r?\n/).filter((line) => /Color=/.test(line)).join(" | "));
 
   check("and the controls nobody touched say nothing about colour",
-    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).length === 2,
-    coloured.split(/\r?\n/).filter((line) => /Color/.test(line)).join(" | "));
+    colourLines(coloured).length === beforeColours + 2,
+    `${colourLines(coloured).length} against ${beforeColours} before: `
+    + colourLines(coloured).join(" | "));
 
   await api.designerEdit("set", { module: form, project, name: "NameBox", property: "BackColor", value: "-2147483643" });
   await api.designerEdit("set", { module: form, project, name: "Taxable", property: "ForeColor", value: "-2147483630" });
-  await waitFor("the lines to leave when the colours go back", async () =>
-    !/Color/.test(await api.designerMarkup(form, project)), { budgetMs: 15000 });
-  check("and putting a colour back where it was takes its line out again", true);
+  await waitFor("the colours to leave when they go back", async () =>
+    colourLines(await api.designerMarkup(form, project)).length === beforeColours, { budgetMs: 15000 });
+  check("and putting a colour back where it was takes its attribute out again", true);
 
   // ---- the squiggles: Core's tolerant parse, drawn on the document as it is typed ----
 
@@ -611,7 +685,6 @@ try {
 
   const canonical = String(tabMarkup.data).replace(/\r\n/g, "\n").split("\n");
   const lineOf = (pattern) => canonical.findIndex((text) => pattern.test(text)) + 1;
-  const endOf = (line) => (canonical[line - 1]?.length ?? 0) + 1;
 
   const vocabulary = await api.markupVocabulary(form, project);
   const kindsMeasured = vocabulary.kinds.map((one) => one.kind);
@@ -642,101 +715,108 @@ try {
     && formKind?.properties.some((one) => one.name === "Cycle" && (one.members?.length ?? 0) > 0),
     `${formKind?.properties.length} properties`);
 
-  // A fresh indented line under the form: the kinds, arriving with their geometry scaffolded.
+  /*
+   * THE LANGUAGE SERVICE, ASKED IN THE TAGGED DIALECT.
+   *
+   * Every position below moved when the documents did, and not by a regex: BETWEEN tags a caret
+   * is choosing a child element, INSIDE one it is choosing an attribute, and inside an attribute's
+   * quotes it is choosing that attribute's value. Under the line dialect those were one place -
+   * a line - which is exactly the ambiguity the tags were adopted to remove.
+   */
   const okLine = lineOf(/<CommandButton Name="OkButton"/);
-  const freshDoc = `${String(tabMarkup.data).trimEnd()}\r\n    \r\n`;
+  // A fresh indented line INSIDE the form, before its close: after `</Form>` is outside the
+  // document's one root element, and nothing is offered there.
+  const freshDoc = addElement(String(tabMarkup.data), "").replace(/    \r\n<\/Form>/, "    \r\n</Form>");
   await api.act("designerSetMarkup", { module: form, markup: freshDoc });
   const freshLine = freshDoc.replace(/\r\n/g, "\n").split("\n").findIndex((text) => text === "    ") + 1;
   const fresh = await api.act("designerComplete", { module: form, line: freshLine, column: 5 });
   const offered = (fresh.data ?? []).map((one) => one.label);
-  check("a fresh line under the form completes the control kinds",
+  check("a fresh line inside the form completes the control kinds",
     offered.includes("CommandButton") && offered.includes("Frame") && !offered.includes("Page"),
     offered.slice(0, 8).join(", "));
-  check("and a kind arrives scaffolded - a name, a caption, a position and a size",
-    /CommandButton \$\{1:[^}]+\} "\$\{2:[^}]+\}" at \$\{3:\d+\},\$\{4:\d+\} size \$\{5:72\}x\$\{6:24\}/
+  check("and a kind arrives scaffolded - a whole element, named, captioned, placed and sized",
+    /^<CommandButton Name="\$\{1:[^}]+\}" Caption="\$\{2:[^}]+\}" Left="\$\{3:\d+\}" Top="\$\{4:\d+\}" Width="\$\{5:72\}" Height="\$\{6:24\}" \/>$/
       .test((fresh.data ?? []).find((one) => one.label === "CommandButton")?.insert ?? ""),
     (fresh.data ?? []).find((one) => one.label === "CommandButton")?.insert);
 
   await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
 
-  // Under a MultiPage, only a Page: the parser refuses anything else there, and the
-  // completions say so early rather than offering a line that cannot land.
-  const wizard = lineOf(/^\s+MultiPage Wizard\b/);
+  // Inside a MultiPage, only a Page: the parser refuses anything else there, and the
+  // completions say so early rather than offering an element that cannot land.
+  const wizard = lineOf(/^\s+<MultiPage\b[^>]*\bName="Wizard"/);
   const underWizard = await api.act("designerComplete", { module: form, line: wizard + 1, column: 9 });
   const pageOnly = (underWizard.data ?? []).map((one) => one.label);
-  check("under a MultiPage the only kind offered is a Page",
+  check("inside a MultiPage the only kind offered is a Page",
     pageOnly.includes("Page") && !pageOnly.includes("Label"),
     pageOnly.slice(0, 8).join(", "));
 
-  // Under a Frame, both: a child control OR one of the Frame's own properties.
-  const options = lineOf(/^\s+Frame Options\b/);
-  const underFrame = (await api.act("designerComplete", { module: form, line: options + 1, column: 9 })).data ?? [];
-  check("under a Frame a line may open a control or set one of the Frame's properties",
-    underFrame.some((one) => one.label === "OptionButton")
-    && underFrame.some((one) => one.label === "SpecialEffect"),
-    `${underFrame.length} suggestion(s)`);
+  // The two halves the tags separate. INSIDE the Frame's body, the child kinds it may hold;
+  // INSIDE its own tag, its own properties. Under the line dialect both arrived at one caret,
+  // and a developer could not tell which of the two a suggestion would become.
+  const options = lineOf(/^\s+<Frame\b[^>]*\bName="Options"/);
+  const frameText = canonical[options - 1] ?? "";
+  const inFrameBody = (await api.act("designerComplete", { module: form, line: options + 1, column: 9 })).data ?? [];
+  check("inside a Frame's body the completions offer the controls it may hold",
+    inFrameBody.some((one) => one.label === "OptionButton")
+    && !inFrameBody.some((one) => one.label === "SpecialEffect"),
+    inFrameBody.map((one) => one.label).slice(0, 8).join(", "));
 
-  // The clause keywords, once the name is behind the caret, and never twice on one line.
-  const hold = lineOf(/^\s+ToggleButton HoldToggle\b/);
-  const clauses = (await api.act("designerComplete", { module: form, line: hold, column: endOf(hold) })).data ?? [];
-  check("a header line that already carries at and size is offered neither again",
-    clauses.length === 0, clauses.map((one) => one.label).join(", "));
+  const inFrameTag = (await api.act("designerComplete",
+    { module: form, line: options, column: frameText.lastIndexOf(">") + 1 })).data ?? [];
+  check("and inside its own tag they offer its properties, the ones it is not already spelling",
+    inFrameTag.some((one) => one.label === "BorderStyle")
+    && !inFrameTag.some((one) => one.label === "SpecialEffect")
+    && !inFrameTag.some((one) => one.label === "OptionButton"),
+    `${inFrameTag.length}: ${inFrameTag.map((one) => one.label).slice(0, 8).join(", ")}`);
 
-  // The value's side of a property line: the enum's members, by the name the developer writes.
-  // `[^\r\n]*` rather than `.*`, because a dot matches a carriage return and the line would
-  // grow one before the split.
-  const valueDoc = String(tabMarkup.data).replace(
-    /^(\s+)(ToggleButton HoldToggle[^\r\n]*)$/m, "$1$2\r\n$1    BackStyle = ");
-  await api.act("designerSetMarkup", { module: form, markup: valueDoc });
-  const valueLines = valueDoc.replace(/\r\n/g, "\n").split("\n");
-  const valueLine = valueLines.findIndex((text) => /BackStyle = $/.test(text)) + 1;
-  const valueText = valueLines[valueLine - 1] ?? "";
+  // Inside an attribute's own quotes: that attribute's enum members, by the name a developer
+  // writes rather than the number the model keeps.
+  const okText = canonical[okLine - 1] ?? "";
+  const valueColumn = okText.indexOf('PicturePosition="') + 'PicturePosition="'.length + 1;
   const values = (await api.act("designerComplete",
-    { module: form, line: valueLine, column: valueText.length + 1 })).data ?? [];
-  check("the value's side of a property line offers that property's enum members by name",
-    values.some((one) => one.label === "fmBackStyleOpaque")
-    && values.some((one) => one.label === "fmBackStyleTransparent"),
-    values.map((one) => one.label).join(", "));
+    { module: form, line: okLine, column: valueColumn })).data ?? [];
+  check("inside an attribute's quotes the completions offer that property's enum members by name",
+    values.some((one) => one.label === "fmPicturePositionLeftCenter")
+    && values.some((one) => one.label === "fmPicturePositionCenter"),
+    values.map((one) => one.label).slice(0, 5).join(", "));
 
   const valueHover = (await api.act("designerHover",
-    { module: form, line: valueLine, column: valueText.indexOf("BackStyle") + 3 })).data ?? [];
-  check("and hovering the path says what it takes and what an untouched control holds",
-    valueHover.some((block) => /BackStyle As fmBackStyle/.test(block))
-    && valueHover.some((block) => /Default `fmBackStyle/.test(block)),
+    { module: form, line: okLine, column: okText.indexOf("PicturePosition") + 3 })).data ?? [];
+  check("and hovering an attribute says what it takes and what an untouched control holds",
+    valueHover.some((block) => /PicturePosition As fmPicturePosition/.test(block))
+    && valueHover.some((block) => /Default `fmPicturePosition/.test(block)),
     JSON.stringify(valueHover));
 
-  await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
-
-  // Hover on a kind: what that class of control IS, and nothing the line already says - which is
+  // Hover on a kind: what that class of control IS, and nothing the tag already says - which is
   // where the geometry used to be read back, and now also where the coclass used to be. For a
   // standard kind `Forms.Frame.1` is the word under the pointer with a prefix and a suffix, so
   // the card was spending a line restating its own heading (the owner, 2026-08-16).
-  const frameText = canonical[options - 1] ?? "";
   const kindHover = (await api.act("designerHover",
     { module: form, line: options, column: frameText.indexOf("Frame") + 3 })).data ?? [];
-  check("hovering a kind describes the class, and does not read the line back at the reader",
+  check("hovering a kind describes the class, and does not read the tag back at the reader",
     kindHover.some((block) => /groups controls/.test(block))
     && !kindHover.some((block) => /Forms\.Frame\.1/.test(block))
     && !kindHover.some((block) => /\bat\b|points/.test(block)),
     JSON.stringify(kindHover));
 
-  const okText = canonical[okLine - 1] ?? "";
   const nameHover = (await api.act("designerHover",
     { module: form, line: okLine, column: okText.indexOf("OkButton") + 3 })).data ?? [];
   check("hovering a control's name declares it the way VBA would, class and all",
     nameHover.some((block) => /OkButton As MSForms\.CommandButton/.test(block)),
     JSON.stringify(nameHover));
 
-  // The hint: the header's grammar, following the clause the hand is on.
-  const hint = (await api.act("designerHint", { module: form, line: okLine, column: endOf(okLine) })).data;
-  check("the header hint shows the grammar and points at the clause being typed",
-    hint?.label === 'Type Name ["Caption"] [at left,top] [size width x height]'
-    && hint?.parameter === "[size width x height]",
+  // The hint: the tag's grammar, following the ATTRIBUTE the hand is on. It follows the name
+  // standing rather than a count, because attributes may be written in any order.
+  const afterLeft = okText.indexOf('Left="262"') + 'Left="262"'.length + 1;
+  const hint = (await api.act("designerHint", { module: form, line: okLine, column: afterLeft })).data;
+  check("the tag hint shows the grammar and points at the attribute being typed",
+    hint?.label === 'Name="..." [Caption="..."] [Left="0" Top="0"] [Width="60" Height="20"]'
+    && hint?.parameter === '[Left="0" Top="0"]',
     JSON.stringify(hint));
 
-  const formHint = (await api.act("designerHint", { module: form, line: 1, column: 6 })).data;
-  check("and the Form's own line has its own grammar, which takes no position",
-    formHint?.label === 'Form Name ["Caption"] [size width x height]',
+  const formHint = (await api.act("designerHint", { module: form, line: 1, column: 7 })).data;
+  check("and the Form's own tag has its own grammar, which takes no position",
+    formHint?.label === 'Name="..." [Caption="..."] [Width="240" Height="180"]',
     JSON.stringify(formHint));
 
   // ---- the canvas follows the document: the draft previews, the form untouched ----
@@ -778,7 +858,7 @@ try {
   // dispatched WheelEvent never triggers native scrolling, so this path had no driver.
   await api.act("designerSetMarkup", {
     module: form,
-    markup: String(tabMarkup.data).replace(/size \d+x[\d.]+/, "size 360x900"),
+    markup: String(tabMarkup.data).replace(/\bHeight="[\d.]+"/, 'Height="900"'),
   });
   await waitFor("the tall draft to render", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.draft) === true, { budgetMs: 15000 });
@@ -834,7 +914,11 @@ try {
   check("clicking a control selects it on the canvas", selectedCanvas.selected === "RegionPick",
     JSON.stringify(selectedCanvas.selected));
   const markupLine = Number(selectedCanvas.markupLine ?? 0);
-  const markupLines = String((await api.act("designerMarkup", { module: form })).data).split(/\r?\n/);
+  // The raw text is kept beside the split: restoring from a re-joined split puts the document
+  // back with the WRONG line endings, and a document that differs from canonical by \r alone is
+  // dirty for ever - which is a wait that never lands rather than a row that fails.
+  const markupText = String((await api.act("designerMarkup", { module: form })).data);
+  const markupLines = markupText.split(/\r?\n/);
   check("and the markup caret lands on the selected control's line",
     markupLine > 1 && /RegionPick/.test(markupLines[markupLine - 1] ?? ""), `line ${markupLine}`);
 
@@ -855,12 +939,22 @@ try {
   // one of the Frame's option buttons for good, so a literal "3" here is a row that passes
   // until somebody reorders the suite and then fails for a reason that is not a defect.
   const framedLines = (() => {
-    const at = markupLines.findIndex((text) => /Frame\s+Options/.test(text));
+    const at = markupLines.findIndex((text) => /<Frame\b[^>]*\bName="Options"/.test(text));
+    if (at < 0) {
+      return 0;
+    }
+
     const indent = (text) => text.length - text.trimStart().length;
     let last = at;
     while (last + 1 < markupLines.length
       && markupLines[last + 1].trim().length > 0
       && indent(markupLines[last + 1]) > indent(markupLines[at])) {
+      last += 1;
+    }
+
+    // AND ITS CLOSING TAG, which the indent walk cannot reach: `</Frame>` sits at the SAME indent
+    // as the opening, so the loop stops one line short of the element the selection covers.
+    if (last + 1 < markupLines.length && /^\s*<\/Frame>/.test(markupLines[last + 1])) {
       last += 1;
     }
 
@@ -872,33 +966,25 @@ try {
     framedBlock === framedLines && framedBlock > 1,
     `${framedBlock} line(s) where the document indents ${framedLines} under the Frame`);
 
-  // A plain control's block is its header plus whatever PROPERTY lines the document gives it,
-  // and since 2026-08-17 that is no longer always zero: the saved baseline tells the projection
-  // which properties are worth printing, so a ComboBox arrives carrying MatchEntry and
-  // ShowDropButtonWhen. The claim being made is that the block is the control's OWN - it ends
-  // where the next header begins - so it is read off the document like the Frame's above rather
-  // than written down as a literal that the projection can falsify.
-  const plainLines = (() => {
-    const at = markupLines.findIndex((text) => /ComboBox\s+RegionPick/.test(text));
-    const indent = (text) => text.length - text.trimStart().length;
-    let last = at;
-    while (last + 1 < markupLines.length
-      && markupLines[last + 1].trim().length > 0
-      && indent(markupLines[last + 1]) > indent(markupLines[at])) {
-      last += 1;
-    }
-
-    return { count: last - at + 1, under: markupLines.slice(at + 1, last + 1) };
-  })();
+  // A CHILDLESS CONTROL IS ONE LINE, and that is the tagged dialect's own answer rather than a
+  // convenience: its properties ride as ATTRIBUTES on its element instead of as lines beneath it,
+  // so a ComboBox carrying MatchEntry and ShowDropButtonWhen from the saved baseline is still a
+  // single self-closing element. Under the line dialect this counted the property lines under the
+  // header, which is the shape that no longer exists.
+  const plainElement = markupLines.find((text) => /<ComboBox\b[^>]*\bName="RegionPick"/.test(text)) ?? "";
 
   const plainBlock = await blockOn("RegionPick");
-  check("and a plain control covers its own block, ending where the next control begins",
-    plainBlock === plainLines.count && plainLines.under.every((line) => line.includes("=")),
-    `${plainBlock} line(s), ${plainLines.count} in the document, `
-    + `under it: ${JSON.stringify(plainLines.under.map((line) => line.trim()))}`);
+  check("and a plain control covers its own element, which is a single line",
+    plainBlock === 1 && /\/>\s*$/.test(plainElement)
+    && /\bMatchEntry="/.test(plainElement) && /\bShowDropButtonWhen="/.test(plainElement),
+    `${plainBlock} line(s): ${plainElement.trim()}`);
 
-  check("and the wash is drawn on the lines the block names",
-    Number(await api.ask(`${inViewAll(".designer-block-mark")}.length`)) >= 1,
+  // Waited for, not read at once: monaco paints a decoration on the NEXT frame, so a count taken
+  // in the same tick as the selection is a race the row loses whenever the surface is busy.
+  const washed = await waitFor("the block wash to be painted", async () =>
+    Number(await api.ask(`${inViewAll(".designer-block-mark")}.length`)) >= 1 ? true : null,
+  { budgetMs: 5000 }).catch(() => false);
+  check("and the wash is drawn on the lines the block names", washed === true,
     "monaco draws a decoration for the lines in view, so this counts what is on screen");
 
   // Markup to canvas, the other direction: a caret INSIDE a control's block selects that
@@ -908,15 +994,45 @@ try {
     return (await api.act("designerCanvas", { module: form })).data?.selected;
   };
 
-  const framedLine = markupLines.findIndex((text) => /OptionButton\s+PickGround/.test(text)) + 1;
+  const framedLine = markupLines.findIndex((text) =>
+    /<OptionButton\b[^>]*\bName="PickGround"/.test(text)) + 1;
   check("a caret on a control's own line selects it on the canvas",
     await caretPicks(framedLine) === "PickGround", `line ${framedLine}`);
 
-  const frameLine = markupLines.findIndex((text) => /Frame\s+Options/.test(text)) + 1;
+  const frameLine = markupLines.findIndex((text) =>
+    /<Frame\b[^>]*\bName="Options"/.test(text)) + 1;
   check("and a caret on the container's line selects the container, not its child",
     await caretPicks(frameLine) === "Options", `line ${frameLine}`);
 
   check("and a caret on the Form line selects the form", await caretPicks(1) === "");
+
+  // A PENDING RENAME DOES NOT DROP THE PANEL ONTO THE FORM. The panel reads the live control, so
+  // a name the document has only just invented is one it cannot find, and its answer for a
+  // control it cannot find is the form. Renaming in the markup therefore left the caret and the
+  // canvas on the control while the panel jumped to the UserForm (the owner, 2026-08-17).
+  {
+    const renamed = markupLines.map((line) =>
+      line.replace(/(<CheckBox\b[^>]*\bName=")Taxable(")/, "$1TaxablePending$2")).join("\n");
+    await api.act("designerSelect", { module: form, control: "Taxable" });
+    await waitFor("the panel on the control before the rename", async () =>
+      (await api.ui()).properties?.component === "Taxable", { budgetMs: 15000 });
+
+    await api.act("designerSetMarkup", { module: form, markup: renamed });
+    await waitFor("the canvas to preview the renamed control", async () =>
+      ((await api.act("designerCanvas", { module: form })).data?.controls ?? [])
+        .some((one) => one.name === "TaxablePending"), { budgetMs: 15000 });
+    const onRenamed = await caretPicks(markupLines.findIndex((line) =>
+      /<CheckBox\b[^>]*\bName="Taxable"/.test(line)) + 1);
+    check("a caret on a control the markup has RENAMED still selects it on the canvas",
+      onRenamed === "TaxablePending", String(onRenamed));
+    check("and the panel stays on the control rather than falling back to the form",
+      (await api.ui()).properties?.component === "Taxable",
+      String((await api.ui()).properties?.component));
+
+    await api.act("designerSetMarkup", { module: form, markup: markupText });
+    await waitFor("the document back after the rename row", async () =>
+      ((await api.act("designerCanvas", { module: form })).data?.dirty) === false, { budgetMs: 15000 });
+  }
 
   await api.act("designerSelect", { module: form });
   const formSelected = (await api.act("designerCanvas", { module: form })).data;
@@ -999,18 +1115,33 @@ try {
   const leftRow = controlPanel.rows.find((row) => row.name === "Left");
   check("and its geometry reads through the rows", Number(leftRow?.value) === 84, leftRow?.value);
 
+  /*
+   * A PANEL ROW ON A DESIGNER TAB EDITS THE DOCUMENT AND WAITS FOR Ctrl+S, since 2026-08-17
+   * (task #68). These rows watched the FORM immediately, which was the old contract: the panel
+   * wrote the form over COM and the text caught up by echo. That put its edits outside the undo
+   * stack, and the owner reported both halves of it ("ctrl+z is not undoing it", then "ctrl+z
+   * updates the markdown editor, but not the designer"). So what is asserted now is the deal the
+   * rest of the tab already makes - document first, form on the save - and the form NOT moving
+   * before the save is as much the claim as its moving after.
+   */
   const panelMove = await api.act("editProperty", { name: "Left", value: "90" });
   check("a control row's edit answers through the model", panelMove.did === true, panelMove.detail);
-  await waitFor("the form to carry the panel's move", async () =>
+  await waitFor("the open tab's document to carry the panel's move", async () =>
+    (await placed("RegionPick")).left === 90, { budgetMs: 15000 });
+  check("a panel row writes the DOCUMENT, the way every other gesture on the tab does", true);
+  check("and the FORM is untouched until the save",
+    Math.abs(((await api.designer(form, project)).controls
+      .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.01,
+    String((await api.designer(form, project)).controls.find((c) => c.name === "RegionPick")?.left));
+
+  await api.command("save");
+  await waitFor("the save to carry the panel's move to the form", async () =>
     Math.abs(((await api.designer(form, project)).controls
       .find((c) => c.name === "RegionPick")?.left ?? 0) - 90) < 0.01, { budgetMs: 15000 });
-  check("the form truly moved", true);
-  await waitFor("and the open tab's document to follow it", async () =>
-    /RegionPick at 90,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
-  { budgetMs: 15000 });
-  check("the markup follows the panel's move - liveness end to end", true);
+  check("and Ctrl+S carries it to the form - liveness end to end", true);
 
   await api.act("editProperty", { name: "Left", value: "84" });
+  await api.command("save");
   await waitFor("and back where the plan puts it", async () =>
     Math.abs(((await api.designer(form, project)).controls
       .find((c) => c.name === "RegionPick")?.left ?? 0) - 84) < 0.01, { budgetMs: 15000 });
@@ -1152,30 +1283,44 @@ try {
   // a suggestion REPLACES matters as much as what it inserts: accepting one where the developer
   // has already typed `"Tah` has to take the quote with it, or the line gains a second string
   // inside the first.
+  //
+  // IN THE ATTRIBUTE'S OWN QUOTES, which is where a face goes now: `FontName` is written inside
+  // the button's tag rather than on a line beneath it, so the probe puts a half-typed attribute
+  // there and asks what the caret is offered.
   const canonicalText = String(tabMarkup.data);
   const withFont = canonicalText.split(/\r?\n/);
   const buttonLine = withFont.findIndex((line) => /<CommandButton Name="OkButton"/.test(line));
-  const tryLine = async (text) => {
+  const tryAttribute = async (partial) => {
     const lines = [...withFont];
-    lines.splice(buttonLine + 1, 0, text);
+    const original = lines[buttonLine];
+    // Spliced in just before the tag closes, so the rest of the element is untouched.
+    const at = original.lastIndexOf("/>");
+    const probe = `${original.slice(0, at)}${partial}${original.slice(at)}`;
+    lines[buttonLine] = probe;
     await api.act("designerSetMarkup", { module: form, markup: lines.join("\n") });
-    await waitFor("the document to hold the probe line", async () =>
-      String((await api.act("designerMarkup", { module: form })).data).includes(text.trim()),
+    await waitFor("the document to hold the probe attribute", async () =>
+      String((await api.act("designerMarkup", { module: form })).data).includes(partial.trim()),
     { budgetMs: 15000 });
     const done = await api.act("designerComplete",
-      { module: form, line: buttonLine + 2, column: text.length + 1 });
+      { module: form, line: buttonLine + 1, column: at + partial.length + 1 });
     const offer = (done.data ?? []).find((one) => one.label === pick);
     return offer
-      ? text.slice(0, offer.replaces.from - 1) + offer.insert + text.slice(offer.replaces.to - 1)
+      ? probe.slice(0, offer.replaces.from - 1) + offer.insert + probe.slice(offer.replaces.to - 1)
       : `no ${pick} among ${(done.data ?? []).length}`;
   };
 
-  check("a face completes on the value's side of FontName",
-    (await tryLine("        FontName = ")) === `        FontName = "${pick}"`,
-    await tryLine("        FontName = "));
-  check("and accepting one replaces the string already begun, quote and all",
-    (await tryLine('        FontName = "Cou')) === `        FontName = "${pick}"`,
-    await tryLine('        FontName = "Cou'));
+  const spelled = (partial) => {
+    const original = withFont[buttonLine];
+    const at = original.lastIndexOf("/>");
+    return `${original.slice(0, at)}FontName="${pick}"${original.slice(at)}`;
+  };
+
+  check("a face completes inside FontName's own quotes",
+    (await tryAttribute('FontName="')) === spelled('FontName="'),
+    await tryAttribute('FontName="'));
+  check("and accepting one replaces the value already begun, closing quote and all",
+    (await tryAttribute('FontName="Cou')) === spelled('FontName="Cou'),
+    await tryAttribute('FontName="Cou'));
 
   await api.act("designerSetMarkup", { module: form, markup: canonicalText });
   await waitFor("the document back at canonical after the font rows", async () =>
@@ -1199,29 +1344,49 @@ try {
   check("a property the library does not name keeps its number - nothing is guessed",
     /^-?\d+$/.test(String(plainRow?.value)) && !plainRow?.options, JSON.stringify(plainRow));
 
+  // Back on the FORM before the rows that write its own properties: the font probes above set the
+  // document, and setting it re-selects whatever the caret then lands in.
+  await api.act("designerSelect", { module: form });
+  await waitFor("the panel on the form for the property-writing rows", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+
   const wroteName = await api.act("editProperty", { name: "Cycle", value: "fmCycleCurrentForm" });
   check("a member NAME writes through to the model", wroteName.did === true, wroteName.detail);
 
   // ...and the number still writes, which is what keeps the row a text field rather than a
-  // list: the developer types either, and the panel answers in the language it reads back.
+  // list: the developer types either. 0 is fmCycleAllForms and fmCycleAllForms is the DEFAULT, so
+  // what the document does with it is take the attribute back out - "defaults stay unspoken" on
+  // the write side as well as the print side, and the act says so rather than echoing a value.
   const wroteNumber = await api.act("editProperty", { name: "Cycle", value: "0" });
-  check("the raw number writes too, and reads back as the member's name",
-    wroteNumber.did === true && /fmCycleAllForms/.test(wroteNumber.detail ?? ""), wroteNumber.detail);
+  check("the raw number writes too, and a default takes the attribute out again",
+    wroteNumber.did === true && /default/.test(wroteNumber.detail ?? ""), wroteNumber.detail);
+  check("and the document says nothing about Cycle once it is back at the default",
+    !/\bCycle=/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    String((await api.act("designerMarkup", { module: form })).data).split(/\r?\n/)[0]);
 
   const wroteHex = await api.act("editProperty", { name: "BackColor", value: "&H00C0FFC0&" });
   check("a colour written as the VBE's hex lands as the model's own number",
     wroteHex.did === true, wroteHex.detail);
+  await api.command("save");
   await waitFor("the form to carry the colour", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === 12648384, { budgetMs: 15000 });
   check("12648384, which is what &H00C0FFC0& means", true);
+  // The row reads back CANONICALLY, not as the developer spelled it. Waited for rather than read
+  // at once: since the panel writes the document (#68) the correction arrives with the host's
+  // republish after the apply, where it used to come straight back from the COM write.
+  const readBack = await waitFor("the panel row to read the colour back canonically", async () => {
+    const row = (await api.ui()).properties.rows.find((one) => one.name === "BackColor");
+    return row?.value === "#c0ffc0" ? row : null;
+  }, { budgetMs: 15000 }).catch(() => null);
   check("and a plain colour reads back the way a developer writes one",
-    (await api.ui()).properties.rows.find((row) => row.name === "BackColor")?.value === "#c0ffc0",
+    readBack !== null,
     JSON.stringify((await api.ui()).properties.rows.find((row) => row.name === "BackColor")));
 
   // The spelling the owner asked for, in both directions.
   const wroteCss = await api.act("editProperty", { name: "BackColor", value: "#ff8000" });
   check("a colour written as #rrggbb lands too - byte order and all",
     wroteCss.did === true && wroteCss.detail?.includes("#ff8000"), wroteCss.detail);
+  await api.command("save");
   await waitFor("the form to carry that one", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === 33023, { budgetMs: 15000 });
   check("33023, which is #ff8000 with the blue-green-red order the model stores", true);
@@ -1229,6 +1394,7 @@ try {
   const wroteSystem = await api.act("editProperty", { name: "BackColor", value: "Highlight" });
   check("and a system colour written by NAME asks the question rather than freezing the answer",
     wroteSystem.did === true, wroteSystem.detail);
+  await api.command("save");
   await waitFor("the form to hold the system colour", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === -2147483635, { budgetMs: 15000 });
   check("-2147483635, the system's own highlight index with the high bit set", true);
@@ -1249,6 +1415,9 @@ try {
   const picked = await api.act("colourPicker", { choose: wanted });
   check("picking a palette colour writes it through the row's own commit",
     picked.did === true, picked.detail);
+  // Ctrl+S, because the picker commits through the same row the typed value does and that row
+  // now writes the DOCUMENT (#68): the form takes it at the save like every other gesture.
+  await api.command("save");
   await waitFor("the form to take the picked colour", async () => {
     const back = (await api.designer(form, project)).form?.backColor ?? 0;
     const css = `#${(back & 0xFF).toString(16).padStart(2, "0")}`
@@ -1264,6 +1433,7 @@ try {
   const pickedSystem = await api.act("colourPicker", { property: "BackColor", choose: "Button Face" });
   check("picking a SYSTEM colour writes the question, not the colour it resolves to today",
     pickedSystem.did === true, pickedSystem.detail);
+  await api.command("save");
   await waitFor("the form to hold the system colour again", async () =>
     ((await api.designer(form, project)).form?.backColor ?? 0) === -2147483633, { budgetMs: 15000 });
   check("-2147483633: the row reads Button Face, and the form asks the machine every time it paints",
@@ -1323,9 +1493,9 @@ try {
   const dragged = await api.act("designerDrag", { module: form, control: "RegionPick", dx: 24, dy: 12 });
   check("a pointer drag on the canvas moves a control", dragged.did === true, dragged.detail);
   await waitFor("the drop to reach the document", async () =>
-    /RegionPick at 108,50/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 108 && (await placed("RegionPick")).top === 50,
   { budgetMs: 15000 });
-  check("the drop rewrites the control's line - at 84,38 becomes at 108,50", true);
+  check("the drop rewrites the control's element - 84,38 becomes 108,50", true);
 
   const dragCanvas = await waitFor("the canvas to preview the drop", async () => {
     const read = (await api.act("designerCanvas", { module: form })).data;
@@ -1350,7 +1520,7 @@ try {
   // edit rather than a stream of them, and that the canvas reaches the document's undo.
   await press("z", "ctrlKey: true,");
   await waitFor("the document to come back", async () =>
-    /RegionPick at 84,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 84 && (await placed("RegionPick")).top === 38,
   { budgetMs: 15000 });
   check("one Ctrl+Z on the canvas undoes the whole drag - the document is the transaction log", true);
   await api.command("save");
@@ -1363,7 +1533,7 @@ try {
   await api.act("designerSelect", { module: form, control: "RegionPick" });
   await press("ArrowRight");
   await waitFor("the nudge to reach the document", async () =>
-    /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 85 && (await placed("RegionPick")).top === 38,
   { budgetMs: 15000 });
   check("an arrow nudges the selection by a single point", true);
 
@@ -1371,18 +1541,18 @@ try {
   // gesture from swallowing the one before it, and one Ctrl+Z gives back exactly one.
   await press("ArrowRight");
   await waitFor("the second nudge", async () =>
-    /RegionPick at 86,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 86 && (await placed("RegionPick")).top === 38,
   { budgetMs: 15000 });
   await press("z", "ctrlKey: true,");
   await waitFor("one gesture back", async () =>
-    /RegionPick at 85,38/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 85 && (await placed("RegionPick")).top === 38,
   { budgetMs: 15000 });
   check("each move is its own undo step - one Ctrl+Z gives back one gesture, not the pair", true);
 
   // A drag with nowhere to go cannot lose the control behind an edge: it stops at the corner.
   await api.act("designerDrag", { module: form, control: "RegionPick", dx: -400, dy: -400 });
   await waitFor("the clamped drop", async () =>
-    /RegionPick at 0,0/.test(String((await api.act("designerMarkup", { module: form })).data)),
+    (await placed("RegionPick")).left === 0 && (await placed("RegionPick")).top === 0,
   { budgetMs: 15000 });
   check("a drag past the top-left stops at the parent's corner rather than going negative", true);
 
@@ -1401,10 +1571,47 @@ try {
     `the form holds ${stale?.left},${stale?.top} while the document says 0,0; if these already `
     + "agree the row below proves nothing");
 
+  // THE PRECONDITION, said out loud. A form whose code-behind no longer compiles does not run,
+  // and the Run command answers "executed" either way - so a broken project reads here as a run
+  // that silently never happened (2026-08-17, chasing exactly that). The code-behind names
+  // RegionPick, Taxable, Views, ViewNote and NameBox, and Option Explicit makes a missing one a
+  // compile error, so a row above that removed or renamed one of them lands here rather than
+  // where it happened.
+  const compiles = await api.compile();
+  check("the project still compiles, so a run that does not stand means what it says",
+    compiles.compiled === true,
+    JSON.stringify({ compiled: compiles.compiled, errors: compiles.errors, detail: compiles.detail }));
+
+  // A DOOR INTO THE POISONED SESSION. This row fails only inside a full run (#71) and never
+  // standalone, so the way to see it is to stop here and drive the live session by hand:
+  //   set XLIDE_PAUSE=1 && node tools\harness\designer-features.mjs
+  // The suite then holds everything exactly as it is until the pause runs out, and the api
+  // client can be pointed at it from another shell.
+  if (process.env.XLIDE_PAUSE) {
+    console.log(`  .... paused before the dirty run; the session is yours (form ${form})`);
+    await new Promise((resume) => setTimeout(resume, 600000));
+  }
+
   const ranDirty = api.command("run");
-  await waitFor("the form to stand running", async () =>
+  // SAYS WHY WHEN IT DOES NOT STAND, rather than throwing a bare timeout. A run that fails here
+  // fails for one of a few reasons - the mode never left design, a dialog is sitting in front of
+  // it, the project stopped compiling - and a row that reports none of them sends the next reader
+  // to the window-event log to guess (2026-08-17, twice).
+  const stood = await waitFor("the form to stand running", async () =>
     ((await api.userforms()).forms ?? []).find((title) => title.includes("Quarter Entry")),
-  { budgetMs: 20000 });
+  { budgetMs: 20000 }).catch(() => null);
+  if (!stood) {
+    const why = {
+      mode: (await api.state()).debugMode,
+      forms: (await api.userforms()).forms ?? [],
+      dialogs: ((await api.dialogs()).dialogs ?? []).map((one) => one.title ?? one),
+      compiles: (await api.compile()).compiled,
+    };
+    check("the form stands after a run over a dirty designer", false, JSON.stringify(why));
+  } else {
+    check("the form stands after a run over a dirty designer", true, String(stood));
+  }
+
   const dirtyRunAnswer = await ranDirty;
   check("F5 over a dirty designer answers that it ran", dirtyRunAnswer.ran === true,
     dirtyRunAnswer.detail);
@@ -1456,12 +1663,12 @@ try {
     { module: form, control: "RegionPick", edge: "se", dx: 24, dy: 12 });
   check("a pull on the south-east handle resizes a control", grew.did === true, grew.detail);
   await waitFor("the size clause to follow the handle", async () =>
-    /RegionPick at 84,38 size 144x32/.test(await tabText()), { budgetMs: 15000 });
+    sizedAt("RegionPick", 84, 38, 144, 32), { budgetMs: 15000 });
   check("120x20 becomes 144x32, and the position is untouched", true);
 
   await api.act("designerResize", { module: form, control: "RegionPick", edge: "nw", dx: 12, dy: 12 });
   await waitFor("the north-west pull", async () =>
-    /RegionPick at 96,50 size 132x20/.test(await tabText()), { budgetMs: 15000 });
+    sizedAt("RegionPick", 96, 50, 132, 20), { budgetMs: 15000 });
   check("a north-west pull moves the origin and the extent together", true);
 
   const drawn = (await api.act("designerCanvas", { module: form })).data.controls
@@ -1472,13 +1679,13 @@ try {
 
   await api.act("designerResize", { module: form, control: "RegionPick", edge: "se", dx: -500, dy: -500 });
   await waitFor("the floored box", async () =>
-    /RegionPick at 96,50 size 4x4/.test(await tabText()), { budgetMs: 15000 });
+    sizedAt("RegionPick", 96, 50, 4, 4), { budgetMs: 15000 });
   check("a pull past the far edge stops at the floor size rather than inverting the box", true);
 
   // Shift+arrow is the keyboard's resize, the native designer's own pairing with a bare arrow.
   await press("ArrowRight", "shiftKey: true,");
   await waitFor("the keyboard resize", async () =>
-    /RegionPick at 96,50 size 5x4/.test(await tabText()), { budgetMs: 15000 });
+    sizedAt("RegionPick", 96, 50, 5, 4), { budgetMs: 15000 });
   check("Shift+arrow resizes by a point where a bare arrow moves", true);
 
   // The FORM's own frame resizes too - and its line takes a size and never a position.
@@ -1531,8 +1738,8 @@ try {
   check("Delete takes the selected control out of the document", deleted.did === true, deleted.detail);
   const afterDelete = await tabText();
   check("and its whole block goes with it - properties and children included",
-    !/Frame Options/.test(afterDelete) && !/PickGround/.test(afterDelete)
-    && /ToggleButton HoldToggle/.test(afterDelete),
+    !/\bName="Options"/.test(afterDelete) && !/\bName="PickGround"/.test(afterDelete)
+    && /<ToggleButton\b[^>]*\bName="HoldToggle"/.test(afterDelete),
     afterDelete.split(/\r?\n/).length + " line(s) left");
   check("the FORM still holds it until the save",
     (await api.designer(form, project)).controls.some((c) => c.name === "PickGround"));
@@ -1542,7 +1749,9 @@ try {
   await press("z", "ctrlKey: true,");
   const blockBack = await waitFor("the block to come back", async () => {
     const text = await tabText();
-    return /Frame Options/.test(text) && /PickGround/.test(text) ? "restored" : null;
+    return /<Frame\b[^>]*\bName="Options"/.test(text) && /\bName="PickGround"/.test(text)
+      ? "restored"
+      : null;
   }, { budgetMs: 8000 }).catch(async () => {
     // A bare timeout says nothing about WHY, and chasing this one without the state cost an
     // hour. The document's own stack answers first: an undo that found nothing to give back
@@ -1739,8 +1948,8 @@ try {
     }
 
     // And a design whose form is not there is refused by name rather than guessed at.
-    writeFileSync(join(syncFolder, "NoSuchForm.form"), `Form NoSuchForm size 100x80
-`, "utf8");
+    writeFileSync(join(syncFolder, "NoSuchForm.form"),
+      `<Form Name="NoSuchForm" Width="100" Height="80" />\r\n`, "utf8");
     const orphan = (await api.syncPlan("import", { folder: syncFolder })).items
       .find((row) => row.file === "NoSuchForm.form");
     check("a design whose form is missing is skipped, saying what to do first",
@@ -1791,8 +2000,11 @@ try {
     // than against the suite's own form, which the rows above have been adding controls to.
     // A TAB is a line of the design and is NOT a control - it holds nothing and has no geometry -
     // so the walk this compares against does not carry one, and neither does the expectation.
-    const namedByFile = [...design.matchAll(/^\s+(\w+) (\w+)/gm)]
-      .filter((one) => one[1] !== "Tab").map((one) => one[2]).sort();
+    // Read off the ELEMENTS the file declares: `<Kind Name="...">`. This matched
+    // `Kind Name` at the head of a line under the old dialect and matches nothing at all under
+    // the tagged one, so the expectation was an empty list and the row compared 19 against 0.
+    const namedByFile = [...design.matchAll(/<([A-Za-z_]\w*)\b[^>]*\bName="([^"]+)"/g)]
+      .filter((one) => one[1] !== "Tab" && one[1] !== "Form").map((one) => one[2]).sort();
     const wholeForm = await api.designer(arrival, project).catch((why) => ({ error: why.message }));
     const arrivedNames = (wholeForm.controls ?? []).map((one) => one.name).sort();
     check("it arrives WHOLE - every control the binary held, not an empty frame",
@@ -1864,8 +2076,11 @@ try {
     { module: form, kind: "Label", left: 40, top: 150 });
   check("a drop over a Frame goes INTO the frame", nestedDrop.did === true, nestedDrop.detail);
   const withNested = await tabText();
-  check("and its line is indented under it, placed in the frame's own coordinates",
-    /^ {8}Label Label1 at \d+,\d+ size 66x16$/m.test(withNested),
+  // Eight spaces of indent is the nesting - the Frame's own children sit one level in - and the
+  // coordinates are the frame's, not the form's, which is what a drop INTO a container means.
+  check("and its element is nested under it, placed in the frame's own coordinates",
+    /^ {8}<Label\b[^>]*\bName="Label1"[^>]*\/>$/m.test(withNested)
+    && (await placed("Label1")).width === 66 && (await placed("Label1")).height === 16,
     withNested.split(/\r?\n/).find((line) => /Label1/.test(line)) ?? "no line");
 
   // The whole loop: Ctrl+S puts both on the FORM, through the same add the api route makes.
@@ -1930,24 +2145,38 @@ try {
   // travel is what fits the canvas the gate's window leaves (about thirty points).
   const nearEdge = await api.act("designerToolbox",
     { module: form, kind: "Label", left: 40, top: 166 });
+  // Eight spaces of indent is inside the Frame, four is the form's own level - the nesting is what
+  // says which container holds it, and in the tagged dialect that is the element's indent.
   check("a label dropped near the frame's bottom edge lands inside the frame",
-    nearEdge.did === true && /^ {8}Label Label\d+ at/m.test(await tabText()), nearEdge.detail);
-  const carried = /^ {8}(Label Label\d+)/m.exec(await tabText())?.[1]?.split(" ")[1] ?? "Label1";
+    nearEdge.did === true && /^ {8}<Label\b[^>]*\bName="Label\d+"/m.test(await tabText()),
+    nearEdge.detail);
+  const carried = /^ {8}<Label\b[^>]*\bName="(Label\d+)"/m.exec(await tabText())?.[1] ?? "Label1";
 
   const outward = await api.act("designerDrag", { module: form, control: carried, dx: 0, dy: 10 });
   check("dragging it past that edge is accepted", outward.did === true, outward.detail);
-  const reparented = await waitFor("the control's line to leave the frame's block", async () =>
-    new RegExp(`^ {4}Label ${carried} at`, "m").test(await tabText()) ? await tabText() : null,
+  const reparented = await waitFor("the control's element to leave the frame's block", async () =>
+    new RegExp(`^ {4}<Label\\b[^>]*\\bName="${carried}"`, "m").test(await tabText())
+      ? await tabText()
+      : null,
   { budgetMs: 15000 });
-  check("the control's whole line moves to the form's own level, in the form's coordinates",
-    new RegExp(`^ {4}Label ${carried} at \\d+,1[6789]\\d`, "m").test(reparented),
+  check("the control's whole element moves to the form's own level, in the form's coordinates",
+    new RegExp(`^ {4}<Label\\b[^>]*\\bName="${carried}"`, "m").test(reparented)
+    && (await placed(carried)).top >= 160 && (await placed(carried)).top < 200,
     reparented.split(/\r?\n/).find((line) => line.includes(carried)) ?? "no line");
 
   // And back in, which is the same gesture the other way: the pointer decides, not the distance.
-  const inward = await api.act("designerDrag", { module: form, control: carried, dx: 0, dy: -10 });
+  //
+  // TWENTY POINTS, not ten. The outward drag leaves the label just below the frame's lower edge
+  // but still within its span, so a ten-point return put the pointer back inside the frame's
+  // RECTANGLE without reaching its client - and the control stayed on the form. Measured by hand
+  // 2026-08-17: -10 does not reparent, -20 does, landing it at the frame's own top. A row that
+  // depends on the smallest crossing that works is a row that breaks whenever the drop clamps
+  // half a point differently.
+  const inward = await api.act("designerDrag", { module: form, control: carried, dx: 0, dy: -20 });
   check("and a drag back over the frame puts it inside again", inward.did === true, inward.detail);
-  await waitFor("the control's line to nest under the frame again", async () =>
-    new RegExp(`^ {8}Label ${carried} at`, "m").test(await tabText()), { budgetMs: 15000 });
+  await waitFor("the control's element to nest under the frame again", async () =>
+    new RegExp(`^ {8}<Label\\b[^>]*\\bName="${carried}"`, "m").test(await tabText()),
+  { budgetMs: 15000 });
   check("nested again, indented under the Frame that now holds it", true);
 
   // The FORM is untouched by all of it until the save, like every other canvas gesture.
@@ -1961,16 +2190,21 @@ try {
 
   // ---- a GROUP: gathered by ctrl+click or a marquee, moved and onTheLeft up as one ----
 
+  // The four by NAME off each element, the same way `placed` reads one: the tagged dialect writes
+  // them as attributes in whatever order the printer chose, so `at x,y size WxH` finds nothing.
   const placesOf = async (...names) => {
     const text = await tabText();
     return names.map((name) => {
-      const line = text.split(/\r?\n/).find((one) => one.includes(` ${name} `) || one.includes(` ${name}"`));
-      const at = /at (\d+),(\d+)/.exec(line ?? "");
-      const size = /size (\d+)x(\d+)/.exec(line ?? "");
+      const line = text.split(/\r?\n/).find((one) => new RegExp(`\\bName="${name}"`).test(one)) ?? "";
+      const number = (attribute) => {
+        const found = new RegExp(`\\b${attribute}="(-?[\\d.]+)"`).exec(line);
+        return found === null ? -1 : Number(found[1]);
+      };
+
       return {
         name,
-        left: Number(at?.[1] ?? -1), top: Number(at?.[2] ?? -1),
-        width: Number(size?.[1] ?? -1), height: Number(size?.[2] ?? -1),
+        left: number("Left"), top: number("Top"),
+        width: number("Width"), height: number("Height"),
       };
     });
   };
@@ -2232,8 +2466,9 @@ try {
   // cheerfully reports otherwise (which is fixed too - designerSelect refuses a name the canvas
   // does not draw).
   const framed = (await api.designerMarkup(form, project)).split(/\r?\n/)
-    .filter((line) => /^ {8}OptionButton /.test(line))
-    .map((line) => line.trim().split(/\s+/)[1]);
+    .filter((line) => /^ {8}<OptionButton\b/.test(line))
+    .map((line) => /\bName="([^"]+)"/.exec(line)?.[1] ?? "")
+    .filter((name) => name.length > 0);
   await api.act("designerSelect", { module: form, control: framed[0] });
   await waitFor("the canvas to hold the selection the dialog will read", async () =>
     ((await api.act("designerCanvas", { module: form })).data?.selected) === framed[0],
@@ -2271,7 +2506,7 @@ try {
 
   const onPage = await canvasNow();
   check("and the PAGE is selected, with the markup caret on its own line - the native gesture",
-    onPage.selected === "Page2" && /^\s+Page Page2/.test((await tabText()).split(/\r?\n/)[onPage.markupLine - 1] ?? ""),
+    onPage.selected === "Page2" && /^\s+<Page\b[^>]*\bName="Page2"/.test((await tabText()).split(/\r?\n/)[onPage.markupLine - 1] ?? ""),
     `${onPage.selected} at line ${onPage.markupLine}`);
   check("opening a page leaves the DOCUMENT alone - looking is not an edit",
     onPage.dirty === false);
@@ -2286,7 +2521,7 @@ try {
 
   // The other direction: a caret in page one's block opens page one. Without this a click on a
   // line inside a hidden page selected nothing at all, because the canvas had no element for it.
-  const agreeLine = (await tabText()).split(/\r?\n/).findIndex((line) => /CheckBox Agree/.test(line)) + 1;
+  const agreeLine = (await tabText()).split(/\r?\n/).findIndex((line) => /<CheckBox\b[^>]*\bName="Agree"/.test(line)) + 1;
   await api.act("designerCaret", { module: form, line: agreeLine });
   const backToOne = await canvasNow();
   check("a caret on a control inside a hidden page opens that page and selects it",
@@ -2315,7 +2550,7 @@ try {
   check("a drop on the open page lands on it", ontoPage.did === true, ontoPage.detail);
   const withPageDrop = await tabText();
   check("and its line is indented under THAT page, not under the first",
-    /Page Page2 "Page2"\r?\n {12}CheckBox CheckBox1/.test(withPageDrop),
+    /<Page\b[^>]*\bName="Page2"[^>]*>\r?\n {12}<CheckBox\b[^>]*\bName="CheckBox1"/.test(withPageDrop),
     withPageDrop.split(/\r?\n/).slice(-6).join(" / "));
 
   // New Page and Delete Page, where the native designer keeps them: the strip's own menu.
@@ -2324,8 +2559,30 @@ try {
     stripMenu.detail === "New Page | Delete Page", stripMenu.detail);
 
   await api.act("chooseMenuItem", { label: "New Page" });
-  const added = await waitFor("the new page to reach the document", async () =>
-    /^ {8}Page Page3 "Page3"$/m.test(await tabText()) ? await canvasNow() : null, { budgetMs: 15000 });
+  // Waited for on the CANVAS, not the document. The document takes the new page immediately and
+  // the canvas only draws it once the lint round trip brings the parsed draft back, so a wait
+  // that watched the text and then read the strip in the same tick read the strip too early.
+  // Waited for on the CANVAS, not the document. The document takes the new page immediately and
+  // the canvas only draws it once the lint round trip brings the parsed draft back, so a wait
+  // that watched the text and then read the strip in the same tick read the strip too early.
+  // Reports what it last saw rather than throwing bare, because "the strip is short a page" and
+  // "the page never reached the document" want different answers.
+  const added = await waitFor("the new page to be drawn on the strip", async () => {
+    if (!/^ {8}<Page\b[^>]*\bName="Page3"[^>]*\bCaption="Page3"/m.test(await tabText())) {
+      return null;
+    }
+
+    const seen = await canvasNow();
+    return seen.containers.find((one) => one.name === "Wizard")?.page === "Page3" ? seen : null;
+  }, { budgetMs: 15000 }).catch(async () => {
+    const seen = await canvasNow();
+    check("New Page reaches the canvas", false, JSON.stringify({
+      strip: seen.containers.find((one) => one.name === "Wizard"),
+      draft: seen.draft, dirty: seen.dirty, selected: seen.selected,
+      lint: (await api.act("designerLint", { module: form })).data,
+    }));
+    return seen;
+  });
   check("New Page writes the line MSForms would name and opens it",
     added.selected === "Page3" && added.containers.find((one) => one.name === "Wizard")?.page === "Page3",
     JSON.stringify(added.containers.find((one) => one.name === "Wizard")));
@@ -2335,16 +2592,17 @@ try {
   await api.act("designerTabMenu", { module: form, container: "Wizard", tab: "Page2" });
   await api.act("chooseMenuItem", { label: "Delete Page" });
   const pageGone = await waitFor("the page to leave the document", async () =>
-    /Page Page2/.test(await tabText()) ? null : await tabText(), { budgetMs: 15000 });
+    /<Page\b[^>]*\bName="Page2"/.test(await tabText()) ? null : await tabText(), { budgetMs: 15000 });
   check("Delete Page takes the page AND everything on it",
-    !/CheckBox CheckBox1/.test(pageGone) && /Page Page1/.test(pageGone) && /Page Page3/.test(pageGone),
+    !/\bName="CheckBox1"/.test(pageGone) && /<Page\b[^>]*\bName="Page1"/.test(pageGone)
+    && /<Page\b[^>]*\bName="Page3"/.test(pageGone),
     pageGone.split(/\r?\n/).filter((line) => /Page/.test(line)).join(" / "));
 
   await press("z", "ctrlKey: true,");
   const undonePage = await waitFor("one undo to give the page back", async () =>
-    /Page Page2/.test(await tabText()) ? await tabText() : null, { budgetMs: 15000 });
+    /<Page\b[^>]*\bName="Page2"/.test(await tabText()) ? await tabText() : null, { budgetMs: 15000 });
   check("and one Ctrl+Z gives the whole page back, child and all",
-    /CheckBox CheckBox1/.test(undonePage));
+    /\bName="CheckBox1"/.test(undonePage));
 
   // A page's ground only became double-clickable when the body took the page's identity, and a
   // PAGE has an event of its own: it raises Click, the VBE's own object list carries pages beside
@@ -2395,10 +2653,10 @@ try {
   // it while the canvas drew two tabs (the owner: "in the markdown, i dont see anything indented
   // under the tab view").
   const stripTabs = (text) => text.split(/\r?\n/)
-    .filter((line) => /^\s+Tab /.test(line))
-    .map((line) => line.trim()).join(" | ");
+    .filter((line) => /^\s+<Tab\b/.test(line))
+    .map((line) => /\bName="([^"]*)"/.exec(line)?.[1] ?? "?").join(" | ");
   check("the strip's tabs are lines of the document, indented under it",
-    stripTabs(await tabText()) === 'Tab Tab1 "Tab1" | Tab Tab2 "Tab2"', stripTabs(await tabText()));
+    stripTabs(await tabText()) === "Tab1 | Tab2", stripTabs(await tabText()));
 
   const tabMenu = await api.act("designerTabMenu", { module: form, container: "Views" });
   check("and its menu offers the pair a strip can keep - tabs, not pages",
@@ -2406,7 +2664,7 @@ try {
 
   await api.act("chooseMenuItem", { label: "New Tab" });
   const grown = await waitFor("the new tab to reach the document", async () =>
-    /Tab Tab3 "Tab3"/.test(await tabText()) ? await canvasNow() : null, { budgetMs: 15000 });
+    /<Tab\b[^>]*\bName="Tab3"[^>]*\bCaption="Tab3"/.test(await tabText()) ? await canvasNow() : null, { budgetMs: 15000 });
   check("New Tab writes a line and the canvas draws it, open",
     grown.containers.find((one) => one.name === "Views")?.tabs.length === 3
     && grown.containers.find((one) => one.name === "Views")?.open === 2,
@@ -2414,14 +2672,14 @@ try {
 
   await api.command("save");
   await waitFor("the tab to reach the FORM", async () =>
-    /Tab Tab3/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
+    /<Tab\b[^>]*\bName="Tab3"/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
   check("and Ctrl+S puts it on the form itself - MSForms' own Tabs.Add", true);
 
   await api.act("designerTabMenu", { module: form, container: "Views", tab: 3 });
   await api.act("chooseMenuItem", { label: "Delete Tab" });
   await api.command("save");
   await waitFor("the tab to leave the form again", async () =>
-    !/Tab Tab3/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
+    !/<Tab\b[^>]*\bName="Tab3"/.test(await api.designerMarkup(form, project)), { budgetMs: 20000 });
   check("Delete Tab takes it back off, through the same diff", true);
 
   check("the FORM kept all of its pages throughout: none of this reached it",
@@ -2456,8 +2714,10 @@ try {
     && ((await api.act("designerCanvas", { module: form })).data?.dirty) === false,
     `${drawnAt100} became ${drawnAt200}`);
 
-  const zoomedPlace = async () =>
-    /HoldToggle .* at (\d+),(\d+)/.exec(await tabText())?.slice(1).map(Number) ?? [];
+  const zoomedPlace = async () => {
+    const box = await placed("HoldToggle");
+    return box.left === null || box.top === null ? [] : [box.left, box.top];
+  };
 
   // The snap OFF while the zoom is measured, so the row reads the gesture rather than the grid -
   // and put back the way it was found, because the grid rows below open by measuring an unsnapped
@@ -2602,11 +2862,10 @@ try {
 
   // ---- the grid: pointer gestures land on it, the keyboard never does ----
 
-  // The caption sits between the name and the position - `ToggleButton HoldToggle "Hold" at
-  // 112,112` - so a `name at` pattern matches nothing at all, quietly, for every control that
-  // carries one.
-  const gridPlace = async () =>
-    /HoldToggle .* at ([0-9]+),([0-9]+)/.exec(await tabText())?.slice(1).map(Number) ?? [];
+  const gridPlace = async () => {
+    const box = await placed("HoldToggle");
+    return box.left === null || box.top === null ? [] : [box.left, box.top];
+  };
 
   await api.act("designerSetMarkup", { module: form, markup: await canonicalNow() });
   await waitFor("the document back at canonical before the grid rows", async () =>
@@ -2625,6 +2884,26 @@ try {
   await api.settings({ designerSnap: "grid" });
   await waitFor("the page to hear that the grid is back", async () =>
     (await api.ui()).settings?.designerSnap === "grid", { budgetMs: 15000 });
+
+  // THE GRID IS ACTUALLY PAINTED - checked HERE, with snapping back on, not merely declared. It was declared and invisible: a radial
+  // gradient with both colour stops at 0.5px is a half-pixel disc with no ramp, and Chromium
+  // rasterised it to nothing, so the toggle lit and the form's ground stayed bare (the owner,
+  // 2026-08-17: "grid snap indicator is lit, but grid snap not showing on form"). Nothing checked
+  // that the dots existed, which is why it shipped. A row cannot count pixels from here, so it
+  // pins the thing that was wrong: a dot with a whole pixel of radius to land on.
+  const painted = String(await api.ask(
+    `getComputedStyle(${inView(".dc-form-client")}).backgroundImage`));
+  // THE SOLID CENTRE, which is the second stop: the browser expands `0 1px` into `0px` and `1px`,
+  // and the transparent stop trails behind them. Taking the first number reads the 0 the dot
+  // starts at, and taking the largest reads the transparent edge - neither says how much of the
+  // dot is actually painted. The broken shape was `0.5px, 0.5px`, whose second stop is 0.5.
+  const dotStops = [...painted.matchAll(/([\d.]+)px/g)].map((one) => Number(one[1]))
+    .sort((a, b) => a - b);
+  const solid = dotStops.length >= 2 ? dotStops[dotStops.length - 2] : 0;
+  check("the grid is painted with a dot big enough to land on a pixel",
+    /radial-gradient/.test(painted) && solid >= 1,
+    `solid to ${solid}px of ${JSON.stringify(dotStops)} in ${painted.slice(0, 70)}`);
+
 
   // And with it on, four points land on the nearest six - a delta chosen because it does NOT
   // reach a grid line by itself, so the row can tell snapping from arithmetic. Seven points
@@ -2675,8 +2954,8 @@ try {
     (await api.ui()).settings?.designerSnap === "objects", { budgetMs: 15000 });
 
   const placeOf = async (control) => {
-    const found = new RegExp(`${control}(?: .*)? at ([0-9]+),([0-9]+)`).exec(await tabText());
-    return found ? found.slice(1).map(Number) : [];
+    const box = await placed(control);
+    return box.left === null || box.top === null ? [] : [box.left, box.top];
   };
 
   const boxWas = await placeOf("NameBox");
@@ -2772,6 +3051,29 @@ try {
     (await designTabs()).find((tab) => tab.module === form), { budgetMs: 15000 });
   check("and back once more through the panel", true);
 
+  // ---- A NAVIGATION INTO A FORM'S CODE TAKES THE SLOT FROM ITS DESIGNER TAB ----
+  //
+  // "The shown module" carries a name and a workbook and no FACE, so a form whose designer tab
+  // held the active slot reported that module as already showing: GoTo took its already-showing
+  // branch and revealed a line in a document nobody was looking at. Clicking a Sub under a form
+  // in the tree therefore did nothing visible at all (the owner, 2026-08-18).
+  //
+  // The consequence past the tab strip is why this is more than a cosmetic slot: `_activeDesignerTab`
+  // is also what F5 and Ctrl+S read to decide whether they are applying a document or running a
+  // module, so a navigation that left it standing left Run aimed at a form the developer had
+  // navigated away from.
+  await api.act("activate", { module: form, face: "design" });
+  await waitFor("the designer tab holding the slot", async () =>
+    (await api.ui()).workspace?.active?.face === "design", { budgetMs: 15000 });
+
+  await api.caret(1, { module: form, column: 1 });
+  const tookTheSlot = await waitFor("the code face to take the slot", async () => {
+    const active = (await api.ui()).workspace?.active;
+    return active?.module === form && !active.face ? active : null;
+  }, { budgetMs: 15000 }).catch(() => null);
+  check("a navigation into a form's code takes the active slot from its designer tab",
+    tookTheSlot !== null, JSON.stringify((await api.ui()).workspace?.active));
+
   // ---- CLOSING A DESIGNER TAB WITH UNAPPLIED EDITS ASKS ----
   //
   // It did not until 2026-08-16: the close was unconditional and a Ctrl+W after three moves lost
@@ -2840,6 +3142,43 @@ try {
   check("and a CLEAN designer tab still closes without a question",
     ((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
       .some((tab) => tab.module === form && !tab.face));
+
+  // ---- A COLOUR ROW WITH NO DESIGNER TAB OPEN: THE HOST PATH ----
+  //
+  // The rows above write colours through the DOCUMENT, because a Properties row on an open
+  // designer tab joins that tab's transaction (#68). With no designer tab there is no document
+  // to join and the row goes straight to the component, which is the path #66 was filed against
+  // and the only one of the two that had never been driven. It is reachable in ordinary use -
+  // a form nobody has opened a designer for, selected in the tree - so it is pinned here, at
+  // the one point in the suite where the designer tab is known to be down.
+  //
+  // #66's narrowing said the raw `#rrggbb` reached the COM put and MSForms threw on it. It does
+  // not: the VBE's Property for a colour reads as VT_I4, so text that will not convert is
+  // refused by the writer BEFORE the model is touched, and text that will convert is a number by
+  // then. Both halves are pinned, because the value of this row is the second one - a refusal
+  // that costs nothing is what keeps a bad value from reaching the designer at all.
+  await waitFor("the panel on the form, with no designer tab to write through", async () =>
+    (await api.ui()).properties?.component === form, { budgetMs: 15000 });
+  check("the designer tab really is down for these rows",
+    !((await api.ui()).workspace?.groups ?? []).flatMap((group) => group.tabs)
+      .some((tab) => tab.module === form && tab.face === "design"));
+
+  const hostColour = await api.act("editProperty", { name: "BackColor", value: "#0080ff" });
+  check("a #rrggbb typed with no designer tab open writes straight through to the component",
+    hostColour.did === true, hostColour.detail);
+  check("...and reaches the form as the NUMBER the model stores, not as the text",
+    ((await api.designer(form, project)).form?.backColor ?? 0) === 16744448,
+    String((await api.designer(form, project)).form?.backColor));
+
+  const hostRefused = await api.act("editProperty", { name: "BackColor", value: "not a colour" });
+  check("text that is no colour at all is refused before the model is touched",
+    hostRefused.did === false && /not a whole number/.test(hostRefused.detail ?? ""),
+    hostRefused.detail);
+  check("...and the refusal costs nothing - the form still reads, holding what it held",
+    ((await api.designer(form, project)).form?.backColor ?? 0) === 16744448,
+    String((await api.designer(form, project)).form?.backColor));
+
+  await api.act("editProperty", { name: "BackColor", value: "Button Face" });
 
   // ---- A REMOVED FORM TAKES ITS DESIGNER TAB WITH IT ----
   //

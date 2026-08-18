@@ -642,7 +642,34 @@ function boot(): void {
     menuRequest: (path) => bridge.requestMenu(path),
     menuExecute: (path) => bridge.executeMenu(path),
     menuClosed: () => workspace.activeEditor().focus(),
-    editProperty: (component, name, value) => bridge.editProperty(component, name, value),
+    /*
+     * A ROW ON A FORM'S OWN TAB EDITS THE DOCUMENT; everything else still writes the component.
+     *
+     * The designer tab is a transaction - drag, resize, delete and the rest all edit the text and
+     * wait for Ctrl+S - and the panel was the one surface writing past it, straight to the form
+     * over COM. That left its edits off the undo stack entirely and left the form holding values
+     * the document had given back, which is both of the owner's reports on 2026-08-17 ("ctrl+z is
+     * not undoing it", "ctrl+z updates the markdown editor, but not the designer"). See task #68.
+     *
+     * DESIGNATED DEVIATION, and docs/userform-designer.md says so: the native Properties window
+     * changes the form the moment you leave the row, and this does not while a designer tab is
+     * open. It changes the document, and Ctrl+S is the apply - the same bargain every other
+     * gesture on the tab already makes.
+     *
+     * A module's (Name), a worksheet, a form with no designer tab open: no document exists to
+     * write, so those go where they always went. So does anything the document cannot spell.
+     */
+    editProperty: (component, name, value) => {
+      const active = workspace.activeDocument();
+      const view = active?.face === "design"
+        ? designerViews.get(docKeyOf(active.module, active.project, active.face))
+        : undefined;
+      if (view && view.spells(component, name) && view.writeProperty(component, name, value)) {
+        return;
+      }
+
+      bridge.editProperty(component, name, value);
+    },
     pickPicture: (component, name) => bridge.pickPicture(component, name),
     selectComponent: (name) => bridge.selectComponent(name),
     renameModule: (name, workbook, newName) => {

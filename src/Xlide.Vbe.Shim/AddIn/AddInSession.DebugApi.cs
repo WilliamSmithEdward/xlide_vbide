@@ -2655,11 +2655,30 @@ internal sealed partial class AddInSession
                 {
                     var shimBuilt = File.GetLastWriteTimeUtc(shimFile);
                     var bundleBuilt = File.GetLastWriteTimeUtc(bundle);
-                    var apart = (shimBuilt - bundleBuilt).Duration();
-                    if (apart > TimeSpan.FromMinutes(30))
+
+                    /*
+                     * ONE DIRECTION ONLY, and the direction is the whole point.
+                     *
+                     * A SHIM newer than the bundle beside it is the real hazard: something
+                     * published the shim and did not redeploy the page, so the session is serving
+                     * an old surface over new host code.
+                     *
+                     * A BUNDLE newer than the shim is the ordinary page loop - `tools\page.ps1` a
+                     * dozen times in an afternoon over a shim nobody has touched - and the shim is
+                     * not stale, it is finished. Measuring the gap with Duration() flagged that as
+                     * suspicious too, and being refused for it costs more than the check saves:
+                     * every generator opens by making a blank workbook and only then asks the
+                     * doctor, so a refusal here leaves FormFixture.xlsm a blank book with no
+                     * project in it. That happened twice on 2026-08-17 and cost a rebuild each
+                     * time. Whether the shim matches its own SOURCES is a different question, and
+                     * tools\dev.ps1 already answers it by comparing the newest .cs against the
+                     * published DLL and refusing to go on.
+                     */
+                    var pageBehind = shimBuilt - bundleBuilt;
+                    if (pageBehind > TimeSpan.FromMinutes(30))
                     {
-                        findings.Add($"the shim and the page bundle were built {apart.TotalMinutes:N0} "
-                            + "minutes apart; one of them is probably stale");
+                        findings.Add($"the shim is {pageBehind.TotalMinutes:N0} minutes newer than "
+                            + "the page bundle beside it; the page was probably not redeployed");
                     }
                 }
                 else

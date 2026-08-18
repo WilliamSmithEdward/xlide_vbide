@@ -87,6 +87,60 @@ export function dressWithPicture(box: HTMLElement, picture: FormMarkupPicture): 
   image.draggable = false;
 
   /*
+   * A CAPTION PICTURE IS DRAWN THROUGH A COLOUR KEY, and a surface picture is not. Measured
+   * 2026-08-17 off the running form, both controls wearing the same black-backed logo:
+   *
+   *   the OK button (PicturePosition)  the runtime keys the black out and the button face shows
+   *                                    through, with a speckled halo where the anti-aliased
+   *                                    near-black pixels missed the key
+   *   the Badge (PictureSizeMode)      the runtime draws the black field solid, letterboxed
+   *
+   * So this is not "black is transparent" and it is not something the loader does to the picture:
+   * the two surfaces are handed the SAME pixels and MSForms draws them two different ways. The
+   * canvas drew both opaque, which is right for the Badge and is the disparity the owner reported
+   * five times over that day about the button.
+   *
+   * EXACTLY-MATCHING PIXELS ONLY, which is not a shortcut - it is what produces the halo. A
+   * tolerance would clean up the speckles and stop matching the thing being matched.
+   */
+  const keyOutBackground = (): void => {
+    if (image.naturalWidth === 0 || image.dataset.keyed === "yes") {
+      return;
+    }
+
+    const sheet = document.createElement("canvas");
+    sheet.width = image.naturalWidth;
+    sheet.height = image.naturalHeight;
+    const ink = sheet.getContext("2d", { willReadFrequently: false });
+    if (ink === null) {
+      return;
+    }
+
+    ink.drawImage(image, 0, 0);
+
+    let field: ImageData;
+    try {
+      field = ink.getImageData(0, 0, sheet.width, sheet.height);
+    } catch {
+      // A picture the page may not read back. Nothing to key, and the opaque draw still stands.
+      return;
+    }
+
+    // The top-left pixel is the key, which is the corner MSForms takes it from.
+    const pixels = field.data;
+    const [red, green, blue] = [pixels[0], pixels[1], pixels[2]];
+    for (let at = 0; at < pixels.length; at += 4) {
+      if (pixels[at] === red && pixels[at + 1] === green && pixels[at + 2] === blue) {
+        pixels[at + 3] = 0;
+      }
+    }
+
+    ink.putImageData(field, 0, 0);
+    image.dataset.keyed = "yes";
+    image.src = sheet.toDataURL("image/png");
+  };
+
+  /*
    * A PICTURE TOO BIG FOR ITS CONTROL IS STRETCHED, not letterboxed and not clipped, because
    * that is what MSForms does - measured off the running form twice (the owner: "see distortion
    * of image over button in live form", then "native form is stretch, and xlide canvas is
@@ -118,9 +172,16 @@ export function dressWithPicture(box: HTMLElement, picture: FormMarkupPicture): 
     }
   };
 
-  image.addEventListener("load", stretchIfOversized);
-  if (image.complete) {
+  // The key first, because it replaces the src and so raises load again; the second pass sees
+  // `keyed` and only measures. Both steps need the natural size, which is why both wait for load.
+  const dress = (): void => {
+    keyOutBackground();
     stretchIfOversized();
+  };
+
+  image.addEventListener("load", dress);
+  if (image.complete) {
+    dress();
   }
 
   box.classList.add("dc-with-picture");

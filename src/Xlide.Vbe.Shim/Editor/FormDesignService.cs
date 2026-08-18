@@ -295,8 +295,48 @@ internal static partial class FormDesignService
     /// 2026-08-13): each refresh stirred the designer, the Toolbox stood back up, and
     /// nothing put it away.
     /// </summary>
+    /// <summary>
+    /// The one form whose designer window is deliberately STANDING, or null.
+    ///
+    /// A run is aimed at the editor's active window, so the form being launched needs its native
+    /// designer up until the posted Run action has read its target. Every put-down in the product
+    /// therefore has to know about that one exception, and the only way to be sure every one of
+    /// them does is to enforce it where they all end up: here.
+    ///
+    /// A session-level guard was tried first and covered seven call sites out of fourteen. The
+    /// ones it missed - the apply's own path in AddInSession.FormDesigner.cs, the walk helpers in
+    /// this file, the vocabulary read - are exactly the ones that fire during a run over a DIRTY
+    /// designer, because that run applies and re-projects before it launches. The projection
+    /// raced the posted Run and put the aimed window down 56ms after the command, and the form
+    /// never stood (2026-08-17, measured off the window-event trace).
+    /// </summary>
+    internal static string? StandingForRun { get; set; }
+
     internal static void KeepDesignerDown(DispatchObject component)
     {
+        var putting = "?";
+        try
+        {
+            putting = component.GetString("Name") ?? "?";
+        }
+        catch
+        {
+            // A component that will not name itself still gets put down; it just goes unnamed.
+        }
+
+        if (StandingForRun is { Length: > 0 } standing
+            && string.Equals(putting, standing, StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Verbose($"designer: {putting} stays up, a run is aimed at it");
+            return;
+        }
+
+        // NAMED, because "who put that window down" is the question every race here has raised and
+        // the trace could never answer: the hide arrives as a window event with no class and no
+        // owner, and a designer torn down mid-run looks exactly like one the editor closed itself.
+        Log.Verbose($"designer: putting {putting} down"
+            + (StandingForRun is { Length: > 0 } held ? $" (holding {held} up)" : string.Empty));
+
         try
         {
             using var window = component.CallObject("DesignerWindow");
@@ -1333,7 +1373,11 @@ internal static partial class FormDesignService
         }
         catch (Exception ex)
         {
-            Log.Warn($"designer: apply to {module} stopped partway ({ex.GetType().Name})");
+            // The MESSAGE too, not just the type name. "InvalidOperationException" on its own sent
+            // three separate investigations looking for a COM refusal that was never there
+            // (2026-08-17): what it actually says is which property, and which control.
+            Log.Warn($"designer: apply to {module} stopped partway "
+                + $"({ex.GetType().Name}: {ex.Message.Trim()})");
             KeepDesignerDown(component);
             return new ApplyOutcome(false, [.. added], [.. removed], setCount,
                 $"stopped at: {ex.Message.Trim()}. What is listed here landed before the refusal.",
@@ -1455,6 +1499,14 @@ internal static partial class FormDesignService
     /// something that is not a number is being given a colour by name or by hash, which is the
     /// one spelling the document uses for a value the model stores as an integer.
     /// </summary>
+    /// <summary>
+    /// What the type library says about the properties of whatever is being written to, shared
+    /// and cached by class name. The panel has its own for its own reasons; the APPLY needs one
+    /// too, because a document may spell an enum by the member's name and only the library can
+    /// turn that back into the number the model stores.
+    /// </summary>
+    private static readonly PropertyTypes Library = new();
+
     private static string InferKind(DispatchObject target, string property, string value)
     {
         System.Runtime.InteropServices.VarEnum variant;
@@ -1479,11 +1531,53 @@ internal static partial class FormDesignService
             return "flag";
         }
 
-        return double.TryParse(
+        if (double.TryParse(
             value, System.Globalization.NumberStyles.Float,
-            System.Globalization.CultureInfo.InvariantCulture, out _)
-            ? "number"
-            : "colour";
+            System.Globalization.CultureInfo.InvariantCulture, out _))
+        {
+            return "number";
+        }
+
+        /*
+         * AN ENUM MEMBER BY NAME, before anything is guessed to be a colour.
+         *
+         * A numeric property handed a word is one of two things - a colour spelled `#c0c0c0` or
+         * `ButtonFace`, or an enum member spelled `fmTextAlignLeft` - and this guessed colour for
+         * both. The panel used to hide that: its writes went through the host, which resolved the
+         * member against the library first. Since a Properties row on a designer tab writes the
+         * DOCUMENT instead (#68), the member name reaches the apply as an attribute, the apply
+         * called it a colour, and the whole apply stopped partway on "fmTextAlignLeft is not a
+         * colour" - which took F5 over that form down with it, because Run applies first
+         * (2026-08-17, #71).
+         */
+        if (MemberValueOf(target, property, value) is not null)
+        {
+            return "member";
+        }
+
+        return "colour";
+    }
+
+    /// <summary>The number an enum member's NAME stands for on this property, or null when the
+    /// library knows no such member.</summary>
+    private static int? MemberValueOf(DispatchObject target, string property, string value)
+    {
+        try
+        {
+            if (!Library.Of(target).TryGetValue(property, out var shape)
+                || shape.Members is not { Count: > 0 } members)
+            {
+                return null;
+            }
+
+            return members.FirstOrDefault(member =>
+                string.Equals(member.Name, value, StringComparison.OrdinalIgnoreCase))?.Value;
+        }
+        catch
+        {
+            // A subject with no readable type library names no members.
+            return null;
+        }
     }
 
     private static void WriteDesignerProperty(DispatchObject target, string property, string value, string? asKind)
@@ -1526,6 +1620,10 @@ internal static partial class FormDesignService
                 return;
             case "flag":
                 target.SetBool(property, bool.Parse(value));
+                return;
+            case "member":
+                target.SetInt32(property, MemberValueOf(target, property, value)
+                    ?? throw new InvalidOperationException($"{value} is not a member of {property}"));
                 return;
             case "colour":
                 target.SetInt32(property, SystemColours.Unspell(value)

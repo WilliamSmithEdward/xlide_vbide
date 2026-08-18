@@ -100,7 +100,13 @@ function escapeForRegExp(name: string): string {
  * rewrites. */
 interface HeaderLine {
   line: number;
+  /** The opening tag with its GEOMETRY attributes taken out and its closing removed, so a
+   * gesture rebuilds the line as `head` + the geometry it wants + `close`. Geometry is removed
+   * rather than left in place because the attributes can sit anywhere in the tag, and rewriting
+   * them where they are means four ranges that all move under each other. */
   head: string;
+  /** How the tag ended: `/>` for a childless element, `>` for one that opens a block. */
+  close: string;
   at: { left: number; top: number } | null;
   size: { width: number; height: number } | null;
   form: boolean;
@@ -517,6 +523,32 @@ export class DesignerView {
       '<path d="M3 1.5v13"/><path d="M13 1.5v13"/><rect x="5.5" y="5" width="5" height="6" rx="1"/>');
 
     /*
+     * TAB ORDER, on the strip beside the switches.
+     *
+     * It was reachable only from the canvas's own right-click menu, which is a menu a developer
+     * has to know is there - and unlike Align and Distribute beside it, tab order is not a
+     * gesture with a visible equivalent on the canvas, so nothing else hints that it exists
+     * (the owner, 2026-08-18: "please add tab order button to strip"). The native editor keeps
+     * it on a MENU (View > Tab Order), and this product has no menu bar, so the strip is where
+     * the equivalent affordance belongs.
+     *
+     * It opens for whatever the selection sits in, exactly as the menu item does - one call, so
+     * the two entry points cannot drift into two behaviours.
+     */
+    const tabOrder = document.createElement("button");
+    tabOrder.type = "button";
+    tabOrder.className = "designer-taborder";
+    tabOrder.title = "The order the Tab key reaches the controls in";
+    tabOrder.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" '
+      + 'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" '
+      + 'stroke-linejoin="round">'
+      + '<path d="M2.5 4h6"/><path d="M2.5 8h6"/><path d="M2.5 12h6"/>'
+      + '<path d="M11 3.5v9"/><path d="M8.75 10.25 11 12.5l2.25-2.25"/>'
+      + "</svg>";
+    tabOrder.addEventListener("click", () => { this.showTabOrder(); });
+    toolboxRow.appendChild(tabOrder);
+
+    /*
      * The ZOOM, at the end of the row beside the snap switches: a button wearing the percentage,
      * opening the same menu the rest of this product's menus use. A control, not a setting -
      * which page is open is view state for the same reason, and a big form wants Fit where the
@@ -806,6 +838,139 @@ export class DesignerView {
     this.model.setValue(markup);
   }
 
+  /** Whether this tab's form is the thing a Properties row is about: the form itself, or one of
+   * the controls the projection knows. Anything else - a module, a worksheet, a control on some
+   * other form - is not this document's to write. */
+  owns(target: string): boolean {
+    return target.toLowerCase() === this.id.module.toLowerCase() || this.kindOf(target) !== "";
+  }
+
+  /**
+   * A Properties row, written to the DOCUMENT.
+   *
+   * THE PANEL JOINS THE TRANSACTION instead of going round it. Every other gesture on this tab
+   * edits the document and lets Ctrl+S carry it to the form; the panel used to write the FORM
+   * over COM and let the re-projection echo back into the text. Two things fell out of that, and
+   * the owner reported both (2026-08-17): "ctrl+z is not undoing it", because the echo is pushed
+   * with no stack element of its own and so leaves nothing for an undo to reverse; and "ctrl+z
+   * updates the markdown editor, but not the designer", because undoing the echo left the FORM
+   * still holding the value, and a draft wears the applied projection's colours over its own.
+   * Writing here instead means the form never diverges, so neither can happen.
+   *
+   * The attribute is replaced where it stands, added before the close where it is absent, and
+   * REMOVED when the value is the kind's own default - which is the dialect's rule that an
+   * untouched property stays unspoken. Answers false when this document has no line to write,
+   * and the caller then falls back to the host.
+   */
+  writeProperty(target: string, property: string, value: string): boolean {
+    const line = target.toLowerCase() === this.id.module.toLowerCase()
+      ? 1
+      : this.headerLineOf(target);
+    if (line === 0 || line > this.model.getLineCount()) {
+      return false;
+    }
+
+    if (!this.spells(target, property)) {
+      return false;
+    }
+
+    const text = this.model.getLineContent(line);
+    const open = text.indexOf("<");
+    if (open < 0) {
+      return false;
+    }
+
+    // Quote-aware, because an attribute value may hold `>` and the tag does not end there.
+    let scan = open + 1;
+    let quoted = false;
+    let end = -1;
+    while (scan < text.length) {
+      const character = text[scan];
+      if (character === '"') {
+        quoted = !quoted;
+      } else if (character === ">" && !quoted) {
+        end = scan;
+        break;
+      }
+      scan += 1;
+    }
+
+    if (end < 0 || quoted) {
+      return false;
+    }
+
+    // A value with a quote in it cannot be spelled in this dialect, so the host keeps that one.
+    if (value.includes('"')) {
+      return false;
+    }
+
+    const body = text.slice(open, end);
+    const selfClosing = body.trimEnd().endsWith("/");
+    const inner = selfClosing ? body.slice(0, body.lastIndexOf("/")) : body;
+
+    const kind = target.toLowerCase() === this.id.module.toLowerCase() ? "Form" : this.kindOf(target);
+    const spelled = this.isDefaultFor(kind, property, value) ? "" : ` ${property}="${value}"`;
+    const already = new RegExp(`\\s*\\b${escapeForRegExp(property)}\\s*=\\s*"[^"]*"`, "i");
+    const rebuilt = already.test(inner)
+      ? inner.replace(already, spelled)
+      : inner.trimEnd() + spelled;
+
+    const written = text.slice(0, open) + rebuilt.trimEnd()
+      + (selfClosing ? " />" : ">") + text.slice(end + 1);
+    if (written === text) {
+      return true;
+    }
+
+    this.model.pushStackElement();
+    this.model.pushEditOperations([], [{
+      range: new monaco.Range(line, 1, line, this.model.getLineMaxColumn(line)),
+      text: written,
+    }], () => null);
+
+    this.lintNow();
+    return true;
+  }
+
+  /** The GEOMETRY four, which the printer writes itself rather than taking from the vocabulary's
+   * property list - so they are spellable without appearing there. */
+  private static readonly PLACEMENT = new Set(["left", "top", "width", "height"]);
+
+  /**
+   * Whether a Properties row about this target is one this document can carry - which is the
+   * question BOTH the routing and the debug act have to answer the same way, so they ask here.
+   *
+   * ONLY WHAT THE DIALECT CAN SPELL. A panel row is not always an attribute: `Font.Name` is a row
+   * and is not a property of the markup - the dialect prints the font differently and its own
+   * vocabulary is the list of what it knows - and an attribute called `Font.Name` is not even a
+   * legal name, so writing one would make a document the apply refuses and a control that never
+   * wears the font (caught by the suite's font-picker row, 2026-08-17). Anything not named here
+   * falls through to the host, which is where it always went.
+   */
+  spells(target: string, property: string): boolean {
+    if (!this.owns(target) || !/^[A-Za-z_]\w*$/.test(property)) {
+      return false;
+    }
+
+    if (DesignerView.PLACEMENT.has(property.toLowerCase())) {
+      return true;
+    }
+
+    const kind = target.toLowerCase() === this.id.module.toLowerCase() ? "Form" : this.kindOf(target);
+    const known = markupVocabulary().find((row) => row.kind.toLowerCase() === kind.toLowerCase());
+    return known?.properties.some((row) => row.name.toLowerCase() === property.toLowerCase()) === true;
+  }
+
+  /** Whether a value is what an untouched control of that kind already holds, as the host
+   * measured it. Only an exact match counts: spelling a default costs a line the canonical print
+   * takes back out at the next save, while dropping a property that was NOT the default would
+   * lose the developer's edit. */
+  private isDefaultFor(kind: string, property: string, value: string): boolean {
+    const known = markupVocabulary().find((row) => row.kind.toLowerCase() === kind.toLowerCase());
+    const shape = known?.properties.find((row) => row.name.toLowerCase() === property.toLowerCase());
+    return shape?.default !== null && shape?.default !== undefined
+      && shape.default.toLowerCase() === value.toLowerCase();
+  }
+
   /*
    * The language service, read at a place in the document. Each of these puts the CARET there
    * first, because that is what a developer asking the same question has done - Ctrl+Space and
@@ -938,6 +1103,9 @@ export class DesignerView {
 
     const adopt = this.awaitingAdopt || !this.dirty;
     const first = this.canonical === null;
+    // Whether this projection is an APPLY'S OWN canonical print, read before the flag is
+    // consumed below. `onApplied` is the only thing that sets it. See the panel refresh at the end.
+    const afterApply = this.awaitingAdopt;
     this.awaitingAdopt = false;
     this.canonical = payload.markup;
 
@@ -996,6 +1164,27 @@ export class DesignerView {
       this.deps.dirtyChanged(nowDirty);
     }
 
+    /*
+     * AND THE PANEL IS REFRESHED WHEN AN APPLY LANDS, because nothing else refreshes it now.
+     *
+     * The Properties panel used to be republished by the host as a side effect of the write it
+     * received; since the panel writes the DOCUMENT instead (#68) the host is never asked, so the
+     * row went on showing whatever the developer typed. Type `&H00C0FFC0&` into a colour and the
+     * row kept saying that long after the save had made it `#c0ffc0` - the panel stale against the
+     * form it is supposed to be showing, swatch and all.
+     *
+     * MEASURED OFF `awaitingAdopt`, which is the one flag that means an apply asked for this
+     * print. Two earlier readings of "an apply landed" were both wrong and both silent, and the
+     * log said so each time - `round` unmoved across an apply while an explicit reselect corrected
+     * the row at once. The dirty EDGE in this method never fires, because replacing the text above
+     * raises the content handler synchronously and that handler takes the edge first; and `dirty`
+     * read on ENTRY never fires either, because `onApplied` clears it the moment the apply is
+     * accepted, well before the projection arrives.
+     */
+    if (afterApply) {
+      this.deps.selection(this.selectedName === "" ? null : this.selectedName);
+    }
+
     this.lastPayload = payload;
     this.setDraftShown(false);
     this.renderCanvas(payload);
@@ -1047,20 +1236,25 @@ export class DesignerView {
       return worn
         ? {
           ...row,
-          fontName: worn.fontName ?? null,
-          fontSize: worn.fontSize ?? null,
-          fontBold: worn.fontBold ?? null,
-          fontItalic: worn.fontItalic ?? null,
-          backColor: worn.backColor ?? null,
-          foreColor: worn.foreColor ?? null,
+          // THE DRAFT WINS WHERE IT SPEAKS. The rule was always "an UNSPOKEN property keeps the
+          // applied one" - that is the dialect's own rule and the sentence below says so - but
+          // this took the applied value either way, so a property the document DID spell could
+          // never reach the canvas while the document was dirty. Typing a colour showed nothing,
+          // and so did the Properties panel once its edits became document edits (2026-08-17).
+          fontName: row.fontName ?? worn.fontName ?? null,
+          fontSize: row.fontSize ?? worn.fontSize ?? null,
+          fontBold: row.fontBold ?? worn.fontBold ?? null,
+          fontItalic: row.fontItalic ?? worn.fontItalic ?? null,
+          backColor: row.backColor ?? worn.backColor ?? null,
+          foreColor: row.foreColor ?? worn.foreColor ?? null,
           insideWidth: worn.insideWidth ?? null,
           insideHeight: worn.insideHeight ?? null,
-          tabs: worn.tabs ?? null,
+          tabs: row.tabs ?? worn.tabs ?? null,
           // The PICTURE is worn like the rest of them, and it has to be: a drag makes the
           // document dirty, the draft renders in place of the applied projection, and a draft
           // that does not carry a picture blanks every image on the form for as long as the
           // document is unsaved (measured 2026-08-16 - the model kept it, the canvas lost it).
-          picture: worn.picture ?? null,
+          picture: row.picture ?? worn.picture ?? null,
         }
         : row;
     });
@@ -1198,7 +1392,16 @@ export class DesignerView {
    * bounce straight back as a fresh selection. */
   private followingSelection = false;
 
-  select(name: string, extend = false): void {
+  /**
+   * @param reveal Move the markup caret onto the selected thing. TRUE for every gesture that
+   * selects from somewhere else - a canvas click, the tree, an act - and FALSE when the caret is
+   * where the selection CAME from, because moving it then is moving it out from under the hand
+   * that is typing. Renaming a control in the markup did exactly that: a half-typed name is not
+   * a name the projection knows, the walk falls back to the form, and the form's block starts at
+   * line 1 - so every keystroke threw the caret to the end of the first line (the owner,
+   * 2026-08-17: "it's popping carret to the end of the firs tline which is kind of jarring").
+   */
+  select(name: string, extend = false, reveal = true): void {
     if (extend) {
       this.extendSelection(name);
       return;
@@ -1217,13 +1420,28 @@ export class DesignerView {
 
     this.followingSelection = true;
     try {
-      this.revealInMarkup(name);
+      this.revealInMarkup(name, reveal);
     } finally {
       this.followingSelection = false;
     }
 
-    // The Properties panel follows the selection host-side - M4's bridgehead.
-    this.deps.selection(name === "" ? null : name);
+    /*
+     * The Properties panel follows the selection host-side - M4's bridgehead - but only to a name
+     * THE FORM HAS.
+     *
+     * The panel reads the live control, so a name the document has only just invented is a name it
+     * cannot find, and its answer for a control it cannot find is to fall back to the form. Rename
+     * a control in the markup and that is what happened: the caret and the canvas stayed on the
+     * control while the panel jumped to the UserForm (the owner, 2026-08-17, with a screenshot of
+     * `NameLabel2` selected and EntryForm's rows showing). Holding the panel where it is keeps it
+     * on the same physical control under the name the form still knows it by, which is the honest
+     * answer until Ctrl+S makes the rename real.
+     */
+    const known = name === ""
+      || (this.lastPayload?.controls ?? []).some((row) => row.name.toLowerCase() === name.toLowerCase());
+    if (known) {
+      this.deps.selection(name === "" ? null : name);
+    }
   }
 
   /**
@@ -1833,7 +2051,7 @@ export class DesignerView {
     this.model.pushStackElement();
     this.model.pushEditOperations([], [{
       range: new monaco.Range(after, column, after, column),
-      text: `\n${" ".repeat(level + 4)}${what} ${name} "${name}"`,
+      text: `\n${" ".repeat(level + 4)}<${what} Name="${name}" Caption="${name}" />`,
     }], () => null);
 
     // Marked open before it is drawn: the child does not exist in the picture until the lint
@@ -2278,8 +2496,11 @@ export class DesignerView {
     const shift = (level + 4) - own;
     const block = lines.slice(header.line - 1, last).map((line, at) => at === 0
       ? `${" ".repeat(level + 4)}${header.head.trimStart()}`
-        + ` at ${Math.round(box.left)},${Math.round(box.top)}`
-        + (header.size !== null ? ` size ${Math.round(box.width)}x${Math.round(box.height)}` : "")
+        + ` Left="${Math.round(box.left)}" Top="${Math.round(box.top)}"`
+        + (header.size !== null
+          ? ` Width="${Math.round(box.width)}" Height="${Math.round(box.height)}"`
+          : "")
+        + (header.close === "/>" ? " />" : ">")
       : shift >= 0 ? " ".repeat(shift) + line : line.slice(Math.min(-shift, indent(line))));
 
     // The whole document, spliced, as ONE edit: the block leaves and arrives in the same
@@ -2584,8 +2805,9 @@ export class DesignerView {
       edits.push({
         range: new monaco.Range(header.line, 1, header.line, this.model.getLineMaxColumn(header.line)),
         text: header.head
-          + (header.form ? "" : ` at ${box.left},${box.top}`)
-          + (spellSize ? ` size ${box.width}x${box.height}` : ""),
+          + (header.form ? "" : ` Left="${box.left}" Top="${box.top}"`)
+          + (spellSize ? ` Width="${box.width}" Height="${box.height}"` : "")
+          + (header.close === "/>" ? " />" : ">"),
       });
       painted.push({ element, box });
     }
@@ -2691,19 +2913,51 @@ export class DesignerView {
 
     // At the END of the container's block, which is where a control added last belongs: the
     // markup's order is the model's order, and the model appends.
+    /*
+     * STOPPING AT THE FORM'S CLOSE, which a tagged document has and a line-oriented one did not.
+     *
+     * Dropping on the form walked to the LAST line of the document, because under the old dialect
+     * the form's block ran to the end of the file. It does not any more: `</Form>` is the last
+     * line, so the new element landed AFTER it and the apply refused the whole document - "one
+     * Form per document; nothing follows </Form>" - which took the drop, the save and every row
+     * after them down with it (2026-08-17). A container's own walk is unchanged; it already stops
+     * on its closing tag, which sits at its own indent.
+     */
     let after = host.line;
-    while (after < lines.length && (where.parent === "" || indent(lines[after] ?? "") > level)) {
+    while (after < lines.length
+      && !/^\s*<\/Form>/.test(lines[after] ?? "")
+      && (where.parent === "" || indent(lines[after] ?? "") > level)) {
       after += 1;
     }
 
-    const line = `${" ".repeat(level + 4)}${carrying.kind} ${name}`
-      + ` at ${Math.round(box.left)},${Math.round(box.top)}`
-      + ` size ${Math.round(box.width)}x${Math.round(box.height)}`;
+    const line = `${" ".repeat(level + 4)}<${carrying.kind} Name="${name}"`
+      + ` Left="${Math.round(box.left)}" Top="${Math.round(box.top)}"`
+      + ` Width="${Math.round(box.width)}" Height="${Math.round(box.height)}" />`;
+
+    /*
+     * AN EMPTY CONTAINER HAS TO BE OPENED FIRST, because a self-closing element has no body to
+     * put anything in. A childless Page prints as `<Page Name="Page2" ... />`, so the walk above
+     * finds nothing deeper than it and stops on the page's own line - and the control went in as
+     * the page's SIBLING, a control directly inside the MultiPage. The lint says exactly that ("a
+     * MultiPage holds Pages; controls go on a Page"), the strict parse then refuses the document,
+     * and the canvas quietly stops previewing because a draft that will not parse keeps the last
+     * picture (2026-08-17). So the tag is split into a pair and the child goes between them.
+     */
+    const hostText = this.model.getLineContent(host.line);
+    const hostEmpty = where.parent !== "" && after === host.line && /\/>\s*$/.test(hostText);
     this.model.pushStackElement();
-    this.model.pushEditOperations([], [{
-      range: new monaco.Range(after, this.model.getLineMaxColumn(after), after, this.model.getLineMaxColumn(after)),
-      text: `\n${line}`,
-    }], () => null);
+    if (hostEmpty) {
+      const opened = hostText.replace(/\s*\/>\s*$/, ">");
+      this.model.pushEditOperations([], [{
+        range: new monaco.Range(host.line, 1, host.line, this.model.getLineMaxColumn(host.line)),
+        text: `${opened}\n${line}\n${" ".repeat(level)}</${this.kindOf(where.parent) || "Page"}>`,
+      }], () => null);
+    } else {
+      this.model.pushEditOperations([], [{
+        range: new monaco.Range(after, this.model.getLineMaxColumn(after), after, this.model.getLineMaxColumn(after)),
+        text: `\n${line}`,
+      }], () => null);
+    }
 
     // Selected on arrival, the way a control dropped from the native toolbox is: the panel
     // targets it and the next gesture is about the thing just made.
@@ -2740,8 +2994,13 @@ export class DesignerView {
    * not already using - counted across the WHOLE document, because a form's names are one
    * namespace however deeply a control is nested. */
   private freeName(kind: string): string {
+    // THE NAMES THE DOCUMENT SPELLS, read off the attribute that carries them. This matched the
+    // second word of a line - `Kind Name` in the old dialect - and under tags that word is
+    // `Name="Page1"` itself, so nothing ever counted as taken and every new control came back as
+    // `Kind1`. New Page on a MultiPage that already had Page1 and Page2 produced a second Page1
+    // (2026-08-17), and the apply then had two elements of one name.
     const taken = new Set(this.model.getLinesContent()
-      .map((text) => /^\s+\S+\s+(\S+)/.exec(text)?.[1]?.toLowerCase())
+      .map((text) => /\bName="([^"]*)"/.exec(text)?.[1]?.toLowerCase())
       .filter((name): name is string => name !== undefined));
     for (let at = 1; ; at++) {
       const name = `${kind}${at}`;
@@ -2792,7 +3051,17 @@ export class DesignerView {
 
       const own = indent(lines[header.line - 1] ?? "");
       doomed.add(header.line);
-      for (let at = header.line; at < lines.length && indent(lines[at] ?? "") > own; at++) {
+      let at = header.line;
+      for (; at < lines.length && indent(lines[at] ?? "") > own; at++) {
+        doomed.add(at + 1);
+      }
+
+      // AND ITS CLOSING TAG, which the indent walk cannot see: `</Page>` sits at the SAME indent as
+      // the `<Page>` that opened it, so a walk that takes everything DEEPER stops one line short and
+      // leaves the close behind. An orphaned close is a document the parser refuses, and a document
+      // the parser refuses stops the canvas previewing at all - deleting a container's pages looked
+      // like the strip simply not updating (2026-08-17).
+      if (at < lines.length && /^\s*<\//.test(lines[at] ?? "") && indent(lines[at] ?? "") === own) {
         doomed.add(at + 1);
       }
     }
@@ -2825,6 +3094,16 @@ export class DesignerView {
     const own = indent(lines[header.line - 1] ?? "");
     let last = header.line;
     while (last < lines.length && indent(lines[last] ?? "") > own) {
+      last += 1;
+    }
+
+    // AND ITS CLOSING TAG, which the indent walk cannot see: `</Page>` sits at the SAME indent as
+    // the `<Page>` that opened it, so a walk that takes everything DEEPER stops one line short and
+    // leaves the close behind. An orphaned close is a document the parser refuses, and a document
+    // the parser refuses stops the canvas previewing at all - deleting a container's pages looked
+    // like the strip simply not updating (2026-08-17).
+    if (last < lines.length && /^\s*<\//.test(lines[last] ?? "")
+      && indent(lines[last] ?? "") === own) {
       last += 1;
     }
 
@@ -2961,7 +3240,15 @@ export class DesignerView {
     const layers: PictureLayer[] = [];
     if (on) {
       layers.push({
-        image: "radial-gradient(color-mix(in srgb, currentColor 16%, transparent) 0.5px, transparent 0.5px)",
+        // A DOT BIG ENOUGH TO RASTERISE. This asked for a 0.5px radius with both colour stops at
+        // the same offset - a half-pixel disc with no ramp - and Chromium painted NOTHING at all:
+        // measured off the live canvas 2026-08-17, the form's ground a uniform 240,240,240 with
+        // the toggle lit and the gradient present in the computed style (the owner: "grid snap
+        // indicator is lit, but grid snap not showing on form"). A whole pixel of solid centre and
+        // a short ramp out to 1.4px is the smallest thing that reliably lands on a device pixel,
+        // and it keeps the dot subtle the way the owner asked for on 2026-08-16 - subtle was never
+        // the problem, invisible was.
+        image: "radial-gradient(color-mix(in srgb, currentColor 18%, transparent) 0 1px, transparent 1.4px)",
         size: `${step}px ${step}px`,
         position: `${half}px ${half}px`,
         repeat: "repeat",
@@ -3225,13 +3512,17 @@ export class DesignerView {
   }
 
   /**
-   * The document line that declares a thing - a control by name, the FORM for "" - split at its
-   * geometry. Null when no line names it, or when the line is not in a shape this can rewrite -
-   * a half-typed header, a caption whose quote never closes - because a gesture that cannot
-   * write the document must not pretend to have changed anything.
+   * The document line that declares a thing - a control by name, the FORM for "" - with its
+   * geometry lifted out. Null when no line names it, or when the line is not in a shape this can
+   * rewrite - a half-typed header, an attribute whose quote never closes - because a gesture that
+   * cannot write the document must not pretend to have changed anything.
    *
-   * The caption is skipped by scanning rather than by regex: ` at ` inside a caption is
-   * ordinary text, and only a scan that knows about doubled quotes can tell the two apart.
+   * THE TAG IS SCANNED, NOT MATCHED WHOLE. An attribute value can hold anything, `>` included, so
+   * where the tag ends is a question only a scan that tracks quoting can answer. This read the
+   * PRE-TAG dialect until 2026-08-17 - `Kind Name "Caption" at x,y size WxH` - and so matched
+   * nothing at all once the documents became XAML-shaped, which silently killed every canvas
+   * gesture that writes: drag, resize, nudge, align, distribute, delete, reparent, add-child and
+   * the toolbox drop all run through here and all refuse when it answers null.
    */
   private headerOf(name: string): HeaderLine | null {
     const form = name === "";
@@ -3241,53 +3532,59 @@ export class DesignerView {
     }
 
     const text = this.model.getLineContent(line);
-    const named = form
-      ? /^Form\s+\S+/.exec(text)
-      : new RegExp(`^\\s+\\S+\\s+${escapeForRegExp(name)}(?=\\s|$)`).exec(text);
-    if (!named) {
+    const open = text.indexOf("<");
+    if (open < 0 || !/^<[A-Za-z_]\w*[\s/>]/.test(text.slice(open))) {
       return null;
     }
 
-    let at = named[0].length;
-    if (/^\s+"/.test(text.slice(at))) {
-      let scan = at + text.slice(at).indexOf('"') + 1;
-      let closed = false;
-      while (scan < text.length) {
-        if (text[scan] !== '"') {
-          scan += 1;
-        } else if (text[scan + 1] === '"') {
-          scan += 2;
-        } else {
-          scan += 1;
-          closed = true;
-          break;
-        }
-      }
-
-      if (!closed) {
-        return null;
-      }
-
-      at = scan;
-    }
-
-    // What follows the caption is geometry and nothing else, so a plain match is safe here.
-    const tail = /^(?:\s+at\s+(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?))?(?:\s+size\s+(-?\d+(?:\.\d+)?)\s*x\s*(-?\d+(?:\.\d+)?))?\s*$/i
-      .exec(text.slice(at));
-    if (!tail) {
+    // The FORM is the only element whose tag may legitimately be the document's first line
+    // without naming itself, so its identity is the line rather than a Name match.
+    if (form && !/^<Form[\s/>]/.test(text.slice(open))) {
       return null;
     }
 
-    const number = (spelled: string | undefined): number | null =>
-      spelled === undefined ? null : Number.parseFloat(spelled);
-    const left = number(tail[1]);
-    const top = number(tail[2]);
-    const width = number(tail[3]);
-    const height = number(tail[4]);
+    let scan = open + 1;
+    let quoted = false;
+    let end = -1;
+    while (scan < text.length) {
+      const character = text[scan];
+      if (character === '"') {
+        quoted = !quoted;
+      } else if (character === ">" && !quoted) {
+        end = scan;
+        break;
+      }
+      scan += 1;
+    }
+
+    // An unclosed tag or an unclosed value: not a line to rewrite.
+    if (end < 0 || quoted) {
+      return null;
+    }
+
+    const body = text.slice(open, end);
+    const close = body.trimEnd().endsWith("/") ? "/>" : ">";
+    const inner = close === "/>" ? body.slice(0, body.lastIndexOf("/")) : body;
+
+    const read = (attribute: string): number | null => {
+      const found = new RegExp(`\\b${attribute}\\s*=\\s*"(-?\\d+(?:\\.\\d+)?)"`, "i").exec(inner);
+      return found === null ? null : Number.parseFloat(found[1]!);
+    };
+
+    const left = read("Left");
+    const top = read("Top");
+    const width = read("Width");
+    const height = read("Height");
+
+    // Everything BUT the geometry, tidied of the gaps taking it out leaves. Anything after the
+    // tag on the same line - a comment, a close - is kept so a rewrite does not eat it.
+    const head = text.slice(0, open)
+      + inner.replace(/\s*\b(?:Left|Top|Width|Height)\s*=\s*"[^"]*"/gi, "").trimEnd();
 
     return {
       line,
-      head: text.slice(0, at),
+      head,
+      close,
       at: left === null || top === null ? null : { left, top },
       size: width === null || height === null ? null : { width, height },
       form,
@@ -3775,7 +4072,9 @@ export class DesignerView {
   /** What the canvas selection lights up in the document, cleared when nothing is selected. */
   private blockMarks: string[] = [];
 
-  private revealInMarkup(name: string): void {
+  /** @param moveCaret See `select`. The WASH always follows the selection - a highlight is a
+   * picture of what is selected and is never in anybody's way - and only the caret is held back. */
+  private revealInMarkup(name: string, moveCaret = true): void {
     const block = this.blockOf(name);
     if (!block) {
       return;
@@ -3795,6 +4094,10 @@ export class DesignerView {
         },
       },
     }]);
+
+    if (!moveCaret) {
+      return;
+    }
 
     this.editor.setPosition({
       lineNumber: block.from,
@@ -3897,7 +4200,8 @@ export class DesignerView {
     }
 
     if (this.selectedName !== found) {
-      this.select(found);
+      // The caret is already where the selection came from, so it stays put. See `select`.
+      this.select(found, false, false);
     }
   }
 

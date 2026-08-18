@@ -183,6 +183,9 @@ export interface DevSurfaceParts {
        * from whether the canvas is drawing one: a control on a closed page is both real and
        * undrawn, and selecting it is what opens the page. */
       knows(name: string): boolean;
+      /** Whether a Properties row about this target and property is one this document can
+       * carry: the form or a control it holds, and an attribute the dialect can spell. */
+      spells(target: string, property: string): boolean;
       completions(line: number, column: number): {
         label: string; detail: string | null; documentation: string | null; insert: string;
         replaces: { from: number; to: number };
@@ -1795,6 +1798,28 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           did: false,
           detail: `${shown.component} has no writable property named ${name}; it offers `
             + (writable.length > 0 ? writable.join(", ") : "none"),
+        };
+      }
+
+      /*
+       * A ROW ON A DESIGNER TAB IS ANSWERED FROM THE DOCUMENT, because no host answer is coming.
+       *
+       * Those edits stopped going to the host on 2026-08-17 (task #68): the panel now writes the
+       * tab's document and Ctrl+S applies it, which is what gives them an undo step. This waited
+       * for the host's republish regardless, so it sat out its two seconds and then called every
+       * one of them refused - a verdict about a round trip that no longer happens. The document
+       * IS the outcome here, so the document is what gets read back.
+       */
+      const active = workspace.activeDocument();
+      const owning = active?.face === "design" ? designer.viewFor(active.module, active.project ?? null) : null;
+      if (owning?.spells(shown.component, name)) {
+        const spelled = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*=\\s*"([^"]*)"`, "i");
+        const held = spelled.exec(owning.markupText())?.[1] ?? null;
+        return {
+          did: true,
+          detail: held === null
+            ? `${shown.component}.${name} is at its default, so the document leaves it unspoken`
+            : `${shown.component}.${name} is ${JSON.stringify(held)} in the document; Ctrl+S applies it`,
         };
       }
 

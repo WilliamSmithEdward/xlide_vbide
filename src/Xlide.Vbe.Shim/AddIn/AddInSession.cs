@@ -1579,8 +1579,17 @@ internal sealed partial class AddInSession : IDisposable
             // the native pane moved and the surface stayed where it was, showing a different
             // workbook's module of the same name (2026-08-07). A navigation that names no
             // project keeps the old meaning: whichever one is shown.
+            // AND A DESIGNER TAB IS NOT ITS FORM'S CODE. "The shown module" carries a name and a
+            // workbook and no FACE, so a form whose designer tab holds the active slot reported
+            // that module as already showing: the branch below revealed a line in a document
+            // nobody was looking at, and clicking a Sub under a form in the tree did nothing
+            // visible at all (the owner, 2026-08-18). The code face has to take the slot first,
+            // which is exactly what a click on the code tab does.
+            var designerHoldsTheSlot = _activeDesignerTab is not null;
+
             var alreadyShowing =
-                string.Equals(_editorSurface?.Module, component, StringComparison.OrdinalIgnoreCase)
+                !designerHoldsTheSlot
+                && string.Equals(_editorSurface?.Module, component, StringComparison.OrdinalIgnoreCase)
                 && (projectId is null
                     || string.Equals(_shownProject, projectId, StringComparison.OrdinalIgnoreCase));
 
@@ -1590,6 +1599,15 @@ internal sealed partial class AddInSession : IDisposable
             }
             else if (_editorSurface is not null)
             {
+                // TAKING THE SLOT BACK FROM WHICHEVER DESIGNER TAB HELD IT, not only this form's.
+                // PublishModules clears this when the NATIVE active pane moves, and here it does
+                // not move - the form's code pane was already the active one underneath, which is
+                // why the tab never changed. It also decides where F5 and Ctrl+S are aimed, so a
+                // navigation that leaves it standing leaves Run pointed at a form the developer
+                // has navigated away from: with FormA's tab up, going to Module1 already put the
+                // code tab on screen and left Run applying FormA.
+                _activeDesignerTab = null;
+
                 // A navigation can target a module the surface has never shown. The Show
                 // above opens it in the object model, but from the empty workspace that
                 // open arrives with no window event the tracker can hear, and the surface
@@ -2097,19 +2115,30 @@ internal sealed partial class AddInSession : IDisposable
                 return VbeCommands.CommandRun.No($"{moduleName}'s designer window would not open");
             }
 
+            // ARMED BEFORE THE WINDOW IS SHOWN. Showing it raises a window event, the event runs
+            // the designer checks, and those put every designer tab back down - so arming after
+            // the command left a gap wide enough for the aimed window to be hidden inside it,
+            // which is what happened (2026-08-17). The deadline starts here for the same reason:
+            // it measures the run, and the run is about to start.
+            _designerRunStanding = (moduleName, projectId, Environment.TickCount64 + 3000, false);
+            FormDesignService.StandingForRun = moduleName;
+
             window.SetBool("Visible", true);
             window.Invoke("SetFocus");
 
             Log.Info($"run form: {moduleName} through the editor's own Run");
             var outcome = VbeCommands.Execute(_editor, VbeCommands.Command.Run);
 
-            _designerRunStanding = (moduleName, projectId, Environment.TickCount64 + 3000, false);
             WatchDebugState();
 
             return outcome.Ran ? VbeCommands.CommandRun.Ok($"ran {moduleName}") : outcome;
         }
         catch (Exception ex)
         {
+            // The exception is over if the run never started, and leaving it armed would keep a
+            // designer window standing for the three seconds until the deadline collected it.
+            _designerRunStanding = null;
+            FormDesignService.StandingForRun = null;
             Log.Error($"run form: {moduleName} would not run", ex);
             return VbeCommands.CommandRun.No($"{moduleName}'s designer would not take focus");
         }
@@ -4582,11 +4611,14 @@ internal sealed partial class AddInSession : IDisposable
                 else if (standing.SawRun || Environment.TickCount64 > standing.Deadline)
                 {
                     _designerRunStanding = null;
+                    FormDesignService.StandingForRun = null;
                     try
                     {
                         using var ranForm = FindComponent(standing.Module, standing.ProjectId, out _);
                         if (ranForm is not null)
                         {
+                            // The service directly, not the guarded put-down: this IS the end of
+                            // the exception, and the field it guards on was cleared a line ago.
                             FormDesignService.KeepDesignerDown(ranForm);
                             Log.Info($"run form: {standing.Module}'s designer put back down");
                         }
@@ -5652,7 +5684,32 @@ internal sealed partial class AddInSession : IDisposable
 
                     if (spec is null)
                     {
-                        Log.Info($"form markup: {moduleName} would not project twice ({reason}); collecting its tab");
+                        /*
+                         * STILL IN THE COLLECTION MEANS STILL ALIVE, and that is the difference
+                         * the two asks above cannot see.
+                         *
+                         * Asking twice separates a slow answer from a settled one by COUNT, not by
+                         * TIME: both calls land in the same instant, so a form mid-teardown - its
+                         * designer torn down and about to come back, right after a Run closes -
+                         * answers "no designer" both times and had its tab collected for good.
+                         * That is #62, and it cost about half the suite runs on 2026-08-17.
+                         *
+                         * A REMOVED component leaves the collection shortly; a torn-down one does
+                         * not. So the collection is what is asked, and a component that is still
+                         * there keeps its tab: the next projection finds the designer back and
+                         * publishes normally. A tab is only collected once the component itself
+                         * has gone, which is the case the row "a removed form leaves no tab
+                         * standing" is about.
+                         */
+                        if (again is not null)
+                        {
+                            Log.Info($"form markup: {moduleName} has no designer just now ({reason}), "
+                                + "but the component is still there - keeping its tab");
+                            surface.PublishFormMarkup(moduleName, projectDisplay, null, reason);
+                            return;
+                        }
+
+                        Log.Info($"form markup: {moduleName} is gone ({reason}); collecting its tab");
                         surface.PublishFormMarkup(moduleName, projectDisplay, null, reason);
                         CloseDesignerTab(moduleName, projectDisplay);
                         return;

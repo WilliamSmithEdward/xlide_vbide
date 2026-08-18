@@ -2184,6 +2184,16 @@ body.live-resize .minimap {
   padding: 16px;
 }
 
+/* The tab-order card is the same shape of thing: a heading, a line of prose, a list and a button
+   row appended straight to the card, with no inner layout to pad its parts. So it went the same
+   way `#close-confirm-card` did - the list ran into the card's edge and the buttons sat in the
+   corner (the owner, 2026-08-18: "tab order modal needs padding"). A width, because a list of
+   control names should not resize the dialog as the selection moves between containers. */
+#taborder-card {
+  width: 360px;
+  padding: 16px;
+}
+
 .modal-title {
   font-weight: 600;
   line-height: 1.4;
@@ -2198,6 +2208,7 @@ body.live-resize .minimap {
 /* The tab-order dialog's list: a rank, a name and a kind per row, in the order Tab walks them.
    Scrolls rather than growing, because a form with forty controls is a form with forty rows. */
 .taborder-list {
+  position: relative;
   margin-top: 10px;
   max-height: 320px;
   overflow-y: auto;
@@ -2210,7 +2221,29 @@ body.live-resize .minimap {
   align-items: baseline;
   gap: 10px;
   padding: 3px 8px;
-  cursor: pointer;
+  cursor: grab;
+  /* The rows are dragged, so the pointer must not be handing the browser a text selection to
+     make instead - a drag down a list otherwise paints it blue and drops nothing. */
+  user-select: none;
+}
+
+/* The row under the hand while it is being carried: still legible, plainly not where it belongs
+   yet. The insertion line below is what says where it WILL belong. */
+.taborder-row.lifting {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+
+/* Where a drop would land. Two pixels and the accent colour, drawn across the list at the gap
+   between two rows - the same language the tab strip's own insertion marker speaks. */
+.taborder-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--vscode-focusBorder, #4d9fff);
+  pointer-events: none;
 }
 
 .taborder-row:hover {
@@ -3921,6 +3954,35 @@ body.objbrowser-page #objbrowser-card {
   outline-offset: 1px;
 }
 
+/* Tab order: a button in the switches' clothing, without their ON state - it OPENS something
+   rather than holding a mode, so it never lights up. Its own left margin, because the pair
+   before it is one choice and this is not part of it. */
+.designer-taborder {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  margin: 3px 3px 3px 9px;
+  padding: 0;
+  color: inherit;
+  opacity: 0.6;
+  background: var(--xl-editor-bg, #1e1e1e);
+  border: 1px solid var(--xl-border, #333);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.designer-taborder:hover {
+  opacity: 0.9;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.designer-taborder:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #4d9fff);
+  outline-offset: 1px;
+}
+
 /* ONE row that scrolls rather than a block that wraps: a second row of palette eats the canvas
    on a narrow tab, and the arrows are the behaviour the command and tab strips already have. */
 .designer-toolbox-strip {
@@ -4090,6 +4152,25 @@ body.objbrowser-page #objbrowser-card {
   flex: 0 0 auto;
   max-width: 100%;
   max-height: 100%;
+  /* NEAREST-NEIGHBOUR, because that is the filter MSForms uses: it drops pixels and speckles
+     where the browser would interpolate and come out smooth.
+
+     THE OWNER SETTLED THIS BY LOOKING, 2026-08-18, and it is worth saying why the measurement
+     did not. designer-parity.mjs reports the same button as percentages of its area - the
+     artwork's black field, button face, and everything else:
+
+       runtime            8.5 / 50.7 / 40.8
+       canvas, smooth     1.1 / 17.2 / 81.7
+       canvas, pixelated  0.8 / 89.3 /  9.9
+
+     Read as distance those are a wash, and the speckled canvas looked like damage to me, so I
+     took it back out. The owner had both surfaces in front of him: "the image is fine... that's
+     actually how the native form renders it". The buckets cannot tell a matching FILTER from a
+     lost picture - they only count how much of each tone is present, and nearest-neighbour
+     rearranges tone without changing what a person recognises. They stay a guard on the BLACK
+     bucket, which is the background-keying defect four fixes got wrong; they are not the arbiter
+     of how the picture is resampled. That one is answered by looking at the two. */
+  image-rendering: pixelated;
 }
 
 .dc:hover:not(:has(.dc:hover)) {

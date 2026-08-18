@@ -243,26 +243,46 @@ function tokenRange(model: monaco.editor.ITextModel, position: monaco.IPosition)
  */
 function valueStringRange(model: monaco.editor.ITextModel, position: monaco.IPosition): monaco.Range | null {
   const line = model.getLineContent(position.lineNumber);
+  const caret = position.column - 1;
 
-  // The property path cannot hold a quote, so the first `=` is the one that splits the line.
-  const equals = line.indexOf("=");
-  if (equals < 0) {
-    return null;
+  /*
+   * THE QUOTED RUN THE CARET IS IN, walked from the start of the line.
+   *
+   * This used to take the first `=` and the first quote after it, which was exactly right while a
+   * property line held ONE of each. A tag holds many, so it always answered with the first
+   * attribute's value: accepting a font face replaced `Name="OkButton"` and left the button
+   * renamed after a typeface (2026-08-17, caught by the suite's font rows).
+   */
+  let at = 0;
+  while (at < line.length) {
+    const open = line.indexOf('"', at);
+    if (open < 0) {
+      return null;
+    }
+
+    let close = open + 1;
+    while (close < line.length && line[close] !== '"') {
+      close++;
+    }
+
+    // Inside the run, its closing quote included, so a caret resting at the end of a value still
+    // replaces the value rather than inserting a second one beside it.
+    if (caret > open && caret <= close) {
+      // An UNTERMINATED run stops at the caret rather than at the end of the line: a half-typed
+      // `FontName="Cou` is followed by the tag's own `/>`, and replacing to the line's end would
+      // take the close of the element with it.
+      const end = close < line.length ? close + 1 : caret;
+      return new monaco.Range(position.lineNumber, open + 1, position.lineNumber, end + 1);
+    }
+
+    if (close >= line.length) {
+      return null;
+    }
+
+    at = close + 1;
   }
 
-  const open = line.indexOf('"', equals + 1);
-  if (open < 0) {
-    return null;
-  }
-
-  let close = open + 1;
-  while (close < line.length && line[close] !== '"') {
-    close++;
-  }
-
-  return new monaco.Range(
-    position.lineNumber, open + 1,
-    position.lineNumber, (close < line.length ? close + 1 : line.length) + 1);
+  return null;
 }
 
 /** The name the native toolbox would give a new control of this kind: the kind plus the first

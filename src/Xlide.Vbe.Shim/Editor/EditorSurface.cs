@@ -841,13 +841,21 @@ internal sealed class EditorSurface : IDisposable
         // client areas, no colours beyond the property lines it speaks. The page carries the
         // display extras over from the last applied projection by name, which keeps the
         // preview steady instead of flickering between dressed and bare.
+        //
+        // A CONTROL'S OWN SPOKEN COLOURS RIDE TOO, which they did not until 2026-08-17: the form's
+        // did and a control's were dropped, so a colour the DOCUMENT spelled could never reach
+        // the canvas while the document was dirty - the page had nothing to prefer over the last
+        // applied projection, and dressed the draft in the old colour. Typing one showed nothing,
+        // and so did the Properties panel once its edits became document edits.
         var draftForm = draft is null ? null : new FormMarkupBox(
             draft.Caption, draft.Width, draft.Height,
-            DraftColour(draft, "BackColor"), DraftColour(draft, "ForeColor"));
+            DraftColour(draft.Properties, "BackColor"), DraftColour(draft.Properties, "ForeColor"));
         var draftControls = draft?.Controls
             .Select(control => new FormMarkupControl(
                 control.Type, control.Name, control.Caption,
-                control.Left, control.Top, control.Width, control.Height, control.Parent))
+                control.Left, control.Top, control.Width, control.Height, control.Parent,
+                BackColor: DraftColour(control.Properties, "BackColor"),
+                ForeColor: DraftColour(control.Properties, "ForeColor")))
             .ToArray();
 
         Post(JsonSerializer.Serialize(
@@ -874,10 +882,11 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.FormMarkupVocabularyMessage));
     }
 
-    /// <summary>A colour property line's value as CSS, when the draft speaks it.</summary>
-    private static string? DraftColour(Core.Forms.FormSpec draft, string name)
+    /// <summary>A colour property's value as CSS, when the draft speaks it - for a control's own
+    /// property list as readily as for the form's, which is the point of taking the list.</summary>
+    private static string? DraftColour(IReadOnlyList<Core.Forms.PropertySpec> properties, string name)
     {
-        var line = draft.Properties.FirstOrDefault(p =>
+        var line = properties.FirstOrDefault(p =>
             string.Equals(p.Path, name, StringComparison.OrdinalIgnoreCase));
         return line is not null
             && int.TryParse(line.Value, System.Globalization.NumberStyles.Integer,

@@ -572,11 +572,85 @@ the host-owns-membership invariant survives.
     takes and rides its callback, so the window that opens is the document. A refused apply
     launches nothing and says why at the document, which is the right way round: the old
     behaviour would have run yesterday's form and said nothing at all.
+  - *And the Properties panel joins the transaction* - **landed 2026-08-17** (the owner: "when
+    I make a change using the property pane, ctrl+z is not undoing it", then "ctrl+z updates
+    the markdown editor, but not the designer"). A row edited while that form's designer tab
+    is open now writes the DOCUMENT, one undoable edit, and reaches the form at Ctrl+S like
+    every other gesture on the tab. It used to write the form over COM and let the
+    re-projection echo back into the text, which put its edits outside the undo stack
+    altogether: Ctrl+Z reached the echoed line and the form kept the value, and undoing the
+    echo left the canvas still dressed in the applied projection's colour. Both reports were
+    that one divergence.
+
+    **A DESIGNATED DEVIATION FROM "THE API MIRRORS THE UI".** The native Properties window
+    changes the form the moment you leave the row; ours does not while a designer tab is open.
+    The reason is that the tab is a transaction with an undo stack, and a panel writing past it
+    breaks the stack for every other gesture on the same form. With no designer tab open -
+    a module's `(Name)`, a worksheet, a form nobody has opened a tab for - the panel writes the
+    component directly, exactly as before, because there is no document to write to.
+
+    Two things fell out of it and are worth knowing. A property put back to its DEFAULT takes
+    the attribute out of the document rather than spelling the default, which is the dialect's
+    "defaults stay unspoken" rule holding on the write side too. And the draft the canvas
+    previews now carries a control's own spoken colours - it carried the form's and dropped
+    every control's, so a colour the document spelled could not reach the canvas while the
+    document was dirty, whether it was typed or set from the panel.
 
     The intent travels WITH the request (`designerApplySave` carries `run`, and the page
     calls back through `saveOnlyThenRun`) rather than being remembered on the host, because
     a refused apply calls nothing back: a flag waiting for a callback that never comes would
     have fired on somebody's unrelated Ctrl+S minutes later.
+
+    *And the OTHER half of that row, the one with no designer tab* - **driven and pinned
+    2026-08-18**. The panel writing a colour as text was filed as a live defect: a `#5ce05c`
+    typed into a row came back `refused ... Unexpected HRESULT`, and the form stopped answering
+    immediately afterwards, which took the panel down with it (it went on showing the last
+    component it could read, reported separately as the panel no longer following the canvas).
+    Driven again through that same path, on a form with no designer tab open:
+
+    ```text
+    editProperty BackColor = "#0080ff"      did=true    form holds 16744448
+    editProperty BackColor = "not a colour" did=false   'not a colour' is not a whole number.
+    designerMarkup                          19 controls, still reads
+    ```
+
+    **The narrowing that was written down was wrong, and it is worth saying how.** It assumed
+    the raw text reached the COM put and MSForms threw on it, so the fix would be a guard in
+    front of the conversion. There is no such path: the VBE's Property for a colour reads as
+    `VT_I4`, and `WriteProperty` switches on that variant, so text that will not parse is
+    refused with a sentence BEFORE the model is touched, and text that will parse is already a
+    number by then. Both halves are now suite rows, because the second one is the valuable one -
+    a refusal that costs nothing is what keeps a bad value away from the designer.
+
+    So the `Unexpected HRESULT` was not the write failing on its input. It was a write against a
+    designer that had ALREADY died - the mid-teardown case, fixed since - and the panel showing
+    stale rows was that same dead form, not a broken selection. Two reports, one cause, and
+    neither of them the conversion they looked like. What the episode actually cost was reading
+    a refusal message and inferring the mechanism instead of driving the path.
+
+  - *A designer tab is not its form's code* - **fixed 2026-08-18** (the owner: "when clicking on a
+    sub under the form, with the form designer tab open, it doesn't focus the code behind
+    editor"). Clicking a procedure under a form in the tree did nothing visible at all while that
+    form's designer tab held the active slot.
+
+    THE SURFACE'S "SHOWN MODULE" CARRIES A NAME AND A WORKBOOK AND NO FACE. `GoTo` compares those
+    two against the navigation's target to decide whether the module is already up, and with the
+    designer tab active the answer was yes - so it took the already-showing branch, posted
+    `revealLine`, and revealed a line in a document nobody was looking at. Driven and confirmed
+    before anything was changed: the host logged `navigate: EntryForm(9,1)`, the page's active
+    document stayed `EntryForm/design`, and the `EntryForm/code` tab was sitting there open and
+    unvisited the whole time.
+
+    The fix is that a standing designer tab disqualifies the already-showing shortcut, so the code
+    face takes the active slot the way a click on its tab would.
+
+    **AND CLEARING `_activeDesignerTab` IS THE HALF THAT IS NOT COSMETIC.** It is what F5 and
+    Ctrl+S read to decide whether they are applying a document or running a module. `PublishModules`
+    clears it when the NATIVE active pane moves, and here it does not move - the form's code pane
+    was already the active one underneath, which is precisely why nothing changed. So it is cleared
+    for any navigation that shows a code document, not only the navigated-to form's: with FormA's
+    designer tab up, going to Module1 already put the code tab on screen while leaving Run aimed
+    at FormA.
   - *Snapping, one way or the other* - **landed 2026-08-16** (the owner: "can we add a
     toggleable snap to grid mode", then "can we add a snap to other objects realignment with
     guide lines, think the experience of moving objects in a powerpoint slide", then - having
@@ -1046,6 +1120,41 @@ the host-owns-membership invariant survives.
   The projection carries `tabIndex` for this - display truth, like the fonts and the client areas
   beside it, not a line the dialect prints.
 
+  **THREE THINGS THE OWNER ASKED FOR ON SEEING IT, 2026-08-18**, all of them about reach rather
+  than about what it does.
+
+  *A button on the strip* ("please add tab order button to strip"). It was reachable only from the
+  canvas's right-click menu, which is a menu a developer has to already know is there - and unlike
+  Align and Distribute beside it, tab order has no visible equivalent on the canvas to hint that
+  it exists. The native editor keeps it on a MENU and this product has no menu bar, so the strip is
+  where the equivalent affordance belongs. It sits after the two snap switches, in their clothing
+  but without their ON state, because it opens something rather than holding a mode, and it calls
+  the same `showTabOrder()` the menu item does so the two entry points cannot drift apart.
+
+  *Padding* ("tab order modal needs padding"). Exactly the shape of the close-confirm card's own
+  defect: `.modal-card` deliberately carries no padding because every dialog has an inner layout
+  that pads its own parts, and this one appends a heading, a line of prose, a list and a button row
+  straight to the card. So the list ran into the edge and the buttons sat in the corner. `#taborder-card`
+  now carries 16px and a fixed 360px width, so the dialog does not resize as the selection moves
+  between containers.
+
+  *Drag and drop* ("please add drag and drop to tab order modal"). The whole sequence is on screen,
+  so "third from the top" is a place a hand can point at, and Move Up pressed five times is that
+  same edit spelled as five. The buttons and Ctrl+arrow stay - a pointer is not the only way in.
+
+  Two decisions inside it. ONE WRITE AT THE DROP, not one per row crossed: the picture follows the
+  pointer and nothing is asked of the host until the hand lets go, so a drag that ends where it
+  started costs the form nothing. And the whole gesture is still the SINGLE `TabIndex` write the
+  buttons make, because MSForms renumbers: a drag of six places and a nudge of one differ only in
+  the number handed over, which is why `moveTo` is the one write path and Move Up is a special case
+  of it. The pointer is captured on the LIST rather than on the row, because selecting repaints and
+  a repainted row is a detached element - capture taken on it is lost the instant the drag begins,
+  which is how this was written the first time.
+
+  Driven end to end rather than eyeballed: dragging `NameLabel` from 0 to 3 left the list reading
+  `NameBox, RegionPick, HistoryList, NameLabel` and the FORM ITSELF reading `0:NameBox, 1:RegionPick,
+  2:HistoryList, 3:NameLabel` - MSForms having done the renumbering off one write.
+
   **PICTURES landed 2026-08-16**, which closes the oldest open risk in this document: M3 named
   `IPictureDisp` extraction as the likely hard case, the risks table below guessed it might need
   an OLE round trip through a temporary stream, and until now an Image control drew as a crossed
@@ -1106,6 +1215,36 @@ the host-owns-membership invariant survives.
   every projection: a full gesture loop - drag, document rewrite, re-projection, canvas agreeing -
   runs 5ms median with no pictures, 7ms with 700KB of them. Two milliseconds. No cache, therefore,
   and no downscaling: both would be machinery bought for a cost that is not there.
+
+  **WHICH FRAME OF A MULTI-SIZE `.ico` GETS LOADED: the largest, and that is a decision rather
+  than an accident** (the owner, 2026-08-18, having been given the three options). An `.ico` is a
+  bundle of the same picture at several sizes - `xlide.ico` carries 16, 24, 32, 48, 64, 128 and
+  256 - and something has to choose. The loader takes the biggest, MSForms draws a caption picture
+  at natural size, and a 256-square logo on a 72x24 button is therefore clipped to a band through
+  its middle with the caption pushed out of view. That is what the owner first reported as
+  distortion, and the canvas now draws the same clipping, so it is visible before F5 rather than
+  after.
+
+  The two rejected options are worth keeping, because the question will be asked again. *Pick the
+  frame nearest the control* is what a developer expects of an icon, and it was refused because it
+  makes the loaded picture depend on the control it lands on: one file would give two different
+  pictures on a small button and a large Image, in a product whose whole premise is that the
+  document is the truth. *Always take 32x32* is predictable and simply wrong for anyone using a
+  large icon as a surface picture.
+
+  **There is no native behaviour to match here, which is what made it a decision at all.** OLE's
+  own loader refuses this file outright (`0x80004005`) because its frames are PNG-compressed, so
+  native VBA cannot show it at all and `PictureBytes` falls through to GDI+ to get anything. Every
+  other question on this surface was settled by copying the native designer. This one could not
+  be: the choice was how much MORE capable than the native designer to be, and the answer was to
+  be honest rather than clever.
+
+  **And the artwork's black field stays**, same call. `assets\images\extension_logo.png` is fully
+  opaque with black corners - measured, not assumed - and the `.ico` built from it inherits that.
+  MSForms keys that field out on a caption picture and paints it solid on a surface picture, which
+  is the disparity the canvas now reproduces. Making the source transparent would clean up both,
+  and it was declined because this is the product's own icon - the installer's and the add-in's -
+  and it reads correctly in the shell, where a solid tile is what is wanted.
 
   **And the layout bug the work uncovered, which was making gestures land on the wrong half.**
   The canvas's scroll box carried its 24px padding on the SCROLL PORT, and a padded port cannot
@@ -1483,6 +1622,30 @@ what round-trips.
 
 A form that has never been saved has no baseline in the file and keeps the bare-coclass answer,
 which is honest and stays.
+
+**What that costs in practice, measured 2026-08-18.** It is not only the narrowed list going
+quiet; it is that a property genuinely set on a form built THIS session is absent from that form's
+markup until the workbook is written. Built through the api and read back at once:
+
+```text
+before Ctrl+S   <CommandButton Name="Btn" Left="10" Top="10" Width="72" Height="24" />
+after  Ctrl+S   <CommandButton Name="Btn" Left="10" Top="10" Width="72" Height="24" PicturePosition="1" />
+```
+
+The set itself answered `Btn.PicturePosition is 1` and the designer route reported `position: 1`
+throughout, so nothing was lost - the document simply had no way to know the value was a choice
+rather than the kind's own. The document therefore GROWS attributes at the first save of a new
+form, which is worth knowing before it looks like a bug.
+
+**AND IT ROTTED THREE SUITE ROWS BEFORE ANYONE NOTICED, which is the part to remember.**
+`designer-features.mjs` builds its own form and three language-service rows aimed at exactly these
+two attributes on it. They passed for weeks. They passed because a run that dies between building
+the form and the cleanup leaves its design in the fixture FILE under the suite's own form name, so
+the next run's fresh form found a dead run's mask sitting under its name and answered from it. The
+rows failed the first time they met a clean file - which is to say they had been testing the
+wreckage of previous runs. The suite now SAVES after building its form, and pins both halves
+(absent before the save, present after) so the dependency is a measured row rather than a
+condition that has to hold by luck.
 
 ## What a sweep for dead and convoluted code found
 
