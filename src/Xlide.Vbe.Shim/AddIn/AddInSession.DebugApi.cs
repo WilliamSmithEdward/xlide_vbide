@@ -95,9 +95,11 @@ internal sealed partial class AddInSession
     /// running, GetObject binds ONE of them - the agent reply carries `pid`, which is how a
     /// caller checks it got the session it meant.
     ///
-    /// The add-in's own `Object` property is still set, best effort, for callers that do hold
-    /// the VBE: the AddIn object turns out to accept the ordinary put and refuse the reference
-    /// form (measured 2026-08-18, the reverse of the editor's own convention).
+    /// The add-in's own `Object` property is still tried, best effort, for callers that do
+    /// hold the VBE - and this VBE refuses it BOTH ways (reference put and ordinary put,
+    /// measured 2026-08-18), so today the attempt only writes a log line. It stays because it
+    /// costs one call, the log records the truth, and a host that ever accepts it gains a
+    /// second address for free. The ROT is the door's real address either way.
     /// </summary>
     private void OfferInsideDoor()
     {
