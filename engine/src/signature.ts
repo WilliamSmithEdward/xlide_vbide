@@ -23,6 +23,7 @@ export function signatureHelpFor(
         projectClassMembers: ctx.projectClassMembers,
         moduleName: ctx.current.name,
         projectProcedures: ctx.projectProcedures,
+        model: ctx.hostModel,
     });
 
     if (!info) {

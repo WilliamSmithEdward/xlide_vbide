@@ -6,7 +6,7 @@
 // same contract with a different transport, so it is reused rather than reimplemented, which keeps
 // one analysis path shared with the editor extension instead of two that can disagree.
 
-import { setHostApp } from './hostApp.js';
+import { hostApp, setHostApp } from './hostApp.js';
 import { analyzerKnowledge, objectModelKnowledge } from './knowledge.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
@@ -770,6 +770,9 @@ export class Dispatcher {
             moduleType: params.moduleType ?? memo?.request.moduleType,
             moduleKind: moduleKindFromType(params.moduleType ?? memo?.request.moduleType),
             documentType: params.documentType ?? memo?.request.documentType,
+            // The analyzer resolves the token to a host model itself (issue #24); for excel
+            // the resolution is a no-op, so this is only ever additive.
+            host: hostApp(),
             implicitMembers: seededMembersOf(this.seededModules.get(params.projectId), params.moduleName),
             // Inherited rather than sent: a fix must be offered under the same rules that drew
             // the squiggle, and the last analysis of this module is what drew it.

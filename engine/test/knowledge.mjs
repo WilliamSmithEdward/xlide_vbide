@@ -3,9 +3,10 @@
 // Two contracts are pinned here beyond the shapes. First, knowledge answers BEFORE initialize
 // and before any project opens - it is product knowledge, not project state, and an agent must
 // be able to learn the terrain without touching anything. Second, the model answers for the
-// HOST the engine was told it is running in: after a project/open that says word, the honest
-// reply is known:false with a note, not Excel's types wearing Word's name - the same rule the
-// features themselves follow.
+// HOST the engine was told it is running in: after a project/open that says word, the reply is
+// WORD's model (the analyzer's host registry, xlide_vscode 4.0.0), and a host the registry
+// does not know answers known:false with a note - never another application's types wearing
+// this host's name.
 //
 //   node test/knowledge.mjs
 //   node test/knowledge.mjs --exe
@@ -103,15 +104,41 @@ await call('project/open', {
 
 const inWord = await call('knowledge/objectModel', {});
 
-check('in word the honest answer is no model, said plainly', () => {
+check('in word the model is WORD\'s, not excel\'s', () => {
     assert.equal(inWord.host, 'word');
-    assert.equal(inWord.known, false);
-    assert.ok(inWord.note.length > 0, 'a refusal without a note strands the caller');
-    assert.equal(inWord.types, undefined);
+    assert.equal(inWord.known, true);
+    assert.ok(inWord.typeCount > 0, 'word answered with no types at all');
+    assert.equal(inWord.globals.ThisDocument, 'Word.Document');
+    assert.equal(inWord.globals.ActiveSheet, undefined, 'an Excel global leaked into Word');
+});
+
+// No host prefix in the request: `Document` must find Word.Document in Word.
+const wordDocument = await call('knowledge/objectModel', { type: 'Document' });
+
+check('a word type expands by its bare display name', () => {
+    assert.equal(wordDocument.type?.name, 'Word.Document');
+    assert.ok(wordDocument.type.memberCount > 0);
+});
+
+// A host the registry does not know: the honest answer is still known:false with a note.
+await call('project/open', {
+    projectId: 'OutlookProject',
+    generation: 1,
+    host: 'outlook',
+    modules: [{ moduleName: 'Module1', source: 'Sub A()\r\nEnd Sub\r\n', type: 'standard' }],
+});
+
+const inOutlook = await call('knowledge/objectModel', {});
+
+check('an unmodelled host says so plainly', () => {
+    assert.equal(inOutlook.host, 'outlook');
+    assert.equal(inOutlook.known, false);
+    assert.ok(inOutlook.note.length > 0, 'a refusal without a note strands the caller');
+    assert.equal(inOutlook.types, undefined);
 });
 
 check('the rule catalogue is host-independent', () => {
-    // The analyzer's rules are VBA-language rules; Word does not lose them.
+    // The analyzer's rules are VBA-language rules; no host loses them.
     assert.equal(rules.ruleCount >= 20, true);
 });
 

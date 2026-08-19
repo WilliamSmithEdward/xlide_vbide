@@ -18,7 +18,8 @@ import {
     type VbaProjectAnalysisOptions,
     type VbaProjectModuleInput,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
-import { hostModelIsKnown } from './hostApp.js';
+import { currentHostModelOverride, hostApp } from './hostApp.js';
+import type { HostObjectModel } from '../../../xlide_vscode/src/analyzer';
 import type { ModulePayload } from './protocol';
 
 type SharedProjectIndex = ReturnType<typeof buildLiveVbaProjectIndex>;
@@ -26,6 +27,7 @@ type SharedProjectIndex = ReturnType<typeof buildLiveVbaProjectIndex>;
 const WORKBOOK = 'Excel.Workbook';
 const WORKSHEET = 'Excel.Worksheet';
 const CHART = 'Excel.Chart';
+const WORD_DOCUMENT = 'Word.Document';
 
 export interface ModuleEntry {
     name: string;
@@ -52,6 +54,12 @@ export interface AssembledContext {
     codeNameList: string[];
     meType?: string;
     meProjectType?: string;
+    /**
+     * The host's own object model, when the host is not Excel: Word's in Word, the empty model
+     * in a host the registry does not know, and undefined in Excel so every resolver's
+     * `?? getExcelObjectModel()` default keeps the behavior Excel always had.
+     */
+    hostModel?: HostObjectModel;
     /** A form's controls, host-supplied: the analyzer's implicit members (xlide_vscode#17). */
     implicitMembers?: readonly { name: string; type: string }[];
     projectClassMembers?: MemberCompletionContext['projectClassMembers'];
@@ -111,6 +119,12 @@ function sharedProjectIndex(seeded: readonly ModulePayload[]): SharedProjectInde
             source: module.source,
             type: module.type ?? 'standard',
             documentType: module.documentType as EventHandlerDocumentType | undefined,
+            // A form's designer-declared controls. The index folds them into the form's member
+            // surface, which is what lets ANOTHER module's `EntryForm.NameBox` resolve - the
+            // form's own code-behind gets them separately, through the per-request context.
+            // Left out until the #77 matrix measured every cross-module caller seeing the form
+            // surface and no controls (2026-08-19).
+            implicitMembers: module.implicitMembers,
         }));
         built = buildLiveVbaProjectIndex(inputs);
     } catch {
@@ -178,6 +192,7 @@ function buildContext(
         codeNameList: entries.filter((entry) => entry.type === 'document').map((entry) => entry.name),
         meType: meTypeFor(current),
         meProjectType: meProjectTypeFor(current),
+        hostModel: currentHostModelOverride(),
         // From the SEEDED module, like every cross-module fact here: the designer facts ride
         // the seed, and a control set that changes without a reseed lags the same way the rest
         // of the project's facts do.
@@ -221,19 +236,24 @@ function meTypeFor(entry: ModuleEntry | undefined): string | undefined {
     }
 
     /*
-     * NOTHING, IN A HOST WHOSE OBJECT MODEL WE CANNOT SPEAK.
+     * THE HOST DECIDES WHAT A DOCUMENT MODULE IS, and only two hosts have an answer.
      *
-     * These three types are Excel's, and this ran in every Office application: the VBE is shared,
+     * The Excel types below ran in every Office application until 2026-08-18: the VBE is shared,
      * so in Word `ThisDocument` was told it was an Excel.Worksheet and offered a worksheet's
-     * members (the owner, 2026-08-18, having run it there). Being confidently wrong is worse than
-     * being silent - a developer can work around no completions and cannot work around completions
-     * for the wrong application.
-     *
-     * So a document module in Word or PowerPoint gets NO host type until there is a model to give
-     * it one. It loses the bogus members rather than gaining Word's own, which is the honest state
-     * and the one to hold until those models exist.
+     * members (the owner, having run it there). First fix: silence outside Excel. Now, with the
+     * analyzer's host models (xlide_vscode 4.0.0), Word's ThisDocument IS a Word.Document -
+     * mirroring the extension's own meTypeFor, which is the authority on these rules:
+     * PowerPoint has no document modules at all, Access's document surfaces are unmodelled, and
+     * an unknown host still asserts nothing, because being confidently wrong is worse than
+     * being silent.
      */
-    if (!hostModelIsKnown()) {
+    const host = hostApp();
+
+    if (host === 'word') {
+        return WORD_DOCUMENT;
+    }
+
+    if (host !== 'excel') {
         return undefined;
     }
 

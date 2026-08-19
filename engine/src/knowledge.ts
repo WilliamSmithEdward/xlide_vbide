@@ -12,15 +12,16 @@
 // actually know. The one editorial act is SHRINKING - members carry their doc's one-line summary
 // rather than the whole doc, because the reply is an inventory, not the reference.
 //
-// The model answers for the host this engine was told it is running in (project/open's token).
-// A host with no model - Word today - answers known:false with a note, which is the same honesty
-// the features themselves practice: silence rather than Excel's members in Word's documents.
+// The model answers for the host this engine was told it is running in (project/open's token),
+// through the analyzer's host registry: Excel, Word, PowerPoint and Access carry models as of
+// xlide_vscode 4.0.0. A host the registry does not know answers known:false with a note, which
+// is the same honesty the features themselves practice: silence rather than another
+// application's members.
 
-import { hostApp, hostModelIsKnown } from './hostApp.js';
+import { currentHostModel, hostApp, hostModelIsKnown } from './hostApp.js';
 import {
     DIAGNOSTIC_RULES,
     STRUCTURAL_DIAGNOSTIC_RULES,
-    getExcelObjectModel,
     type HostMember,
     type HostObjectModel,
     type HostType,
@@ -62,13 +63,13 @@ export function objectModelKnowledge(params: KnowledgeModelParams): KnowledgeMod
             host,
             known: false,
             note:
-                `No object model is wired for '${host}' yet, so the language service asserts `
+                `No object model is wired for '${host}', so the language service asserts `
                 + 'nothing about this host\'s own types - document modules get no host members '
-                + 'rather than another host\'s. Excel is the host with a model today.',
+                + 'rather than another host\'s.',
         };
     }
 
-    const model = getExcelObjectModel();
+    const model = currentHostModel();
 
     if (params.type !== undefined && params.type.length > 0) {
         const resolved = resolveType(model, params.type);
@@ -77,9 +78,9 @@ export function objectModelKnowledge(params: KnowledgeModelParams): KnowledgeMod
                 host,
                 known: true,
                 note:
-                    `No type named '${params.type}'. Names resolve as written in code `
-                    + '(Worksheet), qualified (Excel.Worksheet), or through the model\'s '
-                    + 'aliases; the bare inventory lists every qualified name.',
+                    `No type named '${params.type}'. Names resolve as written in code, `
+                    + 'qualified, or through the model\'s aliases; the bare inventory lists '
+                    + 'every qualified name.',
             };
         }
 
@@ -142,15 +143,21 @@ export function analyzerKnowledge(): KnowledgeAnalyzerResult {
 
 /**
  * A named type, resolved the way code reaches it: as written (`Worksheet`, through the alias
- * table), fully qualified (`Excel.Worksheet`), or by exact key.
+ * table), by exact qualified key, or - host-neutrally - by its bare display name, so
+ * `Document` finds `Word.Document` in Word without this file knowing any host's prefix.
  */
 function resolveType(model: HostObjectModel, name: string): [string, HostType] | undefined {
     const aliased = model.aliases[name.toLowerCase()];
-    const candidates = [aliased, name, `Excel.${name}`];
-
-    for (const candidate of candidates) {
+    for (const candidate of [aliased, name]) {
         if (candidate !== undefined && candidate in model.types) {
             return [candidate, model.types[candidate]!];
+        }
+    }
+
+    const wanted = name.toLowerCase();
+    for (const [qualified, held] of Object.entries(model.types)) {
+        if (held.displayName.toLowerCase() === wanted) {
+            return [qualified, held];
         }
     }
 

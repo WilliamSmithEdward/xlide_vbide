@@ -30,6 +30,7 @@ export function completionsFor(
     // "Dim i As Int" offered nothing (2026-08-04).
     const types = resolveTypeCompletions(params.source, params.offset, {
         projectTypes: ctx.projectTypes,
+        model: ctx.hostModel,
     });
 
     if (types.length > 0) {
@@ -45,6 +46,8 @@ export function completionsFor(
         // A form's controls, so `RegionPick.` answers with the ComboBox's members rather than
         // nothing (xlide_vscode#17); the host supplied them with the seed.
         implicitMembers: ctx.implicitMembers,
+        // The host this engine runs in, when it is not Excel (the resolvers' default).
+        model: ctx.hostModel,
     });
 
     if (members.length > 0) {
@@ -65,6 +68,7 @@ export function completionsFor(
         projectMemberSurfaces: ctx.projectClassMembers,
         projectProcedures: ctx.projectProcedures,
         projectSymbols: ctx.projectSymbols,
+        model: ctx.hostModel,
     });
 
     return [...identifiers.map(identifierItem), ...keywords.items.map(keywordItem)];

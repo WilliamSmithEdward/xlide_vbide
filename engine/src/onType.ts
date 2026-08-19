@@ -163,6 +163,7 @@ export function canonicalCaseFor(
             meType: ctx.meType,
             meProjectType: ctx.meProjectType,
             projectClassMembers: ctx.projectClassMembers,
+            model: ctx.hostModel,
         },
         identifier: {
             codeNames: ctx.codeNameList,
@@ -171,9 +172,11 @@ export function canonicalCaseFor(
             projectMemberSurfaces: ctx.projectClassMembers,
             projectProcedures: ctx.projectProcedures,
             projectSymbols: ctx.projectSymbols,
+            model: ctx.hostModel,
         },
         type: {
             projectTypes: ctx.projectTypes,
+            model: ctx.hostModel,
         },
     };
 

@@ -26,8 +26,10 @@ export function semanticTokensFor(
     const ctx = assembleContext(seeded, params);
 
     const tokens = [
-        ...resolveTypeSemanticTokens(params.source, { projectTypes: ctx.projectTypes }),
-        ...collectHostGlobalTokens(params.source),
+        ...resolveTypeSemanticTokens(params.source, { projectTypes: ctx.projectTypes, model: ctx.hostModel }),
+        // The host's own globals when the host is not Excel: in Word, ActiveDocument colours
+        // and ActiveSheet does not.
+        ...collectHostGlobalTokens(params.source, ctx.hostModel),
         // The collector guards meType itself - only an MSForms.* type engages it - so a
         // worksheet's Excel.Worksheet passes through as an early return, not a special case here.
         ...collectImplicitMemberMethodTokens(params.source, {

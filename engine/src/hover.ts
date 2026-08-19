@@ -26,6 +26,8 @@ export function hoverFor(
         projectClassMembers: ctx.projectClassMembers,
         projectTypes: ctx.projectTypes,
         projectProcedures: ctx.projectProcedures,
+        // The host this engine runs in, when it is not Excel (the resolvers' default).
+        model: ctx.hostModel,
     });
 
     if (!info) {
