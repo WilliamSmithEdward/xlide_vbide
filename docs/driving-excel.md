@@ -1308,6 +1308,12 @@ Three things worth knowing before driving it:
   disagree - the markup's control list is TOTAL, and a `.form` out of date with its `.frx` would
   prune controls the binary brought in. Ticking it is the developer's choice, and the apply then
   reports exactly what it added and removed.
+- **A form's pair is a CREATE here, by decision.** The shared planner refuses to create a
+  userform from a file because the EXTENSION'S applier could not - a capability statement about
+  one product, hardcoded into the shared head. This product's applier imports the pair natively,
+  so the engine's stand-in re-marks that row `will-create` when the `.frx` sits beside the
+  `.frm` (decision 15 in [decisions.md](decisions.md); xlide_vscode#27 asks for the shared
+  mechanism that would make the override unnecessary).
 
 Renaming a form in source control means three edits to the header, not one: the `Begin` line, the
 `Attribute VB_Name` line, and the `OleObjectBlob` line. Miss the first and the editor refuses the

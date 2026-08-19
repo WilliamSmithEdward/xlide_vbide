@@ -393,6 +393,32 @@ uses, and the hand-written declarations still describe the API by hand. Revisit 
 becomes a published package, at which point the vendored directory is what gets published and
 the check becomes a version bump.
 
+## 15. Sync form-creation deliberately forks from the shared planner
+
+Status: decided (owner, 2026-08-19).
+
+The shared sync planner (`moduleSyncPlan.ts`, imported from the xlide_vscode checkout) refuses
+to create a UserForm from a file. That refusal is a capability statement about the EXTENSION'S
+applier, hardcoded into the shared head - and this product's applier is the add-in, which hands
+a `.frm`/`.frx` pair to the VBE's own importer and gets the whole form back: controls, fonts,
+pictures, code. The one-brain design exists so the two products agree about what a sync MEANS;
+what an applier can DO was never rightly the planner's to decide.
+
+So the behavior forks, deliberately: a `.frm` whose `.frx` sits beside it in the folder is a
+CREATE here. The engine's planner stand-in re-marks the row after the shared planner answers
+(`engine/src/sync.ts`). The fork is exactly that wide and no wider:
+
+- Document modules stay refused everywhere. No applier can conjure ThisWorkbook or a sheet
+  module from a file; they are born with the workbook.
+- A `.frm` alone stays refused. The VBE would fail the import with less to say than the
+  planner's warning already says.
+
+The known cost: the stand-in reads the shared planner's row shape, which moves under us -
+xlide_vscode 4.0.0 did exactly that, twice in one day. The designer suite's form-sync rows are
+the tripwire, and they fired within a day both times. If upstream ships a caller-declared
+capability (asked as xlide_vscode#27), the mechanism switches to it and the shape coupling
+goes away; the behavior does not change either way.
+
 ## 13. Conventions and user directives (binding)
 
 Carried here from the handoff log on 2026-08-09, when the dated handovers were consolidated.

@@ -112,22 +112,25 @@ function withoutPointlessComparisons(plan: ModuleSyncPlan): ModuleSyncPlan {
 }
 
 /**
- * A DESIGNATED DEVIATION from the shared planner: a .frm whose .frx sits beside it is a
- * CREATE here, not a refusal.
+ * A DELIBERATE FORK from the shared planner (the owner's decision, 2026-08-19 - decision 15 in
+ * docs/decisions.md): a .frm whose .frx sits beside it is a CREATE here, not a refusal.
  *
  * Their planner refuses to create a userform from a file because THEIR applier cannot -
  * `moduleSyncPlan.ts` encodes the capabilities of the extension's own import path. This
  * product's applier is the add-in, which hands the pair to `VBComponents.Import` and gets the
  * whole form back natively - controls, fonts, pictures - a path the designer suite has pinned
- * since 2026-08-16. The refusal reappeared when the engine was rebuilt against xlide_vscode
- * 4.0.0 (whose #21 classifies .frm as userform; the older engine binary predated that and
- * planned the pair as an ordinary create), caught by the suite going 431/6 (2026-08-19, hunt
- * round three).
+ * since 2026-08-16. The one-brain design is for what a sync MEANS; what an applier can DO was
+ * never rightly the planner's to decide. (The refusal reached us when the engine was rebuilt
+ * against xlide_vscode 4.0.0, whose #21 classifies .frm as userform; the older engine binary
+ * predated that. Caught by the suite going 431/6 - 2026-08-19, hunt round three.)
  *
- * The promotion is deliberately narrow: import direction, a `skipping-import` row, a `.frm`
- * file, and the sidecar PRESENT in the folder - a .frm alone stays refused, because importing
- * it would fail at the VBE with less to say than the planner's warning already says. The ask
- * for a caller-declared capability is filed as xlide_vscode#27, so this layer can retire.
+ * The fork is deliberately narrow: import direction, a `skipping-import` row, a `.frm` file,
+ * and the sidecar PRESENT in the folder. A .frm alone stays refused - the VBE would fail it
+ * with less to say than the planner's warning already says - and document modules stay refused
+ * everywhere, because no applier can conjure ThisWorkbook from a file. If upstream ships a
+ * caller-declared capability (asked as xlide_vscode#27), the MECHANISM switches to it and this
+ * shape-coupled layer goes away; the behavior stays either way. The suite's form-sync rows are
+ * the drift tripwire, and they have fired within a day both times the row shape moved.
  */
 function withFormPairsCreatable(plan: ModuleSyncPlan, folder: string): ModuleSyncPlan {
     const rows = plan as unknown as {
