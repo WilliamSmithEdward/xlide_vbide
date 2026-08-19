@@ -725,6 +725,21 @@ public sealed record DebugUserFormsReply(
     [property: JsonPropertyName("forms")] string[] Forms);
 
 /// <summary>
+/// One live session on this machine, as GET sessions lists them: the fleet the inside door's
+/// `@` prefix addresses. Deliberately WITHOUT ports, tokens, or agent urls: one door's caller
+/// must not be handed the keys to every other door - a caller with file access reads the
+/// discovery files itself, and the `@` proxy uses the keys without ever showing them.
+/// </summary>
+public sealed record DebugSessionRow(
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("startedAt")] string StartedAt,
+    [property: JsonPropertyName("self")] bool Self);
+
+public sealed record DebugSessionsReply(
+    [property: JsonPropertyName("sessions")] DebugSessionRow[] Sessions);
+
+/// <summary>
 /// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
 /// leaves it out - the difference between the editor's menu and the product's.
 /// </summary>
@@ -1466,6 +1481,7 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugWindowRow))]
 [JsonSerializable(typeof(DebugWindowsReply))]
 [JsonSerializable(typeof(DebugUserFormsReply))]
+[JsonSerializable(typeof(DebugSessionsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]

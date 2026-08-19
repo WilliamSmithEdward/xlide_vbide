@@ -95,6 +95,12 @@ internal static class AgentGuide
         new("state", "GET", "-",
             "The session at a glance: shown module and project, debug mode, unwritten edits, whether the engine answers, the editor frame.",
             "GET state", true, DoorPolicy.Open),
+        new("sessions", "GET", "-",
+            "Every live session on this machine: pid, host, and which one is answering. The fleet the inside door's @ prefix addresses - GetObject(, \"Xlide.Api\").Request(\"@word/state\") answers for Word from whichever host holds the name.",
+            "GET sessions", true, DoorPolicy.Open,
+            "Ports, tokens and agent urls are deliberately absent: one door's caller is not "
+            + "handed the keys to every other door. Address a peer with @pid or @host through "
+            + "the inside door, or read its own discovery file."),
         new("doctor", "GET", "-",
             "Staleness and health findings, chief among them whether the running shim, page and engine are the ones last built.",
             "GET doctor", true, DoorPolicy.Open),

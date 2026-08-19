@@ -2,6 +2,12 @@
 # trip that is the whole point of it (push code, set a breakpoint, run, read live locals).
 # Run tools\dev.ps1 -KeepOpen first, or any harness session; Debug builds only.
 # Dev-harness script: uses Application.VBE per decision 10's harness exception.
+param(
+    # Which session, when several are live - a Word fixture beside the Excel one is a designed
+    # state, and Get-XlideApi's refusal named this very flag while nothing here accepted it
+    # (caught 2026-08-19, the day two hosts first ran side by side).
+    [int] $ProcessId
+)
 $ErrorActionPreference = 'Continue'
 
 $checks = [ordered] @{}
@@ -16,7 +22,7 @@ function Check([string] $name, [scriptblock] $test) {
 
 Import-Module (Join-Path $PSScriptRoot 'XlideApi.psm1') -Force
 try {
-    $found = Get-XlideApi
+    $found = Get-XlideApi -ProcessId $ProcessId
 } catch {
     Write-Output "RESULT: FAIL - $($_.Exception.Message)"
     return
@@ -324,6 +330,15 @@ Check 'stats carries a fresh host heartbeat' {
 Check 'doctor finds a healthy session' {
     $d = Invoke-RestMethod "$api/doctor" -TimeoutSec 10
     $d.engineUp -and $d.ghostReadersUp -and $d.surfaceReady -and $d.pageBuildStamp -ne '(none reported)'
+}
+
+Check 'sessions lists this session as itself, and hands out no keys' {
+    # The fleet the inside door's @ prefix addresses. Ports, tokens and agent urls are
+    # deliberately absent from the rows: one door's caller is not handed every other door.
+    $s = Invoke-RestMethod "$api/sessions" -TimeoutSec 8
+    $mine = @($s.sessions | Where-Object { $_.self })
+    $names = @($s.sessions[0].PSObject.Properties.Name)
+    ($mine.Count -eq 1) -and -not ($names -contains 'token') -and -not ($names -contains 'port')
 }
 
 Check 'perf answers with raw samples' {
@@ -661,9 +676,17 @@ Check 'analyzer teaches the rule catalogue with its authorities' {
     $rules.ruleCount -ge 20 -and ($rules.rules | Where-Object { $_.code -eq 'unterminated-string' }).spec -match 'MS-VBAL'
 }
 
-Check 'the inside door answers from the running object table' {
+Check 'the inside door reaches THIS session: one name, however many hosts hold it' {
+    # GetObject binds one registration - the first, then the survivor - and the holder
+    # FEDERATES (2026-08-19): @pid reaches any live session through whoever answers the name.
+    # The old form asserted the holder IS this session, which multi-host made a coin toss.
     $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
-    ($door.Request('agent') | ConvertFrom-Json).pid -eq $d.pid
+    ($door.Request("@$($d.pid)/agent") | ConvertFrom-Json).pid -eq $d.pid
+}
+
+Check 'sessions through the door lists this session among the fleet' {
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    @((($door.Request('sessions')) | ConvertFrom-Json).sessions | Where-Object { $_.pid -eq $d.pid }).Count -eq 1
 }
 
 Check 'Guide answers the front door from inside' {
@@ -673,10 +696,14 @@ Check 'Guide answers the front door from inside' {
 
 Check 'the inside door serves the full surface: a module lifecycle' {
     $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
-    $null = $door.Request('component?action=add&name=DoorSuiteProof&kind=module')
-    $null = $door.Request('module?name=DoorSuiteProof', "Sub DoorSuiteProofRuns()`r`nEnd Sub`r`n")
-    $written = ($door.Request('module?name=DoorSuiteProof') | ConvertFrom-Json).text -match 'DoorSuiteProofRuns'
-    $removed = ($door.Request('component?action=remove&name=DoorSuiteProof') | ConvertFrom-Json).ok
+    # @-addressed to THIS session: with several hosts live, the bare door is whoever holds the
+    # name, and a lifecycle proof that lands its module in some other host's project proves
+    # the wrong thing (and leaves the residue there - seen once, 2026-08-19, a DoorSuiteProof
+    # module in a Word scratch project).
+    $null = $door.Request("@$($d.pid)/component?action=add&name=DoorSuiteProof&kind=module")
+    $null = $door.Request("@$($d.pid)/module?name=DoorSuiteProof", "Sub DoorSuiteProofRuns()`r`nEnd Sub`r`n")
+    $written = ($door.Request("@$($d.pid)/module?name=DoorSuiteProof") | ConvertFrom-Json).text -match 'DoorSuiteProofRuns'
+    $removed = ($door.Request("@$($d.pid)/component?action=remove&name=DoorSuiteProof") | ConvertFrom-Json).ok
     $written -and $removed
 }
 

@@ -778,6 +778,9 @@ function clientFor(entry) {
     /** The start-of-session sanity check: right build, everything attached, nothing standing. */
     doctor: () => call("doctor"),
 
+    /** Every live session on this machine: the fleet the inside door's @ prefix addresses. */
+    sessions: () => call("sessions"),
+
     /** Everything a bug report needs, captured at one moment. */
     journal: (lines) => call(`journal${query({ lines })}`, { timeout: 20000 }),
 
@@ -1377,6 +1380,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "command": return api.command(rest[0]);
       case "dialogs": return api.dialogs();
       case "doctor": return api.doctor();
+      case "sessions": return api.sessions();
       case "journal": return api.journal(rest[0]);
       case "history": return api.history();
       case "assert": return api.assert(rest[0], { value: rest[1] });

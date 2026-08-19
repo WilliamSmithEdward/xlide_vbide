@@ -33,6 +33,15 @@ setting: `GetObject(, "Xlide.Api").Request("state")` - measured at 0.10ms per ca
 against 0.89ms over HTTP. Both doors are in
 [debug-api.md](debug-api.md#an-agents-first-request).
 
+**Several hosts at once is a designed state.** Every session - an Excel, a Word, another
+Excel - publishes its own discovery file and answers its own HTTP door concurrently. The
+inside door's ONE name binds one registration (the first, then the survivor when it closes),
+so whoever holds `Xlide.Api` FEDERATES: `Request("sessions")` lists the live fleet, and a
+target opening `@` reaches any of it - `Request("@word/state")` answers for the Word session,
+`Request("@12345/agent")` for a pid exactly - proxied to that session's own door with its own
+key, which the caller never sees. A host name that matches two sessions refuses and says to
+address by pid.
+
 ---
 
 ## 1. Getting to a drivable state
@@ -270,6 +279,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |
 | `userform` | `userforms(action, caption)` | the RUNNING forms' captions; `"close"` posts the X's own close. Needs no host thread, so it answers whatever the host thread is in |
 | `doctor` | `doctor()` | the start-of-session checklist |
+| `sessions` | `sessions()` | every live session on this machine: pid, host, which one is answering - the fleet the inside door's `@` prefix addresses |
 | `documents` | `documents()` | what the surface holds TEXT for |
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
 | `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
@@ -1825,6 +1835,7 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
 | The debug api | **no** | The door runs inside the add-in's own process and calls the same objects |
 | `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` - Excel running its own ribbon button - not through `$excel.VBE` |
+| `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG`, same ribbon command, scratch.docm by default - Word testing without a hand on the mouse |
 | Building a fixture | **no** | `api.component()` adds, renames and removes from inside |
 | Reading a module back | **no** | `api.readModule()` reads the real object model, from inside |
 | Running a procedure | **no** | `Application.Run` is not gated (measured) |

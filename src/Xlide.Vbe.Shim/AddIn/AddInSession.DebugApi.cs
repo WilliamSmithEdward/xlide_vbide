@@ -246,6 +246,30 @@ internal sealed partial class AddInSession
     /// </summary>
     private string AnswerInsideRequest(string target, string body)
     {
+        /*
+         * ONE NAME REACHES EVERY SESSION (the owner, 2026-08-19: "i don't like the rot door
+         * limitation"). GetObject binds one registration however many hosts are live - the
+         * first, then the survivor - so whoever holds the name FEDERATES: a target opening
+         * `@who/` names another session, resolved against the discovery files and proxied to
+         * that session's own HTTP door with its own key. `@word/state` from Excel's door
+         * answers Word's state; `@12345/agent` addresses a pid exactly. Request("sessions")
+         * lists the fleet. A self-address just serves locally, and a proxied route escapes
+         * this door's host-thread limits for free - the peer answers on its own pool.
+         */
+        var trimmed = target.Trim().TrimStart('/');
+        if (trimmed.StartsWith('@'))
+        {
+            var slash = trimmed.IndexOf('/', StringComparison.Ordinal);
+            if (slash <= 1)
+            {
+                return HostError(
+                    "@ addresses another session and takes its route after the slash: "
+                    + "Request(\"@word/state\"), Request(\"@12345/agent\"). Request(\"sessions\") lists them.");
+            }
+
+            return AnswerAddressedRequest(trimmed[1..slash], trimmed[(slash + 1)..], body);
+        }
+
         // The route and its query, the same split the HTTP door reads from a URL - kept tiny
         // and local because the HTTP parse is entangled with the token prefix this door has no
         // need of.
@@ -271,7 +295,8 @@ internal sealed partial class AddInSession
         {
             return HostError(
                 "Request takes a route, e.g. Request(\"agent\") - Request(\"agent/routes\") "
-                + "lists them all");
+                + "lists them all, and Request(\"@word/state\") reaches another live session "
+                + "(Request(\"sessions\") lists those)");
         }
 
         if (AgentGuide.PolicyOf(route) == AgentGuide.DoorPolicy.HttpOnly)
@@ -298,6 +323,119 @@ internal sealed partial class AddInSession
         return reply.ContentType.StartsWith("application/json", StringComparison.Ordinal)
             ? System.Text.Encoding.UTF8.GetString(reply.Bytes)
             : HostError($"'{route}' answers {reply.ContentType}, which only the HTTP door can carry");
+    }
+
+    /// <summary>
+    /// Every live session's discovery facts, self included: pid and host for naming, port and
+    /// token for the `@` proxy's own use. Dead pids are skipped the way the discovery sweep
+    /// buries them; an unreadable file is a session mid-write and is skipped the same.
+    /// </summary>
+    private static List<(int Pid, string Host, string StartedAt, int Port, string Token)> LiveSessions()
+    {
+        var fleet = new List<(int, string, string, int, string)>();
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Core.ProductIdentity.DataFolderName);
+
+        foreach (var file in Directory.EnumerateFiles(directory, "debug-api-*.json"))
+        {
+            try
+            {
+                using var parsed = JsonDocument.Parse(File.ReadAllText(file));
+                var root = parsed.RootElement;
+                var pid = root.GetProperty("pid").GetInt32();
+                if (pid != Environment.ProcessId)
+                {
+                    using var alive = System.Diagnostics.Process.GetProcessById(pid);
+                }
+
+                fleet.Add((
+                    pid,
+                    root.TryGetProperty("host", out var host) ? host.GetString() ?? "excel" : "excel",
+                    root.TryGetProperty("startedAt", out var started) ? started.GetString() ?? "" : "",
+                    root.GetProperty("port").GetInt32(),
+                    root.GetProperty("token").GetString() ?? ""));
+            }
+            catch
+            {
+                // A corpse or a file mid-write; the fleet is what answers, not what lingers.
+            }
+        }
+
+        fleet.Sort((left, right) => left.Item1.CompareTo(right.Item1));
+        return fleet;
+    }
+
+    private static readonly System.Net.Http.HttpClient PeerDoor = new()
+    {
+        Timeout = TimeSpan.FromSeconds(4),
+    };
+
+    /// <summary>
+    /// The `@` proxy: resolves `who` (a pid, or a host name like word) against the live fleet
+    /// and forwards the request to that session's HTTP door. Self-addresses serve locally.
+    /// The peer's token travels in the URL it already lives in and is never echoed to the
+    /// caller; a body makes the forward a POST, its absence a GET, which is the split every
+    /// route table row documents.
+    /// </summary>
+    private string AnswerAddressedRequest(string who, string target, string body)
+    {
+        var fleet = LiveSessions();
+        List<(int Pid, string Host, string StartedAt, int Port, string Token)> matches;
+        if (int.TryParse(who, out var wantedPid))
+        {
+            matches = fleet.FindAll(one => one.Pid == wantedPid);
+        }
+        else
+        {
+            matches = fleet.FindAll(one => string.Equals(one.Host, who, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (matches.Count == 0)
+        {
+            var known = fleet.Count == 0
+                ? "none are live"
+                : string.Join(", ", fleet.ConvertAll(one => $"{one.Host} (pid {one.Pid})"));
+            return HostError($"@{who}: no live session answers to that; {known}");
+        }
+
+        if (matches.Count > 1)
+        {
+            var pids = string.Join(", ", matches.ConvertAll(one => one.Pid.ToString()));
+            return HostError($"@{who} is {matches.Count} sessions (pids {pids}); address one by pid");
+        }
+
+        var found = matches[0];
+        if (found.Pid == Environment.ProcessId)
+        {
+            return AnswerInsideRequest(target, body);
+        }
+
+        try
+        {
+            var url = $"http://127.0.0.1:{found.Port}/{found.Token}/{target}";
+            using var request = new System.Net.Http.HttpRequestMessage(
+                body.Length > 0 ? System.Net.Http.HttpMethod.Post : System.Net.Http.HttpMethod.Get, url);
+            if (body.Length > 0)
+            {
+                request.Content = new System.Net.Http.StringContent(
+                    body, System.Text.Encoding.UTF8, "application/json");
+            }
+
+            using var response = PeerDoor.Send(request);
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+            using var reader = new StreamReader(response.Content.ReadAsStream(), System.Text.Encoding.UTF8);
+            var answer = reader.ReadToEnd();
+            return contentType.StartsWith("application/json", StringComparison.Ordinal)
+                ? answer
+                : HostError($"@{who}: '{target}' answers {contentType}, which only the HTTP door can carry");
+        }
+        catch (Exception ex)
+        {
+            return HostError(
+                $"@{who} (pid {found.Pid}) did not answer: {ex.GetType().Name}. "
+                + "The session may be mid-teardown; Request(\"sessions\") re-lists the fleet.");
+        }
     }
 
     /// <summary>Shapes a page script's answer the one way every eval-style route answers it:
@@ -1017,6 +1155,25 @@ internal sealed partial class AddInSession
                         AgentBaseUrl(), Engine.HostApp.Name, Environment.ProcessId,
                         _analysis?.IsReady == true, ShimBuiltUtc()),
                     DebugJsonContext.Default.DebugAgentReply));
+            }
+
+            // The fleet, host-free like the front door: the discovery files name every live
+            // session, and this is the list the inside door's `@` prefix addresses. Ports,
+            // tokens and agent urls are deliberately absent from the reply - one door's caller
+            // is not handed the keys to every other door; the `@` proxy uses them unseen.
+            case "sessions":
+            {
+                var fleet = LiveSessions();
+                var rows = new DebugSessionRow[fleet.Count];
+                for (var at = 0; at < fleet.Count; at++)
+                {
+                    rows[at] = new DebugSessionRow(
+                        fleet[at].Pid, fleet[at].Host, fleet[at].StartedAt,
+                        fleet[at].Pid == Environment.ProcessId);
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugSessionsReply(rows), DebugJsonContext.Default.DebugSessionsReply));
             }
 
             case "agent/routes":

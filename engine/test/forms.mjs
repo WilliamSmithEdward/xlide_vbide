@@ -328,6 +328,54 @@ check('and the rollover that started it answers: SelectedItem.Caption hovers as 
 });
 
 /*
+ * THE NEXT TWO RECEIVER GAPS, filed and watched (xlide_vscode#33 and #34, the announce
+ * idiom): a DECLARED LOCAL with a host type paints nothing while its hover says method, and
+ * the host GLOBAL interface's own methods (Word's InchesToPoints) resolve nothing anywhere.
+ * Both rows pin what is true today and shout the day the analyzer moves - #33's fix may want
+ * the locals threaded through semantic.ts, which is exactly what these exist to catch.
+ */
+const LOCAL_RECV = 'Public Sub T()\r\n    Dim rng As Range\r\n    Set rng = ActiveDocument.Range(0, 0)\r\n    rng.InsertParagraphAfter\r\n    TopM = InchesToPoints(1)\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'WordRecv', generation: 1, host: 'word',
+    modules: [{ moduleName: 'M', source: LOCAL_RECV, type: 'standard' }],
+});
+const localPaint = await call('textDocument/semanticTokens', {
+    projectId: 'WordRecv', moduleName: 'M', source: LOCAL_RECV, moduleType: 'standard',
+});
+const localHover = await call('textDocument/hover', {
+    projectId: 'WordRecv', moduleName: 'M', source: LOCAL_RECV,
+    offset: LOCAL_RECV.indexOf('InsertParagraphAfter') + 4, moduleType: 'standard',
+});
+
+check('a declared local resolves its host member to hover; the paint is xlide_vscode#33, watched', () => {
+    assert.equal(localHover.hover?.details?.[0], 'Word host method',
+        `the hover read '${localHover.hover?.details?.[0] ?? '(none)'}'`);
+    const painted = localPaint.tokens.filter(
+        (token) => LOCAL_RECV.slice(token.start, token.end) === 'InsertParagraphAfter');
+    if (painted.length > 0) {
+        console.log('     UPSTREAM FIXED: local receivers paint - check semantic.ts threads the locals, pin it, close xlide_vscode#33.');
+        assert.ok(painted.every((token) => token.type === 'function'),
+            `painted as ${painted.map((token) => token.type).join(', ')}`);
+    }
+});
+
+const globalFnHover = await call('textDocument/hover', {
+    projectId: 'WordRecv', moduleName: 'M', source: LOCAL_RECV,
+    offset: LOCAL_RECV.indexOf('InchesToPoints') + 4, moduleType: 'standard',
+});
+
+check('the host Global interface is xlide_vscode#34, watched: InchesToPoints answers when modelled', () => {
+    if (globalFnHover.hover) {
+        console.log('     UPSTREAM FIXED: the Global interface resolves - pin the hover here and close xlide_vscode#34.');
+        assert.ok(/InchesToPoints/.test(globalFnHover.hover.signature),
+            `signature was '${globalFnHover.hover.signature}'`);
+    }
+});
+
+// NOTE: the word open above re-hosts the engine; the sync fork block below opens access and
+// expects to be LAST. Anything excel-hosted goes before the WordRecv open.
+
+/*
  * THE SYNC FORK FOLLOWS THE HOST (decision 15's narrowing, 2026-08-19): a .frm/.frx pair is a
  * CREATE where the applier's VBComponents.Import can land it, and Access's VBE carries no
  * MSForms at all - no UserForms exist there, so the planner's refusal is the truth and the

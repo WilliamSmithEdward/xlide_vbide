@@ -166,7 +166,10 @@ $deadline = (Get-Date).AddSeconds(30)
 while (-not $listed -and (Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 500
     try {
-        $answer = & node (Join-Path $PSScriptRoot 'xlide-api.mjs') doctor 2>$null | Out-String
+        # BY PID: with a second live session beside this one - a Word fixture, another Excel -
+        # the bare verb refuses to guess between instances, and this loop then read the refusal
+        # as "not healthy yet" for its whole budget (caught 2026-08-19, building the Word twin).
+        $answer = & node (Join-Path $PSScriptRoot 'xlide-api.mjs') --pid $process.Id doctor 2>$null | Out-String
         if ($answer -match '"healthy"') {
             # Healthy, or out of patience. The engine is started alongside the surface and takes
             # a beat longer to connect, so the FIRST answer here is routinely "up but the engine
