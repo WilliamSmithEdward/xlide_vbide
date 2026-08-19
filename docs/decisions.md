@@ -404,6 +404,13 @@ a `.frm`/`.frx` pair to the VBE's own importer and gets the whole form back: con
 pictures, code. The one-brain design exists so the two products agree about what a sync MEANS;
 what an applier can DO was never rightly the planner's to decide.
 
+The difference is architectural, not a version gap (the owner, 2026-08-19). The extension's
+applier imports by writing the CLOSED file's container directly - CFB writes into the .xlsm -
+which is precisely what can never work here: the workbook is OPEN in the host, the file is
+locked, and the disk copy is stale by definition. This product's applier speaks to the open
+project through the VBE instead, which is precisely what a closed-file writer cannot reach.
+The two capability envelopes will never converge, so the fork is permanent, not patience.
+
 So the behavior forks, deliberately: a `.frm` whose `.frx` sits beside it in the folder is a
 CREATE here. The engine's planner stand-in re-marks the row after the shared planner answers
 (`engine/src/sync.ts`). The fork is exactly that wide and no wider:

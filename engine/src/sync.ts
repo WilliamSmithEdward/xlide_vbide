@@ -116,13 +116,16 @@ function withoutPointlessComparisons(plan: ModuleSyncPlan): ModuleSyncPlan {
  * docs/decisions.md): a .frm whose .frx sits beside it is a CREATE here, not a refusal.
  *
  * Their planner refuses to create a userform from a file because THEIR applier cannot -
- * `moduleSyncPlan.ts` encodes the capabilities of the extension's own import path. This
- * product's applier is the add-in, which hands the pair to `VBComponents.Import` and gets the
- * whole form back natively - controls, fonts, pictures - a path the designer suite has pinned
- * since 2026-08-16. The one-brain design is for what a sync MEANS; what an applier can DO was
- * never rightly the planner's to decide. (The refusal reached us when the engine was rebuilt
- * against xlide_vscode 4.0.0, whose #21 classifies .frm as userform; the older engine binary
- * predated that. Caught by the suite going 431/6 - 2026-08-19, hunt round three.)
+ * `moduleSyncPlan.ts` encodes the capabilities of the extension's own import path. The
+ * difference is architectural, not a version gap: their applier writes the CLOSED file's
+ * container directly (CFB writes), which can never work here - the workbook is open in the
+ * host and the file is locked - while this product's applier hands the pair to
+ * `VBComponents.Import` on the OPEN project and gets the whole form back - controls, fonts,
+ * pictures - a path the designer suite has pinned since 2026-08-16. The one-brain design is
+ * for what a sync MEANS; what an applier can DO was never rightly the planner's to decide.
+ * (The refusal reached us when the engine was rebuilt against xlide_vscode 4.0.0, whose #21
+ * classifies .frm as userform; the older engine binary predated that. Caught by the suite
+ * going 431/6 - 2026-08-19, hunt round three.)
  *
  * The fork is deliberately narrow: import direction, a `skipping-import` row, a `.frm` file,
  * and the sidecar PRESENT in the folder. A .frm alone stays refused - the VBE would fail it

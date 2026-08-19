@@ -1309,8 +1309,9 @@ Three things worth knowing before driving it:
   prune controls the binary brought in. Ticking it is the developer's choice, and the apply then
   reports exactly what it added and removed.
 - **A form's pair is a CREATE here, by decision.** The shared planner refuses to create a
-  userform from a file because the EXTENSION'S applier could not - a capability statement about
-  one product, hardcoded into the shared head. This product's applier imports the pair natively,
+  userform from a file because the EXTENSION'S applier cannot: it imports by writing the CLOSED
+  file's container directly, and here the workbook is open in the host and the file is locked.
+  This product's applier hands the pair to the VBE's own importer on the OPEN project instead,
   so the engine's stand-in re-marks that row `will-create` when the `.frx` sits beside the
   `.frm` (decision 15 in [decisions.md](decisions.md); xlide_vscode#27 asks for the shared
   mechanism that would make the override unnecessary).
