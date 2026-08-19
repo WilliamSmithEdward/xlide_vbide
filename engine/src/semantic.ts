@@ -6,13 +6,15 @@
 // a class from an enum from a user-defined type, or tell a host global from a local that shadows
 // its name - those need the analysis, and this is where it comes from.
 //
-// Three collectors, the same set the extension uses: type references resolved against the project's
-// own types, host globals that no declaration in the module has shadowed, and resolved method calls
-// on a form's designer-declared controls (xlide_vscode#20) - `RegionPick.AddItem` paints the way
+// Four collectors, the same set the extension uses: type references resolved against the project's
+// own types, host globals that no declaration in the module has shadowed, resolved method calls
+// on a form's designer-declared controls (xlide_vscode#20), and resolved method calls on a host
+// receiver (xlide_vscode#29) - `RegionPick.AddItem` and `ActiveSheet.Calculate` paint the way
 // `Len` does, while a property read or an unresolved member stays untouched.
 
 import {
     collectHostGlobalTokens,
+    collectHostMemberMethodTokens,
     collectImplicitMemberMethodTokens,
     resolveTypeSemanticTokens,
 } from '../../../xlide_vscode/src/analyzer';
@@ -35,6 +37,14 @@ export function semanticTokensFor(
         ...collectImplicitMemberMethodTokens(params.source, {
             implicitMembers: ctx.implicitMembers,
             meType: ctx.meType,
+        }),
+        // Host receivers join #20's convention (xlide_vscode#29): ActiveSheet.Calculate and
+        // Word's ActiveDocument.FitToPages paint the way RegionPick.AddItem does. Controls ride
+        // along as implicitMembers because inside a form their names bind before the host's.
+        ...collectHostMemberMethodTokens(params.source, {
+            model: ctx.hostModel,
+            codeNames: ctx.codeNames,
+            implicitMembers: ctx.implicitMembers,
         }),
     ];
 

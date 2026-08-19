@@ -183,9 +183,8 @@ for (const one of broken) { console.log("  ! " + one); }
 // the UPSTREAM FIXED line announces the day one starts passing (both #11 cases did with
 // 4.0.0, verified 2026-08-19, and were trimmed from this list the same day).
 const KNOWN = [
-  // xlide_vscode#26: the VBE refuses to compile an unknown member on an early-bound form
-  // receiver; the analyzer says nothing.
-  "a control the form does not have is a finding",
+  // Empty since 2026-08-19: xlide_vscode#26 (a member the form does not have) landed upstream
+  // and its row passes - the third trim, after both #11 cases went the same way with 4.0.0.
 ];
 const unexpected = broken.filter((one) => !KNOWN.includes(one));
 const fixed = KNOWN.filter((one) => !broken.includes(one));

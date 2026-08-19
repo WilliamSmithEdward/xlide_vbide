@@ -123,17 +123,19 @@ check('in excel, ActiveSheet is a host global and no finding', () => {
 });
 
 /*
- * A FILED GAP, WATCHED FROM HERE (the #26 idiom, engine-side): xlide_vscode#29 - a resolved
- * host METHOD takes no semantic token, so Calculate wears property blue while hover calls it
- * 'Excel host method' and completion answers kind:method. The receiver's own defaultLibrary
- * token is the part that is right today, and is pinned. The row runs HERE because the host is
- * the process's identity, one per engine: after the word open below, ActiveSheet is nobody.
+ * HOST METHODS PAINT AS CALLS (xlide_vscode#29, fixed upstream and consumed 2026-08-19):
+ * ActiveSheet.Calculate takes a `function` token the way RegionPick.AddItem does (#20's
+ * convention, extended to host receivers), while the receiver keeps its defaultLibrary tint.
+ * The collector is composed in engine/src/semantic.ts - this row is what notices if that
+ * wiring, or the upstream collector, ever goes quiet again. The row runs HERE because the
+ * host is the process's identity, one per engine: after the word open below, ActiveSheet
+ * is nobody.
  */
 const excelPaint = await call('textDocument/semanticTokens', {
     projectId: 'ExcelProject', moduleName: 'Module1', source: GLOBAL_USER, moduleType: 'standard',
 });
 
-check('the host model reaches the paint at the receiver; xlide_vscode#29 asks for the method too', () => {
+check('a host method paints as a call and its receiver keeps the defaultLibrary tint', () => {
     const over = (word) => excelPaint.tokens.filter(
         (token) => GLOBAL_USER.slice(token.start, token.end) === word);
     const receiver = over('ActiveSheet');
@@ -141,11 +143,8 @@ check('the host model reaches the paint at the receiver; xlide_vscode#29 asks fo
         && (token.modifiers ?? []).includes('defaultLibrary')),
         `ActiveSheet wore ${JSON.stringify(receiver)}`);
     const method = over('Calculate');
-    if (method.length > 0) {
-        console.log('     UPSTREAM FIXED: host methods paint - promote this row to assert function and close xlide_vscode#29.');
-        assert.ok(method.every((token) => token.type === 'function'),
-            `Calculate painted as ${method.map((token) => token.type).join(', ')}`);
-    }
+    assert.equal(method.length, 1, `Calculate took ${method.length} token(s)`);
+    assert.equal(method[0].type, 'function', `Calculate painted as ${method[0].type}`);
 });
 
 // Now tell the engine it is running in Word, the way project/open does, and ask again.
@@ -205,11 +204,13 @@ check('a word type expands by its bare display name', () => {
 });
 
 /*
- * THE SECOND FILED GAP, watched the same way: xlide_vscode#28 - every host-origin label is
- * the literal 'Excel host ...', so in Word this hover answers 'Excel host method' for
- * Document.FitToPages. The data around the label is already Word's - the signature, the
- * member, the documentation - only the word Excel is wrong, and the row tolerates exactly
- * that until the UPSTREAM FIXED line fires.
+ * ORIGIN LABELS NAME THE MODULE'S HOST (xlide_vscode#28, fixed upstream and consumed
+ * 2026-08-19): the model carries its application name, and hover builds the label from it -
+ * so Word's Document.FitToPages hovers as a WORD host method, while Excel's wording stays
+ * byte-for-byte what it always was (pinned by the excel hover rows in smoke.mjs). And the
+ * method takes a `function` token here too: the paint fix (#29) is host-general, so the
+ * user-visible case that started both issues - FitToPages wearing property blue under an
+ * 'Excel host method' hover - is pinned closed from both sides at once.
  */
 const WORD_METHOD = 'Public Sub Probe()\r\n    ActiveDocument.FitToPages\r\nEnd Sub\r\n';
 const wordMethodHover = await call('textDocument/hover', {
@@ -217,13 +218,20 @@ const wordMethodHover = await call('textDocument/hover', {
     offset: WORD_METHOD.indexOf('FitToPages') + 3, moduleType: 'standard',
 });
 
-check('a word host member hovers as a method; xlide_vscode#28 watches the host name', () => {
-    const label = wordMethodHover.hover?.details?.[0] ?? '(no hover)';
-    assert.ok(label.endsWith('host method'), `the label was '${label}'`);
-    if (!label.startsWith('Excel')) {
-        console.log('     UPSTREAM FIXED: the hover names the host - pin the wording here and close xlide_vscode#28.');
-        assert.ok(/^word\b/i.test(label), `the label moved off Excel but not onto Word: '${label}'`);
-    }
+check('a word host member hovers as a Word host method, in those words', () => {
+    assert.equal(wordMethodHover.hover?.details?.[0], 'Word host method',
+        `the label was '${wordMethodHover.hover?.details?.[0] ?? '(no hover)'}'`);
+});
+
+const wordPaint = await call('textDocument/semanticTokens', {
+    projectId: 'WordProject', moduleName: 'Module1', source: WORD_METHOD, moduleType: 'standard',
+});
+
+check('and the word host method paints as a call', () => {
+    const method = wordPaint.tokens.filter(
+        (token) => WORD_METHOD.slice(token.start, token.end) === 'FitToPages');
+    assert.equal(method.length, 1, `FitToPages took ${method.length} token(s)`);
+    assert.equal(method[0].type, 'function', `FitToPages painted as ${method[0].type}`);
 });
 
 // A host the registry does not know: the honest answer is still known:false with a note.
