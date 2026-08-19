@@ -429,6 +429,17 @@ export class Shell {
     // demo) keeps the full menu, which is what every host but Access wants anyway.
     if (host !== undefined) {
       this.hostApp = host;
+
+      // The Immediate hint speaks the host's own tongue (the owner, 2026-08-19: the Excel
+      // example read wrong in Word). The template's static hint is the generic fallback for
+      // the beat before the first setProjects arrives.
+      const hint: Record<string, string> = {
+        excel: '? Range("A1").Value',
+        word: "? ActiveDocument.Name",
+        powerpoint: "? ActivePresentation.Name",
+        access: "? CurrentProject.Name",
+      };
+      this.immediateInput.placeholder = hint[host] ?? "? 1 + 1";
     }
     this.explorer.setProjects(projects);
   }

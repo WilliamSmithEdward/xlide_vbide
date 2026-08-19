@@ -735,6 +735,7 @@ export class DesignerView {
      * has to be cleared on every path out.
      */
     this.editor.onMouseDown((event) => this.onMarkupClick(event));
+    this.editor.onContextMenu((event) => this.onMarkupMenu(event));
     this.editor.onDidChangeCursorPosition((event) => {
       const byHand = event.reason === monaco.editor.CursorChangeReason.Explicit
         || event.reason === monaco.editor.CursorChangeReason.NotSet;
@@ -4634,6 +4635,59 @@ export class DesignerView {
     }
 
     this.deps.openHandler(found[0]!.line);
+  }
+
+  /**
+   * RIGHT-CLICK ON AN ELEMENT ROW: the row's events, and the two things a hand wants from
+   * them (the owner, 2026-08-19). Every written handler is a jump - which also lifts the
+   * annotation's first-of-several limit - "Add event" writes-or-shows the DEFAULT handler
+   * through the same gesture a canvas double-click makes, and "Rename..." is the Properties
+   * panel's own (Name) write reached from where the name is being looked at. The native
+   * VBE's rule holds: a rename does not retitle handlers, and the repainted annotation
+   * saying so is the honest report.
+   *
+   * Rows without a Name= keep monaco's own menu: cut and copy are that row's business.
+   */
+  private onMarkupMenu(event: monaco.editor.IEditorMouseEvent): void {
+    const line = event.target.position?.lineNumber;
+    if (line === undefined) {
+      return;
+    }
+
+    const text = this.model.getLineContent(line);
+    const name = /\bName="([^"]*)"/.exec(text)?.[1];
+    if (name === undefined) {
+      return;
+    }
+
+    event.event.preventDefault();
+    event.event.stopPropagation();
+
+    const isForm = /^\s*<Form\b/.test(text);
+    const handlers = this.handlerLines.get(line) ?? [];
+    const items: ContextMenuItem[] = handlers.map((handler) => ({
+      label: `Go to ${handler.name}`,
+      run: () => this.deps.openHandler(handler.line),
+    }));
+
+    items.push({
+      label: "Add event",
+      run: () => this.deps.eventStub(isForm ? null : name),
+    });
+
+    if (!isForm) {
+      items.push({
+        label: `Rename ${name}...`,
+        run: () => {
+          const wanted = window.prompt(`Rename ${name} to:`, name)?.trim();
+          if (wanted && wanted !== name) {
+            this.deps.setProperty(name, "Name", wanted);
+          }
+        },
+      });
+    }
+
+    showContextMenu(event.event.posx, event.event.posy, items);
   }
 
   private async paintHandlers(): Promise<void> {

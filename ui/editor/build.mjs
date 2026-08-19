@@ -199,7 +199,7 @@ const INDEX_HTML = `<!doctype html>
                 aria-label="Clear the Immediate output"><span class="codicon codicon-clear-all" aria-hidden="true"></span></button>
         <span id="immediate-prompt" aria-hidden="true">&gt;</span>
         <input id="immediate-input" type="text" spellcheck="false" autocomplete="off"
-               aria-label="Evaluate an expression or run a statement" placeholder="? Range(&quot;A1&quot;).Value">
+               aria-label="Evaluate an expression or run a statement" placeholder="? 1 + 1">
       </div>
     </div>
     <div id="locals">

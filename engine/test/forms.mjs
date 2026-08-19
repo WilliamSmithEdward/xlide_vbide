@@ -451,6 +451,43 @@ try {
         assert.ok(row, `no GhostForm row in ${JSON.stringify(inAccess.items?.map((i) => i.relativeName))}`);
         assert.equal(row.status, 'skipping-import', `the row read ${row.status}`);
     });
+
+    /*
+     * A FORM THAT MATCHES ITS FILE, watched (xlide_vscode#36): the planner compares the
+     * .frm - designer header and all - against a live module that can never carry one, so a
+     * form reads will-update forever, a clean round trip included. The .frm here is exactly
+     * the header the fixture form would export plus its code; the day upstream strips the
+     * header before comparing, this row reads unchanged and announces.
+     */
+    const FORM_CODE_HALF = 'Option Explicit\r\n';
+    writeFileSync(join(syncFolder, 'Matching.frm'), [
+        'VERSION 5.00',
+        'Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Matching ',
+        '   Caption         =   "Match"',
+        'End',
+        'Attribute VB_Name = "Matching"',
+        FORM_CODE_HALF,
+    ].join('\r\n'));
+    writeFileSync(join(syncFolder, 'Matching.frx'), Buffer.from([0, 1, 2, 3]));
+
+    const matched = await call('sync/plan', {
+        direction: 'import',
+        workbookPath: 'X:\\nowhere\\Probe.xlsm',
+        folder: syncFolder,
+        mode: 'updateOnly',
+        modules: [{ name: 'Matching', type: 'userform', source: FORM_CODE_HALF }],
+    });
+
+    check('a form whose code matches its file is xlide_vscode#36, watched', () => {
+        const row = (matched.items ?? []).find(
+            (item) => /Matching\.frm$/i.test(item.relativeName ?? ''));
+        assert.ok(row, 'no Matching row in the plan');
+        if (row.status === 'unchanged') {
+            console.log('     UPSTREAM FIXED: the form compare strips the designer header - pin unchanged here and close xlide_vscode#36.');
+        } else {
+            assert.equal(row.status, 'will-update', `the row read ${row.status}`);
+        }
+    });
 } finally {
     rmSync(syncFolder, { recursive: true, force: true });
 }
