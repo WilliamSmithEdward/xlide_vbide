@@ -212,7 +212,13 @@ internal sealed class ImmediateEvaluator
              * form is all there is.
              */
             var file = SafeFileName(project);
-            var target = file is null
+
+            // The `'file'!Module.Proc` bang form is EXCEL's Run spelling. Word's Run takes
+            // `Module.Proc` and resolves it across open projects - the scratch names are
+            // distinctive enough that a collision would need another XlideImmediateScratch -
+            // and handing it Excel's form fails outright (2026-08-19, the day the immediate
+            // window first ran in Word). Other hosts keep Excel's form until proven live.
+            var target = file is null || Engine.HostApp.Name == "word"
                 ? $"{ScratchModule}.{ScratchProcedure}"
                 : $"'{file}'!{ScratchModule}.{ScratchProcedure}";
 

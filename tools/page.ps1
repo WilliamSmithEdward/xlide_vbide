@@ -60,19 +60,17 @@ function Write-Step([string] $text) {
     Write-Host "==> $text" -ForegroundColor Cyan
 }
 
-# The api of whichever session is running, or null when none is. Never guesses between two
-# Excels: a page deployed into the wrong session is a confusing hour. Find-XlideApi is the
-# module's discover(): every live session, proven by /state, never a guess.
-function Get-LiveApi {
+# EVERY live session, because the bundle is shared. The deploy writes one publish directory
+# and every session serves its page from it, so reloading one session and not another leaves
+# the other running the old page with no sign anywhere - and the old form of this function
+# refused outright with two sessions live, which threw AFTER the files had already been
+# deployed (hit 2026-08-19, the day an Excel and a Word first ran side by side). Find-XlideApi
+# is the module's discover(): every live session, proven by /state, never a guess.
+function Get-LiveApis {
     Import-Module (Join-Path $PSScriptRoot 'harness\XlideApi.psm1') -Force
-    $found = @(Find-XlideApi)
-
-    if ($found.Count -eq 0) { return $null }
-    if ($found.Count -gt 1) {
-        throw "More than one xlide session is answering (pids $($found.Pid -join ', ')). Close one, or deploy by hand."
-    }
-
-    return [pscustomobject] @{ Pid = $found[0].Pid; Api = $found[0].Base }
+    return @(Find-XlideApi | ForEach-Object {
+        [pscustomobject] @{ Pid = $_.Pid; Api = $_.Base }
+    })
 }
 
 function Invoke-PageBuild {
@@ -105,42 +103,46 @@ function Invoke-PageDeploy {
     Copy-Item (Join-Path $distRoot '*') $publishRoot -Recurse -Force
     Write-Host "Deployed to $publishRoot"
 
-    $live = Get-LiveApi
-    if (-not $live) {
+    # Wrapped at the CALL: PowerShell unwraps a returned array, so zero sessions came back as
+    # $null and one came back bare, and .Count on either is a strict-mode stop.
+    $sessions = @(Get-LiveApis)
+    if ($sessions.Count -eq 0) {
         Write-Host 'No editor is open, so nothing to reload. Start one with tools\dev.ps1 -KeepOpen.' -ForegroundColor Yellow
         return
     }
 
-    Write-Step "Reload the live page (pid $($live.Pid))"
+    foreach ($live in $sessions) {
+        Write-Step "Reload the live page (pid $($live.Pid))"
 
-    if ($Reset) {
-        # Reset reloads on its own, so this is the reload as well.
-        $reset = Invoke-RestMethod "$($live.Api)/layout?reset=1" -Method Post -TimeoutSec 45
-        if (-not $reset.ran) { throw 'The page did not come back after the layout reset.' }
-        Write-Host 'Arrangement reset to the default.'
-    } else {
-        $reload = Invoke-RestMethod "$($live.Api)/reload" -Method Post -TimeoutSec 45
-        if (-not $reload.ready) { throw "The page did not come back within $($reload.elapsedMs)ms." }
+        if ($Reset) {
+            # Reset reloads on its own, so this is the reload as well.
+            $reset = Invoke-RestMethod "$($live.Api)/layout?reset=1" -Method Post -TimeoutSec 45
+            if (-not $reset.ran) { throw "The page did not come back after the layout reset (pid $($live.Pid))." }
+            Write-Host 'Arrangement reset to the default.'
+        } else {
+            $reload = Invoke-RestMethod "$($live.Api)/reload" -Method Post -TimeoutSec 45
+            if (-not $reload.ready) { throw "The page did not come back within $($reload.elapsedMs)ms (pid $($live.Pid))." }
 
-        # The stamp is the point: it proves the running page IS the build that just happened,
-        # which is the question three rounds of confusion were once spent on.
-        Write-Host ("Back in {0}ms running {1}" -f $reload.elapsedMs, $reload.pageBuildStamp)
-        if ($reload.stale) {
-            throw "The page came back STALE: it is running $($reload.pageBuildStamp) while the bundle on disk is $($reload.bundleBuiltUtc)."
+            # The stamp is the point: it proves the running page IS the build that just happened,
+            # which is the question three rounds of confusion were once spent on.
+            Write-Host ("Back in {0}ms running {1}" -f $reload.elapsedMs, $reload.pageBuildStamp)
+            if ($reload.stale) {
+                throw "The page came back STALE (pid $($live.Pid)): it is running $($reload.pageBuildStamp) while the bundle on disk is $($reload.bundleBuiltUtc)."
+            }
         }
-    }
 
-    # Anything the page complained about on the way up, which the shim log does not carry.
-    try {
-        $console = Invoke-RestMethod "$($live.Api)/console?last=40" -TimeoutSec 8
-        $noisy = @($console.lines | Where-Object { $_ -match '^(warn|error):' })
-        if ($noisy.Count -gt 0) {
-            Write-Host ''
-            Write-Host 'The page said:' -ForegroundColor Yellow
-            $noisy | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+        # Anything the page complained about on the way up, which the shim log does not carry.
+        try {
+            $console = Invoke-RestMethod "$($live.Api)/console?last=40" -TimeoutSec 8
+            $noisy = @($console.lines | Where-Object { $_ -match '^(warn|error):' })
+            if ($noisy.Count -gt 0) {
+                Write-Host ''
+                Write-Host "The page said (pid $($live.Pid)):" -ForegroundColor Yellow
+                $noisy | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+            }
+        } catch {
+            # An older shim without the console route; not worth failing a deploy over.
         }
-    } catch {
-        # An older shim without the console route; not worth failing a deploy over.
     }
 }
 

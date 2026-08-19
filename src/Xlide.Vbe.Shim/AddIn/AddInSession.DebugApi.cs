@@ -405,6 +405,18 @@ internal sealed partial class AddInSession
             return HostError($"@{who} is {matches.Count} sessions (pids {pids}); address one by pid");
         }
 
+        // ONE HOP, designated. A nested address would recurse here once per prefix on a
+        // self-address - a caller stacking thousands of `@pid/` prefixes would overflow the
+        // stack ON THE HOST THREAD and take the host with it - and on a peer it would arrive
+        // at an HTTP door that has never heard of `@` and answer a riddle. A hop that lands
+        // is a session; sessions do not forward.
+        if (target.TrimStart('/').StartsWith('@'))
+        {
+            return HostError(
+                $"@{who}: the address takes ONE hop - name the final session directly "
+                + "(Request(\"sessions\") lists them all)");
+        }
+
         var found = matches[0];
         if (found.Pid == Environment.ProcessId)
         {
