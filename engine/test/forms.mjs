@@ -284,11 +284,11 @@ check('Me.Calculate and Sheet1.Calculate paint as one thing: both mentions, both
 });
 
 /*
- * A FILED GAP, WATCHED (xlide_vscode#32, the announce idiom): member access stops one hop
- * short of what its metadata knows. TabStrip.SelectedItem hovers `As Tab` - the return type
- * is right there - but completion inside the RETURNED object answers nothing, while a host
- * chain (ThisWorkbook.ActiveSheet.) resolves its second hop fine. The direct-member half is
- * asserted as the pin; the chain half announces the day upstream takes the hop.
+ * MEMBER ACCESS FOLLOWS A CONTROL MEMBER INTO WHAT IT RETURNS (xlide_vscode#32, filed on the
+ * owner's screenshot - "caption doesn't have a rollover" - and fixed the same day): TabStrip's
+ * SelectedItem hovers `As Tab`, and the surface INSIDE the returned Tab now answers too, the
+ * way a host chain always did. Upstream's own boundary stands: a primitive or Object-typed
+ * return still ends the chain, the way the VBE's own list does.
  */
 const CHAIN_DOT = 'Private Sub T()\r\n    Views.SelectedItem.\r\nEnd Sub\r\n';
 await call('project/open', {
@@ -308,15 +308,23 @@ const directItems = await call('textDocument/completion', {
     offset: DIRECT_DOT.indexOf('Views.') + 'Views.'.length, moduleType: 'userform',
 });
 
-check('a control member resolves directly; the returned object is xlide_vscode#32, watched', () => {
+check('a control member resolves directly, and the object it returns resolves too', () => {
     assert.ok((directItems.items ?? []).some((item) => item.label === 'SelectedItem'),
         `Views. must offer SelectedItem; got ${directItems.items?.length ?? 0} item(s)`);
-    const inside = chainItems.items ?? [];
-    if (inside.length > 0) {
-        console.log('     UPSTREAM FIXED: the returned object resolves - pin Caption here and close xlide_vscode#32.');
-        assert.ok(inside.some((item) => item.label === 'Caption'),
-            `the Tab surface arrived without Caption? ${inside.length} item(s)`);
-    }
+    assert.ok((chainItems.items ?? []).some((item) => item.label === 'Caption'),
+        `Views.SelectedItem. must offer the Tab's Caption; got ${chainItems.items?.length ?? 0} item(s)`);
+});
+
+const CHAIN_HOVER = 'Private Sub T()\r\n    Dim t As String\r\n    t = Views.SelectedItem.Caption\r\nEnd Sub\r\n';
+const chainHover = await call('textDocument/hover', {
+    projectId: 'Chain', moduleName: 'TabForm', source: CHAIN_HOVER,
+    offset: CHAIN_HOVER.lastIndexOf('Caption') + 3, moduleType: 'userform',
+});
+
+check('and the rollover that started it answers: SelectedItem.Caption hovers as the Tab\'s', () => {
+    assert.ok(chainHover.hover, 'expected a hover');
+    assert.ok(/Caption/.test(chainHover.hover.signature),
+        `signature was '${chainHover.hover.signature}'`);
 });
 
 /*
