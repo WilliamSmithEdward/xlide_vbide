@@ -141,7 +141,7 @@ internal static class AgentGuide
             "The analyzer's findings, optionally for one module.",
             "GET problems", true, DoorPolicy.Open),
         new("component", "POST", "action=add|remove|rename name=<component> kind=<kind on add> newName=<on rename> project=<display>?",
-            "Adds, removes or renames a project component the way the editor would.",
+            "Adds, removes or renames a project component the way the editor would. kind=form is refused in Access, whose VBA has no UserForms.",
             "POST component?action=add&name=Helper&kind=module", true, DoorPolicy.Open),
         new("compile", "POST", "-",
             "Runs Debug > Compile and answers with the error dialog's own words, or that it compiled cleanly.",

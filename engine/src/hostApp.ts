@@ -61,3 +61,14 @@ export function currentHostModel(): HostObjectModel {
 export function hostModelIsKnown(): boolean {
     return currentHostModel() !== EMPTY_HOST_MODEL;
 }
+
+/**
+ * Whether the current host's VBE carries the MSForms designer at all. Access's does not -
+ * Access VBA has its own Forms and no UserForms, so its VBE offers no Insert > UserForm and
+ * `VBComponents.Import` of a .frm can only fail there (the owner, 2026-08-19). Everything that
+ * would CREATE a userform consults this; reading one is not gated, because a form component
+ * can never exist in such a host to begin with.
+ */
+export function hostCarriesMsForms(): boolean {
+    return current !== 'access';
+}

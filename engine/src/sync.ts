@@ -24,6 +24,7 @@ import {
     buildImportModuleSyncPlan,
     type ModuleSyncPlan,
 } from '../../../xlide_vscode/src/moduleSyncPlan';
+import { hostCarriesMsForms } from './hostApp';
 
 /** One module as the shim read it out of the live project. */
 export interface SyncLiveModule {
@@ -136,6 +137,14 @@ function withoutPointlessComparisons(plan: ModuleSyncPlan): ModuleSyncPlan {
  * the drift tripwire, and they have fired within a day both times the row shape moved.
  */
 function withFormPairsCreatable(plan: ModuleSyncPlan, folder: string): ModuleSyncPlan {
+    // And narrower still than the shape below: only where the host's VBE carries MSForms at
+    // all. In Access there are no UserForms - `VBComponents.Import` of a .frm can only fail -
+    // so the planner's refusal is the truth there and the promotion would offer a create that
+    // cannot happen (the owner, 2026-08-19: no surface offers adding a userform in Access).
+    if (!hostCarriesMsForms()) {
+        return plan;
+    }
+
     const rows = plan as unknown as {
         items?: {
             status?: string;

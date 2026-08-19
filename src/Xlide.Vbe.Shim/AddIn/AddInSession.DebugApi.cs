@@ -3596,6 +3596,15 @@ internal sealed partial class AddInSession
                                     $"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
                             }
 
+                            // The api mirrors the UI: Access's VBE has no MSForms, offers no
+                            // Insert > UserForm, and would fail the Add(3) with a COM mumble.
+                            // The refusal is designated instead (the owner, 2026-08-19).
+                            if (kind == 3 && !HostApp.CarriesMsForms)
+                            {
+                                return HostError(
+                                    $"{HostApp.Name} VBA has no UserForms, so kind=form cannot be added here");
+                            }
+
                             using var project = FindProjectByDisplayName(componentProject)
                                 ?? _editor.GetObject("ActiveVBProject");
                             using var components = project?.GetObject("VBComponents");

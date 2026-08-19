@@ -58,7 +58,7 @@ export type HostMessage =
   | { type: "immediateResult"; text: string; failed: boolean }
   | { type: "setModules"; modules: string[]; projects?: (string | null)[]; active: string | null; activeProject?: string | null; dirty?: boolean[]; faces?: (string | null)[]; activeFace?: string | null }
   | { type: "setFindings"; findings: ShellFinding[] }
-  | { type: "setProjects"; projects: ExplorerProject[] }
+  | { type: "setProjects"; projects: ExplorerProject[]; host?: string }
   | { type: "setDiagnostics"; moduleName: string; project?: string | null; markers: HostMarker[] }
   | { type: "setCurrentLine"; line: number | null }
   | { type: "setBreakpoints"; lines: number[] }
@@ -1338,7 +1338,7 @@ export class EditorBridge {
         this.shell?.setFindings(message.findings);
         return;
       case "setProjects":
-        this.shell?.setProjects(message.projects);
+        this.shell?.setProjects(message.projects, message.host);
         return;
       case "setDiagnostics":
         this.setDiagnostics(message.moduleName, message.project ?? null, message.markers);

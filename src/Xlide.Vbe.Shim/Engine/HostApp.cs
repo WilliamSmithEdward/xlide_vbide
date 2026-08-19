@@ -26,6 +26,15 @@ internal static class HostApp
     /// </summary>
     public static string Name { get; } = FromProcess();
 
+    /// <summary>
+    /// Whether this host's VBE carries the MSForms designer at all. Access's does not - Access
+    /// VBA has its own Forms and no UserForms, its VBE offers no Insert > UserForm, and
+    /// `VBComponents.Add(3)` can only fail there - so every surface that would CREATE a
+    /// userform consults this and refuses plainly instead of relaying a COM error (the owner,
+    /// 2026-08-19). Reading forms is not gated: a form component cannot exist in such a host.
+    /// </summary>
+    public static bool CarriesMsForms => Name is not "access";
+
     private static string FromProcess()
     {
         var image = Path.GetFileNameWithoutExtension(Environment.ProcessPath ?? string.Empty);

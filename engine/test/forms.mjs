@@ -17,6 +17,9 @@
 //   node test/forms.mjs --exe
 
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { reporter, startEngine } from './harness.mjs';
 
 const { call, stop } = await startEngine('forms');
@@ -288,6 +291,64 @@ check('Me.Calculate beside Sheet1.Calculate: the Me gap is xlide_vscode#31, watc
         console.log('     UPSTREAM FIXED: Me paints - check semantic.ts passes the me host type, pin both mentions, close xlide_vscode#31.');
     }
 });
+
+/*
+ * THE SYNC FORK FOLLOWS THE HOST (decision 15's narrowing, 2026-08-19): a .frm/.frx pair is a
+ * CREATE where the applier's VBComponents.Import can land it, and Access's VBE carries no
+ * MSForms at all - no UserForms exist there, so the planner's refusal is the truth and the
+ * promotion must stand down. The host is the process's identity, set by project/open, so the
+ * access half runs LAST in this file: everything above assumes Excel, and the first version
+ * of this block sat before the watchers above and quietly re-hosted them (caught the same
+ * hour it was written: the #30 row announced a fix that had not happened).
+ */
+const syncFolder = mkdtempSync(join(tmpdir(), 'xlide-forms-sync-'));
+writeFileSync(join(syncFolder, 'GhostForm.frm'), [
+    'VERSION 5.00',
+    'Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} GhostForm ',
+    '   Caption         =   "Ghost"',
+    'End',
+    'Attribute VB_Name = "GhostForm"',
+    'Option Explicit',
+    '',
+].join('\r\n'));
+writeFileSync(join(syncFolder, 'GhostForm.frx'), Buffer.from([0, 1, 2, 3]));
+
+const planFor = () => call('sync/plan', {
+    direction: 'import',
+    workbookPath: 'X:\\nowhere\\Probe.xlsm',
+    folder: syncFolder,
+    mode: 'updateOnly',
+    modules: [{ name: 'Module1', type: 'standard', source: 'Option Explicit\r\n' }],
+});
+
+const rowOf = (plan) => (plan.items ?? []).find(
+    (item) => /GhostForm\.frm$/i.test(item.relativeName ?? ''));
+
+try {
+    const inExcel = await planFor();
+
+    check('in excel, a .frm with its .frx beside it plans as a create', () => {
+        const row = rowOf(inExcel);
+        assert.ok(row, `no GhostForm row in ${JSON.stringify(inExcel.items?.map((i) => i.relativeName))}`);
+        assert.equal(row.status, 'will-create', `the row read ${row.status}`);
+    });
+
+    // Now the engine learns it is running in Access, the way project/open tells it.
+    await call('project/open', {
+        projectId: 'AccessProbe', generation: 1, host: 'access',
+        modules: [{ moduleName: 'M', source: 'Option Explicit\r\n', type: 'standard' }],
+    });
+
+    const inAccess = await planFor();
+
+    check('in access, the same pair stays refused: no host without MSForms offers a create', () => {
+        const row = rowOf(inAccess);
+        assert.ok(row, `no GhostForm row in ${JSON.stringify(inAccess.items?.map((i) => i.relativeName))}`);
+        assert.equal(row.status, 'skipping-import', `the row read ${row.status}`);
+    });
+} finally {
+    rmSync(syncFolder, { recursive: true, force: true });
+}
 
 stop();
 process.exit(done());

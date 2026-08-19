@@ -185,6 +185,8 @@ export class Shell {
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly explorer: Explorer;
   private readonly menubar: Menubar;
+  /** Which application the session is hosted in ("excel", "word", "access"...), from setProjects. */
+  private hostApp = "excel";
   private readonly problemsBody: HTMLElement;
   private readonly immediateBody: HTMLElement;
   private readonly immediateLog: HTMLElement;
@@ -421,7 +423,13 @@ export class Shell {
     return this.explorer.snapshot();
   }
 
-  setProjects(projects: ExplorerProject[]): void {
+  setProjects(projects: ExplorerProject[], host?: string): void {
+    // Which application the tree belongs to, kept for what the menus may offer: Access VBA
+    // has no UserForms, so its add menus must not promise one. Absent (an older shim, the
+    // demo) keeps the full menu, which is what every host but Access wants anyway.
+    if (host !== undefined) {
+      this.hostApp = host;
+    }
     this.explorer.setProjects(projects);
   }
 
@@ -1483,11 +1491,19 @@ export class Shell {
    * dialogs, which a plus has no business promising.
    */
   private newComponentItems(project: string): ContextMenuItem[] {
-    return [
+    const items: ContextMenuItem[] = [
       { label: "New Module", run: () => this.handlers.insertComponent(1, project) },
       { label: "New Class Module", run: () => this.handlers.insertComponent(2, project) },
-      { label: "New UserForm", run: () => this.handlers.insertComponent(3, project) },
     ];
+
+    // Access VBA has no UserForms - its own VBE offers no Insert > UserForm - so the item
+    // only exists where MSForms does. The host rides setProjects; the shim refuses kind 3
+    // there as well, so hiding this is courtesy, not the guard.
+    if (this.hostApp !== "access") {
+      items.push({ label: "New UserForm", run: () => this.handlers.insertComponent(3, project) });
+    }
+
+    return items;
   }
 
   private hostCommand(id: string): void {

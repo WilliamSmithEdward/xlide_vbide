@@ -1281,7 +1281,7 @@ internal sealed class EditorSurface : IDisposable
         ArgumentNullException.ThrowIfNull(projects);
 
         Send("setProjects", JsonSerializer.Serialize(
-            new SetProjectsMessage("setProjects", projects),
+            new SetProjectsMessage("setProjects", projects, Engine.HostApp.Name),
             EditorMessageContext.Default.SetProjectsMessage));
     }
 

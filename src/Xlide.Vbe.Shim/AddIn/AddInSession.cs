@@ -8542,6 +8542,14 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
+        // The page's menu already hides "New UserForm" where MSForms does not exist, but the
+        // message is a wire anyone can speak: the refusal has to live where the insert does.
+        if (kind == 3 && !HostApp.CarriesMsForms)
+        {
+            _editorSurface?.Notify($"{HostApp.Name} VBA has no UserForms, so none can be added");
+            return;
+        }
+
         try
         {
             // The workbook the menu was opened on, when it was; the active project otherwise.

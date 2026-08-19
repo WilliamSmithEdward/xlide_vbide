@@ -392,10 +392,15 @@ public sealed record SurfaceProject(
     [property: JsonPropertyName("name")] string Name,
     [property: JsonPropertyName("components")] SurfaceComponent[] Components);
 
-/// <summary>The whole project tree, for the explorer.</summary>
+/// <summary>
+/// The whole project tree, for the explorer - and WHICH APPLICATION the tree belongs to, so the
+/// page can shape what it offers: Access VBA has no UserForms, and a "New UserForm" item there
+/// would promise what the host cannot do (the owner, 2026-08-19).
+/// </summary>
 public sealed record SetProjectsMessage(
     [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("projects")] SurfaceProject[] Projects);
+    [property: JsonPropertyName("projects")] SurfaceProject[] Projects,
+    [property: JsonPropertyName("host")] string Host);
 
 /// <summary>
 /// The module's text as the editor now holds it, to be adopted without disturbing the developer.
