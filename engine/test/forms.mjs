@@ -328,6 +328,30 @@ check('and the rollover that started it answers: SelectedItem.Caption hovers as 
 });
 
 /*
+ * HOST CONSTANTS AND THE PAINT, filed and watched (xlide_vscode#35): every host constant
+ * resolves since 4.0.2, and only a curated nineteen paint - via the GRAMMARS' static lists,
+ * not the analysis, so the engine emits no token for any of them today. When the collector
+ * arrives, consuming it needs a legend entry, a theme rule, and the call in semantic.ts -
+ * three things this announcement exists to demand. Runs under EXCEL: before the word block.
+ */
+const CONST_SRC = 'Public Sub T()\r\n    Dim a As Long\r\n    a = xlLandscape\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'Consts', generation: 1,
+    modules: [{ moduleName: 'M', source: CONST_SRC, type: 'standard' }],
+});
+const constPaint = await call('textDocument/semanticTokens', {
+    projectId: 'Consts', moduleName: 'M', source: CONST_SRC, moduleType: 'standard',
+});
+
+check('a resolved host constant takes no token yet; xlide_vscode#35 asks for the family', () => {
+    const over = constPaint.tokens.filter(
+        (token) => CONST_SRC.slice(token.start, token.end) === 'xlLandscape');
+    if (over.length > 0) {
+        console.log('     UPSTREAM FIXED: host constants paint - wire the legend, theme and semantic.ts call, pin it, close xlide_vscode#35.');
+    }
+});
+
+/*
  * THE NEXT TWO RECEIVER GAPS, filed and watched (xlide_vscode#33 and #34, the announce
  * idiom): a DECLARED LOCAL with a host type paints nothing while its hover says method, and
  * the host GLOBAL interface's own methods (Word's InchesToPoints) resolve nothing anywhere.

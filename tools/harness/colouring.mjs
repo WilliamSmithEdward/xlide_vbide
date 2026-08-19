@@ -21,7 +21,9 @@
  */
 import { open, reporter, scratchModule, waitFor } from "./xlide-api.mjs";
 
-const api = await open();
+// XLIDE_PID picks the session when several are live - an Excel fixture beside a Word one is
+// a designed state (2026-08-19), and open() rightly refuses to guess between them.
+const api = await open({ pid: Number(process.env.XLIDE_PID) || undefined });
 const project = await api.project();
 const name = `Colour${process.pid}`;
 
@@ -32,7 +34,11 @@ const CALL = "rgb(220, 220, 170)";
 const PLAIN = "rgb(156, 220, 254)";
 const TYPE = "rgb(78, 201, 184)";
 const KEYWORD = "rgb(197, 134, 192)";
-const NAMES = { [CALL]: "call", [PLAIN]: "identifier", [TYPE]: "type", [KEYWORD]: "keyword" };
+const CONSTANT = "rgb(86, 156, 214)";
+const NAMES = {
+  [CALL]: "call", [PLAIN]: "identifier", [TYPE]: "type", [KEYWORD]: "keyword",
+  [CONSTANT]: "constant",
+};
 const nameOf = (colour) => NAMES[colour] ?? colour;
 
 const lines = [
@@ -60,6 +66,9 @@ const lines = [
   `    ${name}.Recalculate "qualified"`,
   `    Debug.Print ${name}.CalculérName(1)`,
   "    Debug.Print Application.Version",
+  "    Debug.Print vbInformation",
+  "    Debug.Print xlUp",
+  "    Debug.Print xlLandscape",
   "End Sub",
   "",
 ];
@@ -169,6 +178,31 @@ try {
     statement.head === KEYWORD,
     `it is ${nameOf(statement.head)}. Print #1, is a real VBA statement and nothing about the `
     + "member rule should reach it.");
+
+  /*
+   * 3b. THE CONSTANT FAMILIES, pinned for the first time on 2026-08-19 - the day their state
+   * was misread twice for want of a pin. Three tiers, and each is a contract:
+   *
+   *   vbInformation paints CONSTANT: the language's own constants, the grammar's list.
+   *   xlUp paints CONSTANT: the curated nineteen Excel names the COMPANION's grammar paints
+   *     (its constants pattern, byte for byte), which this grammar mirrors - parity, per
+   *     theme.ts's "a module should read identically in the two products".
+   *   xlLandscape paints IDENTIFIER: every host constant OUTSIDE the nineteen, in both
+   *     products alike. All of them RESOLVE (hover answers Const + value since 4.0.2); the
+   *     paint finishing the job is filed as xlide_vscode#35, watched from the engine suite,
+   *     and this row is what gets promoted when the semantic collector arrives and is wired.
+   */
+  const language = await across("    Debug.Print vbInformation", "vbInformation");
+  check("a language constant is painted as a constant",
+    language.head === CONSTANT, `it is ${nameOf(language.head)}`);
+
+  const curated = await across("    Debug.Print xlUp", "xlUp");
+  check("a curated Excel constant paints as one, matching the companion's list",
+    curated.head === CONSTANT, `it is ${nameOf(curated.head)}`);
+
+  const uncurated = await across("    Debug.Print xlLandscape", "xlLandscape");
+  check("a host constant outside the list stays an identifier until xlide_vscode#35 lands",
+    uncurated.head === PLAIN, `it is ${nameOf(uncurated.head)}`);
 
   // 4. A NAME IS ONE COLOUR ALL THE WAY ALONG.
   const plainType = await across("Public Type PlainRecord", "PlainRecord");
