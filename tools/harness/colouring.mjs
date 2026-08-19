@@ -180,6 +180,17 @@ try {
     + "member rule should reach it.");
 
   /*
+   * 3b's rows read SEMANTIC tokens, and the wait at the top deliberately watches a GRAMMAR
+   * observable - so these need their own arrival signal or they race the analysis (they did,
+   * 2026-08-19: green on the first run, red twenty minutes later, same build). The signal is
+   * the host global's tint on `Application` - semantic, and asserted by no row below.
+   */
+  await waitFor("the SEMANTIC pass to land", async () =>
+    (await across("    Debug.Print Application.Version", "Application")).head === "rgb(79, 193, 255)",
+    { budgetMs: 8000 },
+  ).catch(() => console.log("     (the semantic pass never arrived; the colours below say what did)"));
+
+  /*
    * 3b. THE CONSTANT FAMILIES, pinned 2026-08-19 - first as three tiers, promoted to TWO the
    * same day when xlide_vscode#35 landed and was wired (legend, theme, and the collector's
    * ride on the globals walk):
