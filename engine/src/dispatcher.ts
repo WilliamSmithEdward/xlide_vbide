@@ -133,6 +133,13 @@ function crossModuleFingerprint(
                 source: module.source,
                 type: module.type,
                 documentType: module.documentType as EventHandlerDocumentType | undefined,
+                // A form's controls are cross-module analyzer input (xlide_vscode#22, #26):
+                // without them here, a designer change that touched no source produced the
+                // SAME fingerprint, and the memo below replayed pre-change findings - a
+                // removed control kept resolving as a ghost (the 2026-08-19 hunt, found
+                // through three layers: no reseed poke, then a source-only sameness gate,
+                // then this, the fingerprint that could not see what changed).
+                implicitMembers: module.implicitMembers,
             })));
             const procedures = projectProcedureSignatures(index);
 

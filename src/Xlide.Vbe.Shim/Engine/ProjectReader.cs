@@ -189,6 +189,16 @@ internal static class ProjectReader
                     ? Editor.FormDesignService.ControlMembers(component)
                     : null;
 
+                if (componentType == 3)
+                {
+                    // Null and empty are DIFFERENT seeds - unreadable vs vouched-for-empty
+                    // (xlide_vscode#26) - and nothing else says which one a pass sent, which
+                    // is exactly what the 2026-08-19 ghost-control hunt needed to see.
+                    Diagnostics.Log.Verbose($"seed: {moduleName} carries "
+                        + (members is null ? "no designer answer" : $"{members.Length} control(s)"
+                            + (members.Length == 0 ? string.Empty : $": {string.Join(", ", members.Select(m => m.Name))}")));
+                }
+
                 modules.Add(new EngineModule(moduleName, source, TypeName(componentType), members));
             }
 

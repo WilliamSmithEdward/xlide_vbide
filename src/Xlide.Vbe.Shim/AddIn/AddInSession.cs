@@ -5294,10 +5294,19 @@ internal sealed partial class AddInSession : IDisposable
     /// An open designer tab follows every xlide-side change to its form: the designer routes
     /// funnel through here after a successful mutation and the tab re-projects, which is what
     /// keeps the markup and the visual current without anyone re-activating the tab. What comes
-    /// from OUTSIDE the funnel is caught by the fingerprint below instead.
+    /// from OUTSIDE the funnel is caught by the fingerprint below instead - and lands here too,
+    /// so this is also where the ANALYSIS learns the form moved.
     /// </summary>
     private void RefreshDesignerTabFor(string moduleName)
     {
+        // The engine's seed carries the form's control list, so a designer mutation is an
+        // analysis change whether or not any tab is open: without this poke a removed control
+        // kept resolving as a ghost - completion, diagnostics and paint all serving the stale
+        // list - until an unrelated module write happened to run a pass (the 2026-08-19 hunt).
+        // Cheap when nothing material moved: the pass's sameness gate compares the walked
+        // control list (SeedOf), so a geometry-only drag costs one comparison, not an analysis.
+        _analysis?.Reanalyse();
+
         var tab = _designerTabs.FirstOrDefault(t =>
             string.Equals(t.Module, moduleName, StringComparison.OrdinalIgnoreCase));
         if (tab != default)
@@ -5664,6 +5673,11 @@ internal sealed partial class AddInSession : IDisposable
                 if (!outcome.ParseFailed)
                 {
                     PublishFormMarkup(moduleName, display);
+
+                    // The funnel's other mouth: this path publishes directly rather than
+                    // through RefreshDesignerTabFor, so it pokes the analysis itself - the
+                    // seed carries the control list, and an apply may have changed it.
+                    _analysis?.Reanalyse();
                 }
             }
             catch (Exception ex)

@@ -162,5 +162,132 @@ check('the dispatch internals stay hidden, the way the VBE hides them', () => {
     assert.deepEqual(underscored, []);
 });
 
+/*
+ * AN EMPTY CONTROL LIST IS AN ANSWER. Upstream proves a member ABSENT on a form only when the
+ * host vouched for the control list - an EMPTY array included (xlide_vscode#26) - and the shim
+ * folded "walked the designer, found nothing" into null until 2026-08-19, which silenced every
+ * unknown-member finding on a control-less form. Both sides of the contract are pinned: a
+ * supplied empty list proves absence; an absent list proves nothing.
+ */
+const POKE = 'Public Sub Poke()\r\n    Bare.Nope\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'EmptyKnown', generation: 1,
+    modules: [
+        { moduleName: 'Bare', source: 'Option Explicit\r\n', type: 'userform', implicitMembers: [] },
+        { moduleName: 'Uses', source: POKE, type: 'standard' },
+    ],
+});
+
+const emptyKnown = await call('textDocument/diagnostics', {
+    documentKey: 'EmptyKnown/Uses', projectId: 'EmptyKnown', generation: 1,
+    source: POKE, moduleName: 'Uses', moduleType: 'standard',
+});
+
+check('a vouched-for EMPTY form proves absence: Bare.Nope is a finding', () => {
+    assert.ok(emptyKnown.diagnostics.some((one) => one.message.includes('Nope')),
+        `expected an unknown-member finding; got ${JSON.stringify(emptyKnown.diagnostics)}`);
+});
+
+await call('project/open', {
+    projectId: 'EmptyUnknown', generation: 1,
+    modules: [
+        { moduleName: 'Bare', source: 'Option Explicit\r\n', type: 'userform' },
+        { moduleName: 'Uses', source: POKE, type: 'standard' },
+    ],
+});
+
+const emptyUnknown = await call('textDocument/diagnostics', {
+    documentKey: 'EmptyUnknown/Uses', projectId: 'EmptyUnknown', generation: 1,
+    source: POKE, moduleName: 'Uses', moduleType: 'standard',
+});
+
+check('an unvouched form proves nothing: no control list, no absence claim', () => {
+    assert.ok(!emptyUnknown.diagnostics.some((one) => one.message.includes('Nope')),
+        `an absent list must stay silent; got ${JSON.stringify(emptyUnknown.diagnostics)}`);
+});
+
+/*
+ * AND THE FINGERPRINT SEES A DESIGNER CHANGE. The diagnostics memo replays an answer while
+ * the cross-module facts hold still, and a control list can change without a single source
+ * changing - a designer apply is exactly that. The fingerprint's index ignored implicit
+ * members until 2026-08-19, so a removed control kept resolving as a ghost across a reseed:
+ * same sources, same fingerprint, replayed findings. This is that regression, as a sequence.
+ */
+const GHOST = 'Public Sub Poke()\r\n    Wardrobe.Zed.Visible = True\r\nEnd Sub\r\n';
+const wardrobe = (members) => [
+    { moduleName: 'Wardrobe', source: 'Option Explicit\r\n', type: 'userform', implicitMembers: members },
+    { moduleName: 'Pokes', source: GHOST, type: 'standard' },
+];
+const ghostDiag = (generation) => call('textDocument/diagnostics', {
+    documentKey: 'Ghost/Pokes', projectId: 'Ghost', generation,
+    source: GHOST, moduleName: 'Pokes', moduleType: 'standard',
+});
+
+await call('project/open', { projectId: 'Ghost', generation: 1, modules: wardrobe([{ name: 'Zed', type: 'MSForms.TextBox' }]) });
+const withControl = await ghostDiag(1);
+await call('project/open', { projectId: 'Ghost', generation: 2, modules: wardrobe([]) });
+const withoutControl = await ghostDiag(2);
+
+check('a control that exists resolves; removed across a reseed, it is a finding, not a ghost', () => {
+    assert.ok(!withControl.diagnostics.some((one) => one.message.includes('Zed')),
+        `Zed exists at generation 1; got ${JSON.stringify(withControl.diagnostics)}`);
+    assert.ok(withoutControl.diagnostics.some((one) => one.message.includes('Zed')),
+        `the same text after the removal must flag; got ${JSON.stringify(withoutControl.diagnostics)}`);
+});
+
+/*
+ * THE COLLECTORS' REMAINING BLIND SPOTS, filed and watched (the announce idiom that caught
+ * the #29 consume gap): each row pins today's behaviour and prints the UPSTREAM FIXED line
+ * the day the analyzer moves - the fix may need a consume at engine/src/semantic.ts (the
+ * Me fix will want the module's me host type passed through), so arriving unannounced is
+ * the failure mode these exist to prevent.
+ */
+const SHADOWED = 'Public Sub T()\r\n    ActiveSheet.Clear\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'ShadowTint', generation: 1,
+    modules: [{ moduleName: 'F', source: SHADOWED, type: 'userform',
+        implicitMembers: [{ name: 'ActiveSheet', type: 'MSForms.ListBox' }] }],
+});
+const shadowTint = await call('textDocument/semanticTokens', {
+    projectId: 'ShadowTint', moduleName: 'F', source: SHADOWED, moduleType: 'userform',
+});
+
+check('a control named like a host global: the tint gap is xlide_vscode#30, watched', () => {
+    const receiver = shadowTint.tokens.filter(
+        (token) => SHADOWED.slice(token.start, token.end) === 'ActiveSheet');
+    if (receiver.length === 0) {
+        console.log('     UPSTREAM FIXED: the shadowed receiver lost the host tint - pin that here and close xlide_vscode#30.');
+        return;
+    }
+    // Today's filed behaviour: the global collector has no implicitMembers input, so the
+    // control wears variable.defaultLibrary. The member side is already right: Clear paints
+    // as the ListBox's method, pinned so the tint gap never grows into a member gap.
+    const clear = shadowTint.tokens.filter(
+        (token) => SHADOWED.slice(token.start, token.end) === 'Clear');
+    assert.equal(clear.length, 1, `Clear took ${clear.length} token(s)`);
+    assert.equal(clear[0].type, 'function');
+});
+
+const ME_DOC = 'Public Sub T()\r\n    Me.Calculate\r\n    Sheet1.Calculate\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'MeDoc', generation: 1,
+    modules: [{ moduleName: 'Sheet1', source: ME_DOC, type: 'document', documentType: 'worksheet' }],
+});
+const meDoc = await call('textDocument/semanticTokens', {
+    projectId: 'MeDoc', moduleName: 'Sheet1', source: ME_DOC, moduleType: 'document',
+});
+
+check('Me.Calculate beside Sheet1.Calculate: the Me gap is xlide_vscode#31, watched', () => {
+    const calculates = meDoc.tokens.filter(
+        (token) => ME_DOC.slice(token.start, token.end) === 'Calculate');
+    // The code-name receiver paints today; Me does not. One token is the filed state,
+    // two is the fix arriving.
+    assert.ok(calculates.length >= 1 && calculates.every((token) => token.type === 'function'),
+        `Calculate wore ${JSON.stringify(calculates)}`);
+    if (calculates.length >= 2) {
+        console.log('     UPSTREAM FIXED: Me paints - check semantic.ts passes the me host type, pin both mentions, close xlide_vscode#31.');
+    }
+});
+
 stop();
 process.exit(done());

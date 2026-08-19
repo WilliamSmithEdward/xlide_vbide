@@ -250,7 +250,11 @@ internal static partial class FormDesignService
     /// The controls as the analyzer's implicit members: name plus the type completion resolves
     /// it as. The standard toolbox spells as MSForms - the model the analyzer promoted for
     /// exactly this (xlide_vscode#17) - and a type outside the table passes through raw, which
-    /// upstream takes unchanged rather than guessing at. Null when there is nothing to say.
+    /// upstream takes unchanged rather than guessing at. Null when the component is not a form
+    /// or its designer cannot answer; an EMPTY array when the designer answered and holds
+    /// nothing - the analyzer proves a member absent on a form only when the host vouched for
+    /// the list, an empty one included (xlide_vscode#26), so folding "read it, empty" into
+    /// null hid every unknown-member finding on a control-less form.
     /// </summary>
     public static Xlide.Vbe.Core.Engine.EngineImplicitMember[]? ControlMembers(DispatchObject component)
     {
@@ -272,12 +276,14 @@ internal static partial class FormDesignService
         // reading every control's whole property set to answer that would be a walk paid for
         // on every seed.
         Walk(designer, null, string.Empty, rows, seen, 0, default);
-        if (rows.Count == 0)
-        {
-            return null;
-        }
 
+        // Unconditionally: the walk touched the Designer, which materialises its window
+        // whether or not any control was found, and an empty form's designer goes back down
+        // the same as a full one. (This sat after an early return for the empty case until
+        // 2026-08-19, so a control-less form left its designer standing - and a save while
+        // one stands restores it on open, per the note below.)
         KeepDesignerDown(component);
+
         return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
             row.Spec.Name,
             IsToolboxType(row.Spec.Type) ? $"MSForms.{row.Spec.Type}" : row.Spec.Type))];

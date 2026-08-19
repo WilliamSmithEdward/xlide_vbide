@@ -19,7 +19,7 @@
  * Asked through the provider monaco calls, so the answer is the menu the developer would see.
  */
 
-import { open, wait } from "./xlide-api.mjs";
+import { open, scratchModule, wait } from "./xlide-api.mjs";
 
 const api = await open({});
 
@@ -168,14 +168,41 @@ for (const [module, kind] of CALLERS) {
     declared.includes("NameBox"), declared.slice(0, 6).join(","));
 }
 
-// The matrix's negative half: a member the form does NOT have should be a finding, because the
-// VBE itself refuses to compile an unknown member on an early-bound form receiver. It is not
-// one today - filed as xlide_vscode#26 and tolerated below until upstream answers.
+// The matrix's negative half: a member the form does NOT have is a finding, because the
+// VBE itself refuses to compile an unknown member on an early-bound form receiver. Filed as
+// xlide_vscode#26, landed 2026-08-19: absence is provable behind an authoritative control list.
 const defects = await api.problems("Defects");
 const findings = defects.findings ?? [];
 check("a control the form does not have is a finding",
   findings.some((one) => JSON.stringify(one).includes("NoSuchControl")),
   `${findings.length} finding(s) in Defects, none at the NoSuchControl line`);
+
+// And the EMPTY form is vouched for too: #26 proves absence only where the host supplied the
+// control list, an empty one included - and the shim folded "walked the designer, found
+// nothing" into "could not read" until 2026-08-19, which silenced exactly this case while
+// control-bearing forms flagged. The walk here is the real designer walk, not a seed shortcut.
+const bare = `Bare${process.pid}`;
+const bareUses = `BareUses${process.pid}`;
+const bareScratch = scratchModule(api, project.projectId, bare);
+const bareUsesScratch = scratchModule(api, project.projectId, bareUses);
+try {
+  await api.component("add", { kind: 3, name: bare, project: project.projectId });
+  await api.component("add", { kind: "module", name: bareUses, project: project.projectId });
+  await api.writeModule(bareUses,
+    `Option Explicit\r\n\r\nPublic Sub Poke()\r\n    ${bare}.Nope\r\nEnd Sub\r\n`, project.projectId);
+  const flagged = await until("the empty form to prove absence", async () => {
+    const found = (await api.problems(bareUses)).findings ?? [];
+    return found.some((one) => JSON.stringify(one).includes("Nope")) ? found : null;
+  }).catch(() => null);
+  check("a member on a control-less form is a finding too",
+    flagged !== null,
+    flagged === null
+      ? "the empty form's control list never became authoritative"
+      : `${flagged.length} finding(s), the Nope line among them`);
+} finally {
+  await bareUsesScratch.dispose();
+  await bareScratch.dispose();
+}
 
 for (const one of broken) { console.log("  ! " + one); }
 

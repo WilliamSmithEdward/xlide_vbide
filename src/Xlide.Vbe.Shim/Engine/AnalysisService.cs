@@ -52,7 +52,7 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// </summary>
     private sealed record SeededProject(
         int Generation,
-        Dictionary<string, string> Sources,
+        Dictionary<string, string> Seeds,
         IReadOnlyList<Finding> Findings,
         IReadOnlyList<string> Types,
         IReadOnlyList<string> Procedures);
@@ -917,7 +917,7 @@ internal sealed class AnalysisService : IAsyncDisposable
              * gestures that write nothing back.
              */
             var held = _seeded.TryGetValue(snapshot.ProjectId, out var was) ? was : null;
-            if (held is not null && SameSources(held.Sources, snapshot.Modules))
+            if (held is not null && SameSeed(held.Seeds, snapshot.Modules))
             {
                 // The homes map is not rebuilt either: it is derived from the module set, and
                 // the comparison above has just established that the module set is the same.
@@ -1021,7 +1021,7 @@ internal sealed class AnalysisService : IAsyncDisposable
             {
                 _seeded[snapshot.ProjectId] = new SeededProject(
                     snapshot.Generation,
-                    snapshot.Modules.ToDictionary(m => m.ModuleName, m => m.Source, StringComparer.Ordinal),
+                    snapshot.Modules.ToDictionary(m => m.ModuleName, SeedOf, StringComparer.Ordinal),
                     findings,
                     opened.Types,
                     opened.Procedures);
@@ -1140,7 +1140,7 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>
     /// Whether a project's modules are exactly what it was last seeded with: same names, same
-    /// text, none added, none gone.
+    /// text, same designer control lists, none added, none gone.
     ///
     /// Ordinal on both deliberately. Case matters in a module's source, and two sources that
     /// differ only in case are two different programs. It matters in the NAME too, for a smaller
@@ -1148,8 +1148,13 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// spelling the host reports and hands that spelling back in completions and hovers. A module
     /// renamed from `helpers` to `Helpers` has changed nothing the analyzer will complain about
     /// and everything about how its name is offered, so it is a reseed.
+    ///
+    /// The CONTROL LIST is part of the seed, so it is part of the sameness. This compared only
+    /// sources until 2026-08-19, and a designer apply changes what the seed carries without
+    /// touching one: a control removed from a form kept resolving - completion, diagnostics and
+    /// paint all serving the ghost - until some unrelated module write happened to reseed.
     /// </summary>
-    private static bool SameSources(Dictionary<string, string> seeded, EngineModule[] now)
+    private static bool SameSeed(Dictionary<string, string> seeded, EngineModule[] now)
     {
         if (seeded.Count != now.Length)
         {
@@ -1158,13 +1163,35 @@ internal sealed class AnalysisService : IAsyncDisposable
 
         foreach (var module in now)
         {
-            if (!seeded.TryGetValue(module.ModuleName, out var was) || !string.Equals(was, module.Source, StringComparison.Ordinal))
+            if (!seeded.TryGetValue(module.ModuleName, out var was) || !string.Equals(was, SeedOf(module), StringComparison.Ordinal))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// What one module seeds the engine with, flattened for the sameness gate: the source, and
+    /// the designer's control list when the module carries one. Null and empty stay DISTINCT -
+    /// an unread designer proves nothing while a read-and-empty one proves absence
+    /// (xlide_vscode#26) - so flipping between the two is a reseed as well.
+    /// </summary>
+    private static string SeedOf(EngineModule module)
+    {
+        if (module.ImplicitMembers is not { } members)
+        {
+            return module.Source;
+        }
+
+        var seed = new System.Text.StringBuilder(module.Source.Length + 32).Append(module.Source).Append('\0');
+        foreach (var member in members)
+        {
+            seed.Append(member.Name).Append(':').Append(member.Type).Append(';');
+        }
+
+        return seed.ToString();
     }
 
     /// <summary>
