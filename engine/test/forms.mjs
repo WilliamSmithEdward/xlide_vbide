@@ -328,11 +328,10 @@ check('and the rollover that started it answers: SelectedItem.Caption hovers as 
 });
 
 /*
- * HOST CONSTANTS AND THE PAINT, filed and watched (xlide_vscode#35): every host constant
- * resolves since 4.0.2, and only a curated nineteen paint - via the GRAMMARS' static lists,
- * not the analysis, so the engine emits no token for any of them today. When the collector
- * arrives, consuming it needs a legend entry, a theme rule, and the call in semantic.ts -
- * three things this announcement exists to demand. Runs under EXCEL: before the word block.
+ * HOST CONSTANTS PAINT AS ONE FAMILY (xlide_vscode#35, filed and fixed 2026-08-19): every
+ * resolved host constant emits `enumMember` from the globals collector's own walk - the
+ * curated nineteen and the thousands beside them in one tier - and the page's legend and
+ * theme carry the type (main.ts, theme.ts). Runs under EXCEL: before the word block.
  */
 const CONST_SRC = 'Public Sub T()\r\n    Dim a As Long\r\n    a = xlLandscape\r\nEnd Sub\r\n';
 await call('project/open', {
@@ -343,20 +342,19 @@ const constPaint = await call('textDocument/semanticTokens', {
     projectId: 'Consts', moduleName: 'M', source: CONST_SRC, moduleType: 'standard',
 });
 
-check('a resolved host constant takes no token yet; xlide_vscode#35 asks for the family', () => {
+check('a resolved host constant paints as an enum member', () => {
     const over = constPaint.tokens.filter(
         (token) => CONST_SRC.slice(token.start, token.end) === 'xlLandscape');
-    if (over.length > 0) {
-        console.log('     UPSTREAM FIXED: host constants paint - wire the legend, theme and semantic.ts call, pin it, close xlide_vscode#35.');
-    }
+    assert.equal(over.length, 1, `xlLandscape took ${over.length} token(s)`);
+    assert.equal(over[0].type, 'enumMember', `it painted as ${over[0].type}`);
 });
 
 /*
- * THE NEXT TWO RECEIVER GAPS, filed and watched (xlide_vscode#33 and #34, the announce
- * idiom): a DECLARED LOCAL with a host type paints nothing while its hover says method, and
- * the host GLOBAL interface's own methods (Word's InchesToPoints) resolve nothing anywhere.
- * Both rows pin what is true today and shout the day the analyzer moves - #33's fix may want
- * the locals threaded through semantic.ts, which is exactly what these exist to catch.
+ * THE LAST TWO RECEIVER GAPS, filed and fixed the same day (xlide_vscode#33 and #34,
+ * consumed 2026-08-19 with `projectTypes` threaded into the collector's context so a
+ * project class named Range wins over the host's): a DECLARED LOCAL paints its host
+ * members, and the host GLOBAL interface's own methods resolve everywhere - Word's
+ * InchesToPoints hovers with its full signature and paints as the call it is.
  */
 const LOCAL_RECV = 'Public Sub T()\r\n    Dim rng As Range\r\n    Set rng = ActiveDocument.Range(0, 0)\r\n    rng.InsertParagraphAfter\r\n    TopM = InchesToPoints(1)\r\nEnd Sub\r\n';
 await call('project/open', {
@@ -371,16 +369,13 @@ const localHover = await call('textDocument/hover', {
     offset: LOCAL_RECV.indexOf('InsertParagraphAfter') + 4, moduleType: 'standard',
 });
 
-check('a declared local resolves its host member to hover; the paint is xlide_vscode#33, watched', () => {
+check('a declared local resolves its host member to hover AND to the paint', () => {
     assert.equal(localHover.hover?.details?.[0], 'Word host method',
         `the hover read '${localHover.hover?.details?.[0] ?? '(none)'}'`);
     const painted = localPaint.tokens.filter(
         (token) => LOCAL_RECV.slice(token.start, token.end) === 'InsertParagraphAfter');
-    if (painted.length > 0) {
-        console.log('     UPSTREAM FIXED: local receivers paint - check semantic.ts threads the locals, pin it, close xlide_vscode#33.');
-        assert.ok(painted.every((token) => token.type === 'function'),
-            `painted as ${painted.map((token) => token.type).join(', ')}`);
-    }
+    assert.equal(painted.length, 1, `InsertParagraphAfter took ${painted.length} token(s)`);
+    assert.equal(painted[0].type, 'function', `it painted as ${painted[0].type}`);
 });
 
 const globalFnHover = await call('textDocument/hover', {
@@ -388,12 +383,15 @@ const globalFnHover = await call('textDocument/hover', {
     offset: LOCAL_RECV.indexOf('InchesToPoints') + 4, moduleType: 'standard',
 });
 
-check('the host Global interface is xlide_vscode#34, watched: InchesToPoints answers when modelled', () => {
-    if (globalFnHover.hover) {
-        console.log('     UPSTREAM FIXED: the Global interface resolves - pin the hover here and close xlide_vscode#34.');
-        assert.ok(/InchesToPoints/.test(globalFnHover.hover.signature),
-            `signature was '${globalFnHover.hover.signature}'`);
-    }
+check('the host Global interface answers: InchesToPoints hovers as a method and paints as a call', () => {
+    assert.ok(globalFnHover.hover, 'expected a hover');
+    assert.ok(/InchesToPoints\(Inches As Single\) As Single/.test(globalFnHover.hover.signature),
+        `signature was '${globalFnHover.hover.signature}'`);
+    assert.equal(globalFnHover.hover.details?.[0], 'Word host method');
+    const painted = localPaint.tokens.filter(
+        (token) => LOCAL_RECV.slice(token.start, token.end) === 'InchesToPoints');
+    assert.equal(painted.length, 1, `InchesToPoints took ${painted.length} token(s)`);
+    assert.equal(painted[0].type, 'function', `it painted as ${painted[0].type}`);
 });
 
 // NOTE: the word open above re-hosts the engine; the sync fork block below opens access and

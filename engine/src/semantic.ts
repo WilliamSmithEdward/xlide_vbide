@@ -32,7 +32,9 @@ export function semanticTokensFor(
         // The host's own globals when the host is not Excel: in Word, ActiveDocument colours
         // and ActiveSheet does not. The controls ride along as shadows (xlide_vscode#30): a
         // form control named exactly like a host global wins the binding inside its form, so
-        // the receiver must not wear the global's tint there.
+        // the receiver must not wear the global's tint there. Since xlide_vscode#35 this same
+        // walk also paints resolved host CONSTANTS as enumMember - xlLandscape joins xlUp in
+        // one tier - which the page's legend and theme carry.
         ...collectHostGlobalTokens(params.source, ctx.hostModel, ctx.implicitMembers),
         // The collector guards meType itself - only an MSForms.* type engages it - so a
         // worksheet's Excel.Worksheet passes through as an early return, not a special case here.
@@ -51,6 +53,9 @@ export function semanticTokensFor(
             codeNames: ctx.codeNames,
             implicitMembers: ctx.implicitMembers,
             meType: ctx.meType,
+            // Declared locals paint their host members since xlide_vscode#33, and resolving
+            // `Dim rng As Range` must let a PROJECT class named Range win over the host's.
+            projectTypes: ctx.projectTypes,
         }),
     ];
 

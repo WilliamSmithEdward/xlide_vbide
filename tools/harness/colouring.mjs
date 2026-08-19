@@ -35,9 +35,10 @@ const PLAIN = "rgb(156, 220, 254)";
 const TYPE = "rgb(78, 201, 184)";
 const KEYWORD = "rgb(197, 134, 192)";
 const CONSTANT = "rgb(86, 156, 214)";
+const HOSTKNOWN = "rgb(79, 193, 255)";
 const NAMES = {
   [CALL]: "call", [PLAIN]: "identifier", [TYPE]: "type", [KEYWORD]: "keyword",
-  [CONSTANT]: "constant",
+  [CONSTANT]: "constant", [HOSTKNOWN]: "host-known",
 };
 const nameOf = (colour) => NAMES[colour] ?? colour;
 
@@ -180,29 +181,27 @@ try {
     + "member rule should reach it.");
 
   /*
-   * 3b. THE CONSTANT FAMILIES, pinned for the first time on 2026-08-19 - the day their state
-   * was misread twice for want of a pin. Three tiers, and each is a contract:
+   * 3b. THE CONSTANT FAMILIES, pinned 2026-08-19 - first as three tiers, promoted to TWO the
+   * same day when xlide_vscode#35 landed and was wired (legend, theme, and the collector's
+   * ride on the globals walk):
    *
    *   vbInformation paints CONSTANT: the language's own constants, the grammar's list.
-   *   xlUp paints CONSTANT: the curated nineteen Excel names the COMPANION's grammar paints
-   *     (its constants pattern, byte for byte), which this grammar mirrors - parity, per
-   *     theme.ts's "a module should read identically in the two products".
-   *   xlLandscape paints IDENTIFIER: every host constant OUTSIDE the nineteen, in both
-   *     products alike. All of them RESOLVE (hover answers Const + value since 4.0.2); the
-   *     paint finishing the job is filed as xlide_vscode#35, watched from the engine suite,
-   *     and this row is what gets promoted when the semantic collector arrives and is wired.
+   *   xlUp and xlLandscape paint HOST-KNOWN, identically: every RESOLVED host constant is a
+   *     semantic enumMember now, worn in the same tint the host's globals wear - the
+   *     analysis overrides the grammar's old curated-nineteen colouring, so the anointed and
+   *     the multitude finally read as one family, in both products.
    */
   const language = await across("    Debug.Print vbInformation", "vbInformation");
   check("a language constant is painted as a constant",
     language.head === CONSTANT, `it is ${nameOf(language.head)}`);
 
   const curated = await across("    Debug.Print xlUp", "xlUp");
-  check("a curated Excel constant paints as one, matching the companion's list",
-    curated.head === CONSTANT, `it is ${nameOf(curated.head)}`);
+  check("a curated Excel constant paints host-known: the analysis outranks the old list",
+    curated.head === HOSTKNOWN, `it is ${nameOf(curated.head)}`);
 
   const uncurated = await across("    Debug.Print xlLandscape", "xlLandscape");
-  check("a host constant outside the list stays an identifier until xlide_vscode#35 lands",
-    uncurated.head === PLAIN, `it is ${nameOf(uncurated.head)}`);
+  check("and one outside the old list paints the same, which is the point of xlide_vscode#35",
+    uncurated.head === HOSTKNOWN, `it is ${nameOf(uncurated.head)}`);
 
   // 4. A NAME IS ONE COLOUR ALL THE WAY ALONG.
   const plainType = await across("Public Type PlainRecord", "PlainRecord");

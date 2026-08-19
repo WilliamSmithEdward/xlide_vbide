@@ -35,6 +35,10 @@ const darkRules: monaco.editor.ITokenThemeRule[] = [
   { token: "struct", foreground: "4ec9b8" },
   // A host global, tinted away from an ordinary identifier rather than shouted about.
   { token: "variable.defaultLibrary", foreground: "4fc1ff" },
+  // A resolved host constant (xlide_vscode#35), in the same host-known voice: the companion
+  // renders semantic enumMember this colour too, so xlUp and xlLandscape read as ONE family
+  // in both products - and the language's own vb* constants keep their separate blue.
+  { token: "enumMember", foreground: "4fc1ff" },
   // The form markup's attributes. The table had no rule for these at all, so every attribute
   // name in a tagged document painted as plain foreground however the tokenizer labelled it.
   { token: "attribute.name", foreground: "9cdcfe" },
@@ -60,6 +64,7 @@ const lightRules: monaco.editor.ITokenThemeRule[] = [
   { token: "enum", foreground: "267f99" },
   { token: "struct", foreground: "267f99" },
   { token: "variable.defaultLibrary", foreground: "0070c1" },
+  { token: "enumMember", foreground: "0070c1" },
   { token: "attribute.name", foreground: "001080" },
   { token: "delimiter.angle", foreground: "808080" },
 ];

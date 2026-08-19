@@ -113,7 +113,9 @@ const scriptMs = performance.now();
  */
 // `function` is appended rather than sorted in: an index into this list is the wire format,
 // so appending is what keeps every already-painted token meaning what it meant.
-const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable", "function"];
+// `enumMember` (2026-08-19): a resolved host constant - xlLandscape, wdOrientPortrait,
+// acNormal - painted the tint the companion renders them in (xlide_vscode#35).
+const SEMANTIC_TOKEN_TYPES = ["class", "enum", "struct", "type", "variable", "function", "enumMember"];
 
 /** `defaultLibrary` marks a host-injected global - Application, ThisWorkbook, ActiveSheet. */
 const SEMANTIC_TOKEN_MODIFIERS = ["defaultLibrary"];
