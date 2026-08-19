@@ -685,6 +685,17 @@ Check 'the inside door refuses a page route toward the http door' {
     ($door.Request('ui') | ConvertFrom-Json).error -match 'HTTP door'
 }
 
+Check 'assert through the inside door answers at once' {
+    # Inside, host state cannot change while the caller holds the thread, so the door defaults
+    # assert's timeout to zero: one look, answered now. Without that, a false claim held Excel
+    # frozen for the full ten-second default (the 2026-08-19 hunt, round two).
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    $answer = $door.Request('assert?that=stopped') | ConvertFrom-Json
+    $watch.Stop()
+    ($answer.held -eq $false) -and ($watch.ElapsedMilliseconds -lt 3000)
+}
+
 Check 'an assignment to the door is refused, not executed' {
     # `door.Request = "state"` must be member-not-found, never a route run as an assignment's
     # side effect - the 2026-08-19 hunt's find.

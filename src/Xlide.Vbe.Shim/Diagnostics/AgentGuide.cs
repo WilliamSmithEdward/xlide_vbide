@@ -220,7 +220,9 @@ internal static class AgentGuide
         new("assert", "GET", "that=<claim> timeoutMs=<ms>? value=<expected>?",
             "Waits for a named claim - stopped, running, surfaceReady, shownModule, nativeModule, noDialogs, localsHas, watchHas, problemFree, responsive - and answers what it SAW.",
             "GET assert?that=problemFree&timeoutMs=5000", true, DoorPolicy.Open,
-            "From inside, host state cannot change while you hold the thread: call with timeoutMs=0 and read the truth now."),
+            "From inside, host state cannot change while you hold the thread, so the inside "
+            + "door defaults timeoutMs to 0 - one look, answered now. Name a timeout there "
+            + "only if you mean to hold the host while it burns."),
         new("userform", "GET|POST", "action=close? caption=<title>?",
             "The running (shown) forms' windows; action=close closes one.",
             "GET userform", true, DoorPolicy.Open),

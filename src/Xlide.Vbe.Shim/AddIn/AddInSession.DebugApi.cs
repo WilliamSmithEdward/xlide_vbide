@@ -236,12 +236,30 @@ internal sealed partial class AddInSession
 
         route = route.Trim().TrimStart('/');
 
+        if (route.Length == 0)
+        {
+            return HostError(
+                "Request takes a route, e.g. Request(\"agent\") - Request(\"agent/routes\") "
+                + "lists them all");
+        }
+
         if (AgentGuide.PolicyOf(route) == AgentGuide.DoorPolicy.HttpOnly)
         {
             return HostError(
                 $"'{route}' answers only at the HTTP door ({AgentBaseUrl()}): it waits on "
                 + "work only a pumping host thread can finish, and this call is standing on "
                 + "that thread. Request(\"agent/routes\") says which door each route answers.");
+        }
+
+        // A DESIGNATED DEVIATION from the HTTP door: assert defaults to timeoutMs=0 here. Its
+        // wait polls HOST state, and an inside caller is standing on the host thread - so from
+        // this door a false claim can never become true by waiting; it can only hold Excel
+        // frozen for the whole default ten seconds and then answer what one look would have
+        // answered at once. A caller that names a timeout on purpose keeps it, and burning it
+        // is then a choice. timeoutMs=0 evaluates the claim exactly once.
+        if (route == "assert" && !query.ContainsKey("timeoutMs"))
+        {
+            query["timeoutMs"] = "0";
         }
 
         var reply = AnswerDebugRequest(new DebugServer.DebugRequest(route, query, body));
