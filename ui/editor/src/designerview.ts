@@ -3273,6 +3273,16 @@ export class DesignerView {
    */
   private static readonly PASTE_OFFSET = 6;
 
+  /**
+   * An element header's Name, in the POSITION THE PRINTER PUTS IT: first attribute after the
+   * tag. The paste rename used to take the leftmost `Name="..."` anywhere in the line, and a
+   * hand-written caption containing that text - `Caption="Call me Name="` is legal markup -
+   * put the replacement inside the caption and mangled the line (the 2026-08-19 hunt, round
+   * three). Anchored, a hand-reordered line simply keeps its name, and the duplicate-name
+   * refusal that follows names the problem instead of shredding the text.
+   */
+  private static readonly HEADER_NAME = /^(\s*<[A-Za-z][\w.]*\s+)Name="([^"]*)"/;
+
   /** The selection's blocks, as the lines they are written on. Answers null when the selection
    * holds nothing that has a block - the form itself, above all, which cannot be copied. */
   private selectionBlocks(): string[] | null {
@@ -3363,7 +3373,8 @@ export class DesignerView {
      * asks for another one of these, not for one of these inside this one.
      */
     const copyingItself = anchor !== null && anchor !== ""
-      && blocks.some((block) => (/\bName="([^"]*)"/.exec(block)?.[1] ?? "").toLowerCase() === anchor.toLowerCase());
+      && blocks.some((block) =>
+        (DesignerView.HEADER_NAME.exec(block)?.[2] ?? "").toLowerCase() === anchor.toLowerCase());
 
     const host = anchor === null || anchor === ""
       ? ""
@@ -3431,14 +3442,14 @@ export class DesignerView {
       const renamed = rows.map((row, at) => {
         let text = " ".repeat(Math.max(0, indent(row) - base) + level) + row.trimStart();
 
-        text = text.replace(/\bName="([^"]*)"/, (whole, was: string) => {
+        text = text.replace(DesignerView.HEADER_NAME, (_whole, lead: string) => {
           const kind = /^\s*<([A-Za-z][\w.]*)/.exec(row)?.[1] ?? "Control";
           const now = this.freeName(kind, taken);
           if (at === 0) {
             landed.push(now);
           }
 
-          return whole.replace(`"${was}"`, `"${now}"`);
+          return `${lead}Name="${now}"`;
         });
 
         if (at === 0) {

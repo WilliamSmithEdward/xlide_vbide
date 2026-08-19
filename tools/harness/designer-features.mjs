@@ -2250,6 +2250,23 @@ try {
     pageRefused.did === false && /only be pasted into a MultiPage/.test(pageRefused.detail ?? ""),
     pageRefused.detail);
 
+  // A HAND-WRITTEN CAPTION CANNOT BE SHREDDED BY THE RENAME. The document is editable text and
+  // attributes may be typed in any order, so `<Label Caption="Call me Name=" Name="ViewNote">`
+  // is legal - and the paste's rename used to take the leftmost `Name="..."` ANYWHERE in the
+  // line, which put the new name inside that caption and mangled the text (the 2026-08-19
+  // hunt, round three). Anchored to the header's own position, the caption rides untouched;
+  // a line reordered away from the printer's shape keeps its name, and the duplicate that
+  // makes is a refusal that NAMES the problem rather than a shredded document.
+  const trapped = beforeClipboard.replace(/\bName="ViewNote"/, 'Caption="Call me Name=" Name="ViewNote"');
+  await api.act("designerSetMarkup", { module: form, markup: trapped });
+  await api.act("designerSelect", { module: form, control: "ViewNote" });
+  await api.act("designerClipboard", { module: form, how: "copy" });
+  const tricky = await api.act("designerClipboard", { module: form, how: "paste" });
+  const captionsAfter = ((await tabText()).match(/Caption="Call me Name="/g) ?? []).length;
+  check("a caption that spells Name= is never rewritten by the paste's rename",
+    tricky.did === true && captionsAfter === 2,
+    `${tricky.detail}; intact captions: ${captionsAfter} (2 means both copies kept their text)`);
+
   await api.act("designerSetMarkup", { module: form, markup: beforeClipboard });
   await waitFor("the document back where the clipboard rows found it", async () =>
     (await tabText()) === beforeClipboard, { budgetMs: 15000 });

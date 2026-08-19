@@ -17,6 +17,8 @@
  * else about their planner changes, and nothing here touches the workbook file.
  */
 
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import {
     buildExportModuleSyncPlan,
     buildImportModuleSyncPlan,
@@ -109,18 +111,80 @@ function withoutPointlessComparisons(plan: ModuleSyncPlan): ModuleSyncPlan {
     } as ModuleSyncPlan;
 }
 
+/**
+ * A DESIGNATED DEVIATION from the shared planner: a .frm whose .frx sits beside it is a
+ * CREATE here, not a refusal.
+ *
+ * Their planner refuses to create a userform from a file because THEIR applier cannot -
+ * `moduleSyncPlan.ts` encodes the capabilities of the extension's own import path. This
+ * product's applier is the add-in, which hands the pair to `VBComponents.Import` and gets the
+ * whole form back natively - controls, fonts, pictures - a path the designer suite has pinned
+ * since 2026-08-16. The refusal reappeared when the engine was rebuilt against xlide_vscode
+ * 4.0.0 (whose #21 classifies .frm as userform; the older engine binary predated that and
+ * planned the pair as an ordinary create), caught by the suite going 431/6 (2026-08-19, hunt
+ * round three).
+ *
+ * The promotion is deliberately narrow: import direction, a `skipping-import` row, a `.frm`
+ * file, and the sidecar PRESENT in the folder - a .frm alone stays refused, because importing
+ * it would fail at the VBE with less to say than the planner's warning already says. The ask
+ * for a caller-declared capability is filed as xlide_vscode#27, so this layer can retire.
+ */
+function withFormPairsCreatable(plan: ModuleSyncPlan, folder: string): ModuleSyncPlan {
+    const rows = plan as unknown as {
+        items?: {
+            status?: string;
+            /** The planner's own field for the file inside the folder. */
+            relativeName?: string;
+            moduleName?: string;
+            checked?: boolean;
+            warning?: string;
+            detail?: string;
+            unsupportedDirectCreation?: boolean;
+            rightTitle?: string;
+        }[];
+    };
+    if (!Array.isArray(rows.items)) {
+        return plan;
+    }
+
+    return {
+        ...plan,
+        items: rows.items.map((item) => {
+            const file = item.relativeName ?? '';
+            if (item.status !== 'skipping-import' || !/\.frm$/i.test(file)) {
+                return item;
+            }
+
+            const sidecar = `${file.slice(0, -'.frm'.length)}.frx`;
+            if (!existsSync(join(folder, sidecar))) {
+                return item;
+            }
+
+            return {
+                ...item,
+                status: 'will-create',
+                checked: true,
+                warning: undefined,
+                detail: 'Will create',
+                unsupportedDirectCreation: false,
+                rightTitle: `File: ${item.moduleName ?? file} (will create)`,
+            };
+        }),
+    } as ModuleSyncPlan;
+}
+
 /** Works out what an import or export would do, using the companion editor's own planner. */
 export async function syncPlan(params: SyncPlanParams): Promise<ModuleSyncPlan> {
     const bridge = bridgeOver(params.modules) as never;
 
     const plan = params.direction === 'import'
-        ? await buildImportModuleSyncPlan(bridge, {
+        ? withFormPairsCreatable(await buildImportModuleSyncPlan(bridge, {
             workbookPath: params.workbookPath,
             importFolder: params.folder,
             importMode: params.mode === 'trueUpStandardClass' ? 'trueUpStandardClass' : 'updateOnly',
             folderPathSource: 'session',
             importModeSource: 'session',
-        })
+        }), params.folder)
         : await buildExportModuleSyncPlan(bridge, {
             workbookPath: params.workbookPath,
             exportFolder: params.folder,
