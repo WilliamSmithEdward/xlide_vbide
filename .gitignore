@@ -56,3 +56,4 @@ artifacts/fixtures/
 
 # Editor and agent scratch, never the repo's business.
 .claude/
+~$*
