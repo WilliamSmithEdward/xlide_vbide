@@ -17,7 +17,8 @@ the VBE. Each session writes a discovery file:
 
 ```text
 %LOCALAPPDATA%\xlide_vbide\debug-api-{pid}.json
-{"api":1,"port":61503,"token":"92a9...","devtoolsPort":61501,"pid":21916,"startedAt":"..."}
+{"api":1,"port":61503,"token":"92a9...","devtoolsPort":61501,"pid":21916,"startedAt":"...",
+ "product":"xlide_vbide","host":"excel","agent":"http://127.0.0.1:61503/92a9.../agent"}
 ```
 
 Every request goes to `http://127.0.0.1:{port}/{token}/{route}`. The port and token are
@@ -37,6 +38,56 @@ session sweeps files whose process is gone, and clients should probe rather than
 `tools\harness\xlide-api.mjs` does all of this: `discover()` lists live instances,
 `open({ workbook })` picks one, and it refuses to guess when the choice is ambiguous.
 
+## An agent's first request
+
+The discovery file carries three fields for a caller that knows nothing yet: `product`
+(`xlide_vbide`), `host` (which Office application answered - the add-in loads in Word and
+PowerPoint as readily as Excel, and an agent about to write VBA needs to know which object
+model it is writing against), and `agent`, a ready-to-fetch URL. Its reply is the breadcrumb
+trail: identity, how to call, `startHere` steps, and `next` URLs to the route table
+(`agent/routes`), runnable recipes (`agent/examples`), the host object model (`model`), the
+analyzer's rules (`analyzer`), and the live session (`state`, `doctor`). Everything the rest
+of this document teaches a person, those routes teach a program, and the suite holds them to
+it: every advertised breadcrumb must resolve, and every route the table calls safe to try
+bare must answer as itself.
+
+So the whole hand-off to an agent is one sentence: *read
+`%LOCALAPPDATA%\xlide_vbide\debug-api-*.json`, GET the `agent` URL inside it, and follow
+`next`.*
+
+## The inside door: `GetObject(, "Xlide.Api")`
+
+The same routes answer IN PROCESS, with no HTTP and no setting. A live session registers the
+door in the Running Object Table, so VBA in any workbook - and any automation client - can:
+
+```vb
+GetObject(, "Xlide.Api").Guide                              ' the agent reply
+GetObject(, "Xlide.Api").Request("state")                   ' any route
+GetObject(, "Xlide.Api").Request("module?name=Mod1", src)   ' second argument is the POST body
+```
+
+Measured 2026-08-18, `Request("agent")` per call: **0.10ms from VBA in-process**, 0.36ms from
+another process over COM, 0.89ms over HTTP. The call arrives on the host thread and the route
+runs right there - the crossing every HTTP request pays does not exist.
+
+Three things to know, all reported by the door itself:
+
+- **Page routes refuse fast** (`ui`, `act`, `eval`, `await`, `console`, `inspect`, `capture`,
+  `layout`, `type`, `bench`, `trip`, `reload`, plus `immediate`, `compile` and `session`): a
+  page script's answer arrives by the very pump the inside caller is standing on, so the only
+  honest inside answer is "use the HTTP door", immediately, with the URL. `agent/routes` marks
+  each route's door (`insideDoor: open` or `httpOnly`).
+- **No Trust Center setting is required** - the owner's call (2026-08-18): the end-user
+  experience must not require flipping "Trust access to the VBA project object model", and
+  gating only this door protected nothing while the HTTP door beside it answers the same
+  routes for any local caller. The ROT is also WHY this door exists at all: the add-in is a
+  VBE add-in, invisible in `Application.COMAddIns` (measured: that collection holds only
+  Office add-ins), and the VBE's own `AddIns` collection sits behind the very trust switch
+  the door must not require.
+- **Several Excels**: `GetObject` binds ONE running instance, the same way
+  `GetObject(, "Excel.Application")` does. `Request("agent")` carries `pid`; check it when it
+  matters, or use the HTTP door, whose discovery file is per process.
+
 ## Routes
 
 Read routes are GET, acting routes are POST. Everything answers JSON except `capture`.
@@ -53,6 +104,9 @@ caller can hold both at once.
 
 | Route | Method | Arguments | Answers |
 | --- | --- | --- | --- |
+| `agent` | GET | | the front door for a caller that has never seen this api: what the product is, which Office HOST answered (excel/word/powerpoint - the add-in loads in all of them, and an agent about to write VBA needs to know which object model it is writing against), the pid, whether the engine is up, how to call, the in-process alternative, and `next` URLs onward. `agent/routes` is the whole route table as data - each route's arguments, an example, whether a bare GET is safe to try, and how the in-process door treats it; `agent/route?name=x` details one; `agent/examples` is ordered request lines for the common jobs. The discovery file's `agent` field points here, so an agent handed that file is one GET from all of it. Everything under `agent` answers on the pool thread, deliberately: orientation must answer while the host thread is busy or wedged, which is exactly when a caller is most likely to ask what it is looking at |
+| `model` | GET | `type` | what the language service KNOWS about this host's object model, passed through from the engine verbatim: bare, the type inventory (229 Excel types with member counts), the host-injected globals, alias and constant counts; with `type=` (as code writes it, qualified, or through the aliases), that type's members with kinds, returns, signatures and one-line docs. In a host with no model wired yet the answer is `known:false` with a note - the same honesty the features practice, silence over another host's members |
+| `analyzer` | GET | | the analyzer's whole rule catalogue, from the engine: every diagnostic's code, title, default severity, category, evidence kind, confidence, whether it mirrors a VBE compile failure, and the MS-VBAL section it enforces where one applies. What the service will flag, answerable before anything is flagged |
 | `state` | GET | | shown module and project, debug mode, unwritten edits, engine up, frame and document-area handles and rects, **the frame's caption as the title bar actually reads it**, **whether the frame is on screen** (`frameVisible`, read off the window; it is where `frame?action=close` 's posted outcome is observed), palette open and visible, surface ready, DevTools port. `frameCaption` is read off the window, not out of the session's record of what it last wrote there, and that is the only reason it is worth having: the host rewrites that window underneath the add-in. Pressing Reset a second time does it, and the caption sat saying "Microsoft Visual Basic for Applications" with nothing able to observe it (2026-08-09). `engineUp` means the engine is ANSWERING, not that the session got as far as constructing the service that talks to it. It was the second thing until 2026-08-08, which made it true from start-up to shutdown whatever the engine did: killing the engine process left this reporting `true` while the editor drew squiggles from the last pass that had run. It is now false BEFORE the engine connects too, which is a real state a launcher should wait through rather than report |
 | `windows` | GET | | every editor window: type, caption, visible |
 | `native` | GET | `text=1` | the HOST's own editor, underneath the surface that covers it: the ACTIVE CODE PANE's module, project and caret, every pane it holds open, and - in the same reply - what the surface believes it is showing. Run, Step, Compile and ToggleBreakpoint all act on the native pane and its caret rather than on the page, so a disagreement means a Run that executes where the developer is not looking and a breakpoint on the wrong line, with nothing on screen to say so. Carries the pane's CONTENT and the surface's, each reduced the same way - line endings normalised, trailing blanks dropped - so a single changed character registers while the host's CRLF does not. Names agreeing is NOT parity: a surface holding an empty document for a module the host has 42 lines of passes every name comparison and shows a blank editor. `text=1` carries both texts for the run that fails. EVERY open pane carries the workbook's content and the surface's side by side, not only the active one: a background tab holds a copy the developer is not looking at, so a module written from outside while its tab sits behind another goes stale with nothing to notice until it is clicked. `parityAll()` on the client reports which |
@@ -392,8 +446,16 @@ their targets on one socket.
 ## Using it
 
 ```powershell
-# Every live instance
+# Every live instance, each with its host and its agent URL
 node tools\harness\xlide-api.mjs instances
+
+# The api explains itself: the front door, the route table, the recipes
+node tools\harness\xlide-api.mjs agent
+node tools\harness\xlide-api.mjs agentRoutes
+
+# What the language service knows
+node tools\harness\xlide-api.mjs model Worksheet
+node tools\harness\xlide-api.mjs analyzer
 
 # One instance, chosen by workbook
 node tools\harness\xlide-api.mjs --workbook scratch.xlsm state

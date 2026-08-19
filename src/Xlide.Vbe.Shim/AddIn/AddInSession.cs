@@ -1103,6 +1103,10 @@ internal sealed partial class AddInSession : IDisposable
         // lesson 33); the locals and watches routes now read the ghost reader thread's
         // published snapshots, which did not exist the first time.
         _debugServer = DebugServer.Start(AnswerDebugRequest);
+
+        // The same routes from INSIDE the process: GetObject(, "Xlide.Api"), for VBA and for
+        // automation clients, via the running object table.
+        OfferInsideDoor();
 #endif
     }
 
@@ -9456,7 +9460,10 @@ internal sealed partial class AddInSession : IDisposable
         Log.Info("session stopping");
 
 #if DEBUG
-        // First out: no debug request may land on a session mid-teardown.
+        // First out: no debug request may land on a session mid-teardown. The inside door goes
+        // with it, and BEFORE the automation references below - it hangs on the add-in object,
+        // and clearing that property is itself a COM call.
+        RetireInsideDoor();
         _debugServer?.Dispose();
         _debugServer = null;
 #endif

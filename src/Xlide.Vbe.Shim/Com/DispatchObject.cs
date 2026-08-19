@@ -628,6 +628,22 @@ internal sealed unsafe class DispatchObject : IDisposable
         SetProperty(name, ComVariant.CreateRaw(VarEnum.VT_DISPATCH, nint.Zero), InvokeKind.PropertyPutRef);
 
     /// <summary>
+    /// Writes an object property as an ORDINARY put - the opposite convention from
+    /// <see cref="SetObject"/>, and needed because callees disagree: the editor refuses a plain
+    /// put where a reference assignment was meant, and the VBE's AddIn object refuses the
+    /// reference form on its `Object` property. The caller picks the convention its callee
+    /// speaks; trying one and falling back to the other is legitimate.
+    /// </summary>
+    public void SetObjectByValue(string name, DispatchObject value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        ObjectDisposedException.ThrowIf(!value.IsAlive, value);
+
+        Marshal.AddRef(value.Pointer);
+        SetProperty(name, ComVariant.CreateRaw(VarEnum.VT_DISPATCH, value.Pointer), InvokeKind.PropertyPut);
+    }
+
+    /// <summary>
     /// Writes any property.
     ///
     /// A property assignment is the one call shape that carries a named argument: the value being

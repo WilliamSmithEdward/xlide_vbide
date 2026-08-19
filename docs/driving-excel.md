@@ -23,6 +23,16 @@ belongs here the same day. A door nobody can find the handle for is a door nobod
 Also: [working-with-modals.md](working-with-modals.md) is the rules for opening a modal at all,
 and [testing.md](testing.md) is the gate.
 
+**Handing the api to an agent** is one sentence: *read
+`%LOCALAPPDATA%\xlide_vbide\debug-api-*.json`, GET the `agent` URL inside it, and follow
+`next`.* The discovery file names the HOST (excel/word/powerpoint) so the agent knows which
+object model it is writing against, and the `agent` route teaches the rest - the route table
+as data, runnable recipes, the host object model (`model`), the analyzer's rules
+(`analyzer`). Code already running in the host has an even shorter path, no HTTP and no
+setting: `GetObject(, "Xlide.Api").Request("state")` - measured at 0.10ms per call from VBA
+against 0.89ms over HTTP. Both doors are in
+[debug-api.md](debug-api.md#an-agents-first-request).
+
 ---
 
 ## 1. Getting to a drivable state
@@ -251,6 +261,9 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `type` | `type(text)` | types through the keyboard pipeline: smart Enter, comment continuation, auto-indent |
 | `mark` | `mark(text)` | a labelled line in the log, and the offset to read back from |
 | `outline` | `outline(module, project)` | a module's procedures, from the analyzer |
+| `agent` | `agent()` / `agentRoutes()` / `agentRoute(name)` / `agentExamples()` | the api explaining itself: identity and HOST (excel/word/powerpoint), the route table as data, one route's detail, runnable recipes. The discovery file's `agent` URL points here, so an agent handed that file is one GET from the whole surface |
+| `model` | `model(type)` | what the language service knows about this host's object model: the type inventory bare, one type's members when named. `known:false` with a note in a host with no model yet |
+| `analyzer` | `analyzer()` | the analyzer's whole rule catalogue: codes, severities, categories, evidence kinds, and MS-VBAL authorities |
 | `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes |
 | `console` | `console(last)` | what the page said to itself |
 | `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |

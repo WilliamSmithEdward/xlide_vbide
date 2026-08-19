@@ -30,6 +30,19 @@ internal sealed partial class AddInSession
 #if DEBUG
     private DebugServer? _debugServer;
 
+    /// <summary>
+    /// The host UI thread, captured at construction (OnConnection runs there). Two doors need
+    /// it: CrossToHost goes inline instead of deadlocking when a request is ALREADY on the host
+    /// thread - which is every request through the inside door - and RunPageScriptOnce refuses
+    /// there, because a page script's answer arrives by the very pump that thread would be
+    /// blocking to wait.
+    /// </summary>
+    private readonly int _hostThreadId = Environment.CurrentManagedThreadId;
+
+    /// <summary>The in-process door, held so its COM wrapper outlives every caller.</summary>
+    private InsideDoor? _insideDoor;
+    private Com.DispatchObject? _insideDoorRef;
+
     private static DebugServer.DebugReply DebugError(string error) =>
         DebugServer.DebugReply.Json(HostError(error));
 
@@ -49,6 +62,197 @@ internal sealed partial class AddInSession
     private static string HostOk(string detail = "") =>
         System.Text.Json.JsonSerializer.Serialize(
             new DebugCommandReply(true, 0, detail), DebugJsonContext.Default.DebugCommandReply);
+
+    /// <summary>
+    /// The root the agent routes build their advertised URLs on. Null only if the HTTP door
+    /// failed to start while the in-process door still serves - a caller there gets URLs that
+    /// say so rather than URLs that dangle.
+    /// </summary>
+    private string AgentBaseUrl() => _debugServer?.BaseUrl ?? "http://(the-http-door-did-not-start)";
+
+    /// <summary>When the running shim was built, the same reading doctor reports.</summary>
+    private static string ShimBuiltUtc()
+    {
+        var directory = Interop.ShimModule.Directory;
+        var shim = directory is null ? null : Path.Combine(directory, "Xlide.Vbe.Shim.dll");
+        return shim is not null && File.Exists(shim)
+            ? File.GetLastWriteTimeUtc(shim).ToString("O")
+            : "unknown";
+    }
+
+    /// <summary>
+    /// Puts the in-process door where running code can pick it up: the Running Object Table,
+    /// under its own ProgID, so `GetObject(, "Xlide.Api")` answers from VBA and
+    /// GetActiveObject("Xlide.Api") from any automation client.
+    ///
+    /// THE ROT IS THE DOOR'S ADDRESS BECAUSE THE OBVIOUS ADDRESS DOES NOT EXIST. This add-in is
+    /// a VBE add-in, and `Application.COMAddIns` holds only OFFICE add-ins - measured 2026-08-18:
+    /// PowerMap, DataStreamer, PowerPivot, and no VBE add-in at all. The VBE's own collection
+    /// (`Application.VBE.AddIns(...).Object`) is reachable only through Application.VBE, which
+    /// the trust switch gates - so a door hung there could never be found by the very callers it
+    /// is for. The ROT is how Excel itself is found (`GetObject(, "Excel.Application")`), needs
+    /// no traversal, and inherits that mechanism's one ambiguity: with several instances
+    /// running, GetObject binds ONE of them - the agent reply carries `pid`, which is how a
+    /// caller checks it got the session it meant.
+    ///
+    /// The add-in's own `Object` property is still set, best effort, for callers that do hold
+    /// the VBE: the AddIn object turns out to accept the ordinary put and refuse the reference
+    /// form (measured 2026-08-18, the reverse of the editor's own convention).
+    /// </summary>
+    private void OfferInsideDoor()
+    {
+        try
+        {
+            var door = new InsideDoor(AnswerInsideRequest);
+            var unknown = Com.ComRuntime.Wrappers.GetOrCreateComInterfaceForObject(
+                door, System.Runtime.InteropServices.CreateComInterfaceFlags.None);
+
+            var wrapper = Com.DispatchObject.Attach(unknown);
+            if (wrapper is null)
+            {
+                Marshal.Release(unknown);
+                Log.Info("inside door: our own object did not answer as dispatch; not offered");
+                return;
+            }
+
+            _insideDoor = door;
+            _insideDoorRef = wrapper;
+
+            // The ProgID -> CLSID mapping GetObject resolves through. HKCU, written by the
+            // session and removed with it; nothing else reads this key.
+            using (var classes = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
+                $@"Software\Classes\{Core.ProductIdentity.ApiProgId}\CLSID"))
+            {
+                classes.SetValue(null, $"{{{Core.ProductIdentity.ApiClsid}}}");
+            }
+
+            var classId = new Guid(Core.ProductIdentity.ApiClsid);
+            var registered = RegisterActiveObject(wrapper.Pointer, in classId, 0, out _insideDoorRotTicket);
+            if (registered == HResult.Ok)
+            {
+                Log.Info($"inside door: GetObject(, \"{Core.ProductIdentity.ApiProgId}\") answers");
+            }
+            else
+            {
+                _insideDoorRotTicket = 0;
+                Log.Info($"inside door: the running object table refused (0x{registered:X8})");
+            }
+
+            // Best effort, and genuinely secondary: only trust-holding callers can traverse to it.
+            if (_addIn is not null)
+            {
+                try
+                {
+                    _addIn.SetObjectByValue("Object", wrapper);
+                    Log.Info("inside door: the add-in's Object property answers too");
+                }
+                catch (Exception ex)
+                {
+                    Log.Info($"inside door: the add-in refused its Object property ({ex.GetType().Name})");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"inside door: could not be offered ({ex.GetType().Name}: {ex.Message})");
+        }
+    }
+
+    /// <summary>Takes the door back down: out of the ROT, off the add-in, key removed.</summary>
+    private void RetireInsideDoor()
+    {
+        if (_insideDoorRotTicket != 0)
+        {
+            _ = RevokeActiveObject(_insideDoorRotTicket, 0);
+            _insideDoorRotTicket = 0;
+        }
+
+        if (_insideDoorRef is not null)
+        {
+            try
+            {
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
+                    $@"Software\Classes\{Core.ProductIdentity.ApiProgId}", throwOnMissingSubKey: false);
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"inside door: the class key would not delete ({ex.GetType().Name})");
+            }
+
+            if (_addIn is not null)
+            {
+                try
+                {
+                    _addIn.ClearObject("Object");
+                }
+                catch (Exception)
+                {
+                    // The put may never have landed; a refused clear says nothing new.
+                }
+            }
+        }
+
+        _insideDoorRef?.Dispose();
+        _insideDoorRef = null;
+        _insideDoor = null;
+    }
+
+    private uint _insideDoorRotTicket;
+
+    [System.Runtime.InteropServices.LibraryImport("oleaut32.dll")]
+    private static partial int RegisterActiveObject(
+        nint unknown, in Guid classId, uint flags, out uint ticket);
+
+    [System.Runtime.InteropServices.LibraryImport("oleaut32.dll")]
+    private static partial int RevokeActiveObject(uint ticket, nint reserved);
+
+    /// <summary>
+    /// One inside-door request: policy first, then the same switch the HTTP door serves.
+    ///
+    /// The one policy is THREADING, not trust: page routes refuse fast because they could only
+    /// ever time out here (see RunPageScriptOnce). The door deliberately does not gate on the
+    /// host's "Trust access to the VBA project object model" switch - the owner's call,
+    /// 2026-08-18: the end-user experience must not require a Trust Center trip, and the gate
+    /// protected nothing while the HTTP door beside it answers the same routes for any local
+    /// caller without ever reading that switch.
+    /// </summary>
+    private string AnswerInsideRequest(string target, string body)
+    {
+        // The route and its query, the same split the HTTP door reads from a URL - kept tiny
+        // and local because the HTTP parse is entangled with the token prefix this door has no
+        // need of.
+        var route = target;
+        var query = new Dictionary<string, string>(StringComparer.Ordinal);
+        var mark = target.IndexOf('?', StringComparison.Ordinal);
+        if (mark >= 0)
+        {
+            route = target[..mark];
+            foreach (var pair in target[(mark + 1)..].Split('&'))
+            {
+                var eq = pair.IndexOf('=', StringComparison.Ordinal);
+                if (eq > 0)
+                {
+                    query[Uri.UnescapeDataString(pair[..eq])] = Uri.UnescapeDataString(pair[(eq + 1)..]);
+                }
+            }
+        }
+
+        route = route.Trim().TrimStart('/');
+
+        if (AgentGuide.PolicyOf(route) == AgentGuide.DoorPolicy.HttpOnly)
+        {
+            return HostError(
+                $"'{route}' answers only at the HTTP door ({AgentBaseUrl()}): it waits on "
+                + "work only a pumping host thread can finish, and this call is standing on "
+                + "that thread. Request(\"agent/routes\") says which door each route answers.");
+        }
+
+        var reply = AnswerDebugRequest(new DebugServer.DebugRequest(route, query, body));
+
+        return reply.ContentType.StartsWith("application/json", StringComparison.Ordinal)
+            ? System.Text.Encoding.UTF8.GetString(reply.Bytes)
+            : HostError($"'{route}' answers {reply.ContentType}, which only the HTTP door can carry");
+    }
 
     /// <summary>Shapes a page script's answer the one way every eval-style route answers it:
     /// the script's error verbatim, or the answer with its result unwrapped for the caller.</summary>
@@ -112,8 +316,28 @@ internal sealed partial class AddInSession
         public void Dispose() => Done.Dispose();
     }
 
-    private static HostCrossing CrossToHost(EditorSurface host, Action work)
+    private HostCrossing CrossToHost(EditorSurface host, Action work)
     {
+        // Already on the host thread - a request through the inside door. Queueing here would
+        // be a deadlock wearing a timeout's clothes: the queued work waits for the thread that
+        // is standing right here waiting for the queue. Run it now. Not sampled as a marshal,
+        // because no marshal happened and a flood of zero-cost samples would flatter the stats.
+        if (Environment.CurrentManagedThreadId == _hostThreadId)
+        {
+            var inline = new ManualResetEventSlim(true);
+            try
+            {
+                work();
+            }
+            catch
+            {
+                inline.Dispose();
+                throw;
+            }
+
+            return new HostCrossing(true, inline);
+        }
+
         var done = new ManualResetEventSlim(false);
         var began = Environment.TickCount64;
         try
@@ -377,6 +601,18 @@ internal sealed partial class AddInSession
         if (host is null)
         {
             return (false, 0, string.Empty, "the surface is not up yet");
+        }
+
+        // From the host thread itself this can only ever time out: ExecuteScript's answer is
+        // delivered by the pump, and the pump is what this wait would be blocking. That was
+        // already true for doctor's page probe when it runs on-host - it burned its three-second
+        // scheduling wait and reported nothing - and it is true for every inside-door call.
+        // Saying so at once beats proving it slowly.
+        if (Environment.CurrentManagedThreadId == _hostThreadId)
+        {
+            return (false, 0, string.Empty,
+                "a page script cannot be awaited from the host thread itself: its answer arrives "
+                + "by the pump this wait would block. Page routes answer at the HTTP door.");
         }
 
         string? result = null;
@@ -707,6 +943,99 @@ internal sealed partial class AddInSession
 
         switch (request.Route)
         {
+            // The agent front door. Pool-side and host-free on purpose: orientation must answer
+            // even while the host thread is busy or wedged, which is exactly when a caller that
+            // has never seen this api is most likely to be asking what it is looking at.
+            case "agent":
+            {
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    AgentGuide.FrontDoor(
+                        AgentBaseUrl(), Engine.HostApp.Name, Environment.ProcessId,
+                        _analysis?.IsReady == true, ShimBuiltUtc()),
+                    DebugJsonContext.Default.DebugAgentReply));
+            }
+
+            case "agent/routes":
+            {
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    AgentGuide.RouteTable(AgentBaseUrl()),
+                    DebugJsonContext.Default.DebugAgentRoutesReply));
+            }
+
+            case "agent/route" when request.Query.TryGetValue("name", out var helpName) && helpName.Length > 0:
+            {
+                if (AgentGuide.OneRoute(helpName) is not { } row)
+                {
+                    return DebugError(
+                        $"no route named '{helpName}'; the names are "
+                        + string.Join(", ", AgentGuide.Routes.Select(one => one.Name)));
+                }
+
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    row, DebugJsonContext.Default.DebugAgentRouteRow));
+            }
+
+            case "agent/route":
+                return DebugError("agent/route needs name=<route>; agent/routes lists them all");
+
+            case "agent/examples":
+            {
+                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    AgentGuide.Examples(AgentBaseUrl()),
+                    DebugJsonContext.Default.DebugAgentExamplesReply));
+            }
+
+            // What the language service KNOWS, passed through from the engine verbatim: the
+            // engine's reply is the contract, and reshaping it here would be a second copy that
+            // drifts. Pool-side because the pipe answers on its own thread - no host needed.
+            case "model":
+            {
+                if (_analysis?.Engine is not { } modelEngine)
+                {
+                    return DebugError("the analysis engine is not up");
+                }
+
+                request.Query.TryGetValue("type", out var modelType);
+
+                try
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    var known = modelEngine.KnowledgeModelAsync(modelType, deadline.Token)
+                        .GetAwaiter().GetResult();
+
+                    return known is { } model
+                        ? DebugServer.DebugReply.Json(model.GetRawText())
+                        : DebugError("the engine did not answer the model request");
+                }
+                catch (Exception ex)
+                {
+                    return DebugError($"model failed: {ex.Message.Trim()}");
+                }
+            }
+
+            case "analyzer":
+            {
+                if (_analysis?.Engine is not { } rulesEngine)
+                {
+                    return DebugError("the analysis engine is not up");
+                }
+
+                try
+                {
+                    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                    var known = rulesEngine.KnowledgeAnalyzerAsync(deadline.Token)
+                        .GetAwaiter().GetResult();
+
+                    return known is { } rules
+                        ? DebugServer.DebugReply.Json(rules.GetRawText())
+                        : DebugError("the engine did not answer the rules request");
+                }
+                catch (Exception ex)
+                {
+                    return DebugError($"analyzer failed: {ex.Message.Trim()}");
+                }
+            }
+
             case "log":
             {
                 var path = Log.Path;

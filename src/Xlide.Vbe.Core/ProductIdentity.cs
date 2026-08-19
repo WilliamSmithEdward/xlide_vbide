@@ -18,6 +18,16 @@ public static class ProductIdentity
     /// <summary>Description shown in the VBE add-in manager.</summary>
     public const string Description = "Modern VBA development inside the Visual Basic Editor.";
 
+    /// <summary>
+    /// ProgID of the running api door: `GetObject(, "Xlide.Api")` from VBA, or GetActiveObject
+    /// from any automation client. Registered in the Running Object Table by a live dev session;
+    /// distinct from <see cref="AddInProgId"/>, which names the add-in for the VBE loader.
+    /// </summary>
+    public const string ApiProgId = "Xlide.Api";
+
+    /// <summary>CLSID behind <see cref="ApiProgId"/>.</summary>
+    public const string ApiClsid = "B71F7E4E-C5A6-4FA4-9A6F-9A85B20778CE";
+
     /// <summary>Folder name used under LOCALAPPDATA for logs and state.</summary>
     public const string DataFolderName = "xlide_vbide";
 

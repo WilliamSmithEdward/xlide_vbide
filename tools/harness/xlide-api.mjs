@@ -367,6 +367,15 @@ function clientFor(entry) {
     state: (timeout) => call("state", { timeout }),
     windows: () => call("windows"),
 
+    // The agent front door and what it teaches: the api explaining itself, and the two
+    // knowledge routes the engine answers. See "An agent's first request" in debug-api.md.
+    agent: () => call("agent"),
+    agentRoutes: () => call("agent/routes"),
+    agentRoute: (name) => call(`agent/route${query({ name })}`),
+    agentExamples: () => call("agent/examples"),
+    model: (type) => call(`model${query({ type })}`),
+    analyzer: () => call("analyzer"),
+
     /**
      * The editor's menus with their ids, suppressed ones included.
      *
@@ -1290,8 +1299,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       found.map((entry) => ({
         pid: entry.pid,
         port: entry.port,
+        host: entry.host ?? "excel",
         shown: entry.state?.shownProject ?? null,
         module: entry.state?.shownModule ?? null,
+        agent: entry.agent ?? null,
       })),
       null,
       2));
@@ -1303,6 +1314,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     switch (route) {
       case undefined:
       case "state": return api.state();
+      case "agent": return api.agent();
+      case "agentRoutes": return api.agentRoutes();
+      case "agentRoute": return api.agentRoute(rest[0]);
+      case "agentExamples": return api.agentExamples();
+      case "model": return api.model(rest[0]);
+      case "analyzer": return api.analyzer();
       case "windows": return api.windows();
 
       // THE ROUTES A WORKBOOK QUESTION NEEDS, which the command line did not carry.
@@ -1384,7 +1401,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "sync": return api.syncPlan(rest[0] ?? "export", { folder: rest[1], mode: rest[2] });
       case "syncApply": return api.syncApply(rest[0] ?? "export", { folder: rest[1], mode: rest[2], select: rest[3] ?? "checked" });
       case "syncSettings": return api.syncSettings({ folder: rest[0], exportMode: rest[1], importMode: rest[2] });
-      case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, shown: e.state.shownProject }));
+      case "instances": return (await discover()).map((e) => ({ pid: e.pid, port: e.port, host: e.host, shown: e.state.shownProject, agent: e.agent }));
       // designer EntryForm                        the control tree
       // designer EntryForm markup                 the same form as markup text
       // designer EntryForm baseline               what the SAVED workbook says was changed

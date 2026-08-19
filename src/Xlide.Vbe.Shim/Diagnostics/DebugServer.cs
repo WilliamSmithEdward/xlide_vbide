@@ -47,12 +47,16 @@ internal sealed class DebugServer : IDisposable
     private readonly string _discoveryPath;
     private volatile bool _stopped;
 
+    /// <summary>This door's root, token included: what every advertised URL is built on.</summary>
+    public string BaseUrl { get; }
+
     private DebugServer(TcpListener listener, string token, string discoveryPath, Func<DebugRequest, DebugReply> answer)
     {
         _listener = listener;
         _token = token;
         _discoveryPath = discoveryPath;
         _answer = answer;
+        BaseUrl = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/{token}";
     }
 
     public static DebugServer? Start(Func<DebugRequest, DebugReply> answer)
@@ -77,10 +81,18 @@ internal sealed class DebugServer : IDisposable
             // Everything a client needs to pick THIS instance from several running Excels:
             // the file is per pid, and the state route answers with the shown workbook. A
             // client discovers by globbing debug-api-*.json and probing each state.
+            //
+            // `host` and `agent` are for a caller that knows NOTHING yet - an agent handed this
+            // file cold. The host token says which Office application answered (the add-in loads
+            // in Word and PowerPoint as readily as Excel, and an agent about to write VBA needs
+            // to know which object model it is writing against), and `agent` is a ready-to-fetch
+            // URL whose reply teaches the rest of the api. One file read, one GET, oriented.
             File.WriteAllText(discoveryPath,
                 $"{{\"api\":{ApiVersion},\"port\":{port},\"token\":\"{token}\"," +
                 $"\"devtoolsPort\":{WebView.WebView2Surface.DevToolsPort},\"pid\":{Environment.ProcessId}," +
-                $"\"startedAt\":\"{DateTime.UtcNow:O}\"}}");
+                $"\"startedAt\":\"{DateTime.UtcNow:O}\"," +
+                $"\"product\":\"{ProductIdentity.DataFolderName}\",\"host\":\"{Engine.HostApp.Name}\"," +
+                $"\"agent\":\"{server.BaseUrl}/agent\"}}");
 
             _ = Task.Run(server.Loop);
             Log.Info($"debug api: listening on 127.0.0.1:{port}/{token} (dev build only)");
@@ -1406,6 +1418,48 @@ public sealed record DebugStatsReply(
     [property: JsonPropertyName("comWrappersDisposed")] long ComWrappersDisposed,
     [property: JsonPropertyName("comWrappersLive")] long ComWrappersLive);
 
+/// <summary>The `agent` front door: identity, orientation, and the trail onward.</summary>
+public sealed record DebugAgentReply(
+    [property: JsonPropertyName("product")] string Product,
+    [property: JsonPropertyName("what")] string What,
+    [property: JsonPropertyName("host")] string Host,
+    [property: JsonPropertyName("pid")] int Pid,
+    [property: JsonPropertyName("shimBuiltUtc")] string ShimBuiltUtc,
+    [property: JsonPropertyName("engineUp")] bool EngineUp,
+    [property: JsonPropertyName("baseUrl")] string BaseUrl,
+    [property: JsonPropertyName("howToCall")] string HowToCall,
+    [property: JsonPropertyName("insideDoor")] string InsideDoor,
+    [property: JsonPropertyName("startHere")] string[] StartHere,
+    [property: JsonPropertyName("next")] Dictionary<string, string> Next);
+
+/// <summary>One route as `agent/routes` and `agent/route` teach it.</summary>
+public sealed record DebugAgentRouteRow(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("method")] string Method,
+    [property: JsonPropertyName("args")] string Args,
+    [property: JsonPropertyName("what")] string What,
+    [property: JsonPropertyName("example")] string Example,
+    [property: JsonPropertyName("bareGetIsSafe")] bool BareGetIsSafe,
+    [property: JsonPropertyName("insideDoor")] string InsideDoor,
+    [property: JsonPropertyName("note")] string? Note);
+
+public sealed record DebugAgentRoutesReply(
+    [property: JsonPropertyName("count")] int Count,
+    [property: JsonPropertyName("methodNote")] string MethodNote,
+    [property: JsonPropertyName("insideDoorNote")] string InsideDoorNote,
+    [property: JsonPropertyName("routes")] DebugAgentRouteRow[] Routes,
+    [property: JsonPropertyName("next")] Dictionary<string, string> Next);
+
+/// <summary>One recipe: a goal and the ordered request lines that reach it.</summary>
+public sealed record DebugAgentExample(
+    [property: JsonPropertyName("goal")] string Goal,
+    [property: JsonPropertyName("steps")] string[] Steps,
+    [property: JsonPropertyName("note")] string? Note);
+
+public sealed record DebugAgentExamplesReply(
+    [property: JsonPropertyName("examples")] DebugAgentExample[] Examples,
+    [property: JsonPropertyName("next")] Dictionary<string, string> Next);
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DebugStateReply))]
 [JsonSerializable(typeof(DebugVisibilityReply))]
@@ -1475,5 +1529,11 @@ public sealed record DebugStatsReply(
 [JsonSerializable(typeof(DebugHistoryReply))]
 [JsonSerializable(typeof(DebugRouteCost))]
 [JsonSerializable(typeof(DebugRouteCost[]))]
+[JsonSerializable(typeof(DebugAgentReply))]
+[JsonSerializable(typeof(DebugAgentRouteRow))]
+[JsonSerializable(typeof(DebugAgentRoutesReply))]
+[JsonSerializable(typeof(DebugAgentExample))]
+[JsonSerializable(typeof(DebugAgentExamplesReply))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
 #endif

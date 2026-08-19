@@ -214,6 +214,29 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// What the language service knows about the host's object model: the type inventory bare,
+    /// or one type's members when a name is given. Product knowledge, not project state - the
+    /// engine answers before any project opens, and for a host with no model it says so.
+    /// </summary>
+    public async Task<JsonElement?> KnowledgeModelAsync(string? type, CancellationToken cancellation)
+    {
+        var payload = new Dictionary<string, object>();
+        if (!string.IsNullOrEmpty(type))
+        {
+            payload["type"] = type;
+        }
+
+        return await CallAsync("knowledge/objectModel", payload, cancellation).ConfigureAwait(false);
+    }
+
+    /// <summary>The analyzer's rule catalogue: every diagnostic it can raise, classified.</summary>
+    public async Task<JsonElement?> KnowledgeAnalyzerAsync(CancellationToken cancellation)
+    {
+        return await CallAsync("knowledge/analyzer", new Dictionary<string, object>(), cancellation)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Asks the engine what an import or export would do.
     ///
     /// The engine answers with the COMPANION EDITOR'S OWN planner, which is why the modules go

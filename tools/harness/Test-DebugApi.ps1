@@ -601,6 +601,90 @@ Check 'layout reset puts a rearranged workspace back' {
     $reset.ran -and $left.standing -and $bottom.standing -and $panes -match 'problems'
 }
 
+# --- The agent front door, the knowledge routes, and the inside door ---
+
+Check 'discovery advertises product, host, and a ready agent URL' {
+    $disc = Get-Content (Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($d.pid).json") -Raw | ConvertFrom-Json
+    $disc.product -eq 'xlide_vbide' -and $disc.host.Length -gt 0 -and $disc.agent -match '/agent$'
+}
+
+Check 'agent introduces the product and names the host' {
+    $a = Invoke-RestMethod "$api/agent" -TimeoutSec 8
+    $a.product -eq 'xlide_vbide' -and $a.host.Length -gt 0 -and $a.pid -eq $d.pid -and $a.startHere.Count -ge 3
+}
+
+Check 'every breadcrumb the agent hands out resolves' {
+    $a = Invoke-RestMethod "$api/agent" -TimeoutSec 8
+    $bad = @()
+    foreach ($p in $a.next.PSObject.Properties) {
+        try { Invoke-WebRequest $p.Value -UseBasicParsing -TimeoutSec 10 | Out-Null } catch { $bad += $p.Name }
+    }
+    $bad.Count -eq 0
+}
+
+Check 'every route the table calls safe answers as itself, not as unknown' {
+    # The drift guard: a row whose route the switch no longer serves answers the default arm's
+    # "no route" refusal, and this walk catches it. Only bareGetIsSafe rows are called bare.
+    $r = Invoke-RestMethod "$api/agent/routes" -TimeoutSec 8
+    if ($r.count -lt 50) { return $false }
+    $bad = @()
+    foreach ($row in ($r.routes | Where-Object { $_.bareGetIsSafe })) {
+        try {
+            $answer = Invoke-WebRequest "$api/$($row.name)" -UseBasicParsing -TimeoutSec 20
+            if ($answer.Content -match 'no route ') { $bad += $row.name }
+        } catch { $bad += $row.name }
+    }
+    if ($bad.Count -gt 0) { Write-Output "    drifted: $($bad -join ', ')" }
+    $bad.Count -eq 0
+}
+
+Check 'agent/route details one route by name' {
+    (Invoke-RestMethod "$api/agent/route?name=module" -TimeoutSec 8).name -eq 'module'
+}
+
+Check 'agent/examples hands runnable recipes' {
+    (Invoke-RestMethod "$api/agent/examples" -TimeoutSec 8).examples.Count -ge 4
+}
+
+Check 'model teaches the host object model' {
+    $m = Invoke-RestMethod "$api/model" -TimeoutSec 12
+    $m.known -and $m.typeCount -gt 100 -and $m.host -eq 'excel'
+}
+
+Check 'model expands a type through its alias' {
+    $w = Invoke-RestMethod "$api/model?type=Worksheet" -TimeoutSec 12
+    $w.type.name -eq 'Excel.Worksheet' -and $w.type.memberCount -ge 20
+}
+
+Check 'analyzer teaches the rule catalogue with its authorities' {
+    $rules = Invoke-RestMethod "$api/analyzer" -TimeoutSec 12
+    $rules.ruleCount -ge 20 -and ($rules.rules | Where-Object { $_.code -eq 'unterminated-string' }).spec -match 'MS-VBAL'
+}
+
+Check 'the inside door answers from the running object table' {
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    ($door.Request('agent') | ConvertFrom-Json).pid -eq $d.pid
+}
+
+Check 'Guide answers the front door from inside' {
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    ($door.Guide() | ConvertFrom-Json).product -eq 'xlide_vbide'
+}
+
+Check 'the inside door serves the full surface: a module lifecycle' {
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    $null = $door.Request('component?action=add&name=DoorSuiteProof&kind=module')
+    $null = $door.Request('module?name=DoorSuiteProof', "Sub DoorSuiteProofRuns()`r`nEnd Sub`r`n")
+    $written = ($door.Request('module?name=DoorSuiteProof') | ConvertFrom-Json).text -match 'DoorSuiteProofRuns'
+    $removed = ($door.Request('component?action=remove&name=DoorSuiteProof') | ConvertFrom-Json).ok
+    $written -and $removed
+}
+
+Check 'the inside door refuses a page route toward the http door' {
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    ($door.Request('ui') | ConvertFrom-Json).error -match 'HTTP door'
+}
+
 Write-Output ''
 foreach ($name in $checks.Keys) { "  {0,-52} {1}" -f $name, $checks[$name] }
 if ($script:modalDetail) { Write-Output "  modal guard: $script:modalDetail" }
