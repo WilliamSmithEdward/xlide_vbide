@@ -443,6 +443,32 @@ function boot(): void {
   // touches the host's list, so a move can never be mistaken for a close.
   const designerViews = new Map<string, DesignerView>();
 
+  /**
+   * Applies and saves every designer document holding unwritten edits, answering who was
+   * saved and who refused. The two consumers are sync's export flush - the dialog's wrapper
+   * here and the debug api's pre-step through the designerSaveDirty act - so both doors ship
+   * what is on screen, never the last save (decision 15's sibling rule; the Run command keeps
+   * the same one).
+   */
+  const saveDirtyDesigners = async (): Promise<{ saved: string[]; refused: string[] }> => {
+    const saved: string[] = [];
+    const refused: string[] = [];
+    for (const view of designerViews.values()) {
+      if (!view.isDirty()) {
+        continue;
+      }
+
+      const outcome = await view.saveNow();
+      if (outcome !== null && !outcome.ok) {
+        refused.push(`${view.id.module}: ${outcome.refused ?? "the apply was refused"}`);
+      } else {
+        saved.push(view.id.module);
+      }
+    }
+
+    return { saved, refused };
+  };
+
   const designerViewFor = (id: DocumentId): DesignerView => {
     const key = docKeyOf(id.module, id.project, id.face);
     let view = designerViews.get(key);
@@ -609,7 +635,23 @@ function boot(): void {
       // visited once like a preference.
       if (command.id === "openSync") {
         openSyncDialog(
-          (args, body) => bridge.requestSync(args, body),
+          async (args, body) => {
+            // EXPORT FLUSHES THE DESIGNERS FIRST (the owner, 2026-08-19): the document is the
+            // transaction log and the form only catches up on a save, so an export that
+            // skipped the save shipped the LAST save - the same bug Run had, fixed the same
+            // way. A document that refuses to apply stops the export and says why, exactly
+            // as it stops a run; exporting the stale form instead would be shipping a lie.
+            if (args.direction === "export") {
+              const flushed = await saveDirtyDesigners();
+              if (flushed.refused.length > 0) {
+                return {
+                  error: "the export did not run: a designer document refuses to apply - "
+                    + flushed.refused.join("; "),
+                } as never;
+              }
+            }
+            return bridge.requestSync(args, body);
+          },
           () => workspace.activeEditor().focus());
         return;
       }
@@ -1170,6 +1212,7 @@ function boot(): void {
         }
         return null;
       },
+      saveDirty: saveDirtyDesigners,
     },
     search: searchWidget,
     bookmarks,

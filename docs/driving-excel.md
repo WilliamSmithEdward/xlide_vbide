@@ -1315,6 +1315,12 @@ Three things worth knowing before driving it:
   so the engine's stand-in re-marks that row `will-create` when the `.frx` sits beside the
   `.frm` (decision 15 in [decisions.md](decisions.md); xlide_vscode#27 asks for the shared
   mechanism that would make the override unnecessary).
+- **Export ships what is ON SCREEN.** The designer's document is the transaction log and the
+  form only catches up on a save, so an export that skipped the save would ship the LAST one -
+  the same bug Run had (2026-08-16), kept out by the same rule: an export applies-and-saves
+  every dirty designer document first (the dialog does it page-side, the api route in a
+  pool-side pre-step), and unwritten CODE edits are flushed with it. A document that refuses
+  to apply stops the export and says why, exactly as it stops a run.
 
 Renaming a form in source control means three edits to the header, not one: the `Begin` line, the
 `Attribute VB_Name` line, and the `OleObjectBlob` line. Miss the first and the editor refuses the

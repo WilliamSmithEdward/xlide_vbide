@@ -816,6 +816,30 @@ export class DesignerView {
     this.deps.apply(this.model.getValue());
   }
 
+  /** Whether the document holds edits the form has not caught up with. */
+  isDirty(): boolean {
+    return this.dirty;
+  }
+
+  /**
+   * Applies and saves the CURRENT document when it is dirty, answering the outcome - null
+   * means there was nothing to do. This is applyNow's path made awaitable for sync's export
+   * flush; applyDocument below cannot serve it because its setValue resets the model's undo
+   * stack, and a save the developer did not shape must not eat their history.
+   */
+  saveNow(): Promise<FormMarkupApplied | null> {
+    if (!this.dirty) {
+      return Promise.resolve(null);
+    }
+
+    return new Promise((settle) => {
+      this.pendingActOutcome = settle;
+      this.errorStrip.hidden = true;
+      this.pendingSave = { run: false };
+      this.deps.apply(this.model.getValue());
+    });
+  }
+
   /** For the debug surface: set the document and apply, answering the outcome - the same
    * path Ctrl+S takes, save included, which is the point of driving it from a suite. The
    * apply is unconditional here: the act's contract is an outcome, and the clean-document

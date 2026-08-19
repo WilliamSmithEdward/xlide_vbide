@@ -212,6 +212,8 @@ export interface DevSurfaceParts {
       pasteClipboard(): string;
       duplicateSelection(): string;
     } | null;
+    /** Applies and saves every dirty designer document; sync's export flush rides this. */
+    saveDirty(): Promise<{ saved: string[]; refused: string[] }>;
   };
   search: {
     state(): UiSnapshot["search"];
@@ -681,6 +683,21 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * the host round trip, so a suite proves the TAB works and not merely the route the tab
      * shares a service with. Answers the outcome the strip under the document shows.
      */
+    designerSaveDirty: async () => {
+      // Sync's export flush: what lands in the folder is what is on screen. No arguments -
+      // the dirty set is the page's own knowledge, and a caller cannot know it better.
+      const flushed = await designer.saveDirty();
+      return {
+        did: flushed.refused.length === 0,
+        detail: flushed.refused.length > 0
+          ? `refused: ${flushed.refused.join("; ")}`
+          : flushed.saved.length === 0
+            ? "nothing was dirty"
+            : `saved ${flushed.saved.join(", ")}`,
+        data: flushed,
+      };
+    },
+
     designerApply: async (args) => {
       const module = typeof args.module === "string" ? args.module : null;
       const markup = typeof args.markup === "string" ? args.markup : null;

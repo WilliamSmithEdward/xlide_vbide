@@ -279,6 +279,14 @@ internal sealed partial class AddInSession : IDisposable
 
     private string HandleSync(IReadOnlyDictionary<string, string> query, string body)
     {
+        // Unwritten CODE edits go with the sync, the same way they go with a run: the plan reads
+        // the live project over COM, and a module the developer has not finished typing must be
+        // read as typed, not as last written back. The designer documents' half of the same rule
+        // is flushed by the callers (the dialog page-side, the api route's pool pre-step),
+        // because applying a designer document needs the page to pump and this method runs on
+        // the host thread.
+        _editorSurface?.FlushEdits();
+
             // Import and export, the same way the dialog does it.
             //
             // This route does NOT have its own idea of what an import means: it calls the

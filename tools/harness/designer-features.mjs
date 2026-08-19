@@ -1789,6 +1789,71 @@ try {
   mkdirSync(syncFolder, { recursive: true });
 
   try {
+    // ---- EXPORT SHIPS WHAT IS ON SCREEN (the owner, 2026-08-19) ----
+    //
+    // The document is the transaction log and the form only catches up on a save, so an export
+    // that skipped the save shipped the LAST one - the same bug Run had (2026-08-16), now kept
+    // out by the same rule: export applies-and-saves the dirty designers first, page-side for
+    // the dialog and in the api route's pre-step for this door.
+    // The rest of this section drives the shim alone, so no designer tab is open here; the
+    // flush proof needs one to dirty.
+    // Opened the way every other section opens it - no project spelling, so this is the SAME
+    // view under the same document key, not an empty twin beside it.
+    await api.pane("open", { module: form, face: "design" });
+    // Until it HOLDS the form: a fresh view answers before its document arrives, and a drag
+    // against an empty canvas refuses by name.
+    await waitFor("the designer document to arrive on the canvas", async () =>
+      ((await api.act("designerCanvas", { module: form })).data?.controls?.length ?? 0) > 0);
+
+    const designLine = async (name) =>
+      (await tabText()).split(/\r?\n/).find((line) => line.includes(`Name="${name}"`)) ?? "";
+    const leftIn = (line) => Number(/\bLeft="(-?[\d.]+)"/.exec(line)?.[1] ?? NaN);
+
+    // The probe control comes off the LIVE canvas, not a name written here: earlier sections
+    // legitimately remove controls for good (PickAir went in the nested-remove rows), and a
+    // hardcoded name is archaeology waiting to fail. Any drawn control whose line spells Left
+    // serves - the row is about the FLUSH, not about a particular box.
+    const drawn = ((await api.act("designerCanvas", { module: form })).data?.controls ?? [])
+      .map((one) => one.name);
+    let probe = null;
+    for (const name of drawn) {
+      if (Number.isFinite(leftIn(await designLine(name)))) {
+        probe = name;
+        break;
+      }
+    }
+    if (probe === null) {
+      throw new Error(`no drawn control spells Left in the document; canvas holds: ${drawn.join(", ")}`);
+    }
+
+    const probeLeft = leftIn(await designLine(probe));
+    // alt held: a one-point drag under grid snap rounds back to where it started, and this row
+    // needs a real unsaved delta, not a snapped-away one.
+    const nudged = await api.act("designerDrag", { module: form, control: probe, dx: 1, dy: 0, alt: true });
+    if (nudged.did !== true) {
+      throw new Error(`the flush proof's nudge was refused: ${nudged.detail}`);
+    }
+
+    await waitFor("the unsaved nudge to land in the document", async () =>
+      leftIn(await designLine(probe)) === probeLeft + 1);
+
+    const flushedExport = await api.syncApply("export", { folder: syncFolder, select: "all" });
+    const exportedProbe = readFileSync(join(syncFolder, `${form}.form`), "utf8")
+      .split(/\r?\n/).find((line) => line.includes(`Name="${probe}"`)) ?? "";
+    check("an export ships what is ON SCREEN: the unsaved nudge is in the files",
+      (flushedExport.failed ?? []).length === 0 && leftIn(exportedProbe) === probeLeft + 1,
+      `${probe}: document holds ${probeLeft + 1}; the exported .form holds ${leftIn(exportedProbe)}`);
+
+    const idle = await api.act("designerSaveDirty");
+    check("...because the export saved it first: nothing is left dirty",
+      idle.did === true && /nothing was dirty/.test(idle.detail ?? ""), idle.detail);
+
+    // The point goes back and is saved, so the section's own export below starts clean.
+    await api.act("designerDrag", { module: form, control: probe, dx: -1, dy: 0, alt: true });
+    await api.act("designerSaveDirty");
+    await waitFor("the nudge to be undone and saved", async () =>
+      leftIn(await designLine(probe)) === probeLeft);
+
     const exported = await api.syncApply("export", { folder: syncFolder, select: "all" });
     const written = readdirSync(syncFolder);
     check("an export writes the form's design beside its code",

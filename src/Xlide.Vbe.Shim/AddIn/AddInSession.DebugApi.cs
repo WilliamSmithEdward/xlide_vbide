@@ -70,6 +70,37 @@ internal sealed partial class AddInSession
     /// </summary>
     private string AgentBaseUrl() => _debugServer?.BaseUrl ?? "http://(the-http-door-did-not-start)";
 
+    /// <summary>
+    /// The designerSaveDirty act's refusal, or null when every dirty document applied. The act
+    /// answers did:false with its refusals in detail; anything unparseable is read as clean,
+    /// because the flush must never turn a working export into a refusal about JSON.
+    /// </summary>
+    private static string? FlushRefusal(string actAnswer)
+    {
+        try
+        {
+            using var parsed = System.Text.Json.JsonDocument.Parse(actAnswer);
+            var root = parsed.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                using var inner = System.Text.Json.JsonDocument.Parse(root.GetString() ?? "{}");
+                return RefusalOf(inner.RootElement);
+            }
+
+            return RefusalOf(root);
+
+            static string? RefusalOf(System.Text.Json.JsonElement act) =>
+                act.TryGetProperty("did", out var did) && did.ValueKind == System.Text.Json.JsonValueKind.False
+                    && act.TryGetProperty("detail", out var detail)
+                    ? detail.GetString() ?? "a designer document refused to apply"
+                    : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     /// <summary>When the running shim was built, the same reading doctor reports.</summary>
     private static string ShimBuiltUtc()
     {
@@ -954,6 +985,24 @@ internal sealed partial class AddInSession
             && !(request.Query.TryGetValue("button", out var dismissButton) && dismissButton.Length > 0))
         {
             return DebugError("dismiss needs button=<label>, and takes caption=<title> to pick between dialogs");
+        }
+
+        // EXPORT FLUSHES THE DESIGNERS FIRST (the owner, 2026-08-19): the designer's document
+        // is the transaction log and the form only catches up on a save, so an export that
+        // skipped the save shipped the LAST save - the same bug Run had, fixed by the same
+        // rule. Pool-side because applying needs the page to pump; the sync dialog's own path
+        // makes the same call page-side before it sends. A page that is not up has no dirty
+        // designers, so a failed script is a clean continue - and a document that REFUSES to
+        // apply stops the export and says why, exactly as it stops a run.
+        if (request.Route == "sync"
+            && request.Query.TryGetValue("direction", out var syncFlushDirection)
+            && string.Equals(syncFlushDirection, "export", StringComparison.OrdinalIgnoreCase))
+        {
+            var flushed = RunPageScript("window.xlideUi.act('designerSaveDirty', {})", null, 20000);
+            if (flushed.Error is null && FlushRefusal(flushed.Result) is { } refusal)
+            {
+                return DebugError($"the export did not run: a designer document refuses to apply - {refusal}");
+            }
         }
 
         switch (request.Route)
