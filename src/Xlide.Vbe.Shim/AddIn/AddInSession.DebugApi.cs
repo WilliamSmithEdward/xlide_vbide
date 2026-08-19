@@ -120,8 +120,9 @@ internal sealed partial class AddInSession
             _insideDoor = door;
             _insideDoorRef = wrapper;
 
-            // The ProgID -> CLSID mapping GetObject resolves through. HKCU, written by the
-            // session and removed with it; nothing else reads this key.
+            // The ProgID -> CLSID mapping GetObject resolves through. HKCU, rewritten by every
+            // session and left in place at retirement - see RetireInsideDoor for why deleting
+            // it broke the other Excel.
             using (var classes = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(
                 $@"Software\Classes\{Core.ProductIdentity.ApiProgId}\CLSID"))
             {
@@ -160,7 +161,14 @@ internal sealed partial class AddInSession
         }
     }
 
-    /// <summary>Takes the door back down: out of the ROT, off the add-in, key removed.</summary>
+    /// <summary>
+    /// Takes the door back down: out of the ROT and off the add-in. The ProgID -> CLSID key in
+    /// HKCU\Software\Classes deliberately STAYS: with two Excels running, the first session to
+    /// stop would otherwise delete the mapping out from under the survivor, and every
+    /// `GetObject(, "Xlide.Api")` on the machine would fail until some later session start
+    /// rewrote it (found in the 2026-08-19 hunt). A mapping with no running instance behind it
+    /// refuses GetObject exactly the way no mapping does, so leaving it costs nothing.
+    /// </summary>
     private void RetireInsideDoor()
     {
         if (_insideDoorRotTicket != 0)
@@ -169,28 +177,15 @@ internal sealed partial class AddInSession
             _insideDoorRotTicket = 0;
         }
 
-        if (_insideDoorRef is not null)
+        if (_insideDoorRef is not null && _addIn is not null)
         {
             try
             {
-                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(
-                    $@"Software\Classes\{Core.ProductIdentity.ApiProgId}", throwOnMissingSubKey: false);
+                _addIn.ClearObject("Object");
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Log.Info($"inside door: the class key would not delete ({ex.GetType().Name})");
-            }
-
-            if (_addIn is not null)
-            {
-                try
-                {
-                    _addIn.ClearObject("Object");
-                }
-                catch (Exception)
-                {
-                    // The put may never have landed; a refused clear says nothing new.
-                }
+                // The put may never have landed; a refused clear says nothing new.
             }
         }
 

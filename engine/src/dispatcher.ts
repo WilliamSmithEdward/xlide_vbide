@@ -283,7 +283,12 @@ export class Dispatcher {
         switch (method) {
             case 'initialize':
                 this.initialized = true;
-                return { engine: 'xlide', protocol: 1 };
+                // `built` is stamped by the build (see engine/build.mjs): the engine names its
+                // own build the way the shim and the page name theirs, so "is the running
+                // engine the one just built" stops resting on file times alone - and every
+                // packaged executable differs by at least these bytes, which matters on a
+                // machine whose application-control policy caches its verdict per file hash.
+                return { engine: 'xlide', protocol: 1, built: __ENGINE_BUILT__ };
 
             case 'shutdown':
                 this.shuttingDown = true;
@@ -1021,6 +1026,11 @@ export class Dispatcher {
             // reported as an error. The extension's own client always sends both.
             moduleKind: moduleKindFromType(params.moduleType),
             documentType: params.documentType,
+            // The analyzer resolves the token to a host model itself (issue #24). This is the
+            // DIAGNOSTICS request; the fix path below builds its own, and setting the host on
+            // only one of the two was the 2026-08-19 hunt's find - in Word, completion knew
+            // ActiveSheet was nobody while diagnostics stayed silent about it.
+            host: hostApp(),
             // The request's own members win at the worker (live designer truth when the host
             // sends them); the seeded copy answers otherwise, so a form is analysable without
             // a per-request supply. The .frm header fallback below both is dead for Excel

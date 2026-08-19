@@ -113,10 +113,13 @@ function Invoke-FixtureBuild {
     # Written WITHOUT a byte-order mark. In PowerShell 5.1 `-Encoding utf8` means "UTF-8 with a
     # BOM", and JSON.parse refuses one - naming a character that does not appear to be in the
     # file. This lesson was recorded in four generators before it was recorded once, here.
+    # Depth 8: the forms shape bottoms out at exactly five levels, and ConvertTo-Json TRUNCATES
+    # beyond its depth silently - stringified hashtables where objects were meant - so the limit
+    # sits well above the deepest plan rather than exactly at it.
     $planPath = Join-Path ([System.IO.Path]::GetTempPath()) "xlide-fixture-$PID.json"
     [System.IO.File]::WriteAllText(
         $planPath,
-        ($plan | ConvertTo-Json -Depth 5),
+        ($plan | ConvertTo-Json -Depth 8),
         (New-Object System.Text.UTF8Encoding $false))
 
     Write-Host '3. Writing the components through the debug api.'

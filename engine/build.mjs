@@ -37,6 +37,13 @@ await esbuild.build({
     sourcemap: false,
     outfile: bundlePath,
     logLevel: 'info',
+    define: {
+        // The engine names its own build (initialize answers it). Deliberately per-build: an
+        // identical rebuild used to produce an identical executable, and a machine whose
+        // application-control policy caches verdicts per file hash could then never re-judge a
+        // blocked engine however many times it was repackaged (2026-08-19).
+        __ENGINE_BUILT__: JSON.stringify(new Date().toISOString()),
+    },
 });
 
 const bundleSize = statSync(bundlePath).size;

@@ -100,6 +100,15 @@ internal sealed partial class InsideDoor : IDispatch
             return HResult.InvalidArg;
         }
 
+        // Assignments are refused, not executed. A property PUT delivers its value as the one
+        // argument, in the same slot a call's argument arrives in - so without this guard,
+        // `door.Request = "state"` would RUN the state route as a side effect of an assignment
+        // statement, which is the least expected thing an assignment could do.
+        if ((flags & (ushort)(InvokeKind.PropertyPut | InvokeKind.PropertyPutRef)) != 0)
+        {
+            return HResult.DispMemberNotFound;
+        }
+
         var parameters = (DispatchParameters*)dispParams;
         var arguments = (ComVariant*)parameters->Arguments;
         var count = parameters->ArgumentCount;

@@ -685,6 +685,18 @@ Check 'the inside door refuses a page route toward the http door' {
     ($door.Request('ui') | ConvertFrom-Json).error -match 'HTTP door'
 }
 
+Check 'an assignment to the door is refused, not executed' {
+    # `door.Request = "state"` must be member-not-found, never a route run as an assignment's
+    # side effect - the 2026-08-19 hunt's find.
+    $door = [Runtime.InteropServices.Marshal]::GetActiveObject('Xlide.Api')
+    try {
+        $door.Request = 'state'
+        $false
+    } catch {
+        $true
+    }
+}
+
 Write-Output ''
 foreach ($name in $checks.Keys) { "  {0,-52} {1}" -f $name, $checks[$name] }
 if ($script:modalDetail) { Write-Output "  modal guard: $script:modalDetail" }

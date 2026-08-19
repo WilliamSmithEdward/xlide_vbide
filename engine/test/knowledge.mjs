@@ -93,13 +93,71 @@ check('an unknown type answers a note, not an empty crash', () => {
     assert.ok(missing.note.includes('NoSuchThing'));
 });
 
-// Now tell the engine it is running in Word, the way project/open does, and ask again.
+/*
+ * THE HOST REACHES THE FEATURES, not only the knowledge routes. Before the host flips to Word,
+ * pin Excel's half of each pair; after, the same inputs must answer in Word's tongue. Two
+ * paths carry the model and each is pinned through its own door: diagnostics ride the analysis
+ * worker request's `host`, completion rides the assembled context's model.
+ */
+const GLOBAL_USER = 'Option Explicit\r\n\r\nPublic Sub Probe()\r\n    ActiveSheet.Calculate\r\nEnd Sub\r\n';
+
 await call('initialize', {});
+await call('project/open', {
+    projectId: 'ExcelProject',
+    generation: 1,
+    modules: [{ moduleName: 'Module1', source: GLOBAL_USER, type: 'standard' }],
+});
+
+const excelFindings = await call('textDocument/diagnostics', {
+    documentKey: 'ExcelProject/Module1',
+    projectId: 'ExcelProject',
+    generation: 1,
+    source: GLOBAL_USER,
+    moduleName: 'Module1',
+    moduleType: 'standard',
+});
+
+check('in excel, ActiveSheet is a host global and no finding', () => {
+    assert.ok(!excelFindings.diagnostics.some((one) => one.message.includes('ActiveSheet')),
+        JSON.stringify(excelFindings.diagnostics));
+});
+
+// Now tell the engine it is running in Word, the way project/open does, and ask again.
 await call('project/open', {
     projectId: 'WordProject',
     generation: 1,
     host: 'word',
-    modules: [{ moduleName: 'Module1', source: 'Sub A()\r\nEnd Sub\r\n', type: 'standard' }],
+    modules: [{ moduleName: 'Module1', source: GLOBAL_USER, type: 'standard' }],
+});
+
+const wordFindings = await call('textDocument/diagnostics', {
+    documentKey: 'WordProject/Module1',
+    projectId: 'WordProject',
+    generation: 1,
+    source: GLOBAL_USER,
+    moduleName: 'Module1',
+    moduleType: 'standard',
+});
+
+check('in word, ActiveSheet is nobody and the analyzer says so', () => {
+    assert.ok(wordFindings.diagnostics.some((one) => one.message.includes('ActiveSheet')),
+        `expected an undeclared finding; got ${JSON.stringify(wordFindings.diagnostics)}`);
+});
+
+const wordMemberSource = 'Public Sub Probe()\r\n    ActiveDocument.\r\nEnd Sub\r\n';
+const wordMembers = await call('textDocument/completion', {
+    projectId: 'WordProject',
+    moduleName: 'Module1',
+    source: wordMemberSource,
+    offset: wordMemberSource.indexOf('ActiveDocument.') + 'ActiveDocument.'.length,
+    moduleType: 'standard',
+});
+
+check('in word, ActiveDocument. offers Word.Document members', () => {
+    assert.ok(wordMembers.items.some((item) => item.label === 'Paragraphs'),
+        `${wordMembers.items.length} item(s); no Paragraphs`);
+    assert.ok(!wordMembers.items.some((item) => item.label === 'Cells'),
+        'an Excel member leaked into Word');
 });
 
 const inWord = await call('knowledge/objectModel', {});
