@@ -426,7 +426,7 @@ the tripwire, and they fired within a day both times. If upstream ships a caller
 capability (asked as xlide_vscode#27), the mechanism switches to it and the shape coupling
 goes away; the behavior does not change either way.
 
-## 13. Conventions and user directives (binding)
+## 16. Conventions and user directives (binding)
 
 Carried here from the handoff log on 2026-08-09, when the dated handovers were consolidated.
 These are the developer's own directives rather than design choices, and they were the only
