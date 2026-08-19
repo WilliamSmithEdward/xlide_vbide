@@ -7,6 +7,7 @@
 // one analysis path shared with the editor extension instead of two that can disagree.
 
 import { setHostApp } from './hostApp.js';
+import { analyzerKnowledge, objectModelKnowledge } from './knowledge.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
@@ -50,6 +51,7 @@ import {
     type HoverParams,
     type HoverResult,
     type JsonRpcError,
+    type KnowledgeModelParams,
     type LoopSyncParams,
     type LoopSyncResult,
     type ModulePayload,
@@ -356,6 +358,14 @@ export class Dispatcher {
              * Answers the text and a line count; the caller compares against the surface's.
              */
             case 'debug/liveSource':                      return this.liveSource(this.require<LiveSourceParams>(params));
+
+            // Product knowledge, not project state: both answer before initialize and before any
+            // project opens, so a caller can learn the terrain without touching anything.
+            case 'knowledge/objectModel':
+                return objectModelKnowledge((params ?? {}) as KnowledgeModelParams);
+
+            case 'knowledge/analyzer':
+                return analyzerKnowledge();
 
             default:
                 throw new RpcError(ErrorCode.MethodNotFound, `Unknown method: ${method}`);

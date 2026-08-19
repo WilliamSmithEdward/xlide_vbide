@@ -593,3 +593,80 @@ export interface SearchResult {
     matches: SearchMatchPayload[];
     truncated: boolean;
 }
+
+/*
+ * knowledge/objectModel and knowledge/analyzer: what the language service KNOWS, as data.
+ * Product knowledge, not project state - both answer before any project is opened, so an
+ * agent can learn the terrain before touching anything.
+ */
+
+export interface KnowledgeModelParams {
+    /** A type to expand - as written in code, qualified, or through the model's aliases. */
+    type?: string;
+}
+
+/** One type in the bare inventory: enough to decide whether to ask for its members. */
+export interface KnowledgeModelTypeRow {
+    name: string;
+    displayName: string;
+    members: number;
+    /** True only when the member list is complete enough to prove a member absent. */
+    exhaustive: boolean;
+}
+
+export interface KnowledgeModelMemberRow {
+    name: string;
+    kind?: string;
+    returns?: string;
+    signature?: string;
+    /** The reference doc's one-line summary, when the model carries one. */
+    doc?: string;
+}
+
+export interface KnowledgeModelResult {
+    /** The host this engine was told it is running in (project/open's token). */
+    host: string;
+    /** Whether that host has an object model wired at all. */
+    known: boolean;
+    note?: string;
+    source?: string;
+    typeCount?: number;
+    types?: KnowledgeModelTypeRow[];
+    /** Host-injected global identifier -> qualified type. */
+    globals?: Record<string, string>;
+    aliasCount?: number;
+    constantCount?: number;
+    /** The expanded type, when the request named one. */
+    type?: {
+        name: string;
+        displayName: string;
+        exhaustive: boolean;
+        memberCount: number;
+        members: KnowledgeModelMemberRow[];
+    };
+}
+
+export interface KnowledgeAnalyzerRuleRow {
+    /** The catalogue key, stable across releases. */
+    key: string;
+    /** The code shown on the diagnostic itself. */
+    code: string;
+    title: string;
+    severity: string;
+    category: string;
+    /** compile-error against deterministic runtime error and the rest. */
+    kind: string;
+    /** True when the rule mirrors a VBE compile failure. */
+    compileEquivalent: boolean;
+    confidence: string;
+    /** The MS-VBAL section (or other authority) the rule enforces. */
+    spec?: string;
+    /** True when the rule needs the whole project, not a single module. */
+    wholeProject?: boolean;
+}
+
+export interface KnowledgeAnalyzerResult {
+    ruleCount: number;
+    categories: string[];
+    rules: KnowledgeAnalyzerRuleRow[];
+}
