@@ -240,8 +240,20 @@ await reset();
     await reset();
     await until(async () => (await canvas()).draft === false);
     const source = await text();
-    const edited = source.replace(/ToggleButton HoldToggle "Hold" at \d+,\d+/,
-      `ToggleButton HoldToggle "Hold" at ${112 + round},112`);
+    // The tag dialect's line, edited the way a hand would: one attribute value. The compact
+    // spelling this replaced ("HoldToggle \"Hold\" at 112,112") outlived its dialect and the
+    // round then timed out on a draft that could never form - the edit had matched nothing and
+    // set the same text back (caught 2026-08-19). Hence the guard: a miss is a loud rot report.
+    // 113 rather than 112: the fixture's own Left IS 112, and a round-0 edit that writes the
+    // value already there is a no-op the guard below rightly refuses.
+    const edited = source.replace(
+      /(<ToggleButton Name="HoldToggle"[^>]*? Left=")\d+(?:\.\d+)?(")/,
+      `$1${113 + round}$2`);
+    if (edited === source) {
+      const held = source.split("\n").find((one) => one.includes("ToggleButton")) ?? source.slice(0, 120);
+      throw new Error("the HoldToggle edit matched nothing; the markup dialect moved under this row. "
+        + `The document held: ${JSON.stringify(held)}`);
+    }
     const started = Date.now();
     await api.act("designerSetMarkup", { module: form, markup: edited });
     await until(async () => (await canvas()).draft === true);
