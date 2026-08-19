@@ -1113,7 +1113,20 @@ function boot(): void {
   // from an enum from a user-defined type, tell a host global from a local that shadows its
   // name, or know that a form's designer declares controls whose method calls should paint as
   // calls (xlide_vscode#20). Those need the analysis, and this is where it arrives.
+  //
+  // AND WHERE IT REFRESHES. Monaco re-queries tokens on edits and on this event, nothing else -
+  // so a query that raced the project seed painted a form's control methods plain and STAYED
+  // that way in an untouched module (caught 2026-08-19: NameBox.SetFocus blue while its hover
+  // said "TextBox method"; reloading painted it). Diagnostics arriving is the analysis saying
+  // something moved, debounced so a pass burst costs one re-query of the visible models.
+  const semanticRefresh = new monaco.Emitter<void>();
+  let semanticRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+  bridge.semanticsMayHaveMoved = () => {
+    clearTimeout(semanticRefreshTimer);
+    semanticRefreshTimer = setTimeout(() => semanticRefresh.fire(), 250);
+  };
   monaco.languages.registerDocumentSemanticTokensProvider(VBA_LANGUAGE_ID, {
+    onDidChange: semanticRefresh.event,
     getLegend: () => ({ tokenTypes: SEMANTIC_TOKEN_TYPES, tokenModifiers: SEMANTIC_TOKEN_MODIFIERS }),
     provideDocumentSemanticTokens: async (model) => {
       const tokens = await bridge.requestSemanticTokens(model);

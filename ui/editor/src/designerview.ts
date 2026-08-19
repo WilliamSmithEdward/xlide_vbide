@@ -716,6 +716,10 @@ export class DesignerView {
       renderLineHighlight: "none",
       occurrencesHighlight: "off",
       fixedOverflowWidgets: true,
+      // The same breath the code editors take (main.ts): without it line 1 sat flush
+      // against the tab divider (the owner, 2026-08-19, "a bit more space between
+      // divider and line #1").
+      padding: { top: 8, bottom: 8 },
     });
 
     // Ctrl+S applies THIS document, while focus is in it; the code editors' save flows are

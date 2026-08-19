@@ -540,6 +540,14 @@ export class EditorBridge {
   shell: Shell | null = null;
   workspace: Workspace | null = null;
 
+  /**
+   * Fired (if hung) whenever fresh diagnostics arrive, because semantic colouring derives from
+   * the same analysis: the provider's registrar debounces this into monaco's onDidChange, which
+   * re-queries tokens for visible models. Without it, tokens computed before the project seeded
+   * stood until the developer edited (2026-08-19).
+   */
+  semanticsMayHaveMoved: (() => void) | null = null;
+
   /** The floating search widget; assigned after construction, the same way openSettings is.
    * Search answers from the host route here - the widget owns the whole search UI. */
   searchWidget: SearchWidget | null = null;
@@ -1342,6 +1350,12 @@ export class EditorBridge {
         return;
       case "setDiagnostics":
         this.setDiagnostics(message.moduleName, message.project ?? null, message.markers);
+        // Semantics ride the same analysis the markers do, and monaco re-queries tokens only
+        // on EDITS - so colouring computed before the project seeded stood stale until the
+        // developer happened to type (caught 2026-08-19: NameBox.SetFocus plain in a fresh
+        // session while hover called it a method; a reload painted it). Whoever registers
+        // the provider hangs a refresh here.
+        this.semanticsMayHaveMoved?.();
         return;
       case "setCurrentLine":
         this.setCurrentLine(message.line);
