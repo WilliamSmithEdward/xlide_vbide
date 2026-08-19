@@ -720,6 +720,13 @@ export class DesignerView {
       // against the tab divider (the owner, 2026-08-19, "a bit more space between
       // divider and line #1").
       padding: { top: 8, bottom: 8 },
+      // OFF because the element rows carry their own menu (onMarkupMenu), and monaco's
+      // built-in one opens through its own service - preventDefault on the browser event
+      // does not stop it, so a real right-click showed BOTH products' menus stacked, with
+      // monaco's on top (the owner's screenshot, 2026-08-19; every synthetic probe missed
+      // it because dispatched events skip the path that opens the built-in menu). Rows
+      // without a Name= get no menu at all now; cut and copy keep their keys.
+      contextmenu: false,
     });
 
     // Ctrl+S applies THIS document, while focus is in it; the code editors' save flows are
