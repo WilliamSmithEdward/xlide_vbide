@@ -86,6 +86,18 @@ End Property
 Public Property Get Count() As Long
     Count = mCount
 End Property
+
+' CROSS-FORM, FROM A CLASS. One of the five caller kinds in the #77 matrix: a form's controls
+' must answer from every module kind, in both spellings.
+Public Sub FormFromClassDirect()
+    EntryForm.NameBox.Text = "from class"
+End Sub
+
+Public Sub FormFromClassDeclared()
+    Dim f As EntryForm
+    Set f = New EntryForm
+    f.NameBox.Text = "from class"
+End Sub
 '@ }
 
 # An enum and a user-defined type: both resolve by their own path, and both are receivers.
@@ -152,6 +164,18 @@ Public Sub SignatureHere()
     Set g = New Gadget
     g.Describe "prefix"
 End Sub
+
+' CROSS-FORM, FROM A STANDARD MODULE (the #77 matrix). The form's control must be offered
+' after the form's own name, and after a variable declared As the form.
+Public Sub FormFromModuleDirect()
+    EntryForm.NameBox.Text = "from module"
+End Sub
+
+Public Sub FormFromModuleDeclared()
+    Dim f As EntryForm
+    Set f = New EntryForm
+    f.NameBox.Text = "from module"
+End Sub
 '@ }
 
 # ONE module of deliberate defects, isolated so a quick-fix test has exactly one thing to look
@@ -171,13 +195,72 @@ Public Sub TypeMismatch()
     ' A string into a Long.
     n = "not a number"
 End Sub
+
+Public Sub MissingControl()
+    ' The form exists and the control does not (#77): the analyzer should say so.
+    EntryForm.NoSuchControl.Text = "?"
+End Sub
 '@ }
 
 $sheetCode = @'
 Option Explicit
 
-' Nothing here. The sheet exists because a workbook has one, not because the fixture needs it.
+' CROSS-FORM, FROM A WORKSHEET MODULE (the #77 matrix).
+
+Public Sub FormFromSheetDirect()
+    EntryForm.NameBox.Text = "from sheet"
+End Sub
+
+Public Sub FormFromSheetDeclared()
+    Dim f As EntryForm
+    Set f = New EntryForm
+    f.NameBox.Text = "from sheet"
+End Sub
 '@
+
+$workbookCode = @'
+Option Explicit
+
+' CROSS-FORM, FROM THE WORKBOOK MODULE (the #77 matrix).
+
+Public Sub FormFromWorkbookDirect()
+    EntryForm.NameBox.Text = "from workbook"
+End Sub
+
+Public Sub FormFromWorkbookDeclared()
+    Dim f As EntryForm
+    Set f = New EntryForm
+    f.NameBox.Text = "from workbook"
+End Sub
+'@
+
+# The form the matrix points at, and a second form that CALLS it: a form is a caller kind too.
+$forms = @(
+    @{
+        Name = 'EntryForm'
+        Controls = @(
+            @{ Type = 'TextBox'; Name = 'NameBox'; Left = 24; Top = 24; Width = 120; Height = 18 }
+        )
+    }
+    @{
+        Name = 'OtherForm'
+        Code = @'
+Option Explicit
+
+' CROSS-FORM, FROM ANOTHER FORM (the #77 matrix).
+
+Public Sub FormFromFormDirect()
+    EntryForm.NameBox.Text = "from form"
+End Sub
+
+Public Sub FormFromFormDeclared()
+    Dim f As EntryForm
+    Set f = New EntryForm
+    f.NameBox.Text = "from form"
+End Sub
+'@
+    }
+)
 
 # ---------------------------------------------------------------- building it
 #
@@ -186,7 +269,8 @@ Option Explicit
 # the add-in's door can add components without the trust setting.
 
 . (Join-Path $PSScriptRoot 'FixtureDriver.ps1')
-Invoke-FixtureBuild -Path $Path -Modules $modules -SheetCode $sheetCode -OpenAtEnd 'Uses'
+Invoke-FixtureBuild -Path $Path -Modules $modules -SheetCode $sheetCode -OpenAtEnd 'Uses' `
+    -Forms $forms -WorkbookCode $workbookCode
 
 if (-not $Quiet) {
     Write-Host ''
@@ -198,5 +282,8 @@ if (-not $Quiet) {
     Write-Host '  Uses      one receiver per line: class, type, enum, Application, ActiveSheet,'
     Write-Host '            and a call with parameters for signature help'
     Write-Host '  Defects   the only module with findings, so a quick-fix test sees exactly one'
+    Write-Host '  EntryForm a form with one control (NameBox), named from every caller kind:'
+    Write-Host '            Uses, Gadget, OtherForm, ThisWorkbook and Sheet1 each hold the'
+    Write-Host '            direct and the declared spelling (the #77 cross-form matrix)'
     Write-Host ''
 }

@@ -115,6 +115,43 @@ for (const module of plan.modules) {
 }
 
 /*
+ * Forms, when the plan carries any: the component through the same door, each control through
+ * the designer route - the same model the native toolbox calls - and the code-behind written
+ * like any module's. Grown for the language fixture's cross-form matrix (#77): a form another
+ * module can name by its controls is project surface, not designer decoration.
+ */
+for (const form of plan.forms ?? []) {
+  const added = await api.component("add", { kind: 3, name: form.name });
+
+  for (const control of form.controls ?? []) {
+    await api.designerEdit("add", {
+      module: added.name,
+      type: control.type,
+      name: control.name,
+      left: control.left ?? 24,
+      top: control.top ?? 24,
+      width: control.width ?? 96,
+      height: control.height ?? 18,
+    });
+  }
+
+  const controls = `${form.controls?.length ?? 0} control(s)`;
+  if (form.code) {
+    const written = await writeAndCheck(added.name, form.code);
+    console.log(`  ${added.name.padEnd(14)} form    ${written.lines} lines, ${controls}`);
+  } else {
+    console.log(`  ${added.name.padEnd(14)} form    ${controls}`);
+  }
+}
+
+// ThisWorkbook's own module, when the plan carries text for it - addressed by its code name,
+// the same rule as the sheet below.
+if (plan.workbookCode) {
+  const written = await writeAndCheck("ThisWorkbook", plan.workbookCode);
+  console.log(`  ${"ThisWorkbook".padEnd(14)} document  ${written.lines} lines`);
+}
+
+/*
  * The first worksheet's own module. Its name is the CODE name, which is what the object model
  * calls it and what a document module is addressed by - not the tab caption a user sees, which
  * can differ and would address nothing.
@@ -151,7 +188,7 @@ const built = await api.project();
 const written = built.components.filter((component) => component.lines > 0);
 console.log(`  saved; ${written.length} component(s) hold code`);
 
-const missing = plan.modules
+const missing = [...plan.modules, ...(plan.forms ?? [])]
   .map((module) => module.name)
   .filter((name) => !built.components.some((component) => component.name === name));
 

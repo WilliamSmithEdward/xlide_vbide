@@ -5,10 +5,10 @@
  *   tools\\New-LanguageFixture.ps1
  *   node tools\\harness\\language-features.mjs
  *
- * TWO CASES FAIL ON PURPOSE. They are analyzer defects filed upstream as xlide_vscode#11: a
- * project `Type` receiver offers its own name instead of its fields, and an `Enum` receiver
- * offers nothing. They are left failing rather than deleted, because a suite that drops the
- * cases it cannot pass stops being able to tell anyone when they start passing.
+ * KNOWN-UPSTREAM CASES FAIL ON PURPOSE (the KNOWN list below, each filed on xlide_vscode).
+ * They are left failing rather than deleted, because a suite that drops the cases it cannot
+ * pass stops being able to tell anyone when they start passing - which is how both #11 cases
+ * were caught passing the day 4.0.0 landed.
  *
  * Everything asked so far was at a DECLARATION, where zero completions is the right answer, so
  * nothing had ever tested the case a developer actually uses: type a dot after something and see
@@ -117,19 +117,81 @@ const sig = await api.act("signature", { line: callLine + 1, column: inside });
 console.log(`  ${JSON.stringify(sig).slice(0, 260)}`);
 check("signature help answers inside a call", sig.did, sig.detail);
 
+/*
+ * THE CROSS-FORM MATRIX (#77, upstream xlide_vscode#22): EntryForm's control must be offered
+ * from every module kind a project has, in both spellings - the form named directly, and a
+ * variable declared As the form. Before the upstream fix all ten cells were zero: the form's
+ * members answered only inside its own code-behind.
+ */
+console.log("\nthe cross-form matrix: EntryForm's control from every caller kind\n");
+
+/** A module's dot-menu prober: opens its pane once, reads its live text, probes by needle. */
+async function proberFor(module) {
+  await api.pane("open", { module, project: project.projectId });
+  await until(`${module} to be the shown module`, async () => {
+    const ui = await api.ui();
+    return ui.focus.model?.toLowerCase().endsWith(`/${module.toLowerCase()}`) ? ui : null;
+  });
+
+  const held = (await api.readModule(module, project.projectId, { live: true })).text ?? "";
+  const own = held.split(/\r?\n/);
+
+  return async (needle) => {
+    const at = own.findIndex((line) => line.includes(needle));
+    if (at < 0) { throw new Error(`no line holding ${needle} in ${module}`); }
+    const column = own[at].indexOf(".", own[at].indexOf(needle)) + 2;
+    const answer = await api.act("completions", { line: at + 1, column, trigger: "." });
+    return (answer.data ?? []).map((one) => one.label);
+  };
+}
+
+const CALLERS = [
+  ["Uses", "a standard module"],
+  ["Gadget", "a class module"],
+  ["OtherForm", "another form"],
+  ["ThisWorkbook", "the workbook module"],
+  ["Sheet1", "a worksheet module"],
+];
+
+for (const [module, kind] of CALLERS) {
+  const probe = await proberFor(module);
+
+  const direct = await probe("EntryForm.NameBox");
+  console.log(`  ${module.padEnd(12)} EntryForm. ${direct.length} items`);
+  check(`${kind}: EntryForm. offers the control`,
+    direct.includes("NameBox"), direct.slice(0, 6).join(","));
+  check(`${kind}: EntryForm. offers the form surface`,
+    direct.includes("Show"), `${direct.length} items`);
+
+  const declared = await probe("f.NameBox");
+  check(`${kind}: a variable As EntryForm offers the control`,
+    declared.includes("NameBox"), declared.slice(0, 6).join(","));
+}
+
+// The matrix's negative half: a member the form does NOT have should be a finding, because the
+// VBE itself refuses to compile an unknown member on an early-bound form receiver. It is not
+// one today - filed as xlide_vscode#26 and tolerated below until upstream answers.
+const defects = await api.problems("Defects");
+const findings = defects.findings ?? [];
+check("a control the form does not have is a finding",
+  findings.some((one) => JSON.stringify(one).includes("NoSuchControl")),
+  `${findings.length} finding(s) in Defects, none at the NoSuchControl line`);
+
 for (const one of broken) { console.log("  ! " + one); }
 
-// The two known-upstream failures are expected. Anything else is news, and only news fails
-// this script: a known defect that has been filed should not stop a run from being useful.
+// Known-upstream failures are tolerated here rather than failing the run: each is filed, and
+// the UPSTREAM FIXED line announces the day one starts passing (both #11 cases did with
+// 4.0.0, verified 2026-08-19, and were trimmed from this list the same day).
 const KNOWN = [
-  "a user-defined type offers its fields",
-  "an enum offers its members",
+  // xlide_vscode#26: the VBE refuses to compile an unknown member on an early-bound form
+  // receiver; the analyzer says nothing.
+  "a control the form does not have is a finding",
 ];
 const unexpected = broken.filter((one) => !KNOWN.includes(one));
 const fixed = KNOWN.filter((one) => !broken.includes(one));
 
 if (fixed.length > 0) {
-  console.log(`\n  UPSTREAM FIXED: ${fixed.join(", ")} - xlide_vscode#11 can be closed and this list trimmed.`);
+  console.log(`\n  UPSTREAM FIXED: ${fixed.join(", ")} - close the filed issue and trim the KNOWN list.`);
 }
 if (unexpected.length > 0) {
   console.log(`\n  ${unexpected.length} failure(s) beyond the known upstream ones.`);
@@ -140,5 +202,5 @@ if (unexpected.length > 0) {
 // here, and the UPSTREAM FIXED line announces the day the list can shrink.
 const tolerated = broken.length - unexpected.length;
 console.log(`\n${checks - unexpected.length} passed, ${unexpected.length} failed`
-  + (tolerated > 0 ? ` (tolerating ${tolerated} known upstream, filed as xlide_vscode#11)` : ""));
+  + (tolerated > 0 ? ` (tolerating ${tolerated} known upstream, filed - see KNOWN above)` : ""));
 process.exit(unexpected.length === 0 ? 0 : 1);

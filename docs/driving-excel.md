@@ -804,6 +804,14 @@ tools\New-LanguageFixture.ps1              # builds LanguageFixture.xlsm
 node tools\harness\language-features.mjs   # the dot menu, by receiver kind
 ```
 
+The fixture carries a form (`EntryForm`, one TextBox) named from every module kind the project
+has - a standard module, a class, another form, ThisWorkbook and Sheet1, each in both
+spellings - and the suite walks that cross-form matrix (#77, upstream xlide_vscode#22). Its
+negative half, a member the form does not have becoming a finding, is filed as xlide_vscode#26
+and tolerated until upstream answers. The fixture's forms go in through
+`build-fixture.mjs`'s `forms` plan field: the component through the door, each control through
+the designer route, code-behind like any module.
+
 The rename fixture is shaped for renaming: one method on one class, and a project that
 deliberately does not compile. That makes it the wrong workbook for asking what IntelliSense
 offers, because a receiver with one member proves almost nothing and a project full of errors
@@ -1947,6 +1955,14 @@ document.querySelectorAll("*").forEach((n) => { if (n.shadowRoot) { roots.push(n
 ---
 
 ## 7. Traps, each paid for once
+
+**A fresh VBE in another host holds a tab nobody focused.** In Word, opening the editor and a
+pane entirely through the api leaves the workspace with the tab open and ACTIVE - `layout`
+says so - while no editor has focus: `ui.focus.model` reads empty, and every position-taking
+action (`completions`, `hover`, `signature`) answers "nothing open", because they resolve
+against the active editor. DOM focus and `focusEditor` do not cure it; the page's own tab
+click does: `act?do=activate&module=X&project=Y`, after which the same probes answer normally
+(paid for on 2026-08-19, proving Word's ThisDocument offers Word.Document's members).
 
 **`/eval` answers are encoded twice.** The browser returns a result as JSON, so a script that
 builds its answer with `JSON.stringify` comes back quoted twice - and one parse leaves a string

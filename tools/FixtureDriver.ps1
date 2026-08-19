@@ -58,7 +58,15 @@ function Invoke-FixtureBuild {
         [Parameter(Mandatory)] [string] $SheetCode,
 
         # The module left showing when the build finishes.
-        [Parameter(Mandatory)] [string] $OpenAtEnd
+        [Parameter(Mandatory)] [string] $OpenAtEnd,
+
+        # Forms: an array of @{ Name; Controls = @(@{ Type; Name; Left; Top; Width; Height });
+        # Code } - the component through the door, each control through the designer route, the
+        # code-behind written like any module's.
+        [array] $Forms = @(),
+
+        # The ThisWorkbook document module's text, when the fixture wants one.
+        [string] $WorkbookCode
     )
 
     $harness = Join-Path $PSScriptRoot 'harness'
@@ -75,6 +83,31 @@ function Invoke-FixtureBuild {
         )
         sheetCode = $SheetCode
         openAtEnd = $OpenAtEnd
+    }
+
+    if ($Forms.Count -gt 0) {
+        $plan.forms = @(
+            foreach ($form in $Forms) {
+                $shaped = @{ name = $form.Name }
+                if ($form.Contains('Controls')) {
+                    $shaped.controls = @(
+                        foreach ($control in $form.Controls) {
+                            $one = @{ type = $control.Type; name = $control.Name }
+                            foreach ($side in 'Left', 'Top', 'Width', 'Height') {
+                                if ($control.Contains($side)) { $one[$side.ToLowerInvariant()] = $control[$side] }
+                            }
+                            $one
+                        }
+                    )
+                }
+                if ($form.Contains('Code')) { $shaped.code = $form.Code }
+                $shaped
+            }
+        )
+    }
+
+    if ($WorkbookCode) {
+        $plan.workbookCode = $WorkbookCode
     }
 
     # Written WITHOUT a byte-order mark. In PowerShell 5.1 `-Encoding utf8` means "UTF-8 with a
