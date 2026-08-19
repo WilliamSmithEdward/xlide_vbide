@@ -4670,8 +4670,10 @@ body.objbrowser-page #objbrowser-card {
   color: #dcdcaa !important;
   cursor: pointer;
   /* The gap between the tag and the annotation is a MARGIN rather than leading spaces in the
-     text, so the hover underline draws under the name and not under the run-up to it. */
-  margin-left: 1.5ch;
+     text, so the hover underline draws under the name and not under the run-up to it.
+     Three characters: 1.5ch read as touching at the end of a long tag line (the owner,
+     2026-08-19, "slight padding before the text"). */
+  margin-left: 3ch;
 }
 
 .designer-handler-mark:hover {

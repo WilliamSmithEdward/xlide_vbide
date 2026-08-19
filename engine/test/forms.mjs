@@ -284,6 +284,42 @@ check('Me.Calculate and Sheet1.Calculate paint as one thing: both mentions, both
 });
 
 /*
+ * A FILED GAP, WATCHED (xlide_vscode#32, the announce idiom): member access stops one hop
+ * short of what its metadata knows. TabStrip.SelectedItem hovers `As Tab` - the return type
+ * is right there - but completion inside the RETURNED object answers nothing, while a host
+ * chain (ThisWorkbook.ActiveSheet.) resolves its second hop fine. The direct-member half is
+ * asserted as the pin; the chain half announces the day upstream takes the hop.
+ */
+const CHAIN_DOT = 'Private Sub T()\r\n    Views.SelectedItem.\r\nEnd Sub\r\n';
+await call('project/open', {
+    projectId: 'Chain', generation: 1,
+    modules: [{
+        moduleName: 'TabForm', source: CHAIN_DOT, type: 'userform',
+        implicitMembers: [{ name: 'Views', type: 'MSForms.TabStrip' }],
+    }],
+});
+const chainItems = await call('textDocument/completion', {
+    projectId: 'Chain', moduleName: 'TabForm', source: CHAIN_DOT,
+    offset: CHAIN_DOT.indexOf('SelectedItem.') + 'SelectedItem.'.length, moduleType: 'userform',
+});
+const DIRECT_DOT = 'Private Sub T()\r\n    Views.\r\nEnd Sub\r\n';
+const directItems = await call('textDocument/completion', {
+    projectId: 'Chain', moduleName: 'TabForm', source: DIRECT_DOT,
+    offset: DIRECT_DOT.indexOf('Views.') + 'Views.'.length, moduleType: 'userform',
+});
+
+check('a control member resolves directly; the returned object is xlide_vscode#32, watched', () => {
+    assert.ok((directItems.items ?? []).some((item) => item.label === 'SelectedItem'),
+        `Views. must offer SelectedItem; got ${directItems.items?.length ?? 0} item(s)`);
+    const inside = chainItems.items ?? [];
+    if (inside.length > 0) {
+        console.log('     UPSTREAM FIXED: the returned object resolves - pin Caption here and close xlide_vscode#32.');
+        assert.ok(inside.some((item) => item.label === 'Caption'),
+            `the Tab surface arrived without Caption? ${inside.length} item(s)`);
+    }
+});
+
+/*
  * THE SYNC FORK FOLLOWS THE HOST (decision 15's narrowing, 2026-08-19): a .frm/.frx pair is a
  * CREATE where the applier's VBComponents.Import can land it, and Access's VBE carries no
  * MSForms at all - no UserForms exist there, so the planner's refusal is the truth and the
