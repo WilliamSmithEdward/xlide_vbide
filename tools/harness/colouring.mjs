@@ -21,9 +21,8 @@
  */
 import { open, reporter, scratchModule, waitFor } from "./xlide-api.mjs";
 
-// XLIDE_PID picks the session when several are live - an Excel fixture beside a Word one is
-// a designed state (2026-08-19), and open() rightly refuses to guess between them.
-const api = await open({ pid: Number(process.env.XLIDE_PID) || undefined });
+// XLIDE_PID / XLIDE_WORKBOOK pick the session when several are live; open() reads them itself.
+const api = await open();
 const project = await api.project();
 const name = `Colour${process.pid}`;
 

@@ -40,7 +40,10 @@ so whoever holds `Xlide.Api` FEDERATES: `Request("sessions")` lists the live fle
 target opening `@` reaches any of it - `Request("@word/state")` answers for the Word session,
 `Request("@12345/agent")` for a pid exactly - proxied to that session's own door with its own
 key, which the caller never sees. A host name that matches two sessions refuses and says to
-address by pid.
+address by pid. Suites and probes pick their session the same way everything else does:
+`open()` reads `XLIDE_PID` (or `XLIDE_WORKBOOK`) when the caller passed nothing, so
+`XLIDE_PID=1234 node tools\harness\colouring.mjs` runs any suite against any session with
+no per-suite plumbing; the PowerShell suites take `-ProcessId`.
 
 ---
 
@@ -817,8 +820,8 @@ node tools\harness\language-features.mjs   # the dot menu, by receiver kind
 The fixture carries a form (`EntryForm`, one TextBox) named from every module kind the project
 has - a standard module, a class, another form, ThisWorkbook and Sheet1, each in both
 spellings - and the suite walks that cross-form matrix (#77, upstream xlide_vscode#22). Its
-negative half, a member the form does not have becoming a finding, is filed as xlide_vscode#26
-and tolerated until upstream answers. The fixture's forms go in through
+negative half - a member the form does not have is a finding, the empty form's included -
+landed with xlide_vscode#26 (2026-08-19). The fixture's forms go in through
 `build-fixture.mjs`'s `forms` plan field: the component through the door, each control through
 the designer route, code-behind like any module.
 

@@ -269,8 +269,17 @@ export async function discover() {
  * One instance: the only live one, or the one matching pid or workbook. Throws with the list
  * when the choice is ambiguous, because guessing which Excel to drive is how a test writes
  * into the wrong workbook.
+ *
+ * XLIDE_PID and XLIDE_WORKBOOK fill in when the caller passed nothing, HERE rather than in
+ * every suite: the day a Word session first ran beside the Excel one (2026-08-19), all
+ * twenty-eight bare open() calls refused at once, and twenty-eight identical patches would
+ * have been twenty-eight chances to drift. An explicit argument still wins - a suite that
+ * names its session means it.
  */
 export async function open({ pid, workbook } = {}) {
+  pid ??= Number(process.env.XLIDE_PID) || undefined;
+  workbook ??= process.env.XLIDE_WORKBOOK || undefined;
+
   const instances = await discover();
   if (instances.length === 0) {
     // Ask Windows before blaming the developer for not having started Excel. Most of the time
