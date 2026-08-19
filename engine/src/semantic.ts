@@ -30,8 +30,10 @@ export function semanticTokensFor(
     const tokens = [
         ...resolveTypeSemanticTokens(params.source, { projectTypes: ctx.projectTypes, model: ctx.hostModel }),
         // The host's own globals when the host is not Excel: in Word, ActiveDocument colours
-        // and ActiveSheet does not.
-        ...collectHostGlobalTokens(params.source, ctx.hostModel),
+        // and ActiveSheet does not. The controls ride along as shadows (xlide_vscode#30): a
+        // form control named exactly like a host global wins the binding inside its form, so
+        // the receiver must not wear the global's tint there.
+        ...collectHostGlobalTokens(params.source, ctx.hostModel, ctx.implicitMembers),
         // The collector guards meType itself - only an MSForms.* type engages it - so a
         // worksheet's Excel.Worksheet passes through as an early return, not a special case here.
         ...collectImplicitMemberMethodTokens(params.source, {
@@ -40,11 +42,15 @@ export function semanticTokensFor(
         }),
         // Host receivers join #20's convention (xlide_vscode#29): ActiveSheet.Calculate and
         // Word's ActiveDocument.FitToPages paint the way RegionPick.AddItem does. Controls ride
-        // along as implicitMembers because inside a form their names bind before the host's.
+        // along as implicitMembers because inside a form their names bind before the host's,
+        // and meType lets Me paint in a document module (#31) - Me.Calculate beside
+        // Sheet1.Calculate reads as one thing. An MSForms meType stays the implicit
+        // collector's business; the collector leaves it alone by its own rule.
         ...collectHostMemberMethodTokens(params.source, {
             model: ctx.hostModel,
             codeNames: ctx.codeNames,
             implicitMembers: ctx.implicitMembers,
+            meType: ctx.meType,
         }),
     ];
 

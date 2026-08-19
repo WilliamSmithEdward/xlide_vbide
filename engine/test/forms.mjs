@@ -239,11 +239,10 @@ check('a control that exists resolves; removed across a reseed, it is a finding,
 });
 
 /*
- * THE COLLECTORS' REMAINING BLIND SPOTS, filed and watched (the announce idiom that caught
- * the #29 consume gap): each row pins today's behaviour and prints the UPSTREAM FIXED line
- * the day the analyzer moves - the fix may need a consume at engine/src/semantic.ts (the
- * Me fix will want the module's me host type passed through), so arriving unannounced is
- * the failure mode these exist to prevent.
+ * THE COLLECTORS' LAST TWO BLIND SPOTS, filed 2026-08-19 and fixed the same day (xlide_vscode
+ * #30 and #31, landed with 4.0.2 and consumed in engine/src/semantic.ts - the global collector
+ * takes the controls as shadows, the method collector takes meType). These were watcher rows
+ * that announced the fixes' arrival; they pin the fixed behaviour now.
  */
 const SHADOWED = 'Public Sub T()\r\n    ActiveSheet.Clear\r\nEnd Sub\r\n';
 await call('project/open', {
@@ -255,16 +254,11 @@ const shadowTint = await call('textDocument/semanticTokens', {
     projectId: 'ShadowTint', moduleName: 'F', source: SHADOWED, moduleType: 'userform',
 });
 
-check('a control named like a host global: the tint gap is xlide_vscode#30, watched', () => {
+check('a control named like a host global wins the binding: no tint, and Clear is the ListBox\'s', () => {
     const receiver = shadowTint.tokens.filter(
         (token) => SHADOWED.slice(token.start, token.end) === 'ActiveSheet');
-    if (receiver.length === 0) {
-        console.log('     UPSTREAM FIXED: the shadowed receiver lost the host tint - pin that here and close xlide_vscode#30.');
-        return;
-    }
-    // Today's filed behaviour: the global collector has no implicitMembers input, so the
-    // control wears variable.defaultLibrary. The member side is already right: Clear paints
-    // as the ListBox's method, pinned so the tint gap never grows into a member gap.
+    assert.deepEqual(receiver, [],
+        `the control must not wear the host global's tint; it wore ${JSON.stringify(receiver)}`);
     const clear = shadowTint.tokens.filter(
         (token) => SHADOWED.slice(token.start, token.end) === 'Clear');
     assert.equal(clear.length, 1, `Clear took ${clear.length} token(s)`);
@@ -280,16 +274,13 @@ const meDoc = await call('textDocument/semanticTokens', {
     projectId: 'MeDoc', moduleName: 'Sheet1', source: ME_DOC, moduleType: 'document',
 });
 
-check('Me.Calculate beside Sheet1.Calculate: the Me gap is xlide_vscode#31, watched', () => {
+check('Me.Calculate and Sheet1.Calculate paint as one thing: both mentions, both calls', () => {
     const calculates = meDoc.tokens.filter(
         (token) => ME_DOC.slice(token.start, token.end) === 'Calculate');
-    // The code-name receiver paints today; Me does not. One token is the filed state,
-    // two is the fix arriving.
-    assert.ok(calculates.length >= 1 && calculates.every((token) => token.type === 'function'),
-        `Calculate wore ${JSON.stringify(calculates)}`);
-    if (calculates.length >= 2) {
-        console.log('     UPSTREAM FIXED: Me paints - check semantic.ts passes the me host type, pin both mentions, close xlide_vscode#31.');
-    }
+    assert.equal(calculates.length, 2,
+        `both the Me-qualified and the code-name mention paint; got ${JSON.stringify(calculates)}`);
+    assert.ok(calculates.every((token) => token.type === 'function'),
+        `types were ${calculates.map((token) => token.type).join(', ')}`);
 });
 
 /*
