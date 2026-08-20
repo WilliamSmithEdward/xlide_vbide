@@ -284,6 +284,26 @@ Step 'engine form language' {
     'the #20 acceptance table and the Control base merge, over the pipe'
 }
 
+Step 'generated VBA module casing' {
+    # VBA cases identifiers project-wide to the latest declaration it sees, so a lowercase
+    # parameter in a module this product INSTALLS re-spells the developer's own code - every
+    # `.Value` to `.value`, every `Err.Number` to `Err.number` - permanently, because
+    # XlideAssert stays in the workbook. It happened (xlide_vscode#38), and the four names in
+    # that report were not the whole set: two more were found only by measuring
+    # (xlide_vbide#3).
+    #
+    # So it is measured, against the analyzer's own tables - the four host object models and
+    # the VBA runtime, the same oracle the sibling product's test uses. A gate step because
+    # nothing else can see it: the module compiles and runs perfectly while it is renaming
+    # the project around it.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        node test/module-casing.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'a generated VBA module re-cases names the host models own' }
+    } finally { Pop-Location }
+    'three generated modules held to 15k canonical names'
+}
+
 Step 'page probes (headless)' {
     # close-confirm-page-probe.mjs is not missing: it runs inside the close-confirm step below,
     # which drives the same file as one of its three legs. Listing it here too would launch

@@ -327,18 +327,43 @@ internal static partial class TestRunService
     /// The support verdict from the module's TEXT alone, so a caller already holding sources -
     /// the analysis snapshot observer - never reads a module of its own. Null means missing.
     ///
-    /// Case-insensitively, because VBA re-cases identifiers PROJECT-WIDE to the latest
-    /// declaration: a module elsewhere declaring `number` turns this module's `Err.Number`
-    /// into `Err.number` without an edit here, and byte equality then cried outdated over
-    /// text the developer never touched. The sibling product's installed copy also spells
-    /// some parameters in lower case; folding keeps the two products agreeing.
+    /// TWO COMPARISONS, and the first one is why the second is safe.
+    ///
+    /// The body is compared case-INSENSITIVELY, because VBA re-cases identifiers PROJECT-WIDE
+    /// to the latest declaration: a module elsewhere declaring `number` turns this module's
+    /// `Err.Number` into `Err.number` without an edit here, and byte equality then cried
+    /// outdated over text the developer never touched.
+    ///
+    /// But folding case is also how a revision that CHANGES ONLY CASE hides: revision 2 fixed
+    /// the parameters that were re-casing the developer's project, and against a folded compare
+    /// it reads identical to revision 1 - the gate says installed and the fix never reaches a
+    /// workbook that already has the module, silently (xlide_vscode's own port of this, filed
+    /// as xlide_vbide#3, 2026-08-20). So the REVISION STAMP is compared first and verbatim: a
+    /// comment VBA never rewrites, which both products spell the same way.
     /// </summary>
     internal static string SupportStateOf(string? held) =>
         held is null
             ? "missing"
-            : string.Equals(Normalized(held), Normalized(AssertModuleSource), StringComparison.OrdinalIgnoreCase)
-                ? "installed"
-                : "outdated";
+            : RevisionOf(held) != RevisionOf(AssertModuleSource)
+                ? "outdated"
+                : string.Equals(Normalized(held), Normalized(AssertModuleSource), StringComparison.OrdinalIgnoreCase)
+                    ? "installed"
+                    : "outdated";
+
+    /// <summary>
+    /// The revision the module's own stamp claims, or 0 for a copy from before stamps existed -
+    /// which is exactly the copy that needs replacing. Read from the comment rather than from
+    /// the code, because a comment is the one thing in a VBA module the editor leaves alone.
+    /// </summary>
+    private static int RevisionOf(string source)
+    {
+        var stamp = SupportRevision().Match(source);
+        return stamp.Success && int.TryParse(stamp.Groups["revision"].Value, out var revision) ? revision : 0;
+    }
+
+    [GeneratedRegex(@"^'\s*XLIDE test support module,\s*revision\s*(?<revision>\d+)\.",
+        RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex SupportRevision();
 
     /// <summary>
     /// Writes XlideAssert into the project, replacing an out-of-date copy. This is a REAL
@@ -507,11 +532,11 @@ internal static partial class TestRunService
         body.Append("Option Explicit\r\n");
         body.Append("Option Compare Text\r\n\r\n");
         body.Append("' Generated for one XLIDE test run; removed when the run ends.\r\n");
-        body.Append("Public Sub XlideInvokeTarget(ByVal macroName As String)\r\n");
+        body.Append("Public Sub XlideInvokeTarget(ByVal MacroName As String)\r\n");
         body.Append("    On Error GoTo Caught\r\n");
         body.Append($"    {AssertModuleName}.RecordTargetOutcome 0, \"\", \"\"\r\n");
         body.Append("    Dim targetKey As String\r\n");
-        body.Append("    targetKey = Trim$(macroName)\r\n");
+        body.Append("    targetKey = Trim$(MacroName)\r\n");
 
         const int chunkSize = 100;
         var chunks = (targets.Count + chunkSize - 1) / chunkSize;
@@ -520,7 +545,7 @@ internal static partial class TestRunService
             body.Append($"    If XlideDispatch{chunk}(targetKey) Then Exit Sub\r\n");
         }
 
-        body.Append("    Err.Raise 5, \"XLIDE.TestDispatch\", \"Unknown test target: \" & macroName\r\n");
+        body.Append("    Err.Raise 5, \"XLIDE.TestDispatch\", \"Unknown test target: \" & MacroName\r\n");
         body.Append("    Exit Sub\r\n");
         body.Append("Caught:\r\n");
         body.Append($"    {AssertModuleName}.RecordTargetOutcome Err.Number, Err.Source, Err.Description\r\n");
