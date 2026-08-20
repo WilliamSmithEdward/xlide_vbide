@@ -1705,6 +1705,10 @@ internal sealed partial class AddInSession : IDisposable
             // discovered shape changed.
             _analysis.SnapshotObserved = OnAnalysisSnapshot;
 
+            // And the tree - with the two panes' file lists behind it - follows files opening
+            // and closing in the host, which nothing in here would otherwise notice.
+            _analysis.ProjectsObserved = OnProjectsObserved;
+
             // The engine dying is not a crash and is not recoverable in this session: it is a
             // separate process and it is not restarted. Everything else keeps working, which is
             // precisely why it has to be said - the Problems panel reads "0 Errors" either way.
@@ -4944,10 +4948,22 @@ internal sealed partial class AddInSession : IDisposable
         // WORKSPACE and this is a fact about the WINDOW. Read from the record placement keeps
         // rather than asked of the window: this runs from several places and the answer only
         // changes when placement notices it change, which is where UpdatePolling is called from.
+        // THE IDLE TIER WATCHES THE WORKSPACE, and it exists because the tier above it only
+        // covers an EMPTY editor. A workbook opened or closed in the host produces no event in
+        // here, and with a module open the poll stopped altogether - so the project-count check
+        // in PollDebugState, which was written for exactly this in 2026-08-08, never ran while
+        // the developer had a module open and was not stepping. Closing a workbook whose
+        // modules were never opened left it in the tree, in both panes' file lists, and its
+        // tests in the Tests pane, until something unrelated happened (the owner, 2026-08-20).
+        //
+        // Cheap on purpose: this tick reads one property - the project count - where the empty
+        // tier walks every project's components. It needs the frame VISIBLE, so an editor
+        // window that has gone away is not polled about a tree nobody can see.
         var interval = _resyncPanePolls > 0 ? ClosingPollMilliseconds
             : _pollsRemaining > 0 ? DebugPollMilliseconds
             : _watchingImmediate ? ImmediatePollMilliseconds
             : _watchingEmpty && _frameVisible ? EmptyWorkspacePollMilliseconds
+            : _frameVisible ? WorkspaceWatchPollMilliseconds
             : 0;
 
         _editorSurface?.Poll(interval);
@@ -4970,6 +4986,13 @@ internal sealed partial class AddInSession : IDisposable
     private const uint ClosingPollMilliseconds = 16;
 
     private const uint EmptyWorkspacePollMilliseconds = 1000;
+
+    /// <summary>
+    /// How often an otherwise idle editor asks whether the set of open files has changed. One
+    /// property read per tick, against the collection the tree and both panes' file lists are
+    /// built from; a changed count is the only thing that provokes any further work.
+    /// </summary>
+    private const uint WorkspaceWatchPollMilliseconds = 1000;
 
     /// <summary>
     /// Checks that the surface still agrees with the module, and adopts the module when it does
@@ -7736,6 +7759,7 @@ internal sealed partial class AddInSession : IDisposable
             }
 
             var tree = new List<SurfaceProject>(projectCount);
+            var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var i = 1; i <= projectCount; i++)
             {
                 using var project = projects!.GetItem(i);
@@ -7760,9 +7784,15 @@ internal sealed partial class AddInSession : IDisposable
                 _projectNames[ProjectReader.Identity(project).Id] = display;
 
                 tree.Add(new SurfaceProject(display, [.. members]));
+                live.Add(ProjectReader.Identity(project).Id);
             }
 
             surface.ShowProjects([.. tree]);
+
+            // The tree is where a file opening or closing is noticed, so it is where the Tests
+            // pane hears about either: its own picture is merged per analysis snapshot, and
+            // neither event produces one.
+            ReconcileTestFiles(live);
         }
         catch (Exception ex)
         {

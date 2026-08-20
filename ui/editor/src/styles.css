@@ -2692,6 +2692,14 @@ body.live-resize .minimap {
   overflow-y: auto;
   padding: 2px 0 8px;
   font-size: 12px;
+
+  /* THE COLUMN GEOMETRY, in one place, because more than the columns depend on it: a failure's
+     message is a paragraph under its row and has to stop where the name column stops, or it
+     runs along underneath the chips and reads as cramped against them (the owner, 2026-08-20).
+     Stated here so the row and the paragraph can never drift apart. */
+  --tests-name-col: min(280px, 42%);
+  --tests-meta-col: 150px;
+  --tests-gutter: 22px;
 }
 
 .tests-empty {
@@ -2800,7 +2808,7 @@ body.live-resize .minimap {
   text-overflow: ellipsis;
   /* Shrinks with the pane rather than pushing the acts off the edge; every row shares the
      basis, so they shrink together and the columns stay lined up. */
-  flex: 0 1 min(280px, 42%);
+  flex: 0 1 var(--tests-name-col);
   text-align: left;
 }
 
@@ -2813,8 +2821,8 @@ body.live-resize .minimap {
    the columns themselves are narrower (the owner, 2026-08-20, twice). 28px measured across
    the whole range. */
 .tests-meta {
-  flex: 0 1 150px;
-  margin-left: 22px;
+  flex: 0 1 var(--tests-meta-col);
+  margin-left: var(--tests-gutter);
   font-size: 11px;
   opacity: 0.55;
   white-space: nowrap;
@@ -2826,7 +2834,7 @@ body.live-resize .minimap {
    the row left-packs, and the slot stays fixed so the digits align where rows share a shape. */
 .tests-time {
   flex: 0 0 56px;
-  margin-left: 22px;
+  margin-left: var(--tests-gutter);
   text-align: right;
   font-size: 11px;
   opacity: 0.6;
@@ -2856,8 +2864,29 @@ body.live-resize .minimap {
   opacity: 1 !important;
 }
 
+/* A FAILURE IS A PARAGRAPH, NOT A ROW. The message and its output belong to the row above
+   them, and with no air around them the red ran into the row it explains and into the heading
+   below it (the owner, 2026-08-20). The block keeps a margin under it, the message a line of
+   its own above and below, and a heading that follows starts further down. */
+.tests-row-block {
+  padding-bottom: 7px;
+}
+
+.tests-row-block + .tests-module,
+.tests-row-block + .tests-file {
+  padding-top: 12px;
+}
+
+.tests-row-block .tests-message,
+.tests-row-block .tests-output {
+  /* Ends where the name column ends - 38px of indent plus the column itself - so it never runs
+     along under the chips. Long text wraps inside that measure instead. */
+  max-width: calc(38px + var(--tests-name-col));
+}
+
 .tests-row-block .tests-message {
-  padding: 1px 10px 3px 38px;
+  padding: 4px 10px 3px 38px;
+  line-height: 1.45;
   color: var(--vscode-testing-message-error-decorationForeground, var(--vscode-errorForeground, #e51400));
   white-space: pre-wrap;
 }
@@ -2872,7 +2901,7 @@ body.live-resize .minimap {
 }
 
 .tests-row-block .tests-output {
-  padding: 0 10px 1px 38px;
+  padding: 1px 10px 2px 38px;
   opacity: 0.75;
   font-family: var(--monaco-monospace-font, Consolas, monospace);
   font-size: 11px;

@@ -70,6 +70,15 @@ internal sealed class AnalysisService : IAsyncDisposable
     public Action<string, IReadOnlyList<EngineModule>>? SnapshotObserved { get; set; }
 
     /// <summary>
+    /// Fired once a pass with the identity of every project the editor now holds. A workbook
+    /// opening or closing is not something the developer did inside this product, so nothing
+    /// else notices it on its own; the pass already enumerates the projects, which makes this
+    /// the one place that can say so at no cost. Invoked on the pass's worker thread; the
+    /// observer owns any hop back to the host.
+    /// </summary>
+    public Action<IReadOnlyCollection<string>>? ProjectsObserved { get; set; }
+
+    /// <summary>
     /// One pass at a time, with at most one more remembered.
     ///
     /// <see cref="Reanalyse"/> has ten callers and used to start a pass from each, unguarded, so a
@@ -1063,6 +1072,23 @@ internal sealed class AnalysisService : IAsyncDisposable
         // the workbook a new identity. The engine forgets them so their modules stop answering,
         // and the homes map drops their entries so a shared name stops offering a dead address.
         var present = new HashSet<string>(snapshots.Select(s => s.ProjectId), StringComparer.OrdinalIgnoreCase);
+
+        // WHICH FILES ARE OPEN, once a pass. This loop is the only thing in the product that
+        // looks at the whole project list on its own: everything else republishes the tree
+        // because the developer did something to it, and a workbook opened or closed in the
+        // host is not something the developer did in here. Without this signal a closed file's
+        // modules sat in the tree, and its tests in the Tests pane, until an unrelated pane
+        // change happened to refresh them (the owner, 2026-08-20: "if files open/close ...
+        // will the drop downs auto update?").
+        try
+        {
+            ProjectsObserved?.Invoke(present);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"analysis: the open-project signal was not taken, {ex.Message}");
+        }
+
         foreach (var known in _openProjects.Keys)
         {
             if (!present.Contains(known) && _openProjects.TryRemove(known, out _))
