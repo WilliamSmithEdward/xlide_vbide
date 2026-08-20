@@ -453,39 +453,68 @@ try {
     });
 
     /*
-     * A FORM THAT MATCHES ITS FILE, watched (xlide_vscode#36): the planner compares the
-     * .frm - designer header and all - against a live module that can never carry one, so a
-     * form reads will-update forever, a clean round trip included. The .frm here is exactly
-     * the header the fixture form would export plus its code; the day upstream strips the
-     * header before comparing, this row reads unchanged and announces.
+     * A FORM THAT MATCHES ITS FILE READS UNCHANGED (xlide_vscode#36, fixed upstream in
+     * 4ae5980, consumed 2026-08-19): the planner used to hold the .frm - designer header and
+     * all - against a live module that can never carry one, so every form read will-update
+     * forever, a clean round trip included. It compares on the half the text CAN say now: the
+     * header strips before the equality, and the two rows here pin both directions - a
+     * matching code half is unchanged, a differing one still is not.
      */
     const FORM_CODE_HALF = 'Option Explicit\r\n';
-    writeFileSync(join(syncFolder, 'Matching.frm'), [
+    const DESIGNER_HEADER = [
         'VERSION 5.00',
         'Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} Matching ',
         '   Caption         =   "Match"',
         'End',
         'Attribute VB_Name = "Matching"',
-        FORM_CODE_HALF,
-    ].join('\r\n'));
+    ];
+    writeFileSync(join(syncFolder, 'Matching.frm'),
+        [...DESIGNER_HEADER, FORM_CODE_HALF].join('\r\n'));
     writeFileSync(join(syncFolder, 'Matching.frx'), Buffer.from([0, 1, 2, 3]));
 
-    const matched = await call('sync/plan', {
-        direction: 'import',
-        workbookPath: 'X:\\nowhere\\Probe.xlsm',
-        folder: syncFolder,
-        mode: 'updateOnly',
-        modules: [{ name: 'Matching', type: 'userform', source: FORM_CODE_HALF }],
+    const planMatching = async (liveSource) => {
+        const plan = await call('sync/plan', {
+            direction: 'import',
+            workbookPath: 'X:\\nowhere\\Probe.xlsm',
+            folder: syncFolder,
+            mode: 'updateOnly',
+            modules: [{ name: 'Matching', type: 'userform', source: liveSource }],
+        });
+        return (plan.items ?? []).find(
+            (item) => /Matching\.frm$/i.test(item.relativeName ?? ''));
+    };
+
+    const cleanRow = await planMatching(FORM_CODE_HALF);
+    check('a form whose code matches its file reads unchanged - the header is not compared', () => {
+        assert.ok(cleanRow, 'no Matching row in the plan');
+        assert.equal(cleanRow.status, 'unchanged', `the row read ${cleanRow.status}`);
     });
 
-    check('a form whose code matches its file is xlide_vscode#36, watched', () => {
-        const row = (matched.items ?? []).find(
-            (item) => /Matching\.frm$/i.test(item.relativeName ?? ''));
-        assert.ok(row, 'no Matching row in the plan');
-        if (row.status === 'unchanged') {
-            console.log('     UPSTREAM FIXED: the form compare strips the designer header - pin unchanged here and close xlide_vscode#36.');
+    const editedRow = await planMatching(
+        'Option Explicit\r\nPrivate Sub UserForm_Click()\r\nEnd Sub\r\n');
+    check('and a form whose code differs still reads will-update - the strip did not over-eat', () => {
+        assert.ok(editedRow, 'no Matching row in the plan');
+        assert.equal(editedRow.status, 'will-update', `the row read ${editedRow.status}`);
+    });
+
+    /*
+     * THE EXPORTER'S OWN TRAILING CRLF, watched (xlide_vscode#37): the VBE's Export writes
+     * the module text plus one extra CRLF at EOF - `End Sub\r\n\r\n` on disk against
+     * `End Sub\r\n` live, measured byte-level off a real Excel round trip the day the #36
+     * strip shipped. So a REAL export still reads will-update over one blank line nothing
+     * wrote on purpose. The day upstream trims trailing blank runs before the equality,
+     * this row reads unchanged and announces.
+     */
+    writeFileSync(join(syncFolder, 'Matching.frm'),
+        [...DESIGNER_HEADER, `${FORM_CODE_HALF}\r\n`].join('\r\n'));
+
+    const exporterRow = await planMatching(FORM_CODE_HALF);
+    check('a form whose file carries the exporter\'s trailing CRLF is xlide_vscode#37, watched', () => {
+        assert.ok(exporterRow, 'no Matching row in the plan');
+        if (exporterRow.status === 'unchanged') {
+            console.log('     UPSTREAM FIXED: trailing blank runs trim before the compare - pin unchanged here and close xlide_vscode#37.');
         } else {
-            assert.equal(row.status, 'will-update', `the row read ${row.status}`);
+            assert.equal(exporterRow.status, 'will-update', `the row read ${exporterRow.status}`);
         }
     });
 } finally {
