@@ -1864,11 +1864,21 @@ try {
     // The VBE's own exporter writes the binary sidecar, and the text names it: a form written by
     // splicing named a TEMPORARY path instead, so every export of a form produced a file whose
     // OleObjectBlob line changed and pointed at nothing (found 2026-08-16).
-    const codeFile = written.find((one) => /^EntryForm\d*\.(cls|frm)$/i.test(one) || one.startsWith(`${form}.`));
+    //
+    // THIS form's .frm, by exact name. The old find took anything starting `${form}.` - which
+    // is the .form DESIGN file first in every directory listing - and on FormFixture it then
+    // fell back onto the OTHER form's .frm and passed on that file's blob line. The gate's
+    // DebugFixture run, with one form and no accident available, read the design file, found
+    // no blob line, and died at the arrival rows below (2026-08-19, the v0.7.0 gate).
+    const codeFile = written.find((one) => one.toLowerCase() === `${form.toLowerCase()}.frm`);
     const codeText = codeFile ? readFileSync(join(syncFolder, codeFile), "latin1") : "";
     const blob = /OleObjectBlob\s*=\s*"([^"]+)"/.exec(codeText)?.[1];
     check("the exported form names a sidecar that is actually there",
       blob !== undefined && written.includes(blob), `${blob ?? "no blob line"} of ${written.join(", ")}`);
+    if (blob === undefined) {
+      throw new Error(`${form}.frm carries no OleObjectBlob line, and the arrival rows below `
+        + "clone that sidecar - there is nothing meaningful to run past this point.");
+    }
 
     const design = readFileSync(join(syncFolder, `${form}.form`), "utf8");
     check("the design file holds the same projection the tab holds",
