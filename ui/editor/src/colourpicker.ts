@@ -111,11 +111,24 @@ export function pickColour(spelling: string): string | null {
   return target.dataset.value ?? null;
 }
 
+/** Runs after the open picker actually closes - the Properties panel flushes a deferred
+ * republish through it, so a picker browsed mid-analysis is not torn down under the hand. */
+let afterClose: (() => void) | null = null;
+
+export function onColourPickerClosed(hook: () => void): void {
+  afterClose = hook;
+}
+
 export function closeColourPicker(): void {
-  open?.root.remove();
+  if (open === null) {
+    return;
+  }
+
+  open.root.remove();
   open = null;
   document.removeEventListener("pointerdown", onPointerDown, true);
   document.removeEventListener("keydown", onKeyDown, true);
+  afterClose?.();
 }
 
 function onPointerDown(event: PointerEvent): void {
@@ -146,6 +159,11 @@ export function openColourPicker(options: {
   focusFirst?: boolean;
   onPick: (spelling: string) => void;
 }): void {
+  // Measured BEFORE the close below: closing an earlier picker flushes any deferred panel
+  // republish, which rebuilds the rows and detaches this anchor - a rect read after that is
+  // all zeros and the picker lands in the corner. The replacement row keeps this geometry.
+  const box = options.anchor.getBoundingClientRect();
+
   closeColourPicker();
 
   const root = document.createElement("div");
@@ -246,7 +264,7 @@ export function openColourPicker(options: {
   document.body.appendChild(root);
 
   // Under the swatch, and pulled back onto the screen when the row sits low in a short panel.
-  const box = options.anchor.getBoundingClientRect();
+  // The box was measured at the top, before the close above could recycle the anchor's row.
   const width = root.offsetWidth || 220;
   const height = root.offsetHeight || 260;
   root.style.left = `${Math.max(4, Math.min(box.left - width + box.width, innerWidth - width - 4))}px`;

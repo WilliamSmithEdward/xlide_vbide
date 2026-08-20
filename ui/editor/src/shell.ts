@@ -9,7 +9,7 @@
  * concept of them.
  */
 
-import { closeColourPicker, openColourPicker } from "./colourpicker.js";
+import { closeColourPicker, colourPickerState, onColourPickerClosed, openColourPicker } from "./colourpicker.js";
 import { showContextMenu, type ContextMenuItem } from "./contextmenu.js";
 import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type ExplorerProject } from "./explorer.js";
 import { Menubar, type MenuItem } from "./menubar.js";
@@ -225,6 +225,9 @@ export class Shell {
   /** Bumped every time the HOST republishes the panel. See setProperties. */
   private propertiesRound = 0;
 
+  /** A republish that arrived while the colour picker was open; painted when it closes. */
+  private propertiesDeferred = false;
+
   constructor(root: HTMLElement, handlers: ShellHandlers) {
     this.handlers = handlers;
 
@@ -253,6 +256,16 @@ export class Shell {
     });
 
     this.propertiesList = root.querySelector("#properties-list") as HTMLElement;
+
+    // The republish a colour picker held back paints the moment the picker closes - by a
+    // pick, an Escape, a click outside, or the scroll underneath - so the panel never shows
+    // rows the host has since replaced.
+    onColourPickerClosed(() => {
+      if (this.propertiesDeferred) {
+        this.propertiesDeferred = false;
+        this.paintProperties(this.propertiesComponent);
+      }
+    });
     this.propertiesObject = root.querySelector("#properties-object") as HTMLElement;
 
     this.toolbarRoot = root.querySelector("#toolbar") as HTMLElement;
@@ -489,6 +502,27 @@ export class Shell {
     // the host republishes, which it does whether it applied the edit or refused it.
     this.propertiesRound += 1;
 
+    // A republish landing while the developer is INSIDE the colour picker waits: rebuilding
+    // the rows closes the picker, and the host republishes on every analysis pass, so a
+    // picker being browsed vanished under the hand whenever one landed mid-choice (the
+    // v0.7.0 gate caught it between "the picker is open" and the pick, 2026-08-19). The
+    // freshest answer paints the moment the picker closes, by any of its ways out.
+    if (colourPickerState() !== null) {
+      this.propertiesDeferred = true;
+      return;
+    }
+
+    this.paintProperties(component);
+  }
+
+  /** Brings the Properties pane forward wherever it is docked, and puts focus in it. */
+  revealProperties(): void {
+    this.docks.reveal("properties");
+    this.propertiesList.querySelector<HTMLInputElement>("input")?.focus();
+  }
+
+  /** Renders the held properties, and lands a rename's focus when one was asked for. */
+  private paintProperties(component: string): void {
     this.renderProperties();
 
     // A rename that was asked for lands here, when the name field for it actually exists.
@@ -500,15 +534,11 @@ export class Shell {
     }
   }
 
-  /** Brings the Properties pane forward wherever it is docked, and puts focus in it. */
-  revealProperties(): void {
-    this.docks.reveal("properties");
-    this.propertiesList.querySelector<HTMLInputElement>("input")?.focus();
-  }
-
   private renderProperties(): void {
     // A picker belongs to a row that is about to be replaced; the host republishes on every
-    // edit, so leaving one open would leave it anchored to an element nothing owns.
+    // edit, so leaving one open would leave it anchored to an element nothing owns. A DEFERRED
+    // republish never reaches here with one open - setProperties holds it - so this close only
+    // fires for direct renders, where the selection itself moved.
     closeColourPicker();
     this.propertiesList.replaceChildren();
 
