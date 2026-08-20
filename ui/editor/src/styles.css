@@ -2610,12 +2610,28 @@ body.live-resize .minimap {
   opacity: 1;
 }
 
+/* On wears the Problems pane's own active dressing; off is plain and dimmed, so the state
+   reads at a glance rather than by comparing opacities. */
+.tests-filter[aria-pressed="true"] {
+  opacity: 1;
+  background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.22));
+  border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
+}
+
 .tests-filter[aria-pressed="false"] {
   opacity: 0.45;
 }
 
 .tests-filter .codicon {
   font-size: 13px;
+}
+
+.tests-filter .codicon-pass {
+  color: var(--vscode-testing-iconPassed, #388a34);
+}
+
+.tests-filter .codicon-error {
+  color: var(--vscode-testing-iconFailed, #f14c4c);
 }
 
 #tests-summary {
