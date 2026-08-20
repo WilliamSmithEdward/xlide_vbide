@@ -759,6 +759,12 @@ function boot(): void {
   });
   bridge.testsChanged = (tests) => testsPane.paint(tests);
 
+  // Asked once at boot, so a pane restored open by the saved layout holds its state - the
+  // support chip included - without waiting for a run, a press, or the first analysis pass
+  // to land (the owner: "doesn't show until test is run"). A boot before any project is open
+  // answers nothing, and auto-rediscovery corrects the picture at the first pass.
+  bridge.testsAction("refresh");
+
   // Ctrl+W closes the active group's active tab from anywhere in the surface. The host's key
   /*
    * NO SURFACE FALLS THROUGH TO THE BROWSER'S OWN CONTEXT MENU.

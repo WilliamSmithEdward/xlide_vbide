@@ -253,6 +253,16 @@ internal sealed partial class AddInSession
 
             case "debug" when target is { Length: > 0 }:
             {
+                // Gated like a run: a test that calls a missing XlideAssert is a compile-error
+                // modal, not a debug session.
+                var debugSupport = TestRunService.SupportState(project);
+                if (debugSupport != "installed")
+                {
+                    return debugSupport == "missing"
+                        ? $"the {TestRunService.AssertModuleName} module is not installed - install it first"
+                        : $"the {TestRunService.AssertModuleName} module is out of date - reinstall it first";
+                }
+
                 var wanted = TestRunService.Discover(project)
                     .FirstOrDefault(test => string.Equals(test.Id, target, StringComparison.OrdinalIgnoreCase));
                 if (wanted is null)
