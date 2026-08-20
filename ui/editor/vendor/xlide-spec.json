@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "d414c103b0c08dbe3dea8cba5d6babd7442adf8a",
+  "commit": "0dc935c2ee4ea5d4511b675eff7ee9b0d4bd7bc4",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
@@ -9,7 +9,7 @@
   ],
   "files": {
     "analyzer/lexer/keywordTable.ts": "8ad84b78d73c56012d2912d7296817ab22e59a00aec53f5d19a755fd687713ba",
-    "analyzer/lexer/strippedLines.ts": "c5fc6cb2a7f53fd3165f5a5d7ba37ef3cbe841e0a39ab0f7d3fcd307538ff45f",
+    "analyzer/lexer/strippedLines.ts": "900c70d7c7d5423ec231df7c17f02cc376a651630f1830230ebf233b27c57169",
     "analyzer/lexer/tokenKinds.ts": "2032c749c1290f2c40e4c7d5882984e092a74e451f0e2dcbc21443fbcee6194e",
     "analyzer/lexer/tokenize.ts": "fc40e684b1f8e9f9b16083960ecf31204cf0c59623856353c194639dfe725844",
     "analyzer/lexer/trivia.ts": "6fad65c2a9b540b241ddb430eb2898c834210cf59919811aabaf2eebc13cb6d7",
