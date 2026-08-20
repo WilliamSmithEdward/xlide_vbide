@@ -1,4 +1,4 @@
-/*
+﻿/*
  * The scope selector, on both list panes.
  *
  * Both panes answer for a whole workspace - the analyzer reads every module of every open
@@ -86,7 +86,7 @@ const showPane = (which) =>
 const optionFor = (select, module) => ask(
   `(() => [...document.querySelectorAll("#${select} option")]`
   + `.filter(o => o.textContent.startsWith(${JSON.stringify(module + " (")}))`
-  + ".map(o => o.value))()");
+  + ".map(o => ({ value: o.value, label: o.textContent })))()");
 
 /** Picks a scope, through the change event the control itself fires. */
 const pickScope = (select, value) => ask(
@@ -110,30 +110,34 @@ try {
   check("the suite's three modules were added", made.length === 3, made.join(", ") || "none");
 
   await showPane("problems");
-  const brokenOption = await waitFor("both broken modules to reach the scope selector", async () => {
-    const mine = await optionFor("problems-scope", BROKEN);
-    const other = await optionFor("problems-scope", ALSO);
-    return mine?.length === 1 && other?.length === 1 ? mine[0] : null;
+  // The list is drawn from the TREE, not from the findings, so a module reaches it by existing.
+  // Waited on the count instead: the broken module is listed either way, and what says its
+  // finding has landed is the number beside it.
+  const brokenOption = await waitFor("the broken module's finding to be counted in the selector", async () => {
+    const mine = await optionFor("problems-scope-module", BROKEN);
+    const other = await optionFor("problems-scope-module", ALSO);
+    return mine?.length === 1 && other?.length === 1 && !mine[0].label.endsWith("(0)") ? mine[0] : null;
   }, { budgetMs: 30000 });
 
-  check("a module with findings earns an option; a clean one does not",
-    (await optionFor("problems-scope", CLEAN)).length === 0);
+  check("a clean module is offered too, so a scope can answer 'nothing wrong here'",
+    (await optionFor("problems-scope-module", CLEAN)).length === 1,
+    `${CLEAN} is ${(await optionFor("problems-scope-module", CLEAN)).length === 1 ? "listed" : "missing"}`);
 
   // The counts on the options are the pane's own arithmetic; the door's problems route is the
   // independent answer they have to match.
   const trueCount = (await api.problems(BROKEN)).findings.length;
   const labelled = await ask(
-    `(() => [...document.querySelectorAll("#problems-scope option")]`
-    + `.find(o => o.value === ${JSON.stringify(brokenOption)})?.textContent)()`);
+    `(() => [...document.querySelectorAll("#problems-scope-module option")]`
+    + `.find(o => o.value === ${JSON.stringify(brokenOption.value)})?.textContent)()`);
   check("the option carries the module's own count",
     labelled === `${BROKEN} (${trueCount})`, `${labelled} against ${trueCount} from the door`);
 
-  await pickScope("problems-scope", brokenOption);
+  await pickScope("problems-scope-module", brokenOption.value);
   const scoped = await ask(
     '(() => ({ modules: [...new Set([...document.querySelectorAll("#panel-list .row")]'
     + '.map(r => r.dataset.moduleName))], counts: [...document.querySelectorAll('
     + '"#problems-filters .filter-count")].map(n => n.textContent),'
-    + ' narrowed: document.querySelector("#problems-scope").classList.contains("scope-narrowed") }))()');
+    + ' narrowed: document.querySelector("#problems-scope-module").classList.contains("scope-narrowed") }))()');
   check("a scoped pane lists that module alone",
     scoped.modules.length === 1 && scoped.modules[0] === BROKEN, JSON.stringify(scoped.modules));
   check("the severity counts count within the scope, or they contradict the list",
@@ -157,7 +161,7 @@ try {
 
   // ---- the empty state, and its way back ----
   await api.pane("open", { module: CLEAN, project: project.projectId });
-  await pickScope("problems-scope", "@current");
+  await pickScope("problems-scope-module", "@current");
   const empty = await waitFor("the empty state for a clean module", async () => {
     const said = await ask('(() => document.querySelector("#panel-list .panel-empty")?.textContent ?? null)()');
     return typeof said === "string" && said.includes(CLEAN) ? said : null;
@@ -167,20 +171,20 @@ try {
 
   const back = await ask(
     '(() => { document.querySelector("#panel-list .panel-empty-act").click();'
-    + ' return { scope: document.querySelector("#problems-scope").value,'
+    + ' return { scope: document.querySelector("#problems-scope-module").value,'
     + ' rows: document.querySelectorAll("#panel-list .row").length }; })()');
   check("Show All is the way back out of a scope", back.scope === "@all" && back.rows > 0,
     JSON.stringify(back));
 
   // ---- auto-adjust: a module that leaves takes its option with it ----
-  await pickScope("problems-scope", brokenOption);
+  await pickScope("problems-scope-module", brokenOption.value);
   await api.component("remove", { name: BROKEN, project: project.projectId });
   made.splice(made.indexOf(BROKEN), 1);
   const settled = await waitFor("the scope to notice the module has gone", async () => {
     const now = await ask(
-      '(() => ({ value: document.querySelector("#problems-scope").value,'
-      + ' options: [...document.querySelectorAll("#problems-scope option")].map(o => o.value) }))()');
-    return now && !now.options.includes(brokenOption) ? now : null;
+      '(() => ({ value: document.querySelector("#problems-scope-module").value,'
+      + ' options: [...document.querySelectorAll("#problems-scope-module option")].map(o => o.value) }))()');
+    return now && !now.options.includes(brokenOption.value) ? now : null;
   }, { budgetMs: 30000 });
   check("a scope whose module has gone falls back to All rather than filtering against nothing",
     settled.value === "@all", JSON.stringify(settled));
@@ -198,10 +202,10 @@ try {
 
   await showPane("tests");
   const testsOption = await waitFor("the tests scope to offer the module", async () => {
-    const mine = await optionFor("tests-scope", TESTS);
+    const mine = await optionFor("tests-scope-module", TESTS);
     return mine?.length === 1 ? mine[0] : null;
   }, { budgetMs: 15000 });
-  await pickScope("tests-scope", testsOption);
+  await pickScope("tests-scope-module", testsOption.value);
   const testScoped = await waitFor("the tests pane to narrow", async () => {
     const now = await ask(
       '(() => ({ modules: [...document.querySelectorAll("#tests-list .tests-module")].map(n => n.textContent),'
@@ -238,8 +242,8 @@ try {
   }, { budgetMs: 15000 });
   check("the pane says it in words, beside the tally", /^Ran \d/.test(said), said);
 } finally {
-  await ask('(() => { const s = document.querySelector("#tests-scope"); if (s) { s.value = "@all"; '
-    + 's.dispatchEvent(new Event("change")); } const p = document.querySelector("#problems-scope"); '
+  await ask('(() => { const s = document.querySelector("#tests-scope-module"); if (s) { s.value = "@all"; '
+    + 's.dispatchEvent(new Event("change")); } const p = document.querySelector("#problems-scope-module"); '
     + 'if (p) { p.value = "@all"; p.dispatchEvent(new Event("change")); } return "reset"; })()')
     .catch(() => {});
   for (const name of made) {

@@ -2655,8 +2655,17 @@ body.live-resize .minimap {
   color: var(--vscode-editorWarning-foreground, #bf8803);
 }
 
-#tests-summary {
+/* The tally, the clock and the support chip are ONE group at the row's end. Left as three
+   toolbar items they wrapped separately in a half-width pane, stranding the chip on a line of
+   its own; together they take the end of whichever line they land on. */
+#tests-standing {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-left: auto;
+}
+
+#tests-summary {
   font-size: 11px;
   opacity: 0.7;
   white-space: nowrap;
@@ -2800,10 +2809,12 @@ body.live-resize .minimap {
 }
 
 /* GUTTERS, wider than the row's own gap: at 6px the chips read as a continuation of the name
-   rather than as their own column (the owner, 2026-08-20). */
+   rather than as their own column, and 22px still read as tight in a half-width pane, where
+   the columns themselves are narrower (the owner, 2026-08-20, twice). 28px measured across
+   the whole range. */
 .tests-meta {
   flex: 0 1 150px;
-  margin-left: 16px;
+  margin-left: 22px;
   font-size: 11px;
   opacity: 0.55;
   white-space: nowrap;
@@ -2815,7 +2826,7 @@ body.live-resize .minimap {
    the row left-packs, and the slot stays fixed so the digits align where rows share a shape. */
 .tests-time {
   flex: 0 0 56px;
-  margin-left: 16px;
+  margin-left: 22px;
   text-align: right;
   font-size: 11px;
   opacity: 0.6;
@@ -3167,15 +3178,24 @@ body.objbrowser-page #objbrowser-card {
   outline-offset: -2px;
 }
 
-/* THE SCOPE SELECTOR, worn by both list panes: which module's rows the pane is showing. Quiet
-   while it is showing everything - it is not a control anyone should have to notice - and
-   outlined the moment it is narrowing, because an unnoticed filter turns a hidden row into a
-   row the developer believes does not exist. */
+/* THE SCOPE CONTROL, worn by both list panes: which file's and which module's rows the pane is
+   showing. Quiet while it is showing everything - it is not a control anyone should have to
+   notice - and outlined the moment it is narrowing, because an unnoticed filter turns a hidden
+   row into a row the developer believes does not exist. */
+.scope-select-pair {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .scope-select {
-  /* Shrinks before it clips, and wraps to its own line in a narrow dock rather than pushing
-     the toggles off the edge. */
-  min-width: 88px;
-  max-width: 200px;
+  /* FIXED, NOT INTRINSIC. A select sizes itself to its widest option, and one of these options
+     names the active module - so clicking through tabs resized the control and shoved the
+     toolbar around beside it (the owner, 2026-08-20). The width is the control's own; the
+     title carries any name too long for it. */
+  width: 186px;
+  flex: 0 0 auto;
+  text-overflow: ellipsis;
   padding: 1px 4px;
   border: 1px solid transparent;
   border-radius: 3px;
@@ -3202,9 +3222,25 @@ body.objbrowser-page #objbrowser-card {
   outline-offset: -2px;
 }
 
+/* THE POPUP'S OWN COLOURS. A select's list is drawn by the browser, which means it takes none
+   of this page's theme unless every row says so - and a row nobody styled is drawn in the
+   browser's own greys. The FILE headings were the ones that failed: an unstyled optgroup label
+   is dimmed and italicised over a lighter band, which on this dark surface came out grey on
+   grey (the owner's screenshot, 2026-08-20). Both rows are stated here, at full foreground
+   contrast, with the heading carrying its weight rather than a colour difference. */
 .scope-select option {
   background: var(--vscode-menu-background, #252526);
-  color: var(--vscode-menu-foreground, #cccccc);
+  color: var(--vscode-menu-foreground, #f0f0f0);
+}
+
+/* The file select is the narrower of the two: a file name is shorter than "Current Module:"
+   and everything after it. It hides itself when a session holds one file. */
+.scope-select-file {
+  width: 152px;
+}
+
+.scope-select[hidden] {
+  display: none;
 }
 
 /* The Problems row ends with its scope; the severity toggles keep the left, where they have

@@ -221,9 +221,11 @@ const INDEX_HTML = `<!doctype html>
         <button id="tests-refresh" type="button" title="Rediscover tests"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
         <span id="tests-scope-seat"></span>
         <span id="tests-filters" role="group" aria-label="Filter tests by outcome"></span>
-        <span id="tests-summary" aria-live="polite"></span>
-        <span id="tests-ran" hidden></span>
-        <button id="tests-install" type="button" hidden></button>
+        <span id="tests-standing">
+          <span id="tests-summary" aria-live="polite"></span>
+          <span id="tests-ran" hidden></span>
+          <button id="tests-install" type="button" hidden></button>
+        </span>
       </div>
       <div id="tests-list" role="tree" aria-label="Tests"></div>
     </div>

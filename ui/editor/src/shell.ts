@@ -506,6 +506,10 @@ export class Shell {
       this.immediateInput.placeholder = hint[host] ?? "? 1 + 1";
     }
     this.explorer.setProjects(projects);
+
+    // The problems scope offers every open file, so it follows the tree: a file opening or
+    // closing changes what there is to narrow to, with or without a finding in it.
+    this.renderPanel();
   }
 
   /** Takes one menu's items from the host: the bar for an empty path, a dropdown otherwise. */
@@ -1657,13 +1661,7 @@ export class Shell {
       if (already) {
         already.count++;
       } else {
-        scopes.set(home, {
-          key: home,
-          name: finding.module,
-          label: finding.module,
-          file,
-          count: 1,
-        });
+        scopes.set(home, { key: home, name: finding.module, file, count: 1 });
       }
 
       const holding = fileCounts.get(file.toLowerCase());
@@ -1674,11 +1672,34 @@ export class Shell {
       }
     }
 
+    // EVERY OPEN FILE AND EVERY MODULE IN IT IS OFFERED, not only the ones with findings.
+    // Drawing the lists from the findings alone meant a clean session had nothing to choose
+    // between, so the way to narrow only appeared once something was already wrong (the owner,
+    // 2026-08-20: "i dont see workbook scoping on problems pane", then "shouldn't we show
+    // modules in the dropdown even if no errors?"). A module with nothing wrong is a scope
+    // worth choosing - it answers "nothing here", which is the answer being looked for.
+    for (const project of this.explorer.snapshot()) {
+      if (!project.name) {
+        continue;
+      }
+
+      if (!fileCounts.has(project.name.toLowerCase())) {
+        fileCounts.set(project.name.toLowerCase(), { name: project.name, count: 0 });
+      }
+
+      for (const component of project.components) {
+        const home = problemCountKey(project.name, component.name);
+        if (!scopes.has(home)) {
+          scopes.set(home, { key: home, name: component.name, file: project.name, count: 0 });
+        }
+      }
+    }
+
     const activeKey = this.activeModuleName
       ? problemCountKey(this.activeModuleProject, this.activeModuleName)
       : null;
     this.problemsScope.setEntries(
-      [...scopes.values()].sort((a, b) => a.file.localeCompare(b.file) || a.label.localeCompare(b.label)),
+      [...scopes.values()].sort((a, b) => a.file.localeCompare(b.file) || a.name.localeCompare(b.name)),
       activeKey && this.activeModuleName
         ? { key: activeKey, name: this.activeModuleName, file: this.activeModuleProject ?? "" }
         : null,
@@ -1696,7 +1717,7 @@ export class Shell {
     // counts, which its own guard would have swallowed.
     const key = JSON.stringify([
       this.severityFilters,
-      this.problemsScope.element.value,
+      this.problemsScope.stateKey(),
       activeKey ?? "",
       this.findings.map((f) => [f.severity, f.project ?? "", f.module, f.line, f.column, f.code ?? "", f.message]),
     ]);

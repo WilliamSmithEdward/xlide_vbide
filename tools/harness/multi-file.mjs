@@ -127,20 +127,25 @@ try {
   const installed = await api.tests({ action: "install", file: TWIN });
   check("installing into one named file fixes that file", installed.detail === `${TWIN}: installed`, installed.detail);
 
-  // ---- the Tests pane's file tier ----
+  // ---- the Tests pane's two selects ----
   await showPane("tests");
-  await ask(`(() => { const s = document.querySelector("#tests-scope"); s.value = "@all"; s.dispatchEvent(new Event('change')); return 1; })()`);
-  const grouped = await waitFor("the scope selector to group modules under their files", async () => {
+  await ask("(() => { for (const one of document.querySelectorAll('.scope-select')) {"
+    + " one.value = one.classList.contains('scope-select-file') ? '@allfiles' : '@all';"
+    + " one.dispatchEvent(new Event('change')); } return 1; })()");
+  const offered = await waitFor("the file select to offer both open files", async () => {
     const shape = await ask(
-      '(() => [...document.querySelector("#tests-scope").children]'
-      + '.filter(n => n.tagName === "OPTGROUP").map(n => n.label + ": "'
-      + ' + [...n.children].map(o => o.textContent).join(" | ")))()');
-    return Array.isArray(shape) && shape.length === 2 ? shape : null;
+      '(() => [...document.querySelectorAll("#tests-scope-file option")].map(o => o.textContent))()');
+    return Array.isArray(shape) && shape.length === 3 ? shape : null;
   }, { budgetMs: 20000 });
-  check("each open file is a group, headed by a whole-file scope",
-    grouped.every((group) => group.includes("All of ")), grouped.join("  //  "));
-  check("a module name in both files appears once under each, not once for both",
-    grouped.filter((group) => group.includes("InvoiceTests")).length === 2, grouped.join("  //  "));
+  check("the file select offers All Files and each open file, with its own count",
+    offered[0].startsWith("All Files (15)")
+    && offered.some((one) => one.startsWith(`${MAIN} (10)`))
+    && offered.some((one) => one.startsWith(`${TWIN} (5)`)), offered.join(" | "));
+
+  const across = await ask(
+    '(() => [...document.querySelectorAll("#tests-scope-module option")].map(o => o.textContent))()');
+  check("across files a shared module name says which file it is, or the two would be one choice",
+    across.filter((one) => one.startsWith("InvoiceTests - ")).length === 2, across.join(" | "));
 
   // Objects come back as objects: the door parses a script's JSON answer on the way out, and a
   // second parse here reads "[object Object]" (the trap docs\driving-excel.md names).
@@ -150,21 +155,24 @@ try {
   check("the tree heads each file's block with the file, then its modules",
     tree.files.length === 2 && tree.modules.length === 3, JSON.stringify(tree));
 
-  await pickScope("tests-scope", `All of ${TWIN}`);
+  await pickScope("tests-scope-file", TWIN);
   const only = await ask(
     '(() => ({rows:document.querySelectorAll("#tests-list .tests-row").length,'
     + ' files:[...document.querySelectorAll("#tests-list .tests-file")].map(n=>n.textContent),'
+    + ' modules:[...document.querySelectorAll("#tests-scope-module option")].map(o=>o.textContent),'
     + ' label:document.querySelector("#tests-run .tests-label").textContent,'
     + ' title:document.querySelector("#tests-run").title}))()');
-  check("a whole-file scope shows that file's tests alone", only.rows === 5, JSON.stringify(only));
+  check("choosing a file shows that file's tests alone", only.rows === 5, JSON.stringify(only));
   check("...and drops the file heading, which would then be saying one thing over and over",
     only.files.length === 0);
+  check("the module select narrows to that file's modules, unqualified because they cannot collide",
+    only.modules.some((one) => one.startsWith("InvoiceTests (3)"))
+    && only.modules.some((one) => one.startsWith("LedgerTests (2)"))
+    && !only.modules.some((one) => one.includes(" - ")), only.modules.join(" | "));
   check("Run All becomes Run File, and says which", only.label === "Run File" && only.title.includes(TWIN),
     only.title);
 
-  // ---- the Problems pane's file tier ----
-  // Planted in BOTH files: the tier appears when findings span more than one file, because with
-  // one file's findings on screen a file group would be a heading over everything.
+  // ---- the Problems pane's two selects ----
   for (const where of [MAIN, TWIN]) {
     await api.component("add", { kind: "module", name: BROKEN, project: where });
     await api.writeModule(BROKEN, BROKEN_SOURCE, where);
@@ -172,24 +180,28 @@ try {
 
   plantedIn = [MAIN, TWIN];
   await showPane("problems");
-  const files = await waitFor("both files' findings to reach the Problems scope", async () => {
+  // Waited on the COUNTS, not the names: the file select lists every open file whether or not
+  // it has findings, so a file appearing in it says nothing about whether its planted module
+  // has been analysed yet.
+  const problemFiles = await waitFor("both files' findings to be counted in the Problems file select", async () => {
     const shape = await ask(
-      '(() => [...document.querySelector("#problems-scope").children]'
-      + '.filter(n => n.tagName === "OPTGROUP").map(n => n.label))()');
-    return Array.isArray(shape) && shape.includes(TWIN) && shape.includes(MAIN) ? shape : null;
+      '(() => [...document.querySelectorAll("#problems-scope-file option")].map(o => o.textContent))()');
+    const counted = (name) => shape?.some((one) => one.startsWith(name) && !one.endsWith("(0)"));
+    return Array.isArray(shape) && counted(MAIN) && counted(TWIN) ? shape : null;
   }, { budgetMs: 40000 });
-  check("the Problems scope groups its modules by file too", files.length === 2, files.join(", "));
+  check("the Problems pane offers a file select of its own, counting each file's findings",
+    problemFiles.length === 3, problemFiles.join(" | "));
 
-  const picked = await pickScope("problems-scope", `All of ${TWIN}`);
+  const picked = await pickScope("problems-scope-file", TWIN);
   check("a whole-file problem scope is offered", typeof picked === "string" && picked.startsWith("file:"), String(picked));
   const rows = await ask(
     '(() => [...new Set([...document.querySelectorAll("#panel-list .row")].map(r => r.dataset.project))])()');
   check("...and it shows that file's findings alone",
     Array.isArray(rows) && rows.length === 1 && rows[0] === TWIN, JSON.stringify(rows));
 } finally {
-  await ask('(() => { for (const id of ["tests-scope", "problems-scope"]) {'
-    + ' const s = document.querySelector("#" + id);'
-    + " if (s) { s.value = '@all'; s.dispatchEvent(new Event('change')); } } return 'reset'; })()").catch(() => {});
+  await ask("(() => { for (const one of document.querySelectorAll('.scope-select')) {"
+    + " one.value = one.classList.contains('scope-select-file') ? '@allfiles' : '@all';"
+    + " one.dispatchEvent(new Event('change')); } return 'reset'; })()").catch(() => {});
   for (const where of plantedIn ?? []) {
     await api.component("remove", { name: BROKEN, project: where }).catch(() => {});
   }
