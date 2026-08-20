@@ -498,24 +498,22 @@ try {
     });
 
     /*
-     * THE EXPORTER'S OWN TRAILING CRLF, watched (xlide_vscode#37): the VBE's Export writes
-     * the module text plus one extra CRLF at EOF - `End Sub\r\n\r\n` on disk against
-     * `End Sub\r\n` live, measured byte-level off a real Excel round trip the day the #36
-     * strip shipped. So a REAL export still reads will-update over one blank line nothing
-     * wrote on purpose. The day upstream trims trailing blank runs before the equality,
-     * this row reads unchanged and announces.
+     * THE EXPORTER'S OWN TRAILING CRLF READS EQUAL (xlide_vscode#37, fixed upstream in
+     * d4d2920, released 4.0.5, consumed 2026-08-19): the VBE's Export writes the module text
+     * plus one extra CRLF at EOF - `End Sub\r\n\r\n` on disk against `End Sub\r\n` live,
+     * measured byte-level off a real Excel round trip the day the #36 strip shipped - so a
+     * real export read will-update over a blank line nothing wrote on purpose. Trailing
+     * blank runs trim before the equality now, and with the differing-code pin above, the
+     * pair says the trim is exactly one line wide: a clean export reads clean, an edit
+     * still does not.
      */
     writeFileSync(join(syncFolder, 'Matching.frm'),
         [...DESIGNER_HEADER, `${FORM_CODE_HALF}\r\n`].join('\r\n'));
 
     const exporterRow = await planMatching(FORM_CODE_HALF);
-    check('a form whose file carries the exporter\'s trailing CRLF is xlide_vscode#37, watched', () => {
+    check('a form whose file carries the exporter\'s trailing CRLF reads unchanged', () => {
         assert.ok(exporterRow, 'no Matching row in the plan');
-        if (exporterRow.status === 'unchanged') {
-            console.log('     UPSTREAM FIXED: trailing blank runs trim before the compare - pin unchanged here and close xlide_vscode#37.');
-        } else {
-            assert.equal(exporterRow.status, 'will-update', `the row read ${exporterRow.status}`);
-        }
+        assert.equal(exporterRow.status, 'unchanged', `the row read ${exporterRow.status}`);
     });
 } finally {
     rmSync(syncFolder, { recursive: true, force: true });
