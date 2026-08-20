@@ -2566,8 +2566,11 @@ body.live-resize .minimap {
 
 /* The support chip: a status first, an action second. Yellow says the press installs or
    updates; green says there is nothing left to press. Set apart from the summary count. */
+/* Stood well clear of the run clock: the chip is a different KIND of thing from the readouts
+   beside it - a control, not a fact - and at 10px it read as the end of the same sentence
+   (the owner, 2026-08-20). */
 #tests-actions #tests-install {
-  margin-left: 10px;
+  margin-left: 22px;
   opacity: 1;
 }
 
@@ -2752,7 +2755,9 @@ body.live-resize .minimap {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 0 0 min(280px, 42%);
+  /* Shrinks with the pane rather than pushing the acts off the edge; every row shares the
+     basis, so they shrink together and the columns stay lined up. */
+  flex: 0 1 min(280px, 42%);
   text-align: left;
 }
 
@@ -2760,8 +2765,11 @@ body.live-resize .minimap {
   text-decoration: underline;
 }
 
+/* GUTTERS, wider than the row's own gap: at 6px the chips read as a continuation of the name
+   rather than as their own column (the owner, 2026-08-20). */
 .tests-meta {
-  flex: 0 0 150px;
+  flex: 0 1 150px;
+  margin-left: 16px;
   font-size: 11px;
   opacity: 0.55;
   white-space: nowrap;
@@ -2773,10 +2781,16 @@ body.live-resize .minimap {
    the row left-packs, and the slot stays fixed so the digits align where rows share a shape. */
 .tests-time {
   flex: 0 0 56px;
+  margin-left: 16px;
   text-align: right;
   font-size: 11px;
   opacity: 0.6;
   white-space: nowrap;
+}
+
+/* The acts are their own group at the row's end, not a fourth column. */
+.tests-time + .tests-act {
+  margin-left: 10px;
 }
 
 .tests-act {
