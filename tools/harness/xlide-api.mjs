@@ -797,14 +797,18 @@ function clientFor(entry) {
      *
      *   await api.tests();                                    // discovery + support + outcomes
      *   await api.tests({ action: "install" });               // write/update XlideAssert
-     *   await api.tests({ action: "run" });                   // everything
+     *   await api.tests({ action: "run" });                   // every test in every open file
+     *   await api.tests({ action: "run", file: "Book.xlsm" });
      *   await api.tests({ action: "run", module: "MyTests" });
      *   await api.tests({ action: "run", test: "MyTests.Adds" });
      *   await api.tests({ action: "runFailed" });
      *   await api.tests({ action: "debug", test: "MyTests.Adds" }); // waits out the debugger
+     *
+     * `file` narrows any verb to one open file, which every verb needs once two files can hold
+     * a module - or a test - of the same name. Without it a verb means every open file.
      */
-    tests: ({ action, module, test, timeoutMs = 120000 } = {}) =>
-      call(`tests${query({ action, module, test })}`, { timeout: timeoutMs }),
+    tests: ({ action, module, test, file, timeoutMs = 120000 } = {}) =>
+      call(`tests${query({ action, module, test, file })}`, { timeout: timeoutMs }),
 
     /** Everything a bug report needs, captured at one moment. */
     journal: (lines) => call(`journal${query({ lines })}`, { timeout: 20000 }),
@@ -1406,7 +1410,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "dialogs": return api.dialogs();
       case "doctor": return api.doctor();
       case "sessions": return api.sessions();
-      case "tests": return api.tests({ action: rest[0], module: rest[1], test: rest[2] });
+      // node xlide-api.mjs tests run "" "" TestFixture.xlsm   (action, module, test, file)
+      case "tests": return api.tests({ action: rest[0], module: rest[1], test: rest[2], file: rest[3] });
       case "journal": return api.journal(rest[0]);
       case "history": return api.history();
       case "assert": return api.assert(rest[0], { value: rest[1] });

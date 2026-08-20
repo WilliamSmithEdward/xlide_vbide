@@ -172,7 +172,8 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Raised by the Tests pane: (action, target test id or null). Actions are
     /// refresh, install, run, runFailed, runOne and debug.</summary>
-    public Action<string, string?>? TestsActionRequested { get; set; }
+    /// <summary>A Tests pane gesture: the verb, the test it names, and the file it is scoped to.</summary>
+    public Action<string, string?, string?>? TestsActionRequested { get; set; }
 
     /// <summary>Raised when the canvas selection changes: (module, workbook display or
     /// null, control name or null for the form itself). The Properties panel follows.</summary>
@@ -1899,6 +1900,9 @@ internal sealed class EditorSurface : IDisposable
                             testsAsked,
                             document.RootElement.TryGetProperty("test", out var testsTarget)
                                 ? testsTarget.GetString()
+                                : null,
+                            document.RootElement.TryGetProperty("file", out var testsFile)
+                                ? testsFile.GetString()
                                 : null);
                     }
 

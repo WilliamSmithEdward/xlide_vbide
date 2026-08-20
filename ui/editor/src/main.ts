@@ -754,15 +754,17 @@ function boot(): void {
   // The Tests pane: a projection of the host's setTests message, its gestures posted back
   // through the same channel the debug api's tests route drives - one brain, two doors.
   const testsPane = new TestsPane(document.querySelector("#tests") as HTMLElement, {
-    act: (action, test) => bridge.testsAction(action, test),
-    navigate: (module, line) => bridge.navigate(module, line, 1, true),
+    act: (action, test, file) => bridge.testsAction(action, test, file),
+    // The file goes with the module: two open files can each hold an InvoiceTests, and a
+    // navigation that named only the module would open whichever answered first.
+    navigate: (module, line, file) => bridge.navigate(module, line, 1, true, file),
   });
   bridge.testsChanged = (tests) => testsPane.paint(tests);
 
   // Both panes' Current Module scope follows the same tab, and the shell is where every road
   // to a changed active module already meets - the host's own setActive and the workspace's
   // tab activation both land there.
-  shell.activeModuleChanged = (module) => testsPane.setActiveModule(module);
+  shell.activeModuleChanged = (module, project) => testsPane.setActiveModule(module, project);
 
   // Asked once at boot, so a pane restored open by the saved layout holds its state - the
   // support chip included - without waiting for a run, a press, or the first analysis pass

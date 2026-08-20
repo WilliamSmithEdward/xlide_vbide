@@ -100,6 +100,8 @@ export type HostMessage =
 /** One test as the Tests pane draws it: identity, place, directive facts, and outcome. */
 export interface TestRow {
   id: string;
+  /** The file the test lives in, as it is shown: a module name is not an identity across files. */
+  file: string;
   module: string;
   procedure: string;
   line: number;
@@ -115,12 +117,21 @@ export interface TestRow {
 }
 
 /** The Tests pane's whole picture, sent whole on every change so nothing drifts. */
+/** One open file's standing: the support module is installed per file, so this is per file. */
+export interface TestFileState {
+  file: string;
+  support: string;
+  tests: number;
+}
+
 export interface SetTestsState {
+  /** The session's worst support standing across the files that hold tests. */
   support: string;
   running: boolean;
   currentTest: string | null;
   /** When the last run finished, ISO 8601 with offset; null before any run this session. */
   ranAt: string | null;
+  files: TestFileState[];
   rows: TestRow[];
 }
 
@@ -465,7 +476,7 @@ export type ClientMessage =
   // setting that could not be changed but a setting that got RESET: every other change posted a
   // payload with no syncEngine in it, and the host read the absence as the default.
   | ({ type: "updateSettings" } & EditorSettings)
-  | { type: "testsAction"; action: string; test?: string }
+  | { type: "testsAction"; action: string; test?: string; file?: string }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -777,12 +788,17 @@ export class EditorBridge {
 
   private readonly formMarkupVocabularyWatchers = new Set<(kinds: FormMarkupKind[]) => void>();
 
-  /** The Tests pane pressed something: refresh, install, run, runFailed, runOne or debug. */
-  testsAction(action: string, test?: string): void {
+  /**
+   * The Tests pane pressed something: refresh, install, run, runFile, runModule, runOne,
+   * runFailed or debug. `file` scopes the verb to one open file the way the pane's scope
+   * selector does - without it a verb means every file that has tests.
+   */
+  testsAction(action: string, test?: string, file?: string): void {
     this.transport.post({
       type: "testsAction",
       action,
       ...(test ? { test } : {}),
+      ...(file ? { file } : {}),
     });
   }
 

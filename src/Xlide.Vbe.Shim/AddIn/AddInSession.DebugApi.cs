@@ -3599,23 +3599,28 @@ internal sealed partial class AddInSession
                 request.Query.TryGetValue("action", out var testsAction);
                 request.Query.TryGetValue("module", out var testsModule);
                 request.Query.TryGetValue("test", out var testsTarget);
+                request.Query.TryGetValue("file", out var testsFile);
 
                 var testsDetail = "listed";
                 if (testsAction is { Length: > 0 } and not "list")
                 {
+                    // `run` says what it means by what it carries: a test, a module, a file, or
+                    // nothing at all - which is every test in every open file.
                     var testsVerb = testsAction == "run" && testsTarget is { Length: > 0 } ? "runOne"
                         : testsAction == "run" && testsModule is { Length: > 0 } ? "runModule"
+                        : testsAction == "run" && testsFile is { Length: > 0 } ? "runFile"
                         : testsAction;
                     testsDetail = HandleTestsAction(
                         testsVerb,
-                        testsTarget is { Length: > 0 } ? testsTarget : testsModule);
+                        testsTarget is { Length: > 0 } ? testsTarget : testsModule,
+                        testsFile);
                 }
 
                 var testsNow = TestsSnapshot();
                 return System.Text.Json.JsonSerializer.Serialize(
                     new DebugTestsReply(
                         testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest,
-                        testsNow.RanAt, testsNow.Rows),
+                        testsNow.RanAt, testsNow.Files, testsNow.Rows),
                     DebugJsonContext.Default.DebugTestsReply);
             }
 

@@ -141,12 +141,17 @@ try {
   check("a narrowed selector says so, so a hidden row is never read as a clean project",
     scoped.narrowed === true);
 
-  // The tree badges keep the WHOLE workspace while the panel shows one module: a scope is a
-  // view, not a change to what the product knows.
-  const badge = await ask(
-    `(() => { const item = [...document.querySelectorAll("#sidebar-tree .tree-item")]`
-    + `.find(n => n.textContent.includes(${JSON.stringify(ALSO)}));`
-    + ` return item ? item.textContent : null; })()`);
+  // The tree badges keep the WHOLE session while the panel shows one module: a scope is a
+  // view, not a change to what the product knows. The workbook is expanded first, because a
+  // collapsed one renders no rows at all and "no badge" would then mean "not looked at".
+  await api.act("expandWorkbook", { workbook: project.projectId }).catch(() => {});
+  const badge = await waitFor("the tree to show the module the panel is scoped away from", async () => {
+    const found = await ask(
+      `(() => { const item = [...document.querySelectorAll("#sidebar-tree .tree-item")]`
+      + `.find(n => n.textContent.includes(${JSON.stringify(ALSO)}));`
+      + ` return item ? item.textContent : null; })()`);
+    return typeof found === "string" ? found : null;
+  }, { budgetMs: 15000 }).catch(() => null);
   check("the tree still badges a module the panel is scoped away from",
     typeof badge === "string" && /\d/.test(badge), badge ?? "not in the tree");
 
@@ -158,7 +163,7 @@ try {
     return typeof said === "string" && said.includes(CLEAN) ? said : null;
   }, { budgetMs: 15000 });
   check("a scope with nothing in it says which module, not nothing at all",
-    empty.startsWith(`No problems in ${CLEAN}.`) && empty.includes("in other modules"), empty);
+    empty.startsWith(`No problems in ${CLEAN}.`) && empty.includes("elsewhere"), empty);
 
   const back = await ask(
     '(() => { document.querySelector("#panel-list .panel-empty-act").click();'

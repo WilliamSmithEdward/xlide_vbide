@@ -750,6 +750,7 @@ public sealed record DebugTestsReply(
     [property: JsonPropertyName("running")] bool Running,
     [property: JsonPropertyName("currentTest")] string? CurrentTest,
     [property: JsonPropertyName("ranAt")] string? RanAt,
+    [property: JsonPropertyName("files")] Xlide.Vbe.Shim.Editor.TestFileMessage[] Files,
     [property: JsonPropertyName("rows")] Xlide.Vbe.Shim.Editor.TestRowMessage[] Rows);
 
 /// <summary>

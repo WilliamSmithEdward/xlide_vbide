@@ -608,6 +608,13 @@ if ($Live) {
                                      'format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
                                      'settings-bite.mjs', 'rename-features.mjs',
                                      'search-features.mjs', 'rename-boundary.mjs')
+            # TWO FILES OF TESTS, which is the only state the runner's file dimension exists in.
+            # The runner reads every open project, XlideAssert lives per file, and both fixtures
+            # hold a module called InvoiceTests on purpose - so a result filed by module name
+            # alone lands on the wrong file's test, and a gate that read support once for the
+            # session refuses the file that has it. None of that is askable with one file open,
+            # which is why the pair exists (tools\New-TestTwinFixture.ps1).
+            'TestFixture.xlsm + TestTwinFixture.xlsm' = @('multi-file.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

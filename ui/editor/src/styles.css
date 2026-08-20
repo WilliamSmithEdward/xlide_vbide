@@ -2694,10 +2694,44 @@ body.live-resize .minimap {
   opacity: 0.7;
 }
 
+/* The file a group of modules is in, shown only when the pane is holding more than one file's
+   tests - with one file open every row would carry the same name, which is noise. Set above the
+   module headings by an uppercase, tracked, quieter line rather than by a heavier one: the
+   module names are what the developer is scanning for. */
+.tests-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 2px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+.tests-file::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
 .tests-module {
   padding: 6px 10px 2px;
   font-weight: 600;
   opacity: 0.85;
+}
+
+/* Indented under a file heading when there is one, so the tiers read as a tree. Every module
+   heading and every row AFTER the first file heading is inside some file, which is what the
+   sibling combinator says. */
+.tests-file ~ .tests-module {
+  padding-left: 20px;
+}
+
+.tests-file ~ .tests-row,
+.tests-file ~ .tests-row-block .tests-row {
+  padding-left: 28px;
 }
 
 .tests-row {

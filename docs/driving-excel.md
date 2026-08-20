@@ -283,7 +283,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `userform` | `userforms(action, caption)` | the RUNNING forms' captions; `"close"` posts the X's own close. Needs no host thread, so it answers whatever the host thread is in |
 | `doctor` | `doctor()` | the start-of-session checklist |
 | `sessions` | `sessions()` | every live session on this machine: pid, host, which one is answering - the fleet the inside door's `@` prefix addresses |
-| `tests` | `tests({ action, module, test, timeoutMs })` | the VBA test runner, one brain with the Tests pane. Bare `tests()` lists discovery + support state + latest outcomes; `install` writes/updates `XlideAssert`; `run` (optionally scoped by `module` or `test`) waits for the whole run and answers a row per test; `runFailed` reruns the red set, narrowed to one module when given `module`; `debug` runs one test untrapped so breakpoints stop in the debugger. `ranAt` says when the last run finished. Give `run` a `timeoutMs` that covers the suite being run |
+| `tests` | `tests({ action, module, test, file, timeoutMs })` | the VBA test runner, one brain with the Tests pane, over EVERY open file. Bare `tests()` lists each file with its own support state and test count, plus every discovered test and its latest outcome; `install` writes/updates `XlideAssert` (per file - the runner calls it inside the file it runs); `run` (optionally scoped by `file`, `module` or `test`) waits for the whole run and answers a row per test; `runFailed` reruns the red set, narrowed by `module`/`file`; `debug` runs one test untrapped so breakpoints stop in the debugger. `ranAt` says when the last run finished. Give `run` a `timeoutMs` that covers the suite being run |
 | `documents` | `documents()` | what the surface holds TEXT for |
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
 | `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
@@ -1841,6 +1841,7 @@ node tools\harness\xlide-api.mjs tests run MyTests
 node tools\harness\xlide-api.mjs tests run "" MyTests.InvoiceTotal_AddsTax
 node tools\harness\xlide-api.mjs tests runFailed
 node tools\harness\xlide-api.mjs tests runFailed MyTests
+node tools\harness\xlide-api.mjs tests run "" "" TestFixture.xlsm
 node tools\harness\xlide-api.mjs tests debug "" MyTests.InvoiceTotal_AddsTax
 ```
 
@@ -1853,24 +1854,51 @@ way a looping macro is, with Ctrl+Break - and the suite that pins all of this is
 `tools\harness\test-runner.mjs`.
 
 The snapshot carries `ranAt`, when the last run finished, which is what the pane says beside
-its tally. `runFailed` takes a module the same way `run` does, and that is what the pane's own
-Failed button sends while its scope selector holds a module.
+its tally. `runFailed` takes a module or a file the same way `run` does, and that is what the
+pane's own Failed button sends while its scope selector holds one.
+
+**EVERY OPEN FILE.** A session holds as many VBA projects as the host has files open, and the
+runner sees all of them: `tests()` answers a `files` array - each with its own support state and
+test count - and every row carries the `file` it came from. Three things follow, and each is a
+question a single-file session cannot ask:
+
+- a module name is only unique inside its file, so `run&module=X` runs X in every file holding
+  one, and `file=` says which copy is meant;
+- `XlideAssert` is a module IN a file, so support is per file: a run refuses for a file that
+  lacks it and proceeds for one that has it, and an unscoped `install` fixes every file that
+  holds tests and needs it;
+- a result is filed under (file, test), so two files' `InvoiceTests.Adds` are two tests.
 
 **The scope selector** is the panes' own state and is not told to the host, so it is driven
 through the page rather than through a route. Both list panes carry one: `#problems-scope` and
-`#tests-scope`, each offering All Modules, Current Module (which follows the active tab), and
-every module carrying rows, rebuilt from the rows themselves so it follows workbooks opening
-and closing. In the Tests pane the scope also retargets the run buttons - Run All becomes Run
-Module. `tools\harness\pane-scope.mjs` drives both:
+`#tests-scope`, each offering All Modules, Current Module (which follows the active tab), and -
+when more than one file has rows - an `<optgroup>` per file holding a whole-file scope and that
+file's modules. It is rebuilt from the rows themselves, so it follows files opening and closing.
+In the Tests pane the scope also retargets the run buttons: Run All becomes Run File or Run
+Module, and the file rides along with the verb.
 
 ```bash
 node tools\harness\pane-scope.mjs
+node tools\harness\multi-file.mjs
+```
+
+`pane-scope.mjs` drives both panes' selectors in any session; `multi-file.mjs` is the pair
+suite and needs both test fixtures open:
+
+```bash
+tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\TestFixture.xlsm,artifacts\fixtures\TestTwinFixture.xlsm
 ```
 
 `tools\New-TestFixture.ps1` builds TestFixture.xlsm for working ON the runner: an Invoice
 module under test, eleven directives covering every outcome the runner can answer (a
 deliberate red among the green, a skip, an xfail, expected-error both ways, Assert.Throws),
-and XlideAssert already installed and saved - it opens ready for the beaker and Run All.
+and XlideAssert already installed and saved - it opens ready to Run All.
+
+`tools\New-TestTwinFixture.ps1` builds its companion, TestTwinFixture.xlsm, to be opened
+BESIDE it. Its Invoice and InvoiceTests deliberately share the other fixture's module names
+with different bodies and different failure messages, so a result filed by module name alone
+lands visibly on the wrong file; its Ledger module has no counterpart, so a file scope shows
+more than a module scope can.
 
 ---
 

@@ -405,6 +405,11 @@ public sealed record SetProjectsMessage(
 /// <summary>One test as the Tests pane draws it: identity, place, directive facts, and outcome.</summary>
 public sealed record TestRowMessage(
     [property: JsonPropertyName("id")] string Id,
+    /// <summary>
+    /// The file the test lives in, as it is shown - a workbook in Excel, a document in Word.
+    /// A module name is not an identity across files, so a row without this cannot be placed.
+    /// </summary>
+    [property: JsonPropertyName("file")] string File,
     [property: JsonPropertyName("module")] string Module,
     [property: JsonPropertyName("procedure")] string Procedure,
     [property: JsonPropertyName("line")] int Line,
@@ -419,18 +424,35 @@ public sealed record TestRowMessage(
     [property: JsonPropertyName("expectedError")] string? ExpectedError);
 
 /// <summary>
-/// The Tests pane's whole picture in one message: the support module's state, whether a run is
-/// in flight and where it stands, and every known test with its latest outcome. Sent whole on
+/// One open file's standing in the runner: what it is called, whether it carries a current
+/// XlideAssert, and how many tests were discovered in it. The support module is installed per
+/// file, because it is a module IN the file - so a session with two files open has two answers,
+/// and a pane showing one number for both would be lying to whichever it did not mean.
+/// </summary>
+public sealed record TestFileMessage(
+    [property: JsonPropertyName("file")] string File,
+    [property: JsonPropertyName("support")] string Support,
+    [property: JsonPropertyName("tests")] int Tests);
+
+/// <summary>
+/// The Tests pane's whole picture in one message: every open file's support state, whether a run
+/// is in flight and where it stands, and every known test with its latest outcome. Sent whole on
 /// every change - discovery, run start, each landing result - because a panel diffing partial
 /// updates is a panel that drifts.
 /// </summary>
 public sealed record SetTestsMessage(
     [property: JsonPropertyName("type")] string Type,
+    /// <summary>
+    /// The whole session's support standing, worst first: missing if any file holding tests has
+    /// no XlideAssert, outdated if any is behind, installed when every file that needs one has a
+    /// current one. `files` carries the per-file truth the summary is drawn from.
+    /// </summary>
     [property: JsonPropertyName("support")] string Support,
     [property: JsonPropertyName("running")] bool Running,
     [property: JsonPropertyName("currentTest")] string? CurrentTest,
     /// <summary>When the last run finished, round-trip ISO 8601 with offset; null before any run.</summary>
     [property: JsonPropertyName("ranAt")] string? RanAt,
+    [property: JsonPropertyName("files")] TestFileMessage[] Files,
     [property: JsonPropertyName("rows")] TestRowMessage[] Rows);
 
 /// <summary>

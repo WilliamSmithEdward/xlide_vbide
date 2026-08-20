@@ -158,8 +158,10 @@ try {
 
   // ---- one test alone, and the failed set ----
   const one = await api.tests({ action: "run", test: `${name}.Adds`, timeoutMs: 60000 });
+  // The answer says how many ran and in which file, because a session holds more than one.
   check("run with test= runs exactly that test",
-    one.rows.find((row) => row.id === `${name}.Adds`)?.status === "passed" && one.detail === "ran");
+    one.rows.find((row) => row.id === `${name}.Adds`)?.status === "passed"
+    && /^ran 1 in /.test(one.detail), one.detail);
 
   const failedAgain = await api.tests({ action: "runFailed", timeoutMs: 120000 });
   const rerunIds = [];

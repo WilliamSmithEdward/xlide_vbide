@@ -101,11 +101,13 @@ internal static class AgentGuide
             "Ports, tokens and agent urls are deliberately absent: one door's caller is not "
             + "handed the keys to every other door. Address a peer with @pid or @host through "
             + "the inside door, or read its own discovery file."),
-        new("tests", "GET", "action, module, test",
-            "The VBA test runner: '@xlide-test' directives over zero-argument Subs in standard modules, the XlideAssert latched-failure protocol, results per test. No action lists; action=install writes/updates XlideAssert; action=run runs everything, run&module= one module, run&test= one test; action=runFailed reruns what failed, narrowed to one module when given module=; action=debug&test= runs one test untrapped so breakpoints and errors drop into the debugger. ranAt says when the last run finished.",
+        new("tests", "GET", "action, module, test, file",
+            "The VBA test runner over EVERY open file: '@xlide-test' directives over zero-argument Subs in standard modules, the XlideAssert latched-failure protocol, results per test. No action lists, answering a files array - each file's own support state and test count - and a row per test carrying the file it came from. file= narrows any verb to one open file, which a module name cannot do on its own because it is only unique inside its own file. action=install writes/updates XlideAssert in one file with file= or in every file that holds tests without it; action=run runs everything everywhere, run&file= one file, run&module= that module wherever it is, run&test= one test; action=runFailed reruns what failed, narrowed by module= or file=; action=debug&test= runs one test untrapped so breakpoints and errors drop into the debugger. ranAt says when the last run finished.",
             "GET tests?action=run", true, DoorPolicy.Open,
             "run answers when the whole run has finished - the Tests pane streams the same "
-            + "results live. debug answers when the debug session ends. A test's timeout "
+            + "results live. XlideAssert is a module INSIDE a file, so support is per file: a "
+            + "run refuses for the file that lacks it while the file that has it still runs. "
+            + "debug answers when the debug session ends. A test's timeout "
             + "metadata is carried but not enforced: in-process VBA cannot be preempted, and "
             + "Ctrl+Break remains the escape, exactly as with the native F5."),
         new("doctor", "GET", "-",

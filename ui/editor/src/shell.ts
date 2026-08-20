@@ -1640,37 +1640,49 @@ export class Shell {
       findingHomes.get(lower)!.add((finding.project ?? "").toLowerCase());
     }
 
-    // The scope selector's own list, rebuilt from the findings so it follows the workspace as
-    // workbooks open and close. Settled BEFORE the render key is taken, because a scope whose
-    // module has gone falls back to All in here and the key must carry what actually paints.
+    // The scope selector's own list, rebuilt from the findings so it follows the session as
+    // files open and close. Settled BEFORE the render key is taken, because a scope whose
+    // module or file has gone falls back to All in here and the key must carry what paints.
+    //
+    // Two tiers: the FILE a finding is in - the option list groups modules under theirs - and
+    // the module itself. A module name is only unique inside its file, so the key carries both
+    // and two same-named modules in two files are two entries rather than one wrong one.
     const homeOf = (finding: ShellFinding) => problemCountKey(finding.project ?? null, finding.module);
     const scopes = new Map<string, ScopeEntry>();
+    const fileCounts = new Map<string, { name: string; count: number }>();
     for (const finding of this.findings) {
       const home = homeOf(finding);
+      const file = finding.project ?? "";
       const already = scopes.get(home);
       if (already) {
         already.count++;
-        continue;
+      } else {
+        scopes.set(home, {
+          key: home,
+          name: finding.module,
+          label: finding.module,
+          file,
+          count: 1,
+        });
       }
 
-      // Two workbooks can hold a module of the same name, and then the option has to say which
-      // - with a dash rather than the rows' parentheses, because the count is already wearing
-      // the brackets here.
-      const collides = (findingHomes.get(finding.module.toLowerCase())?.size ?? 0) > 1;
-      scopes.set(home, {
-        key: home,
-        name: finding.module,
-        label: collides && finding.project ? `${finding.module} - ${finding.project}` : finding.module,
-        count: 1,
-      });
+      const holding = fileCounts.get(file.toLowerCase());
+      if (holding) {
+        holding.count++;
+      } else {
+        fileCounts.set(file.toLowerCase(), { name: file, count: 1 });
+      }
     }
 
     const activeKey = this.activeModuleName
       ? problemCountKey(this.activeModuleProject, this.activeModuleName)
       : null;
     this.problemsScope.setEntries(
-      [...scopes.values()].sort((a, b) => a.label.localeCompare(b.label)),
-      activeKey && this.activeModuleName ? { key: activeKey, name: this.activeModuleName } : null);
+      [...scopes.values()].sort((a, b) => a.file.localeCompare(b.file) || a.label.localeCompare(b.label)),
+      activeKey && this.activeModuleName
+        ? { key: activeKey, name: this.activeModuleName, file: this.activeModuleProject ?? "" }
+        : null,
+      [...fileCounts.values()].sort((a, b) => a.name.localeCompare(b.name)));
 
     // This rebuilds the whole list with replaceChildren, and its callers fire it far more often
     // than the set changes: the active-line hold republishes on every line the caret enters or
@@ -1696,7 +1708,8 @@ export class Shell {
     // Everything the scope admits. The severity toggles count within it - "2 Errors" beside a
     // list scoped to one module means two in that module, or the number and the list would
     // contradict each other - while the tree badges and the squiggles keep the full picture.
-    const inScope = this.findings.filter((finding) => this.problemsScope.admits(homeOf(finding)));
+    const inScope = this.findings.filter((finding) =>
+      this.problemsScope.admits(homeOf(finding), finding.project ?? ""));
 
     // A filtered-out severity still says how many it is hiding, which is what makes toggling it
     // back on an informed act.
@@ -1798,7 +1811,7 @@ export class Shell {
     const where = this.problemsScope.scopeName();
     const elsewhere = this.findings.length;
     said.textContent = (where ? `No problems in ${where}.` : "No module is open.")
-      + (elsewhere > 0 ? ` ${elsewhere} in other modules.` : "");
+      + (elsewhere > 0 ? ` ${elsewhere} elsewhere.` : "");
 
     const showAll = document.createElement("button");
     showAll.type = "button";
