@@ -101,6 +101,8 @@ export interface ShellHandlers {
   requestOutline(module: string, workbook?: string): Promise<ExplorerProcedure[] | null>;
   /** A line for the host's log, from the corners only the log's data cadence explains. */
   trace(text: string): void;
+  /** The Tests pane came forward; it rediscovers so the tree matches the code as it stands. */
+  testsShown(): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -322,6 +324,7 @@ export class Shell {
       seat("immediate", "Immediate", [this.immediateBody], () => this.immediateInput.focus()),
       seat("locals", "Locals", [this.localsBody]),
       seat("watch", "Watch", [this.watchBody]),
+      seat("tests", "Tests", [root.querySelector("#tests") as HTMLElement], () => handlers.testsShown()),
     ];
 
     const dockOf = (side: string) => root.querySelector(`#dock-${side}`) as HTMLElement;

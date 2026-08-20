@@ -402,6 +402,35 @@ public sealed record SetProjectsMessage(
     [property: JsonPropertyName("projects")] SurfaceProject[] Projects,
     [property: JsonPropertyName("host")] string Host);
 
+/// <summary>One test as the Tests pane draws it: identity, place, directive facts, and outcome.</summary>
+public sealed record TestRowMessage(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("procedure")] string Procedure,
+    [property: JsonPropertyName("line")] int Line,
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("message")] string? Message,
+    [property: JsonPropertyName("durationMs")] double DurationMs,
+    [property: JsonPropertyName("output")] string[] Output,
+    [property: JsonPropertyName("tags")] string[] Tags,
+    [property: JsonPropertyName("owner")] string? Owner,
+    [property: JsonPropertyName("requirement")] string? Requirement,
+    [property: JsonPropertyName("timeoutMs")] int? TimeoutMs,
+    [property: JsonPropertyName("expectedError")] string? ExpectedError);
+
+/// <summary>
+/// The Tests pane's whole picture in one message: the support module's state, whether a run is
+/// in flight and where it stands, and every known test with its latest outcome. Sent whole on
+/// every change - discovery, run start, each landing result - because a panel diffing partial
+/// updates is a panel that drifts.
+/// </summary>
+public sealed record SetTestsMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("support")] string Support,
+    [property: JsonPropertyName("running")] bool Running,
+    [property: JsonPropertyName("currentTest")] string? CurrentTest,
+    [property: JsonPropertyName("rows")] TestRowMessage[] Rows);
+
 /// <summary>
 /// The module's text as the editor now holds it, to be adopted without disturbing the developer.
 ///
@@ -794,6 +823,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SurfaceSearchMatch))]
 [JsonSerializable(typeof(SetFindingsMessage))]
 [JsonSerializable(typeof(SetProjectsMessage))]
+[JsonSerializable(typeof(SetTestsMessage))]
 [JsonSerializable(typeof(SyncDocumentMessage))]
 [JsonSerializable(typeof(EditorCommandMessage))]
 [JsonSerializable(typeof(NoticeMessage))]

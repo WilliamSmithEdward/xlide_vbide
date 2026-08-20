@@ -48,12 +48,12 @@ function WaitFor([string] $what, [scriptblock] $condition, [int] $seconds = 15) 
     throw "timed out waiting for $what"
 }
 
-# Two documents, so there is something to split against: the fixture's CleanModule, and
+# Two documents, so there is something to split against: the fixture's Helper, and
 # ThisWorkbook, which every workbook has. The activation is asked for and then WAITED for -
 # the host opens panes and echoes tabs on its own schedule.
 Check 'both modules open, ThisWorkbook active' {
-    Page 'window.xlideBridge.activateModule("CleanModule")' | Out-Null
-    WaitFor 'CleanModule tab' { (Page 'document.querySelectorAll(".tab[data-module=CleanModule]").length') -ge 1 } | Out-Null
+    Page 'window.xlideBridge.activateModule("Helper")' | Out-Null
+    WaitFor 'Helper tab' { (Page 'document.querySelectorAll(".tab[data-module=Helper]").length') -ge 1 } | Out-Null
     Page 'window.xlideBridge.activateModule("ThisWorkbook")' | Out-Null
     WaitFor 'ThisWorkbook active' {
         (Page 'document.querySelector(".tab.active") ? document.querySelector(".tab.active").dataset.module : ""') -eq 'ThisWorkbook'
@@ -77,13 +77,13 @@ Check 'split right makes two groups showing different modules' {
 
 Check 'an edit to a background document writes its own module' {
     if (-not $script:splitStood) { throw 'the split never stood' }
-    # ThisWorkbook is host-active; CleanModule is a background document. The edit goes to
-    # CleanModule's MODEL - the same channel every keystroke uses - and must land in
-    # CleanModule, never in the active module.
+    # ThisWorkbook is host-active; Helper is a background document. The edit goes to
+    # Helper's MODEL - the same channel every keystroke uses - and must land in
+    # Helper, never in the active module.
     $r = Page @'
 (() => {
   const docs = window.xlideBridge.documents;
-  const clean = docs.all().find(d => d.module.toLowerCase() === "cleanmodule");
+  const clean = docs.all().find(d => d.module.toLowerCase() === "helper");
   if (!clean) return "no-doc";
   const model = docs.get(clean.module, clean.project);
   if (!model) return "no-model";
@@ -93,7 +93,7 @@ Check 'an edit to a background document writes its own module' {
 '@
     if ($r -ne 'edited') { throw "edit not applied: $r" }
     WaitFor 'the write to land' {
-        (Invoke-RestMethod "$api/module?name=CleanModule" -TimeoutSec 8).text -match 'split probe touched this'
+        (Invoke-RestMethod "$api/module?name=Helper" -TimeoutSec 8).text -match 'split probe touched this'
     }
 }
 
@@ -106,7 +106,7 @@ Check 'undo reverts on the same live model' {
     $line = Page @'
 (() => {
   const docs = window.xlideBridge.documents;
-  const clean = docs.all().find(d => d.module.toLowerCase() === "cleanmodule");
+  const clean = docs.all().find(d => d.module.toLowerCase() === "helper");
   if (!clean) return "no-doc";
   const model = docs.get(clean.module, clean.project);
   if (!model) return "no-model";

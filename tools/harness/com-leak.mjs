@@ -359,6 +359,27 @@ await repeat("building, reading and removing a form", 0, async () => {
   await wait(400);
 }, changing);
 
+// The test runner's whole COM road in one round: discovery walks every module's CodeModule,
+// install writes the support module, a run injects the runner and dispatcher, calls
+// Application.Run per test, and removes what it injected - each of them a wrapper this door
+// takes and must give back.
+let leakTestRound = 0;
+await repeat("discovering and running a test", 0, async () => {
+  const name = `LeakTest${++leakTestRound}`;
+  await api.tests({ action: "install" });
+  await api.component("add", { kind: "module", name, project: project.projectId });
+  await api.writeModule(name, [
+    "' @xlide-test",
+    "Public Sub Green()",
+    "    XlideAssert.IsTrue True",
+    "End Sub",
+  ].join("\r\n"), project.projectId);
+  await api.tests({ action: "run", module: name, timeoutMs: 60000 });
+  await api.component("remove", { name, project: project.projectId });
+  await api.component("remove", { name: "XlideAssert", project: project.projectId });
+  await wait(400);
+}, changing);
+
 // The markup language's vocabulary creates a BARE INSTANCE of every control coclass and walks
 // each one's type library - fourteen objects this door MAKES rather than borrows, which is a
 // shape nothing else here covers. Named without a module on purpose: the Form entry's designer

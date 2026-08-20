@@ -2514,6 +2514,181 @@ body.live-resize .minimap {
   display: none;
 }
 
+/* THE TESTS PANE. A toolbar the watch pane's shape, then the tree: module headings over test
+   rows, each row a glyph, the clickable name, the directive chips, the time, and the two acts.
+   Failure text sits under its row in the finding's own red, output lines under that. */
+#tests {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+#tests[hidden] {
+  display: none;
+}
+
+#tests-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#tests-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+#tests-actions button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+#tests-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#tests-actions #tests-install {
+  border-color: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-background, #0e639c);
+  opacity: 1;
+}
+
+#tests-summary {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+#tests-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0 8px;
+  font-size: 12px;
+}
+
+.tests-empty {
+  padding: 10px 12px;
+  opacity: 0.7;
+}
+
+.tests-module {
+  padding: 6px 10px 2px;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+.tests-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 18px;
+}
+
+.tests-row:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
+}
+
+.tests-glyph {
+  font-size: 14px;
+  flex: 0 0 auto;
+}
+
+.tests-passed .tests-glyph,
+.tests-xfail .tests-glyph {
+  color: var(--vscode-testing-iconPassed, #388a34);
+}
+
+.tests-failed .tests-glyph {
+  color: var(--vscode-testing-iconFailed, #e51400);
+}
+
+.tests-error .tests-glyph {
+  color: var(--vscode-editorWarning-foreground, #bf8803);
+}
+
+.tests-skipped .tests-glyph,
+.tests-none .tests-glyph {
+  opacity: 0.5;
+}
+
+.tests-name {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tests-name:hover {
+  text-decoration: underline;
+}
+
+.tests-meta {
+  font-size: 11px;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tests-time {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+.tests-act {
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 1px 2px;
+  cursor: pointer;
+  opacity: 0;
+  font-size: 13px;
+}
+
+.tests-row:hover .tests-act:not(:disabled) {
+  opacity: 0.7;
+}
+
+.tests-act:hover:not(:disabled) {
+  opacity: 1 !important;
+}
+
+.tests-row-block .tests-message {
+  padding: 1px 10px 3px 38px;
+  color: var(--vscode-testing-message-error-decorationForeground, var(--vscode-errorForeground, #e51400));
+  white-space: pre-wrap;
+}
+
+.tests-row-block .tests-output {
+  padding: 0 10px 1px 38px;
+  opacity: 0.75;
+  font-family: var(--monaco-monospace-font, Consolas, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
 #watch-actions {
   display: flex;
   align-items: center;

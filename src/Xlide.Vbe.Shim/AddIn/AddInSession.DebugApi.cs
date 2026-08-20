@@ -3590,6 +3590,33 @@ internal sealed partial class AddInSession
             case "sync":
                 return HandleSync(request.Query, request.Body);
 
+            // The VBA test runner, mirrored: the same brain the Tests pane presses. No action
+            // answers the snapshot alone; `run` waits for the whole run (the pane streams the
+            // same results live), `debug` waits for the debug session to end, which is the
+            // honest shape of debugging - the fleet's other doors still answer meanwhile.
+            case "tests":
+            {
+                request.Query.TryGetValue("action", out var testsAction);
+                request.Query.TryGetValue("module", out var testsModule);
+                request.Query.TryGetValue("test", out var testsTarget);
+
+                var testsDetail = "listed";
+                if (testsAction is { Length: > 0 } and not "list")
+                {
+                    var testsVerb = testsAction == "run" && testsTarget is { Length: > 0 } ? "runOne"
+                        : testsAction == "run" && testsModule is { Length: > 0 } ? "runModule"
+                        : testsAction;
+                    testsDetail = HandleTestsAction(
+                        testsVerb,
+                        testsTarget is { Length: > 0 } ? testsTarget : testsModule);
+                }
+
+                var testsNow = TestsSnapshot();
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugTestsReply(testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest, testsNow.Rows),
+                    DebugJsonContext.Default.DebugTestsReply);
+            }
+
             // What a control of a KIND holds untouched, measured from a bare instance of the
             // coclass MSForms registers - no form, no workbook, nothing on screen. This is the
             // inventory the markup projection compares against to decide what a developer has

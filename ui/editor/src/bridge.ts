@@ -87,6 +87,7 @@ export type HostMessage =
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
+  | ({ type: "setTests" } & SetTestsState)
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
   | { type: "setWatches"; stopped: boolean; rows: { expression: string; value: string; kind: string; context: string }[] }
   | { type: "setDebugState"; mode: string }
@@ -95,6 +96,31 @@ export type HostMessage =
   | { type: "obMembersResult"; id: number; members: ObMember[] }
   | { type: "searchResult"; id: number; matches: HostSearchMatch[]; truncated: boolean; replaced?: number }
   | ({ type: "setSettings" } & IncomingSettings);
+
+/** One test as the Tests pane draws it: identity, place, directive facts, and outcome. */
+export interface TestRow {
+  id: string;
+  module: string;
+  procedure: string;
+  line: number;
+  status: string;
+  message: string | null;
+  durationMs: number;
+  output: string[];
+  tags: string[];
+  owner: string | null;
+  requirement: string | null;
+  timeoutMs: number | null;
+  expectedError: string | null;
+}
+
+/** The Tests pane's whole picture, sent whole on every change so nothing drifts. */
+export interface SetTestsState {
+  support: string;
+  running: boolean;
+  currentTest: string | null;
+  rows: TestRow[];
+}
 
 /**
  * One library the Object Browser lists: a referenced type library, or an open workbook's
@@ -437,6 +463,7 @@ export type ClientMessage =
   // setting that could not be changed but a setting that got RESET: every other change posted a
   // payload with no syncEngine in it, and the host read the absence as the default.
   | ({ type: "updateSettings" } & EditorSettings)
+  | { type: "testsAction"; action: string; test?: string }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -747,6 +774,18 @@ export class EditorBridge {
   }
 
   private readonly formMarkupVocabularyWatchers = new Set<(kinds: FormMarkupKind[]) => void>();
+
+  /** The Tests pane pressed something: refresh, install, run, runFailed, runOne or debug. */
+  testsAction(action: string, test?: string): void {
+    this.transport.post({
+      type: "testsAction",
+      action,
+      ...(test ? { test } : {}),
+    });
+  }
+
+  /** The Tests pane's whole picture arrived; the pane repaints from it. */
+  testsChanged: ((tests: SetTestsState) => void) | null = null;
 
   /** A canvas double-click: the host writes or shows the control's default event handler.
    * A null control means the form itself. */
@@ -1514,6 +1553,9 @@ export class EditorBridge {
         }
 
         this.shell?.setDebugMode(message.mode);
+        return;
+      case "setTests":
+        this.testsChanged?.(message);
         return;
       case "obLibrariesResult":
       case "obTypesResult":

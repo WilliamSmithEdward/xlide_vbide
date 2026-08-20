@@ -83,6 +83,7 @@ import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
+import { TestsPane } from "./testspane.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
 import { Workspace } from "./workspace.js";
@@ -744,8 +745,17 @@ function boot(): void {
     removeComponent: (name, project) => bridge.removeComponent(name, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
+    testsShown: () => bridge.testsAction("refresh"),
   });
   bridge.shell = shell;
+
+  // The Tests pane: a projection of the host's setTests message, its gestures posted back
+  // through the same channel the debug api's tests route drives - one brain, two doors.
+  const testsPane = new TestsPane(document.querySelector("#tests") as HTMLElement, {
+    act: (action, test) => bridge.testsAction(action, test),
+    navigate: (module, line) => bridge.navigate(module, line, 1, true),
+  });
+  bridge.testsChanged = (tests) => testsPane.paint(tests);
 
   // Ctrl+W closes the active group's active tab from anywhere in the surface. The host's key
   /*

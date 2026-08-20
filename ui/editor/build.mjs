@@ -214,6 +214,16 @@ const INDEX_HTML = `<!doctype html>
       </div>
       <div id="watch-table" role="table" aria-label="Watch expressions"></div>
     </div>
+    <div id="tests">
+      <div id="tests-actions" role="toolbar" aria-label="Test runner">
+        <button id="tests-run" type="button" title="Run every test"><span class="codicon codicon-run-all" aria-hidden="true"></span>Run All</button>
+        <button id="tests-run-failed" type="button" title="Rerun what failed"><span class="codicon codicon-debug-rerun" aria-hidden="true"></span>Failed</button>
+        <button id="tests-refresh" type="button" title="Rediscover tests"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <span id="tests-summary" aria-live="polite"></span>
+        <button id="tests-install" type="button" hidden></button>
+      </div>
+      <div id="tests-list" role="tree" aria-label="Tests"></div>
+    </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
 </div>

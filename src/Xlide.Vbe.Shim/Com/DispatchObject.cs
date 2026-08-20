@@ -370,6 +370,46 @@ internal sealed unsafe class DispatchObject : IDisposable
     }
 
     /// <summary>
+    /// Calls a method with two integer arguments and renders whatever it returns as text - the
+    /// shape of `CodeModule.Lines(1, CountOfLines)`, a module's whole text in one read.
+    /// </summary>
+    public string CallToString(string name, int first, int second)
+    {
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var a = ComVariant.Create(first);
+        using var b = ComVariant.Create(second);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [a, b]);
+        return Display(result);
+    }
+
+    /// <summary>
+    /// Calls a method with two string arguments and renders whatever it returns as text - the
+    /// shape of `Application.Run "<runner>", "<testId>"`, where the runner's String return is
+    /// the test's result JSON.
+    /// </summary>
+    public string CallToString(string name, string first, string second)
+    {
+        ArgumentNullException.ThrowIfNull(first);
+        ArgumentNullException.ThrowIfNull(second);
+
+        var dispId = GetDispId(name);
+        if (dispId == DispId.Unknown)
+        {
+            throw new InvalidOperationException($"The object has no member named '{name}'.");
+        }
+
+        using var a = ComVariant.Create(first);
+        using var b = ComVariant.Create(second);
+        using var result = InvokeCore(dispId, InvokeKind.Method | InvokeKind.PropertyGet, [a, b]);
+        return Display(result);
+    }
+
+    /// <summary>
     /// Calls a method with one string argument and renders whatever it returns as text.
     ///
     /// The result is shown to a developer, so it is rendered the way the language spells things

@@ -283,6 +283,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `userform` | `userforms(action, caption)` | the RUNNING forms' captions; `"close"` posts the X's own close. Needs no host thread, so it answers whatever the host thread is in |
 | `doctor` | `doctor()` | the start-of-session checklist |
 | `sessions` | `sessions()` | every live session on this machine: pid, host, which one is answering - the fleet the inside door's `@` prefix addresses |
+| `tests` | `tests({ action, module, test, timeoutMs })` | the VBA test runner, one brain with the Tests pane. Bare `tests()` lists discovery + support state + latest outcomes; `install` writes/updates `XlideAssert`; `run` (optionally scoped by `module` or `test`) waits for the whole run and answers a row per test; `runFailed` reruns the red set; `debug` runs one test untrapped so breakpoints stop in the debugger. Give `run` a `timeoutMs` that covers the suite being run |
 | `documents` | `documents()` | what the surface holds TEXT for |
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
 | `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
@@ -1805,6 +1806,50 @@ keyboard hover take no focus and stand for as long as the capture needs. Stage t
 
 The diagnostics scene adds its module of deliberate findings through the api and removes it
 after, never saving, so the committed workbook keeps compiling for the debugger scene.
+
+---
+
+## 3c. The test runner
+
+Tests are zero-argument **public** Subs in standard modules, marked with a comment directive
+immediately above the declaration - the same authoring surface as xlide_vscode, so a project's
+tests move between the products unchanged:
+
+```vba
+' @xlide-test tags="smoke" owner=william timeout=5s
+Public Sub InvoiceTotal_AddsTax()
+    XlideAssert.AreEqual 108, Invoice.TotalOf(100, 0.08)
+End Sub
+
+' @xlide-test-skip reason="needs the ledger workbook"
+' @xlide-test-xfail reason="known defect 12"
+' @xlide-test expected-error=13
+```
+
+The tests call the `XlideAssert` module (`AreEqual`, `IsTrue`, `Contains`, `Throws`,
+`WriteLine`, and the rest of the shared surface), which `tests?action=install` writes into the
+project. Assertions are non-fatal and first-failure-wins: the test runs to its end, and the
+runner reads the latched message after it returns.
+
+The whole flow, runnable:
+
+```bash
+node tools\harness\xlide-api.mjs tests install
+node tools\harness\xlide-api.mjs tests
+node tools\harness\xlide-api.mjs tests run
+node tools\harness\xlide-api.mjs tests run MyTests
+node tools\harness\xlide-api.mjs tests run "" MyTests.InvoiceTotal_AddsTax
+node tools\harness\xlide-api.mjs tests runFailed
+node tools\harness\xlide-api.mjs tests debug "" MyTests.InvoiceTotal_AddsTax
+```
+
+`run` executes in the LIVE project - no staged copy, no second host - one `Application.Run`
+per test with the generated runner injected for the run and removed after, and the Tests pane
+streams each result as it lands. `debug` runs one test with no trap at all: a breakpoint or an
+error stops in the debugger exactly as F5 on the Sub would, and the route answers when the
+debug session ends. There is no timeout enforcement in-process - a looping test is stopped the
+way a looping macro is, with Ctrl+Break - and the suite that pins all of this is
+`tools\harness\test-runner.mjs`.
 
 ---
 

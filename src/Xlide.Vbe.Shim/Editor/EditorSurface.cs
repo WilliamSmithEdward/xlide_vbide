@@ -170,6 +170,10 @@ internal sealed class EditorSurface : IDisposable
     /// event handler, the native designer's own gesture.</summary>
     public Action<string, string?, string?>? DesignerEventStubRequested { get; set; }
 
+    /// <summary>Raised by the Tests pane: (action, target test id or null). Actions are
+    /// refresh, install, run, runFailed, runOne and debug.</summary>
+    public Action<string, string?>? TestsActionRequested { get; set; }
+
     /// <summary>Raised when the canvas selection changes: (module, workbook display or
     /// null, control name or null for the form itself). The Properties panel follows.</summary>
     public Action<string, string?, string?>? DesignerSelectionRequested { get; set; }
@@ -1285,6 +1289,14 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.SetProjectsMessage));
     }
 
+    /// <summary>The Tests pane's whole picture, replacing whatever it held.</summary>
+    public void ShowTests(SetTestsMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        Send("setTests", JsonSerializer.Serialize(message, EditorMessageContext.Default.SetTestsMessage));
+    }
+
     /// <summary>
     /// Marks the line execution is stopped on, or clears the mark.
     ///
@@ -1875,6 +1887,19 @@ internal sealed class EditorSurface : IDisposable
                                 ? applyOwner.GetString()
                                 : null,
                             applyText);
+                    }
+
+                    break;
+
+                case "testsAction":
+                    if (document.RootElement.TryGetProperty("action", out var testsVerb)
+                        && testsVerb.GetString() is { Length: > 0 } testsAsked)
+                    {
+                        TestsActionRequested?.Invoke(
+                            testsAsked,
+                            document.RootElement.TryGetProperty("test", out var testsTarget)
+                                ? testsTarget.GetString()
+                                : null);
                     }
 
                     break;

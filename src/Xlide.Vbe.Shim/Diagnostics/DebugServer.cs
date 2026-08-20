@@ -740,6 +740,18 @@ public sealed record DebugSessionsReply(
     [property: JsonPropertyName("sessions")] DebugSessionRow[] Sessions);
 
 /// <summary>
+/// The tests route's whole answer: what an action said, the support module's state, whether a
+/// run is in flight, and every discovered test with its latest outcome - the same rows the
+/// Tests pane paints, because the two are one snapshot.
+/// </summary>
+public sealed record DebugTestsReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("support")] string Support,
+    [property: JsonPropertyName("running")] bool Running,
+    [property: JsonPropertyName("currentTest")] string? CurrentTest,
+    [property: JsonPropertyName("rows")] Xlide.Vbe.Shim.Editor.TestRowMessage[] Rows);
+
+/// <summary>
 /// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
 /// leaves it out - the difference between the editor's menu and the product's.
 /// </summary>
@@ -1482,6 +1494,7 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugWindowsReply))]
 [JsonSerializable(typeof(DebugUserFormsReply))]
 [JsonSerializable(typeof(DebugSessionsReply))]
+[JsonSerializable(typeof(DebugTestsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]
