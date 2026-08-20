@@ -2561,10 +2561,22 @@ body.live-resize .minimap {
   cursor: default;
 }
 
+/* The support chip: a status first, an action second. Yellow says the press installs or
+   updates; green says there is nothing left to press. Set apart from the summary count. */
 #tests-actions #tests-install {
-  border-color: var(--vscode-button-background, #0e639c);
-  color: var(--vscode-button-background, #0e639c);
+  margin-left: 10px;
   opacity: 1;
+}
+
+#tests-actions #tests-install.tests-install-needed {
+  border-color: var(--vscode-editorWarning-foreground, #bf8803);
+  color: var(--vscode-editorWarning-foreground, #bf8803);
+}
+
+#tests-actions #tests-install.tests-install-ok {
+  border-color: var(--vscode-testing-iconPassed, #388a34);
+  color: var(--vscode-testing-iconPassed, #388a34);
+  cursor: default;
 }
 
 /* The outcome filters, drawn the way the Problems pane draws its severity toggles: a divider
@@ -2693,7 +2705,7 @@ body.live-resize .minimap {
 }
 
 .tests-meta {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   font-size: 11px;
   opacity: 0.55;
   white-space: nowrap;
@@ -2701,6 +2713,8 @@ body.live-resize .minimap {
   text-overflow: ellipsis;
 }
 
+/* Beside the content it times, not exiled to the pane's far edge (the owner, 2026-08-20):
+   the row left-packs, and the slot stays fixed so the digits align where rows share a shape. */
 .tests-time {
   flex: 0 0 56px;
   text-align: right;

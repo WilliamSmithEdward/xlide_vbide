@@ -85,7 +85,6 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "objectBrowser", target: "host", icon: "library", label: "Object browser (F2)", separatorBefore: true },
 
   { id: "openSync", target: "editor", icon: "repo-sync", label: "Import and export modules", separatorBefore: true },
-  { id: "openTests", target: "editor", icon: "beaker", label: "Tests" },
   { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
   { id: "openHelp", target: "editor", icon: "question", label: "About xlide" },

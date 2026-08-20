@@ -116,7 +116,12 @@ export class TestsPane {
       count.className = "filter-count";
       count.textContent = `0 ${shape.many}`;
       button.append(icon, count);
-      button.addEventListener("click", () => {
+      // On POINTERDOWN, not click: the pane repaints itself whenever an analysis pass lands,
+      // and a repaint between a real press and its release breaks the browser's click
+      // pairing - the same churn that broke the canvas double-click. The down always fires
+      // on the pressed node, whatever happens to the DOM after it.
+      button.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
         this.filters[group] = !this.filters[group];
         button.setAttribute("aria-pressed", String(this.filters[group]));
         this.paint(this.state);
@@ -152,15 +157,24 @@ export class TestsPane {
       ? ""
       : `${counts.passed} passed, ${counts.failed} failed of ${state.rows.length}`;
 
-    // The support chip: absent while the assert module is current, an action while it is not.
+    // The support chip is a STATUS, always visible: yellow while the assert module needs
+    // installing or updating - a press does it - and green once it is current, when the
+    // press has nothing left to do.
+    this.install.hidden = false;
     if (state.support === "installed") {
-      this.install.hidden = true;
+      this.install.textContent = "XlideAssert Installed";
+      this.install.title = "The XlideAssert module in this project matches this product.";
+      this.install.classList.remove("tests-install-needed");
+      this.install.classList.add("tests-install-ok");
+      this.install.disabled = true;
     } else {
-      this.install.hidden = false;
       this.install.textContent = state.support === "missing" ? "Install XlideAssert" : "Update XlideAssert";
       this.install.title = state.support === "missing"
         ? "Tests call the XlideAssert module; install it into the project to run them."
         : "The project's XlideAssert is older than this product's; update it to run tests.";
+      this.install.classList.remove("tests-install-ok");
+      this.install.classList.add("tests-install-needed");
+      this.install.disabled = false;
     }
 
     const canRun = state.support === "installed" && !state.running && state.rows.length > 0;
