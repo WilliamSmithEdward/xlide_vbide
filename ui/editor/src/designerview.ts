@@ -4765,6 +4765,14 @@ export class DesignerView {
       return;
     }
 
+    // The await gives the tab time to CLOSE: painting resumed against a disposed model and the
+    // rejection surfaced as "Model is disposed!" in the console, unhandled - noise at best, and
+    // under a running suite it landed inside whichever act was in flight (the roaming timeouts
+    // on the v0.7.0 gate, 2026-08-19). A closed tab has nothing to annotate.
+    if (this.model.isDisposed()) {
+      return;
+    }
+
     if (procedures === null) {
       // A shrug: keep whatever is already shown rather than claiming there are none.
       return;
