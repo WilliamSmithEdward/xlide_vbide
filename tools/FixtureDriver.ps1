@@ -43,6 +43,12 @@ function Invoke-FixtureLaunch {
 
     Write-Host '2. Opening it with the editor, which is what loads the add-in.'
     & (Join-Path $PSScriptRoot 'harness\Start-Excel.ps1') -Workbook $Path -Fresh | Write-Host
+
+    # The builder's own session, named for every harness call that follows: a Word session
+    # beside the fresh Excel is a designed state now (2026-08-19), and a bare open() rightly
+    # refuses to guess between two. -Fresh closed every Excel, so the one Excel IS the
+    # builder's - read its pid from the process list rather than parsing console text.
+    $env:XLIDE_PID = (Get-Process EXCEL | Select-Object -First 1).Id
 }
 
 function Invoke-FixtureBuild {

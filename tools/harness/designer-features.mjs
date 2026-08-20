@@ -2824,14 +2824,30 @@ try {
   // PAGE has an event of its own: it raises Click, the VBE's own object list carries pages beside
   // the controls, and the host writes `Page1_Click` for one - measured on a fresh form, after a
   // first reading that said otherwise and was a read taken too early.
+  //
+  // Pressed TWICE, the way a hand does it: the view pairs doubles by name and clock at the press,
+  // because the browser's dblclick never fires when the first click's re-render replaces the
+  // element - so a dispatched dblclick would prove a listener real hands cannot reach.
   const doubled = await api.ask(`(() => {
-    const body = ${inViewAll(".dc")}.find((one) => one.dataset.kind === "Page");
-    if (!body) { return "no page body"; }
-    body.scrollIntoView({ block: "nearest", inline: "nearest" });
-    const box = body.getBoundingClientRect();
-    body.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true,
-      clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) }));
-    return body.dataset.control;
+    const find = () => ${inViewAll(".dc")}.find((one) => one.dataset.kind === "Page");
+    const first = find();
+    if (!first) { return "no page body"; }
+    first.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const name = first.dataset.control;
+    // Re-found for EVERY event: the first press selects, the selection re-renders, and a
+    // reference held across that is a detached node whose events bubble to nothing - the
+    // exact blindness the by-name detector exists to survive. A hand presses coordinates.
+    const press = (type, buttons) => {
+      const body = find();
+      if (!body) { return; }
+      const box = body.getBoundingClientRect();
+      body.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons,
+        clientX: Math.round(box.left + box.width / 2), clientY: Math.round(box.top + box.height / 2) }));
+    };
+    press("pointerdown", 1); press("pointerup", 0);
+    press("pointerdown", 1); press("pointerup", 0);
+    return name;
   })()`);
   const pageHandler = new RegExp(`Private Sub ${doubled}_Click\\(\\)`);
   await waitFor("the page's own handler to land in the code-behind", async () =>

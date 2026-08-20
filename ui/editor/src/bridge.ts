@@ -868,6 +868,17 @@ export class EditorBridge {
   private pendingCaret: { module: string; project: string | null; line: number; column: number; selectLine: boolean } | null = null;
 
   /**
+   * One stub gesture awaiting its landing: when the host's next setCaret arrives - the stub's
+   * real line - the bridge routes it through navigate, which fronts the CODE face and focuses
+   * the Sub. Set by the designer's eventStub dep; consumed by the first setCaret after it.
+   */
+  private stubReveal: { module: string; project: string | null } | null = null;
+
+  expectStubReveal(module: string, project: string | null): void {
+    this.stubReveal = { module, project };
+  }
+
+  /**
    * Places the waiting caret if the shown module is the one it belongs to. A navigation that
    * named no workbook matches the module by name alone - a finding that could not say still
    * navigates - and one that named it must match both parts.
@@ -1394,6 +1405,17 @@ export class EditorBridge {
         this.ed()?.revealLineInCenterIfOutsideViewport(message.line);
         return;
       case "setCaret":
+        // A stub gesture's landing: the host just wrote (or found) the handler and this caret
+        // is its line, so the reveal happens NOW, with the real line, through the same
+        // navigate the row menu's Go-to rides - code face fronted, Sub focused. One writer,
+        // nothing to race (2026-08-19; the placeholder this replaces lost by 5ms).
+        if (this.stubReveal) {
+          const reveal = this.stubReveal;
+          this.stubReveal = null;
+          this.navigate(reveal.module, message.line, message.column, true, reveal.project ?? undefined);
+          return;
+        }
+
         // The caret decides what an editor command acts on, and the host copies it into the
         // native pane before running one, so this is how anything outside the page aims a
         // Run or a Step at a particular procedure.

@@ -494,7 +494,14 @@ function boot(): void {
           id: run ? "saveOnlyThenRun" : "saveOnly", target: "host", icon: "", label: "Save",
         }),
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
-        eventStub: (control) => bridge.designerEventStub(id.module, id.project ?? null, control),
+        eventStub: (control) => {
+          // The gesture ends IN the code half, focused on the Sub (the owner, 2026-08-19).
+          // Marked BEFORE the request, and the reveal happens when the host's own caret
+          // arrives with the stub's real line - a placeholder navigate raced that caret and
+          // whoever landed last won (measured: 5ms apart, either order).
+          bridge.expectStubReveal(id.module, id.project ?? null);
+          bridge.designerEventStub(id.module, id.project ?? null, control);
+        },
         selection: (control) => bridge.designerSelection(id.module, id.project ?? null, control),
         zorder: (control, front) => bridge.designerZOrder(id.module, id.project ?? null, control, front),
         setProperty: (control, property, value) =>

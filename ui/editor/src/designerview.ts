@@ -652,18 +652,9 @@ export class DesignerView {
     this.canvasScroll.addEventListener("pointercancel", () => this.cancelDrag());
     this.canvasScroll.addEventListener("keydown", (event) => this.onCanvasKey(event));
     this.canvasScroll.addEventListener("contextmenu", (event) => this.onCanvasMenu(event));
-    this.canvasScroll.addEventListener("dblclick", (event) => {
-      const control = (event.target as HTMLElement).closest<HTMLElement>(".dc");
-      if (control?.dataset.control) {
-        // A PAGE gets its own handler, and that is measured rather than assumed: a page raises
-        // Click, the host writes `Page1_Click` for one, and the VBE's own object list carries
-        // pages beside the controls. So the page's ground - double-clickable since the body took
-        // the page's identity - asks for the page's handler, exactly as the native designer does.
-        this.deps.eventStub(control.dataset.control);
-      } else if ((event.target as HTMLElement).closest(".dc-form")) {
-        this.deps.eventStub(null);
-      }
-    });
+    // No dblclick listener: the press handler detects the double itself, by name and clock,
+    // because the browser's dblclick never fires when the first click's selection re-render
+    // replaces the element under the second. One detector, or a surviving element stubs twice.
 
     // Ctrl+S anywhere in the view is the same save. Capture, so it runs ahead of the
     // markup editor's own binding and nothing double-fires.
@@ -2310,6 +2301,37 @@ export class DesignerView {
 
     const target = event.target as HTMLElement;
 
+    /*
+     * DOUBLE-CLICK BY NAME AND CLOCK, not by the browser's dblclick. The first press selects,
+     * the selection re-projects the canvas, and the second press lands on a REPLACED element -
+     * two different nodes, so the browser never synthesizes dblclick and the native designer's
+     * open-the-handler gesture silently did nothing for a real hand (the owner, 2026-08-19;
+     * every synthetic probe passed because a dispatched dblclick skips the re-render).
+     *
+     * A press only counts as the FIRST half once its gesture ends without travelling - the
+     * drop marks it `clicked`, the way Windows itself pairs WM_LBUTTONDBLCLK with a completed
+     * click. Without that, any two drags on one control inside the window read as a double:
+     * the second drag's press became a phantom handler stub and the gesture it meant to start
+     * was swallowed (the clamp-drop regression, same day).
+     */
+    const pressedName = target.closest<HTMLElement>(".dc")?.dataset.control
+      ?? (target.closest(".dc-form") ? "" : null);
+    const now = Date.now();
+    if (pressedName !== null
+      && this.lastPress !== null
+      && this.lastPress.clicked
+      && pressedName === this.lastPress.name
+      && now - this.lastPress.at < 450
+      && Math.abs(event.clientX - this.lastPress.x) < 6
+      && Math.abs(event.clientY - this.lastPress.y) < 6) {
+      this.lastPress = null;
+      this.deps.eventStub(pressedName === "" ? null : pressedName);
+      return;
+    }
+    this.lastPress = pressedName === null
+      ? null
+      : { name: pressedName, at: now, x: event.clientX, y: event.clientY, clicked: false };
+
     // The handles come first, because they stand ON the selection's boundary: a press there is
     // a resize of the selected thing, never a pick of whatever the boundary crosses.
     const handle = target.closest<HTMLElement>(".dc-handle");
@@ -2360,8 +2382,13 @@ export class DesignerView {
 
     // A Page is not placed by coordinates - it fills its MultiPage - so there is nothing to
     // drag it by. Everything else only ARMS here: the gesture begins past the threshold, which
-    // is what keeps a plain click a plain click.
+    // is what keeps a plain click a plain click. No gesture means no drop to complete the
+    // click, so it completes right here - a page can still be double-pressed for its handler.
     if (control.dataset.kind === "Page") {
+      if (this.lastPress) {
+        this.lastPress.clicked = true;
+      }
+
       return;
     }
 
@@ -2453,9 +2480,18 @@ export class DesignerView {
     }
 
     if (!band.element) {
+      // The band never drew: this press was the click that selects the ground, completed here
+      // so a second press can pair with it - the form's own double-click gesture.
+      if (this.lastPress) {
+        this.lastPress.clicked = true;
+      }
+
       this.select("");
       return;
     }
+
+    // A marquee travelled, so its press was no click.
+    this.lastPress = null;
 
     const box = band.element.getBoundingClientRect();
     band.element.remove();
@@ -2659,8 +2695,17 @@ export class DesignerView {
 
     this.releaseDrag(drag);
     if (!drag.moved) {
+      // A press that never travelled is a completed CLICK, and only now: the next press at the
+      // same spot inside the window is a double. A gesture that travelled clears the memory
+      // below, so two quick drags can never pair into a phantom handler stub.
+      if (this.lastPress) {
+        this.lastPress.clicked = true;
+      }
+
       return;
     }
+
+    this.lastPress = null;
 
     // A drop the document refuses - a line this cannot rewrite - puts the thing back the way
     // the document still describes it, rather than leaving a picture nothing agrees with.
@@ -2904,6 +2949,8 @@ export class DesignerView {
       return;
     }
 
+    // An abandoned gesture is not a click; nothing should pair with its press.
+    this.lastPress = null;
     this.releaseDrag(drag);
     if (drag.moved) {
       this.paintBox(drag.element, drag.origin);
@@ -4617,6 +4664,9 @@ export class DesignerView {
   /** Markup line -> the handlers annotated on it, so a click can say where to go. */
   private readonly handlerLines = new Map<number, { name: string; line: number }[]>();
 
+  /** The last canvas press, for the by-name double-click above. */
+  private lastPress: { name: string; at: number; x: number; y: number; clicked: boolean } | null = null;
+
   /**
    * A CLICK ON THE ANNOTATION OPENS THE HANDLER, in the code half, at its Sub.
    *
@@ -4636,12 +4686,14 @@ export class DesignerView {
       return;
     }
 
-    const found = this.handlerLines.get(at.lineNumber);
-    if (!found || found.length === 0 || at.column < this.model.getLineMaxColumn(at.lineNumber)) {
+    if (at.column < this.model.getLineMaxColumn(at.lineNumber)) {
       return;
     }
 
-    this.deps.openHandler(found[0]!.line);
+    const found = this.handlerLines.get(at.lineNumber);
+    if (found && found.length > 0) {
+      this.deps.openHandler(found[0]!.line);
+    }
   }
 
   /**
@@ -4671,18 +4723,23 @@ export class DesignerView {
     event.event.stopPropagation();
 
     const isForm = /^\s*<Form\b/.test(text);
+    // A Tab is the strip's item, not a control: no event to add, no (Name) the designer's
+    // set reaches - its menu is the jumps it has, which is usually none.
+    const isTab = /^\s*<Tab\b/.test(text);
     const handlers = this.handlerLines.get(line) ?? [];
     const items: ContextMenuItem[] = handlers.map((handler) => ({
       label: `Go to ${handler.name}`,
       run: () => this.deps.openHandler(handler.line),
     }));
 
-    items.push({
-      label: "Add event",
-      run: () => this.deps.eventStub(isForm ? null : name),
-    });
+    if (!isTab) {
+      items.push({
+        label: "Add event",
+        run: () => this.deps.eventStub(isForm ? null : name),
+      });
+    }
 
-    if (!isForm) {
+    if (!isForm && !isTab) {
       items.push({
         label: `Rename ${name}...`,
         run: () => {
@@ -4692,6 +4749,10 @@ export class DesignerView {
           }
         },
       });
+    }
+
+    if (items.length === 0) {
+      return;
     }
 
     showContextMenu(event.event.posx, event.event.posy, items);
@@ -4752,6 +4813,10 @@ export class DesignerView {
         ...(byControl.get(name.toLowerCase()) ?? []),
         ...(isForm ? byControl.get("userform") ?? [] : []),
       ];
+
+      // Rows WITHOUT a handler carry nothing: an Event: [None] on every bare row was tried
+      // and withdrawn the same hour (the owner, 2026-08-19) - a form full of [None] is noise
+      // wearing the annotation's colour. The row menu's "Add event" is the discoverable path.
       if (found.length === 0) {
         continue;
       }
@@ -4773,6 +4838,10 @@ export class DesignerView {
             content: `${found.length > 1 ? "Events" : "Event"}: `
               + found.map((one) => one.name).join(", "),
             inlineClassName: "designer-handler-mark",
+            // NEVER a caret stop: injected text defaults to one, so ArrowLeft from the next
+            // line parked the caret in the middle of the annotation (the owner, 2026-08-19)
+            // - text the model does not contain, where typing means nothing.
+            cursorStops: monaco.editor.InjectedTextCursorStops.None,
           },
           showIfCollapsed: true,
         },
