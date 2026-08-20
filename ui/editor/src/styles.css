@@ -2636,6 +2636,12 @@ body.live-resize .minimap {
   color: var(--vscode-testing-iconFailed, #f14c4c);
 }
 
+/* The XFail toggle's check speaks the same amber its rows do, after the green rule so the
+   later declaration wins the tie. */
+.tests-filter-xfail .codicon {
+  color: var(--vscode-editorWarning-foreground, #bf8803);
+}
+
 #tests-summary {
   margin-left: auto;
   font-size: 11px;

@@ -43,24 +43,28 @@ const STATUS_GLYPH: Record<string, StatusShape> = {
 };
 
 /** The filter groups, the Problems pane's own idea: pressed shows, pressed-out hides. */
-type TestGroup = "passed" | "failed" | "skipped" | "notRun";
+type TestGroup = "passed" | "failed" | "xfail" | "skipped" | "notRun";
 
-const GROUP_SHAPE: Record<TestGroup, { icon: string; one: string; many: string }> = {
-  passed: { icon: "pass", one: "Passed", many: "Passed" },
-  failed: { icon: "error", one: "Failed", many: "Failed" },
-  skipped: { icon: "circle-slash", one: "Skipped", many: "Skipped" },
-  notRun: { icon: "circle-large-outline", one: "Not Run", many: "Not Run" },
+const GROUP_ORDER: TestGroup[] = ["passed", "failed", "xfail", "skipped", "notRun"];
+
+const GROUP_SHAPE: Record<TestGroup, { icon: string; many: string }> = {
+  passed: { icon: "pass", many: "Passed" },
+  failed: { icon: "error", many: "Failed" },
+  xfail: { icon: "pass", many: "XFail" },
+  skipped: { icon: "circle-slash", many: "Skipped" },
+  notRun: { icon: "circle-large-outline", many: "Not Run" },
 };
 
 function groupOf(status: string): TestGroup | null {
   switch (status) {
     case "passed":
-    case "xfail":
       return "passed";
     case "failed":
     case "error":
     case "xpass":
       return "failed";
+    case "xfail":
+      return "xfail";
     case "skipped":
     case "skip-marked":
       return "skipped";
@@ -81,7 +85,7 @@ export class TestsPane {
   private readonly runFailed: HTMLButtonElement;
   private readonly filterButtons = new Map<TestGroup, HTMLButtonElement>();
   private readonly filters: Record<TestGroup, boolean> = {
-    passed: true, failed: true, skipped: true, notRun: true,
+    passed: true, failed: true, xfail: true, skipped: true, notRun: true,
   };
 
   private state: SetTestsState = { support: "missing", running: false, currentTest: null, rows: [] };
@@ -103,11 +107,11 @@ export class TestsPane {
     // The outcome filters, the Problems pane's own gesture: each shows its count always and
     // hides its rows when pressed out.
     const filterRow = root.querySelector("#tests-filters") as HTMLElement;
-    for (const group of ["passed", "failed", "skipped", "notRun"] as TestGroup[]) {
+    for (const group of GROUP_ORDER) {
       const shape = GROUP_SHAPE[group];
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "tests-filter";
+      button.className = `tests-filter tests-filter-${group}`;
       button.setAttribute("aria-pressed", "true");
       const icon = document.createElement("span");
       icon.className = `codicon codicon-${shape.icon}`;
@@ -138,7 +142,7 @@ export class TestsPane {
 
   paint(state: SetTestsState): void {
     this.state = state;
-    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, skipped: 0, notRun: 0 };
+    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, xfail: 0, skipped: 0, notRun: 0 };
     for (const row of state.rows) {
       const group = groupOf(row.status);
       if (group !== null) {
