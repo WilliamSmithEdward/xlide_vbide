@@ -670,6 +670,15 @@ function boot(): void {
         return;
       }
 
+      // The Tests pane's own button, in the bar's feature cluster beside the Object Browser:
+      // revealing the seat fires its onShown, which rediscovers, so the button IS the refresh.
+      // Optional-chained because this closure is handed to the Shell being constructed; by the
+      // time a press can run it, the assignment below has long finished.
+      if (command.id === "openTests") {
+        shell?.revealTests();
+        return;
+      }
+
       // Beside About, because it answers the question About raises. The addresses are opened by
       // the HOST: this page is not allowed to navigate anywhere, and the host will only open the
       // three it holds.
@@ -696,7 +705,7 @@ function boot(): void {
     commandAvailable: (command) =>
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
-      || command.id === "openSponsor" || command.id === "openSync"
+      || command.id === "openSponsor" || command.id === "openSync" || command.id === "openTests"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),

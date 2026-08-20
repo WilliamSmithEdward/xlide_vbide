@@ -20,20 +20,41 @@ internal sealed partial class AddInSession
     private string? _testsCurrent;
 
     /// <summary>
+    /// While a run is in flight: the support state and the discovery the run started with.
+    /// Every landing result repaints the pane, and a repaint that re-walked every module's
+    /// text over COM turned an N-test run into N whole-project reads - measured as the
+    /// dominant cost of a run the day after the runner shipped. Patched statuses over this
+    /// cache instead; the run's last repaint clears it and walks fresh, because a test is
+    /// allowed to have edited modules.
+    /// </summary>
+    private (string Support, List<TestRunService.TestCase> Discovered)? _testsLive;
+
+    /// <summary>
     /// The pane's whole picture right now: support state, run state, and every discovered test
     /// merged with its latest outcome. Discovery walks the live modules on every call - tests
-    /// are code, and code moves under the pane.
+    /// are code, and code moves under the pane - except mid-run, where the run's own snapshot
+    /// stands in.
     /// </summary>
     internal SetTestsMessage TestsSnapshot()
     {
-        using var project = _editor.GetObject("ActiveVBProject");
-        if (project is null)
+        string support;
+        List<TestRunService.TestCase> discovered;
+        if (_testsLive is { } live)
         {
-            return new SetTestsMessage("setTests", "missing", false, null, []);
+            (support, discovered) = live;
+        }
+        else
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            if (project is null)
+            {
+                return new SetTestsMessage("setTests", "missing", false, null, []);
+            }
+
+            support = TestRunService.SupportState(project);
+            discovered = TestRunService.Discover(project);
         }
 
-        var support = TestRunService.SupportState(project);
-        var discovered = TestRunService.Discover(project);
         var rows = new TestRowMessage[discovered.Count];
         for (var i = 0; i < discovered.Count; i++)
         {
@@ -86,6 +107,13 @@ internal sealed partial class AddInSession
             {
                 var installed = TestRunService.InstallSupport(project);
                 Log.Info($"tests: support module {installed}");
+
+                // The install changes what the project contains, so the tree and the engine
+                // are told, the way a component added by hand tells them - without this the
+                // analyzer's copy has no XlideAssert and squiggles every assertion as an
+                // undeclared variable (the owner's screenshot, 2026-08-20).
+                PublishProjects();
+                _analysis?.Reanalyse();
                 PublishTests();
                 return installed;
             }
@@ -105,7 +133,10 @@ internal sealed partial class AddInSession
                         : $"the {TestRunService.AssertModuleName} module is out of date - reinstall it first (tests?action=install)";
                 }
 
-                var discovered = TestRunService.Discover(project);
+                // One project walk serves discovery, the pane's mid-run snapshot, AND the
+                // dispatcher's target scan - the module read is the expensive COM call here.
+                var reads = TestRunService.ReadStandardModules(project);
+                var discovered = TestRunService.DiscoverFrom(reads);
                 var selection = action switch
                 {
                     "runOne" => new TestRunService.Selection(null, target, []),
@@ -113,20 +144,36 @@ internal sealed partial class AddInSession
                     _ => new TestRunService.Selection(null, null, []),
                 };
 
+                // A misspelled target answers by name, not with a run that ran nothing.
+                if (action == "runOne" && !discovered.Any(test =>
+                    string.Equals(test.Id, target, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return $"no test named {target}";
+                }
+
+                if (action == "runModule" && !discovered.Any(test =>
+                    string.Equals(test.Module, target, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return $"no tests in {target}";
+                }
+
+                // runFailed narrows what RUNS; the pane keeps painting the whole discovery,
+                // or every green row would vanish for the duration of the rerun.
+                var runSet = discovered;
                 if (action == "runFailed")
                 {
                     var failed = _testOutcomes.Values
                         .Where(one => one.Status is "failed" or "error" or "xpass")
                         .Select(one => one.Id)
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    discovered = [.. discovered.Where(test => failed.Contains(test.Id))];
-                    if (discovered.Count == 0)
+                    runSet = [.. discovered.Where(test => failed.Contains(test.Id))];
+                    if (runSet.Count == 0)
                     {
                         return "nothing has failed";
                     }
                 }
 
-                RunTests(project, discovered, selection, failFast: false);
+                RunTests(project, reads, discovered, runSet, selection, support, failFast: false);
                 return "ran";
             }
 
@@ -155,19 +202,23 @@ internal sealed partial class AddInSession
     /// </summary>
     private void RunTests(
         DispatchObject project,
-        IReadOnlyList<TestRunService.TestCase> discovered,
+        IReadOnlyList<(string Name, string Source)> reads,
+        List<TestRunService.TestCase> discovered,
+        IReadOnlyList<TestRunService.TestCase> runSet,
         TestRunService.Selection selection,
+        string support,
         bool failFast)
     {
         _testsRunning = true;
         _testsCurrent = null;
+        _testsLive = (support, discovered);
         PublishTests();
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var landed = 0;
         try
         {
             TestRunService.Run(
-                project, discovered, selection, failFast,
+                project, reads, runSet, selection, failFast,
                 starting: id =>
                 {
                     _testsCurrent = id;
@@ -185,8 +236,15 @@ internal sealed partial class AddInSession
         {
             _testsRunning = false;
             _testsCurrent = null;
+            _testsLive = null;
             watch.Stop();
             PublishTests();
+
+            // The run added and removed its generated modules; the tree and the engine hear
+            // about it so neither carries a ghost of a module that no longer exists - and a
+            // test is allowed to have edited real modules, which the engine should re-read.
+            PublishProjects();
+            _analysis?.Reanalyse();
             Log.Info($"tests: {landed} result(s) in {watch.ElapsedMilliseconds}ms");
             if (TestRunService.LeftDesignMode(project))
             {
@@ -206,6 +264,7 @@ internal sealed partial class AddInSession
         {
             Log.Error($"tests: {action} failed", ex);
             _testsRunning = false;
+            _testsLive = null;
             PublishTests();
         }
     }

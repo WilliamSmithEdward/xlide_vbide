@@ -524,6 +524,14 @@ export class Shell {
     this.propertiesList.querySelector<HTMLInputElement>("input")?.focus();
   }
 
+  /** Brings the Tests pane forward wherever it is docked, rediscovering either way: the
+   * seat's onShown covers a refronted tab, and the explicit ask covers a reopened one,
+   * whose path through the docks does not fire the hook. */
+  revealTests(): void {
+    this.docks.reveal("tests");
+    this.handlers.testsShown();
+  }
+
   /** Renders the held properties, and lands a rename's focus when one was asked for. */
   private paintProperties(component: string): void {
     this.renderProperties();

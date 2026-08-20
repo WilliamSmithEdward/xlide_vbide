@@ -1851,6 +1851,11 @@ debug session ends. There is no timeout enforcement in-process - a looping test 
 way a looping macro is, with Ctrl+Break - and the suite that pins all of this is
 `tools\harness\test-runner.mjs`.
 
+`tools\New-TestFixture.ps1` builds TestFixture.xlsm for working ON the runner: an Invoice
+module under test, eleven directives covering every outcome the runner can answer (a
+deliberate red among the green, a skip, an xfail, expected-error both ways, Assert.Throws),
+and XlideAssert already installed and saved - it opens ready for the beaker and Run All.
+
 ---
 
 ## 4. Where the api stops

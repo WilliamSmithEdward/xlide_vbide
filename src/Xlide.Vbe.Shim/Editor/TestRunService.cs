@@ -64,20 +64,19 @@ internal static partial class TestRunService
     // ---------------------------------------------------------------- discovery
 
     /// <summary>
-    /// Every test the project declares, walked straight off the live modules: standard modules
-    /// only, a contiguous comment block ending immediately above a zero-argument PUBLIC Sub,
-    /// carrying at least one `@xlide-test` directive. Private Subs are excluded here on
-    /// purpose - the generated runner calls `Module.Proc`, which cannot compile against a
-    /// Private target. (xlide_vscode discovers them and then fails the whole generated module;
-    /// filed there rather than copied here.)
+    /// Every standard module's name and whole text, read once. The module read is the
+    /// expensive COM call here, and both consumers - test discovery and the dispatcher's
+    /// target scan - used to make it separately, which doubled every run's project walk.
+    /// The runner's own generated modules are left out; XlideAssert rides along because the
+    /// dispatcher offers its public zero-argument Subs as targets, the way the sibling does.
     /// </summary>
-    internal static List<TestCase> Discover(DispatchObject project)
+    internal static List<(string Name, string Source)> ReadStandardModules(DispatchObject project)
     {
-        var tests = new List<TestCase>();
+        var reads = new List<(string, string)>();
         using var components = project.GetObject("VBComponents");
         if (components is null)
         {
-            return tests;
+            return reads;
         }
 
         var count = components.GetInt32("Count");
@@ -90,7 +89,7 @@ internal static partial class TestRunService
             }
 
             var name = component.GetString("Name") ?? string.Empty;
-            if (IsGeneratedModule(name))
+            if (IsGeneratedModule(name) && !string.Equals(name, AssertModuleName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -102,7 +101,32 @@ internal static partial class TestRunService
                 continue;
             }
 
-            var source = code.CallToString("Lines", 1, lineCount);
+            reads.Add((name, code.CallToString("Lines", 1, lineCount)));
+        }
+
+        return reads;
+    }
+
+    /// <summary>
+    /// Every test the project declares, walked straight off the live modules: standard modules
+    /// only, a contiguous comment block ending immediately above a zero-argument PUBLIC Sub,
+    /// carrying at least one `@xlide-test` directive. Private Subs are excluded here on
+    /// purpose - the generated runner calls `Module.Proc`, which cannot compile against a
+    /// Private target. (xlide_vscode discovers them and then fails the whole generated module;
+    /// filed there rather than copied here.)
+    /// </summary>
+    internal static List<TestCase> Discover(DispatchObject project) => DiscoverFrom(ReadStandardModules(project));
+
+    internal static List<TestCase> DiscoverFrom(IReadOnlyList<(string Name, string Source)> modules)
+    {
+        var tests = new List<TestCase>();
+        foreach (var (name, source) in modules)
+        {
+            if (string.Equals(name, AssertModuleName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             tests.AddRange(DiscoverInSource(name, source));
         }
 
@@ -448,33 +472,11 @@ internal static partial class TestRunService
     /// original-cased keys keeps the matching on VBA's own case rule. Chunked at 100 targets a
     /// procedure, under VBA's compiled-procedure cap.
     /// </summary>
-    internal static string BuildDispatchModule(DispatchObject project)
+    internal static string BuildDispatchModule(IReadOnlyList<(string Name, string Source)> modules)
     {
         var targets = new List<(string Module, string Procedure)>();
-        using var components = project.GetObject("VBComponents");
-        var count = components?.GetInt32("Count") ?? 0;
-        for (var i = 1; i <= count; i++)
+        foreach (var (name, source) in modules)
         {
-            using var component = components!.GetItem(i);
-            if (component is null || component.GetInt32("Type") != StandardModule)
-            {
-                continue;
-            }
-
-            var name = component.GetString("Name") ?? string.Empty;
-            if (IsGeneratedModule(name) && !string.Equals(name, AssertModuleName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            using var code = component.GetObject("CodeModule");
-            var lineCount = code?.GetInt32("CountOfLines") ?? 0;
-            if (code is null || lineCount == 0)
-            {
-                continue;
-            }
-
-            var source = code.CallToString("Lines", 1, lineCount);
             foreach (var line in source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
             {
                 var declaration = ProcedureDeclaration().Match(line);
@@ -563,6 +565,7 @@ internal static partial class TestRunService
     /// </summary>
     internal static List<TestResult> Run(
         DispatchObject project,
+        IReadOnlyList<(string Name, string Source)> modules,
         IReadOnlyList<TestCase> discovered,
         Selection selection,
         bool failFast,
@@ -611,7 +614,7 @@ internal static partial class TestRunService
         try
         {
             AddModule(components, runnerName, BuildRunnerModule(runnable));
-            AddModule(components, DispatchModuleName, BuildDispatchModule(project));
+            AddModule(components, DispatchModuleName, BuildDispatchModule(modules));
 
             using var application = HostApplication.Find()
                 ?? throw new InvalidOperationException("The host application could not be reached.");
