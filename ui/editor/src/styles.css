@@ -2611,14 +2611,16 @@ body.live-resize .minimap {
 }
 
 /* On wears the Problems pane's own active dressing; off is plain and dimmed, so the state
-   reads at a glance rather than by comparing opacities. */
-.tests-filter[aria-pressed="true"] {
+   reads at a glance rather than by comparing opacities. Scoped under the toolbar's id,
+   because the generic `#tests-actions button` rule outranks a bare class and flattened
+   this to transparent the first time. */
+#tests-actions .tests-filter[aria-pressed="true"] {
   opacity: 1;
   background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.22));
   border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
 }
 
-.tests-filter[aria-pressed="false"] {
+#tests-actions .tests-filter[aria-pressed="false"] {
   opacity: 0.45;
 }
 
@@ -2679,10 +2681,10 @@ body.live-resize .minimap {
   color: var(--vscode-testing-iconPassed, #388a34);
 }
 
-/* An expected failure is expected: the check mutes rather than wearing the pass green, and
-   its message below keeps the same muted voice instead of the finding red. */
+/* An expected failure has its own voice: amber, between the pass green it must not wear and
+   the finding red it must not cry - grey read as no colour at all (the owner, 2026-08-20). */
 .tests-xfail .tests-glyph {
-  color: var(--vscode-descriptionForeground, #8a8a8a);
+  color: var(--vscode-editorWarning-foreground, #bf8803);
 }
 
 .tests-failed .tests-glyph {
@@ -2763,10 +2765,13 @@ body.live-resize .minimap {
   white-space: pre-wrap;
 }
 
-/* A skip's reason and an expected failure's message are information, not alarms. */
-.tests-row-block.tests-skipped .tests-message,
-.tests-row-block.tests-xfail .tests-message {
+/* A skip's reason is information; an expected failure's message speaks its amber. */
+.tests-row-block.tests-skipped .tests-message {
   color: var(--vscode-descriptionForeground, #8a8a8a);
+}
+
+.tests-row-block.tests-xfail .tests-message {
+  color: var(--vscode-editorWarning-foreground, #bf8803);
 }
 
 .tests-row-block .tests-output {
