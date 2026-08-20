@@ -61,6 +61,15 @@ internal sealed class AnalysisService : IAsyncDisposable
         new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Fired when a pass finds a project's text has MOVED, with the module snapshot it just
+    /// read - the whole project's sources, already in hand for the engine. The test runner's
+    /// auto-rediscovery rides this so it never reads a module of its own: text scans on this
+    /// snapshot cost microseconds where a COM walk costs a project read. Invoked on the pass's
+    /// worker thread; the observer owns any hop back to the host.
+    /// </summary>
+    public Action<string, IReadOnlyList<EngineModule>>? SnapshotObserved { get; set; }
+
+    /// <summary>
     /// One pass at a time, with at most one more remembered.
     ///
     /// <see cref="Reanalyse"/> has ten callers and used to start a pass from each, unguarded, so a
@@ -927,6 +936,17 @@ internal sealed class AnalysisService : IAsyncDisposable
                 _openProjects.TryAdd(snapshot.ProjectId, 0);
                 Log.Verbose($"engine: {snapshot.ProjectId} is unchanged, so its {held.Findings.Count} finding(s) stand");
                 continue;
+            }
+
+            // The text moved, and the whole project's sources are in hand: the one moment
+            // auto-rediscovery needs, at no read of its own.
+            try
+            {
+                SnapshotObserved?.Invoke(snapshot.ProjectId, snapshot.Modules);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"engine: a snapshot observer failed, {ex.Message}");
             }
 
             var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)

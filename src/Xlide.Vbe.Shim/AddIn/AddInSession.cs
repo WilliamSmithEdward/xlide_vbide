@@ -1700,6 +1700,11 @@ internal sealed partial class AddInSession : IDisposable
         {
             _analysis = new AnalysisService(_editor);
 
+            // The Tests pane rediscovers whenever a pass finds the text moved, from the very
+            // snapshot the pass just read - no read of its own, and silent unless the
+            // discovered shape changed.
+            _analysis.SnapshotObserved = OnAnalysisSnapshot;
+
             // The engine dying is not a crash and is not recoverable in this session: it is a
             // separate process and it is not restarted. Everything else keeps working, which is
             // precisely why it has to be said - the Problems panel reads "0 Errors" either way.

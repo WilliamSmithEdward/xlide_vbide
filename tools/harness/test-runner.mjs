@@ -104,6 +104,15 @@ try {
   check("a typoed directive discovers nothing", !mine.some((row) => row.procedure === "TypoedDirective"));
   check("an unmarked helper Sub is not a test", !mine.some((row) => row.procedure === "MustMismatch"));
 
+  // AUTO-REDISCOVERY: the pane heard about this module from the analysis pass alone - the
+  // write above provoked a pass, the pass handed its snapshot over, and the rows repainted
+  // with no tests() call and no refresh press. Read off the pane's own DOM, which paints
+  // whether or not the pane is showing.
+  const autoHeard = await waitFor("the pane to hear the new tests on its own", async () =>
+    (await api.ask(`document.querySelector("#tests-list")?.textContent.includes(${JSON.stringify(name)}) === true`)) === true,
+  { budgetMs: 20000 }).then(() => true).catch(() => false);
+  check("the pane rediscovers on its own when code changes - no refresh pressed", autoHeard);
+
   const tagged = mine.find((row) => row.procedure === "FailsOnPurpose");
   check("metadata rides discovery: tags, owner, and a timeout in seconds",
     tagged?.tags.join(",") === "smoke,math" && tagged?.owner === "william" && tagged?.timeoutMs === 5000,

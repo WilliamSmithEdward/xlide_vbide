@@ -219,6 +219,7 @@ const INDEX_HTML = `<!doctype html>
         <button id="tests-run" type="button" title="Run every test"><span class="codicon codicon-run-all" aria-hidden="true"></span>Run All</button>
         <button id="tests-run-failed" type="button" title="Rerun what failed"><span class="codicon codicon-debug-rerun" aria-hidden="true"></span>Failed</button>
         <button id="tests-refresh" type="button" title="Rediscover tests"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <span id="tests-filters" role="group" aria-label="Filter tests by outcome"></span>
         <span id="tests-summary" aria-live="polite"></span>
         <button id="tests-install" type="button" hidden></button>
       </div>

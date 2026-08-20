@@ -36,9 +36,41 @@ const STATUS_GLYPH: Record<string, StatusShape> = {
   error: { icon: "warning", className: "tests-error", word: "errored" },
   skipped: { icon: "circle-slash", className: "tests-skipped", word: "skipped" },
   "skip-marked": { icon: "circle-slash", className: "tests-skipped", word: "marked skip" },
+  // An expected failure is EXPECTED: a muted check, never the pass green - a green check over
+  // a red message read as a contradiction (the owner, 2026-08-20). Its message mutes too.
   xfail: { icon: "pass", className: "tests-xfail", word: "expected failure" },
   xpass: { icon: "error", className: "tests-failed", word: "unexpected pass" },
 };
+
+/** The filter groups, the Problems pane's own idea: pressed shows, pressed-out hides. */
+type TestGroup = "passed" | "failed" | "skipped" | "notRun";
+
+const GROUP_SHAPE: Record<TestGroup, { icon: string; one: string; many: string }> = {
+  passed: { icon: "pass", one: "Passed", many: "Passed" },
+  failed: { icon: "error", one: "Failed", many: "Failed" },
+  skipped: { icon: "circle-slash", one: "Skipped", many: "Skipped" },
+  notRun: { icon: "circle-large-outline", one: "Not Run", many: "Not Run" },
+};
+
+function groupOf(status: string): TestGroup | null {
+  switch (status) {
+    case "passed":
+    case "xfail":
+      return "passed";
+    case "failed":
+    case "error":
+    case "xpass":
+      return "failed";
+    case "skipped":
+    case "skip-marked":
+      return "skipped";
+    case "none":
+      return "notRun";
+    default:
+      // A running test is never filtered away: hiding the row in flight is hiding the run.
+      return null;
+  }
+}
 
 export class TestsPane {
   private readonly deps: TestsPaneDeps;
@@ -47,6 +79,11 @@ export class TestsPane {
   private readonly install: HTMLButtonElement;
   private readonly runAll: HTMLButtonElement;
   private readonly runFailed: HTMLButtonElement;
+  private readonly filterButtons = new Map<TestGroup, HTMLButtonElement>();
+  private readonly filters: Record<TestGroup, boolean> = {
+    passed: true, failed: true, skipped: true, notRun: true,
+  };
+
   private state: SetTestsState = { support: "missing", running: false, currentTest: null, rows: [] };
 
   constructor(root: HTMLElement, deps: TestsPaneDeps) {
@@ -62,6 +99,31 @@ export class TestsPane {
     (root.querySelector("#tests-refresh") as HTMLButtonElement)
       .addEventListener("click", () => this.deps.act("refresh"));
     this.install.addEventListener("click", () => this.deps.act("install"));
+
+    // The outcome filters, the Problems pane's own gesture: each shows its count always and
+    // hides its rows when pressed out.
+    const filterRow = root.querySelector("#tests-filters") as HTMLElement;
+    for (const group of ["passed", "failed", "skipped", "notRun"] as TestGroup[]) {
+      const shape = GROUP_SHAPE[group];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "tests-filter";
+      button.setAttribute("aria-pressed", "true");
+      const icon = document.createElement("span");
+      icon.className = `codicon codicon-${shape.icon}`;
+      icon.setAttribute("aria-hidden", "true");
+      const count = document.createElement("span");
+      count.className = "filter-count";
+      count.textContent = `0 ${shape.many}`;
+      button.append(icon, count);
+      button.addEventListener("click", () => {
+        this.filters[group] = !this.filters[group];
+        button.setAttribute("aria-pressed", String(this.filters[group]));
+        this.paint(this.state);
+      });
+      filterRow.appendChild(button);
+      this.filterButtons.set(group, button);
+    }
   }
 
   /** The pane asked to be shown: rediscover, so the tree matches the code as it stands. */
@@ -71,14 +133,18 @@ export class TestsPane {
 
   paint(state: SetTestsState): void {
     this.state = state;
-    const counts = { passed: 0, failed: 0, rest: 0 };
+    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, skipped: 0, notRun: 0 };
     for (const row of state.rows) {
-      if (row.status === "passed" || row.status === "xfail") {
-        counts.passed++;
-      } else if (row.status === "failed" || row.status === "error" || row.status === "xpass") {
-        counts.failed++;
-      } else {
-        counts.rest++;
+      const group = groupOf(row.status);
+      if (group !== null) {
+        counts[group]++;
+      }
+    }
+
+    for (const [group, button] of this.filterButtons) {
+      const label = button.querySelector(".filter-count");
+      if (label) {
+        label.textContent = `${counts[group]} ${GROUP_SHAPE[group].many}`;
       }
     }
 
@@ -114,16 +180,34 @@ export class TestsPane {
     }
 
     let lastModule = "";
+    let heading: HTMLElement | null = null;
+    let shownUnder = 0;
     for (const row of state.rows) {
       if (row.module !== lastModule) {
+        if (heading !== null && shownUnder === 0) {
+          heading.remove();
+        }
+
         lastModule = row.module;
-        const heading = document.createElement("div");
+        shownUnder = 0;
+        heading = document.createElement("div");
         heading.className = "tests-module";
         heading.textContent = row.module;
         this.list.appendChild(heading);
       }
 
+      const group = groupOf(row.status);
+      if (group !== null && !this.filters[group]) {
+        continue;
+      }
+
+      shownUnder++;
       this.list.appendChild(this.renderRow(row));
+    }
+
+    // A heading with every child filtered away says nothing; it goes with them.
+    if (heading !== null && shownUnder === 0) {
+      heading.remove();
     }
   }
 
@@ -179,7 +263,7 @@ export class TestsPane {
 
     if (row.message) {
       const holder = document.createElement("div");
-      holder.className = "tests-row-block";
+      holder.className = `tests-row-block ${shape.className}`;
       holder.appendChild(line);
       const message = document.createElement("div");
       message.className = "tests-message";

@@ -1,3 +1,4 @@
+using System.Text;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 using Xlide.Vbe.Shim.Editor;
@@ -55,6 +56,11 @@ internal sealed partial class AddInSession
             discovered = TestRunService.Discover(project);
         }
 
+        return ComposeTests(support, discovered);
+    }
+
+    private SetTestsMessage ComposeTests(string support, List<TestRunService.TestCase> discovered)
+    {
         var rows = new TestRowMessage[discovered.Count];
         for (var i = 0; i < discovered.Count; i++)
         {
@@ -70,6 +76,74 @@ internal sealed partial class AddInSession
         }
 
         return new SetTestsMessage("setTests", support, _testsRunning, _testsCurrent, rows);
+    }
+
+    /// <summary>The last auto-published discovery shape, so unchanged passes stay silent.</summary>
+    private string _testsFingerprint = string.Empty;
+
+    /// <summary>
+    /// AUTO-REDISCOVERY: the analysis pass just read the whole project because its text moved,
+    /// and hands the snapshot here. Discovery and the support check are pure text scans over
+    /// sources already in memory - no COM read of any kind - and the pane repaints only when
+    /// the discovered shape actually changed, through a hop to the host thread. Runs on the
+    /// pass's worker thread until that hop.
+    /// </summary>
+    internal void OnAnalysisSnapshot(string projectId, IReadOnlyList<Xlide.Vbe.Core.Engine.EngineModule> modules)
+    {
+        // Only the shown project drives the pane; another workbook's edits are not its news.
+        if (_shownProject is { Length: > 0 } shown
+            && !string.Equals(projectId, shown, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var pairs = new List<(string Name, string Source)>();
+        string? assertSource = null;
+        foreach (var module in modules)
+        {
+            if (!string.Equals(module.Type, "standard", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.Equals(module.ModuleName, TestRunService.AssertModuleName, StringComparison.OrdinalIgnoreCase))
+            {
+                assertSource = module.Source;
+                continue;
+            }
+
+            if (!TestRunService.IsGeneratedModule(module.ModuleName))
+            {
+                pairs.Add((module.ModuleName, module.Source));
+            }
+        }
+
+        var discovered = TestRunService.DiscoverFrom(pairs);
+        var support = TestRunService.SupportStateOf(assertSource);
+        var fingerprint = new StringBuilder(support);
+        foreach (var test in discovered)
+        {
+            fingerprint.Append('').Append(test.Id).Append('@').Append(test.Line)
+                .Append('|').Append(test.SkipReason).Append('|').Append(test.XfailReason)
+                .Append('|').Append(string.Join(',', test.Tags)).Append('|').Append(test.ExpectedError)
+                .Append('|').Append(test.TimeoutMs).Append('|').Append(test.Owner).Append('|').Append(test.Requirement);
+        }
+
+        var shape = fingerprint.ToString();
+        if (shape == _testsFingerprint)
+        {
+            return;
+        }
+
+        _testsFingerprint = shape;
+        _editorSurface?.RunOnHostThread(() =>
+        {
+            // A run in flight owns the pane; its final repaint walks fresh anyway.
+            if (!_testsRunning)
+            {
+                _editorSurface?.ShowTests(ComposeTests(support, discovered));
+            }
+        });
     }
 
     private void PublishTests()

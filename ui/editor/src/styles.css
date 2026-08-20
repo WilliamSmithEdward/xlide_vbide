@@ -2567,6 +2567,45 @@ body.live-resize .minimap {
   opacity: 1;
 }
 
+/* The outcome filters, drawn the way the Problems pane draws its severity toggles: a divider
+   from the run buttons, then a button per group, pressed-out meaning hidden. */
+#tests-filters {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding-left: 8px;
+  border-left: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.tests-filter {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.tests-filter:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+.tests-filter[aria-pressed="false"] {
+  opacity: 0.45;
+}
+
+.tests-filter .codicon {
+  font-size: 13px;
+}
+
 #tests-summary {
   margin-left: auto;
   font-size: 11px;
@@ -2608,9 +2647,14 @@ body.live-resize .minimap {
   flex: 0 0 auto;
 }
 
-.tests-passed .tests-glyph,
-.tests-xfail .tests-glyph {
+.tests-passed .tests-glyph {
   color: var(--vscode-testing-iconPassed, #388a34);
+}
+
+/* An expected failure is expected: the check mutes rather than wearing the pass green, and
+   its message below keeps the same muted voice instead of the finding red. */
+.tests-xfail .tests-glyph {
+  color: var(--vscode-descriptionForeground, #8a8a8a);
 }
 
 .tests-failed .tests-glyph {
@@ -2626,6 +2670,9 @@ body.live-resize .minimap {
   opacity: 0.5;
 }
 
+/* COLUMNS, not a free-for-all: the name takes a fixed minimum so the chips start on one
+   vertical line down the pane, the chips flex in the middle, and the time sits in its own
+   fixed right-aligned slot so the digits align (the owner, 2026-08-20). */
 .tests-name {
   border: none;
   background: transparent;
@@ -2636,6 +2683,9 @@ body.live-resize .minimap {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 0 1 auto;
+  min-width: min(260px, 40%);
+  text-align: left;
 }
 
 .tests-name:hover {
@@ -2643,6 +2693,7 @@ body.live-resize .minimap {
 }
 
 .tests-meta {
+  flex: 1 1 auto;
   font-size: 11px;
   opacity: 0.55;
   white-space: nowrap;
@@ -2651,7 +2702,8 @@ body.live-resize .minimap {
 }
 
 .tests-time {
-  margin-left: auto;
+  flex: 0 0 56px;
+  text-align: right;
   font-size: 11px;
   opacity: 0.6;
   white-space: nowrap;
@@ -2679,6 +2731,12 @@ body.live-resize .minimap {
   padding: 1px 10px 3px 38px;
   color: var(--vscode-testing-message-error-decorationForeground, var(--vscode-errorForeground, #e51400));
   white-space: pre-wrap;
+}
+
+/* A skip's reason and an expected failure's message are information, not alarms. */
+.tests-row-block.tests-skipped .tests-message,
+.tests-row-block.tests-xfail .tests-message {
+  color: var(--vscode-descriptionForeground, #8a8a8a);
 }
 
 .tests-row-block .tests-output {

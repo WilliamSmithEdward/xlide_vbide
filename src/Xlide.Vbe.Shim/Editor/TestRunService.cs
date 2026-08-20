@@ -320,17 +320,25 @@ internal static partial class TestRunService
         using var code = installed.GetObject("CodeModule");
         var lineCount = code?.GetInt32("CountOfLines") ?? 0;
         var held = lineCount > 0 ? code!.CallToString("Lines", 1, lineCount) : string.Empty;
-
-        // Case-insensitively, because VBA re-cases identifiers PROJECT-WIDE to the latest
-        // declaration: a module elsewhere declaring `number` turns this module's `Err.Number`
-        // into `Err.number` without an edit here, and byte equality then cried outdated over
-        // text the developer never touched. The sibling product's installed copy also spells
-        // some parameters in lower case; folding keeps the two products agreeing.
-        return string.Equals(
-            Normalized(held), Normalized(AssertModuleSource), StringComparison.OrdinalIgnoreCase)
-            ? "installed"
-            : "outdated";
+        return SupportStateOf(held);
     }
+
+    /// <summary>
+    /// The support verdict from the module's TEXT alone, so a caller already holding sources -
+    /// the analysis snapshot observer - never reads a module of its own. Null means missing.
+    ///
+    /// Case-insensitively, because VBA re-cases identifiers PROJECT-WIDE to the latest
+    /// declaration: a module elsewhere declaring `number` turns this module's `Err.Number`
+    /// into `Err.number` without an edit here, and byte equality then cried outdated over
+    /// text the developer never touched. The sibling product's installed copy also spells
+    /// some parameters in lower case; folding keeps the two products agreeing.
+    /// </summary>
+    internal static string SupportStateOf(string? held) =>
+        held is null
+            ? "missing"
+            : string.Equals(Normalized(held), Normalized(AssertModuleSource), StringComparison.OrdinalIgnoreCase)
+                ? "installed"
+                : "outdated";
 
     /// <summary>
     /// Writes XlideAssert into the project, replacing an out-of-date copy. This is a REAL

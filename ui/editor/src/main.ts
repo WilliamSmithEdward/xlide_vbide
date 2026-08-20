@@ -83,6 +83,7 @@ import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
 import { bootObjectBrowserPage } from "./objectbrowser.js";
 import { Shell } from "./shell.js";
+import { registerTestDirectiveCompletion } from "./testdirectives.js";
 import { TestsPane } from "./testspane.js";
 import { defineThemes, preferredTheme, watchPreferredTheme } from "./theme.js";
 import { installTypingAutomation } from "./typing.js";
@@ -895,6 +896,7 @@ function boot(): void {
   };
 
   monaco.languages.registerCompletionItemProvider(VBA_LANGUAGE_ID, completionProvider);
+  registerTestDirectiveCompletion(VBA_LANGUAGE_ID);
 
   // Hovers come from the same engine: the identifier under the cursor described by its
   // declaration line, its origin, and its documentation. The signature renders as VBA code, the
