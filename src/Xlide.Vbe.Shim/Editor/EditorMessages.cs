@@ -429,6 +429,8 @@ public sealed record SetTestsMessage(
     [property: JsonPropertyName("support")] string Support,
     [property: JsonPropertyName("running")] bool Running,
     [property: JsonPropertyName("currentTest")] string? CurrentTest,
+    /// <summary>When the last run finished, round-trip ISO 8601 with offset; null before any run.</summary>
+    [property: JsonPropertyName("ranAt")] string? RanAt,
     [property: JsonPropertyName("rows")] TestRowMessage[] Rows);
 
 /// <summary>

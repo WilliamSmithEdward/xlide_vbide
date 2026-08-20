@@ -21,6 +21,13 @@ internal sealed partial class AddInSession
     private string? _testsCurrent;
 
     /// <summary>
+    /// When the last run finished. The pane says it out loud, because "7 passed" with no clock
+    /// beside it cannot tell a result that just landed from one left over from an hour ago -
+    /// and a rerun that changes nothing looks identical to a rerun that never happened.
+    /// </summary>
+    private DateTimeOffset? _testsRanAt;
+
+    /// <summary>
     /// While a run is in flight: the support state and the discovery the run started with.
     /// Every landing result repaints the pane, and a repaint that re-walked every module's
     /// text over COM turned an N-test run into N whole-project reads - measured as the
@@ -49,7 +56,7 @@ internal sealed partial class AddInSession
             using var project = _editor.GetObject("ActiveVBProject");
             if (project is null)
             {
-                return new SetTestsMessage("setTests", "missing", false, null, []);
+                return new SetTestsMessage("setTests", "missing", false, null, null, []);
             }
 
             support = TestRunService.SupportState(project);
@@ -75,7 +82,9 @@ internal sealed partial class AddInSession
                 test.Tags, test.Owner, test.Requirement, test.TimeoutMs, test.ExpectedError);
         }
 
-        return new SetTestsMessage("setTests", support, _testsRunning, _testsCurrent, rows);
+        return new SetTestsMessage(
+            "setTests", support, _testsRunning, _testsCurrent,
+            _testsRanAt?.ToString("o", System.Globalization.CultureInfo.InvariantCulture), rows);
     }
 
     /// <summary>The last auto-published discovery shape, so unchanged passes stay silent.</summary>
@@ -232,7 +241,9 @@ internal sealed partial class AddInSession
                 }
 
                 // runFailed narrows what RUNS; the pane keeps painting the whole discovery,
-                // or every green row would vanish for the duration of the rerun.
+                // or every green row would vanish for the duration of the rerun. A module
+                // target narrows it further, so a rerun from a module-scoped pane cannot run
+                // failures the developer scoped out of sight.
                 var runSet = discovered;
                 if (action == "runFailed")
                 {
@@ -240,10 +251,12 @@ internal sealed partial class AddInSession
                         .Where(one => one.Status is "failed" or "error" or "xpass")
                         .Select(one => one.Id)
                         .ToHashSet(StringComparer.OrdinalIgnoreCase);
-                    runSet = [.. discovered.Where(test => failed.Contains(test.Id))];
+                    runSet = [.. discovered.Where(test => failed.Contains(test.Id)
+                        && (target is not { Length: > 0 }
+                            || string.Equals(test.Module, target, StringComparison.OrdinalIgnoreCase)))];
                     if (runSet.Count == 0)
                     {
-                        return "nothing has failed";
+                        return target is { Length: > 0 } ? $"nothing has failed in {target}" : "nothing has failed";
                     }
                 }
 
@@ -321,6 +334,7 @@ internal sealed partial class AddInSession
             _testsRunning = false;
             _testsCurrent = null;
             _testsLive = null;
+            _testsRanAt = DateTimeOffset.Now;
             watch.Stop();
             PublishTests();
 

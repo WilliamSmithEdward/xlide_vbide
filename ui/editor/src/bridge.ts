@@ -119,6 +119,8 @@ export interface SetTestsState {
   support: string;
   running: boolean;
   currentTest: string | null;
+  /** When the last run finished, ISO 8601 with offset; null before any run this session. */
+  ranAt: string | null;
   rows: TestRow[];
 }
 

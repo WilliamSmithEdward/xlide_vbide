@@ -12,6 +12,7 @@
  */
 
 import type { SetTestsState, TestRow } from "./bridge.js";
+import { ScopeSelect, type ScopeEntry } from "./scopeselect.js";
 
 export interface TestsPaneDeps {
   /** Press a runner verb: refresh, install, run, runFailed, runOne or debug. */
@@ -76,30 +77,78 @@ function groupOf(status: string): TestGroup | null {
   }
 }
 
+/**
+ * When the last run finished, said the way a person would: the clock alone for a run from
+ * today, the date in front of it for an older one. Seconds are in because reruns land inside
+ * the same minute all day, and the whole point of the readout is telling one from the next.
+ */
+function describeRun(iso: string | null): string {
+  if (iso === null) {
+    return "";
+  }
+
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) {
+    return "";
+  }
+
+  const clock = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const now = new Date();
+  const sameDay = at.getFullYear() === now.getFullYear()
+    && at.getMonth() === now.getMonth()
+    && at.getDate() === now.getDate();
+  return sameDay
+    ? `Ran ${clock}`
+    : `Ran ${at.toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${clock}`;
+}
+
 export class TestsPane {
   private readonly deps: TestsPaneDeps;
   private readonly list: HTMLElement;
   private readonly summary: HTMLElement;
+  private readonly ran: HTMLElement;
   private readonly install: HTMLButtonElement;
   private readonly runAll: HTMLButtonElement;
+  private readonly runAllLabel: HTMLElement;
   private readonly runFailed: HTMLButtonElement;
+  private readonly scope: ScopeSelect;
   private readonly filterButtons = new Map<TestGroup, HTMLButtonElement>();
   private readonly filters: Record<TestGroup, boolean> = {
     passed: true, failed: true, xfail: true, skipped: true, notRun: true,
   };
 
-  private state: SetTestsState = { support: "missing", running: false, currentTest: null, rows: [] };
+  /** The active tab's module, for the Current Module scope. Pushed in by the shell. */
+  private activeModule: string | null = null;
+
+  private state: SetTestsState = {
+    support: "missing", running: false, currentTest: null, ranAt: null, rows: [],
+  };
 
   constructor(root: HTMLElement, deps: TestsPaneDeps) {
     this.deps = deps;
     this.list = root.querySelector("#tests-list") as HTMLElement;
     this.summary = root.querySelector("#tests-summary") as HTMLElement;
+    this.ran = root.querySelector("#tests-ran") as HTMLElement;
     this.install = root.querySelector("#tests-install") as HTMLButtonElement;
     this.runAll = root.querySelector("#tests-run") as HTMLButtonElement;
+    this.runAllLabel = this.runAll.querySelector(".tests-label") as HTMLElement;
     this.runFailed = root.querySelector("#tests-run-failed") as HTMLButtonElement;
 
-    this.runAll.addEventListener("click", () => this.deps.act("run"));
-    this.runFailed.addEventListener("click", () => this.deps.act("runFailed"));
+    // The module scope sits with the run buttons, because it changes what they do, and left of
+    // the outcome filters: which tests first, then which outcomes of them.
+    this.scope = new ScopeSelect("tests-scope", "Show tests from", "tests", () => this.paint(this.state));
+    (root.querySelector("#tests-scope-seat") as HTMLElement).appendChild(this.scope.element);
+
+    // A run follows the scope. Scoped to a module, Run All runs that module and Failed reruns
+    // its failures alone - a button that ran tests the pane is not showing would be a button
+    // that disagrees with the list above it.
+    this.runAll.addEventListener("click", () => {
+      const only = this.scope.scopeName();
+      this.deps.act(only ? "runModule" : "run", only ?? undefined);
+    });
+    this.runFailed.addEventListener("click", () => {
+      this.deps.act("runFailed", this.scope.scopeName() ?? undefined);
+    });
     (root.querySelector("#tests-refresh") as HTMLButtonElement)
       .addEventListener("click", () => this.deps.act("refresh"));
     this.install.addEventListener("click", () => this.deps.act("install"));
@@ -155,10 +204,41 @@ export class TestsPane {
     this.deps.act("refresh");
   }
 
+  /** The active tab moved. A Current Module scope follows it; every other scope holds still. */
+  setActiveModule(module: string | null): void {
+    if (module === this.activeModule) {
+      return;
+    }
+
+    this.activeModule = module;
+    this.paint(this.state);
+  }
+
   paint(state: SetTestsState): void {
     this.state = state;
-    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, xfail: 0, skipped: 0, notRun: 0 };
+
+    // The scope's option list, rebuilt from the discovered tests so it follows the project as
+    // modules come and go. Tests are the ACTIVE project's, so a bare module name is unambiguous
+    // here in a way it is not in the Problems pane.
+    const scopes = new Map<string, ScopeEntry>();
     for (const row of state.rows) {
+      const key = row.module.toLowerCase();
+      const already = scopes.get(key);
+      if (already) {
+        already.count++;
+      } else {
+        scopes.set(key, { key, name: row.module, label: row.module, count: 1 });
+      }
+    }
+
+    const activeKey = this.activeModule?.toLowerCase() ?? null;
+    this.scope.setEntries(
+      [...scopes.values()].sort((a, b) => a.label.localeCompare(b.label)),
+      activeKey && this.activeModule ? { key: activeKey, name: this.activeModule } : null);
+
+    const shown = state.rows.filter((row) => this.scope.admits(row.module.toLowerCase()));
+    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, xfail: 0, skipped: 0, notRun: 0 };
+    for (const row of shown) {
       const group = groupOf(row.status);
       if (group !== null) {
         counts[group]++;
@@ -172,9 +252,18 @@ export class TestsPane {
       }
     }
 
-    this.summary.textContent = state.rows.length === 0
+    this.summary.textContent = shown.length === 0
       ? ""
-      : `${counts.passed} passed, ${counts.failed} failed of ${state.rows.length}`;
+      : `${counts.passed} passed, ${counts.failed} failed of ${shown.length}`;
+
+    // When the results landed. "7 passed" with no clock beside it cannot tell a result that
+    // just arrived from one left over from an hour ago, and a rerun that changes nothing looks
+    // identical to a rerun that never happened.
+    this.ran.textContent = state.running ? "running" : describeRun(state.ranAt);
+    this.ran.hidden = this.ran.textContent.length === 0;
+    this.ran.title = state.ranAt !== null && !state.running
+      ? `The last run finished ${new Date(state.ranAt).toLocaleString()}`
+      : "";
 
     // The support chip is a STATUS, always visible: yellow while the assert module needs
     // installing or updating - a press does it - and green once it is current, when the
@@ -196,10 +285,17 @@ export class TestsPane {
       this.install.disabled = false;
     }
 
-    const canRun = state.support === "installed" && !state.running && state.rows.length > 0;
+    // The run buttons say what the scope has made them: Run All means all of what is showing.
+    const only = this.scope.scopeName();
+    const canRun = state.support === "installed" && !state.running && shown.length > 0;
     this.runAll.disabled = !canRun;
+    this.runAllLabel.textContent = only ? "Run Module" : "Run All";
+    this.runAll.title = only
+      ? `Run the ${shown.length} test${shown.length === 1 ? "" : "s"} in ${only}`
+      : "Run every test";
     this.runFailed.disabled = !canRun
-      || !state.rows.some((row) => row.status === "failed" || row.status === "error" || row.status === "xpass");
+      || !shown.some((row) => row.status === "failed" || row.status === "error" || row.status === "xpass");
+    this.runFailed.title = only ? `Rerun what failed in ${only}` : "Rerun what failed";
 
     this.list.replaceChildren();
     if (state.rows.length === 0) {
@@ -212,10 +308,31 @@ export class TestsPane {
       return;
     }
 
+    // Scoped to a module with nothing in it - or to a tab that holds no tests - the pane says
+    // so and offers its way back, rather than reading as a project that has lost its tests.
+    if (shown.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "tests-empty";
+      const said = document.createElement("span");
+      said.textContent = (only ? `No tests in ${only}.` : "The active tab holds no tests.")
+        + ` ${state.rows.length} elsewhere in the project.`;
+      const showAll = document.createElement("button");
+      showAll.type = "button";
+      showAll.className = "panel-empty-act";
+      showAll.textContent = "Show All";
+      showAll.addEventListener("click", () => {
+        this.scope.reset();
+        this.paint(this.state);
+      });
+      empty.append(said, showAll);
+      this.list.appendChild(empty);
+      return;
+    }
+
     let lastModule = "";
     let heading: HTMLElement | null = null;
     let shownUnder = 0;
-    for (const row of state.rows) {
+    for (const row of shown) {
       if (row.module !== lastModule) {
         if (heading !== null && shownUnder === 0) {
           heading.remove();

@@ -15,6 +15,7 @@ import { ComponentKind, Explorer, problemCountKey, type ExplorerProcedure, type 
 import { Menubar, type MenuItem } from "./menubar.js";
 import { openModal } from "./modal.js";
 import { PanelDocks, type PanelSeat } from "./paneldocks.js";
+import { ScopeSelect, type ScopeEntry } from "./scopeselect.js";
 import type { PaneVisibilityControl } from "./settingsdialog.js";
 import { buildToolbar, type ToolbarCommand } from "./toolbar.js";
 
@@ -172,6 +173,20 @@ export class Shell {
   private readonly panelList: HTMLElement;
   private readonly problemsFilters: HTMLElement;
 
+  /** Which module's problems the list shows: everything, the active tab's, or one named. */
+  private readonly problemsScope: ScopeSelect;
+
+  /** The active tab's module and workbook, for the Current Module scope. */
+  private activeModuleName: string | null = null;
+  private activeModuleProject: string | null = null;
+
+  /**
+   * Told whenever the active module changes, however it changed. The Tests pane's own scope
+   * follows the same tab, and this is the one place both roads through - the host's setActive
+   * and the workspace's own tab activation - already meet.
+   */
+  activeModuleChanged: ((module: string | null, project: string | null) => void) | null = null;
+
   /** The four sections around the editor, and everything docked in them. */
   private readonly docks: PanelDocks;
 
@@ -307,6 +322,13 @@ export class Shell {
 
       this.renderPanel();
     });
+
+    // The scope selector, at the row's right: the severity toggles say WHICH KIND, this says
+    // WHOSE. It sits beside them rather than in a menu because narrowing to the module being
+    // worked on is a per-minute gesture, not a setting.
+    this.problemsScope = new ScopeSelect(
+      "problems-scope", "Show problems from", "problems", () => this.renderPanel());
+    this.problemsFilters.appendChild(this.problemsScope.element);
 
     this.problemsBody = root.querySelector("#panel-list") as HTMLElement;
     this.immediateBody = root.querySelector("#immediate") as HTMLElement;
@@ -447,6 +469,16 @@ export class Shell {
   setActiveModule(active: string | null, activeProject: string | null): void {
     this.statusModule.textContent = active ?? "";
     this.explorer.setActive(active, activeProject ?? undefined);
+
+    // A Current Module scope follows the tab, so the panel is rebuilt behind it - and the
+    // Tests pane, whose scope follows the same tab, hears it here.
+    const moved = active !== this.activeModuleName || activeProject !== this.activeModuleProject;
+    this.activeModuleName = active;
+    this.activeModuleProject = activeProject;
+    if (moved) {
+      this.renderPanel();
+      this.activeModuleChanged?.(active, activeProject);
+    }
   }
 
   /** Replaces the project explorer's contents. */
@@ -1597,17 +1629,60 @@ export class Shell {
   private lastPanelKey: string | null = null;
 
   private renderPanel(): void {
+    // A module name findings know from more than one workbook names its workbook in each row,
+    // the way the tabs do; a unique name stays bare.
+    const findingHomes = new Map<string, Set<string>>();
+    for (const finding of this.findings) {
+      const lower = finding.module.toLowerCase();
+      if (!findingHomes.has(lower)) {
+        findingHomes.set(lower, new Set());
+      }
+      findingHomes.get(lower)!.add((finding.project ?? "").toLowerCase());
+    }
+
+    // The scope selector's own list, rebuilt from the findings so it follows the workspace as
+    // workbooks open and close. Settled BEFORE the render key is taken, because a scope whose
+    // module has gone falls back to All in here and the key must carry what actually paints.
+    const homeOf = (finding: ShellFinding) => problemCountKey(finding.project ?? null, finding.module);
+    const scopes = new Map<string, ScopeEntry>();
+    for (const finding of this.findings) {
+      const home = homeOf(finding);
+      const already = scopes.get(home);
+      if (already) {
+        already.count++;
+        continue;
+      }
+
+      const collides = (findingHomes.get(finding.module.toLowerCase())?.size ?? 0) > 1;
+      scopes.set(home, {
+        key: home,
+        name: finding.module,
+        label: collides && finding.project ? `${finding.module} (${finding.project})` : finding.module,
+        count: 1,
+      });
+    }
+
+    const activeKey = this.activeModuleName
+      ? problemCountKey(this.activeModuleProject, this.activeModuleName)
+      : null;
+    this.problemsScope.setEntries(
+      [...scopes.values()].sort((a, b) => a.label.localeCompare(b.label)),
+      activeKey && this.activeModuleName ? { key: activeKey, name: this.activeModuleName } : null);
+
     // This rebuilds the whole list with replaceChildren, and its callers fire it far more often
     // than the set changes: the active-line hold republishes on every line the caret enters or
     // leaves while typing, and most of those publishes carry the same findings. A rebuild that
     // changes nothing visible still destroys the row the developer had focused or was reaching
     // to click - so, like setProblemCounts one hop below, it returns on an unchanged key. The
     // key carries everything the render reads: every field of every finding, in order and in
-    // raw casing since the rows display them raw, and the severity filters, since a toggle must
-    // still redraw. Skipping setProblemCounts on the way out is safe because equal findings
-    // yield equal counts, which its own guard would have swallowed.
+    // raw casing since the rows display them raw, the severity filters, since a toggle must
+    // still redraw, and the scope, whose Current Module reading moves with the active tab.
+    // Skipping setProblemCounts on the way out is safe because equal findings yield equal
+    // counts, which its own guard would have swallowed.
     const key = JSON.stringify([
       this.severityFilters,
+      this.problemsScope.element.value,
+      activeKey ?? "",
       this.findings.map((f) => [f.severity, f.project ?? "", f.module, f.line, f.column, f.code ?? "", f.message]),
     ]);
     if (key === this.lastPanelKey) {
@@ -1615,10 +1690,15 @@ export class Shell {
     }
     this.lastPanelKey = key;
 
-    // The toggles always carry the full counts - a filtered-out severity still says how many it
-    // is hiding, which is what makes toggling it back on an informed act.
+    // Everything the scope admits. The severity toggles count within it - "2 Errors" beside a
+    // list scoped to one module means two in that module, or the number and the list would
+    // contradict each other - while the tree badges and the squiggles keep the full picture.
+    const inScope = this.findings.filter((finding) => this.problemsScope.admits(homeOf(finding)));
+
+    // A filtered-out severity still says how many it is hiding, which is what makes toggling it
+    // back on an informed act.
     const totals: Record<SeverityGroup, number> = { errors: 0, warnings: 0, messages: 0 };
-    for (const finding of this.findings) {
+    for (const finding of inScope) {
       totals[severityGroup(finding.severity)]++;
     }
 
@@ -1635,7 +1715,7 @@ export class Shell {
     // Worst first, then by where they are, so the order does not depend on which module the
     // engine happened to analyse first. Severities the developer pressed out stay out of the
     // list; every other surface - badges, squiggles, tree - keeps the full picture.
-    const sorted = [...this.findings]
+    const sorted = [...inScope]
       .filter((finding) => this.severityFilters[severityGroup(finding.severity)])
       .sort((a, b) =>
         SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]
@@ -1643,15 +1723,10 @@ export class Shell {
         || a.line - b.line
         || a.column - b.column);
 
-    // A module name findings know from more than one workbook names its workbook in each row,
-    // the way the tabs do; a unique name stays bare.
-    const findingHomes = new Map<string, Set<string>>();
-    for (const finding of this.findings) {
-      const lower = finding.module.toLowerCase();
-      if (!findingHomes.has(lower)) {
-        findingHomes.set(lower, new Set());
-      }
-      findingHomes.get(lower)!.add((finding.project ?? "").toLowerCase());
+    if (sorted.length === 0) {
+      this.panelList.appendChild(this.emptyPanel(inScope.length));
+      this.publishProblemCounts();
+      return;
     }
 
     for (const finding of sorted) {
@@ -1690,9 +1765,57 @@ export class Shell {
       this.panelList.appendChild(row);
     }
 
-    // Counts per component change with the findings, so the tree follows them. Filed by
-    // (workbook, module), because a count belongs to one workbook's module and a shared name
-    // must not pool them. The tab badges are the workspace's, fed the same findings.
+    this.publishProblemCounts();
+  }
+
+  /**
+   * What the list says when it has no rows to show. An empty pane with no cause reads as a
+   * broken pane, and each of the three ways to arrive here has a different answer: nothing is
+   * wrong anywhere, nothing is wrong HERE while something is wrong elsewhere, or the severity
+   * toggles are holding everything back. The scoped case carries its own way out.
+   */
+  private emptyPanel(inScope: number): HTMLElement {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    const said = document.createElement("span");
+    empty.appendChild(said);
+
+    if (inScope > 0) {
+      said.textContent = `${inScope} problem${inScope === 1 ? "" : "s"} hidden by the severity filters.`;
+      return empty;
+    }
+
+    // Unscoped and nothing in scope means nothing anywhere: the analyzer has read every module
+    // of every open project and found nothing to say.
+    if (this.problemsScope.showsEverything()) {
+      said.textContent = "No problems found.";
+      return empty;
+    }
+
+    const where = this.problemsScope.scopeName();
+    const elsewhere = this.findings.length;
+    said.textContent = (where ? `No problems in ${where}.` : "No module is open.")
+      + (elsewhere > 0 ? ` ${elsewhere} in other modules.` : "");
+
+    const showAll = document.createElement("button");
+    showAll.type = "button";
+    showAll.className = "panel-empty-act";
+    showAll.textContent = "Show All";
+    showAll.addEventListener("click", () => {
+      this.problemsScope.reset();
+      this.renderPanel();
+    });
+    empty.appendChild(showAll);
+    return empty;
+  }
+
+  /**
+   * Counts per component change with the findings, so the tree follows them. Filed by
+   * (workbook, module), because a count belongs to one workbook's module and a shared name
+   * must not pool them. The tab badges are the workspace's, fed the same findings - and all
+   * of them count the WHOLE workspace, whatever the panel's scope is showing.
+   */
+  private publishProblemCounts(): void {
     const counts = new Map<string, number>();
     for (const finding of this.findings) {
       const key = problemCountKey(finding.project ?? null, finding.module);

@@ -283,7 +283,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `userform` | `userforms(action, caption)` | the RUNNING forms' captions; `"close"` posts the X's own close. Needs no host thread, so it answers whatever the host thread is in |
 | `doctor` | `doctor()` | the start-of-session checklist |
 | `sessions` | `sessions()` | every live session on this machine: pid, host, which one is answering - the fleet the inside door's `@` prefix addresses |
-| `tests` | `tests({ action, module, test, timeoutMs })` | the VBA test runner, one brain with the Tests pane. Bare `tests()` lists discovery + support state + latest outcomes; `install` writes/updates `XlideAssert`; `run` (optionally scoped by `module` or `test`) waits for the whole run and answers a row per test; `runFailed` reruns the red set; `debug` runs one test untrapped so breakpoints stop in the debugger. Give `run` a `timeoutMs` that covers the suite being run |
+| `tests` | `tests({ action, module, test, timeoutMs })` | the VBA test runner, one brain with the Tests pane. Bare `tests()` lists discovery + support state + latest outcomes; `install` writes/updates `XlideAssert`; `run` (optionally scoped by `module` or `test`) waits for the whole run and answers a row per test; `runFailed` reruns the red set, narrowed to one module when given `module`; `debug` runs one test untrapped so breakpoints stop in the debugger. `ranAt` says when the last run finished. Give `run` a `timeoutMs` that covers the suite being run |
 | `documents` | `documents()` | what the surface holds TEXT for |
 | `eval` | `ask(script)` / `eval(script)` | runs script in the page. **Prefer `ask`** |
 | `guard` | `guard(on, {forget})` | the dialog guard, and what it has cleared |
@@ -1840,6 +1840,7 @@ node tools\harness\xlide-api.mjs tests run
 node tools\harness\xlide-api.mjs tests run MyTests
 node tools\harness\xlide-api.mjs tests run "" MyTests.InvoiceTotal_AddsTax
 node tools\harness\xlide-api.mjs tests runFailed
+node tools\harness\xlide-api.mjs tests runFailed MyTests
 node tools\harness\xlide-api.mjs tests debug "" MyTests.InvoiceTotal_AddsTax
 ```
 
@@ -1850,6 +1851,21 @@ error stops in the debugger exactly as F5 on the Sub would, and the route answer
 debug session ends. There is no timeout enforcement in-process - a looping test is stopped the
 way a looping macro is, with Ctrl+Break - and the suite that pins all of this is
 `tools\harness\test-runner.mjs`.
+
+The snapshot carries `ranAt`, when the last run finished, which is what the pane says beside
+its tally. `runFailed` takes a module the same way `run` does, and that is what the pane's own
+Failed button sends while its scope selector holds a module.
+
+**The scope selector** is the panes' own state and is not told to the host, so it is driven
+through the page rather than through a route. Both list panes carry one: `#problems-scope` and
+`#tests-scope`, each offering All Modules, Current Module (which follows the active tab), and
+every module carrying rows, rebuilt from the rows themselves so it follows workbooks opening
+and closing. In the Tests pane the scope also retargets the run buttons - Run All becomes Run
+Module. `tools\harness\pane-scope.mjs` drives both:
+
+```bash
+node tools\harness\pane-scope.mjs
+```
 
 `tools\New-TestFixture.ps1` builds TestFixture.xlsm for working ON the runner: an Invoice
 module under test, eleven directives covering every outcome the runner can answer (a

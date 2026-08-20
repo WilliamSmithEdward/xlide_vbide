@@ -3613,7 +3613,9 @@ internal sealed partial class AddInSession
 
                 var testsNow = TestsSnapshot();
                 return System.Text.Json.JsonSerializer.Serialize(
-                    new DebugTestsReply(testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest, testsNow.Rows),
+                    new DebugTestsReply(
+                        testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest,
+                        testsNow.RanAt, testsNow.Rows),
                     DebugJsonContext.Default.DebugTestsReply);
             }
 

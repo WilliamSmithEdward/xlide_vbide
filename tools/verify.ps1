@@ -583,7 +583,7 @@ if ($Live) {
                                      'debugger-features.mjs', 'step-into-features.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
-                                     'write-rollback.mjs')
+                                     'pane-scope.mjs', 'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.

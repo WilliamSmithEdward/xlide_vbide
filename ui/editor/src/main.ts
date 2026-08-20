@@ -759,6 +759,11 @@ function boot(): void {
   });
   bridge.testsChanged = (tests) => testsPane.paint(tests);
 
+  // Both panes' Current Module scope follows the same tab, and the shell is where every road
+  // to a changed active module already meets - the host's own setActive and the workspace's
+  // tab activation both land there.
+  shell.activeModuleChanged = (module) => testsPane.setActiveModule(module);
+
   // Asked once at boot, so a pane restored open by the saved layout holds its state - the
   // support chip included - without waiting for a run, a press, or the first analysis pass
   // to land (the owner: "doesn't show until test is run"). A boot before any project is open

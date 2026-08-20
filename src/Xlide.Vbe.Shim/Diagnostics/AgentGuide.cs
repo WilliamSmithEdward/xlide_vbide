@@ -102,7 +102,7 @@ internal static class AgentGuide
             + "handed the keys to every other door. Address a peer with @pid or @host through "
             + "the inside door, or read its own discovery file."),
         new("tests", "GET", "action, module, test",
-            "The VBA test runner: '@xlide-test' directives over zero-argument Subs in standard modules, the XlideAssert latched-failure protocol, results per test. No action lists; action=install writes/updates XlideAssert; action=run runs everything, run&module= one module, run&test= one test; action=runFailed reruns what failed; action=debug&test= runs one test untrapped so breakpoints and errors drop into the debugger.",
+            "The VBA test runner: '@xlide-test' directives over zero-argument Subs in standard modules, the XlideAssert latched-failure protocol, results per test. No action lists; action=install writes/updates XlideAssert; action=run runs everything, run&module= one module, run&test= one test; action=runFailed reruns what failed, narrowed to one module when given module=; action=debug&test= runs one test untrapped so breakpoints and errors drop into the debugger. ranAt says when the last run finished.",
             "GET tests?action=run", true, DoorPolicy.Open,
             "run answers when the whole run has finished - the Tests pane streams the same "
             + "results live. debug answers when the debug session ends. A test's timeout "

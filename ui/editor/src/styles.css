@@ -2530,9 +2530,12 @@ body.live-resize .minimap {
 
 #tests-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  /* Wider on the right than the left: the support chip ends the row, and a chip against the
+     pane's edge reads as clipped (the owner, 2026-08-20). */
+  padding: 4px 16px 4px 10px;
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
@@ -2577,6 +2580,13 @@ body.live-resize .minimap {
   border-color: var(--vscode-testing-iconPassed, #388a34);
   color: var(--vscode-testing-iconPassed, #388a34);
   cursor: default;
+}
+
+/* The module scope sits with the run buttons it retargets, before the divider. */
+#tests-scope-seat {
+  display: flex;
+  align-items: center;
+  margin-left: 2px;
 }
 
 /* The outcome filters, drawn the way the Problems pane draws its severity toggles: a divider
@@ -2649,6 +2659,22 @@ body.live-resize .minimap {
   white-space: nowrap;
 }
 
+/* When the run landed, set off from the tally by a hairline rather than by punctuation, so the
+   two read as two facts and not as one run-on sentence. */
+#tests-ran {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+  font-size: 11px;
+  opacity: 0.6;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+#tests-ran[hidden] {
+  display: none;
+}
+
 #tests-list {
   flex: 1;
   overflow-y: auto;
@@ -2657,6 +2683,10 @@ body.live-resize .minimap {
 }
 
 .tests-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   padding: 10px 12px;
   opacity: 0.7;
 }
@@ -3048,6 +3078,7 @@ body.objbrowser-page #objbrowser-card {
    shown. Sits under the tab row and belongs to the Problems panel alone. */
 #problems-filters {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 2px 10px 4px;
@@ -3086,6 +3117,79 @@ body.objbrowser-page #objbrowser-card {
 .problems-filter:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: -2px;
+}
+
+/* THE SCOPE SELECTOR, worn by both list panes: which module's rows the pane is showing. Quiet
+   while it is showing everything - it is not a control anyone should have to notice - and
+   outlined the moment it is narrowing, because an unnoticed filter turns a hidden row into a
+   row the developer believes does not exist. */
+.scope-select {
+  /* Shrinks before it clips, and wraps to its own line in a narrow dock rather than pushing
+     the toggles off the edge. */
+  min-width: 88px;
+  max-width: 200px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.scope-select:hover {
+  opacity: 1;
+}
+
+.scope-select.scope-narrowed {
+  opacity: 1;
+  background: var(--vscode-inputOption-activeBackground, rgba(0, 120, 212, 0.22));
+  border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
+}
+
+.scope-select:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+.scope-select option {
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #cccccc);
+}
+
+/* The Problems row ends with its scope; the severity toggles keep the left, where they have
+   always been. */
+#problems-scope {
+  margin-left: auto;
+}
+
+/* What a list pane says when it has nothing to show, and its way back when a scope is the
+   reason. A blank pane cannot tell "nothing is wrong" from "nothing is shown". */
+.panel-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.panel-empty-act {
+  padding: 1px 8px;
+  border: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.panel-empty-act:hover {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
 }
 
 .problems-filter .codicon-error {
