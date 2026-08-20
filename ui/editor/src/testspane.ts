@@ -120,13 +120,28 @@ export class TestsPane {
       count.className = "filter-count";
       count.textContent = `0 ${shape.many}`;
       button.append(icon, count);
+      button.title = "Click to toggle; Ctrl+click to show only this";
       // On POINTERDOWN, not click: the pane repaints itself whenever an analysis pass lands,
       // and a repaint between a real press and its release breaks the browser's click
       // pairing - the same churn that broke the canvas double-click. The down always fires
       // on the pressed node, whatever happens to the DOM after it.
       button.addEventListener("pointerdown", (event) => {
         event.preventDefault();
-        this.filters[group] = !this.filters[group];
+        if (event.ctrlKey || event.metaKey) {
+          // SOLO: only this group shows - and soloing the solo brings everything back.
+          const alreadySolo = this.filters[group]
+            && GROUP_ORDER.every((other) => other === group || !this.filters[other]);
+          for (const other of GROUP_ORDER) {
+            this.filters[other] = alreadySolo || other === group;
+          }
+        } else {
+          this.filters[group] = !this.filters[group];
+        }
+
+        for (const [other, otherButton] of this.filterButtons) {
+          otherButton.setAttribute("aria-pressed", String(this.filters[other]));
+        }
+
         button.setAttribute("aria-pressed", String(this.filters[group]));
         this.paint(this.state);
       });

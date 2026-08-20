@@ -280,6 +280,8 @@ export class Shell {
 
     // The severity toggles: each shows its count always and filters the list when pressed out,
     // the way the studio's Error List reads. State lives here, pressed-ness on the button.
+    // Ctrl+click SOLOS a group - only it shows - and soloing the solo brings everything back,
+    // the same gesture the Tests pane's filters take.
     this.problemsFilters.addEventListener("click", (event) => {
       const button = (event.target as HTMLElement).closest("[data-severity-filter]") as HTMLElement | null;
       const group = button?.dataset.severityFilter as SeverityGroup | undefined;
@@ -287,8 +289,22 @@ export class Shell {
         return;
       }
 
-      this.severityFilters[group] = !this.severityFilters[group];
-      button.setAttribute("aria-pressed", String(this.severityFilters[group]));
+      const groups = Object.keys(this.severityFilters) as SeverityGroup[];
+      if (event.ctrlKey || event.metaKey) {
+        const alreadySolo = this.severityFilters[group]
+          && groups.every((other) => other === group || !this.severityFilters[other]);
+        for (const other of groups) {
+          this.severityFilters[other] = alreadySolo || other === group;
+        }
+      } else {
+        this.severityFilters[group] = !this.severityFilters[group];
+      }
+
+      for (const other of groups) {
+        this.problemsFilters.querySelector(`[data-severity-filter="${other}"]`)
+          ?.setAttribute("aria-pressed", String(this.severityFilters[other]));
+      }
+
       this.renderPanel();
     });
 
