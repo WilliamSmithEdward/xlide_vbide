@@ -1653,11 +1653,14 @@ export class Shell {
         continue;
       }
 
+      // Two workbooks can hold a module of the same name, and then the option has to say which
+      // - with a dash rather than the rows' parentheses, because the count is already wearing
+      // the brackets here.
       const collides = (findingHomes.get(finding.module.toLowerCase())?.size ?? 0) > 1;
       scopes.set(home, {
         key: home,
         name: finding.module,
-        label: collides && finding.project ? `${finding.module} (${finding.project})` : finding.module,
+        label: collides && finding.project ? `${finding.module} - ${finding.project}` : finding.module,
         count: 1,
       });
     }
