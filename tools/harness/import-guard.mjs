@@ -70,8 +70,11 @@ try {
   const refused = await api.syncApply("import", { folder, select: "all" });
   await wait(1500);
 
+  // "HAD not written": the sync flushes typing first so the plan reads what the developer
+  // sees, so by the time the row is refused the edits are safely IN the module - the refusal
+  // says so, and the guard keys off the dirty set taken before that flush.
   check("the import refuses that row rather than replacing them",
-    (refused.failed ?? []).some((line) => /have not written yet/.test(line)),
+    (refused.failed ?? []).some((line) => /had not written yet/.test(line)),
     JSON.stringify(refused));
   check("and nothing is counted as changed", (refused.changed ?? []).length === 0,
     JSON.stringify(refused.changed));

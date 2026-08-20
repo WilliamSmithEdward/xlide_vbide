@@ -285,6 +285,19 @@ internal sealed partial class AddInSession : IDisposable
         // is flushed by the callers (the dialog page-side, the api route's pool pre-step),
         // because applying a designer document needs the page to pump and this method runs on
         // the host thread.
+        //
+        // THE DIRTY SET IS TAKEN FIRST, because this flush is also what blinded the import
+        // guard: writing the typing so the plan reads the text the developer sees clears the
+        // very flag the guard refuses by, and an import then replaced the freshly written
+        // typing with the file - the exact loss the guard exists to stop, one save later
+        // (verify.ps1 -Deep, 2026-08-19). A module that was mid-typing when the gesture
+        // started stays refused for THIS apply, whatever the flush did for the plan.
+        var unwrittenBefore = new HashSet<string>(
+            (_editorSurface?.DocumentTable ?? [])
+                .Where(doc => doc.Unwritten)
+                .Select(doc =>
+                    $"{(doc.Project ?? string.Empty).ToLowerInvariant()}\0{doc.Module.ToLowerInvariant()}"),
+            StringComparer.Ordinal);
         _editorSurface?.FlushEdits();
 
             // Import and export, the same way the dialog does it.
@@ -419,11 +432,14 @@ internal sealed partial class AddInSession : IDisposable
                          * every other row that could not be applied. They write or discard, and
                          * import again.
                          */
-                        if (_editorSurface?.HasUnwritten(component, DisplayFromProjectId(owner)) == true)
+                        var guardKey = $"{(DisplayFromProjectId(owner) ?? string.Empty).ToLowerInvariant()}"
+                            + $"\0{component.ToLowerInvariant()}";
+                        if (unwrittenBefore.Contains(guardKey)
+                            || _editorSurface?.HasUnwritten(component, DisplayFromProjectId(owner)) == true)
                         {
-                            return $"{component} was not imported: it has edits you have not written "
-                                + "yet, and importing would replace them. Write them or discard them, "
-                                + "then import again.";
+                            return $"{component} was not imported: it held edits you had not written "
+                                + "yet, and importing would have replaced them. They are written to "
+                                + "the module now - review them, then import again.";
                         }
 
                         return WriteModule(component, text, owner, hostRewrite: true, keepEveryCharacter: true);
