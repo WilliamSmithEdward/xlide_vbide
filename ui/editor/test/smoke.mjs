@@ -48,18 +48,24 @@ check("bundle contains the xlide-dark theme and the vba language id", async () =
   assert.ok(bundle.includes("vba"), 'bundle does not contain "vba"');
 });
 
-check("the semantic legend carries every type the engine emits, function appended last", async () => {
+check("the semantic legend carries every type the engine emits, append-only", async () => {
   // The provider drops any token whose type is not in this list, silently - so an engine that
-  // starts emitting a type the page never learned paints nothing and fails nowhere. `function`
-  // is the call colouring (xlide_vscode#20), appended so existing indices keep their meaning,
-  // and the theme must map it or the legend entry paints the default foreground.
+  // starts emitting a type the page never learned paints nothing and fails nowhere. The legend
+  // is APPEND-ONLY so existing indices keep their meaning: `function` is the call colouring
+  // (xlide_vscode#20) and `enumMember` is the host-constant tint (xlide_vscode#35), each added
+  // at the end in its day. The theme must map every entry, in both palettes, or that entry
+  // paints the default foreground.
   const bundle = await readFile(path.join(dist, "editor.js"), "utf8");
   assert.ok(
-    bundle.includes('["class","enum","struct","type","variable","function"]')
-    || bundle.includes('["class", "enum", "struct", "type", "variable", "function"]'),
-    "the bundled legend is not the five known types plus function, in that order");
+    bundle.includes('["class","enum","struct","type","variable","function","enumMember"]')
+    || bundle.includes('["class", "enum", "struct", "type", "variable", "function", "enumMember"]'),
+    "the bundled legend is not the six known types plus enumMember, in that order");
   assert.match(bundle, /token:\s*"function",\s*foreground:\s*"dcdcaa"/i,
     'the theme does not map semantic "function" to the call yellow');
+  assert.match(bundle, /token:\s*"enumMember",\s*foreground:\s*"4fc1ff"/i,
+    'the dark theme does not map semantic "enumMember" to the host-known blue');
+  assert.match(bundle, /token:\s*"enumMember",\s*foreground:\s*"0070c1"/i,
+    'the light theme does not map semantic "enumMember" to the host-known blue');
 });
 
 check("codicon font shipped and referenced relatively from the stylesheet", async () => {
