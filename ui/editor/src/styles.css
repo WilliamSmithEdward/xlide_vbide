@@ -3879,6 +3879,17 @@ body.objbrowser-page #objbrowser-card {
   overflow: hidden;
 }
 
+/* A chromed form with no colour of its own still dresses its border ring as chrome: the
+   stylesheet ground stays on the client and the ring drops a shade, the same split the
+   builder makes inline when the form names a BackColor. */
+.dc-form.chromed.ringed {
+  background: #d8d4c4;
+}
+
+.dc-form.chromed.ringed .dc-form-client {
+  background: #ece9d8;
+}
+
 /* The canvas previewing the DOCUMENT's draft rather than the form: the note names it, and
    the dashed outline says "not applied" without repainting the form's own colours. An
    OVERLAY pinned above the scroll box - as a flow sibling of a positioned scroll it

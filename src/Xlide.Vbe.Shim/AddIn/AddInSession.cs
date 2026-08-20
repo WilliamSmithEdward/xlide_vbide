@@ -2032,14 +2032,40 @@ internal sealed partial class AddInSession : IDisposable
         // save's own callback, so a refused apply launches nothing and says why at the document.
         if (command == VbeCommands.Command.Run && _activeDesignerTab is { } designTab)
         {
-            if (!skipDesignerApply)
+            // A second launch aimed while the project is ALREADY running writes a design over a
+            // live instance: the apply lands mid-run, the new form never stands, and every
+            // designer open after it answers "has no designer" until the project resets (the
+            // owner, 2026-08-19: "trying to launch a form, when a form is already active").
+            // What the developer wants is the form that is standing, so it comes forward
+            // instead. BREAK mode falls through past this fork on purpose: F5 stopped at a
+            // breakpoint is CONTINUE, which is exactly the plain command below.
+            var mode = ProjectModeNow();
+            if (mode == RunMode)
             {
-                _editorSurface?.RequestDesignerApplySave(
-                    designTab.Module, DisplayFromProjectId(designTab.ProjectId), run: true);
-                return VbeCommands.CommandRun.Ok("the designer tab applies and saves, then runs");
+                var standing = FindStandingFormWindow();
+                if (standing != 0)
+                {
+                    Win32.SetForegroundWindow(standing);
+                    Log.Info("run form: a form is already standing; brought forward instead of launched again");
+                    return VbeCommands.CommandRun.Ok(
+                        "a form is already running - its window was brought forward; close it before launching again");
+                }
+
+                return VbeCommands.CommandRun.No(
+                    "the project is already running - close the running form, or Reset, before launching another");
             }
 
-            return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
+            if (mode == DesignMode)
+            {
+                if (!skipDesignerApply)
+                {
+                    _editorSurface?.RequestDesignerApplySave(
+                        designTab.Module, DisplayFromProjectId(designTab.ProjectId), run: true);
+                    return VbeCommands.CommandRun.Ok("the designer tab applies and saves, then runs");
+                }
+
+                return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
+            }
         }
 
         // Save with a designer tab holding the active slot is the designer's FlushEdits:
@@ -2627,8 +2653,44 @@ internal sealed partial class AddInSession : IDisposable
     private string? _lastStopFollowed;
 
     /// <summary>Project modes, as the editor numbers them.</summary>
+    private const int RunMode = 0;
     private const int BreakMode = 1;
     private const int DesignMode = 2;
+
+    /// <summary>The active project's mode right now, read fresh; design when nothing answers.</summary>
+    private int ProjectModeNow()
+    {
+        try
+        {
+            using var project = _editor.GetObject("ActiveVBProject");
+            return project?.GetInt32("Mode") ?? DesignMode;
+        }
+        catch
+        {
+            return DesignMode;
+        }
+    }
+
+    /// <summary>
+    /// The window of a UserForm this process is showing - ThunderDFrame is the runtime form's
+    /// own class - or 0 when none stands. Break mode never shows one; run mode with a form up
+    /// always does.
+    /// </summary>
+    private static nint FindStandingFormWindow()
+    {
+        var pid = (uint)Environment.ProcessId;
+        nint frame = 0;
+        while ((frame = Win32.FindWindowEx(0, frame, "ThunderDFrame", null)) != 0)
+        {
+            Win32.GetWindowThreadProcessId(frame, out var owner);
+            if (owner == pid)
+            {
+                return frame;
+            }
+        }
+
+        return 0;
+    }
 
     /// <summary>How often the execution state is looked at while anything might be running.</summary>
     private const uint DebugPollMilliseconds = 150;

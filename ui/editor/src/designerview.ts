@@ -5030,6 +5030,19 @@ export class DesignerView {
       client.style.top = `${top}px`;
       titlebar.style.height = `${top}px`;
       form.classList.add("chromed");
+
+      // The ring between the frame and the client is the RUNTIME's window border, so it is
+      // dressed as chrome rather than left in the form's own colour: painted as ground it read
+      // as padding a control could never reach, and a control clamped flush at 0 looked like it
+      // had stopped short of the edge (the owner, 2026-08-19, "see how there is space to the
+      // left of the control"). The client keeps the real BackColor; the ring drops a shade.
+      const ground = payload.form?.backColor;
+      if (ground) {
+        form.style.background = `color-mix(in srgb, ${ground} 78%, #6b6b6b)`;
+        client.style.background = ground;
+      } else {
+        form.classList.add("ringed");
+      }
     }
     // The form's own picture is held rather than painted here: the GRID paints on this same
     // element, and showGrid composes the two so neither wipes the other.
