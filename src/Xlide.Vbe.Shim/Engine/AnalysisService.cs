@@ -405,8 +405,28 @@ internal sealed class AnalysisService : IAsyncDisposable
             return;
         }
 
+        // Anything that changes what the engine holds for this module moves its version, which
+        // is half of what the colouring cache below is keyed on.
+        _liveVersions.AddOrUpdate(TokenKey(home, moduleName), 1, (_, was) => was + 1);
+
         engine.NotifyDidChange(home, moduleName, source, edits);
     }
+
+    /// <summary>How many times a module's live text has been streamed to the engine.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string Project, string Module), long> _liveVersions = new();
+
+    /// <summary>
+    /// The colouring last handed out for a module, with the two numbers that make it still true:
+    /// the generation its project was seeded at, and how many live edits the engine has been
+    /// told about since. Either one moving is a different answer; neither moving cannot be.
+    /// </summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<
+        (string Project, string Module), (int Generation, long LiveVersion, EngineSemanticToken[] Tokens)> _colouring = new();
+
+    /// <summary>A module, addressed by its project and its name, both folded: VBA does not
+    /// tell two spellings of one name apart, and neither may this.</summary>
+    private static (string Project, string Module) TokenKey(string projectId, string moduleName) =>
+        (projectId.ToLowerInvariant(), moduleName.ToLowerInvariant());
 
     /// <summary>
     /// The engine's own copy of a module, for comparing against the surface's. Null when there
@@ -755,10 +775,43 @@ internal sealed class AnalysisService : IAsyncDisposable
             return [];
         }
 
+        /*
+         * THE SAME TEXT COLOURS THE SAME WAY, so it is only coloured once.
+         *
+         * The editor re-queries a model's tokens on every edit and whenever the analysis says
+         * something moved, and activating a tab asks twice on its own. On a 64,802-line module
+         * that was 60-70ms of analyzer each time, for a module nobody had touched - and the pipe
+         * serves one call at a time, so it was also 60-70ms in front of whatever the developer
+         * was waiting for (measured 2026-08-21).
+         *
+         * Two numbers say the answer still holds: the generation the project was last seeded at,
+         * which moves whenever the engine is re-taught the project, and how many live edits the
+         * engine has been told about for this module, which moves on every keystroke that
+         * reaches it. Nothing else can change what the colouring would be.
+         */
+        var key = TokenKey(resolved.ProjectId, moduleName);
+        var generation = _seeded.TryGetValue(resolved.ProjectId, out var seeded) ? seeded.Generation : 0;
+        var liveVersion = _liveVersions.TryGetValue(key, out var version) ? version : 0;
+
+        if (_colouring.TryGetValue(key, out var had)
+            && had.Generation == generation && had.LiveVersion == liveVersion)
+        {
+            return had.Tokens;
+        }
+
         var result = await engine.SemanticTokensAsync(resolved.ProjectId, moduleName, resolved.ModuleType, null, cancellation)
             .ConfigureAwait(false);
 
-        return result?.Tokens ?? [];
+        // A refusal is not an answer: caching it would leave the module plainly coloured until
+        // something else moved, and the caller keeps what is painted when it gets nothing.
+        if (result is null)
+        {
+            return [];
+        }
+
+        var tokens = result.Tokens ?? [];
+        _colouring[key] = (generation, liveVersion, tokens);
+        return tokens;
     }
 
     /// <summary>

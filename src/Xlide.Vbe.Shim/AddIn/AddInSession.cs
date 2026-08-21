@@ -7271,12 +7271,25 @@ internal sealed partial class AddInSession : IDisposable
         _propertiesControl = null;
 
         var display = DisplayFromProjectId(owner);
-        _writtenModules[WrittenKey(component, display)] = source;
+        var written = WrittenKey(component, display);
+        var toldBefore = _writtenModules.TryGetValue(written, out var already) ? already : null;
+        _writtenModules[written] = source;
         _editorSurface?.Show(component, display, source);
 
         // The engine's live copy starts from what is being shown; the keystrokes stream from
         // here as edits.
-        _analysis?.NotifyLiveText(component, source, null);
+        //
+        // ONLY WHEN IT HAS MOVED. This sent the module's whole text on EVERY activation, so
+        // clicking a tab handed the engine a megabyte and a half of text it already had and made
+        // it re-parse the module from scratch - with the pipe serving one call at a time, every
+        // other request queued behind that. Switching to a 64,802-line tab froze the editor for
+        // two to three seconds, reported twice by the owner (2026-08-21); the same switch is
+        // under a tenth of that when the text has not changed. The surface's own Show above
+        // already worked this way, and posts nothing when the page's copy matches.
+        if (!string.Equals(toldBefore, source, StringComparison.Ordinal))
+        {
+            _analysis?.NotifyLiveText(component, source, null);
+        }
         Log.Info($"editor surface: showing {component}, {source.Length} character(s)");
 
         // A hold belongs to the module it began in; the switch is the caret leaving the line.
