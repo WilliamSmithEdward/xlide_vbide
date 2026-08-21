@@ -98,11 +98,18 @@ internal sealed partial class AddInSession
                 // option, collapsed their scope keys into one, and left Current Module unable
                 // to match the tab it was following (measured 2026-08-20 with two unsaved
                 // books open beside the fixtures). One name per file across the whole surface.
-                var display = DisplayFromProjectId(id) ?? own;
+                // The tree's name, and ONLY a name the tree knows. Closing a workbook leaves
+                // the editor holding its project for a beat while it is torn down, and that
+                // ghost is briefly the ACTIVE one - so the rule below let it in, and both
+                // panes flashed a file called "VBAProject" that nobody had opened (measured
+                // 2026-08-20 while closing the twin). A project the tree has never published
+                // is one the developer cannot see anyway.
+                var known = DisplayFromProjectId(id);
+                var display = known ?? own;
                 var tests = TestRunService.DiscoverFrom(TestRunService.ReadStandardModules(project));
                 var support = TestRunService.SupportState(project);
                 if (tests.Count == 0 && support == "missing"
-                    && !string.Equals(id, activeId, StringComparison.OrdinalIgnoreCase))
+                    && !(known is not null && string.Equals(id, activeId, StringComparison.OrdinalIgnoreCase)))
                 {
                     continue;
                 }
@@ -357,6 +364,12 @@ internal sealed partial class AddInSession
             return;
         }
 
+        // FORGETTING COMES FIRST, WHATEVER ELSE THIS TICK DOES. A file closing and another
+        // opening in the same beat used to take the "something new is open" road and return
+        // before any of this ran, so the closed file's results survived the very event that
+        // should have dropped them.
+        var forgotten = ForgetClosedFiles(liveProjectIds);
+
         bool unknown;
         lock (_testsSeen)
         {
@@ -366,38 +379,82 @@ internal sealed partial class AddInSession
         if (unknown)
         {
             // Something new is open. Walk it properly - outside the lock, because the walk is
-            // COM and the analysis thread merges its snapshots under the same one - which also
-            // drops whatever has gone on the way past.
+            // COM and the analysis thread merges its snapshots under the same one.
             PublishTests();
+            return;
+        }
+
+        if (!forgotten)
+        {
             return;
         }
 
         List<TestFile> left;
         lock (_testsSeen)
         {
-            var gone = _testsSeen.Keys.Where(id => !liveProjectIds.Contains(id)).ToList();
-            if (gone.Count == 0)
-            {
-                return;
-            }
-
-            foreach (var id in gone)
-            {
-                _testsSeen.Remove(id);
-
-                // The module-name shape goes with it, or a file closed and reopened is judged
-                // against what it held last time and skips the republish it needs.
-                lock (_moduleShapes)
-                {
-                    _moduleShapes.Remove(id);
-                }
-            }
-
             left = Order([.. _testsSeen.Values], ActiveProjectIdOrNull());
         }
 
         _testsFingerprint = string.Empty;
         _editorSurface?.ShowTests(ComposeTests(left));
+    }
+
+    /// <summary>
+    /// Drops everything this session remembers about files it no longer holds, and answers
+    /// whether anything went. A file that has left takes its discovery, its module-name shape
+    /// and ITS RESULTS with it: kept, the results came back on reopen as green ticks and a red
+    /// against code that anything could have edited while the file was away, under a clock from
+    /// a run that happened before it returned (measured 2026-08-20 - close the twin, reopen it,
+    /// and every row still claimed its last result). A reopened file reads "not run", which is
+    /// the only thing this product actually knows about it.
+    /// </summary>
+    private bool ForgetClosedFiles(IReadOnlyCollection<string> liveProjectIds)
+    {
+        // EACH STORE IS PRUNED AGAINST THE LIVE SET, not against another store. Driving this
+        // from _testsSeen looked right and was not: every walk REWRITES that map, so by the
+        // time a close was noticed an unrelated refresh had already dropped the file from it,
+        // "what went" came out empty, and the outcomes stayed - which is exactly how a
+        // reopened file got its old green ticks back while its rows had visibly gone
+        // (measured 2026-08-20, twice, the second time because the first fix looked like it
+        // worked: the rows vanish either way).
+        var dropped = false;
+        lock (_testsSeen)
+        {
+            foreach (var id in _testsSeen.Keys.Where(id => !liveProjectIds.Contains(id)).ToList())
+            {
+                _testsSeen.Remove(id);
+                dropped = true;
+            }
+        }
+
+        lock (_moduleShapes)
+        {
+            foreach (var id in _moduleShapes.Keys.Where(id => !liveProjectIds.Contains(id)).ToList())
+            {
+                _moduleShapes.Remove(id);
+            }
+        }
+
+        // An outcome is filed under (file, test), so the file it belongs to is the key's head.
+        var forgotten = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in _testOutcomes.Keys.ToList())
+        {
+            var cut = key.IndexOf('\0', StringComparison.Ordinal);
+            var owner = cut < 0 ? key : key[..cut];
+            if (!liveProjectIds.Contains(owner))
+            {
+                _testOutcomes.Remove(key);
+                forgotten.Add(owner);
+                dropped = true;
+            }
+        }
+
+        if (forgotten.Count > 0)
+        {
+            Log.Info($"tests: {string.Join(", ", forgotten)} closed; their results are forgotten");
+        }
+
+        return dropped;
     }
 
     private void PublishTests()

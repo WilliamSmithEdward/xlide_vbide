@@ -7870,6 +7870,16 @@ internal sealed partial class AddInSession : IDisposable
 
             surface.ShowProjects([.. tree]);
 
+            // A NAME IS FOR A PROJECT THAT EXISTS. This map never forgot, so a project the
+            // editor holds for a beat while a closed workbook is torn down kept its entry for
+            // the rest of the session - and anything that trusted "the tree knows this one"
+            // went on trusting it, which is how a ghost file called VBAProject kept appearing
+            // in the Tests pane after a close (measured 2026-08-20).
+            foreach (var stale in _projectNames.Keys.Where(id => !live.Contains(id)).ToList())
+            {
+                _projectNames.TryRemove(stale, out _);
+            }
+
             // The tree is where a file opening or closing is noticed, so it is where the Tests
             // pane hears about either: its own picture is merged per analysis snapshot, and
             // neither event produces one.
