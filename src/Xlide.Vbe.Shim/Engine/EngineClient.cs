@@ -34,10 +34,14 @@ internal sealed class EngineClient : IAsyncDisposable
 
     /// <summary>
     /// One request on the pipe at a time. The protocol pairs each answer with the last question
-    /// by position, so two concurrent calls would take each other's answers; a completion asked
-    /// during an analysis pass waits its turn instead.
+    /// by position, so two concurrent calls would take each other's answers.
+    ///
+    /// The gate takes them in arrival order with ONE exception, which is its whole reason for
+    /// being: a query the developer is waiting for may go in front of background work that is
+    /// only queued, never in front of anything that changes what the engine holds. See CallGate
+    /// for the measurements that put it there.
     /// </summary>
-    private readonly SemaphoreSlim _oneCall = new(1, 1);
+    private readonly CallGate _oneCall = new();
 
     private EngineClient(string executablePath)
     {
@@ -670,14 +674,16 @@ internal sealed class EngineClient : IAsyncDisposable
 
         try
         {
-            await _oneCall.WaitAsync().ConfigureAwait(false);
+            // A BARRIER, not a message in a queue: everything asked after this must be answered
+            // about the text it carries, so nothing may be let past it.
+            await _oneCall.EnterAsync(CallKind.Barrier).ConfigureAwait(false);
             try
             {
                 await writer.WriteLineAsync(line.AsMemory()).ConfigureAwait(false);
             }
             finally
             {
-                _oneCall.Release();
+                _oneCall.Leave();
             }
         }
         catch (Exception ex)
@@ -685,6 +691,35 @@ internal sealed class EngineClient : IAsyncDisposable
             Log.Info($"engine: didChange could not be sent ({ex.GetType().Name})");
         }
     }
+
+    /// <summary>
+    /// What each method is to the gate. Named one by one rather than by pattern, and anything
+    /// unrecognised is a BARRIER: a method nobody has classified is one whose effect on the
+    /// engine nobody has thought about, and the safe reading of that is "do not move it".
+    ///
+    /// Interactive means a person is waiting with their hands on the keyboard. Background means
+    /// the answer paints itself whenever it arrives. Everything that seeds, closes, renames or
+    /// otherwise changes what the engine holds is a barrier, because a query moved in front of
+    /// one would be answered about a project that no longer exists or does not exist yet.
+    /// </summary>
+    private static CallKind KindOf(string method) => method switch
+    {
+        "textDocument/completion" => CallKind.Interactive,
+        "textDocument/hover" => CallKind.Interactive,
+        "textDocument/signatureHelp" => CallKind.Interactive,
+        "textDocument/canonicalCase" => CallKind.Interactive,
+        "textDocument/smartEnter" => CallKind.Interactive,
+        "textDocument/codeAction" => CallKind.Interactive,
+        "textDocument/loopSync" => CallKind.Interactive,
+
+        "textDocument/diagnostics" => CallKind.Background,
+        "textDocument/semanticTokens" => CallKind.Background,
+        "textDocument/outline" => CallKind.Background,
+
+        // Everything else - initialize, project/open, project/close, debug/liveSource, the
+        // renames, workspace/search, the knowledge routes, shutdown - keeps its place.
+        _ => CallKind.Barrier,
+    };
 
     private async Task<JsonElement?> CallAsync(string method, Dictionary<string, object> parameters, CancellationToken cancellation)
     {
@@ -719,7 +754,7 @@ internal sealed class EngineClient : IAsyncDisposable
 #if DEBUG
         var queued = System.Diagnostics.Stopwatch.StartNew();
 #endif
-        await _oneCall.WaitAsync(deadline.Token).ConfigureAwait(false);
+        await _oneCall.EnterAsync(KindOf(method), deadline.Token).ConfigureAwait(false);
 #if DEBUG
         queued.Stop();
         var served = System.Diagnostics.Stopwatch.StartNew();
@@ -730,31 +765,76 @@ internal sealed class EngineClient : IAsyncDisposable
         {
             await writer.WriteLineAsync(line.AsMemory(), deadline.Token).ConfigureAwait(false);
 
-            // One request is outstanding at a time, so the next line is this call's answer. A
-            // pipeline would need correlation by identifier; nothing here benefits from one.
-            var response = await reader.ReadLineAsync(deadline.Token).ConfigureAwait(false);
-            if (response is null)
+            /*
+             * ONCE THE REQUEST IS WRITTEN, ITS ANSWER IS READ. The caller's deadline stops
+             * applying here, and the answer is matched to the request by identifier.
+             *
+             * THIS IS THE ONE THAT KILLED A SESSION. One request is outstanding at a time and the
+             * next line used to be taken as this call's answer, on the caller's own token. A
+             * caller whose deadline expired after its request went out - a live diagnosis at five
+             * seconds, a page request at eight, both reachable on a large module where a single
+             * call is over a second - abandoned an answer that was still coming. The next call
+             * then read THAT one, and the next read the one before it: the pipe was off by one
+             * for the rest of the session, permanently.
+             *
+             * What that looks like is not a stall. Every answer belongs to the previous question,
+             * so `project/open` is told "No current sources for this project, send project/open
+             * first", the seed's facts arrive somewhere that expected diagnostics, and the pass
+             * dies on a null. The Problems pane keeps whatever it last had and never changes
+             * again - "the analyzer stopped working", reported by the owner while typing in a
+             * 64,802-line module (2026-08-21, log lines at 20:20:49 onward).
+             *
+             * So: the read finishes on the PIPE's deadline, not the caller's, and a line whose id
+             * is not ours is a leftover from a call that gave up - skipped, said once, and the
+             * pipe is back in step instead of broken for good.
+             */
+            using var pipeDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            JsonDocument? document = null;
+
+            while (document is null)
             {
-                throw new IOException("The engine closed the connection.");
+                var response = await reader.ReadLineAsync(pipeDeadline.Token).ConfigureAwait(false);
+                if (response is null)
+                {
+                    throw new IOException("The engine closed the connection.");
+                }
+
+                var candidate = JsonDocument.Parse(response);
+                var answered = candidate.RootElement.TryGetProperty("id", out var answeredId)
+                    && answeredId.ValueKind == JsonValueKind.Number
+                    && answeredId.TryGetInt32(out var number)
+                        ? number
+                        : (int?)null;
+
+                if (answered is null || answered == id)
+                {
+                    document = candidate;
+                    continue;
+                }
+
+                candidate.Dispose();
+                Log.Warn($"engine: an answer to request {answered} arrived while waiting for {id} ({method}); "
+                         + "it belonged to a call that gave up, and was dropped rather than read as this one's");
             }
 
-            using var document = JsonDocument.Parse(response);
-
-            if (document.RootElement.TryGetProperty("error", out var error))
+            using (document)
             {
-                var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
-                Log.Warn($"engine: {method} refused: {message}");
+                if (document.RootElement.TryGetProperty("error", out var error))
+                {
+                    var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
+                    Log.Warn($"engine: {method} refused: {message}");
 #if DEBUG
-                refused = true;
+                    refused = true;
 #endif
-                return null;
-            }
+                    return null;
+                }
 
-            return document.RootElement.TryGetProperty("result", out var result) ? result.Clone() : null;
+                return document.RootElement.TryGetProperty("result", out var result) ? result.Clone() : null;
+            }
         }
         finally
         {
-            _oneCall.Release();
+            _oneCall.Leave();
 #if DEBUG
             // In the finally, so a cancelled or thrown call is counted too. A perf hunt that
             // silently drops the calls that went wrong is reading the healthy half only.

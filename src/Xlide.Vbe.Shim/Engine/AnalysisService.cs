@@ -919,147 +919,177 @@ internal sealed class AnalysisService : IAsyncDisposable
 
         foreach (var snapshot in snapshots)
         {
-            /*
-             * A PROJECT WHOSE TEXT HAS NOT MOVED IS LEFT ALONE.
-             *
-             * A pass re-seeded every project and then analysed every module of it, every time,
-             * however little had changed. Adding one comment line to a 109-line module cost six
-             * analyses and 476ms, of which 446ms was re-deriving findings for four modules that
-             * were byte-identical to the ones already on screen (measured on the perf fixture,
-             * 2026-08-08). The analyzer scales sub-linearly but it does not scale to free, and
-             * the pipe serves one request at a time, so that work is also 476ms during which a
-             * completion in another module waits. It was measured at 332ms.
-             *
-             * Sources compared rather than a generation counted, because the counter says a pass
-             * happened and the sources say whether anything came of it. Most passes come from
-             * gestures that write nothing back.
-             */
+            // ONE PROJECT'S FAILURE IS ONE PROJECT'S. A pass that threw part way through
+            // published nothing at all and recorded nothing, so the panes kept the findings they
+            // already had and the next pass began again from the same place - the analyzer, from
+            // where the developer sits, simply stopped (2026-08-21). What a project that cannot be
+            // analysed loses is its own findings, and even those stand: what was last known about
+            // it is carried into this pass rather than cleared, because a workbook that failed to
+            // analyse has not been shown to be clean.
+            // What this project last analysed to, read before the try so the catch below can
+            // stand on it: a project that fails keeps what was last known about it.
             var held = _seeded.TryGetValue(snapshot.ProjectId, out var was) ? was : null;
-            if (held is not null && SameSeed(held.Seeds, snapshot.Modules))
-            {
-                // The homes map is not rebuilt either: it is derived from the module set, and
-                // the comparison above has just established that the module set is the same.
-                factTypes.UnionWith(held.Types);
-                factProcedures.UnionWith(held.Procedures);
-                everything.AddRange(held.Findings);
-                _openProjects.TryAdd(snapshot.ProjectId, 0);
-                Log.Verbose($"engine: {snapshot.ProjectId} is unchanged, so its {held.Findings.Count} finding(s) stand");
-                continue;
-            }
 
-            // The text moved, and the whole project's sources are in hand: the one moment
-            // auto-rediscovery needs, at no read of its own.
             try
             {
-                SnapshotObserved?.Invoke(snapshot.ProjectId, snapshot.Modules);
-            }
-            catch (Exception ex)
-            {
-                Log.Warn($"engine: a snapshot observer failed, {ex.Message}");
-            }
-
-            var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
-                .ConfigureAwait(false);
-
-            if (opened is not null)
-            {
-                factTypes.UnionWith(opened.Types);
-                factProcedures.UnionWith(opened.Procedures);
-            }
-
-            _openProjects.TryAdd(snapshot.ProjectId, 0);
-
-            // This project's homes, rebuilt into a fresh map and swapped in whole: readers
-            // snapshot the reference, and a name shared across workbooks keeps every home it
-            // has rather than the last writer's.
-            var rehomed = new Dictionary<string, List<(string ProjectId, string ModuleType)>>(
-                _moduleHomes.Count,
-                StringComparer.OrdinalIgnoreCase);
-
-            foreach (var (name, homes) in _moduleHomes)
-            {
-                var kept = homes
-                    .Where(h => !string.Equals(h.ProjectId, snapshot.ProjectId, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                if (kept.Count > 0)
+                /*
+                 * A PROJECT WHOSE TEXT HAS NOT MOVED IS LEFT ALONE.
+                 *
+                 * A pass re-seeded every project and then analysed every module of it, every time,
+                 * however little had changed. Adding one comment line to a 109-line module cost six
+                 * analyses and 476ms, of which 446ms was re-deriving findings for four modules that
+                 * were byte-identical to the ones already on screen (measured on the perf fixture,
+                 * 2026-08-08). The analyzer scales sub-linearly but it does not scale to free, and
+                 * the pipe serves one request at a time, so that work is also 476ms during which a
+                 * completion in another module waits. It was measured at 332ms.
+                 *
+                 * Sources compared rather than a generation counted, because the counter says a pass
+                 * happened and the sources say whether anything came of it. Most passes come from
+                 * gestures that write nothing back.
+                 */
+                if (held is not null && SameSeed(held.Seeds, snapshot.Modules))
                 {
-                    rehomed[name] = kept;
-                }
-            }
-
-            foreach (var module in snapshot.Modules)
-            {
-                if (!rehomed.TryGetValue(module.ModuleName, out var list))
-                {
-                    rehomed[module.ModuleName] = list = [];
-                }
-
-                list.Add((snapshot.ProjectId, module.Type));
-            }
-
-            _moduleHomes = rehomed;
-
-            var findings = new List<Finding>();
-
-            // Every module answered, or this pass does not get to say what the project looks like.
-            // A single module that the engine declined leaves a hole in `findings`, and recording
-            // a hole as the project's state means the next pass compares sources, finds them
-            // unchanged, skips, and republishes the hole. Forever: nothing would ever ask again.
-            var complete = true;
-
-            foreach (var module in snapshot.Modules)
-            {
-                // NO CARET, deliberately, and it is what lets this be free for the module the
-                // developer is editing. The live analysis has already answered about that text
-                // WITH a caret, and the engine serves a caret-less request from a caret-carrying
-                // answer for the same text. Sending one here would only narrow that.
-                var result = await engine.DiagnoseAsync(
-                    snapshot.ProjectId,
-                    snapshot.Generation,
-                    module.ModuleName,
-                    module.Type,
-                    null,
-                    _stopping.Token).ConfigureAwait(false);
-
-                if (result is null)
-                {
-                    complete = false;
+                    // The homes map is not rebuilt either: it is derived from the module set, and
+                    // the comparison above has just established that the module set is the same.
+                    factTypes.UnionWith(held.Types ?? []);
+                    factProcedures.UnionWith(held.Procedures ?? []);
+                    everything.AddRange(held.Findings);
+                    _openProjects.TryAdd(snapshot.ProjectId, 0);
+                    Log.Verbose($"engine: {snapshot.ProjectId} is unchanged, so its {held.Findings.Count} finding(s) stand");
                     continue;
                 }
 
-                if (result.Diagnostics.Length == 0)
+                // The text moved, and the whole project's sources are in hand: the one moment
+                // auto-rediscovery needs, at no read of its own.
+                try
                 {
-                    continue;
+                    SnapshotObserved?.Invoke(snapshot.ProjectId, snapshot.Modules);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"engine: a snapshot observer failed, {ex.Message}");
                 }
 
-                findings.AddRange(Convert(snapshot.ProjectId, module.ModuleName, module.Source, result.Diagnostics));
-            }
+                var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
+                    .ConfigureAwait(false);
 
-            Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
-            everything.AddRange(findings);
+                if (opened is not null)
+                {
+                    // An answer without its word lists is still an answer. They arrive as arrays and
+                    // a missing one deserialises to null, which SortedSet.UnionWith throws on - and
+                    // the throw took the whole pass with it, so the Problems pane kept the findings
+                    // it had and never moved again (2026-08-21; the pipe was handing out the wrong
+                    // call's answers, which is fixed in EngineClient, but a pass must survive a
+                    // strange answer rather than end the session's analysis).
+                    factTypes.UnionWith(opened.Types ?? []);
+                    factProcedures.UnionWith(opened.Procedures ?? []);
+                }
 
-            // Recorded only now, with the generation this project was actually seeded at: a pass
-            // that seeds nothing must leave the old number standing, because that is the number
-            // the engine will still answer to.
-            //
-            // And only when the seed took AND every module answered. `opened` is null when the
-            // engine refused the seed, and recording that as seeded would let the next pass skip
-            // a project the engine has never been told about, which answers "send project/open
-            // first" to everything for the rest of the session.
-            if (opened is not null && complete)
-            {
-                _seeded[snapshot.ProjectId] = new SeededProject(
-                    snapshot.Generation,
-                    snapshot.Modules.ToDictionary(m => m.ModuleName, SeedOf, StringComparer.Ordinal),
-                    findings,
-                    opened.Types,
-                    opened.Procedures);
+                _openProjects.TryAdd(snapshot.ProjectId, 0);
+
+                // This project's homes, rebuilt into a fresh map and swapped in whole: readers
+                // snapshot the reference, and a name shared across workbooks keeps every home it
+                // has rather than the last writer's.
+                var rehomed = new Dictionary<string, List<(string ProjectId, string ModuleType)>>(
+                    _moduleHomes.Count,
+                    StringComparer.OrdinalIgnoreCase);
+
+                foreach (var (name, homes) in _moduleHomes)
+                {
+                    var kept = homes
+                        .Where(h => !string.Equals(h.ProjectId, snapshot.ProjectId, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    if (kept.Count > 0)
+                    {
+                        rehomed[name] = kept;
+                    }
+                }
+
+                foreach (var module in snapshot.Modules)
+                {
+                    if (!rehomed.TryGetValue(module.ModuleName, out var list))
+                    {
+                        rehomed[module.ModuleName] = list = [];
+                    }
+
+                    list.Add((snapshot.ProjectId, module.Type));
+                }
+
+                _moduleHomes = rehomed;
+
+                var findings = new List<Finding>();
+
+                // Every module answered, or this pass does not get to say what the project looks like.
+                // A single module that the engine declined leaves a hole in `findings`, and recording
+                // a hole as the project's state means the next pass compares sources, finds them
+                // unchanged, skips, and republishes the hole. Forever: nothing would ever ask again.
+                var complete = true;
+
+                foreach (var module in snapshot.Modules)
+                {
+                    // NO CARET, deliberately, and it is what lets this be free for the module the
+                    // developer is editing. The live analysis has already answered about that text
+                    // WITH a caret, and the engine serves a caret-less request from a caret-carrying
+                    // answer for the same text. Sending one here would only narrow that.
+                    var result = await engine.DiagnoseAsync(
+                        snapshot.ProjectId,
+                        snapshot.Generation,
+                        module.ModuleName,
+                        module.Type,
+                        null,
+                        _stopping.Token).ConfigureAwait(false);
+
+                    if (result is null)
+                    {
+                        complete = false;
+                        continue;
+                    }
+
+                    if (result.Diagnostics.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    findings.AddRange(Convert(snapshot.ProjectId, module.ModuleName, module.Source, result.Diagnostics));
+                }
+
+                Log.Info($"engine: {snapshot.ProjectId} produced {findings.Count} finding(s)");
+                everything.AddRange(findings);
+
+                // Recorded only now, with the generation this project was actually seeded at: a pass
+                // that seeds nothing must leave the old number standing, because that is the number
+                // the engine will still answer to.
+                //
+                // And only when the seed took AND every module answered. `opened` is null when the
+                // engine refused the seed, and recording that as seeded would let the next pass skip
+                // a project the engine has never been told about, which answers "send project/open
+                // first" to everything for the rest of the session.
+                if (opened is not null && complete)
+                {
+                    _seeded[snapshot.ProjectId] = new SeededProject(
+                        snapshot.Generation,
+                        snapshot.Modules.ToDictionary(m => m.ModuleName, SeedOf, StringComparer.Ordinal),
+                        findings,
+                        opened.Types ?? [],
+                        opened.Procedures ?? []);
+                }
+                else
+                {
+                    // Nothing recorded, so the next pass re-seeds rather than trusting this one.
+                    _seeded.TryRemove(snapshot.ProjectId, out _);
+                    Log.Warn($"engine: {snapshot.ProjectId} did not analyse cleanly, so the next pass will do it again");
+                }
             }
-            else
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // Nothing recorded, so the next pass re-seeds rather than trusting this one.
+                Log.Error($"engine: {snapshot.ProjectId} could not be analysed; the pass carries on without it", ex);
+
+                // Not recorded as seeded, so the next pass reads it again from scratch.
                 _seeded.TryRemove(snapshot.ProjectId, out _);
-                Log.Warn($"engine: {snapshot.ProjectId} did not analyse cleanly, so the next pass will do it again");
+                if (held is not null)
+                {
+                    everything.AddRange(held.Findings);
+                }
             }
         }
 
