@@ -239,8 +239,15 @@ export class Dispatcher {
      * So text that arrives equal to text already held is answered with the instance already
      * held. One comparison of the whole module per request, in place of hundreds of thousands.
      * Strings are immutable, so the two are interchangeable in every way except the one that
-     * matters here. Filed upstream as xlide_vscode#45; this stands whatever happens there,
-     * because handing a memo a stable key is the caller's side of that bargain.
+     * matters here.
+     *
+     * WHAT THIS IS NOW WORTH, honestly: nothing measurable. It was the whole of the fix for a
+     * day. Upstream took xlide_vscode#45 and released it in 4.1.3, and with those memos adopting
+     * the caller's instance themselves, removing this changes the same measurements by 13ms in
+     * 450 - noise (measured both ways, 2026-08-21). It stays because it is the caller's half of
+     * that bargain and it costs the same nothing: the analyzer beside this one is UNPINNED and
+     * can move back under us, the memos in this file compare source strings the same way, and
+     * the next memo anyone adds on either side is covered without being thought about.
      *
      * What it holds is instances, not copies: a module nobody has edited is the same string the
      * seed already holds, so it costs a map entry. Only a module being edited accumulates
