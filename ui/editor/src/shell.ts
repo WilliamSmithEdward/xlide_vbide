@@ -1567,13 +1567,15 @@ export class Shell {
   }
 
   /**
-   * The workbook's menu, grouped the way the companion editor groups it: what can be created in
-   * the workbook first, then the dialogs that belong to the project itself.
+   * The workbook's menu: the project's own dialogs, and nothing else.
+   *
+   * Adding a component is the PLUS on the row, which is visible, one press, and already
+   * offers the three kinds - so the right-click menu offering them too was the same list in
+   * two places, with the longer path (the owner, 2026-08-20). The dialogs stay here because
+   * nothing else on the row can reach them.
    */
   private workbookMenu(project: string, x: number, y: number): void {
     showContextMenu(x, y, [
-      ...this.newComponentItems(project),
-      {},
       { label: "References...", run: () => this.hostCommand("references", project) },
       { label: "Project Properties...", run: () => this.hostCommand("projectProperties", project) },
     ]);
@@ -1582,10 +1584,9 @@ export class Shell {
   /**
    * What the plus on a workbook's row offers: the same three things, and only those three.
    *
-   * ONE LIST, shared with the right-click menu. Two places offering "add something to this
-   * workbook" is two places to add the next component kind to, and the one that gets forgotten is
-   * whichever the author was not looking at. The right-click menu is this plus the project's own
-   * dialogs, which a plus has no business promising.
+   * The PLUS's list, and the only place that offers to add a component to a workbook. The
+   * right-click menu carried a copy until 2026-08-20; one list means the next component kind
+   * is added in one place.
    */
   private newComponentItems(project: string): ContextMenuItem[] {
     const items: ContextMenuItem[] = [

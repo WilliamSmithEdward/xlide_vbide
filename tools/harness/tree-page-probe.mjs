@@ -152,9 +152,12 @@ const DRIVE = `(async () => {
     sheetMenu.did && !sheetMenu.detail.includes('Remove'), sheetMenu.detail);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 
+  // THE WORKBOOK'S MENU IS THE PROJECT'S DIALOGS, and only those: adding a component is the
+  // plus on the row, which is visible and one press, so the menu stopped carrying a second
+  // copy of that list (2026-08-20).
   const bookMenu = act('treeMenu', { workbook: 'Book1.xlsm' });
-  check('the workbook menu is untouched by all this',
-    bookMenu.did && bookMenu.detail.includes('New Module'), bookMenu.detail);
+  check('the workbook menu offers the dialogs a row cannot otherwise reach',
+    bookMenu.did && bookMenu.detail === 'References... | Project Properties...', bookMenu.detail);
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 
   // NOTHING GOES WITHOUT THE QUESTION.

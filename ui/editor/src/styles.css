@@ -2693,6 +2693,16 @@ body.live-resize .minimap {
   padding: 2px 0 8px;
   font-size: 12px;
 
+  /* ONE RHYTHM, KEPT IN ONE PLACE. Every line - a row, a heading, a failure's message - is a
+     child of this list, so the gap between any two of them is this gap. Spacing them by each
+     kind's own padding is what made the list uneven: a row carrying a message sat further
+     from its neighbour than a row without one (the owner, 2026-08-20). Headings add to it
+     rather than replace it, and a file heading adds most, because a file is the larger
+     boundary. */
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
   /* THE COLUMN GEOMETRY, in one place, because more than the columns depend on it: a failure's
      message is a paragraph under its row and has to stop where the name column stops, or it
      runs along underneath the chips and reads as cramped against them (the owner, 2026-08-20).
@@ -2719,7 +2729,8 @@ body.live-resize .minimap {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 10px 2px;
+  padding: 2px 10px;
+  margin-top: 11px;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2734,7 +2745,8 @@ body.live-resize .minimap {
 }
 
 .tests-module {
-  padding: 6px 10px 2px;
+  padding: 2px 10px;
+  margin-top: 5px;
   font-weight: 600;
   opacity: 0.85;
 }
@@ -2742,6 +2754,11 @@ body.live-resize .minimap {
 /* Indented under a file heading when there is one, so the tiers read as a tree. Every module
    heading and every row AFTER the first file heading is inside some file, which is what the
    sibling combinator says. */
+#tests-list > .tests-file:first-child,
+#tests-list > .tests-module:first-child {
+  margin-top: 0;
+}
+
 .tests-file ~ .tests-module {
   padding-left: 20px;
 }
@@ -2868,13 +2885,12 @@ body.live-resize .minimap {
    them, and with no air around them the red ran into the row it explains and into the heading
    below it (the owner, 2026-08-20). The block keeps a margin under it, the message a line of
    its own above and below, and a heading that follows starts further down. */
+/* A row and the message that explains it are ONE line of the list: they sit closer to each
+   other than to anything else, and the list's own gap separates the pair from what follows. */
 .tests-row-block {
-  padding-bottom: 7px;
-}
-
-.tests-row-block + .tests-module,
-.tests-row-block + .tests-file {
-  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .tests-row-block .tests-message,
