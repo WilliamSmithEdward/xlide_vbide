@@ -151,6 +151,14 @@ internal sealed class EngineClient : IAsyncDisposable
     /// </summary>
     private const int ExpectedEngineProtocol = 1;
 
+    /// <summary>
+    /// How long an answer may take before the log says so. Above the honest cost of the slowest
+    /// legitimate call - a first analysis of a module at VBA's 65,534-line ceiling is about a
+    /// second - and far below the pipe's own thirty-second deadline, so it catches a call that
+    /// has gone wrong without narrating the ones that are merely large.
+    /// </summary>
+    private const int SlowAnswerMs = 5000;
+
     /// <summary>Reads a child stream to the log so it cannot fill its buffer and block the child.</summary>
     private static void DrainAsync(StreamReader stream, string label) =>
         _ = Task.Run(async () =>
@@ -757,9 +765,17 @@ internal sealed class EngineClient : IAsyncDisposable
         await _oneCall.EnterAsync(KindOf(method), deadline.Token).ConfigureAwait(false);
 #if DEBUG
         queued.Stop();
-        var served = System.Diagnostics.Stopwatch.StartNew();
         var refused = false;
 #endif
+
+        // TIMED IN EVERY BUILD, not only in a debug one, because the failure this had no words for
+        // was a call that stopped answering. A diagnosis of a 64,802-line module cost fifteen
+        // seconds for a while (xlide_vscode#45), and nothing said so: the caller gave up, the pass
+        // was abandoned before it published, and the only trace was a later pass reporting that
+        // nothing had changed. It was found by inference from that, not from anything that named
+        // it. A stopwatch is nothing against a round trip over a pipe, and now a slow call says
+        // which method it was and how long it took.
+        var served = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
@@ -835,10 +851,19 @@ internal sealed class EngineClient : IAsyncDisposable
         finally
         {
             _oneCall.Leave();
-#if DEBUG
+
             // In the finally, so a cancelled or thrown call is counted too. A perf hunt that
             // silently drops the calls that went wrong is reading the healthy half only.
             served.Stop();
+
+            if (served.ElapsedMilliseconds >= SlowAnswerMs)
+            {
+                Log.Warn($"engine: {method} took {served.ElapsedMilliseconds}ms to answer"
+                         + (cancellation.IsCancellationRequested
+                             ? ", and whoever asked had already given up on it"
+                             : string.Empty));
+            }
+#if DEBUG
             Diagnostics.EngineCounters.Record(
                 method, queued.ElapsedMilliseconds, served.ElapsedMilliseconds, refused);
 #endif
