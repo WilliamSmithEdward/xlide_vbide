@@ -189,8 +189,13 @@ try {
     const counted = (name) => shape?.some((one) => one.startsWith(name) && !one.endsWith("(0)"));
     return Array.isArray(shape) && counted(MAIN) && counted(TWIN) ? shape : null;
   }, { budgetMs: 40000 });
+  // NOT a length check: the developer may have anything else open beside the pair, and a suite
+  // that failed because a scratch workbook was up would be testing the session, not the product.
   check("the Problems pane offers a file select of its own, counting each file's findings",
-    problemFiles.length === 3, problemFiles.join(" | "));
+    problemFiles[0].startsWith("All Files")
+    && problemFiles.some((one) => one.startsWith(MAIN) && !one.endsWith("(0)"))
+    && problemFiles.some((one) => one.startsWith(TWIN) && !one.endsWith("(0)")),
+    problemFiles.join(" | "));
 
   const picked = await pickScope("problems-scope-file", TWIN);
   check("a whole-file problem scope is offered", typeof picked === "string" && picked.startsWith("file:"), String(picked));
