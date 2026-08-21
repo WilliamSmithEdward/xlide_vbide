@@ -2336,12 +2336,25 @@ internal sealed partial class AddInSession : IDisposable
             // another workbook's same-named module would write a merge of the two.
             var writtenKey = WrittenKey(component, DisplayFromProjectId(foundOwner ?? owner));
 
-            // The changed lines alone, when the last read-back says where they are. Replacing a
-            // whole large module makes the host reparse every line of it - seconds, on the
-            // thread the keystrokes live on - where typing only ever touches a few. The whole
-            // replace below remains for a module with no baseline or a rewrite too large to
-            // call an edit.
-            var baseline = _writtenModules.TryGetValue(writtenKey, out var known) ? known : null;
+            // The changed lines alone, when we know where they are. Replacing a whole large
+            // module makes the host reparse every line of it - seconds, on the thread the
+            // keystrokes live on - where typing only ever touches a few. The whole replace below
+            // remains for a rewrite too large to call an edit.
+            //
+            // NO BASELINE IS NOT A REASON TO REPLACE THE MODULE. It used to be: the baseline is
+            // remembered from what this session has written or shown, so the FIRST write to a
+            // module nobody has opened had none and replaced all of it. That is not a rare path -
+            // it is a rename reaching modules that are not open, an import, a replace-all, any
+            // api write - and on a 64,802-line module it takes Excel off the air long enough for
+            // Windows to mark the window Not Responding (caught doing exactly that at 05:17 on
+            // 2026-08-21, "took 0ms to compare and is replacing the module").
+            //
+            // So the module is asked what it holds instead: one read, about 40ms at that size,
+            // against seconds of reparse. The import path has already read it for its
+            // all-or-nothing check, and that copy is used rather than read again.
+            var baseline = _writtenModules.TryGetValue(writtenKey, out var known)
+                ? known
+                : wasHoldingBefore ?? ProjectReader.ReadSource(found);
 
             // Declared out here because the call below is short-circuited: with no baseline there
             // is no diff to attempt and no window to hear about.
