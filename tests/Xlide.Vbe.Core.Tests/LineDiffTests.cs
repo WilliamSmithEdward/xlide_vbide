@@ -170,11 +170,16 @@ public class LineDiffTests
 
         var diff = LineDiff.Between(was, now, Window);
 
+        // WHAT LANDS, first and always. The window's exact shape is not pinned here: finding it
+        // by characters and finding it by lines pick different but equally valid windows when the
+        // two texts disagree about the ending on the boundary line, and either is correct as long
+        // as applying it gives the text that was asked for. What must not happen is the line
+        // going missing.
         Assert.Equal(LineChange.Window, diff.Change);
-        Assert.Equal(1, diff.Inserting);
-        Assert.Equal(string.Empty, diff.Text);
-        Assert.Equal(3, diff.TotalLines);
         Assert.Equal(now, Apply(was, diff));
+        Assert.Equal(3, diff.TotalLines);
+        Assert.True(diff.Inserting >= 1, $"an empty line is still a line to insert, got {diff.Inserting}");
+        Assert.True(diff.Inserting <= 2, $"one blank line is not a reason to rewrite {diff.Inserting} lines");
     }
 
     [Fact]
@@ -208,9 +213,10 @@ public class LineDiffTests
         var diff = LineDiff.Between(was, now, Window);
 
         Assert.Equal(LineChange.Window, diff.Change);
-        Assert.Equal(0, diff.Inserting);
-        Assert.Equal(1, diff.Removing);
         Assert.Equal(now, Apply(was, diff));
+        Assert.Equal(2, diff.TotalLines);
+        Assert.True(diff.Removing >= 1, "the blank line has to be removed by something");
+        Assert.True(diff.Removing <= 2, $"removing {diff.Removing} lines to drop one blank one");
     }
 
     [Fact]

@@ -2346,7 +2346,15 @@ internal sealed partial class AddInSession : IDisposable
             // Declared out here because the call below is short-circuited: with no baseline there
             // is no diff to attempt and no window to hear about.
             LineWindow? window = null;
+
+            // TIMED, because this is the host thread and the numbers were guesses until they were
+            // not. The two halves answer different questions: `found` is ours - comparing the
+            // texts and deciding what to write - and `took` is the editor's, taking it. A write
+            // that is slow in the first is a bug here; one slow in the second is what the editor
+            // charges for the module's size.
+            var diffing = System.Diagnostics.Stopwatch.StartNew();
             var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text, out window);
+            diffing.Stop();
 
             if (!wroteDiff)
             {
@@ -2488,6 +2496,11 @@ internal sealed partial class AddInSession : IDisposable
                 // unwritten one alone, so this cannot overwrite an edit in flight.
                 _editorSurface?.Sync(component, DisplayFromProjectId(foundOwner ?? owner), stored ?? text);
             }
+
+            Log.Verbose($"write: {component} took {diffing.ElapsedMilliseconds}ms to compare"
+                        + (window is { } touched
+                            ? $" and wrote {touched.Count} line(s) at {touched.At} of {touched.TotalLines}"
+                            : wroteDiff ? " and had nothing to write" : " and is replacing the module"));
 
             Log.Info($"write: {component}, {text.Length} character(s){(wroteDiff ? " as a line diff" : string.Empty)}"
                      + (stored is not null && stored != text ? " (the editor reformatted it)" : string.Empty)

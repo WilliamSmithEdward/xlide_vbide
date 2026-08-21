@@ -67,6 +67,30 @@ public readonly record struct LineDiff(
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(text);
 
+        // THE COMMON CASE FIRST, and it is common: a write-back whose text has not moved is what
+        // every pause in typing produces once the module is already up to date. One vectorised
+        // comparison answers it, where walking the lines to reach the same conclusion costs two
+        // passes over both texts - 1.49MB each - and put 35ms back on every write (measured
+        // 2026-08-21, after the walk replaced the split).
+        if (string.Equals(baseline, text, StringComparison.Ordinal))
+        {
+            return new LineDiff(LineChange.Identical, 0, 0, 0, string.Empty, string.Empty, CountLines(text));
+        }
+
+        // MOST WRITES ARE ONE LINE IN A LARGE MODULE, and finding that by walking lines is a
+        // step per unchanged line: 64,700 of them for an edit near the top, which measured
+        // 123-187ms of host thread per write. The scan below finds the same window with
+        // vectorised comparisons over the whole string and no per-line step at all.
+        //
+        // It can be fooled, and that is why it is allowed to decline: the two texts may spell
+        // their line endings differently - the surface sends LF, the editor stores CRLF - and a
+        // character comparison then finds nothing in common. It answers null in that case, and
+        // the line walk below, which reads endings as endings, gives the real answer.
+        if (ByCharacters(baseline, text, largestWindow) is { } quick)
+        {
+            return quick;
+        }
+
         var oldTotal = CountLines(baseline);
         var newTotal = CountLines(text);
 
@@ -126,6 +150,102 @@ public readonly record struct LineDiff(
             newTotal);
     }
 
+
+    /// <summary>
+    /// The window found by comparing CHARACTERS, backed off to whole lines - or null when what
+    /// that finds is too big to be an edit, which is both the genuinely-wholesale case and the
+    /// case where the two texts disagree about how a line ends.
+    /// </summary>
+    private static LineDiff? ByCharacters(string baseline, string text, int largestWindow)
+    {
+        var head = baseline.AsSpan().CommonPrefixLength(text.AsSpan());
+
+        // The shared tail, by binary search over vectorised comparisons: "the last k characters
+        // match" is true for every k below the answer and false above it, so this costs a
+        // handful of passes rather than a step per character.
+        var lo = 0;
+        var hi = Math.Min(baseline.Length, text.Length) - head;
+        while (lo < hi)
+        {
+            var mid = lo + ((hi - lo + 1) / 2);
+            if (baseline.AsSpan(baseline.Length - mid).SequenceEqual(text.AsSpan(text.Length - mid)))
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid - 1;
+            }
+        }
+
+        var tail = lo;
+
+        // Back off to whole lines. Everything before the head is shared, so the line it lands in
+        // starts the same distance back in both - the shorter of the two, when one of them began
+        // at the very start.
+        var oldStart = LineStartAt(baseline, head);
+        var newStart = LineStartAt(text, head);
+        var shared = Math.Min(head - oldStart, head - newStart);
+        oldStart = head - shared;
+        newStart = head - shared;
+
+        // And forward to the line boundary the shared tail begins on: a tail that starts inside a
+        // line leaves that line partly changed, so the whole of it belongs to the window.
+        var oldEnd = Math.Max(oldStart, LineEndAt(baseline, baseline.Length - tail));
+        var newEnd = Math.Max(newStart, LineEndAt(text, text.Length - tail));
+
+        var removing = LinesIn(baseline, oldStart, oldEnd);
+        var inserting = LinesIn(text, newStart, newEnd);
+        if (removing > largestWindow || inserting > largestWindow)
+        {
+            return null;
+        }
+
+        var separated = newEnd < text.Length;
+        return new LineDiff(
+            LineChange.Window,
+            NewlinesIn(text, 0, newStart) + 1,
+            removing,
+            inserting,
+            inserting == 0 ? string.Empty : Crlf(text[newStart..newEnd], separated),
+            removing == 0 ? string.Empty : Crlf(baseline[oldStart..oldEnd], oldEnd < baseline.Length),
+            CountLines(text));
+    }
+
+    /// <summary>Where the line containing an offset begins.</summary>
+    private static int LineStartAt(string text, int at)
+    {
+        if (at <= 0)
+        {
+            return 0;
+        }
+
+        var ending = text.LastIndexOf('\n', Math.Min(at, text.Length) - 1);
+        return ending < 0 ? 0 : ending + 1;
+    }
+
+    /// <summary>Where the line containing an offset ends, meaning where the next one begins.</summary>
+    private static int LineEndAt(string text, int at)
+    {
+        if (at >= text.Length)
+        {
+            return text.Length;
+        }
+
+        var ending = text.IndexOf('\n', Math.Max(at, 0));
+        return ending < 0 ? text.Length : ending + 1;
+    }
+
+    /// <summary>
+    /// Lines between two line boundaries. A run that reaches the end of the text carries one more
+    /// than its endings, because the text's last line has no ending after it - the same
+    /// convention <see cref="CountLines"/> counts by.
+    /// </summary>
+    private static int LinesIn(string text, int from, int to) =>
+        NewlinesIn(text, from, to) + (to == text.Length ? 1 : 0);
+
+    private static int NewlinesIn(string text, int from, int to) =>
+        to <= from ? 0 : text.AsSpan(from, to - from).Count('\n');
     /// <summary>
     /// The line beginning at <paramref name="at"/>, as the half-open range of its content with
     /// the ending left off, and where the next line begins. False when the offset is past the
