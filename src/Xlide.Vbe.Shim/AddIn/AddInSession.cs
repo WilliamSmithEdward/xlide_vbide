@@ -2342,7 +2342,11 @@ internal sealed partial class AddInSession : IDisposable
             // replace below remains for a module with no baseline or a rewrite too large to
             // call an edit.
             var baseline = _writtenModules.TryGetValue(writtenKey, out var known) ? known : null;
-            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text);
+
+            // Declared out here because the call below is short-circuited: with no baseline there
+            // is no diff to attempt and no window to hear about.
+            LineWindow? window = null;
+            var wroteDiff = baseline is not null && TryWriteLineDiff(module, baseline, text, out window);
 
             if (!wroteDiff)
             {
@@ -2391,6 +2395,23 @@ internal sealed partial class AddInSession : IDisposable
                 }
             }
 
+            // READ BACK ONLY WHAT WAS WRITTEN, when what was written can be checked on its own.
+            //
+            // The read below is the editor's own copy, and it is here because the editor rewrites
+            // what it is given (see the comment under it). A whole-module read to check a
+            // one-line edit costs the same as reading the module: on a 64,802-line module a write
+            // of identical text - which touches the editor not at all - still cost about 100ms of
+            // host thread, most of it this read and the comparison after it, on every pause in
+            // typing (measured 2026-08-21).
+            //
+            // So: nothing written means nothing to check. A window written means the window is
+            // read back and compared against exactly what went in, with the module's line count
+            // as the guard - if the editor inserted or removed a line anywhere, or changed one
+            // outside the window, the count moves and the whole module is read as before. Any
+            // mismatch at all falls back to the full read, so the checks below see the same text
+            // they always did.
+            var checkedWindow = wroteDiff && (window is null || WindowCameBackIntact(module, window));
+
             // Read straight back and remembered, but not pushed into the surface.
             //
             // The editor rewrites what it is given, and its rewrites are the kind a developer is in
@@ -2399,7 +2420,7 @@ internal sealed partial class AddInSession : IDisposable
             // just been typed and inserted lines nobody asked for. What it holds is remembered as
             // the baseline instead, so a later comparison sees changes made by something else and
             // not the editor's own tidying of our own write.
-            var stored = ProjectReader.ReadSource(found);
+            var stored = checkedWindow ? text : ProjectReader.ReadSource(found);
 
             // A CHARACTER THE HOST CONVERTED RATHER THAN STORED.
             //
@@ -2407,7 +2428,11 @@ internal sealed partial class AddInSession : IDisposable
             // text lives in the system ANSI code page. On import that is the developer's file about
             // to be lost, so the module goes back to what it held and the row is reported failed.
             // On every other path it is said once and allowed, for the reasons on the parameter.
-            if (Core.Editor.ModuleText.FirstCharacterLost(text, stored ?? string.Empty) is { } lost)
+            // Skipped when the read-back above already proved the module holds exactly this text:
+            // a comparison of a string with itself can only answer "nothing was lost", and on a
+            // 1.49MB module it walks both copies to say so.
+            if (!ReferenceEquals(text, stored)
+                && Core.Editor.ModuleText.FirstCharacterLost(text, stored ?? string.Empty) is { } lost)
             {
                 var said = $"{component}: this machine's VBA cannot store {lost.Describe()}, on line "
                     + $"{lost.Line}. Excel converts it on the way in, so the module would not hold "
@@ -2542,12 +2567,24 @@ internal sealed partial class AddInSession : IDisposable
     /// gives the removed lines back instead of costing them. Free here, unlike on the whole-replace
     /// path: these lines are already in hand.
     /// </summary>
-    private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text)
+    /// <summary>
+    /// What a diff write put into the module: where it started, how many lines it inserted, how
+    /// many the module should hold afterwards, and the exact text of the window. Enough to check
+    /// the write by reading back THAT WINDOW rather than the whole module - see the read-back in
+    /// <see cref="WriteModule"/>. Null when nothing was written at all.
+    /// </summary>
+    private sealed record LineWindow(int At, int Count, int TotalLines, string Text);
+
+    private static bool TryWriteLineDiff(DispatchObject module, string baseline, string text, out LineWindow? wrote)
     {
         const int LargestDiffLines = 400;
 
+        wrote = null;
+
         if (baseline == text)
         {
+            // The module already holds exactly this. Nothing is written, so there is nothing to
+            // read back and nothing that could have been converted on the way in.
             return true;
         }
 
@@ -2596,12 +2633,15 @@ internal sealed partial class AddInSession : IDisposable
             module.Invoke("DeleteLines", prefix + 1, oldWindow);
         }
 
+        var inserted = newWindow > 0
+            ? string.Join("\r\n", newLines.Skip(prefix).Take(newWindow))
+            : string.Empty;
+
         if (newWindow > 0)
         {
             try
             {
-                module.Invoke("InsertLines", prefix + 1,
-                    string.Join("\r\n", newLines.Skip(prefix).Take(newWindow)));
+                module.Invoke("InsertLines", prefix + 1, inserted);
             }
             catch
             {
@@ -2624,7 +2664,43 @@ internal sealed partial class AddInSession : IDisposable
             }
         }
 
+        wrote = new LineWindow(prefix + 1, newWindow, newLines.Length, inserted);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the module holds exactly the window that was just written to it, and nothing else
+    /// moved: the line count is what the write expected, and the window reads back character for
+    /// character. False for anything else - the editor tidied the text, converted a character it
+    /// cannot store, or added a line somewhere - and the caller then reads the whole module,
+    /// which is what it used to do unconditionally.
+    /// </summary>
+    private static bool WindowCameBackIntact(DispatchObject module, LineWindow wrote)
+    {
+        try
+        {
+            if (module.GetInt32("CountOfLines") != wrote.TotalLines)
+            {
+                return false;
+            }
+
+            if (wrote.Count == 0)
+            {
+                // A pure deletion: the count above is the whole check.
+                return true;
+            }
+
+            return string.Equals(
+                module.GetStringIndexed("Lines", wrote.At, wrote.Count),
+                wrote.Text,
+                StringComparison.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            // A module that will not answer about its own lines is one to read whole.
+            Log.Info($"write: a written window could not be read back ({ex.GetType().Name})");
+            return false;
+        }
     }
 
     private static string[] SplitPhysicalLines(string text) =>
