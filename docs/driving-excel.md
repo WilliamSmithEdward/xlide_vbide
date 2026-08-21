@@ -1869,6 +1869,13 @@ question a single-file session cannot ask:
   holds tests and needs it;
 - a result is filed under (file, test), so two files' `InvoiceTests.Adds` are two tests.
 
+A file with NOTHING TO SAY - no tests and no `XlideAssert` - is answered for but not listed:
+`files` carries it only while the developer is in it, which is what gives the chip somewhere to
+install into before the first test exists. It is still addressable, so `run&file=` on it answers
+`no tests to run in <file>` rather than refusing to find it, and `install&file=` puts XlideAssert
+in. The store behind the pane holds every open file either way; only the painting leaves one out
+(the three symptoms of getting that split wrong are written on `Shown` in AddInSession.Tests.cs).
+
 **The scope selector** is the panes' own state and is not told to the host, so it is driven
 through the page rather than through a route. Both list panes carry one: `#problems-scope` and
 `#tests-scope`, each offering All Modules, Current Module (which follows the active tab), and -
@@ -1883,10 +1890,11 @@ node tools\harness\multi-file.mjs
 ```
 
 `pane-scope.mjs` drives both panes' selectors in any session; `multi-file.mjs` is the pair
-suite and needs both test fixtures open:
+suite and needs both test fixtures open, with DebugFixture beside them as the file that holds
+no tests at all:
 
 ```bash
-tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\TestFixture.xlsm,artifacts\fixtures\TestTwinFixture.xlsm
+tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\TestFixture.xlsm,artifacts\fixtures\TestTwinFixture.xlsm,artifacts\fixtures\DebugFixture.xlsm
 ```
 
 `tools\New-TestFixture.ps1` builds TestFixture.xlsm for working ON the runner: an Invoice

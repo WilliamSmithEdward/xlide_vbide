@@ -634,7 +634,14 @@ if ($Live) {
             # alone lands on the wrong file's test, and a gate that read support once for the
             # session refuses the file that has it. None of that is askable with one file open,
             # which is why the pair exists (tools\New-TestTwinFixture.ps1).
-            'TestFixture.xlsm + TestTwinFixture.xlsm' = @('multi-file.mjs')
+            #
+            # AND A THIRD FILE WITH NOTHING TO SAY, which costs no extra launch and buys the
+            # other half of the file dimension: a project holding neither tests nor XlideAssert.
+            # The pane's cache had two writers with two rules about such a file, and all three
+            # symptoms - no install offered for the file being worked in, the file vanishing
+            # mid-typing, and a full COM walk of the session on every tree publish - were
+            # invisible while every open file held tests (2026-08-21).
+            'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm' = @('multi-file.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

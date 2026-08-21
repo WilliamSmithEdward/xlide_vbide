@@ -55,6 +55,10 @@ internal sealed partial class AddInSession
     /// What each project last discovered, so an analysis snapshot for one file can repaint the
     /// pane without re-reading the others. Refreshed wholesale by <see cref="ReadTestFiles"/>,
     /// which is also what forgets a file that has been closed.
+    ///
+    /// EVERY OPEN FILE IS IN HERE, including one with no tests and no support module. What the
+    /// pane paints is decided by <see cref="Shown"/> instead - see the three symptoms written
+    /// there for why this must not be the place a file is left out.
     /// </summary>
     private readonly Dictionary<string, TestFile> _testsSeen = new(StringComparer.OrdinalIgnoreCase);
 
@@ -69,7 +73,7 @@ internal sealed partial class AddInSession
     /// <summary>True once a walk has covered every open file, so the cache can be trusted.</summary>
     private bool _testsWalked;
 
-    internal SetTestsMessage TestsSnapshot() => ComposeTests(_testsLive ?? ReadTestFiles());
+    internal SetTestsMessage TestsSnapshot() => ComposeTests(_testsLive ?? Shown(ReadTestFiles()));
 
     /// <summary>
     /// The same picture WITHOUT re-reading the project, when this session has already walked it
@@ -93,7 +97,7 @@ internal sealed partial class AddInSession
         List<TestFile> known;
         lock (_testsSeen)
         {
-            known = Order([.. _testsSeen.Values], ActiveProjectIdOrNull());
+            known = Shown([.. _testsSeen.Values]);
         }
 
         return ComposeTests(known);
@@ -101,13 +105,20 @@ internal sealed partial class AddInSession
 
     /// <summary>
     /// Walks every open project: its standard modules once, its tests out of that text, and its
-    /// support state. A file with no tests and no support module is left out - it has nothing to
-    /// say - except the active one, which stays so the chip has somewhere to install into.
+    /// support state. EVERY open file comes back, including one with nothing to say - the pane
+    /// leaves those out through <see cref="Shown"/>, and the actions below want them all: a file
+    /// named to an action has to be findable, and a file the walk has covered has to be known
+    /// afterwards or the reconcile asks for the walk again on every tree publish.
     /// </summary>
     private List<TestFile> ReadTestFiles()
     {
         var files = new List<TestFile>();
+
+        // The editor's own idea of active, read here because this is the host thread. It stands
+        // in for the shown project in the beat before a module has been adopted, which is the
+        // one moment a pane can be painted with nothing shown.
         var activeId = ActiveProjectId();
+        _walkedActiveProjectId = activeId;
 
         using var projects = _editor.GetObject("VBProjects");
         var count = projects?.GetInt32("Count") ?? 0;
@@ -131,20 +142,14 @@ internal sealed partial class AddInSession
                 // books open beside the fixtures). One name per file across the whole surface.
                 // The tree's name, and ONLY a name the tree knows. Closing a workbook leaves
                 // the editor holding its project for a beat while it is torn down, and that
-                // ghost is briefly the ACTIVE one - so the rule below let it in, and both
+                // ghost is briefly the ACTIVE one - which let it into the pane, where both
                 // panes flashed a file called "VBAProject" that nobody had opened (measured
                 // 2026-08-20 while closing the twin). A project the tree has never published
-                // is one the developer cannot see anyway.
-                var known = DisplayFromProjectId(id);
-                var display = known ?? own;
+                // is one the developer cannot see anyway; the gate on it now lives in
+                // <see cref="Shown"/>, with the active-file rule it belongs to.
+                var display = DisplayFromProjectId(id) ?? own;
                 var tests = TestRunService.DiscoverFrom(TestRunService.ReadStandardModules(project));
                 var support = TestRunService.SupportState(project);
-                if (tests.Count == 0 && support == "missing"
-                    && !(known is not null && string.Equals(id, activeId, StringComparison.OrdinalIgnoreCase)))
-                {
-                    continue;
-                }
-
                 files.Add(new TestFile(id, display, support, tests));
             }
             catch (Exception ex)
@@ -154,7 +159,7 @@ internal sealed partial class AddInSession
             }
         }
 
-        var ordered = Order(files, activeId);
+        var ordered = Order(files, PaneActiveProjectId());
         _testsWalked = true;
         lock (_testsSeen)
         {
@@ -175,6 +180,41 @@ internal sealed partial class AddInSession
             .OrderByDescending(file => string.Equals(file.ProjectId, activeId, StringComparison.OrdinalIgnoreCase))
             .ThenBy(file => file.Name, StringComparer.OrdinalIgnoreCase),
     ];
+
+    /// <summary>
+    /// The files worth PAINTING, in the order the pane reads them: every file that holds tests
+    /// or carries the support module, plus the file the developer is in - which stays even with
+    /// nothing to say, because that is where the chip's install has to land.
+    ///
+    /// STORAGE HOLDS EVERY OPEN FILE AND ONLY THIS LEAVES ONE OUT. The rule used to live in the
+    /// walk, which kept a file with nothing to say only while it was active, while the analysis
+    /// pass - the other writer of the same cache - dropped it outright. Two writers, two rules,
+    /// three symptoms (all measured 2026-08-21 with a 7-module, 81,795-line file open):
+    ///
+    ///   - opening a file with no tests offered NO install: the pane had never heard of it, so
+    ///     the chip spoke for some other file and reported "installed" for a file that had
+    ///     nothing installed;
+    ///   - a file listed by a walk VANISHED the moment its text moved, because the pass that
+    ///     read the change dropped it on the way past;
+    ///   - the reconcile asks whether every live file is known, and for such a file the answer
+    ///     could never become yes, so EVERY tree publish walked the whole session again: 95ms
+    ///     per module add with every file known against 228-412ms with one that could not be.
+    ///
+    /// The tree's name is still the gate on the active file, for the reason the walk gives
+    /// above: a workbook being torn down is briefly the active project, and a file the tree has
+    /// never published is one the developer cannot see.
+    /// </summary>
+    private List<TestFile> Shown(IEnumerable<TestFile> files)
+    {
+        var active = PaneActiveProjectId();
+        return Order(
+            files.Where(file =>
+                file.Tests.Count > 0
+                || file.Support != "missing"
+                || (string.Equals(file.ProjectId, active, StringComparison.OrdinalIgnoreCase)
+                    && DisplayFromProjectId(file.ProjectId) is not null)),
+            active);
+    }
 
     private string? ActiveProjectId()
     {
@@ -302,19 +342,17 @@ internal sealed partial class AddInSession
         var display = DisplayFromProjectId(projectId)
             ?? _testsSeen.GetValueOrDefault(projectId)?.Name
             ?? System.IO.Path.GetFileName(projectId);
+        List<TestFile> files;
         lock (_testsSeen)
         {
-            if (discovered.Count == 0 && support == "missing")
-            {
-                _testsSeen.Remove(projectId);
-            }
-            else
-            {
-                _testsSeen[projectId] = new TestFile(projectId, display, support, discovered);
-            }
+            // Stored whatever it holds, and READ UNDER THE SAME LOCK. The copy used to be taken
+            // outside it, so a pass composing on its own thread enumerated the dictionary the
+            // host thread's walk was clearing and refilling - the pass would have thrown
+            // "collection was modified", been caught as a failed pass, and left the pane holding
+            // whatever it had (found by reading, 2026-08-21).
+            _testsSeen[projectId] = new TestFile(projectId, display, support, discovered);
+            files = Shown([.. _testsSeen.Values]);
         }
-
-        var files = Order([.. _testsSeen.Values], ActiveProjectIdOrNull());
         var fingerprint = new StringBuilder();
         foreach (var file in files)
         {
@@ -351,6 +389,18 @@ internal sealed partial class AddInSession
     /// shown project is what the developer is looking at, which is what the ordering wants.
     /// </summary>
     private string? ActiveProjectIdOrNull() => _shownProject is { Length: > 0 } shown ? shown : null;
+
+    /// <summary>
+    /// The file the pane treats as the developer's own: the module they are looking at, and - in
+    /// the beat before the editor has adopted one, which is the whole of a fresh workbook's
+    /// first moments - whatever the last walk found active. Never COM from here: the analysis
+    /// pass composes off the host thread.
+    /// </summary>
+    private string? PaneActiveProjectId() => ActiveProjectIdOrNull() ?? _walkedActiveProjectId;
+
+    /// <summary>What the last walk found active, so a pane painted before any module is shown
+    /// still knows which file the install chip belongs to.</summary>
+    private volatile string? _walkedActiveProjectId;
 
     /// <summary>The project set the last pass reported, so an unchanged one publishes nothing.</summary>
     private string _lastProjectSet = string.Empty;
@@ -424,7 +474,7 @@ internal sealed partial class AddInSession
         List<TestFile> left;
         lock (_testsSeen)
         {
-            left = Order([.. _testsSeen.Values], ActiveProjectIdOrNull());
+            left = Shown([.. _testsSeen.Values]);
         }
 
         _testsFingerprint = string.Empty;
@@ -577,7 +627,7 @@ internal sealed partial class AddInSession
             // The walk above IS the refresh; publishing from it rather than through
             // PublishTests, which would walk every open file a second time for the same answer.
             case "refresh":
-                _editorSurface?.ShowTests(ComposeTests(files));
+                _editorSurface?.ShowTests(ComposeTests(Shown(files)));
                 _lastTestsPublishTicks = Environment.TickCount64;
                 return "refreshed";
 
@@ -757,7 +807,7 @@ internal sealed partial class AddInSession
         _testsRunning = true;
         _testsCurrent = null;
         _testsCurrentProject = null;
-        _testsLive = everything;
+        _testsLive = Shown(everything);
         PublishTests();
         var watch = System.Diagnostics.Stopwatch.StartNew();
         var landed = 0;

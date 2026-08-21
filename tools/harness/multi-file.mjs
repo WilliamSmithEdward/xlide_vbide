@@ -12,21 +12,25 @@
  *   the panes' scope selector grows a file tier, and a whole-file scope has to mean the file
  *     rather than every module that happens to share its name.
  *
- * Runs against TestFixture.xlsm and TestTwinFixture.xlsm open together:
+ * Runs against TestFixture.xlsm and TestTwinFixture.xlsm - and DebugFixture.xlsm beside them,
+ * which holds no tests and no XlideAssert. A THIRD FILE WITH NOTHING TO SAY is not padding: the
+ * pane's storage and its painting had two different rules for such a file, and every symptom of
+ * that lived where no session with only test-bearing files could see it (see the block below).
  *
- *   tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\TestFixture.xlsm,artifacts\fixtures\TestTwinFixture.xlsm
+ *   tools\harness\Start-Excel.ps1 -Fresh -Workbook artifacts\fixtures\TestFixture.xlsm,artifacts\fixtures\TestTwinFixture.xlsm,artifacts\fixtures\DebugFixture.xlsm
  *   node tools\harness\multi-file.mjs
  *
  * It puts back everything it changes: the twin's XlideAssert is removed to prove the per-file
  * gate and reinstalled through the same route the chip presses.
  */
-import { open, reporter, waitFor } from "./xlide-api.mjs";
+import { open, reporter, waitFor, waitUntilStable } from "./xlide-api.mjs";
 
 const api = await open();
 const { check, done } = reporter();
 
 const MAIN = "TestFixture.xlsm";
 const TWIN = "TestTwinFixture.xlsm";
+const PLAIN = "DebugFixture.xlsm";
 
 const ask = (script) => api.ask(script);
 const showPane = (which) =>
@@ -52,10 +56,13 @@ try {
   // ---- both files are open, and both are the runner's ----
   const listed = await api.tests();
   const named = listed.files.map((file) => file.file).sort();
+  // NOT a count: a file with no tests is listed only while the developer is IN it, so a session
+  // with the plain fixture beside the pair has two files or three depending on which one the
+  // editor adopted at launch. What must hold is that neither test-bearing file is missing.
   check("the runner sees both open files, not just the front one",
-    named.length === 2 && named[0] === MAIN && named[1] === TWIN, named.join(", "));
+    named.includes(MAIN) && named.includes(TWIN), named.join(", "));
 
-  if (named.length !== 2) {
+  if (!named.includes(MAIN) || !named.includes(TWIN)) {
     throw new Error(`this suite needs ${MAIN} and ${TWIN} open together; it found ${named.join(", ") || "neither"}`);
   }
 
@@ -135,7 +142,9 @@ try {
   const offered = await waitFor("the file select to offer both open files", async () => {
     const shape = await ask(
       '(() => [...document.querySelectorAll("#tests-scope-file option")].map(o => o.textContent))()');
-    return Array.isArray(shape) && shape.length === 3 ? shape : null;
+    // Not a count: the plain fixture beside the pair is offered too while the editor is in it.
+    return Array.isArray(shape) && shape.some((one) => one.startsWith(`${MAIN} (10)`))
+      && shape.some((one) => one.startsWith(`${TWIN} (5)`)) ? shape : null;
   }, { budgetMs: 20000 });
   check("the file select offers All Files and each open file, with its own count",
     offered[0].startsWith("All Files (15)")
@@ -203,6 +212,66 @@ try {
     '(() => [...new Set([...document.querySelectorAll("#panel-list .row")].map(r => r.dataset.project))])()');
   check("...and it shows that file's findings alone",
     Array.isArray(rows) && rows.length === 1 && rows[0] === TWIN, JSON.stringify(rows));
+
+  /*
+   * ---- a file with NOTHING TO SAY is still the file the developer is in ----
+   *
+   * The pane's cache had two writers - the COM walk and the analysis pass - and they disagreed
+   * about a file holding neither tests nor XlideAssert: the walk kept it while it was active,
+   * the pass dropped it outright. One disagreement, three symptoms, none of them reachable in a
+   * session where every open file holds tests (all measured 2026-08-21):
+   *
+   *   the file being worked in was absent from the pane, so there was no install to press and
+   *     the chip spoke for a different file entirely;
+   *   a file a walk had listed VANISHED the moment its text moved, mid-typing;
+   *   the reconcile behind the tree asks whether every open file is known, and for this file
+   *     the answer could never become yes - so every tree publish walked every module of every
+   *     project again (95ms per module add with every file known, 228-412ms without).
+   */
+  await showPane("tests");
+  const plain = await api.project(PLAIN);
+  const plainModule = plain.components.find((one) => one.kind === "module")?.name;
+  check(`${PLAIN} is open beside the pair, with a standard module and no tests of its own`,
+    typeof plainModule === "string", JSON.stringify(plain.components?.map((one) => one.name)));
+
+  await api.caret(1, { module: plainModule, project: PLAIN });
+  const spell = (answer) => answer.files.map((one) => `${one.file}:${one.support}:${one.tests}`).join(" | ");
+  const inPlain = await waitFor(`${PLAIN} to be the pane's own file`, async () => {
+    const now = await api.tests();
+    return now.files.some((one) => one.file === PLAIN) ? now : null;
+  }, { budgetMs: 20000 });
+  const standing = inPlain.files.find((one) => one.file === PLAIN);
+  check("the file being worked in is listed even with nothing to say, so an install has somewhere to land",
+    standing.support === "missing" && standing.tests === 0, spell(inPlain));
+
+  const walked = await api.tests({ action: "refresh" });
+  const cached = await api.tests();
+  check("a refresh and a repaint answer the same files - one store, one rule about what is shown",
+    spell(walked) === spell(cached), `${spell(walked)}  vs  ${spell(cached)}`);
+
+  // Its TEXT MOVES: a module added is a change the analysis pass reads, which is the pass that
+  // used to drop the file on its way past.
+  await api.component("add", { kind: "module", name: BROKEN, project: PLAIN });
+  plantedIn = [...(plantedIn ?? []), PLAIN];
+  // Read until it STOPS MOVING, rather than once: a check that asked the moment the add
+  // returned would pass on the answer standing before the pass had been anywhere near it.
+  const settled = await waitUntilStable(async () => spell(await api.tests()),
+    { quiet: 4, pollMs: 400, budgetMs: 25000 });
+  check("...and it is still listed once the pass that read the change has been past",
+    settled.includes(PLAIN), settled);
+
+  const askedPlain = await api.tests({ action: "run", file: PLAIN });
+  check("an action naming it answers about that file, rather than refusing to find it",
+    askedPlain.detail === `no tests to run in ${PLAIN}`, askedPlain.detail);
+
+  // The install the developer came for: scoped to their own file, the chip is that file's.
+  await pickScope("tests-scope-file", PLAIN);
+  const chip = await ask(
+    '(() => ({install:document.querySelector("#tests-install")?.textContent,'
+    + ' empty:document.querySelector("#tests-list .tests-empty")?.textContent}))()');
+  check("scoped to it, the chip offers ITS install and the list says where the tests are instead",
+    chip.install === "Install XlideAssert" && chip.empty?.includes(`No tests in ${PLAIN}`),
+    JSON.stringify(chip));
 } finally {
   await ask("(() => { for (const one of document.querySelectorAll('.scope-select')) {"
     + " one.value = one.classList.contains('scope-select-file') ? '@allfiles' : '@all';"
