@@ -214,7 +214,12 @@ export class TestsPane {
 
   /** The pane asked to be shown: rediscover, so the tree matches the code as it stands. */
   shown(): void {
-    this.deps.act("refresh");
+    // NOT "refresh": showing a pane is not a reason to re-read the project. On a large one
+    // that walk is a third of a second of COM on the host thread (81,795 lines measured
+    // 2026-08-20), and it buys nothing the analysis pass has not already told this pane -
+    // auto-rediscovery keeps it current whether it is on screen or not. The refresh BUTTON
+    // still forces the read, which is what a button labelled refresh is for.
+    this.deps.act("show");
   }
 
   /** The active tab moved. A Current Module scope follows it; every other scope holds still. */

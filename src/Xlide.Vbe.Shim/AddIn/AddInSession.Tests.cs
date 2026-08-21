@@ -66,7 +66,38 @@ internal sealed partial class AddInSession
     /// outcomes. Discovery walks the live projects on every call - tests are code, and code
     /// moves under the pane - except mid-run, where the run's own snapshot stands in.
     /// </summary>
+    /// <summary>True once a walk has covered every open file, so the cache can be trusted.</summary>
+    private bool _testsWalked;
+
     internal SetTestsMessage TestsSnapshot() => ComposeTests(_testsLive ?? ReadTestFiles());
+
+    /// <summary>
+    /// The same picture WITHOUT re-reading the project, when this session has already walked it
+    /// once: the analysis pass hands every file's text to <see cref="OnAnalysisSnapshot"/> as it
+    /// moves, so the cache is as fresh as the last pass - which is the same freshness the pane
+    /// has always run on. A walk of a large project is a third of a second of COM on the host
+    /// thread (81,795 lines, measured 2026-08-20), and showing a pane should not cost that.
+    /// </summary>
+    private SetTestsMessage TestsSnapshotCached()
+    {
+        if (_testsLive is { } live)
+        {
+            return ComposeTests(live);
+        }
+
+        if (!_testsWalked)
+        {
+            return ComposeTests(ReadTestFiles());
+        }
+
+        List<TestFile> known;
+        lock (_testsSeen)
+        {
+            known = Order([.. _testsSeen.Values], ActiveProjectIdOrNull());
+        }
+
+        return ComposeTests(known);
+    }
 
     /// <summary>
     /// Walks every open project: its standard modules once, its tests out of that text, and its
@@ -124,6 +155,7 @@ internal sealed partial class AddInSession
         }
 
         var ordered = Order(files, activeId);
+        _testsWalked = true;
         lock (_testsSeen)
         {
             _testsSeen.Clear();
@@ -506,6 +538,22 @@ internal sealed partial class AddInSession
     /// </summary>
     private string HandleTestsAction(string action, string? target, string? file)
     {
+        // BEFORE THE WALK, because the walk is the thing this action exists to avoid: showing
+        // the pane repaints from what the analysis pass has already told us.
+        if (action == "show")
+        {
+            try
+            {
+                _editorSurface?.ShowTests(TestsSnapshotCached());
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"tests: the pane could not be repainted, {ex.Message}");
+            }
+
+            return "shown";
+        }
+
         var files = ReadTestFiles();
         if (files.Count == 0)
         {
@@ -526,8 +574,11 @@ internal sealed partial class AddInSession
 
         switch (action)
         {
+            // The walk above IS the refresh; publishing from it rather than through
+            // PublishTests, which would walk every open file a second time for the same answer.
             case "refresh":
-                PublishTests();
+                _editorSurface?.ShowTests(ComposeTests(files));
+                _lastTestsPublishTicks = Environment.TickCount64;
                 return "refreshed";
 
             case "install":

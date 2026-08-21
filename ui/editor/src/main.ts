@@ -747,7 +747,7 @@ function boot(): void {
     removeComponent: (name, project) => bridge.removeComponent(name, project),
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
-    testsShown: () => bridge.testsAction("refresh"),
+    testsShown: () => bridge.testsAction("show"),
   });
   bridge.shell = shell;
 

@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Runtime.InteropServices;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Core.Editor;
@@ -3616,7 +3616,11 @@ internal sealed partial class AddInSession
                         testsFile);
                 }
 
-                var testsNow = TestsSnapshot();
+                // From the CACHE, not a fresh walk: every action above has just walked the open
+                // files itself, so a second read here answers the same thing at the same cost
+                // again - a third of a second on a large project, on every route call
+                // (measured 2026-08-20). A bare list with nothing walked yet still reads.
+                var testsNow = TestsSnapshotCached();
                 return System.Text.Json.JsonSerializer.Serialize(
                     new DebugTestsReply(
                         testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest,
