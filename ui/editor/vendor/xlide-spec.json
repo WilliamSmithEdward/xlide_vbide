@@ -1,6 +1,6 @@
 {
   "source": "xlide_vscode",
-  "commit": "0dc935c2ee4ea5d4511b675eff7ee9b0d4bd7bc4",
+  "commit": "47f3db4d1157c3ad1ac3d93db42b05abf24cd9c2",
   "entries": [
     "analyzer/lexer/strippedLines",
     "vbaSmartEnter",
@@ -8,14 +8,14 @@
     "vbaSourceScan"
   ],
   "files": {
-    "analyzer/lexer/keywordTable.ts": "8ad84b78d73c56012d2912d7296817ab22e59a00aec53f5d19a755fd687713ba",
+    "analyzer/lexer/keywordTable.ts": "dfb1b22298e37a69f5e42ce6900c41a12601b58230d8c89d22b13895c238d4d9",
     "analyzer/lexer/strippedLines.ts": "900c70d7c7d5423ec231df7c17f02cc376a651630f1830230ebf233b27c57169",
     "analyzer/lexer/tokenKinds.ts": "2032c749c1290f2c40e4c7d5882984e092a74e451f0e2dcbc21443fbcee6194e",
-    "analyzer/lexer/tokenize.ts": "fc40e684b1f8e9f9b16083960ecf31204cf0c59623856353c194639dfe725844",
+    "analyzer/lexer/tokenize.ts": "8997ac0554c06dc7f5edb7c9e9876aef5bb223f8149d8d48bd51a59f58b2240b",
     "analyzer/lexer/trivia.ts": "6fad65c2a9b540b241ddb430eb2898c834210cf59919811aabaf2eebc13cb6d7",
     "vbaSmartEnter.ts": "0cd52149861094dd5323c0ec17931dfb1b18df7496046b5589a378629de06162",
     "vbaSmartTab.ts": "551d20c3ee06e9a47996f39f352065e83a36d164f7d92e03c87ef46e25f00b0c",
-    "vbaSourceScan.ts": "b7626a93d2adf9b47138c8b75ff726dd2f6b58834a38ab6ade16b980ddb0c398",
-    "vbaStructuralDiagnostics.ts": "14cd1791114e4b56ffc48faa99a5c3178c76e5f7efec009d7212758924c3cba4"
+    "vbaSourceScan.ts": "2c105ef42e61336507770401a70dc83dc62d60d95c93f83f3530ff9753844ff7",
+    "vbaStructuralDiagnostics.ts": "e1b362ff840b2ff71c72d124db08162360ef11af2cadce70fb65210db8219225"
   }
 }
