@@ -358,6 +358,71 @@ if (runnable) try {
   }
 
   /*
+   * TWO ENTERS LEAVE TWO INDENTED LINES, not one indented and one at column 1.
+   *
+   * The editor trims indentation it inserted itself as soon as the caret leaves the line without
+   * typing anything - on by default, and sensible for a language whose files are read in diffs.
+   * VBA's editor does not: press Enter twice in the VBE and both lines keep the indent, and the
+   * module it writes holds the spaces. So the trim made this surface disagree with the one it
+   * covers, and arrowing back up landed at column 1 instead of where the code sits (reported
+   * 2026-08-21).
+   *
+   * Pressed rather than typed, for the reason the block above gives: only a real Enter runs the
+   * editor's enter rules at all.
+   */
+  // Driven entirely through the PAGE - no write to the module. By this point the surface holds
+  // edits the module has not been given, and a host rewrite deliberately leaves an unwritten
+  // document alone, so writing a module here and reading it back tests the write path rather
+  // than the Enter (it timed out doing exactly that while this check was being written).
+  const beforeTwo = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+    .split(/\r?\n/);
+
+  // An indented line that is not a block opener: a plain Enter, not smart Enter's block layout.
+  const plain = beforeTwo.findIndex((one) =>
+    /^\s+\S/.test(one)
+    && !/\b(if|for|do|while|with|select|sub|function|property|type|enum)\b/i.test(one));
+  check("the module holds an indented statement to press Enter after",
+    plain >= 0, `lines were ${JSON.stringify(beforeTwo.slice(0, 8))}`);
+
+  if (plain >= 0) {
+    const at = plain + 1;
+    const endOfIt = beforeTwo[plain].length + 1;
+    await api.caret(at, { module: target, project: project.projectId, column: endOfIt });
+    await waitFor("the caret to reach the end of the indented statement", async () => {
+      const focus = (await api.ui()).focus;
+      return focus?.line === at && focus?.column === endOfIt;
+    });
+
+    await api.act("press", { key: "Enter" });
+    await api.act("press", { key: "Enter" });
+    await waitFor("both new lines to exist", async () =>
+      ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+        .split(/\r?\n/).length >= beforeTwo.length + 2);
+
+    const afterTwo = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+      .split(/\r?\n/);
+    const indent = beforeTwo[plain].search(/\S/);
+    const first = afterTwo[plain + 1] ?? "";
+    check("pressing Enter twice leaves the FIRST line indented, not emptied",
+      first.trim() === "" && first.length >= indent,
+      `it came back as ${JSON.stringify(first)}, around it ${JSON.stringify(afterTwo.slice(plain, plain + 4))}`);
+    // AND ARROWING BACK UP LANDS ON THE INDENT, which is the gesture that was reported: the
+    // caret after the second Enter sits on the SECOND line, which keeps its whitespace either
+    // way, so asking about that one alone passes with the trim on and proves nothing.
+    //
+    // Through the editor's own cursorUp - what the ArrowUp key is bound to. `press` carries the
+    // keys that edit (Enter, Tab, Backspace, Delete, Escape) and not the ones that only move,
+    // and a caret set through the route would not carry the column the arrow remembers.
+    const back = await api.ask(
+      '(() => { const ed = globalThis.xlideBridge.workspace.activeEditor();'
+      + ' ed.trigger("keyboard", "cursorUp", null); const at = ed.getPosition();'
+      + ' return { line: at.lineNumber, column: at.column }; })()');
+    check("...and arrowing back up onto it lands on that indent, not at column 1",
+      back?.line === plain + 2 && (back?.column ?? 0) > indent,
+      `the caret came back to line ${back?.line}, column ${back?.column}`);
+  }
+
+  /*
    * AND THE FINDING GOES AWAY WHEN THE CODE DOES.
    *
    * The pass used to publish per project and only when that project had something to say, so a

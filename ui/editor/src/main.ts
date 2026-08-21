@@ -386,6 +386,15 @@ function boot(): void {
     useTabStops: true,
     detectIndentation: false,
     autoIndent: "full",
+    // A BLANK LINE KEEPS THE INDENT IT WAS GIVEN, which is what the editor underneath does.
+    //
+    // On by default, this removes indentation the editor inserted as soon as the caret leaves
+    // the line without typing anything - so pressing Enter twice left the first of the two
+    // lines at column 1, and arrowing back up landed there instead of at the indent the code
+    // around it sits on (the owner, 2026-08-21). The native VBE keeps that whitespace and so
+    // does the module it writes, so trimming it was this editor disagreeing with the thing it
+    // covers.
+    trimAutoWhitespace: false,
     wordWrap: "off",
     smoothScrolling: false,
     fixedOverflowWidgets: true,
