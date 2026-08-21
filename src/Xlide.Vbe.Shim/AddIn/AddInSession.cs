@@ -2581,78 +2581,58 @@ internal sealed partial class AddInSession : IDisposable
 
         wrote = null;
 
-        if (baseline == text)
+        var diff = Core.Editor.LineDiff.Between(baseline, text, LargestDiffLines);
+        if (diff.Change == Core.Editor.LineChange.Wholesale)
+        {
+            return false;
+        }
+
+        if (diff.Change == Core.Editor.LineChange.Identical)
         {
             // The module already holds exactly this. Nothing is written, so there is nothing to
             // read back and nothing that could have been converted on the way in.
             return true;
         }
 
-        var oldLines = SplitPhysicalLines(baseline);
-        var newLines = SplitPhysicalLines(text);
-
-        var prefix = 0;
-        var maxPrefix = Math.Min(oldLines.Length, newLines.Length);
-        while (prefix < maxPrefix && oldLines[prefix] == newLines[prefix])
-        {
-            prefix++;
-        }
-
-        var suffix = 0;
-        var maxSuffix = Math.Min(oldLines.Length, newLines.Length) - prefix;
-        while (suffix < maxSuffix
-               && oldLines[oldLines.Length - 1 - suffix] == newLines[newLines.Length - 1 - suffix])
-        {
-            suffix++;
-        }
-
-        var oldWindow = oldLines.Length - prefix - suffix;
-        var newWindow = newLines.Length - prefix - suffix;
-
-        if (oldWindow > LargestDiffLines || newWindow > LargestDiffLines)
-        {
-            return false;
-        }
-
         // Never ask to delete lines that are not there.
         //
-        // An EMPTY module has CountOfLines 0, but the empty baseline splits into one empty line -
-        // so the window says "delete 1 from line 1" and the editor refuses the whole write with
-        // "Invalid procedure call or argument". Nothing is written, and the only place it is said
-        // is the log: the write route's reply looks like every other success. It took the code out
-        // of the first module of every fixture built through the door, leaving a workbook that
+        // An EMPTY module has CountOfLines 0, but an empty text is one empty line - so the window
+        // says "delete 1 from line 1" and the editor refuses the whole write with "Invalid
+        // procedure call or argument". Nothing is written, and the only place it is said is the
+        // log: the write route's reply looks like every other success. It took the code out of
+        // the first module of every fixture built through the door, leaving a workbook that
         // looked right and no longer exercised what it existed for (2026-08-07).
         var present = module.GetInt32("CountOfLines");
-        if (prefix + oldWindow > present)
+        var removing = diff.Removing;
+        if (diff.At - 1 + removing > present)
         {
-            oldWindow = Math.Max(0, present - prefix);
+            removing = Math.Max(0, present - (diff.At - 1));
         }
 
-        if (oldWindow > 0)
+        if (removing > 0)
         {
-            module.Invoke("DeleteLines", prefix + 1, oldWindow);
+            module.Invoke("DeleteLines", diff.At, removing);
         }
 
-        var inserted = newWindow > 0
-            ? string.Join("\r\n", newLines.Skip(prefix).Take(newWindow))
-            : string.Empty;
-
-        if (newWindow > 0)
+        // ON THE COUNT, not on whether the text is empty: one empty line is a line, and reading
+        // it as nothing to insert drops the blank line at the end of a text that ends with an
+        // ending - which is how a file on disk ends, so an import lost it.
+        if (diff.Inserting > 0)
         {
             try
             {
-                module.Invoke("InsertLines", prefix + 1, inserted);
+                module.Invoke("InsertLines", diff.At, diff.Text);
             }
             catch
             {
-                // The lines just removed, back where they were. They are at most LargestDiffLines,
-                // and they are already here, so this costs one call and no read at all.
-                if (oldWindow > 0)
+                // The lines just removed, back where they were. They are at most
+                // LargestDiffLines, and the window is already in hand, so this costs one call
+                // and no read at all.
+                if (removing > 0 && diff.Removed.Length > 0)
                 {
                     try
                     {
-                        module.Invoke("InsertLines", prefix + 1,
-                            string.Join("\r\n", oldLines.Skip(prefix).Take(oldWindow)));
+                        module.Invoke("InsertLines", diff.At, diff.Removed);
                     }
                     catch (Exception putBack)
                     {
@@ -2664,7 +2644,7 @@ internal sealed partial class AddInSession : IDisposable
             }
         }
 
-        wrote = new LineWindow(prefix + 1, newWindow, newLines.Length, inserted);
+        wrote = new LineWindow(diff.At, diff.Inserting, diff.TotalLines, diff.Text);
         return true;
     }
 
@@ -2702,9 +2682,6 @@ internal sealed partial class AddInSession : IDisposable
             return false;
         }
     }
-
-    private static string[] SplitPhysicalLines(string text) =>
-        text.Split(["\r\n", "\n"], StringSplitOptions.None);
 
     /// <summary>
     /// Breakpoints the developer has set, by module.
