@@ -358,6 +358,24 @@ if (runnable) try {
     `caret went to line ${joined.data?.line}, wanted ${indented}, on ${JSON.stringify(joined.data?.text)}`);
 
   /*
+   * AND THE EDITOR UNDERNEATH HOLDS WHAT THIS ONE DOES.
+   *
+   * The two rules above - a blank line keeping its indent, and Backspace taking all of it - are
+   * both about whitespace, which is exactly the kind of difference a page can show while the
+   * module holds something else. Neither is finished until the native pane agrees, so the
+   * write-back is waited for and the two are compared, the way the format check above does it.
+   */
+  const afterTyping = await waitFor("the write-back to reach the native pane", async () => {
+    const answer = await api.inSync();
+    return answer.agreed ? answer : null;
+  }, { budgetMs: 20000 }).catch(async () => api.inSync());
+
+  check("the native editor holds what these rules left behind, whitespace included",
+    afterTyping.agreed && afterTyping.contentAgrees,
+    `native ${afterTyping.nativeLines} line(s), surface ${afterTyping.surfaceLines} line(s), `
+    + `content agreeing: ${afterTyping.contentAgrees}`);
+
+  /*
    * ENTER, AND WHAT HANGS OFF IT.
    *
    * Untestable until 2026-08-09. `type` inserts a string, and Monaco applies its enter rules only
