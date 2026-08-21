@@ -182,9 +182,9 @@ internal sealed partial class AddInSession
     ];
 
     /// <summary>
-    /// The files worth PAINTING, in the order the pane reads them: every file that holds tests
-    /// or carries the support module, plus the file the developer is in - which stays even with
-    /// nothing to say, because that is where the chip's install has to land.
+    /// The files the pane lists, in the order it reads them: every file the tree has published,
+    /// the developer's own first - because the file select has to be able to offer all of them,
+    /// and the install chip has to be able to land on any one.
     ///
     /// STORAGE HOLDS EVERY OPEN FILE AND ONLY THIS LEAVES ONE OUT. The rule used to live in the
     /// walk, which kept a file with nothing to say only while it was active, while the analysis
@@ -207,13 +207,19 @@ internal sealed partial class AddInSession
     private List<TestFile> Shown(IEnumerable<TestFile> files)
     {
         var active = PaneActiveProjectId();
-        return Order(
-            files.Where(file =>
-                file.Tests.Count > 0
-                || file.Support != "missing"
-                || (string.Equals(file.ProjectId, active, StringComparison.OrdinalIgnoreCase)
-                    && DisplayFromProjectId(file.ProjectId) is not null)),
-            active);
+
+        // EVERY FILE THE TREE KNOWS, now that the pane has a file select on it.
+        //
+        // This used to keep a file only while it held tests, carried the support module, or was
+        // the one being worked in. That was right for a list of ROWS and wrong for a list of
+        // FILES: a workbook with no tests and no XlideAssert vanished from the select the moment
+        // the developer looked at something else, so the one file a developer most needs to point
+        // the install chip at was the one file they could not choose (the owner, 2026-08-21).
+        //
+        // The tree's name is still the gate, for the reason the walk gives: a workbook being torn
+        // down is briefly the active project, and a file the tree has never published is one the
+        // developer cannot see. A file with nothing to say now says so, with a count of zero.
+        return Order(files.Where(file => DisplayFromProjectId(file.ProjectId) is not null), active);
     }
 
     private string? ActiveProjectId()
@@ -258,25 +264,32 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// The session's one-word support standing, worst first, counting only files that hold tests
-    /// - a file with no tests needs no XlideAssert and must not drag the answer red. With no
-    /// tests open anywhere the active file's own state stands, so the chip still offers the
-    /// install a developer about to write their first test is looking for.
+    /// The session's one-word support standing, worst first, across EVERY file the pane lists.
+    ///
+    /// It used to count only files that hold tests, on the reasoning that a file with no tests
+    /// needs no XlideAssert and should not drag the answer red. That reads well and it lies: with
+    /// nothing open holding tests the condition is vacuously satisfied, so the chip went green and
+    /// its tooltip said "every open file that holds tests carries an XlideAssert matching this
+    /// product" - true, and about no files at all. The owner reported it as a chip that stayed
+    /// green with a workbook selected that plainly did not have it (2026-08-21).
+    ///
+    /// So the whole-session answer is now the worst standing among the files the pane lists, which
+    /// is what "All Files" has to mean if choosing one file means that file. A file with nothing
+    /// to say still says it: the chip offers the install, and the tooltip names which files.
     /// </summary>
     private static string SummarySupport(IReadOnlyList<TestFile> files)
     {
-        var holding = files.Where(file => file.Tests.Count > 0).ToList();
-        if (holding.Count == 0)
-        {
-            return files.Count > 0 ? files[0].Support : "missing";
-        }
-
-        if (holding.Any(file => file.Support == "missing"))
+        if (files.Count == 0)
         {
             return "missing";
         }
 
-        return holding.Any(file => file.Support == "outdated") ? "outdated" : "installed";
+        if (files.Any(file => file.Support == "missing"))
+        {
+            return "missing";
+        }
+
+        return files.Any(file => file.Support == "outdated") ? "outdated" : "installed";
     }
 
     /// <summary>The last auto-published discovery shape, so unchanged passes stay silent.</summary>
@@ -633,17 +646,17 @@ internal sealed partial class AddInSession
 
             case "install":
             {
-                // Unscoped, this installs into every file that HAS tests and needs it, which is
-                // what the chip promises when it is speaking for a whole session. A file with no
-                // tests is never written to on a guess.
+                // Unscoped, this installs into every file that needs it - which is what the chip
+                // says out loud when it is speaking for All Files, down to the count in its own
+                // label. It used to skip files holding no tests, on the rule that one is "never
+                // written to on a guess"; that rule and the chip's promise cannot both be kept,
+                // and now that the developer picks the file themselves the press is not a guess
+                // (the owner, 2026-08-21).
                 var wanted = file is { Length: > 0 }
                     ? scope
-                    : [.. scope.Where(one => one.Tests.Count > 0 && one.Support != "installed")];
-                if (wanted.Count == 0)
-                {
-                    wanted = [.. scope.Where(one => one.Tests.Count > 0)];
-                }
+                    : [.. scope.Where(one => one.Support != "installed")];
 
+                // Nothing needs it, so the press is a deliberate re-install of the file in hand.
                 if (wanted.Count == 0)
                 {
                     wanted = [scope[0]];

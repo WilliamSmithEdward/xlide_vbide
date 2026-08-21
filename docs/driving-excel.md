@@ -1904,15 +1904,37 @@ question a single-file session cannot ask:
   one, and `file=` says which copy is meant;
 - `XlideAssert` is a module IN a file, so support is per file: a run refuses for a file that
   lacks it and proceeds for one that has it, and an unscoped `install` fixes every file that
-  holds tests and needs it;
+  needs it - every one, not only those holding tests, because that is what the chip says out
+  loud when it is speaking for All Files;
 - a result is filed under (file, test), so two files' `InvoiceTests.Adds` are two tests.
 
-A file with NOTHING TO SAY - no tests and no `XlideAssert` - is answered for but not listed:
-`files` carries it only while the developer is in it, which is what gives the chip somewhere to
-install into before the first test exists. It is still addressable, so `run&file=` on it answers
-`no tests to run in <file>` rather than refusing to find it, and `install&file=` puts XlideAssert
-in. The store behind the pane holds every open file either way; only the painting leaves one out
-(the three symptoms of getting that split wrong are written on `Shown` in AddInSession.Tests.cs).
+**A file with NOTHING TO SAY - no tests and no `XlideAssert` - is listed anyway**, with a count of
+zero. It has to be: the pane's file select is how the install chip is pointed at a file, and a
+file that is not offered is one the developer cannot choose. `files` carries every file the tree
+has published; the tree's name is still the gate, because a workbook being torn down is briefly
+the active project.
+
+That was not always so, and the three ways it went wrong are worth knowing (all 2026-08-21):
+
+- listed only while it held tests, carried the support module, or was being worked in - so it
+  vanished from the select the moment the developer looked elsewhere;
+- nothing republished the pane when the developer moved between files, so the route answered
+  correctly on every read while the pane drew a picture 36 minutes old;
+- the session's one-word `support` counted only files that HOLD TESTS, which with nothing open
+  holding tests is vacuously satisfied - a green chip whose tooltip said "every open file that
+  holds tests carries an XlideAssert", true and about no files at all.
+
+**The install chip answers for whatever the file select is pointing at**: one file, and it is that
+file's and installs into it; All Files, and it is the worst standing among all of them and
+installs into every one that needs it. `tests-support.mjs` pins it, and needs files that DISAGREE
+about XlideAssert to ask the question at all:
+
+```bash
+node tools\harness	ests-support.mjs
+```
+
+`run&file=` on a file with no tests answers `no tests to run in <file>` rather than refusing to
+find it, and `install&file=` puts XlideAssert in.
 
 **The scope selector** is the panes' own state and is not told to the host, so it is driven
 through the page rather than through a route. Both list panes carry one: `#problems-scope` and

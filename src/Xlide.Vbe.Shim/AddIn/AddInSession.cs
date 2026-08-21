@@ -7376,10 +7376,28 @@ internal sealed partial class AddInSession : IDisposable
         // project first, and markers for a same-named module elsewhere stay off this surface.
         // The analysis service hears it too, so completions, hover, and live text for a shared
         // name address the workbook actually on screen.
+        var movedFile = !string.Equals(_shownProject, owner, StringComparison.OrdinalIgnoreCase);
         _shownProject = owner;
         if (_analysis is not null)
         {
             _analysis.PreferredProject = owner;
+        }
+
+        // THE TESTS PANE SPEAKS FOR THE FILE THE DEVELOPER IS IN, so it has to hear when that
+        // changes. Which files the pane lists is decided by `Shown()`, and one of its three rules
+        // is "the file being worked in, even with nothing to say" - so moving between workbooks
+        // changes the list, the install chip's answer, and whether the file select appears at all.
+        // Nothing published for it. Every read of the `tests` route was correct and the PANE was
+        // whatever the last install or refresh left behind: with DebugFixture and TwinFixture open
+        // and TwinFixture on screen, the route answered both files and "missing" while the pane
+        // still drew one file and a green "XlideAssert Installed" from 36 minutes earlier
+        // (2026-08-21, the owner's report).
+        //
+        // Only when the FILE moves. Switching modules inside one workbook changes nothing the
+        // pane shows, and this is on the path every tab change takes.
+        if (movedFile)
+        {
+            PublishTests();
         }
 
         // A project the engine has never been seeded with - a workbook just opened or created.

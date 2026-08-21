@@ -308,16 +308,20 @@ export class TestsPane {
       ? `The last run finished ${new Date(state.ranAt).toLocaleString()}`
       : "";
 
-    // The support chip speaks for WHAT THE PANE IS SHOWING. XlideAssert is a module inside a
-    // file, so a session with two files open has two answers: scoped to one file, the chip is
-    // that file's and installs into it; unscoped, it is the worst standing among the files that
-    // hold tests, and installing fixes all of them - which is what a chip speaking for the whole
-    // session has to mean.
+    // The support chip speaks for WHAT THE FILE SELECT IS POINTING AT. XlideAssert is a module
+    // inside a file, so a session with two files open has two answers: scoped to one file, the
+    // chip is that file's and installs into it; on All Files it is the worst standing among all
+    // of them, and installing fixes every one - which is what "All Files" has to mean once
+    // choosing one file means that file (the owner, 2026-08-21).
+    //
+    // `needing` used to require tests > 0, which is why the chip could read green over a file
+    // that plainly had no XlideAssert: with nothing open holding tests the list was empty and
+    // the session answer was vacuously satisfied.
     const scopedFile = this.scope.scopeFile();
     const standing = scopedFile
       ? state.files.find((file) => file.file.toLowerCase() === scopedFile.toLowerCase())?.support ?? state.support
       : state.support;
-    const needing = state.files.filter((file) => file.tests > 0 && file.support !== "installed");
+    const needing = state.files.filter((file) => file.support !== "installed");
     const wheres = scopedFile ?? (needing.length > 1 ? `${needing.length} files` : needing[0]?.file ?? "this file");
 
     // TWO FILES CAN NEED DIFFERENT THINGS AT ONCE - one has no XlideAssert, the other has an old
@@ -333,7 +337,7 @@ export class TestsPane {
       this.install.textContent = "XlideAssert Installed";
       this.install.title = scopedFile
         ? `The XlideAssert module in ${scopedFile} matches this product.`
-        : "Every open file that holds tests carries an XlideAssert matching this product.";
+        : "Every open file carries an XlideAssert matching this product.";
       this.install.classList.remove("tests-install-needed");
       this.install.classList.add("tests-install-ok");
       this.install.disabled = true;

@@ -655,7 +655,15 @@ if ($Live) {
             # symptoms - no install offered for the file being worked in, the file vanishing
             # mid-typing, and a full COM walk of the session on every tree publish - were
             # invisible while every open file held tests (2026-08-21).
-            'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm' = @('multi-file.mjs')
+            #
+            # tests-support joins them because it needs files that DISAGREE about XlideAssert, and
+            # this is the only session that has them by construction: two test fixtures carrying
+            # it and one file that does not. The install chip used to read green over a file that
+            # plainly had none - the pane listed a file only while it held tests or was being
+            # worked in, nothing republished it when the developer moved, and the session's answer
+            # counted only files holding tests, which with none open is vacuously satisfied
+            # (2026-08-21).
+            'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm' = @('multi-file.mjs', 'tests-support.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {
