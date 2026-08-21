@@ -1043,6 +1043,26 @@ removes are already in hand.
 door's three-second budget for the host thread, so a caller writing tens of thousands of lines
 reads the line count back rather than trusting the reply either way. `build-fixture.mjs` does.
 
+**What goes in is what the module holds, and proving it needs over 400 lines.** A write under
+that goes out as a line diff; above it the whole module is replaced, and only the second path
+could reach `CodeModule.AddFromString` - which appends a line reading `()` to the bottom of any
+module holding a `Declare` broken over a line continuation:
+
+```vba
+Private Declare PtrSafe Function utc_popen Lib "/usr/lib/libc.dylib" Alias "popen" _
+    (ByVal utc_Command As String, ByVal utc_Mode As String) As LongPtr
+```
+
+Not a rewrite of the statement: a new line of nonsense at the end, which does not compile. It is
+the editor's own doing - reproducible in a throwaway workbook with no add-in loaded - and the
+same declaration on ONE line is clean, which is why nothing smaller than a real module found it.
+Whole-module writes use `InsertLines` for that reason, and drop the blank line the editor leaves
+after them. `write-fidelity.mjs` pins it, deliberately with a module big enough to take that path:
+
+```bash
+node tools\harness\write-fidelity.mjs
+```
+
 ### Waiting, rather than sleeping
 
 ```js

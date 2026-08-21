@@ -2399,7 +2399,7 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     try
                     {
-                        module.Invoke("AddFromString", text);
+                        FillEmptyModule(module, text);
                     }
                     catch (Exception refusal)
                     {
@@ -2551,6 +2551,43 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
+    /// Puts a text into an EMPTY module, and only that text.
+    ///
+    /// NOT AddFromString, WHICH CORRUPTS SOME MODULES. Hand it a module holding a `Declare`
+    /// broken over a line continuation and the editor appends a line reading `()` to the end of
+    /// the module - not a rewrite of the statement, a new line of nonsense at the bottom, which
+    /// does not compile. Reproduced on 2026-08-21 outside this product entirely, in a throwaway
+    /// workbook with no add-in loaded:
+    ///
+    ///   Private Declare PtrSafe Function utc_popen Lib "/usr/lib/libc.dylib" Alias "popen" _
+    ///       (ByVal utc_Command As String, ByVal utc_Mode As String) As LongPtr
+    ///
+    ///   AddFromString: 1,124 lines in, 1,125 back, every line identical plus a trailing `()`
+    ///   InsertLines:   1,124 lines in, 1,125 back, every line identical plus a trailing blank
+    ///
+    /// Put the same declaration on one line and AddFromString is clean, which is why it took a
+    /// real module to find: it is the continuation the editor mishandles. It cost the owner a
+    /// module that would not compile, pasted from a file that was fine (VBA-JSON, whose Mac
+    /// branch declares four of these).
+    ///
+    /// So the lines go in through InsertLines, which reproduces the text exactly, and the blank
+    /// line it leaves after them is removed. Anything past the line count that was handed over
+    /// was added by the editor, and none of it was asked for.
+    /// </summary>
+    private static void FillEmptyModule(DispatchObject module, string text)
+    {
+        module.Invoke("InsertLines", 1, text);
+
+        var wanted = Core.Editor.LineDiff.CountLines(text);
+        var present = module.GetInt32("CountOfLines");
+
+        if (present > wanted)
+        {
+            module.Invoke("DeleteLines", wanted + 1, present - wanted);
+        }
+    }
+
+    /// <summary>
     /// Puts a module's previous text back after a write the editor refused.
     ///
     /// True when the module is holding it again. False is the case that matters: the developer's
@@ -2571,7 +2608,7 @@ internal sealed partial class AddInSession : IDisposable
 
             if (!string.IsNullOrEmpty(previous))
             {
-                module.Invoke("AddFromString", previous);
+                FillEmptyModule(module, previous);
             }
 
             return true;

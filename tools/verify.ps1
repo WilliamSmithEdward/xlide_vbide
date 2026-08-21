@@ -597,8 +597,15 @@ if ($Live) {
             # the read against the plan that built it, round-trips the mutations, and removes
             # the component - so it adds components and runs before write-rollback like
             # everything that needs the session able to add.
+            # write-fidelity is here because it needs nothing of the fixture but a project to
+            # add a module to. It pins one property the rest of this list cannot see: that a
+            # whole-module write puts back exactly the text it was given. The editor appends a
+            # line reading `()` to any module holding a `Declare` broken over a continuation
+            # when it is filled with AddFromString, which cost the owner a module that would
+            # not compile, pasted from a file that was fine (2026-08-21).
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
+                                     'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
                                      'debugger-features.mjs', 'step-into-features.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',

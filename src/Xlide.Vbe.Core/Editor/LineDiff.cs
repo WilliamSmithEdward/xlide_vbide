@@ -314,8 +314,10 @@ public readonly record struct LineDiff(
     /// <summary>
     /// How many lines a text is, counted the way splitting it would: a trailing ending leaves an
     /// empty line after it, and an empty text is one empty line.
+    ///
+    /// Public because it is also how a whole-module write knows what the editor added to it.
     /// </summary>
-    private static int CountLines(string text)
+    public static int CountLines(string text)
     {
         var lines = 1;
         foreach (var one in text)
