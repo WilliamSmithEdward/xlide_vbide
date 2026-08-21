@@ -51,7 +51,12 @@ console.log("the floors:");
 console.log(`  a script into the page and back   ${String(floor.medianMs).padStart(6)}ms`);
 console.log(`  a PROMISE collected by the door   ${String(promiseFloor.medianMs).padStart(6)}ms   <- every figure below contains this\n`);
 
-const sizes = ["Small", "Medium", "Large", "Huge"];
+// MASSIVE IS WHY THE FIXTURE EXISTS and it was not being measured. Its generator says so in as
+// many words: the four sizes below it all fit comfortably and so agree with each other about
+// what is fast, and anything quadratic in module size is invisible at 11,000 lines and obvious
+// at VBA's per-module ceiling. Opening it costs the EDITOR seconds of its own parse, which the
+// wait below absorbs; the figures are the page's and the analyzer's, not the open's.
+const sizes = ["Small", "Medium", "Large", "Huge", "Massive"];
 const rows = [];
 
 for (const module of sizes) {
@@ -69,15 +74,43 @@ for (const module of sizes) {
   const lines = text.split(/\r?\n/).length;
 
   // A call site DEEP in the module, so the position is past everything the analyzer must scan.
-  const prefix = module[0];
-  const deep = `${prefix}${Math.max(0, Math.floor((lines / 8) * 0.8))}`;
-  const word = text.includes(deep) ? deep : `${prefix}0`;
+  //
+  // TAKEN FROM THE TEXT, not from the module's name. The old spelling built the word out of the
+  // module's first letter - which holds for four of the five sizes and not for Massive, whose
+  // procedures are prefixed V: every feature was asked about `M0`, a word no module has, and
+  // answered `did: false` (2026-08-21). A curve is only about size if the probe exists at every
+  // size, so it is read out of the source itself.
+  const declared = [...text.matchAll(/^(?:Public\s+|Private\s+)?(?:Function|Sub)\s+(\w+)/gim)]
+    .map((found) => found[1]);
+  if (declared.length === 0) {
+    throw new Error(`${module} declares no procedure to probe`);
+  }
+
+  const word = declared[Math.min(declared.length - 1, Math.floor(declared.length * 0.8))];
+
+  // AND THE PAGE MUST ACTUALLY HOLD IT. The tab reports the new model the moment it switches,
+  // seconds before a ceiling-sized module's text is in it - so at 64,802 lines every feature
+  // was asked about a word the model did not have yet, declined, and printed as `undefined` in
+  // a curve that then read NaN and still said "nothing over 200ms" (2026-08-21).
+  await until(`${module} to hold ${word} in the page's own model`,
+    async () => (await api.at(word)) ?? null, 120000);
 
   // Timed INSIDE the page, so the door appears in none of these. The through-the-door figures
   // are kept alongside for one size only, at the end, to show how much of them was the harness.
-  const hover = await api.timeFeature("hover", { word }, { n: 8 });
-  const completions = await api.timeFeature("completions", { word }, { n: 8 });
-  const definition = await api.timeFeature("definition", { word }, { n: 8 });
+  // A feature that declined has no timing, and a curve that prints its absence as a number is
+  // worse than one that stops: it read "undefined" and carried on concluding.
+  const timed = async (what) => {
+    const answer = await api.timeFeature(what, { word }, { n: 8 });
+    if (typeof answer?.medianMs !== "number") {
+      throw new Error(`${what} in ${module} answered no timing: ${JSON.stringify(answer)}`);
+    }
+
+    return answer;
+  };
+
+  const hover = await timed("hover");
+  const completions = await timed("completions");
+  const definition = await timed("definition");
 
   // And the analyzer's own share of it, which the counters report separately.
   await api.perf({ reset: true });
