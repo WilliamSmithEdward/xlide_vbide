@@ -429,7 +429,7 @@ export type ClientMessage =
   | { type: "breakpointToggleRequested"; line: number }
   | { type: "activateModule"; moduleName: string; project?: string; face?: string }
   | { type: "navigate"; module: string; line: number; column: number; project?: string }
-  | { type: "command"; name: string }
+  | { type: "command"; name: string; project?: string }
   | { type: "evaluate"; text: string }
   | { type: "openExternal"; url: string }
   | { type: "requestDocument"; module: string; project?: string }
@@ -1333,7 +1333,11 @@ export class EditorBridge {
    */
   runCommand(command: ToolbarCommand): void {
     if (command.target === "host") {
-      this.transport.post({ type: "command", name: command.id });
+      this.transport.post({
+        type: "command",
+        name: command.id,
+        ...(command.project ? { project: command.project } : {}),
+      });
       return;
     }
 

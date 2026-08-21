@@ -1574,8 +1574,8 @@ export class Shell {
     showContextMenu(x, y, [
       ...this.newComponentItems(project),
       {},
-      { label: "References...", run: () => this.hostCommand("references") },
-      { label: "Project Properties...", run: () => this.hostCommand("projectProperties") },
+      { label: "References...", run: () => this.hostCommand("references", project) },
+      { label: "Project Properties...", run: () => this.hostCommand("projectProperties", project) },
     ]);
   }
 
@@ -1603,8 +1603,8 @@ export class Shell {
     return items;
   }
 
-  private hostCommand(id: string): void {
-    this.handlers.command({ id, target: "host", icon: "", label: id });
+  private hostCommand(id: string, project?: string): void {
+    this.handlers.command({ id, target: "host", icon: "", label: id, ...(project ? { project } : {}) });
   }
 
   /**

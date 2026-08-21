@@ -26,6 +26,14 @@ export interface ToolbarCommand {
   separatorBefore?: boolean;
   /** Only means something in break mode; drawn disabled until the host says stopped. */
   needsBreak?: boolean;
+  /**
+   * Which file the command is about, when it is about one. The VBE's own References and
+   * Project Properties dialogs act on the ACTIVE project, so a command raised from a
+   * workbook's row in the tree has to say which workbook was clicked or it opens the
+   * dialog for whatever tab happens to be in front (the owner, 2026-08-20). Toolbar
+   * commands never set this; they mean "whatever is in front" by definition.
+   */
+  project?: string;
 }
 
 /**

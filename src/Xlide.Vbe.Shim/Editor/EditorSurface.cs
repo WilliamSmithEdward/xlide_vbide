@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Xlide.Vbe.Core.Editor;
 using Xlide.Vbe.Core.Engine;
 using Xlide.Vbe.Core.Hosting;
@@ -135,7 +135,11 @@ internal sealed class EditorSurface : IDisposable
     public Action<string, int, int, string?>? NavigateRequested { get; set; }
 
     /// <summary>Raised when the developer chooses a command the editor owns.</summary>
-    public Action<string>? CommandRequested { get; set; }
+    /// <summary>
+    /// A command the host runs, and the file it is about when it is about one - a dialog
+    /// raised from a workbook's row in the tree names that workbook.
+    /// </summary>
+    public Action<string, string?>? CommandRequested { get; set; }
 
     /// <summary>Raised when the developer enters a line in the Immediate panel.</summary>
     public Action<string>? EvaluateRequested { get; set; }
@@ -1982,7 +1986,11 @@ internal sealed class EditorSurface : IDisposable
                     if (document.RootElement.TryGetProperty("name", out var command)
                         && command.GetString() is { Length: > 0 } commandName)
                     {
-                        CommandRequested?.Invoke(commandName);
+                        CommandRequested?.Invoke(
+                            commandName,
+                            document.RootElement.TryGetProperty("project", out var commandProject)
+                                ? commandProject.GetString()
+                                : null);
                     }
 
                     break;

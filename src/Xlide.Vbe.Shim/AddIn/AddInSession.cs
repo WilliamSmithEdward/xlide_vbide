@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Core;
@@ -5107,6 +5107,27 @@ internal sealed partial class AddInSession : IDisposable
         PerfCounters.Beat();
 #endif
 
+        /*
+         * THE IDLE TIER IS A WORKSPACE WATCH, NOT A DEBUG POLL, and everything below this is
+         * the debug poll.
+         *
+         * The tick that only exists to notice a file opening or closing was landing in the
+         * whole of PollDebugState: PublishModules, whose own comment says the pane walk is
+         * several invokes per open pane plus a Workbooks find per workbook EVERY TICK, and
+         * UpdateDebugState after it. Measured on an editor with nothing happening: 241 KB/s of
+         * allocation on Excel's own UI thread, against 4 KB/s with the editor window shut -
+         * a second-by-second cost this tier never meant to buy, and one the empty-workspace
+         * tier above was always careful about (2026-08-20).
+         *
+         * So the idle tier asks its one question and leaves. The heartbeat is stamped first,
+         * because the doctor reads it to mean "the host thread ran our periodic work".
+         */
+        if (_resyncPanePolls == 0 && _pollsRemaining == 0 && !_watchingImmediate && !_watchingEmpty)
+        {
+            WatchOpenProjects();
+            return;
+        }
+
         // While the editor has no panes, the tree is the only living thing on screen and the
         // only route to a first module, so it follows the project as it grows.
         if (_watchingEmpty)
@@ -5133,13 +5154,7 @@ internal sealed partial class AddInSession : IDisposable
              * collection the tree is built from. A change in it is the only thing that provokes
              * the rebuild, so the ordinary case costs a single call and publishes nothing.
              */
-            var projectCount = ProjectCount();
-            if (projectCount >= 0 && projectCount != _lastProjectCount)
-            {
-                Log.Info($"explorer: the project count went {_lastProjectCount} to {projectCount}, republishing");
-                _lastProjectCount = projectCount;
-                PublishProjects();
-            }
+            WatchOpenProjects();
         }
 
         _immediateReader?.Poll();
@@ -5216,6 +5231,29 @@ internal sealed partial class AddInSession : IDisposable
         {
             _pollsRemaining = 0;
             UpdatePolling();
+        }
+    }
+
+    /// <summary>
+    /// The one question the idle tier exists to ask: has the set of open files changed? One
+    /// property read against the collection the tree and both panes' file lists are built
+    /// from, and a change in it is the only thing that provokes any further work.
+    ///
+    /// A WORKBOOK THAT APPEARS WHILE A MODULE IS OPEN USED TO NEVER APPEAR. The republish for
+    /// an empty editor is gated on having no panes, so the tree followed the project set only
+    /// until the first module was opened; after that a workbook opened alongside was absent
+    /// from the explorer entirely - no row, no modules, no route to its code (2026-08-08). The
+    /// pane tracker cannot cover it either: it watches code pane WINDOWS, and a workbook
+    /// nobody has opened a module in has none.
+    /// </summary>
+    private void WatchOpenProjects()
+    {
+        var projectCount = ProjectCount();
+        if (projectCount >= 0 && projectCount != _lastProjectCount)
+        {
+            Log.Info($"explorer: the project count went {_lastProjectCount} to {projectCount}, republishing");
+            _lastProjectCount = projectCount;
+            PublishProjects();
         }
     }
 
@@ -7097,8 +7135,24 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>Runs a command the developer chose from the toolbar.</summary>
-    private void RunCommand(string name)
+    private void RunCommand(string name, string? project)
     {
+        /*
+         * A DIALOG RAISED FROM A WORKBOOK'S ROW IS ABOUT THAT WORKBOOK.
+         *
+         * References and Project Properties are the editor's OWN dialogs and they act on the
+         * ACTIVE project - so the tree's menu opened whichever workbook happened to be in
+         * front, whatever row was right-clicked, with nothing on screen to say so (the owner,
+         * 2026-08-20: "it seems it's loading for the workbook for the active tab, no matter
+         * which workbook i right click on"). The page now says which workbook it meant, and
+         * the project is made active first, which is exactly what clicking that project in
+         * the editor's own explorer would do before opening the same dialog.
+         */
+        if (project is { Length: > 0 })
+        {
+            ActivateProject(project);
+        }
+
         // The designer's save callback: the RAW File Save, skipping the designer branch -
         // that branch is what asked the page to apply in the first place, and letting the
         // callback loop back into it would apply forever.
@@ -7125,6 +7179,33 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         ExecuteEditorCommand(command);
+    }
+
+    /// <summary>
+    /// Makes one open file's project the editor's active one, so a command that acts on the
+    /// ACTIVE project acts on the file the developer named. Answers whether it moved; a name
+    /// nothing answers to is logged and the command runs where it would have run anyway,
+    /// because refusing to open a dialog at all would be the worse of the two wrongs.
+    /// </summary>
+    private bool ActivateProject(string display)
+    {
+        try
+        {
+            using var wanted = FindProjectByDisplayName(display);
+            if (wanted is null)
+            {
+                Log.Info($"command: no open file called {display}; the active project stands");
+                return false;
+            }
+
+            _editor.SetObject("ActiveVBProject", wanted);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"command: {display} could not be made active, {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>Puts the native pane's caret where the surface's caret is.</summary>
