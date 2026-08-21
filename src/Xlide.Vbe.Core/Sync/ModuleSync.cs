@@ -494,6 +494,40 @@ public static class ModuleSync
 
         var midLeft = left[head..leftEnd];
         var midRight = right[head..rightEnd];
+
+        // BOUNDED, because the table below is the whole cost and it is quadratic in BOTH time and
+        // memory. Measured on generated modules whose middles share nothing: 803 lines 5ms and
+        // 3 MB, 1,603 lines 21ms and 10 MB, 3,203 lines 83ms and 40 MB, 6,403 lines 353ms and
+        // 158 MB - four times the cost for twice the lines, exactly as `new int[n+1, m+1]` says
+        // it must be. At VBA's own per-module ceiling of 65,534 lines that extrapolates to about
+        // 36 seconds and 16 GB, which is not a slow dialog: it is an OutOfMemoryException while
+        // a developer is looking at an import they were about to accept (2026-08-21).
+        //
+        // The head and tail are already off, so this cap is only reached by two texts that
+        // genuinely disagree over thousands of lines - a module regenerated, or an export edited
+        // wholesale elsewhere. Lining those up line by line tells a reader nothing they can use
+        // anyway, so the honest answer is the one that costs nothing: this went, that came.
+        if (midLeft.Length > LargestAlignableMiddle || midRight.Length > LargestAlignableMiddle)
+        {
+            for (var gone = 0; gone < midLeft.Length; gone++)
+            {
+                output.Add(new SyncDiffLine(head + gone + 1, null, midLeft[gone], string.Empty, DiffKind.Removed));
+            }
+
+            for (var came = 0; came < midRight.Length; came++)
+            {
+                output.Add(new SyncDiffLine(null, head + came + 1, string.Empty, midRight[came], DiffKind.Added));
+            }
+
+            for (var k = 0; k < tail; k++)
+            {
+                output.Add(new SyncDiffLine(
+                    leftEnd + k + 1, rightEnd + k + 1, left[leftEnd + k], right[rightEnd + k], DiffKind.Equal));
+            }
+
+            return output;
+        }
+
         var table = LongestCommonSubsequence(midLeft, midRight);
 
         int i = 0, j = 0;
@@ -1171,6 +1205,13 @@ public static class ModuleSync
 
     private static string[] SplitLines(string text) =>
         text.Length == 0 ? [] : NormaliseEol(text).Split('\n');
+
+    /// <summary>
+    /// How many differing lines either side may have before the comparison stops trying to line
+    /// them up. 2,000 is a table of 4 million ints - 16 MB and about 150ms at the worst - which is
+    /// the most a dialog should spend deciding how to draw something.
+    /// </summary>
+    private const int LargestAlignableMiddle = 2000;
 
     private static int[,] LongestCommonSubsequence(string[] left, string[] right)
     {
