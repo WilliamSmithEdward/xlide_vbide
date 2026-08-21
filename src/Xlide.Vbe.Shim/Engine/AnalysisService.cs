@@ -360,7 +360,15 @@ internal sealed class AnalysisService : IAsyncDisposable
                 }
                 catch (OperationCanceledException)
                 {
-                    // Shutting down. Whatever is queued goes with it.
+                    // Shutting down. Whatever is queued goes with it - but SAID, because a pass
+                    // that stops here publishes nothing and records nothing, so the panes keep
+                    // whatever they had and nothing on screen or in the log says why. That is
+                    // indistinguishable from the analyzer having gone quiet, and it cost an hour
+                    // of reading memo decisions that were all correct (2026-08-21).
+                    Log.Warn("engine: a pass was abandoned before it published; "
+                             + (_stopping.IsCancellationRequested
+                                ? "the session is shutting down"
+                                : "a call it was waiting on gave up"));
                     return;
                 }
                 catch (Exception ex)
