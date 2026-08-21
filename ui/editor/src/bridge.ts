@@ -506,6 +506,22 @@ const SEVERITY: Record<HostSeverity, monaco.MarkerSeverity> = {
 };
 
 
+/** How many answers the colouring and outline caches hold: a tab strip a developer moves in. */
+const ANSWERS_HELD = 8;
+
+/**
+ * Keeps an answer under its key, holding the last few. Insertion order is the eviction order,
+ * which for tab switching is the same as least recently answered.
+ */
+function remember<T>(held: Map<string, T>, key: string, answer: T): void {
+  held.set(key, answer);
+  while (held.size > ANSWERS_HELD) {
+    const oldest = held.keys().next();
+    if (oldest.done) { return; }
+    held.delete(oldest.value);
+  }
+}
+
 function fromMonacoRange(range: monaco.IRange): HostRange {
   return {
     startLine: range.startLineNumber,
@@ -1126,8 +1142,26 @@ export class EditorBridge {
   }
 
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
+    // Held the same way the colouring is, and for the same measurement: a 7,200-procedure module
+    // answers 343,317 characters, and the tree asked for it again on every activation.
+    const model = this.documents.get(module, project ?? null);
+    const key = model ? `${docKeyOf(module, project ?? null)}@${model.getVersionId()}` : null;
+    if (key) {
+      const held = this.outlineByDoc.get(key);
+      if (held) {
+        return Promise.resolve(held);
+      }
+    }
+
     return this.pendingOutlines.ask(() => null, 8000, (id) =>
-      this.transport.post({ type: "outline", id, module, ...(project ? { project } : {}) }));
+      this.transport.post({ type: "outline", id, module, ...(project ? { project } : {}) }))
+      .then((procedures) => {
+        if (key && procedures) {
+          remember(this.outlineByDoc, key, procedures);
+        }
+
+        return procedures;
+      });
   }
 
   /**
@@ -1310,14 +1344,48 @@ export class EditorBridge {
       return Promise.resolve(null);
     }
 
+    // ANSWERED FROM HERE WHEN NOTHING CAN HAVE CHANGED IT. The editor asks its provider every
+    // time a model is shown, so switching to a tab re-fetched the whole module's colouring: on a
+    // 64,802-line module that is 1,328,608 characters across the bridge for an answer identical
+    // to the one already painted, and it made every switch cost a third of a second with the
+    // host's message pump stalling inside it (measured 2026-08-21).
+    //
+    // Two things change the answer and both are known here: the model's own version, which moves
+    // on every edit, and the analysis moving under it, which is exactly what semanticsMayHaveMoved
+    // announces - and that clears this.
+    const key = `${docKeyOf(shown.module, shown.project ?? null)}@${model.getVersionId()}`;
+    const held = this.colouringByDoc.get(key);
+    if (held) {
+      return Promise.resolve(held);
+    }
+
     return this.pendingSemanticTokens.ask(() => null, 8000, (id) =>
       this.transport.post({
         type: "semanticTokens",
         id,
         module: shown.module,
         ...(shown.project ? { project: shown.project } : {}),
-      }));
+      })).then((tokens) => {
+        // Null is "the host could not answer", which the caller turns into "keep what is
+        // painted". Holding on to that would keep the module uncoloured until something else
+        // moved, so only a real answer is kept.
+        if (tokens) {
+          remember(this.colouringByDoc, key, tokens);
+        }
+
+        return tokens;
+      });
   }
+
+  /**
+   * The colouring last answered for a document at a version. A FEW of them, not one: the whole
+   * point is switching between tabs, and a cache holding only the newest answer misses every
+   * time two modules alternate, which is the case that was reported.
+   */
+  private readonly colouringByDoc = new Map<string, HostSemanticToken[]>();
+
+  /** The last outline answered for one module at one version, for the same reason. */
+  private readonly outlineByDoc = new Map<string, HostProcedure[]>();
 
   /** True while a host edit is being written into the model, so listeners can tell it from typing. */
   get isApplyingHostEdit(): boolean {
@@ -1427,6 +1495,12 @@ export class EditorBridge {
         // developer happened to type (caught 2026-08-19: NameBox.SetFocus plain in a fresh
         // session while hover called it a method; a reload painted it). Whoever registers
         // the provider hangs a refresh here.
+        //
+        // And what is held from the last answer goes with it: the analysis moving is the one
+        // thing that changes a colouring or an outline without the text changing, so the caches
+        // keyed on the model's version have to be told about it.
+        this.colouringByDoc.clear();
+        this.outlineByDoc.clear();
         this.semanticsMayHaveMoved?.();
         return;
       case "setCurrentLine":

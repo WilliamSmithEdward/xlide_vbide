@@ -139,6 +139,14 @@ function kindWord(kind: number): string {
 }
 
 /** Severity order for sorting, worst first. */
+/**
+ * How many problem rows the pane will draw at once. Not a limit on what is FOUND - the counts,
+ * the badges, the squiggles and the tree keep the whole picture - only on what is built into
+ * the DOM, because a list past a few hundred rows is navigated by narrowing rather than by
+ * scrolling.
+ */
+const PROBLEMS_DRAWN_AT_MOST = 500;
+
 const SEVERITY_RANK: Record<FindingSeverity, number> = {
   error: 0,
   warning: 1,
@@ -1767,7 +1775,15 @@ export class Shell {
       return;
     }
 
-    for (const finding of sorted) {
+    // A LIST NOBODY CAN READ IS NOT WORTH BUILDING. One malformed `End Function` in a
+    // 7,200-procedure module has the analyzer report every later procedure as declared inside
+    // one, and the pane then built a row per finding: 36,005 nodes and a 283,239px list, at
+    // 182ms of layout, on every publish (measured 2026-08-21). Nobody scrolls seven thousand
+    // rows - they narrow the scope, which the two selects above are for - so the pane draws
+    // the worst of them and says plainly how many it is not drawing.
+    const drawn = sorted.slice(0, PROBLEMS_DRAWN_AT_MOST);
+
+    for (const finding of drawn) {
       const collides = (findingHomes.get(finding.module.toLowerCase())?.size ?? 0) > 1;
 
       const row = document.createElement("div");
@@ -1801,6 +1817,14 @@ export class Shell {
       body.append(message, where);
       row.append(mark, body);
       this.panelList.appendChild(row);
+    }
+
+    if (sorted.length > drawn.length) {
+      const more = document.createElement("div");
+      more.className = "panel-more";
+      more.textContent = `${sorted.length.toLocaleString()} problems here. `
+        + `Showing the first ${drawn.length.toLocaleString()} - narrow by file or module to see the rest.`;
+      this.panelList.appendChild(more);
     }
 
     this.publishProblemCounts();

@@ -1238,7 +1238,14 @@ internal sealed class EditorSurface : IDisposable
 
         // Keyed per document rather than one held slot: with several models live, the newest
         // set for one module must not evict the newest set for another.
-        Send($"setDiagnostics:{(project ?? string.Empty).ToLowerInvariant()}/{moduleName.ToLowerInvariant()}", JsonSerializer.Serialize(
+        var docKind = $"setDiagnostics:{(project ?? string.Empty).ToLowerInvariant()}/{moduleName.ToLowerInvariant()}";
+        if (_lastMarkers.TryGetValue(docKind, out var had) && had.AsSpan().SequenceEqual(markers.AsSpan()))
+        {
+            return;
+        }
+
+        _lastMarkers[docKind] = markers;
+        SendIfChanged(docKind, JsonSerializer.Serialize(
             new SetDiagnosticsMessage("setDiagnostics", moduleName, project, markers),
             EditorMessageContext.Default.SetDiagnosticsMessage));
     }
@@ -1438,10 +1445,30 @@ internal sealed class EditorSurface : IDisposable
     {
         ArgumentNullException.ThrowIfNull(findings);
 
-        Send("setFindings", JsonSerializer.Serialize(
+        // COMPARED BEFORE IT IS BUILT. Serialising and then finding the page already has it
+        // still pays for the serialising, and that is the expensive half here: one malformed
+        // End Function in a 7,200-procedure module is 7,199 findings and 1,490 KB of JSON, built
+        // on the host thread on every activation and every pass. Switching tabs with that
+        // standing cost 415-1044ms a time and stalled Excel's message pump for as long as 424ms
+        // - which is what Windows calls not responding (measured 2026-08-21).
+        //
+        // The records compare by value, so this is a walk of what is already in hand.
+        if (_lastFindings is { } was && was.AsSpan().SequenceEqual(findings.AsSpan()))
+        {
+            return;
+        }
+
+        _lastFindings = findings;
+        SendIfChanged("setFindings", JsonSerializer.Serialize(
             new SetFindingsMessage("setFindings", findings),
             EditorMessageContext.Default.SetFindingsMessage));
     }
+
+    /// <summary>The findings the page was last given, so an unchanged set is never rebuilt.</summary>
+    private SurfaceFinding[]? _lastFindings;
+
+    /// <summary>The squiggles each document was last given, for the same reason.</summary>
+    private readonly Dictionary<string, EditorMarker[]> _lastMarkers = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Scrolls a one-based line into view. Not held: where the developer wanted to be some seconds
@@ -1521,6 +1548,32 @@ internal sealed class EditorSurface : IDisposable
         }
     }
 
+    /// <summary>
+    /// What was last sent under each kind, for the messages that are pure STATE - the findings
+    /// list and a document's squiggles. The same set twice says nothing to the page and costs
+    /// the machine everything: one broken `End Function` in a 7,200-procedure module has the
+    /// analyzer report every later procedure as declared inside one, and each pass then pushed
+    /// 1,490 KB of identical findings across the bridge for the page to parse and rebuild
+    /// 36,005 nodes from, at 182ms of layout a time (measured 2026-08-21).
+    /// </summary>
+    private readonly Dictionary<string, string> _sentByKind = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Sends a state message unless the page already has exactly this one. Only for messages
+    /// whose meaning is "here is the whole state now" - never for anything that ACTS, where
+    /// sending the same thing twice is two of something rather than one.
+    /// </summary>
+    private void SendIfChanged(string kind, string json)
+    {
+        if (_sentByKind.TryGetValue(kind, out var was) && was == json)
+        {
+            return;
+        }
+
+        _sentByKind[kind] = json;
+        Send(kind, json);
+    }
+
     /// <summary>Sends a message, or holds it until the page is ready for it.</summary>
     private void Send(string kind, string json)
     {
@@ -1579,8 +1632,12 @@ internal sealed class EditorSurface : IDisposable
                     _loaded = true;
 
                     // A fresh page has the default chrome, whatever was last said to the
-                    // page before it; the cache would otherwise skip re-saying it.
+                    // page before it; the cache would otherwise skip re-saying it. The same
+                    // goes for every state message: a reloaded page holds none of them.
                     _chromeSent = null;
+                    _sentByKind.Clear();
+                    _lastFindings = null;
+                    _lastMarkers.Clear();
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
 #if DEBUG
                     PageBuildStamp = document.RootElement.TryGetProperty("timings", out var readyTimings)

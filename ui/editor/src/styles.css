@@ -3306,6 +3306,14 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.7;
 }
 
+/* What the list is not drawing, said at the end of what it is. */
+.panel-more {
+  padding: 10px 12px;
+  font-size: 12px;
+  opacity: 0.7;
+  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+}
+
 .panel-empty-act {
   padding: 1px 8px;
   border: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
