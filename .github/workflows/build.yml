@@ -116,6 +116,19 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/freshness.mjs
 
+      # A repeat analysis of one module must not cost more than the first analysis of it. The
+      # analyzer memoises per source string and finds its entries with `===`, which settles on the
+      # pointer inside one analysis and compares a megabyte of characters across two - so a module
+      # arriving again over the pipe, as a new string with the same content, made every one of the
+      # hundreds of thousands of memo lookups in a pass a full scan of the module. The 64,802-line
+      # fixture went from 0.9s for its first analysis to 15.8s for every one after, which is what
+      # the editor freezing for ten to fifteen seconds after a keystroke actually was.
+      #
+      # It asserts a RATIO against the module's own first analysis, so it carries across runners.
+      - name: Pass cost
+        working-directory: xlide_vbide/engine
+        run: node test/pass-cost.mjs
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.

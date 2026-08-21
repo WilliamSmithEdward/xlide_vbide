@@ -33,7 +33,12 @@ await esbuild.build({
     format: 'cjs',
     platform: 'node',
     target: 'node22',
-    minify: true,
+    // XLIDE_NO_MINIFY=1 builds one that can be PROFILED. A minified bundle names its functions
+    // `XP` and `Tt`, so `node --cpu-prof` answers a perf question with two-letter labels and the
+    // question stays open; unminified it answers `statementTokensCached`, which is how the
+    // quadratic memo lookup behind the editor's freezes was found (2026-08-21). Never set for a
+    // shipped build: the bundle is 10.7 MB instead of 8.8 MB.
+    minify: process.env.XLIDE_NO_MINIFY ? false : true,
     sourcemap: false,
     outfile: bundlePath,
     logLevel: 'info',

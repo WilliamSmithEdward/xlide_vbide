@@ -9,7 +9,7 @@
     "check-types": "tsc --noEmit",
     "build": "node build.mjs",
     "package": "node build.mjs --package",
-    "test": "node test/smoke.mjs && node test/language.mjs && node test/forms.mjs && node test/positions.mjs && node test/freshness.mjs && node test/knowledge.mjs && node test/module-casing.mjs",
+    "test": "node test/smoke.mjs && node test/language.mjs && node test/forms.mjs && node test/positions.mjs && node test/freshness.mjs && node test/pass-cost.mjs && node test/knowledge.mjs && node test/module-casing.mjs",
     "test:forms": "node test/forms.mjs",
     "test:knowledge": "node test/knowledge.mjs",
     "test:freshness": "node test/freshness.mjs",

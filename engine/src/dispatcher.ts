@@ -75,6 +75,9 @@ import {
     type SmartEnterResult,
 } from './protocol';
 
+/** How many recent versions of one module's text are held by instance. See stableSource. */
+const STABLE_SOURCES_HELD = 3;
+
 function liveKey(projectId: string, moduleName: string): string {
     return `${projectId}\0${moduleName.toLowerCase()}`;
 }
@@ -216,6 +219,34 @@ export class Dispatcher {
      * is what lets the analyzer's identity-keyed token cache actually hit.
      */
     private readonly liveSources = new Map<string, string>();
+
+    /**
+     * ONE STRING INSTANCE PER MODULE, WHICH IS WORTH THIRTY TIMES THE SPEED OF A PASS.
+     *
+     * The analyzer memoises per source string and finds its entries with `===`. Inside a single
+     * analysis that is free, because the caller keeps handing back the very string the entry was
+     * stored under and V8 settles `===` on the pointer. Across two analyses it is not: a request
+     * arrives over a pipe, `JSON.parse` builds a NEW string of the same 1.5 MB, and every lookup
+     * has to compare the two character by character. `statementTokensCached` is asked "hundreds
+     * of thousands of times" per pass by its own account, so the pass turns quadratic in module
+     * size - measured on the 64,802-line fixture at 15.8 SECONDS against 0.9s for the very first
+     * analysis, which is fast only because the cache was empty and stored the caller's own
+     * instance (2026-08-21).
+     *
+     * That is what the owner has been feeling as the editor freezing for ten to fifteen seconds
+     * after a keystroke in a large module, and as passes that give up before they publish.
+     *
+     * So text that arrives equal to text already held is answered with the instance already
+     * held. One comparison of the whole module per request, in place of hundreds of thousands.
+     * Strings are immutable, so the two are interchangeable in every way except the one that
+     * matters here. Filed upstream as xlide_vscode#45; this stands whatever happens there,
+     * because handing a memo a stable key is the caller's side of that bargain.
+     *
+     * What it holds is instances, not copies: a module nobody has edited is the same string the
+     * seed already holds, so it costs a map entry. Only a module being edited accumulates
+     * distinct versions, and only up to STABLE_SOURCES_HELD of them.
+     */
+    private readonly stableSources = new Map<string, string[]>();
 
     /**
      * The last outline answered per module, keyed by the exact text it described. The tree
@@ -422,11 +453,20 @@ export class Dispatcher {
         // module: it decides whether a document module gets a host type at all.
         setHostApp(params.host);
 
+        // Every module's text, settled onto the instance already held before anything downstream
+        // sees it. A seed re-parses each module to rebuild the project index, and the parser's
+        // memo is found the same way the token memo is - so a project whose text has not changed
+        // was re-parsed in full on every pass. See stableSources.
+        const modules = params.modules.map((module) => ({
+            ...module,
+            source: this.stableSource(liveKey(params.projectId, module.moduleName), module.source),
+        }));
+
         this.analysis.handle({
             kind: 'seed',
             workbookKey: params.projectId,
             generation: params.generation,
-            modules: params.modules.map((module) => ({
+            modules: modules.map((module) => ({
                 moduleName: module.moduleName,
                 source: module.source,
                 type: module.type,
@@ -439,7 +479,7 @@ export class Dispatcher {
         });
 
         this.generations.set(params.projectId, params.generation);
-        this.seededModules.set(params.projectId, params.modules.map((module) => ({ ...module })));
+        this.seededModules.set(params.projectId, modules.map((module) => ({ ...module })));
 
         /*
          * A MODULE THAT IS GONE TAKES ITS ANALYSIS WITH IT.
@@ -458,7 +498,7 @@ export class Dispatcher {
          * run inherited the previous run's answers and reported findings on a module that had
          * been created three lines earlier (2026-08-08).
          */
-        const present = new Set(params.modules.map((module) => module.moduleName.toLowerCase()));
+        const present = new Set(modules.map((module) => module.moduleName.toLowerCase()));
         const prefix = `${params.projectId}\0`;
         for (const key of [...this.lastAnalysis.keys()]) {
             if (key.startsWith(prefix) && !present.has(key.slice(prefix.length))) {
@@ -466,6 +506,7 @@ export class Dispatcher {
                 this.semanticMemo.delete(key);
                 this.outlineMemo.delete(key);
                 this.liveSources.delete(key);
+                this.stableSources.delete(key);
             }
         }
 
@@ -473,8 +514,8 @@ export class Dispatcher {
         // that are procedures. This is what lets `ROneCOne.Create(...)` read as a type and a
         // call while `values(index, 1)` stays a variable - the distinction the extension makes
         // with its semantic tokens.
-        const facts = projectWordsFor(params.projectId, params.modules);
-        return { modules: params.modules.length, types: facts.types, procedures: facts.procedures };
+        const facts = projectWordsFor(params.projectId, modules);
+        return { modules: modules.length, types: facts.types, procedures: facts.procedures };
     }
 
     private closeProject(params: { projectId: string }): null {
@@ -509,6 +550,12 @@ export class Dispatcher {
         for (const key of this.semanticMemo.keys()) {
             if (key.startsWith(prefix)) {
                 this.semanticMemo.delete(key);
+            }
+        }
+
+        for (const key of [...this.stableSources.keys()]) {
+            if (key.startsWith(prefix)) {
+                this.stableSources.delete(key);
             }
         }
 
@@ -909,9 +956,54 @@ export class Dispatcher {
 
     /** The text a request is about: sent with it, held live from didChange, or the seeded copy. */
     private sourceFor(params: { projectId: string; moduleName: string; source?: string }): string | undefined {
-        return params.source
+        const text = params.source
             ?? this.liveSources.get(liveKey(params.projectId, params.moduleName))
             ?? this.seededSourceOf(params.projectId, params.moduleName);
+
+        return text === undefined
+            ? undefined
+            : this.stableSource(liveKey(params.projectId, params.moduleName), text);
+    }
+
+    /**
+     * The instance to hand the analyzer for this module: the one already held, when it matches.
+     *
+     * A FEW OF THEM, NOT ONE, because a developer alternates. Type a break, look at it, undo it,
+     * break it again - the module's text swaps between two versions, and holding only the latest
+     * meant the version coming BACK was always a fresh instance while the analyzer's memo still
+     * held the older equal one. That is the same quadratic lookup, reached the other way round,
+     * and it is exactly the sequence the owner reported ("setting function a, and then reverting
+     * several times"): 3.2 SECONDS per analysis where a repeat of one text costs 0.4s.
+     *
+     * Three, matching the smallest of the analyzer's own memos plus room to spare. An entry
+     * older than that has been evicted there anyway, so keeping it would buy the comparison
+     * without the hit it is for. The whole-module comparison this costs stops at the first
+     * differing character for texts that are actually different, which is what makes a ring
+     * affordable at all: one real comparison per request rather than one per lookup.
+     */
+    private stableSource(key: string, text: string): string {
+        const held = this.stableSources.get(key) ?? [];
+
+        for (let i = 0; i < held.length; i += 1) {
+            if (held[i] === text) {
+                // To the front: the next request is far likelier to be this text than the ones
+                // behind it, and the front is where a comparison costs nothing to reach.
+                const found = held[i];
+                if (i > 0) {
+                    held.splice(i, 1);
+                    held.unshift(found);
+                }
+                return found;
+            }
+        }
+
+        held.unshift(text);
+        if (held.length > STABLE_SOURCES_HELD) {
+            held.pop();
+        }
+
+        this.stableSources.set(key, held);
+        return text;
     }
 
     private seededSourceOf(projectId: string, moduleName: string): string | undefined {
