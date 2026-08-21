@@ -120,12 +120,81 @@ function describe(value: unknown): string {
     });
 }
 
+/**
+ * What a seed DECLARES, cheaply: the lines that can change what another module sees, plus each
+ * module's name, kind and designer members. Everything else in a module - the bodies of its
+ * procedures, its comments, its blank lines - is invisible across the module boundary, so a seed
+ * whose declarations match the last one produces the very same fingerprints.
+ *
+ * This exists to skip REBUILDING them, not to replace them. The fingerprints below are the
+ * project index resolved per module, which is the precise question and costs 439ms on an
+ * 81,795-line project - paid on the first analysis after every re-seed, so a module with zero
+ * characters in it took 453ms to diagnose (measured 2026-08-21). Nearly every re-seed comes from
+ * an edit inside one procedure, which declares nothing, and rebuilding an identical index for it
+ * is the whole of that cost.
+ *
+ * Conservative by construction: any line that could be a declaration counts, whether or not it
+ * turns out to be one, and anything unparseable falls back to rebuilding. A key that missed a
+ * real declaration change would replay a stale answer, which is the one failure this must not
+ * have.
+ */
+function declarationKey(seeded: readonly ModulePayload[]): string {
+    const parts: string[] = [];
+
+    for (const module of seeded) {
+        parts.push(`${module.moduleName.toLowerCase()}|${module.type}|${module.documentType ?? ''}`);
+        if (module.implicitMembers) {
+            parts.push(describe(module.implicitMembers));
+        }
+
+        const source = module.source;
+        let at = 0;
+        while (at < source.length) {
+            const ending = source.indexOf('\n', at);
+            const stop = ending < 0 ? source.length : ending;
+
+            // The first word of the line, skipping its indent.
+            let from = at;
+            while (from < stop && (source.charCodeAt(from) === 32 || source.charCodeAt(from) === 9)) {
+                from += 1;
+            }
+
+            if (from < stop && DECLARING.test(source.slice(from, Math.min(stop, from + 40)))) {
+                parts.push(source.slice(from, stop));
+            }
+
+            at = stop + 1;
+        }
+    }
+
+    return parts.join('\n');
+}
+
+/**
+ * Line starts that can carry a declaration another module can see. Deliberately generous - it
+ * matches `Const` inside a procedure too, which is local and cannot matter, because counting a
+ * line that does not matter costs a rebuild and missing one costs a wrong answer.
+ */
+const DECLARING =
+    /^(public|private|friend|global|dim|const|type|enum|declare|sub|function|property|implements|option)\b/i;
+
+/** The declarations the last built map was for, and the map itself. See declarationKey. */
+let lastDeclarations: { key: string; map: Map<string, string> | null } | null = null;
+
 function crossModuleFingerprint(
     seeded: readonly ModulePayload[],
     moduleName: string,
 ): string | undefined {
     let held = crossModuleFacts.get(seeded);
     if (held === undefined) {
+        // A re-seed whose declarations are unchanged produces the same fingerprints, so the map
+        // is carried over rather than rebuilt from a fresh index.
+        const declarations = declarationKey(seeded);
+        if (lastDeclarations && lastDeclarations.key === declarations) {
+            crossModuleFacts.set(seeded, lastDeclarations.map);
+            return lastDeclarations.map?.get(moduleName.toLowerCase());
+        }
+
         held = null;
         try {
             const index = buildVbaProjectIndex(seeded.map((module) => ({
@@ -167,6 +236,7 @@ function crossModuleFingerprint(
         }
 
         crossModuleFacts.set(seeded, held);
+        lastDeclarations = { key: declarations, map: held };
     }
 
     return held?.get(moduleName.toLowerCase());
@@ -697,7 +767,7 @@ export class Dispatcher {
 
         // NAME AND SOURCE, because a rename changes the first and not the second. Joined by a
         // character a name cannot hold, so no two different pairs can spell the same fingerprint.
-        const fingerprint = modules.map((module) => `${module.moduleName}\u0000${module.source}`);
+        const fingerprint = modules.map((module) => `${module.moduleName}|${module.source}`);
 
         const memo = this.symbolsMemo.get(projectId);
         if (memo

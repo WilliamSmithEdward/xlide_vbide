@@ -1084,6 +1084,11 @@ internal sealed class AnalysisService : IAsyncDisposable
                     // developer is editing. The live analysis has already answered about that text
                     // WITH a caret, and the engine serves a caret-less request from a caret-carrying
                     // answer for the same text. Sending one here would only narrow that.
+                    // TIMED PER MODULE. The pass asks about every module of a project whose text
+                    // moved, and which of those answers is expensive is not visible in a
+                    // per-method counter - it took a round of guessing to find that one module
+                    // was costing most of a pass while the rest were free (2026-08-21).
+                    var asking = System.Diagnostics.Stopwatch.StartNew();
                     var result = await engine.DiagnoseAsync(
                         snapshot.ProjectId,
                         snapshot.Generation,
@@ -1091,6 +1096,13 @@ internal sealed class AnalysisService : IAsyncDisposable
                         module.Type,
                         null,
                         _stopping.Token).ConfigureAwait(false);
+                    asking.Stop();
+
+                    if (asking.ElapsedMilliseconds >= 50)
+                    {
+                        Log.Verbose($"engine: {module.ModuleName} took {asking.ElapsedMilliseconds}ms to diagnose"
+                                    + $" ({module.Source.Length} character(s))");
+                    }
 
                     if (result is null)
                     {
