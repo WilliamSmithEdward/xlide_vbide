@@ -347,7 +347,7 @@ Also on the client, built from those: `waitUntilResponsive()` and `ask()`.
 | Write a module through the session's writer | `writeModule(name, text, project)` |
 | Does the project compile, errors as DATA | `compile()` |
 | **Close a tab, click the tree, send a chord, open a dialog** | **`act(name, args)`** |
-| Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }`; read it back on `ui.sync` |
+| Drive the OPEN sync dialog: press apply/close/all/none/export/import, tick a row, type the folder, point it at a project | `act("syncDialog", { press })` / `{ tick, on }` / `{ folder }` / `{ project }`; read it back on `ui.sync`, which carries `project` and `projects` |
 | Close a HIDDEN pane's native window, the host-originated direction | `pane("closeNative", { module, project })` |
 | Put the Object Browser palette away (the summons is `command("objectBrowser")`) | `paletteHide()` |
 | Close the editor window, the developer's own X click | `frame("close")`, then poll `state().frameVisible` |
@@ -1038,6 +1038,24 @@ words instead of only logging them. The copy costs a read of text the write read
 3ms of a 1,037ms write at 1,002 lines, 66ms of a 12,594ms write at 40,002. Half a percent, at the
 size where losing it hurts most. The line-diff path pays nothing at all, because the lines it
 removes are already in hand.
+
+**Import and export act on ONE project, and the dialog says which.** It carries a project select
+- hidden when a single file is open, the rule the list panes' file select follows - and sends the
+choice with the plan AND with the apply, so what is on screen and what Apply carries out cannot
+drift apart. `ui.sync` reads back `project` and `projects`; `act("syncDialog", {project})` points
+it elsewhere through the select's own change event.
+
+The `sync` route has always taken `project`, and it is worth naming even when only one file is
+open. Leave it out and the host falls back to the SHOWN project. It used to fall back twice and
+differently - the plan's identity to the shown project, its modules to the editor's
+`ActiveVBProject` - which with two workbooks open are routinely different: seconds after opening
+two fixtures side by side, a plan titled `DebugFixture.xlsm` listed `TwinFixture.xlsm`'s six
+modules, and applying it would have written one workbook's folder over the other's code
+(2026-08-21). `sync-scope.mjs` pins it, and needs two workbooks to ask the question at all:
+
+```bash
+node tools\harness\sync-scope.mjs
+```
 
 `writeModule` throws on a refusal rather than answering ok. A large write still outlives the
 door's three-second budget for the host thread, so a caller writing tens of thousands of lines

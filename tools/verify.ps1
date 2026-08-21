@@ -631,9 +631,16 @@ if ($Live) {
             # and rename-boundary.mjs runs last: the one question only two workbooks can ask,
             # whether a rename crosses modules and STOPS at the workbook, byte for byte,
             # through the rename and its undo.
+            #
+            # sync-scope joins them for the same reason rename-boundary is here: it asks the one
+            # question only two workbooks can ask. Import and export used to name no project, and
+            # the host filled the gap with the SHOWN project for the plan's identity and the
+            # ACTIVE one for its modules - routinely different with two open, so a plan titled one
+            # workbook listed the other's modules and applying it would have written the folder
+            # over the wrong code (2026-08-21).
             'RenameFixture.xlsm + TwinFixture.xlsm' = @(
                                      'format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
-                                     'settings-bite.mjs', 'rename-features.mjs',
+                                     'settings-bite.mjs', 'rename-features.mjs', 'sync-scope.mjs',
                                      'search-features.mjs', 'rename-boundary.mjs')
             # TWO FILES OF TESTS, which is the only state the runner's file dimension exists in.
             # The runner reads every open project, XlideAssert lives per file, and both fixtures

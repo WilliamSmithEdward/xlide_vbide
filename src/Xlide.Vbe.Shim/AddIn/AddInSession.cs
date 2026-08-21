@@ -165,10 +165,23 @@ internal sealed partial class AddInSession : IDisposable
                 return false;
             }
 
-            using var target = FindProjectByDisplayName(project) ?? _editor?.GetObject("ActiveVBProject");
+            // THE PROJECT THAT WAS RESOLVED, not whichever one the editor happens to call active.
+            //
+            // These two lines used to fall back differently: the identity to the SHOWN project and
+            // the modules to ActiveVBProject. Open two workbooks and they are routinely different -
+            // measured 2026-08-21, with nothing contrived, a session two seconds after opening
+            // DebugFixture and TwinFixture side by side answered a plan titled DebugFixture.xlsm
+            // whose rows were TwinFixture's six modules.
+            //
+            // Applying that plan would export one workbook's modules into the other's folder, or
+            // import that folder over the other workbook's code. The lookup takes an identity as
+            // well as a display name, so it is given the id that was resolved, and a project that
+            // cannot be found is refused rather than swapped for a different one. It is the same
+            // defect this helper's own comment records being closed at nine other call sites.
+            using var target = FindProjectByDisplayName(projectId);
             if (target is null)
             {
-                refusal = Refuse("the project could not be reached");
+                refusal = Refuse($"the project could not be reached: nothing open is {projectId}");
                 return false;
             }
 
@@ -356,12 +369,12 @@ internal sealed partial class AddInSession : IDisposable
                 }
 
                 var importing = string.Equals(syncDirection, "import", StringComparison.OrdinalIgnoreCase);
-                using var syncTarget = FindProjectByDisplayName(syncProject)
-                    ?? _editor?.GetObject("ActiveVBProject");
+                // The resolved identity, for the reasons under the other one of these.
+                using var syncTarget = FindProjectByDisplayName(syncProjectId);
                 if (syncTarget is null)
                 {
                     return System.Text.Json.JsonSerializer.Serialize(
-                        new SyncErrorReply("the project could not be reached"),
+                        new SyncErrorReply($"the project could not be reached: nothing open is {syncProjectId}"),
                         SyncJsonContext.Default.SyncErrorReply);
                 }
 

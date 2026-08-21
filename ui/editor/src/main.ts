@@ -672,7 +672,15 @@ function boot(): void {
             }
             return bridge.requestSync(args, body);
           },
-          () => workspace.activeEditor().focus());
+          () => workspace.activeEditor().focus(),
+          // WHICH PROJECTS ARE OPEN, so the dialog can be pointed at one explicitly and say so
+          // in every request. The tree's own list, and the workbook of the document being looked
+          // at as the one to start on - which is the answer to "which file am I working on" that
+          // the developer would give.
+          {
+            names: (shell?.currentProjects() ?? []).map((one) => one.name),
+            current: workspace.activeDocument()?.project ?? null,
+          });
         return;
       }
       if (command.id === "openHelp") {

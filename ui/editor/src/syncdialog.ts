@@ -54,6 +54,12 @@ interface SyncPlan {
 /** How the host is reached. One function, because there is only one kind of request. */
 export type SyncRequest = (args: Record<string, string>, body?: string) => Promise<Record<string, unknown>>;
 
+/** The projects this session has open, and the one the developer is looking at. */
+export interface OpenProjects {
+  names: string[];
+  current: string | null;
+}
+
 /**
  * The OPEN dialog, readable and drivable for the dev surface. Everything a driver does goes
  * through the dialog's own controls - the checkbox's change, the button's click, the input's
@@ -67,6 +73,9 @@ export interface SyncDialogProbe {
     mode: string;
     busy: boolean;
     status: string;
+    /** The project this dialog is acting on, and the ones it could be pointed at. */
+    project: string;
+    projects: string[];
     rows: { file: string; status: string; detail: string; ticked: boolean; actionable: boolean }[];
   };
   /** Presses a named control: apply, close, all, none, export, import. False when unknown. */
@@ -75,6 +84,8 @@ export interface SyncDialogProbe {
   tick(file: string, on: boolean): boolean;
   /** Types a folder path, through the input's own change event. */
   setFolder(path: string): void;
+  /** Points the dialog at another open project, through the select's own change event. */
+  chooseProject(name: string): boolean;
 }
 
 let liveDialog: SyncDialogProbe | null = null;
@@ -97,7 +108,11 @@ const STATUS_TONE: Record<string, { label: string; tone: string }> = {
  * Opens the dialog. One at a time: opening while open focuses the one that exists, the way the
  * settings card behaves.
  */
-export function openSyncDialog(request: SyncRequest, closed: () => void): void {
+export function openSyncDialog(
+  request: SyncRequest,
+  closed: () => void,
+  session: OpenProjects = { names: [], current: null },
+): void {
   if (document.getElementById("sync-backdrop")) {
     document.querySelector<HTMLElement>("#sync-folder")?.focus();
     return;
@@ -105,6 +120,22 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
 
   let direction: "export" | "import" = "export";
   let folder = "";
+  /*
+   * WHICH PROJECT, SENT WITH EVERY REQUEST.
+   *
+   * The dialog used to name none, and the host filled the gap with two different fallbacks: the
+   * plan's identity from the SHOWN project and its modules from the editor's ACTIVE one. With two
+   * workbooks open those are routinely different - measured 2026-08-21 with nothing contrived,
+   * seconds after opening two fixtures side by side, a plan titled DebugFixture.xlsm whose rows
+   * were TwinFixture's six modules. Applying it would have exported one workbook's modules into
+   * the other's folder, or imported that folder over the other workbook's code.
+   *
+   * Naming it here closes the other half of that too: the plan on screen and the Apply that
+   * carries it out cannot drift apart while the dialog is open, whatever the editor does behind
+   * it. An empty string means the session offered nothing to choose from, and the host falls back
+   * to the shown project exactly as before.
+   */
+  let project = session.current ?? session.names[0] ?? "";
   let plan: SyncPlan | null = null;
   let selectedId: string | null = null;
   let showHeaders = false;
@@ -183,6 +214,61 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
   directions.append(exportButton, importButton);
 
   // ---- folder -----------------------------------------------------------------------------
+  // ---- project ----------------------------------------------------------------------------
+  //
+  // "Project", not "File", though a file is this product's word for a workbook everywhere else
+  // (see scopeselect.ts). Here the rows below ARE files - the .bas and .cls on disk - and one
+  // dialog cannot use the word for both without the reader having to work out which is meant.
+  // Project is what VBA calls it, what the plan's own field is called, and what the tree holds.
+  //
+  // Hidden with one project open, the same rule the list panes' file select follows: a choice
+  // between one thing and nothing is not a choice, and the title names it anyway.
+  const projectRow = document.createElement("div");
+  projectRow.className = "sync-row";
+  projectRow.hidden = session.names.length < 2;
+
+  const projectLabel = document.createElement("label");
+  projectLabel.className = "sync-row-label";
+  projectLabel.textContent = "Project";
+  projectLabel.htmlFor = "sync-project";
+
+  const projectSelect = document.createElement("select");
+  projectSelect.id = "sync-project";
+  projectSelect.className = "sync-mode";
+  for (const name of session.names) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    projectSelect.appendChild(option);
+  }
+  if (project) {
+    projectSelect.value = project;
+  }
+
+  // READ BACK, so the control and the value sent cannot disagree. Assigning a value the list does
+  // not hold leaves a select showing its FIRST option and reports nothing - and then the dialog
+  // would say one project on screen and name another in every request, which is the exact failure
+  // this control was added to end.
+  project = projectSelect.value;
+
+  const projectHint = document.createElement("span");
+  projectHint.className = "sync-row-hint";
+  projectHint.textContent = "The one these modules are imported into, or exported from.";
+
+  projectSelect.addEventListener("change", () => {
+    project = projectSelect.value;
+
+    // FORGOTTEN ON PURPOSE. Every project remembers its own folder, and carrying this one's over
+    // would offer the new project the old one's folder as though it had chosen it - which is the
+    // shape of the mistake this whole control exists to prevent. Cleared, the host answers with
+    // what the newly chosen project remembers, and the plan puts it back in the box.
+    folder = "";
+    folderInput.value = "";
+    void refresh();
+  });
+
+  projectRow.append(projectLabel, projectSelect, projectHint);
+
   const folderRow = document.createElement("div");
   folderRow.className = "sync-row";
 
@@ -413,7 +499,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
 
   foot.append(status, cancel, apply);
 
-  card.append(head, directions, folderRow, modeRow, body, foot);
+  card.append(head, directions, projectRow, folderRow, modeRow, body, foot);
 
   // ---- behaviour --------------------------------------------------------------------------
   const actionable = (item: SyncItem): boolean =>
@@ -674,6 +760,7 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
 
     const answer = await request({
       direction,
+      ...(project ? { project } : {}),
       ...(folder ? { folder } : {}),
       mode: modeSelect.value,
     });
@@ -745,7 +832,9 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
     say(direction === "export" ? "Writing the folder..." : "Writing the workbook...");
 
     const answer = await request(
-      { action: "apply", direction, folder, mode: modeSelect.value },
+      // The SAME project the plan above was read for. Without it the apply resolved itself
+      // all over again, so a plan drawn for one workbook could be carried out against another.
+      { action: "apply", direction, ...(project ? { project } : {}), folder, mode: modeSelect.value },
       [...ticked].join("\n"),
     );
 
@@ -777,6 +866,8 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
       mode: modeSelect.value,
       busy,
       status: status.textContent ?? "",
+      project: projectSelect.value,
+      projects: [...projectSelect.options].map((one) => one.value),
       rows: (plan?.items ?? []).map((item) => ({
         file: item.file,
         status: item.status,
@@ -811,6 +902,15 @@ export function openSyncDialog(request: SyncRequest, closed: () => void): void {
         box.click();
       }
 
+      return true;
+    },
+    chooseProject: (name) => {
+      const option = [...projectSelect.options].find((one) => one.value === name);
+      if (!option) {
+        return false;
+      }
+      projectSelect.value = name;
+      projectSelect.dispatchEvent(new Event("change"));
       return true;
     },
     setFolder: (path) => {

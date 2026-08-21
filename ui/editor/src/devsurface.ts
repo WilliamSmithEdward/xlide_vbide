@@ -1812,9 +1812,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     /**
      * Drives the OPEN sync dialog through its own controls: `{press}` clicks a named button
      * (apply, close, all, none, export, import), `{tick, on}` a row's checkbox by file name,
-     * `{folder}` types the path through the input's own change event. `ui.sync` is the read
-     * side. Before this pair, driving the dialog meant querySelector against its private DOM
-     * from a harness file, which tests the selector as much as the dialog.
+     * `{folder}` types the path through the input's own change event, and `{project}` points it
+     * at another open project through the select's own change event. `ui.sync` is the read side,
+     * and it carries `project` and `projects` so a driver can see the choice as well as make it.
+     * Before this pair, driving the dialog meant querySelector against its private DOM from a
+     * harness file, which tests the selector as much as the dialog.
      */
     syncDialog: (args) => {
       const dialog = syncDialogProbe();
@@ -1842,7 +1844,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: true, detail: "folder set through the input's own change" };
       }
 
-      return { did: false, detail: "nothing asked; pass press, tick (with on), or folder" };
+      if (args.project !== undefined) {
+        const name = String(args.project);
+        return dialog.chooseProject(name)
+          ? { did: true, detail: `pointed at ${name} through the select's own change` }
+          : { did: false, detail: `${name} is not one of the open projects the dialog was given` };
+      }
+
+      return { did: false, detail: "nothing asked; pass press, tick (with on), folder or project" };
     },
 
     /**
