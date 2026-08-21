@@ -100,7 +100,43 @@ function Invoke-PageDeploy {
     }
 
     Write-Step 'Deploy into the published shim'
-    Copy-Item (Join-Path $distRoot '*') $publishRoot -Recurse -Force
+
+    # COPIED, THEN CHECKED, because the copy can fail without failing.
+    #
+    # `Copy-Item -Force` writes a NON-TERMINATING error when a file is locked and carries on, so
+    # a running host - whose WebView holds editor.js open - left the published bundle at its
+    # previous build while this printed "Deployed" and the reload below then re-ran the OLD page.
+    # Nothing downstream could see it either: the staleness guard compares the running page
+    # against the bundle IN THE PUBLISH, and both were equally old, so they agreed. It cost three
+    # wrong conclusions in one session, including a check that looked like it could not catch the
+    # regression it had been written for (2026-08-21).
+    #
+    # So the destination is compared against the source afterwards, by size and time, and a file
+    # that did not land is named along with whatever is holding it.
+    Copy-Item (Join-Path $distRoot '*') $publishRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+    $missed = @()
+    foreach ($built in Get-ChildItem $distRoot -Recurse -File) {
+        $relative = $built.FullName.Substring($distRoot.Length).TrimStart('\')
+        $landed = Join-Path $publishRoot $relative
+        $there = Get-Item $landed -ErrorAction SilentlyContinue
+        if (-not $there -or $there.Length -ne $built.Length -or $there.LastWriteTimeUtc -lt $built.LastWriteTimeUtc) {
+            $missed += $relative
+        }
+    }
+
+    if ($missed.Count -gt 0) {
+        $holding = @(Get-Process EXCEL, WINWORD, POWERPNT -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.ProcessName) $($_.Id)" })
+        $blame = if ($holding.Count -gt 0) {
+            " A host is running and holds the page open: $($holding -join ', '). Close it and run this again."
+        } else {
+            ''
+        }
+
+        throw "The page did NOT reach the publish: $($missed -join ', ') did not land.$blame"
+    }
+
     Write-Host "Deployed to $publishRoot"
 
     # Wrapped at the CALL: PowerShell unwraps a returned array, so zero sessions came back as

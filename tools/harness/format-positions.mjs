@@ -303,6 +303,61 @@ if (runnable) try {
     `caret at column ${single.data?.column}, line now ${JSON.stringify(single.data?.text)}`);
 
   /*
+   * AND ON A LINE THAT IS NOTHING BUT INDENT, IT TAKES ALL OF IT.
+   *
+   * Backspace already goes back a level rather than a space, but a blank line two levels in
+   * still cost a press per level to clear, and clearing it is the whole of what a developer is
+   * doing there - there is nothing else on the line to keep (the owner, 2026-08-21). The line
+   * stays, empty; joining it upwards is what the next press does, as it always did.
+   *
+   * Driven through the KEY. Smart Backspace is a keybinding with no command id, so the action
+   * used to reach the editor's stock deleteLeft and none of the product's own rules; the two
+   * checks above passed either way because neither of them is one.
+   */
+  // Built through the PAGE - Enter for a blank line at this indent, Tab for a second level -
+  // because by now the surface holds edits the module has not been given, and a write here
+  // would be replaced by the surface's own write-back rather than landing (it timed out doing
+  // exactly that while this was being written). TWO levels is the point: one level is a single
+  // level either way, so it cannot tell this rule from the editor's own tab stops.
+  const nowAt = ((await api.readModule(target, project.projectId, { live: true })).text ?? "")
+    .split(/\r?\n/)[indented - 1] ?? "";
+  const endOfLine = nowAt.length + 1;
+  await api.caret(indented, { module: target, project: project.projectId, column: endOfLine });
+  await waitFor("the caret to reach the end of the indented line", async () => {
+    const focus = (await api.ui()).focus;
+    return focus?.line === indented && focus?.column === endOfLine;
+  });
+
+  // Tabbed up to two levels rather than once: the checks above have already taken the indent
+  // off this line, so how deep Enter starts depends on what they left behind.
+  await api.act("press", { key: "Enter" });
+  const want = (size * 2) + 1;
+  for (let press = 0; press < 3; press += 1) {
+    if (((await api.ui()).focus?.column ?? 0) >= want) {
+      break;
+    }
+
+    await api.act("press", { key: "Tab" });
+  }
+
+  const twoLevels = await waitFor("a blank line indented two levels", async () => {
+    const focus = (await api.ui()).focus;
+    return (focus?.column ?? 0) >= want ? focus : null;
+  });
+  check(`Enter and Tab leave the caret ${size * 2} spaces in, on a line holding nothing else`,
+    twoLevels.column === want, `the caret was at column ${twoLevels.column}`);
+
+  const cleared = await api.act("backspace");
+  check(`one Backspace clears a blank line indented ${size * 2} spaces, not one level of it`,
+    cleared.data?.column === 1 && (cleared.data?.text ?? "").length === 0,
+    `caret at column ${cleared.data?.column}, line now ${JSON.stringify(cleared.data?.text)}`);
+
+  const joined = await api.act("backspace");
+  check("...and the next Backspace joins it upwards, the way it always did",
+    (joined.data?.line ?? 0) === indented,
+    `caret went to line ${joined.data?.line}, wanted ${indented}, on ${JSON.stringify(joined.data?.text)}`);
+
+  /*
    * ENTER, AND WHAT HANGS OFF IT.
    *
    * Untestable until 2026-08-09. `type` inserts a string, and Monaco applies its enter rules only

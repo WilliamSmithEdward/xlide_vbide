@@ -411,14 +411,75 @@ class TypingAutomation {
 
   /**
    * Backspace on the empty marker a continued comment left behind clears the whole marker, so
-   * leaving a comment is one keystroke rather than one per apostrophe. Anything else stays an
-   * ordinary Backspace.
+   * leaving a comment is one keystroke rather than one per apostrophe. Backspace on a line that
+   * is nothing but indent clears all of it, so leaving one is one keystroke rather than one per
+   * level. Anything else stays an ordinary Backspace.
    */
   private smartBackspace(): void {
     const model = this.editor.getModel();
-    if (!model || !this.clearEmptyContinuedComment(model)) {
+    if (!model) {
       this.editor.trigger("xlide", "deleteLeft", null);
+      return;
     }
+
+    if (this.clearEmptyContinuedComment(model) || this.clearBlankLineIndent(model)) {
+      return;
+    }
+
+    this.editor.trigger("xlide", "deleteLeft", null);
+  }
+
+  /**
+   * A caret at the end of a line that holds only whitespace: Backspace takes the whole indent,
+   * not one level of it. True when it did.
+   *
+   * Backspace in leading whitespace already goes back a whole level rather than a single space
+   * (useTabStops), but a blank line two or three levels in still costs a press per level to
+   * clear - and clearing it is what the developer is doing, since there is nothing else on the
+   * line to keep (the owner, 2026-08-21).
+   *
+   * The line is left in place, empty. Joining it to the line above is what the NEXT Backspace
+   * does, which is the ordinary rule and is what a developer who wanted the line gone would
+   * press anyway.
+   */
+  private clearBlankLineIndent(model: monaco.editor.ITextModel): boolean {
+    const selections = this.editor.getSelections();
+    if (!selections || selections.length !== 1) {
+      return false;
+    }
+
+    const selection = selections[0];
+    if (!selection || !selection.isEmpty()) {
+      return false;
+    }
+
+    const position = selection.getPosition();
+    const line = model.getLineContent(position.lineNumber);
+
+    // Only whitespace, and the caret past the start of it: at column 1 there is nothing here to
+    // take and Backspace means the line above.
+    if (line.length === 0 || position.column === 1 || !/^[ \t]+$/.test(line)) {
+      return false;
+    }
+
+    // And only from the END of it. A caret parked mid-indent is a developer aiming at part of
+    // it, and taking the lot would be this rule guessing.
+    if (position.column !== line.length + 1) {
+      return false;
+    }
+
+    this.applying = true;
+    try {
+      this.editor.executeEdits("xlide-smart-backspace", [{
+        range: new monaco.Range(position.lineNumber, 1, position.lineNumber, position.column),
+        text: "",
+      }]);
+    } finally {
+      this.applying = false;
+    }
+
+    this.editor.setPosition({ lineNumber: position.lineNumber, column: 1 });
+    return true;
   }
 
   /**

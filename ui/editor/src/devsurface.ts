@@ -2507,19 +2507,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       };
     },
 
+    /**
+     * Backspace, THE KEY - not the editor's deleteLeft command underneath it.
+     *
+     * Smart Backspace is bound to the key with a when-clause and no command id, which is the
+     * only way to rebind a key here without taking it away from every other editor on the page.
+     * Nothing can invoke it by name, so driving `deleteLeft` reached the stock command and the
+     * product's own rules - the continued comment's marker, a blank line's indent - were
+     * untestable from outside, while the checks that used this action read as if they covered
+     * them (found 2026-08-21, adding the blank-line rule).
+     *
+     * A synthesised keydown on the editor's textarea DOES reach the keybinding service, which
+     * is where a keybinding lives; it is only the typing path that ignores synthetic events,
+     * because that arrives as input rather than as a key. When a rule declines, its handler
+     * falls through to deleteLeft, so this stays exactly as useful for the ordinary cases.
+     */
     backspace: (args) => {
       const editor = workspace.activeEditor();
       const times = Math.max(1, Math.min(64, Number(args.times ?? 1) || 1));
 
       editor.focus();
+      const area = editor.getDomNode()?.querySelector("textarea");
       for (let press = 0; press < times; press += 1) {
-        editor.trigger("keyboard", "deleteLeft", null);
+        if (area) {
+          area.dispatchEvent(new KeyboardEvent("keydown", {
+            key: "Backspace", code: "Backspace", keyCode: 8, which: 8,
+            bubbles: true, cancelable: true,
+          }));
+        } else {
+          editor.trigger("keyboard", "deleteLeft", null);
+        }
       }
 
       const at = editor.getPosition();
       return {
         did: true,
-        detail: `deleteLeft ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
+        detail: `Backspace ×${times}, caret at ${at?.lineNumber}:${at?.column}`,
         data: {
           line: at?.lineNumber ?? null,
           column: at?.column ?? null,
