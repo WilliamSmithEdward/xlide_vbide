@@ -72,7 +72,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
 import { tokensFitTheText } from "./semanticfit.js";
 import { openReferencesDialog } from "./referencesdialog.js";
-import { DocumentStore, docKeyOf, docUriOf, type DocumentId } from "./documents.js";
+import { DocumentStore, docKeyOf, docUriOf, namesTheSameWorkbook, type DocumentId } from "./documents.js";
 import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
@@ -1337,7 +1337,7 @@ function boot(): void {
       viewFor: (module, project) => {
         for (const view of designerViews.values()) {
           if (view.id.module.toLowerCase() === module.toLowerCase()
-            && (project === null || (view.id.project ?? "").toLowerCase() === project.toLowerCase())) {
+            && (project === null || namesTheSameWorkbook(view.id.project, project))) {
             return view;
           }
         }

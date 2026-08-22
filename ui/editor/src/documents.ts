@@ -29,6 +29,33 @@ export function docKeyOf(module: string, project: string | null | undefined, fac
   return `${(project ?? "").toLowerCase()}\0${module.toLowerCase()}${face ? `\0${face}` : ""}`;
 }
 
+/**
+ * Whether a caller's spelling of a workbook names the one a tab is holding.
+ *
+ * TWO SPELLINGS, BOTH OURS. `projects()` answers a `projectId` - the workbook's full path - and
+ * a `project` - the name the tree draws. The host's routes take either, deliberately: its own
+ * comment says an identity is accepted "because this product hands them out and then would not"
+ * take them back. The PAGE's actions compared the caller's string to a tab's display name and
+ * nothing else, so the field literally named `projectId` was refused by `activate` while its
+ * refusal listed the module as open - which reads as the surface contradicting itself, and is
+ * how it was found (2026-08-22).
+ *
+ * A tab carries the display name, so a path matches when its file name does. An unsaved
+ * workbook has no path and falls through to the exact compare, which is the right answer for it.
+ */
+export function namesTheSameWorkbook(held: string | null | undefined, asked: string): boolean {
+  const mine = (held ?? "").toLowerCase();
+  const theirs = asked.toLowerCase();
+  if (mine === theirs) {
+    return true;
+  }
+
+  return fileNameOf(theirs) === mine || fileNameOf(mine) === theirs;
+}
+
+const fileNameOf = (path: string): string =>
+  path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
+
 /** The model URI for a document. Both parts encoded, so names with slashes cannot forge paths. */
 export function docUriOf(module: string, project: string | null | undefined): monaco.Uri {
   return monaco.Uri.parse(

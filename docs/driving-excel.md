@@ -426,6 +426,10 @@ ui.changes.full;                  // whether the comparison is up full size
 ui.changes.fullChoices;           // snapshots the card's rail offers; 0 when it is down
 ui.changes.railUp;                // whether the rail is showing
 ui.changes.railWidth;             // how wide it was left, in px; 0 when folded away
+ui.changes.behind;                // the log has moved on since these counts were read
+ui.changes.total;                 // rounds the log HOLDS. The `changes` route stops at
+                                  //   `limit` (200 by default), so this is how a reader
+                                  //   tells the newest 200 from all of them
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a

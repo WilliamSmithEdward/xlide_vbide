@@ -47,7 +47,16 @@ public sealed record ChangeLogReply(
     [property: JsonPropertyName("project")] string Project,
     [property: JsonPropertyName("acceptedAt")] int AcceptedAt,
     [property: JsonPropertyName("covers")] string Covers,
-    [property: JsonPropertyName("rounds")] ChangeRoundReply[] Rounds);
+    [property: JsonPropertyName("rounds")] ChangeRoundReply[] Rounds,
+    /// <summary>
+    /// How many rounds the log holds, which is not always how many are in `rounds`.
+    ///
+    /// A view that stops at its limit and says nothing makes "the newest two hundred" and "all of
+    /// them" the same answer. That matters to a reader deciding whether it has seen the whole
+    /// history - a developer looking for an edit they remember, or an agent told to review what it
+    /// changed - and this log's stance everywhere else is to say what it cannot show.
+    /// </summary>
+    [property: JsonPropertyName("total")] int Total = 0);
 
 /// <summary>One text the change log kept, asked for by round and module.</summary>
 public sealed record ChangeTextReply(

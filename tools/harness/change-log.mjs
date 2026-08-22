@@ -145,6 +145,21 @@ check("and closes it", labelled[0]?.open, false);
 const empty = since(await log({ action: "snapshot", label: "nothing happened" }));
 check("a snapshot with nothing running invents no round", empty.length, labelled.length);
 
+// ---- and it says when it has not shown everything ---------------------------------------------
+//
+// The list stops at `limit`, so a reply of two hundred rounds and a complete history were the
+// same answer. That matters to a developer hunting an edit they remember making, and to an agent
+// told to review what it changed - and this log's stance everywhere else is to say what it cannot
+// show, which is why a round whose text has gone reports `held: false` rather than drawing an
+// empty comparison. Asked with a small limit, because proving it needs a truncated view and not
+// two hundred rounds.
+
+const whole = await log();
+const clipped = await log({ limit: "2" });
+check("a limited view returns what was asked for", clipped.rounds.length, 2);
+check("and says how many the log actually holds", clipped.total, whole.rounds.length);
+check("while an unlimited one agrees with itself", whole.total, whole.rounds.length);
+
 // ---- the pane draws what the route says --------------------------------------------------------
 
 await api.ask(

@@ -212,6 +212,17 @@ public sealed class ChangeLog
         AcceptedAt = _number;
     }
 
+    /// <summary>
+    /// How many rounds this log holds, the one still running included.
+    ///
+    /// SO THAT A TRUNCATED VIEW CAN SAY IT IS ONE. `Rounds` takes a limit and quietly stops at it,
+    /// which makes "these are the newest two hundred" and "these are all of them" the same answer
+    /// - and this log's whole stance is that it says what it cannot show rather than going quiet
+    /// (the same reason a round whose text has gone reports `held: false`). A reader with 401
+    /// rounds and 200 in hand had no way to know, and neither did an agent told to review them.
+    /// </summary>
+    public int RoundCount => _rounds.Count + (_running ? 1 : 0);
+
     /// <summary>Every round, newest first, with the one still running - if any - at the front.</summary>
     public IReadOnlyList<ChangeRound> Rounds(int limit = 200)
     {

@@ -45,6 +45,8 @@ export interface ChangeLogState {
   acceptedAt: number;
   covers: string;
   rounds: ChangeRound[];
+  /** How many rounds the log holds, which is not always how many are in `rounds`. */
+  total: number;
 }
 
 /** How the pane reaches the host. One function, because there is only one kind of request. */
@@ -78,6 +80,8 @@ export interface ChangesPaneProbe {
     railWidth: number;
     /** Whether the host has recorded changes since these counts were read. */
     behind: boolean;
+    /** Rounds in the log, against the rounds on screen. */
+    total: number;
   };
   /** Presses a named control: refresh, snapshot, accept. False when unknown. */
   press(control: string): boolean;
@@ -353,6 +357,19 @@ export class ChangesPane {
       }
 
       this.list.appendChild(this.drawRound(round));
+    }
+
+    // AND IT SAYS WHEN THERE ARE MORE. The answer stops at a limit, so a list of two hundred and a
+    // complete history look identical - which matters to a developer hunting an edit they remember
+    // making, and to an agent told to review what it changed. This pane's stance everywhere else
+    // is to say what it cannot show (a round whose text has gone reports it rather than drawing an
+    // empty comparison); the list quietly stopping was the one place it did not.
+    const held = state.total ?? state.rounds.length;
+    if (held > state.rounds.length) {
+      const more = document.createElement("div");
+      more.className = "changes-empty changes-more";
+      more.textContent = `the newest ${state.rounds.length} of ${held} rounds`;
+      this.list.appendChild(more);
     }
 
     // The rail is the same list said shorter, so it is rebuilt from the same pass. One list drawn
@@ -959,6 +976,7 @@ export class ChangesPane {
           ? this.full.rail.getBoundingClientRect().width
           : 0),
         behind: this.hostStamp > this.drawnStamp,
+        total: this.state?.total ?? 0,
       }),
       press: (control) => {
         const button = control === "refresh" ? this.refresh

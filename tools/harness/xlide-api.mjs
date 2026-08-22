@@ -285,7 +285,12 @@ export async function open({ pid, workbook } = {}) {
     // Ask Windows before blaming the developer for not having started Excel. Most of the time
     // they have, and it died.
     throw new Error(
-      "no xlide instance is answering; start Excel and open the editor (Debug build only)"
+      // NOT "Debug build only" any more: the api ships, and a shipped build keeps the door shut
+      // until someone opens it from the agent card. A dev build opens it unless `api.enabled` in
+      // the settings file says otherwise - which a previous session can have left behind.
+      "no xlide instance is answering. Start Excel and open the editor; if it is open, the api"
+      + " door may be shut - check api.enabled in %LOCALAPPDATA%\\xlide_vbide\\settings.json,"
+      + " or turn it on from the toolbar's agent button"
       + describeDeath(await whyDidItDie()));
   }
 

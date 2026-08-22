@@ -5924,3 +5924,12 @@ body.objbrowser-page #objbrowser-card {
   border-radius: 50%;
   background: var(--vscode-charts-yellow, #cca700);
 }
+
+/* "the newest 200 of 401" - the list saying it stopped. Quiet, at the end of the rounds, where a
+   reader arrives after scrolling rather than before starting. */
+.changes-more {
+  font-size: 11px;
+  opacity: 0.6;
+  border-top: 1px dashed var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
+  margin-top: 4px;
+}

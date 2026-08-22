@@ -264,7 +264,7 @@ internal sealed partial class AddInSession
         return System.Text.Json.JsonSerializer.Serialize(
             new ChangeLogReply(
                 detail, DisplayFromProjectId(wanted) ?? wanted ?? string.Empty,
-                log.AcceptedAt, ChangeLogCovers, rounds),
+                log.AcceptedAt, ChangeLogCovers, rounds, log.RoundCount),
             ChangeJsonContext.Default.ChangeLogReply);
     }
 

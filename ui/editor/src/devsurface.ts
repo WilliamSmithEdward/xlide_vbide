@@ -30,6 +30,7 @@ import { colourPickerState, pickColour } from "./colourpicker.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
+import { namesTheSameWorkbook } from "./documents.js";
 import { changesPaneProbe } from "./changespane.js";
 import { agentDialogProbe } from "./agentdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
@@ -1480,16 +1481,31 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
 
       const wantedModule = module.toLowerCase();
-      const wantedProject = project === null ? null : project.toLowerCase();
       // The FACE is part of the identity: a form's code tab and designer tab share a name,
       // and without this an activate could pick either. No face means the code tab.
       const wantedFace = args.face === "design" ? "design" : undefined;
       const open = workspace.snapshot().groups.flatMap((group) => group.tabs);
       const matches = open.filter((tab) => tab.module.toLowerCase() === wantedModule
-        && (wantedProject === null || (tab.project ?? "").toLowerCase() === wantedProject)
+        && (project === null || namesTheSameWorkbook(tab.project, project))
         && (tab.face ?? undefined) === wantedFace);
 
       if (matches.length === 0) {
+        // SAY WHICH HALF MISSED. Listing every open tab after "no tab answers to Massive" names
+        // Massive among them whenever the project was the mismatch, which reads as the surface
+        // contradicting itself and sends the caller looking at the wrong argument.
+        const byName = open.filter((tab) => tab.module.toLowerCase() === wantedModule);
+        if (byName.length > 0 && project !== null) {
+          const elsewhere = [...new Set(byName.map((tab) => tab.project ?? "?"))].join(", ");
+          return {
+            did: false,
+            detail: `${module} is open, but in ${elsewhere}, not in ${project}`,
+          };
+        }
+
+        if (byName.length > 0 && wantedFace !== undefined) {
+          return { did: false, detail: `${module} is open, but no designer tab for it is` };
+        }
+
         const strip = open.map((tab) => tab.label).join(", ");
         return {
           did: false,
@@ -1499,8 +1515,8 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       let picked = matches[0]!;
       if (matches.length > 1) {
-        const shownProject = (workspace.activeDocument()?.project ?? "").toLowerCase();
-        const inShown = matches.find((tab) => (tab.project ?? "").toLowerCase() === shownProject);
+        const shownProject = workspace.activeDocument()?.project ?? "";
+        const inShown = matches.find((tab) => namesTheSameWorkbook(tab.project, shownProject));
         if (!inShown) {
           return {
             did: false,
