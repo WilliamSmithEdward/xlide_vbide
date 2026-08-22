@@ -88,6 +88,7 @@ export type HostMessage =
   | { type: "syncResult"; id: number; json: string }
   | { type: "changesResult"; id: number; json: string }
   | { type: "apiResult"; id: number; json: string }
+  | { type: "changesStamp"; stamp: number }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | ({ type: "setTests" } & SetTestsState)
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -1168,6 +1169,13 @@ export class EditorBridge {
    * This rides the page's own channel to the host - the same one settings and the change log use -
    * so it answers whether the door is open or shut.
    */
+  /**
+   * Called when the host has recorded a change. The Changes pane uses it to say its numbers are
+   * a reading rather than a live count - it does NOT make the pane re-read, which is the whole
+   * point of the pane being asked rather than pushed.
+   */
+  changesStamped: ((stamp: number) => void) | undefined;
+
   requestApi(args: Record<string, string>): Promise<Record<string, unknown>> {
     return this.pendingApi.ask(
       () => ({ error: "the host did not answer in time" }),
@@ -1655,6 +1663,11 @@ export class EditorBridge {
           answer = { error: "the host's answer could not be read" };
         }
         this.pendingChanges.settle(message.id, answer);
+        return;
+      }
+      case "changesStamp": {
+        // Carries no counts, so there is nothing to apply - only somebody to tell.
+        this.changesStamped?.(message.stamp);
         return;
       }
       case "apiResult": {

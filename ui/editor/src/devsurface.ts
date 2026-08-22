@@ -1851,7 +1851,8 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * snapshot, accept, or rail for the full-size card's own show-and-hide), `{round, module}`
      * opens one module's comparison exactly as clicking its row does, `{file}` points the pane at
      * another open file, and `{expand}` shows the comparison full size or closes it. `ui.changes`
-     * is the read side, and carries `full`, `fullChoices`, `railUp` and `railWidth`.
+     * is the read side, and carries `full`, `fullChoices`, `railUp`, `railWidth`, and
+     * `behind` - whether the host has recorded changes since these counts were read.
      *
      * `{round, module, in: "full"}` clicks the row in the FULL-SIZE card's rail instead of the
      * pane's list. Two controls onto the same comparison, so a check that drove one has not said

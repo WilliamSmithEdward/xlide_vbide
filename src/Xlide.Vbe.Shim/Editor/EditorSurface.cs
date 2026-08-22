@@ -505,6 +505,19 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.ChangesResultMessage));
     }
 
+    /// <summary>Tells the pane the log has moved on. One integer; see ChangesStampMessage.</summary>
+    public void ShowChangesStamp(int stamp)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ChangesStampMessage("changesStamp", stamp),
+            EditorMessageContext.Default.ChangesStampMessage));
+    }
+
     /// <summary>The api door's state, back to the card that asked.</summary>
     public void ShowApiResult(int requestId, string json)
     {

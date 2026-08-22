@@ -5885,3 +5885,42 @@ body.objbrowser-page #objbrowser-card {
   font-size: 11px;
   opacity: 0.8;
 }
+
+/* "There is newer" - the pane admitting its numbers are a reading.
+   A dot AND the words, never the dot alone: a coloured pip beside a toolbar is not a message. */
+#changes-newer {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  opacity: 0.85;
+  color: var(--vscode-charts-yellow, #cca700);
+}
+
+#changes-newer[hidden] {
+  display: none;
+}
+
+.changes-newer-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* And the button that answers it wears the same mark, so the thing to press is obvious from the
+   thing that is being said. */
+.changes-refresh-newer {
+  position: relative;
+}
+
+.changes-refresh-newer::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--vscode-charts-yellow, #cca700);
+}

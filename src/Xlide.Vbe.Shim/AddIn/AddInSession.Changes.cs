@@ -131,12 +131,29 @@ internal sealed partial class AddInSession
 
             ChangeLogFor(ChangeLogProject(projectId))?.Record(
                 module, kind, before, after, _writingAs ?? "developer", DateTimeOffset.UtcNow, from);
+
+            // A TAP ON THE SHOULDER, CARRYING NO COUNTS. The pane reads the log when it is opened
+            // and when the developer asks again, never on the write path, because every count in
+            // it is a comparison of two whole texts and this product has learned twice what that
+            // costs per keystroke. That rule stands - and it left the pane showing a reading from
+            // minutes ago beside live code, with nothing on screen to say which was which (the
+            // owner, 2026-08-22, reading +54 next to a module that had grown to 61 lines).
+            //
+            // So the host says only THAT something landed. No module, no text, no arithmetic: an
+            // integer the pane compares with the one it last drew. Writes are flushed when typing
+            // stops rather than per keystroke, so this fires at the rate a developer finishes
+            // thoughts, not the rate they press keys.
+            _editorSurface?.ShowChangesStamp(++_changeStamp);
         }
         catch (Exception ex)
         {
             Log.Warn($"changes: {module} was not recorded, {ex.Message}");
         }
     }
+
+    /// <summary>How many changes this session has recorded. Only ever compared, never read as a
+    /// count of anything the developer would recognise.</summary>
+    private int _changeStamp;
 
     /// <summary>
     /// Ends the round that is running on every project, with a label when the caller has one.

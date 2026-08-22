@@ -804,6 +804,11 @@ function boot(): void {
       current: workspace.activeDocument()?.project ?? null,
     }));
 
+  // The host's tap on the shoulder when it records a change. It does NOT make the pane re-read -
+  // the pane's counts are whole-text comparisons and are never taken on the write path - it only
+  // lets the pane say that what it is showing has been overtaken.
+  bridge.changesStamped = (stamp) => changesPane?.stamped(stamp);
+
   // Both panes' Current Module scope follows the same tab, and the shell is where every road
   // to a changed active module already meets - the host's own setActive and the workspace's
   // tab activation both land there.

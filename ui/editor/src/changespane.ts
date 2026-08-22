@@ -76,6 +76,8 @@ export interface ChangesPaneProbe {
     /** Whether the rail is up, and how wide it was left. */
     railUp: boolean;
     railWidth: number;
+    /** Whether the host has recorded changes since these counts were read. */
+    behind: boolean;
   };
   /** Presses a named control: refresh, snapshot, accept. False when unknown. */
   press(control: string): boolean;
@@ -126,6 +128,26 @@ export class ChangesPane {
   private readonly accept: HTMLButtonElement;
 
   private readonly file: HTMLSelectElement;
+  private readonly newer: HTMLElement;
+
+  /*
+   * WHAT THE COUNTS ARE, AND WHAT THEY ARE NOT.
+   *
+   * Every number in this pane is a comparison of two whole module texts, so it is worked out when
+   * the pane is opened and when the developer asks again - never on the write path. That rule is
+   * not negotiable; it is why this pane exists in the shape it does.
+   *
+   * The cost of it is that the numbers age, and they aged silently: a reading of +54 sat beside a
+   * module the editor had already grown to 61 lines, with nothing on screen saying which of the
+   * two was current (the owner, 2026-08-22: "shouldn't + number align with number of lines?").
+   * They did align - with the module as it was when the pane last looked.
+   *
+   * So the host taps the pane on the shoulder with a bare integer whenever it records a change,
+   * and the pane says "newer changes" if that integer has moved past the one it drew. No counting,
+   * no re-read, no text: the pull-only rule holds, and the pane stops implying it is live.
+   */
+  private drawnStamp = 0;
+  private hostStamp = 0;
 
   private state: ChangeLogState | null = null;
   private showing: { round: number; module: string } | null = null;
@@ -161,6 +183,7 @@ export class ChangesPane {
     this.accept = root.querySelector("#changes-accept") as HTMLButtonElement;
 
     this.file = root.querySelector("#changes-file") as HTMLSelectElement;
+    this.newer = root.querySelector("#changes-newer") as HTMLElement;
 
     livePane = this.probe();
 
@@ -180,6 +203,33 @@ export class ChangesPane {
     this.accept.addEventListener("click", () => void this.reload({ action: "accept" }));
 
     this.draw();
+  }
+
+  /**
+   * The host recorded a change. Nothing is re-read - see the note by `drawnStamp`.
+   *
+   * The DOM is touched only on the edge, when the pane goes from current to behind, because this
+   * arrives on every write and a class set on every one of them is work for no change on screen.
+   */
+  stamped(stamp: number): void {
+    if (stamp <= this.hostStamp) {
+      return;
+    }
+
+    const wasBehind = this.hostStamp > this.drawnStamp;
+    this.hostStamp = stamp;
+    if (!wasBehind) {
+      this.showNewer();
+    }
+  }
+
+  private showNewer(): void {
+    const behind = this.hostStamp > this.drawnStamp;
+    this.newer.hidden = !behind;
+    this.refresh.classList.toggle("changes-refresh-newer", behind);
+    this.refresh.title = behind
+      ? "Read the log again - it has moved on since these counts were taken."
+      : "Read the log again. These counts are a reading, not a live total.";
   }
 
   /** Asked for when the pane is opened, which is the only time any of this costs anything. */
@@ -237,10 +287,18 @@ export class ChangesPane {
 
     this.busy = true;
     this.setBusy(true);
+
+    // Stamped BEFORE the ask, not after: a change recorded while the request is in flight is one
+    // this answer may or may not carry, and claiming it was included would be the pane going
+    // quiet about something it might have missed. Erring towards "there is newer" is the safe
+    // direction - the cost of a needless refresh is one read, and the cost of a missed one is a
+    // number the developer trusts.
+    const asOf = this.hostStamp;
     try {
       const answer = await this.ask(
         this.file.value ? { project: this.file.value, ...args } : args);
       this.state = answer as unknown as ChangeLogState;
+      this.drawnStamp = asOf;
 
       // A round the developer just closed is gone from the list as a running one, so a diff
       // opened from it would be pointing at a row that has moved.
@@ -248,6 +306,7 @@ export class ChangesPane {
         this.showing = null;
       }
     } finally {
+      this.showNewer();
       this.busy = false;
       this.setBusy(false);
       this.draw();
@@ -899,6 +958,7 @@ export class ChangesPane {
         railWidth: Math.round(this.full && !this.railHidden
           ? this.full.rail.getBoundingClientRect().width
           : 0),
+        behind: this.hostStamp > this.drawnStamp,
       }),
       press: (control) => {
         const button = control === "refresh" ? this.refresh

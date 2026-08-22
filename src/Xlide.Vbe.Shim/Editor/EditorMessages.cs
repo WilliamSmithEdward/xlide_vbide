@@ -817,6 +817,15 @@ public sealed record ApiResultMessage(
     [property: JsonPropertyName("json")] string Json);
 
 /// <summary>
+/// One number, meaning "the change log has moved on since you last read it". Carries nothing
+/// else on purpose: the pane's counts are whole-text comparisons and are never computed on the
+/// write path, so this is a tap on the shoulder rather than an update.
+/// </summary>
+public sealed record ChangesStampMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("stamp")] int Stamp);
+
+/// <summary>
 /// The project's own words for the tokenizer: names that denote types and names that denote
 /// procedures, so a name reads as what it is wherever it appears.
 /// </summary>
@@ -893,6 +902,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(LoopSyncResultMessage))]
 [JsonSerializable(typeof(ChangesResultMessage))]
 [JsonSerializable(typeof(ApiResultMessage))]
+[JsonSerializable(typeof(ChangesStampMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]
