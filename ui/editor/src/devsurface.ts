@@ -108,14 +108,13 @@ export interface UiSnapshot {
   } | null;
   /**
    * The change log as the Changes pane is drawing it: which project, which files it can be
-   * pointed at, the newest round marked reviewed, what the log says it covers, and the rounds
-   * with one row per module. Null before the pane has been built.
+   * pointed at, the newest round marked reviewed, and the rounds with one row per module. Null
+   * before the pane has been built.
    */
   changes: {
     project: string;
     files: string[];
     acceptedAt: number;
-    covers: string;
     busy: boolean;
     rounds: {
       round: number;

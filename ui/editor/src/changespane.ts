@@ -59,7 +59,6 @@ export interface ChangesPaneProbe {
     project: string;
     files: string[];
     acceptedAt: number;
-    covers: string;
     busy: boolean;
     rounds: {
       round: number;
@@ -112,7 +111,6 @@ export const changesPaneProbe = (): ChangesPaneProbe | null => livePane;
 export class ChangesPane {
   private readonly list: HTMLElement;
   private readonly diff: HTMLElement;
-  private readonly covers: HTMLElement;
   private readonly title: HTMLElement;
   private readonly refresh: HTMLButtonElement;
   private readonly snapshot: HTMLButtonElement;
@@ -135,7 +133,6 @@ export class ChangesPane {
   constructor(root: HTMLElement, private readonly ask: ChangesRequest, private readonly files: OpenFiles) {
     this.list = root.querySelector("#changes-list") as HTMLElement;
     this.diff = root.querySelector("#changes-diff") as HTMLElement;
-    this.covers = root.querySelector("#changes-covers") as HTMLElement;
     this.title = root.querySelector("#changes-project") as HTMLElement;
     this.refresh = root.querySelector("#changes-refresh") as HTMLButtonElement;
     this.snapshot = root.querySelector("#changes-snapshot") as HTMLButtonElement;
@@ -172,10 +169,10 @@ export class ChangesPane {
   /**
    * Rebuilds the file list from the session as it stands.
    *
-   * A CLOSED FILE DROPS OUT. Its log stays on disk - it is a record, and a record that deletes
-   * itself when a workbook closes is not one - but a workbook nobody has open is not something
-   * this pane offers, and if it was the one being shown the pane falls back to the file the
-   * developer is actually in rather than going on answering about a file that is not there.
+   * A CLOSED FILE DROPS OUT. A workbook nobody has open is not something this pane offers, and if
+   * it was the one being shown the pane falls back to the file the developer is actually in rather
+   * than going on answering about a file that is not there. The session lets go of its log at the
+   * same moment, so opening the workbook again starts fresh.
    */
   filesChanged(): void {
     const { names, current } = this.files();
@@ -244,7 +241,6 @@ export class ChangesPane {
   private draw(): void {
     const state = this.state;
     this.title.textContent = state?.project ?? "";
-    this.covers.textContent = state?.covers ?? "";
 
     this.list.replaceChildren();
 
@@ -484,7 +480,6 @@ export class ChangesPane {
         project: this.state?.project ?? "",
         files: [...this.file.options].map((one) => one.value),
         acceptedAt: this.state?.acceptedAt ?? 0,
-        covers: this.state?.covers ?? "",
         busy: this.busy,
         rounds: (this.state?.rounds ?? []).map((round) => ({
           round: round.round,

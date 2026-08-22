@@ -1147,16 +1147,10 @@ pane draws as "text let go" rather than as an empty comparison. The rounds thems
 are the record, and they cost almost nothing.
 
 **What it does not cover** is everything that is not module code: references, project properties
-and form designs. It says so in its own `covers` field and the pane repeats it in a footer, because
-a log that is quietly partial about its own scope is worse than no log - the same lesson as the
-install chip that read green about no files at all.
-
-The footer leads with what IS recorded, and says "written through this editor" rather than naming
-the code window underneath. Both are deliberate: a developer's own typing is in the log under their
-own name and that is the half they doubt, and an earlier wording that led with the exclusions and
-called the uncovered case "edits made directly in the VBE" read as "anything I type" to somebody
-sitting inside the VBE looking at this editor - the opposite of the truth, to the person most
-likely to read it.
+and form designs. The `covers` field says so, for anything reading the log rather than looking at
+it - an agent deciding whether the absence of a row means a module was untouched or merely
+unwatched. The pane does not draw it: a caveat under every view is noise to somebody who has read
+it once.
 
 `change-log.mjs` pins it against a fixture of its own (`tools\New-ChangeFixture.ps1`), whose
 `Untouched` module is edited by nobody, which is how "the log did not over-report" is a real

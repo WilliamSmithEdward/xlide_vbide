@@ -241,7 +241,6 @@ const INDEX_HTML = `<!doctype html>
         <div id="changes-list" role="list" aria-label="Rounds"></div>
         <div id="changes-diff" aria-label="What changed"></div>
       </div>
-      <div id="changes-covers"></div>
     </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>

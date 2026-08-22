@@ -5408,14 +5408,6 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.7;
 }
 
-/* What the log does NOT watch, where a reader will see it. A log that is quietly partial about
-   its own scope is worse than no log. */
-#changes-covers {
-  padding: 4px 10px;
-  font-size: 11px;
-  opacity: 0.6;
-  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
-}
 
 /* The round's own number. Everything else names a round by it - the api's `round=`, a label read
    back by a driver, a developer asking an agent to look at "round 4" - so the pane says it too. */

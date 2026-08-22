@@ -146,14 +146,11 @@ check("the pane and the route agree about the counts",
   drawn.rounds.flatMap((round) => round.modules.map((one) => `${one.module}+${one.added}-${one.removed}`)),
   routeNow.rounds.flatMap((round) => round.entries.map((one) => `${one.module}+${one.added}-${one.removed}`)));
 
-check("the pane says what the log does not cover", drawn.covers, routeNow.covers);
-// BOTH HALVES. The exclusions matter, and so does the part a reader doubts: their own typing is
-// recorded, under their own name. The first wording led with the exclusions and called the
-// uncovered case "edits made directly in the VBE", which the owner read - correctly, from inside
-// the VBE - as "anything I type", while their typing was in the log all along.
-check("it says what IS recorded, the developer's own edits included",
-  drawn.covers.includes("yours and an agent's alike"));
-check("and what is not", drawn.covers.includes("form designs"));
+// The scope is still ANSWERED, for anything reading the log rather than looking at it - an agent
+// deciding whether the absence of a row means a module was untouched or merely unwatched. The pane
+// no longer draws it: a caveat under every view is noise to somebody who has read it once.
+check("the route still says what the log does not cover",
+  routeNow.covers.includes("form designs") && routeNow.covers.includes("written through this editor"));
 
 // ---- and the pane opens one module's comparison -------------------------------------------------
 
