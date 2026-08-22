@@ -173,19 +173,182 @@ check("and it draws rows", rows > 0);
 const grew = await api.act("changesPane", { expand: true });
 check("the comparison opens full size", grew.did, true);
 
-const bigger = await api.ask(`JSON.stringify({
-  card: !!document.querySelector('#changes-full-card'),
-  title: document.querySelector('#changes-full-head span')?.textContent ?? '',
-  closes: !!document.querySelector('#changes-full-close'),
-  rows: [...document.querySelectorAll('#changes-full-diff .sync-diff-row')].length,
-  clipped: getComputedStyle(document.querySelector('#changes-full-diff .sync-code')).textOverflow
-})`);
+const bigger = await api.ask(`JSON.stringify((() => {
+  const card = document.querySelector('#changes-full-card');
+  const body = document.querySelector('#changes-full-diff');
+  const drawn = [...document.querySelectorAll('#changes-full-diff .sync-diff-row')];
+  const box = card?.getBoundingClientRect() ?? { top: -1, bottom: -1, left: -1, right: -1 };
+  const first = drawn[0]?.getBoundingClientRect() ?? { top: 0 };
+  return {
+    card: !!card,
+    title: document.querySelector('#changes-full-head span')?.textContent ?? '',
+    closes: !!document.querySelector('#changes-full-close'),
+    rows: drawn.length,
+    clipped: getComputedStyle(body.querySelector('.sync-code')).textOverflow,
+    onScreen: box.top >= 0 && box.left >= 0
+      && Math.ceil(box.bottom) <= window.innerHeight && Math.ceil(box.right) <= window.innerWidth,
+    below: Math.round(box.bottom - window.innerHeight),
+    fills: Math.round((box.height / window.innerHeight) * 100),
+    // Head-room over the first line, which is the top half of the breathing space.
+    airTop: Math.round(first.top - body.getBoundingClientRect().top),
+  };
+})())`);
 const full = JSON.parse(typeof bigger === "string" ? bigger : JSON.stringify(bigger));
 
 check("it draws the same rows, with a way out", { card: full.card, closes: full.closes, drew: full.rows > 0 },
   { card: true, closes: true, drew: true });
 check("and the code is not clipped, because reading it is the point", full.clipped, "clip");
+
+// WHERE IT LANDS. The shared scaffold's head-room is sized for a small confirm, so a card that
+// wants the screen has to fit under what it asked for. This one asked for 92vh under an inherited
+// 18vh of padding and hung a tenth of a screen off the bottom edge, on screen, for a release (the
+// owner, 2026-08-22: "the popout geometry is off"). Opening was checked; landing was not.
+check(`and it lands on the screen (${full.below}px past the bottom)`, full.onScreen, true);
+
+// FULL HEIGHT, whatever it holds, so the comparison is the same shape every time it is opened.
+check(`and fills the height (${full.fills}vh)`, full.fills >= 88 && full.fills <= 96, true);
+
+// With the first and last lines off the edges rather than against them.
+check(`and the first line is not against the head (${full.airTop}px over it)`, full.airTop >= 6, true);
 check("the pane says it is up", (await api.ui()).changes.full, true);
+
+// ---- and it carries the snapshots with it --------------------------------------------------
+//
+// Opening one comparison full size and having to close it to reach the next one is the dialog
+// asking the reader to hold the list in their head. The rail is that list, kept where it can be
+// pointed at - and it is a CONTROL, so it is driven here rather than merely counted.
+
+const rail = await api.ask(`JSON.stringify((() => {
+  const list = document.getElementById('changes-full-list');
+  const opts = [...list.querySelectorAll('[role="option"]')];
+  const here = list.querySelector('.changes-full-showing');
+  const box = here?.getBoundingClientRect() ?? { height: 0 };
+  return {
+    listbox: list.getAttribute('role'),
+    width: Math.round(list.getBoundingClientRect().width),
+    options: opts.length,
+    selected: opts.filter((one) => one.getAttribute('aria-selected') === 'true').length,
+    // Roving tabindex: ONE stop on the way round the card, arrows moving within it.
+    stops: opts.filter((one) => one.tabIndex === 0).length,
+    // The current row said other than by fill, and a row big enough to hit.
+    bar: here ? getComputedStyle(here).borderLeftColor : '',
+    fill: here ? getComputedStyle(here).backgroundColor : '',
+    rowHeight: Math.round(box.height),
+  };
+})())`);
+const nav = JSON.parse(typeof rail === "string" ? rail : JSON.stringify(rail));
+
+check("the card carries the snapshot list", { listbox: nav.listbox, offered: nav.options > 1 },
+  { listbox: "listbox", offered: true });
+check(`and it is compact beside the code (${nav.width}px wide)`, nav.width <= 240, true);
+check("and exactly one snapshot is the selected one", { selected: nav.selected, stops: nav.stops },
+  { selected: 1, stops: 1 });
+check("and which one is said other than by colour", nav.bar !== nav.fill && nav.bar !== "", true);
+check(`and its rows can be hit (${nav.rowHeight}px)`, nav.rowHeight >= 24, true);
+check("and it reports what it offers", (await api.ui()).changes.fullChoices, nav.options);
+
+// Picking another one, from the CARD's rail rather than the pane's list.
+const onScreen = (await api.ui()).changes;
+const elsewhere = onScreen.rounds
+  .flatMap((one) => one.modules.map((each) => ({ round: one.round, module: each.module })))
+  .find((one) => !(one.round === oneHand[0].round && one.module === "Ledger"));
+
+const picked = await api.act("changesPane",
+  { round: elsewhere.round, module: elsewhere.module, in: "full" });
+check("the rail picks another snapshot without closing the card", picked.did, true);
+
+const swapped = await waitFor("the card to swap", async () => {
+  const said = await api.ask(`document.getElementById('changes-full-title')?.textContent ?? ''`);
+  const title = String(said);
+  return title.includes(`round ${elsewhere.round}`) ? title : false;
+}, { budgetMs: 15000 });
+check("and says which one it is now showing", swapped,
+  `${elsewhere.module}, round ${elsewhere.round}`);
+check("and the card is still up", (await api.ui()).changes.full, true);
+
+// ONE SOURCE OF TRUTH. The rail and the pane's list are two controls onto one comparison, so a
+// pick in the card has to move the pane behind it as well - otherwise closing the card drops the
+// reader back onto whatever they were looking at before they started navigating.
+check("and the pane behind agrees", (await api.ui()).changes.showing,
+  `${elsewhere.module}@${elsewhere.round}`);
+
+// ---- the rail folds away ---------------------------------------------------------------------
+//
+// One button, and the divider stays behind as the way home.
+
+const wide = (await api.ui()).changes.railWidth;
+await api.act("changesPane", { press: "rail" });
+const away = await waitFor("the rail to fold", async () => {
+  const now = (await api.ui()).changes;
+  return now.railUp === false ? now : false;
+}, { budgetMs: 10000 });
+check("one button puts the snapshots away", away.railUp, false);
+
+const home = await api.ask(`JSON.stringify({
+  divider: !!document.getElementById('changes-full-splitter')?.offsetParent,
+  says: document.getElementById('changes-full-toggle')?.getAttribute('aria-expanded') ?? '',
+  wider: Math.round(document.getElementById('changes-full-diff').getBoundingClientRect().width),
+})`);
+const folded = JSON.parse(typeof home === "string" ? home : JSON.stringify(home));
+check("and the divider stays as the way back", { divider: folded.divider, says: folded.says },
+  { divider: true, says: "false" });
+
+await api.act("changesPane", { press: "rail" });
+const back = await waitFor("the rail to come back", async () => {
+  const now = (await api.ui()).changes;
+  return now.railUp === true ? now : false;
+}, { budgetMs: 10000 });
+check("and the same button brings them back, the width it was left",
+  { up: back.railUp, width: back.railWidth }, { up: true, width: wide });
+
+// ---- and it is draggable ----------------------------------------------------------------------
+//
+// How much of the card a list of module names is worth is the reader's call, not this pane's. The
+// floor and the ceiling are the pane's, though: a rail at 20px is a control nobody can use, and one
+// at 80% of the card has eaten the code it was meant to be a way into.
+
+const pull = async (by) => {
+  await api.ask(`(() => {
+    const bar = document.getElementById('changes-full-splitter');
+    const box = bar.getBoundingClientRect();
+    const y = box.top + box.height / 2;
+    const at = (type, x) => bar.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 0, buttons: 1,
+      clientX: x, clientY: y,
+    }));
+    const from = box.left + box.width / 2;
+    at('pointerdown', from);
+    at('pointermove', from + ${by});
+    at('pointerup', from + ${by});
+    return true;
+  })()`);
+  return (await api.ui()).changes.railWidth;
+};
+
+check("the divider drags", await pull(80), wide + 80);
+check("and stops before the rail is too small to use", await pull(-4000), 140);
+
+const ceiling = Number(await api.ask(
+  `Math.round(document.getElementById('changes-full-card').clientWidth * 0.4)`));
+check("and before it has eaten the code", await pull(4000), ceiling);
+
+const separator = await api.ask(`JSON.stringify((() => {
+  const bar = document.getElementById('changes-full-splitter');
+  return {
+    role: bar.getAttribute('role'),
+    orient: bar.getAttribute('aria-orientation'),
+    now: bar.getAttribute('aria-valuenow'),
+    grip: !!document.getElementById('changes-full-grip')?.offsetParent,
+    reachable: bar.tabIndex,
+  };
+})())`);
+const bar = JSON.parse(typeof separator === "string" ? separator : JSON.stringify(separator));
+check("and says what it is, with a grip to say it can be pulled",
+  { role: bar.role, orient: bar.orient, grip: bar.grip, reachable: bar.reachable >= 0 },
+  { role: "separator", orient: "vertical", grip: true, reachable: true });
+check("and reports where it stands", Number(bar.now), ceiling);
+
+await pull(-4000);
 
 const shrank = await api.act("changesPane", { expand: false });
 check("and it closes", { did: shrank.did, up: (await api.ui()).changes.full }, { did: true, up: false });

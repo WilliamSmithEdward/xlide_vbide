@@ -398,10 +398,19 @@ await api.act("search", { query: "Recalculate", scope: "project", run: "findAll"
 ui.search.scopedMatches;          // the project/workbook answer. `matches` is MODULE SCOPE ONLY
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("format");                        // Format Module; {selection: true} for the selection
-await api.act("changesPane", { press: "refresh" });   // refresh, snapshot, accept
+await api.act("changesPane", { press: "refresh" });   // refresh, snapshot, accept, rail
 await api.act("changesPane", { round: 3, module: "Ledger" });  // open one module's comparison
 await api.act("changesPane", { file: "Ledger.xlsm" });  // point it at another open file
 await api.act("changesPane", { expand: true });         // the comparison, full size; false closes it
+await api.act("changesPane", { round: 3, module: "Ledger", in: "full" });  // pick from the card's
+                                                //   own rail, not the pane's list: two controls
+                                                //   onto one comparison, and driving one says
+                                                //   nothing about the other
+await api.act("changesPane", { press: "rail" }); // fold the card's snapshot rail away, or back
+ui.changes.full;                  // whether the comparison is up full size
+ui.changes.fullChoices;           // snapshots the card's rail offers; 0 when it is down
+ui.changes.railUp;                // whether the rail is showing
+ui.changes.railWidth;             // how wide it was left, in px; 0 when folded away
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a

@@ -1834,9 +1834,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
     /**
      * Drives the Changes pane through its own controls: `{press}` clicks a named button (refresh,
-     * snapshot, accept), `{round, module}` opens one module's comparison exactly as clicking its
-     * row does, `{file}` points the pane at another open file, and `{expand}` shows the comparison
-     * full size or closes it. `ui.changes` is the read side, and carries `full`.
+     * snapshot, accept, or rail for the full-size card's own show-and-hide), `{round, module}`
+     * opens one module's comparison exactly as clicking its row does, `{file}` points the pane at
+     * another open file, and `{expand}` shows the comparison full size or closes it. `ui.changes`
+     * is the read side, and carries `full`, `fullChoices`, `railUp` and `railWidth`.
+     *
+     * `{round, module, in: "full"}` clicks the row in the FULL-SIZE card's rail instead of the
+     * pane's list. Two controls onto the same comparison, so a check that drove one has not said
+     * anything about the other.
      *
      * There is no revert here because there is none in the pane: the log shows, and writing is
      * done through `module`, where it lands in the log like any other write.
@@ -1851,15 +1856,16 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         const control = String(args.press);
         return pane.press(control)
           ? { did: true, detail: `${control} pressed` }
-          : { did: false, detail: `no control named ${control}; use refresh, snapshot or accept` };
+          : { did: false, detail: `no control named ${control}; use refresh, snapshot, accept or rail` };
       }
 
       if (args.module !== undefined) {
         const module = String(args.module);
         const round = Number(args.round ?? 0);
-        return pane.show(round, module)
-          ? { did: true, detail: `showing ${module} from round ${round}` }
-          : { did: false, detail: `round ${round} has no row for ${module} on screen` };
+        const where = String(args.in ?? "pane") === "full" ? "full" : "pane";
+        return pane.show(round, module, where)
+          ? { did: true, detail: `showing ${module} from round ${round}, from the ${where}` }
+          : { did: false, detail: `the ${where} has no row for ${module} in round ${round}` };
       }
 
       if (args.file !== undefined) {
@@ -1876,7 +1882,10 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: open ? "there is no comparison on screen to show" : "nothing was up" };
       }
 
-      return { did: false, detail: "nothing asked; pass press, file, expand, or module (with round)" };
+      return {
+        did: false,
+        detail: "nothing asked; pass press, file, expand, or module (with round, and in=full for the card's rail)",
+      };
     },
 
     /**

@@ -71,11 +71,20 @@ export interface ChangesPaneProbe {
     showing: string | null;
     /** Whether the comparison is up full size. */
     full: boolean;
+    /** Snapshots the full-size card's own rail offers. Zero when it is down or holds one. */
+    fullChoices: number;
+    /** Whether the rail is up, and how wide it was left. */
+    railUp: boolean;
+    railWidth: number;
   };
   /** Presses a named control: refresh, snapshot, accept. False when unknown. */
   press(control: string): boolean;
-  /** Opens one round's module diff, as clicking its row does. */
-  show(round: number, module: string): boolean;
+  /**
+   * Opens one round's module diff, as clicking its row does. `where` says WHICH row: the pane's
+   * list, or the full-size card's rail - two controls onto the same comparison, and a harness
+   * proving one has not proved the other.
+   */
+  show(round: number, module: string, where?: "pane" | "full"): boolean;
   /** Points the pane at another open file, through the select's own change event. */
   chooseFile(name: string): boolean;
   /** Opens the comparison on screen full size, or closes it. */
@@ -128,7 +137,20 @@ export class ChangesPane {
   /** The comparison on screen, kept so it can be shown full size without asking again. */
   private showingRows: SyncDiffLine[] = [];
   private showingTitle = "";
-  private full: { card: HTMLElement; dismiss: () => void } | null = null;
+  private full: {
+    card: HTMLElement;
+    dismiss: () => void;
+    title: HTMLElement;
+    split: HTMLElement;
+    rail: HTMLElement;
+    splitter: HTMLElement;
+    toggle: HTMLButtonElement;
+    body: HTMLElement;
+  } | null = null;
+
+  /** How wide the rail was left, and whether it was left up. Kept across opens in this session. */
+  private railWidth = 200;
+  private railHidden = false;
 
   constructor(root: HTMLElement, private readonly ask: ChangesRequest, private readonly files: OpenFiles) {
     this.list = root.querySelector("#changes-list") as HTMLElement;
@@ -251,6 +273,7 @@ export class ChangesPane {
         ? "Nothing has been written to this project's modules yet."
         : "Reading the change log...";
       this.list.appendChild(empty);
+      this.drawFullList();
       this.drawDiff();
       return;
     }
@@ -273,6 +296,9 @@ export class ChangesPane {
       this.list.appendChild(this.drawRound(round));
     }
 
+    // The rail is the same list said shorter, so it is rebuilt from the same pass. One list drawn
+    // twice by one rule cannot drift; two lists maintained separately always do.
+    this.drawFullList();
     this.drawDiff();
   }
 
@@ -430,6 +456,9 @@ export class ChangesPane {
     }
 
     this.diff.appendChild(body);
+
+    // And the card, when one is up, from the rows the strip was just given.
+    this.drawFullDiff();
   }
 
   /**
@@ -437,8 +466,13 @@ export class ChangesPane {
    *
    * The pane is a strip along the bottom and a comparison is two columns of code, so anything
    * past a few lines is read three words at a time down there. This is the same rows, drawn by
-   * the same renderer, in a card that fills the window - and it asks the host nothing, because
-   * the rows it is showing are the rows it already has.
+   * the same renderer, in a card that fills the window.
+   *
+   * IT CARRIES THE SNAPSHOTS WITH IT. Opening one comparison full size and having to close it to
+   * reach the next one is the dialog asking the reader to hold the list in their head; the rail
+   * down the left is that list, kept where it can be pointed at (the owner, 2026-08-22: "inside
+   * the modal, I'd like a way to change the various snapshots too"). Compact, because the code is
+   * what came here to be read.
    */
   expand(): void {
     if (this.full || this.showingRows.length === 0) {
@@ -458,7 +492,7 @@ export class ChangesPane {
     head.id = "changes-full-head";
 
     const named = document.createElement("span");
-    named.textContent = this.showingTitle;
+    named.id = "changes-full-title";
 
     const close = document.createElement("button");
     close.type = "button";
@@ -470,12 +504,329 @@ export class ChangesPane {
 
     head.append(named, close);
 
+    const split = document.createElement("div");
+    split.id = "changes-full-split";
+
+    const rail = document.createElement("div");
+    rail.id = "changes-full-list";
+    rail.setAttribute("role", "listbox");
+    rail.setAttribute("aria-label", "Snapshots");
+    rail.style.flex = `0 0 ${this.railWidth}px`;
+    rail.addEventListener("keydown", (event) => this.railKey(event));
+
+    // The divider between them, the same one the designer's two halves are separated by: a grip
+    // to say it can be dragged, a chevron to put the rail away, and both reachable by keyboard.
+    const splitter = document.createElement("div");
+    splitter.id = "changes-full-splitter";
+    splitter.setAttribute("role", "separator");
+    splitter.setAttribute("aria-orientation", "vertical");
+    splitter.setAttribute("aria-label", "Resize the snapshot list");
+    splitter.title = "Drag to resize the snapshots. Enter, or the chevron, puts them away";
+    splitter.tabIndex = 0;
+
+    const grip = document.createElement("div");
+    grip.id = "changes-full-grip";
+    splitter.appendChild(grip);
+
+    // ONE button, and the chevron carries the direction: pointing at the rail while it is up,
+    // away from it once it is gone.
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.id = "changes-full-toggle";
+    toggle.innerHTML = '<svg viewBox="0 0 10 10" aria-hidden="true">'
+      + '<path d="M2 6.5 L5 3.5 L8 6.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.showRail(this.railHidden);
+    });
+    toggle.addEventListener("pointerdown", (event) => event.stopPropagation());
+    splitter.appendChild(toggle);
+
     const body = document.createElement("div");
     body.id = "changes-full-diff";
-    drawDiffRows(body, this.showingRows, "sync");
 
-    card.append(head, body);
-    this.full = { card, dismiss };
+    split.append(rail, splitter, body);
+    card.append(head, split);
+
+    this.full = { card, dismiss, title: named, split, rail, splitter, toggle, body };
+    this.dragRail(splitter);
+    this.showRail(!this.railHidden);
+    this.drawFullList();
+    this.drawFullDiff();
+  }
+
+  /**
+   * Puts the rail away, or brings it back.
+   *
+   * The divider STAYS either way - it is the way home, and a control that removes the only thing
+   * that could undo it is a trapdoor. The chevron turns to say which way it now goes.
+   */
+  private showRail(up: boolean): void {
+    this.railHidden = !up;
+    if (!this.full) {
+      return;
+    }
+
+    this.full.split.classList.toggle("changes-rail-away", !up);
+    this.full.toggle.setAttribute("aria-expanded", up ? "true" : "false");
+    this.full.toggle.title = up ? "Hide the snapshots" : "Show the snapshots";
+    this.full.toggle.setAttribute("aria-label", this.full.toggle.title);
+    this.full.splitter.setAttribute("aria-valuenow", String(up ? Math.round(this.railWidth) : 0));
+
+    if (up) {
+      this.full.rail.style.flex = `0 0 ${this.railWidth}px`;
+    }
+  }
+
+  /** Drag, or the arrow keys, to say how much of the card the snapshots are worth. */
+  private dragRail(splitter: HTMLElement): void {
+    const widest = (): number => Math.max(240, (this.full?.card.clientWidth ?? 800) * 0.4);
+    const settle = (width: number): void => {
+      // Rounded AFTER the clamp, not before: the ceiling is a fraction of the card's width, so
+      // rounding first left the pinned width - and the `aria-valuenow` read off it - as
+      // 596.8000000000001, which is what a screen reader would then say out loud.
+      this.railWidth = Math.round(Math.min(Math.max(140, width), widest()));
+      if (this.full) {
+        this.full.rail.style.flex = `0 0 ${this.railWidth}px`;
+        splitter.setAttribute("aria-valuenow", String(this.railWidth));
+        splitter.setAttribute("aria-valuemax", String(Math.round(widest())));
+      }
+    };
+
+    splitter.setAttribute("aria-valuemin", "140");
+
+    let start = 0;
+    let startWidth = 0;
+    const onMove = (event: PointerEvent): void => settle(startWidth + (event.clientX - start));
+
+    splitter.addEventListener("pointerdown", (event) => {
+      // Dragging a rail that is not there is how a divider becomes a mystery. Bring it back first.
+      if (this.railHidden) {
+        return;
+      }
+
+      start = event.clientX;
+      startWidth = this.full?.rail.getBoundingClientRect().width ?? this.railWidth;
+
+      // Capture keeps the drag alive when the pointer outruns a 6px divider, but it is a nicety:
+      // it throws for a pointer that is no longer down, and taking the listeners with it would
+      // turn a lost capture into a dead splitter.
+      try {
+        splitter.setPointerCapture(event.pointerId);
+      } catch {
+        /* the drag still tracks through the listeners below */
+      }
+
+      splitter.addEventListener("pointermove", onMove);
+      const done = (): void => {
+        splitter.removeEventListener("pointermove", onMove);
+        splitter.removeEventListener("pointerup", done);
+        splitter.removeEventListener("pointercancel", done);
+      };
+      splitter.addEventListener("pointerup", done);
+      splitter.addEventListener("pointercancel", done);
+    });
+
+    splitter.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        this.showRail(this.railHidden);
+        return;
+      }
+
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+
+      event.preventDefault();
+      if (this.railHidden) {
+        this.showRail(true);
+        return;
+      }
+
+      settle(this.railWidth + (event.key === "ArrowRight" ? 24 : -24));
+    });
+  }
+
+  /**
+   * The rail: every snapshot this file's log holds, newest first, as one line each.
+   *
+   * Rebuilt rather than patched, because the list behind it is rebuilt on every refresh and two
+   * lists maintained by different rules is how they come to disagree. It is the SAME rows the
+   * pane draws, said shorter - a round's number and who wrote it over its modules.
+   */
+  private drawFullList(): void {
+    if (!this.full) {
+      return;
+    }
+
+    const rail = this.full.rail;
+
+    // The rebuild throws away the element the arrows are standing on, so whether they were
+    // standing on one is remembered and given back below. Without it, walking the list with the
+    // keyboard drops focus on the first step and the next arrow jumps to the top.
+    const had = document.activeElement instanceof Node && rail.contains(document.activeElement);
+    rail.replaceChildren();
+
+    const state = this.state;
+    const rounds = (state?.rounds ?? []).filter((round) => round.entries.length > 0);
+
+    // ONE SNAPSHOT IS NOT A CHOICE - the same rule the file select follows. A rail offering the
+    // single thing already on screen is a column of chrome charging rent for nothing.
+    const only = rounds.reduce((count, round) => count + round.entries.length, 0) < 2;
+    rail.hidden = only;
+    this.full.splitter.hidden = only;
+    if (only) {
+      return;
+    }
+
+    let marked = (state?.acceptedAt ?? 0) <= 0;
+    for (const round of rounds) {
+      if (!marked && state && round.round <= state.acceptedAt) {
+        marked = true;
+        const line = document.createElement("div");
+        line.className = "changes-accepted changes-full-accepted";
+        line.textContent = "accepted";
+        rail.appendChild(line);
+      }
+
+      const group = document.createElement("div");
+      group.className = "changes-full-group";
+      group.setAttribute("role", "group");
+      group.setAttribute("aria-label", `Round ${round.round}, by ${round.by}`);
+      group.dataset.round = String(round.round);
+
+      const head = document.createElement("div");
+      head.className = "changes-full-round";
+
+      const number = document.createElement("span");
+      number.className = "changes-number";
+      number.textContent = String(round.round);
+
+      const who = document.createElement("span");
+      who.className = `changes-by changes-by-${round.by.toLowerCase() === "developer" ? "developer" : "agent"}`;
+      who.textContent = round.by;
+
+      head.append(number, who);
+      group.appendChild(head);
+
+      for (const entry of round.entries) {
+        group.appendChild(this.drawRailEntry(round, entry));
+      }
+
+      rail.appendChild(group);
+    }
+
+    const here = rail.querySelector<HTMLElement>(".changes-full-showing");
+    if (had && here) {
+      here.focus();
+    }
+
+    here?.scrollIntoView({ block: "nearest" });
+  }
+
+  private drawRailEntry(round: ChangeRound, entry: ChangeEntry): HTMLElement {
+    const showing = this.showing?.round === round.round && this.showing.module === entry.module;
+
+    const option = document.createElement("div");
+    option.className = "changes-full-entry";
+    option.dataset.module = entry.module;
+    option.dataset.round = String(round.round);
+    option.setAttribute("role", "option");
+    option.setAttribute("aria-selected", showing ? "true" : "false");
+
+    // Roving tabindex: the rail is ONE stop on the way round the card, and the arrows move within
+    // it. Tabbing through forty snapshots to reach the close button is not keyboard support.
+    option.tabIndex = showing ? 0 : -1;
+    if (showing) {
+      option.classList.add("changes-full-showing");
+    }
+
+    const name = document.createElement("span");
+    name.className = "changes-module";
+    name.textContent = entry.module;
+
+    const counts = document.createElement("span");
+    counts.className = "changes-counts";
+    if (entry.held) {
+      const added = document.createElement("span");
+      added.className = "changes-added";
+      added.textContent = `+${entry.added}`;
+      const removed = document.createElement("span");
+      removed.className = "changes-removed";
+      removed.textContent = `-${entry.removed}`;
+      counts.append(added, removed);
+    } else {
+      counts.textContent = "let go";
+      counts.classList.add("changes-gone");
+    }
+
+    // The whole line, because a name and its counts are one thing to point at.
+    option.title = entry.from
+      ? `${entry.module}, round ${round.round}, renamed from ${entry.from}`
+      : `${entry.module}, round ${round.round}, ${KIND_WORD[entry.kind] ?? entry.kind}`;
+
+    option.append(name, counts);
+    option.addEventListener("click", () => void this.open(round.round, entry.module));
+    return option;
+  }
+
+  /**
+   * The arrows, and what they select.
+   *
+   * SELECTION FOLLOWS FOCUS, because selecting here only draws a comparison - nothing is written,
+   * nothing is spent, and a reader walking the list wants to SEE each one, not press Enter forty
+   * times to find out what they are looking at.
+   */
+  private railKey(event: KeyboardEvent): void {
+    const rail = this.full?.rail;
+    if (!rail) {
+      return;
+    }
+
+    const options = [...rail.querySelectorAll<HTMLElement>('[role="option"]')];
+    if (options.length === 0) {
+      return;
+    }
+
+    const at = options.findIndex((one) => one === document.activeElement);
+    const going = event.key === "ArrowDown" ? Math.min(options.length - 1, at + 1)
+      : event.key === "ArrowUp" ? Math.max(0, at - 1)
+      : event.key === "Home" ? 0
+      : event.key === "End" ? options.length - 1
+      : event.key === "Enter" || event.key === " " ? Math.max(at, 0)
+      : -1;
+
+    if (going < 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const next = options[going];
+    if (!next) {
+      return;
+    }
+
+    next.focus();
+    next.scrollIntoView({ block: "nearest" });
+    const round = Number(next.dataset.round ?? 0);
+    const module = next.dataset.module ?? "";
+    if (round > 0 && module && !(this.showing?.round === round && this.showing.module === module)) {
+      void this.open(round, module);
+    }
+  }
+
+  /** The comparison in the card: the rows the pane already has, drawn by the same renderer. */
+  private drawFullDiff(): void {
+    if (!this.full) {
+      return;
+    }
+
+    this.full.title.textContent = this.showingTitle;
+    this.full.card.setAttribute("aria-label", `What changed in ${this.showingTitle}`);
+    this.full.body.replaceChildren();
+    drawDiffRows(this.full.body, this.showingRows, "sync");
+    this.full.body.scrollTop = 0;
   }
 
   /** The pane as the dev surface reads and drives it. */
@@ -501,11 +852,20 @@ export class ChangesPane {
         })),
         showing: this.showing ? `${this.showing.module}@${this.showing.round}` : null,
         full: this.full !== null,
+        fullChoices: this.full && !this.full.rail.hidden
+          ? this.full.rail.querySelectorAll('[role="option"]').length
+          : 0,
+        railUp: this.full !== null && !this.railHidden && !this.full.rail.hidden,
+        railWidth: Math.round(this.full && !this.railHidden
+          ? this.full.rail.getBoundingClientRect().width
+          : 0),
       }),
       press: (control) => {
         const button = control === "refresh" ? this.refresh
           : control === "snapshot" ? this.snapshot
           : control === "accept" ? this.accept
+          // The card's own control, so a driver can put the snapshots away and bring them back.
+          : control === "rail" ? this.full?.toggle ?? null
           : null;
         button?.click();
         return button !== null;
@@ -531,9 +891,12 @@ export class ChangesPane {
         this.file.dispatchEvent(new Event("change"));
         return true;
       },
-      show: (round, module) => {
-        const row = this.list.querySelector<HTMLElement>(
-          `.changes-round[data-round="${round}"] .changes-entry[data-module="${CSS.escape(module)}"]`);
+      show: (round, module, where) => {
+        const row = where === "full"
+          ? this.full?.rail.querySelector<HTMLElement>(
+            `.changes-full-entry[data-round="${round}"][data-module="${CSS.escape(module)}"]`) ?? null
+          : this.list.querySelector<HTMLElement>(
+            `.changes-round[data-round="${round}"] .changes-entry[data-module="${CSS.escape(module)}"]`);
         row?.click();
         return row !== null;
       },
