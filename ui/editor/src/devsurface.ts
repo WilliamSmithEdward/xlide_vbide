@@ -107,12 +107,13 @@ export interface UiSnapshot {
     rows: { file: string; status: string; detail: string; ticked: boolean; actionable: boolean }[];
   } | null;
   /**
-   * The change log as the Changes pane is drawing it: which project, where the accepted line
-   * sits, what the log says it covers, and the rounds with one row per module. Null before the
-   * pane has been built, which is before the page has finished coming up.
+   * The change log as the Changes pane is drawing it: which project, which files it can be
+   * pointed at, the newest round marked reviewed, what the log says it covers, and the rounds
+   * with one row per module. Null before the pane has been built.
    */
   changes: {
     project: string;
+    files: string[];
     acceptedAt: number;
     covers: string;
     busy: boolean;
@@ -1860,7 +1861,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: `round ${round} has no row for ${module} on screen` };
       }
 
-      return { did: false, detail: "nothing asked; pass press, or module (with round)" };
+      if (args.file !== undefined) {
+        const file = String(args.file);
+        return pane.chooseFile(file)
+          ? { did: true, detail: `pointed at ${file} through the select's own change` }
+          : { did: false, detail: `${file} is not one of the open files the pane was given` };
+      }
+
+      return { did: false, detail: "nothing asked; pass press, file, or module (with round)" };
     },
 
     /**

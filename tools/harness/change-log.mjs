@@ -121,9 +121,16 @@ await api.ask(
   `(() => { const tab = document.querySelector('.panel-tab[data-panel="changes"]');`
   + ` if (tab) { tab.click(); } return !!tab; })()`);
 
+// POINTED AT THE FILE THIS SUITE IS WRITING TO. With a second workbook open the pane starts on
+// whichever the developer is in, which need not be this one - and that is the pane being right,
+// not the suite: every project keeps its own log.
+await api.act("changesPane", { file: project.project });
+
 const drawn = await waitFor("the pane to read the log", async () => {
   const ui = await api.ui();
-  return ui.changes && ui.changes.rounds.length > 0 ? ui.changes : false;
+  return ui.changes && ui.changes.project === project.project && ui.changes.rounds.length > 0
+    ? ui.changes
+    : false;
 }, { budgetMs: 20000 });
 
 const routeNow = await log();
@@ -152,11 +159,40 @@ const rows = await waitFor("the comparison to draw", async () => {
 }, { budgetMs: 15000 });
 check("and it draws rows", rows > 0);
 
-// ---- the accepted line -------------------------------------------------------------------------
+// ---- accepting -------------------------------------------------------------------------
 
 const accepted = await log({ action: "accept" });
-check("accepting draws a line at the newest round", accepted.acceptedAt, accepted.rounds[0]?.round);
+check("accepting marks the newest round as reviewed", accepted.acceptedAt, accepted.rounds[0]?.round);
 check("and destroys nothing", since(accepted).length, since(routeNow).length);
+
+// ---- the pane is scoped to ONE file ---------------------------------------------------------------
+//
+// Every project keeps its own log, so the pane's file select is choosing between logs rather than
+// filtering one. With a second workbook open the select appears; with one it stays out of the way,
+// the same rule the list panes follow. And a file that CLOSES leaves the list, which is what makes
+// its changes drop out of the pane rather than lingering as an answer about a workbook nobody has.
+const session = (await api.projects()).projects;
+const paneNow = (await api.ui()).changes;
+
+check("the pane offers every open file",
+  [...paneNow.files].sort(), session.map((one) => one.project).sort());
+
+check("and it is pointed at one of them", session.some((one) => one.project === paneNow.project));
+
+if (session.length > 1) {
+  const other = paneNow.files.find((name) => name !== paneNow.project);
+  const moved = await api.act("changesPane", { file: other });
+  check("the select points the pane at another open file", moved.did, true);
+
+  const after = await waitFor("the pane to answer for the other file", async () => {
+    const now = (await api.ui()).changes;
+    return now && now.project === other ? now : false;
+  }, { budgetMs: 20000 });
+
+  check("and what it shows is that file's log", after.project, other);
+} else {
+  check("with one file open the select stays hidden", paneNow.files.length, 1);
+}
 
 // ---- nothing here wrote to the project ----------------------------------------------------------
 

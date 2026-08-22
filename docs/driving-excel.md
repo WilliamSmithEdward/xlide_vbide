@@ -257,7 +257,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
-| `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` draws the accepted line. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
+| `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` marks the rounds so far as reviewed. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass`. **A FORM CARRIES THREE FILES**: its code, the binary sidecar the VBE's own exporter writes beside it, and `Name.form` - the design as xlide's markup, a row of its own that diffs and applies like any other. On import a `.form` goes through the markup's name-keyed diff (the same apply Ctrl+S makes), so an edit made in a text file reaches the control; a `.form` whose form is not in the project is skipped saying to add the form first |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` - and `form` is refused in Access, whose VBA has no UserForms |
 | `defaults` | `controlDefaults(type)` | what a control of a KIND holds UNTOUCHED, by property: the inventory the markup projection compares against to print only what a developer changed. Measured from a bare instance of the coclass MSForms registers - `Forms.CommandButton.1` and the rest, the same ProgIDs the add route takes - so no workbook is opened, no form is created, nothing appears on screen, and no table of ours can rot against the MSForms this machine actually has. Two honest gaps it reports rather than papers over: a control that will not come up outside a container answers few properties or none (a MultiPage answers one), and a bare control's FONT is not the font it would wear on a form, which inherits the form's - so fonts are compared against the form, never against this |
@@ -1099,6 +1099,12 @@ can lose work. So the old text is made reachable instead, and whoever wants it b
 themselves - the developer in the editor, where normal undo protects them, or an agent through
 `writeModule`, whose undo then lands in the log as visible and as reversible as the work it undid.
 Cleverness in the caller, dumbness in the store.
+
+**It is scoped to one file.** Every project keeps its own log, so the pane's file select chooses
+between logs rather than filtering one - hidden when a single file is open, the rule the list
+panes follow. A file that CLOSES leaves the list and its changes drop out of the pane: the log
+stays on disk, because it is a record, but a workbook nobody has open is not something the pane
+offers, and the session lets go of it.
 
 **A round** is a stretch of writes by one hand. It ends when somebody says so, when the writing
 hand changes, when the workbook is saved, or after five minutes' silence. The hand-change rule is

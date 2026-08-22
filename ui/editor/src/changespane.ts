@@ -50,10 +50,14 @@ export interface ChangeLogState {
 /** How the pane reaches the host. One function, because there is only one kind of request. */
 export type ChangesRequest = (args: Record<string, string>) => Promise<Record<string, unknown>>;
 
+/** The files this session has open, and the one the developer is looking at. */
+export type OpenFiles = () => { names: string[]; current: string | null };
+
 /** What the pane can be driven and read through, for the dev surface. */
 export interface ChangesPaneProbe {
   state(): {
     project: string;
+    files: string[];
     acceptedAt: number;
     covers: string;
     busy: boolean;
@@ -71,6 +75,8 @@ export interface ChangesPaneProbe {
   press(control: string): boolean;
   /** Opens one round's module diff, as clicking its row does. */
   show(round: number, module: string): boolean;
+  /** Points the pane at another open file, through the select's own change event. */
+  chooseFile(name: string): boolean;
 }
 
 const KIND_WORD: Record<string, string> = {
@@ -107,11 +113,16 @@ export class ChangesPane {
   private readonly snapshot: HTMLButtonElement;
   private readonly accept: HTMLButtonElement;
 
+  private readonly file: HTMLSelectElement;
+
   private state: ChangeLogState | null = null;
   private showing: { round: number; module: string } | null = null;
   private busy = false;
 
-  constructor(root: HTMLElement, private readonly ask: ChangesRequest) {
+  /** What the select was last built from, so an unchanged session leaves an open popup alone. */
+  private fileSignature = "";
+
+  constructor(root: HTMLElement, private readonly ask: ChangesRequest, private readonly files: OpenFiles) {
     this.list = root.querySelector("#changes-list") as HTMLElement;
     this.diff = root.querySelector("#changes-diff") as HTMLElement;
     this.covers = root.querySelector("#changes-covers") as HTMLElement;
@@ -120,7 +131,20 @@ export class ChangesPane {
     this.snapshot = root.querySelector("#changes-snapshot") as HTMLButtonElement;
     this.accept = root.querySelector("#changes-accept") as HTMLButtonElement;
 
+    this.file = root.querySelector("#changes-file") as HTMLSelectElement;
+
     livePane = this.probe();
+
+    // A FILE CHOICE IS A DIFFERENT LOG, not a filter over one: every project keeps its own. So
+    // what is on screen is dropped first - a comparison from the old file's round would be read
+    // as belonging to the new one.
+    this.file.addEventListener("change", () => {
+      this.showing = null;
+      this.state = null;
+      void this.reload();
+    });
+
+    this.filesChanged();
 
     this.refresh.addEventListener("click", () => void this.reload());
     this.snapshot.addEventListener("click", () => void this.reload({ action: "snapshot" }));
@@ -131,7 +155,50 @@ export class ChangesPane {
 
   /** Asked for when the pane is opened, which is the only time any of this costs anything. */
   shown(): void {
+    this.filesChanged();
     void this.reload();
+  }
+
+  /**
+   * Rebuilds the file list from the session as it stands.
+   *
+   * A CLOSED FILE DROPS OUT. Its log stays on disk - it is a record, and a record that deletes
+   * itself when a workbook closes is not one - but a workbook nobody has open is not something
+   * this pane offers, and if it was the one being shown the pane falls back to the file the
+   * developer is actually in rather than going on answering about a file that is not there.
+   */
+  filesChanged(): void {
+    const { names, current } = this.files();
+    const signature = JSON.stringify([names, current]);
+    if (signature === this.fileSignature) {
+      return;
+    }
+
+    this.fileSignature = signature;
+    const chosen = this.file.value;
+    const keep = names.some((name) => name.toLowerCase() === chosen.toLowerCase());
+
+    this.file.replaceChildren();
+    for (const name of names) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      this.file.appendChild(option);
+    }
+
+    // One file is not a choice, the same rule the list panes' file select follows - and the
+    // name beside it goes the other way, so the workbook is said exactly once either way.
+    this.file.hidden = names.length < 2;
+    this.title.hidden = !this.file.hidden;
+    this.file.value = keep ? chosen : current ?? names[0] ?? "";
+
+    // Read back, so what is drawn and what is sent cannot disagree: assigning a value the list
+    // does not hold leaves a select showing its first option and reports nothing about it.
+    if (this.file.value !== chosen) {
+      this.showing = null;
+      this.state = null;
+      void this.reload();
+    }
   }
 
   private async reload(args: Record<string, string> = {}): Promise<void> {
@@ -142,7 +209,8 @@ export class ChangesPane {
     this.busy = true;
     this.setBusy(true);
     try {
-      const answer = await this.ask(args);
+      const answer = await this.ask(
+        this.file.value ? { project: this.file.value, ...args } : args);
       this.state = answer as unknown as ChangeLogState;
 
       // A round the developer just closed is gone from the list as a running one, so a diff
@@ -184,8 +252,8 @@ export class ChangesPane {
     for (const round of state.rounds) {
       this.list.appendChild(this.drawRound(round));
 
-      // The accepted line, drawn where it falls rather than as a property of a round: everything
-      // above it is what has happened since the developer last said yes.
+      // Where the reviewed mark falls, drawn as its own row rather than as a property of a
+      // round: the rounds above it are the ones written since the developer last said yes.
       if (round.round === state.acceptedAt) {
         const line = document.createElement("div");
         line.className = "changes-accepted";
@@ -278,7 +346,9 @@ export class ChangesPane {
     this.showing = { round, module };
     this.draw();
 
-    const answer = await this.ask({ action: "diff", round: String(round), module });
+    const asking = { action: "diff", round: String(round), module };
+    const answer = await this.ask(
+      this.file.value ? { project: this.file.value, ...asking } : asking);
 
     if (this.showing?.round !== round || this.showing.module !== module) {
       return;
@@ -325,6 +395,7 @@ export class ChangesPane {
     return {
       state: () => ({
         project: this.state?.project ?? "",
+        files: [...this.file.options].map((one) => one.value),
         acceptedAt: this.state?.acceptedAt ?? 0,
         covers: this.state?.covers ?? "",
         busy: this.busy,
@@ -350,6 +421,17 @@ export class ChangesPane {
           : null;
         button?.click();
         return button !== null;
+      },
+      chooseFile: (name) => {
+        const option = [...this.file.options].find(
+          (one) => one.value.toLowerCase() === name.toLowerCase());
+        if (!option) {
+          return false;
+        }
+
+        this.file.value = option.value;
+        this.file.dispatchEvent(new Event("change"));
+        return true;
       },
       show: (round, module) => {
         const row = this.list.querySelector<HTMLElement>(

@@ -63,6 +63,20 @@ internal sealed partial class AddInSession
         }
     }
 
+    /// <summary>
+    /// Which project a caller meant, whatever they called it.
+    ///
+    /// The pane names a workbook the way the tree shows it and a script names the identity the
+    /// `projects` route hands out, and the log is keyed by one thing - so without this they are
+    /// two logs for one workbook, and the pane reads an empty one while the route reads a full
+    /// one. Exactly the defect the sync route carried until this morning, in a new place
+    /// (2026-08-21). Named nothing at all means the project on screen.
+    /// </summary>
+    private string? ChangeLogProject(string? asked) =>
+        asked is { Length: > 0 }
+            ? ProjectIdFromDisplay(asked) ?? asked
+            : _shownProject;
+
     /// <summary>The log for a project, or null when there is nowhere to keep one.</summary>
     private ChangeLog? ChangeLogFor(string? projectId)
     {
@@ -193,14 +207,14 @@ internal sealed partial class AddInSession
 
     private string Accepted(string? projectId)
     {
-        ChangeLogFor(projectId)?.Accept(DateTimeOffset.UtcNow);
+        ChangeLogFor(ChangeLogProject(projectId))?.Accept(DateTimeOffset.UtcNow);
         return ChangesReply("accepted", projectId, 200);
     }
 
     /// <summary>The change log's answer for one project, rounds newest first.</summary>
     private string ChangesReply(string detail, string? projectId, int limit)
     {
-        var wanted = projectId is { Length: > 0 } ? projectId : _shownProject;
+        var wanted = ChangeLogProject(projectId);
         var log = ChangeLogFor(wanted);
         if (log is null)
         {
@@ -270,7 +284,7 @@ internal sealed partial class AddInSession
     /// </summary>
     private string ChangeDiffReply(string? projectId, int round, string? module)
     {
-        var wanted = projectId is { Length: > 0 } ? projectId : _shownProject;
+        var wanted = ChangeLogProject(projectId);
         var log = ChangeLogFor(wanted);
         var found = log?.Rounds(int.MaxValue).FirstOrDefault(one => one.Number == round);
         var entry = found?.Entries.FirstOrDefault(
@@ -306,7 +320,7 @@ internal sealed partial class AddInSession
     /// <summary>A text the log kept, named by round and module.</summary>
     private string ChangeTextReply(string? projectId, int round, string? module, string? which)
     {
-        var wanted = projectId is { Length: > 0 } ? projectId : _shownProject;
+        var wanted = ChangeLogProject(projectId);
         var log = ChangeLogFor(wanted);
         var side = string.Equals(which, "after", StringComparison.OrdinalIgnoreCase) ? "after" : "before";
 

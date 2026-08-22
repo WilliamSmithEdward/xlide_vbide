@@ -549,6 +549,16 @@ internal sealed partial class AddInSession
             Log.Info($"tests: {string.Join(", ", forgotten)} closed; their results are forgotten");
         }
 
+        // AND THE CHANGE LOG LETS GO OF A FILE THAT IS GONE. The log itself stays on disk - it is
+        // a record, and a record that deletes itself when a workbook closes is not one - but this
+        // session stops holding it, so a workbook opened again is read fresh rather than answered
+        // from what it looked like an hour ago. The pane drops it at the same moment, because a
+        // file that is not open is not in its file list.
+        foreach (var id in _changeLogs.Keys.Where(id => !liveProjectIds.Contains(id)).ToList())
+        {
+            _changeLogs.Remove(id);
+        }
+
         return dropped;
     }
 

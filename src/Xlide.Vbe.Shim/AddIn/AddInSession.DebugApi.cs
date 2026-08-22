@@ -3688,8 +3688,7 @@ internal sealed partial class AddInSession
 
                     case "accept":
                     {
-                        var accepting = ChangeLogFor(
-                            changesProject is { Length: > 0 } ? changesProject : _shownProject);
+                        var accepting = ChangeLogFor(ChangeLogProject(changesProject));
                         accepting?.Accept(DateTimeOffset.UtcNow);
                         return ChangesReply("accepted", changesProject, changesMost);
                     }

@@ -786,12 +786,19 @@ function boot(): void {
   // pane and a driver are reading one reply rather than two shapes that can drift.
   changesPane = new ChangesPane(
     document.querySelector("#changes") as HTMLElement,
-    (args) => bridge.requestChanges(args));
+    (args) => bridge.requestChanges(args),
+    // The tree's own list of open files, and the one being looked at as the one to start on.
+    // A file that closes leaves this list, which is what makes its changes drop out of the pane.
+    () => ({
+      names: (shell?.currentProjects() ?? []).map((one) => one.name),
+      current: workspace.activeDocument()?.project ?? null,
+    }));
 
   // Both panes' Current Module scope follows the same tab, and the shell is where every road
   // to a changed active module already meets - the host's own setActive and the workspace's
   // tab activation both land there.
   shell.activeModuleChanged = (module, project) => testsPane.setActiveModule(module, project);
+  shell.projectsChanged = () => changesPane?.filesChanged();
 
   // Asked once at boot, so a pane restored open by the saved layout holds its state - the
   // support chip included - without waiting for a run, a press, or the first analysis pass

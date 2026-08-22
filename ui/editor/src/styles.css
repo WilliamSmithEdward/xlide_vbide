@@ -5233,6 +5233,34 @@ body.objbrowser-page #objbrowser-card {
   border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
 
+/* The same flat toolbar the Tests pane wears. Without this the buttons fall back to the
+   platform's own boxed button and the two panes read as parts of different products - which is
+   exactly how they looked before somebody put them side by side. */
+#changes-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+#changes-actions button:hover:not(:disabled) {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.18));
+  opacity: 1;
+}
+
+#changes-actions button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 #changes-project {
   margin-left: auto;
   opacity: 0.7;
@@ -5314,7 +5342,7 @@ body.objbrowser-page #objbrowser-card {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 2px 10px 2px 22px;
+  padding: 2px 10px 2px 18px;
   background: none;
   border: none;
   color: inherit;
@@ -5324,7 +5352,7 @@ body.objbrowser-page #objbrowser-card {
 }
 
 .changes-entry:hover {
-  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.1));
 }
 
 .changes-entry-showing {

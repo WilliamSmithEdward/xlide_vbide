@@ -231,9 +231,10 @@ const INDEX_HTML = `<!doctype html>
     </div>
     <div id="changes">
       <div id="changes-actions" role="toolbar" aria-label="Change log">
-        <button id="changes-refresh" type="button" title="Read the change log again"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
-        <button id="changes-snapshot" type="button" title="End the round that is running, so what comes next is counted separately"><span class="codicon codicon-history" aria-hidden="true"></span><span class="changes-label-text">Snapshot</span></button>
-        <button id="changes-accept" type="button" title="Draw the accepted line: everything above it is what has happened since"><span class="codicon codicon-check" aria-hidden="true"></span><span class="changes-label-text">Accept</span></button>
+        <button id="changes-refresh" type="button" title="Read the log again. It does not update itself while the pane is open."><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <button id="changes-snapshot" type="button" title="End the current round. Later writes are counted separately from these."><span class="codicon codicon-history" aria-hidden="true"></span><span class="changes-label-text">Snapshot</span></button>
+        <button id="changes-accept" type="button" title="Mark these rounds as reviewed. They stay in the log, and new ones appear above them."><span class="codicon codicon-check" aria-hidden="true"></span><span class="changes-label-text">Accept</span></button>
+        <select id="changes-file" class="scope-select scope-select-file" aria-label="Show changes from"></select>
         <span id="changes-project" aria-live="polite"></span>
       </div>
       <div id="changes-body">

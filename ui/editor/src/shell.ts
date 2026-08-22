@@ -523,7 +523,14 @@ export class Shell {
     // The problems scope offers every open file, so it follows the tree: a file opening or
     // closing changes what there is to narrow to, with or without a finding in it.
     this.renderPanel();
+
+    // And so does the change log's, for the stronger reason: a file that has closed must stop
+    // being offered at all, or the pane goes on answering about a workbook nobody has open.
+    this.projectsChanged?.();
   }
+
+  /** The set of open files moved. The Changes pane rebuilds its file select from it. */
+  projectsChanged?: () => void;
 
   /** Takes one menu's items from the host: the bar for an empty path, a dropdown otherwise. */
   setMenu(path: number[], items: MenuItem[]): void {
