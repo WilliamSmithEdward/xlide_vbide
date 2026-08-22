@@ -5,6 +5,7 @@ using System.Linq;
 using Xlide.Vbe.Core;
 using Xlide.Vbe.Core.Changes;
 using Xlide.Vbe.Core.Sync;
+using Xlide.Vbe.Shim.Changes;
 using Xlide.Vbe.Shim.Diagnostics;
 
 namespace Xlide.Vbe.Shim.AddIn;
@@ -190,8 +191,8 @@ internal sealed partial class AddInSession
         {
             Log.Error("changes: the pane's question could not be answered", ex);
             answer = System.Text.Json.JsonSerializer.Serialize(
-                new DebugChangesReply(ex.Message.Trim(), string.Empty, string.Empty, 0, ChangeLogCovers, []),
-                DebugJsonContext.Default.DebugChangesReply);
+                new ChangeLogReply(ex.Message.Trim(), string.Empty, string.Empty, 0, ChangeLogCovers, []),
+                ChangeJsonContext.Default.ChangeLogReply);
         }
 
         _editorSurface?.ShowChangesResult(requestId, answer);
@@ -219,14 +220,14 @@ internal sealed partial class AddInSession
         if (log is null)
         {
             return System.Text.Json.JsonSerializer.Serialize(
-                new DebugChangesReply(
+                new ChangeLogReply(
                     "no project is shown, and none was named", string.Empty, string.Empty, 0,
                     ChangeLogCovers, []),
-                DebugJsonContext.Default.DebugChangesReply);
+                ChangeJsonContext.Default.ChangeLogReply);
         }
 
         var rounds = log.Rounds(limit <= 0 ? 200 : limit)
-            .Select(round => new DebugChangeRound(
+            .Select(round => new ChangeRoundReply(
                 round.Number,
                 round.Started.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
                 round.Ended.ToString("o", System.Globalization.CultureInfo.InvariantCulture),
@@ -240,10 +241,10 @@ internal sealed partial class AddInSession
             .ToArray();
 
         return System.Text.Json.JsonSerializer.Serialize(
-            new DebugChangesReply(
+            new ChangeLogReply(
                 detail, DisplayFromProjectId(wanted) ?? wanted ?? string.Empty,
                 log.Directory, log.AcceptedAt, ChangeLogCovers, rounds),
-            DebugJsonContext.Default.DebugChangesReply);
+            ChangeJsonContext.Default.ChangeLogReply);
     }
 
     /// <summary>
@@ -254,7 +255,7 @@ internal sealed partial class AddInSession
     /// keeps the count off the write path, where this product has learned twice what a whole-text
     /// comparison costs when it happens per keystroke.
     /// </summary>
-    private static DebugChangeEntry EntryReply(ChangeLog log, ChangeEntry entry)
+    private static ChangeEntryReply EntryReply(ChangeLog log, ChangeEntry entry)
     {
         var before = log.TextOf(entry.Before);
         var after = log.TextOf(entry.After);
@@ -272,7 +273,7 @@ internal sealed partial class AddInSession
             }
         }
 
-        return new DebugChangeEntry(
+        return new ChangeEntryReply(
             entry.Module, entry.Kind.ToString().ToLowerInvariant(),
             added, removed, entry.Before, entry.After, held);
     }
@@ -293,10 +294,10 @@ internal sealed partial class AddInSession
         if (log is null || entry is null)
         {
             return System.Text.Json.JsonSerializer.Serialize(
-                new DebugChangeDiffReply(
+                new Changes.ChangeDiffReply(
                     found is null ? $"the log holds no round {round}" : $"round {round} did not touch {module}",
                     round, module ?? string.Empty, false, []),
-                DebugJsonContext.Default.DebugChangeDiffReply);
+                ChangeJsonContext.Default.ChangeDiffReply);
         }
 
         var before = log.TextOf(entry.Before);
@@ -312,9 +313,9 @@ internal sealed partial class AddInSession
             : [];
 
         return System.Text.Json.JsonSerializer.Serialize(
-            new DebugChangeDiffReply(
+            new Changes.ChangeDiffReply(
                 held ? "held" : "the text is no longer held", round, entry.Module, held, rows),
-            DebugJsonContext.Default.DebugChangeDiffReply);
+            ChangeJsonContext.Default.ChangeDiffReply);
     }
 
     /// <summary>A text the log kept, named by round and module.</summary>
@@ -331,23 +332,23 @@ internal sealed partial class AddInSession
         if (log is null || entry is null)
         {
             return System.Text.Json.JsonSerializer.Serialize(
-                new DebugChangeTextReply(
+                new Changes.ChangeTextReply(
                     found is null
                         ? $"the log holds no round {round}"
                         : $"round {round} did not touch {module}",
                     round, module ?? string.Empty, side, false, null),
-                DebugJsonContext.Default.DebugChangeTextReply);
+                ChangeJsonContext.Default.ChangeTextReply);
         }
 
         var hash = side == "after" ? entry.After : entry.Before;
         var text = log.TextOf(hash);
 
         return System.Text.Json.JsonSerializer.Serialize(
-            new DebugChangeTextReply(
+            new Changes.ChangeTextReply(
                 hash is null
                     ? $"{module} had no text {side} round {round}"
                     : text is null ? "the text is no longer held" : "held",
                 round, entry.Module, side, text is not null, text),
-            DebugJsonContext.Default.DebugChangeTextReply);
+            ChangeJsonContext.Default.ChangeTextReply);
     }
 }
