@@ -196,6 +196,33 @@ const accepted = await log({ action: "accept" });
 check("accepting marks the newest round as reviewed", accepted.acceptedAt, accepted.rounds[0]?.round);
 check("and destroys nothing", since(accepted).length, since(routeNow).length);
 
+// WHERE THE MARK SITS. The list runs newest first, so a mark naming the newest reviewed round
+// belongs IN FRONT of it: everything below has been seen, everything above has not. Drawn after
+// that round instead, the round sat on the unreviewed side - so accepting everything left the mark
+// one row down from the top rather than at it.
+await api.act("changesPane", { press: "refresh" });
+const laidOut = async () => {
+  const said = await api.ask(`JSON.stringify(
+    [...document.querySelectorAll('#changes-list > *')].map((el) =>
+      el.classList.contains('changes-accepted') ? 'accepted' : 'round'))`);
+  return JSON.parse(typeof said === "string" ? said : JSON.stringify(said));
+};
+
+await waitFor("the pane to show the mark", async () => (await laidOut()).includes("accepted"),
+  { budgetMs: 15000 });
+check("with everything accepted the mark is at the top", (await laidOut())[0], "accepted");
+
+// And once something new arrives it sits between the new work and the reviewed work.
+await write("Ledger", [ledgerWas, "' after the accept"].join("\r\n"), "claude");
+await log({ action: "snapshot", label: "since you said yes" });
+await api.act("changesPane", { press: "refresh" });
+await waitFor("the new round to draw", async () => {
+  const now = (await api.ui()).changes;
+  return now.rounds[0]?.label === "since you said yes";
+}, { budgetMs: 15000 });
+
+check("and a round written since sits above it", (await laidOut()).slice(0, 2), ["round", "accepted"]);
+
 // ---- a module arriving, being renamed, and leaving --------------------------------------------
 //
 // Only the write path recorded anything at first, so a module could be added, filled and removed

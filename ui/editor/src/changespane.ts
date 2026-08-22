@@ -255,17 +255,22 @@ export class ChangesPane {
       return;
     }
 
+    // ABOVE THE NEWEST REVIEWED ROUND, not under it. The list runs newest first and `acceptedAt`
+    // names the newest round that WAS reviewed, so the mark belongs in front of it: everything
+    // below the line has been seen, everything above it has not. Drawn after that round instead,
+    // the round itself sat on the unreviewed side - so pressing Accept, which reviews everything,
+    // left the mark one row down from the top rather than at it (the owner spotted it, 2026-08-22).
+    let marked = state.acceptedAt <= 0;
     for (const round of state.rounds) {
-      this.list.appendChild(this.drawRound(round));
-
-      // Where the reviewed mark falls, drawn as its own row rather than as a property of a
-      // round: the rounds above it are the ones written since the developer last said yes.
-      if (round.round === state.acceptedAt) {
+      if (!marked && round.round <= state.acceptedAt) {
+        marked = true;
         const line = document.createElement("div");
         line.className = "changes-accepted";
         line.textContent = "accepted";
         this.list.appendChild(line);
       }
+
+      this.list.appendChild(this.drawRound(round));
     }
 
     this.drawDiff();
