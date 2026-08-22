@@ -102,6 +102,30 @@ check("the switch is described by that warning, for a reader who cannot see the 
 check("the paste box has a real label, and is not editable by accident",
   { labelled: shown.labelled, readOnly: shown.readOnly }, { labelled: true, readOnly: true });
 
+// ---- and it can be read without scrolling sideways -------------------------------------------
+//
+// The box exists to be selected and copied, so a horizontal scrollbar under it means reading what
+// you are about to hand over takes two gestures. It wraps instead - and the wrap is DISPLAY only:
+// the newlines are what the paste depends on, so they have to survive it.
+
+const shape = await api.ask(`JSON.stringify((() => {
+  const box = document.getElementById('agent-text');
+  return {
+    sideways: box.scrollWidth > box.clientWidth,
+    wraps: getComputedStyle(box).whiteSpace,
+  };
+})())`);
+const fits = JSON.parse(typeof shape === "string" ? shape : JSON.stringify(shape));
+
+check("the paste does not scroll sideways", fits.sideways, false);
+check("and wraps rather than clipping", fits.wraps, "pre-wrap");
+
+// The longest line is the workbook's full path, which has no space to fold on - so this is the
+// one that would have kept the scrollbar had the box only been told to wrap on words.
+check("the text itself keeps its lines through the wrap", text.split("\n").length > 10, true);
+check("and still carries an address to start at",
+  /http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]+/.test(text), true);
+
 // ---- copying ---------------------------------------------------------------------------------
 
 const copied = await api.act("agentCard", { press: "copy" });

@@ -5861,8 +5861,16 @@ body.objbrowser-page #objbrowser-card {
   font-family: var(--vscode-editor-font-family, Consolas, monospace);
   font-size: 12px;
   line-height: 1.5;
-  white-space: pre;
-  overflow: auto;
+
+  /* WRAPPED, NOT SCROLLED SIDEWAYS. `pre` kept the lines intact and put a horizontal scrollbar
+     under a box whose whole job is to be selected and copied - so the reader had to scroll to
+     read what they were about to hand over (the owner, 2026-08-22: "remove horizontal scroll").
+     `pre-wrap` keeps every newline, which is what the paste depends on; only the display folds.
+     `break-word` is for the one line that cannot fold on a space: the workbook's full path. */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 #agent-text:focus-visible {
