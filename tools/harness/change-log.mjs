@@ -153,8 +153,7 @@ check("the pane says what the log does not cover", drawn.covers, routeNow.covers
 // the VBE - as "anything I type", while their typing was in the log all along.
 check("it says what IS recorded, the developer's own edits included",
   drawn.covers.includes("yours and an agent's alike"));
-check("and what is not, naming the editor's own window rather than 'the VBE'",
-  drawn.covers.includes("form designs") && drawn.covers.includes("own code window"));
+check("and what is not", drawn.covers.includes("form designs"));
 
 // ---- and the pane opens one module's comparison -------------------------------------------------
 

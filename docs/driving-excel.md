@@ -1146,11 +1146,17 @@ Past 64 MB of held text per project the oldest rounds let their texts go and say
 pane draws as "text let go" rather than as an empty comparison. The rounds themselves stay: they
 are the record, and they cost almost nothing.
 
-**What it does not cover** is everything that is not module code: references, project properties,
-form designs, and edits made straight into the VBE rather than through this product. It says so in
-its own `covers` field and the pane repeats it in a footer, because a log that is quietly partial
-about its own scope is worse than no log - the same lesson as the install chip that read green
-about no files at all.
+**What it does not cover** is everything that is not module code: references, project properties
+and form designs. It says so in its own `covers` field and the pane repeats it in a footer, because
+a log that is quietly partial about its own scope is worse than no log - the same lesson as the
+install chip that read green about no files at all.
+
+The footer leads with what IS recorded, and says "written through this editor" rather than naming
+the code window underneath. Both are deliberate: a developer's own typing is in the log under their
+own name and that is the half they doubt, and an earlier wording that led with the exclusions and
+called the uncovered case "edits made directly in the VBE" read as "anything I type" to somebody
+sitting inside the VBE looking at this editor - the opposite of the truth, to the person most
+likely to read it.
 
 `change-log.mjs` pins it against a fixture of its own (`tools\New-ChangeFixture.ps1`), whose
 `Untouched` module is edited by nobody, which is how "the log did not over-report" is a real

@@ -39,13 +39,15 @@ internal sealed partial class AddInSession
     /// first wording led with the exclusions and called the uncovered case "edits made directly in
     /// the VBE", which reads as "anything I type" to somebody sitting inside the VBE looking at
     /// this editor - and their typing is recorded, so the sentence said the opposite of the truth
-    /// to the person most likely to read it (the owner, 2026-08-22). The uncovered case is the
-    /// editor's OWN code window, underneath this one.
+    /// to the person most likely to read it (the owner, 2026-08-22).
+    ///
+    /// AND THEN IT STOPPED NAMING THE EDITOR'S OWN WINDOW AT ALL. "Written through this editor"
+    /// already carries that exclusion, so spelling it out was a second clause that added nothing
+    /// and invited the same misreading twice.
     /// </summary>
     private const string ChangeLogCovers =
         "Records module code written through this editor, yours and an agent's alike. Not "
-        + "recorded: references, project properties, form designs, or code typed into the VBE's "
-        + "own code window underneath.";
+        + "recorded: references, project properties, or form designs.";
 
     /// <summary>One log per project, opened when a project is first written to.</summary>
     private readonly Dictionary<string, ChangeLog> _changeLogs = new(StringComparer.OrdinalIgnoreCase);
