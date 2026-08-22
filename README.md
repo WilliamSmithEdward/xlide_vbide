@@ -2,7 +2,7 @@
 
 [![Latest release](https://img.shields.io/github/v/release/WilliamSmithEdward/xlide_vbide)](https://github.com/WilliamSmithEdward/xlide_vbide/releases/latest)
 [![MIT license](https://img.shields.io/github/license/WilliamSmithEdward/ROneCOne)](LICENSE)
-[![Microsoft 365 Excel on Windows x64](https://img.shields.io/badge/Excel-Microsoft_365_Windows_x64-217346)](README.md)
+[![Excel, Word, PowerPoint and Access on Microsoft 365 Windows x64](https://img.shields.io/badge/Excel,_Word,_PowerPoint,_Access-Microsoft_365_Windows_x64-0078D4)](README.md)
 
 ![The xlide surface inside the VBE: editing side by side, completion from the analyzer, diagnostics with quick fixes, and break mode with live locals](assets/images/tour.gif)
 ***(Yes! This is really the VBA Editor in Excel)***
@@ -18,7 +18,8 @@ install first.
 
 ## What it is
 
-xlide is a native add-in that Excel's editor loads through its own extensibility model. It draws
+xlide is a native add-in that the VBE loads through its own extensibility model - the same editor
+Excel, Word, PowerPoint and Access all share, so one install reaches every one of them. It draws
 over the VBE's document area and puts a modern editing surface there: every open module live at
 once, editors side by side, diagnostics as you type. The native editor keeps running underneath as
 the text of record, the compile target, and the debugger, so nothing about how your code compiles or
