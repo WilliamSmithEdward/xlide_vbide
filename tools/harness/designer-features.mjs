@@ -3324,25 +3324,46 @@ try {
   // AutoSize, reads the box and puts BOTH the flag and the geometry back.
   //
   // The picture row is the one that pins the owner's decision (2026-08-18): a CommandButton
-  // wearing a 256-square logo autosizes to 220.5x198.1, bigger than the form that holds it, and
-  // that is the answer this writes. Not capped, not clamped to the container, not quietly
-  // replaced by the caption's width.
+  // wearing a 256-square logo autosizes far past the 72x24 it started at, bigger than a caption
+  // could ever justify, and that is the answer this writes. Not capped, not clamped to the
+  // container, not quietly replaced by the caption's width.
+  //
+  // ASKED IN RATIOS, NOT IN POINTS. These pinned MSForms' exact output - 29x22 and 220.5x198.1 -
+  // and MSForms derives both from the screen's DPI and the font's metrics, so the numbers are
+  // facts about the MACHINE as much as about the product. On a differently scaled display the
+  // same correct behaviour reads 26x19 and 153x133, and three checks fail for a reason that has
+  // nothing to do with the code (2026-08-22, a release gate). What the rows are FOR survives the
+  // rescaling: that the size came from the host rather than from the page's guess at the
+  // caption's ink, and that a picture button is not clamped to its caption or its container.
   const beforeFit = await tabText();
+  const toggleWas = await placed("HoldToggle");
   await api.act("designerSelect", { module: form, control: "HoldToggle" });
   const fitToggle = await api.act("designerFormat", { module: form, how: "fit" });
   const toggleBox = await placed("HoldToggle");
+
+  // A page-side read of "Hold" put it at 18pt, NARROWER than its own caption, because the glyph
+  // and the chrome are not in the ink. So the host's answer has to be wider than that, and the
+  // box has to have actually moved.
   check("Size to Fit takes MSForms' own AutoSize, not the caption's ink",
-    fitToggle.did === true && toggleBox.width === 29 && toggleBox.height === 22,
-    `${fitToggle.detail}; ${await placedAt("HoldToggle")}`);
+    fitToggle.did === true
+      && toggleBox.width > 18
+      && toggleBox.height > 0
+      && (toggleBox.width !== toggleWas.width || toggleBox.height !== toggleWas.height),
+    `${fitToggle.detail}; ${await placedAt("HoldToggle")} from ${toggleWas.width}x${toggleWas.height}`);
 
   await api.act("designerSelect", { module: form, control: "OkButton" });
   await api.act("designerFormat", { module: form, how: "fit" });
   const fitted = await placed("OkButton");
+
+  // Started 72x24. A caption fit would leave it about that wide and no taller; a PICTURE fit is
+  // several times both. The multiples hold at any scaling - the ratio is the picture's, not the
+  // display's.
   check("...and a button wearing an oversized picture fits to the PICTURE, uncapped",
-    fitted.width > 200 && fitted.height > 180, await placedAt("OkButton"));
+    fitted.width > 72 * 1.5 && fitted.height > 24 * 4,
+    `${await placedAt("OkButton")} from 72x24`);
   check("...which is an order larger than the 72x24 it started at, and is not capped",
-    fitted.width > 200 && fitted.height > 180 && fitted.width > 360 - 200,
-    `${fitted.width}x${fitted.height} from 72x24`);
+    fitted.height > fitted.width * 0.5 && fitted.height > 24 * 4,
+    `${fitted.width}x${fitted.height} from 72x24 - a caption fit would be wide and short`);
 
   await api.act("designerSetMarkup", { module: form, markup: beforeFit });
   await waitFor("the document back after the fit rows", async () =>
