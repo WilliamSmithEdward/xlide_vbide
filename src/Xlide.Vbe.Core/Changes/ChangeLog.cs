@@ -222,8 +222,8 @@ public sealed class ChangeLog
     }
 
     /// <summary>
-    /// Draws the accepted line. Everything above it is what has happened since; nothing is
-    /// destroyed, because a log that deletes its own past is not a log.
+    /// Marks every round so far as reviewed. None of them are removed - a log that deletes its
+    /// own past is not one - so what this changes is where a reader starts counting from.
     /// </summary>
     public void Accept(DateTimeOffset now)
     {
@@ -238,7 +238,7 @@ public sealed class ChangeLog
         AcceptedAt = _number;
     }
 
-    /// <summary>The round the accepted line sits after, or zero when nothing has been accepted.</summary>
+    /// <summary>The newest round marked reviewed, or zero when none has been.</summary>
     public int AcceptedAt { get; private set; }
 
     /// <summary>Every round, newest first, with the one still running - if any - at the front.</summary>
