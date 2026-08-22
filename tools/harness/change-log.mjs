@@ -52,6 +52,20 @@ const held = (name) => api.readModule(name, project.projectId).then((one) => one
 const write = (name, text, by) => api.writeModule(name, text, project.projectId, { by });
 const log = (args = {}) => api.changes({ ...args, project: project.projectId });
 
+// THE SECOND MODULE, BY KIND RATHER THAN BY NAME. The checks below need a component of another
+// kind joining a round, which the fixture ships as a class - but RENAMING is one of the things
+// this product does, and a suite holding the name its fixture shipped with breaks the first time
+// anyone exercises that feature on their own copy. It did: `Ticket` came back `Tickets` and the
+// run died on a raw "no module named Ticket" from the door (2026-08-22).
+const inside = await api.project(project.project);
+const classes = (inside.components ?? []).filter((one) => one.kind === "class");
+const second = classes[0]?.name;
+if (!second) {
+  console.log("FAIL this workbook has no class module, so the second-kind checks cannot run."
+    + "\n     Rebuild the fixture: powershell tools\\New-ChangeFixture.ps1");
+  process.exit(1);
+}
+
 // What every check below is measured against. The fixture's own text, before this run.
 const ledgerWas = await held("Ledger");
 const untouchedWas = await held("Untouched");
@@ -102,7 +116,7 @@ check("the change lines up, and only the new lines are added",
 // ---- a different hand is a different round -----------------------------------------------------
 
 await write("Ledger", `${ledgerWas}\r\n' one\r\n' two\r\n' three\r\n' by hand`, "developer");
-await write("Ticket", `${await held("Ticket")}\r\n' back to the agent`, "claude");
+await write(second, `${await held(second)}\r\n' back to the agent`, "claude");
 
 const hands = since(await log());
 check("agent, then developer, then agent again is three rounds", hands.length, 3);
@@ -169,6 +183,25 @@ check("and it draws rows", rows > 0);
 //
 // The pane is a strip along the bottom and a comparison is two columns of code, so anything past a
 // few lines is read three words at a time down there.
+
+// The button that opens it. A glyph given only horizontal padding takes the button's baseline and
+// sits high and left of the middle - which is what the focus ring then draws a rectangle around
+// (the owner, 2026-08-22: "glyph is not centered in button").
+const centred = await api.ask(`JSON.stringify((() => {
+  const off = (button) => {
+    if (!button) { return null; }
+    const box = button.getBoundingClientRect();
+    const mark = button.querySelector('.codicon').getBoundingClientRect();
+    return [
+      Math.round(((mark.left + mark.right) - (box.left + box.right)) / 2),
+      Math.round(((mark.top + mark.bottom) - (box.top + box.bottom)) / 2),
+    ];
+  };
+  return { grow: off(document.getElementById('changes-expand')) };
+})())`);
+const middle = JSON.parse(typeof centred === "string" ? centred : JSON.stringify(centred));
+check(`the expand button centres its glyph (off by ${middle.grow})`,
+  Math.abs(middle.grow[0]) <= 1 && Math.abs(middle.grow[1]) <= 1, true);
 
 const grew = await api.act("changesPane", { expand: true });
 check("the comparison opens full size", grew.did, true);
@@ -240,6 +273,23 @@ const nav = JSON.parse(typeof rail === "string" ? rail : JSON.stringify(rail));
 
 check("the card carries the snapshot list", { listbox: nav.listbox, offered: nav.options > 1 },
   { listbox: "listbox", offered: true });
+
+// The head's own two buttons, held to the same square.
+const heads = await api.ask(`JSON.stringify((() => {
+  const off = (id) => {
+    const button = document.getElementById(id);
+    const box = button.getBoundingClientRect();
+    const mark = button.querySelector('.codicon').getBoundingClientRect();
+    return [
+      Math.round(((mark.left + mark.right) - (box.left + box.right)) / 2),
+      Math.round(((mark.top + mark.bottom) - (box.top + box.bottom)) / 2),
+    ];
+  };
+  return { toggle: off('changes-full-toggle'), close: off('changes-full-close') };
+})())`);
+const inHead = JSON.parse(typeof heads === "string" ? heads : JSON.stringify(heads));
+check(`and the head's buttons centre their glyphs (${JSON.stringify(inHead)})`,
+  [...inHead.toggle, ...inHead.close].every((one) => Math.abs(one) <= 1), true);
 check(`and it is compact beside the code (${nav.width}px wide)`, nav.width <= 240, true);
 check("and exactly one snapshot is the selected one", { selected: nav.selected, stops: nav.stops },
   { selected: 1, stops: 1 });
@@ -284,14 +334,22 @@ const away = await waitFor("the rail to fold", async () => {
 }, { budgetMs: 10000 });
 check("one button puts the snapshots away", away.railUp, false);
 
-const home = await api.ask(`JSON.stringify({
-  divider: !!document.getElementById('changes-full-splitter')?.offsetParent,
-  says: document.getElementById('changes-full-toggle')?.getAttribute('aria-expanded') ?? '',
-  wider: Math.round(document.getElementById('changes-full-diff').getBoundingClientRect().width),
-})`);
+const home = await api.ask(`JSON.stringify((() => {
+  const button = document.getElementById('changes-full-toggle');
+  const head = document.getElementById('changes-full-head');
+  return {
+    // The way back stays put, in the corner it was pressed in. The DIVIDER goes with the rail:
+    // there is nothing left to resize, and it is not what brings it back any more.
+    stays: !!button?.offsetParent,
+    inHead: head?.firstElementChild === button,
+    says: button?.getAttribute('aria-pressed') ?? '',
+    divider: !!document.getElementById('changes-full-splitter')?.offsetParent,
+  };
+})())`);
 const folded = JSON.parse(typeof home === "string" ? home : JSON.stringify(home));
-check("and the divider stays as the way back", { divider: folded.divider, says: folded.says },
-  { divider: true, says: "false" });
+check("and the button stays, top left, as the way back",
+  { stays: folded.stays, inHead: folded.inHead, says: folded.says, divider: folded.divider },
+  { stays: true, inHead: true, says: "false", divider: false });
 
 await api.act("changesPane", { press: "rail" });
 const back = await waitFor("the rail to come back", async () => {
@@ -471,7 +529,7 @@ check("Untouched is exactly as the fixture built it", (await held("Untouched")) 
 
 // Put the fixture's own module back, so a second run starts where the first did.
 await write("Ledger", ledgerWas, "change-log.mjs cleanup");
-await write("Ticket", (await held("Ticket")).replace("\r\n' back to the agent", ""), "change-log.mjs cleanup");
+await write(second, (await held(second)).replace("\r\n' back to the agent", ""), "change-log.mjs cleanup");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

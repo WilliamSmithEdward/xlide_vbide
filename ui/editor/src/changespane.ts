@@ -491,6 +491,16 @@ export class ChangesPane {
     const head = document.createElement("div");
     head.id = "changes-full-head";
 
+    // TOP LEFT, where a panel toggle lives - not out on the divider, where it was a 15px target
+    // hunting for a chevron (the owner, 2026-08-22: "I'd prefer a button at the top left").
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.id = "changes-full-toggle";
+    toggle.className = "toolbar-button";
+    toggle.setAttribute("aria-controls", "changes-full-list");
+    toggle.innerHTML = '<span class="codicon codicon-list-flat" aria-hidden="true"></span>';
+    toggle.addEventListener("click", () => this.showRail(this.railHidden));
+
     const named = document.createElement("span");
     named.id = "changes-full-title";
 
@@ -502,7 +512,7 @@ export class ChangesPane {
     close.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
     close.addEventListener("click", () => dismiss());
 
-    head.append(named, close);
+    head.append(toggle, named, close);
 
     const split = document.createElement("div");
     split.id = "changes-full-split";
@@ -514,33 +524,20 @@ export class ChangesPane {
     rail.style.flex = `0 0 ${this.railWidth}px`;
     rail.addEventListener("keydown", (event) => this.railKey(event));
 
-    // The divider between them, the same one the designer's two halves are separated by: a grip
-    // to say it can be dragged, a chevron to put the rail away, and both reachable by keyboard.
+    // The divider between them, the same one the designer's two halves are separated by: a grip to
+    // say it can be dragged, and the arrow keys for anyone who cannot drag. It resizes and nothing
+    // else now - what put the rail away moved to the head, where a panel toggle belongs.
     const splitter = document.createElement("div");
     splitter.id = "changes-full-splitter";
     splitter.setAttribute("role", "separator");
     splitter.setAttribute("aria-orientation", "vertical");
     splitter.setAttribute("aria-label", "Resize the snapshot list");
-    splitter.title = "Drag to resize the snapshots. Enter, or the chevron, puts them away";
+    splitter.title = "Drag to resize the snapshots";
     splitter.tabIndex = 0;
 
     const grip = document.createElement("div");
     grip.id = "changes-full-grip";
     splitter.appendChild(grip);
-
-    // ONE button, and the chevron carries the direction: pointing at the rail while it is up,
-    // away from it once it is gone.
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.id = "changes-full-toggle";
-    toggle.innerHTML = '<svg viewBox="0 0 10 10" aria-hidden="true">'
-      + '<path d="M2 6.5 L5 3.5 L8 6.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
-    toggle.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this.showRail(this.railHidden);
-    });
-    toggle.addEventListener("pointerdown", (event) => event.stopPropagation());
-    splitter.appendChild(toggle);
 
     const body = document.createElement("div");
     body.id = "changes-full-diff";
@@ -558,8 +555,9 @@ export class ChangesPane {
   /**
    * Puts the rail away, or brings it back.
    *
-   * The divider STAYS either way - it is the way home, and a control that removes the only thing
-   * that could undo it is a trapdoor. The chevron turns to say which way it now goes.
+   * The button STAYS either way, in the corner it was pressed in - it is the way home, and a
+   * control that removes the only thing which could undo it is a trapdoor. Pressed while the rail
+   * is up, which is how a toggle in this product says it is on.
    */
   private showRail(up: boolean): void {
     this.railHidden = !up;
@@ -568,7 +566,7 @@ export class ChangesPane {
     }
 
     this.full.split.classList.toggle("changes-rail-away", !up);
-    this.full.toggle.setAttribute("aria-expanded", up ? "true" : "false");
+    this.full.toggle.setAttribute("aria-pressed", up ? "true" : "false");
     this.full.toggle.title = up ? "Hide the snapshots" : "Show the snapshots";
     this.full.toggle.setAttribute("aria-label", this.full.toggle.title);
     this.full.splitter.setAttribute("aria-valuenow", String(up ? Math.round(this.railWidth) : 0));
@@ -627,23 +625,14 @@ export class ChangesPane {
       splitter.addEventListener("pointercancel", done);
     });
 
+    // Arrows only. The divider resizes; putting the rail away is the head's button, and one job
+    // per control beats a divider that quietly does two.
     splitter.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        this.showRail(this.railHidden);
-        return;
-      }
-
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+      if ((event.key !== "ArrowLeft" && event.key !== "ArrowRight") || this.railHidden) {
         return;
       }
 
       event.preventDefault();
-      if (this.railHidden) {
-        this.showRail(true);
-        return;
-      }
-
       settle(this.railWidth + (event.key === "ArrowRight" ? 24 : -24));
     });
   }
@@ -676,6 +665,7 @@ export class ChangesPane {
     const only = rounds.reduce((count, round) => count + round.entries.length, 0) < 2;
     rail.hidden = only;
     this.full.splitter.hidden = only;
+    this.full.toggle.hidden = only;
     if (only) {
       return;
     }
