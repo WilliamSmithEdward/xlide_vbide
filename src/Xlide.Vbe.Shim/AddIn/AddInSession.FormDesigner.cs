@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Globalization;
 using System.Text.Json;
 using Xlide.Vbe.Shim.Com;
@@ -8,7 +7,7 @@ using Xlide.Vbe.Shim.Diagnostics;
 namespace Xlide.Vbe.Shim.AddIn;
 
 /// <summary>
-/// The designer half of the debug api: a UserForm's control tree read as data, and the three
+/// The designer half of the xlide api: a UserForm's control tree read as data, and the three
 /// mutations a fixture is made of. This is docs/userform-designer.md's M1 instrument - the
 /// route ships before any canvas exists, so every later claim about the designer has something
 /// to be measured against.
@@ -796,4 +795,3 @@ internal sealed partial class AddInSession
         _ => raw,
     };
 }
-#endif

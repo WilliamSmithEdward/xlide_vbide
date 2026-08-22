@@ -10,7 +10,7 @@
 #      Group/Object/All scopes, the whole-group pull, details rows, splitter keyboard.
 #   3. Live behaviour - its own Excel, driven SEMANTICALLY through the dev build's two
 #      doors: the DevTools protocol clicks real elements on the live pages, and the shim's
-#      debug api answers with the native truth. This is what pins the double-click
+#      xlide api answers with the native truth. This is what pins the double-click
 #      navigate leg that posted mouse messages never could. Window lifecycle (hide with
 #      the editor, stay away, re-present) runs through the same doors; only the icon check
 #      still asks Win32, because an icon is not a page's business.
@@ -60,8 +60,8 @@ Test-Seam 'the page carries scopes, the group pull, and the details pane' (Join-
     'objbrowser-scope', 'pullWhole', 'objbrowser-splitter', 'objbrowser-detail-signature')
 Test-Seam 'built bundle carries the palette page' (Join-Path $repo 'ui\editor\dist\editor.js') @(
     'objbrowser-scope', 'Pick a type on the left')
-Test-Seam 'the dev doors are gated to Debug' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\DebugServer.cs') @(
-    '^#if DEBUG', 'DebugReply', '\\"api\\":')
+Test-Seam 'the dev doors are gated to Debug' (Join-Path $repo 'src\Xlide.Vbe.Shim\Diagnostics\ApiServer.cs') @(
+    '^#if DEBUG', 'ApiReply', '\\"api\\":')
 Test-Seam 'the dev build asks for the DevTools protocol' (Join-Path $repo 'src\Xlide.Vbe.Shim\WebView\WebView2Surface.cs') @(
     'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', 'DevToolsPort', 'MessageTap')
 Test-Seam 'the api carries the log, messages, capture, breakpoint, and immediate routes' (Join-Path $repo 'src\Xlide.Vbe.Shim\AddIn\AddInSession*.cs') @(
@@ -186,7 +186,7 @@ try {
     try {
         $discovery = Get-XlideApi -ProcessId $process.Id -TimeoutSeconds $remaining
     } catch {
-        throw 'no live debug api for the launched Excel; is this a Debug publish?'
+        throw 'no live xlide api for the launched Excel; is this a Debug publish?'
     }
     $api = $discovery.Base
 
@@ -195,7 +195,7 @@ try {
         try { $state = Invoke-RestMethod "$api/state"; if ($state.surfaceReady) { break } } catch { }
         Start-Sleep -Milliseconds 250
     }
-    Test-Live 'the debug api answers and the surface is ready' ($null -ne $state -and $state.surfaceReady)
+    Test-Live 'the xlide api answers and the surface is ready' ($null -ne $state -and $state.surfaceReady)
 
     # The whole in-page story - summon by real click, real libraries, members from real
     # code, and the double-click navigate - runs in the node probe over the two doors.

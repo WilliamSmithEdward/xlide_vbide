@@ -22,7 +22,7 @@ Good for page-only behaviour: the close-confirm modal's queueing, the object bro
 Needs no Excel, so it runs in the ordinary gate.
 
 **Live probes** (`tools\harness\Test-*.ps1`, gated behind `verify.ps1 -Live`). Drive a real editor
-through the debug api. Reach for these when the defect lives in the interaction: window events,
+through the xlide api. Reach for these when the defect lives in the interaction: window events,
 focus, the host rewriting something underneath the page, a module going away mid-flight. The gate
 launches its own Excel per fixture; run one by hand against a `tools\dev.ps1 -KeepOpen
 -Configuration Debug` session. Debug builds only, and they find their session through
@@ -203,15 +203,15 @@ The gate waits for the session to be healthy before probing rather than sleeping
 that has only just launched is still seeding, and a probe asserting a healthy session then fails on
 the truth that it is not healthy YET, which is a real answer to the wrong question.
 
-Debug builds only for anything using the debug api. Release has none of it, and the gate verifies
+Debug builds only for anything using the xlide api. Release has none of it, and the gate verifies
 that by inspecting the built binary rather than trusting the compiler flag.
 
-## What the debug api gives a probe
+## What the xlide api gives a probe
 
 `state`, `problems`, `module` read and write, `layout`, `eval` and `await` against the live page,
 `command` by name, `caret`, `breakpoint`, `capture` for a cropped screenshot, `log` with `waitMs`
 to block until a line appears, and `assert` to state an expectation and wait for it. Full reference
-in [debug-api.md](debug-api.md).
+in [xlide-api.md](xlide-api.md).
 
 `await` and `log?waitMs` exist so a probe can wait for the thing it means instead of sleeping a
 guess. A fixed sleep races the fixture's own boot traffic, and the race is usually won on the

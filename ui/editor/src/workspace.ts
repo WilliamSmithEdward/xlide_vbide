@@ -80,7 +80,7 @@ interface Tab {
   dirty: boolean;
 }
 
-/** One tab as the debug api reports it: what it holds, and what the strip draws for it. */
+/** One tab as the xlide api reports it: what it holds, and what the strip draws for it. */
 export interface TabSnapshot {
   module: string;
   project: string | null;
@@ -307,7 +307,7 @@ class EditorGroup {
     return undefined;
   }
 
-  /** The MRU stack itself, for the debug api: what a close will fall back through, in order. */
+  /** The MRU stack itself, for the xlide api: what a close will fall back through, in order. */
   shownOrder(): string[] {
     return [...this.shownHere];
   }
@@ -553,7 +553,7 @@ export class Workspace {
   }
 
   /**
-   * What the strip would say, as data. For the debug api's `ui` route.
+   * What the strip would say, as data. For the xlide api's `ui` route.
    *
    * Reported from the tabs themselves rather than read back out of the DOM, because a probe
    * that scrapes the strip is measuring the render and calling it the state, and a stale

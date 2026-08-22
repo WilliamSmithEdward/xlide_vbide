@@ -12,7 +12,7 @@
 # UseRealPixels a scaling artifact reads as a one-pixel mismatch that is not real).
 # Resizes the VBE frame twice per state and compares frame client, overlay, and browser.
 #
-# Nothing here needs VBA project trust: the panes are closed through the debug api's own
+# Nothing here needs VBA project trust: the panes are closed through the xlide api's own
 # pane route (the door the product is moving everything to), and the measuring core is
 # Win32, which is the subject - the whole point is what the native windows are doing.
 $ErrorActionPreference = 'Continue'

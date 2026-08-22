@@ -79,6 +79,7 @@ import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
 import { ChangesPane } from "./changespane.js";
 import { openSyncDialog } from "./syncdialog.js";
+import { openAgentDialog } from "./agentdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
 import { Bookmarks } from "./bookmarks.js";
@@ -461,7 +462,7 @@ function boot(): void {
   /**
    * Applies and saves every designer document holding unwritten edits, answering who was
    * saved and who refused. The two consumers are sync's export flush - the dialog's wrapper
-   * here and the debug api's pre-step through the designerSaveDirty act - so both doors ship
+   * here and the xlide api's pre-step through the designerSaveDirty act - so both doors ship
    * what is on screen, never the last save (decision 15's sibling rule; the Run command keeps
    * the same one).
    */
@@ -652,6 +653,15 @@ function boot(): void {
         return;
       }
 
+      // The agent card: the api's own switch, and the address it hands out. Its own dialog rather
+      // than a settings row, because turning it on is opening a door rather than setting a taste.
+      if (command.id === "openAgent") {
+        openAgentDialog(
+          (args) => bridge.requestApi(args),
+          () => workspace.activeEditor().focus());
+        return;
+      }
+
       // The Panes menu: its own dropdown under its own toolbar button, beside settings
       // (developer, 2026-08-06). Showing and hiding a pane is done while working, not
       // visited once like a preference.
@@ -717,7 +727,7 @@ function boot(): void {
     commandAvailable: (command) =>
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
-      || command.id === "openSponsor" || command.id === "openSync"
+      || command.id === "openSponsor" || command.id === "openSync" || command.id === "openAgent"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
@@ -772,7 +782,7 @@ function boot(): void {
   bridge.shell = shell;
 
   // The Tests pane: a projection of the host's setTests message, its gestures posted back
-  // through the same channel the debug api's tests route drives - one brain, two doors.
+  // through the same channel the xlide api's tests route drives - one brain, two doors.
   const testsPane = new TestsPane(document.querySelector("#tests") as HTMLElement, {
     act: (action, test, file) => bridge.testsAction(action, test, file),
     // The file goes with the module: two open files can each hold an InvoiceTests, and a
@@ -782,7 +792,7 @@ function boot(): void {
   bridge.testsChanged = (tests) => testsPane.paint(tests);
 
   // The Changes pane: the change log, read when the pane is looked at and at no other time.
-  // Its request goes through the same channel the debug api's `changes` route answers, so the
+  // Its request goes through the same channel the xlide api's `changes` route answers, so the
   // pane and a driver are reading one reply rather than two shapes that can drift.
   changesPane = new ChangesPane(
     document.querySelector("#changes") as HTMLElement,
@@ -1278,7 +1288,7 @@ function boot(): void {
 
   monaco.languages.registerSignatureHelpProvider(VBA_LANGUAGE_ID, signatureProvider);
 
-  // And the surface itself, as data and as actions: the debug api's `ui` and `act` routes. See
+  // And the surface itself, as data and as actions: the xlide api's `ui` and `act` routes. See
   // devsurface.ts for why this is a module rather than a script written fresh per question.
   installDevSurface({
     workspace,

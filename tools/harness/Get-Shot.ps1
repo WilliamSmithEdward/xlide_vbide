@@ -3,7 +3,7 @@
     A picture of the running editor - or of one widget in it - as a PNG.
 
 .DESCRIPTION
-    The debug api renders windows as BMP, because a bitmap is what PrintWindow gives and
+    The xlide api renders windows as BMP, because a bitmap is what PrintWindow gives and
     encoding anything else inside an ahead-of-time shim is work the shim should not carry.
     Most things that want to LOOK at the result want a PNG, so the conversion happens here.
 

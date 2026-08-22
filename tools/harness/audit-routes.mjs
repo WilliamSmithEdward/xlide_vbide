@@ -76,7 +76,7 @@ if (routes.length === 0) {
   process.exit(1);
 }
 
-const reference = read("docs/debug-api.md");
+const reference = read("docs/xlide-api.md");
 const driving = read("docs/driving-excel.md");
 const client = read("tools/harness/xlide-api.mjs");
 
@@ -179,7 +179,7 @@ const isDriven = (route) =>
 
 const gaps = [];
 for (const route of routes) {
-  if (!inReference(route)) { gaps.push(`${route}: not in docs/debug-api.md`); }
+  if (!inReference(route)) { gaps.push(`${route}: not in docs/xlide-api.md`); }
   if (!inDriving(route)) { gaps.push(`${route}: not in docs/driving-excel.md`); }
   if (!inClient(route)) { gaps.push(`${route}: no method in tools/harness/xlide-api.mjs`); }
 

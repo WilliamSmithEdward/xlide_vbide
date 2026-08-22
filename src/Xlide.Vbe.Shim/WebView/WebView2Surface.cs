@@ -81,34 +81,55 @@ internal sealed class WebView2Surface : IDisposable
     /// <summary>Appended to the bundle's entry address on navigation.</summary>
     private string _entryQuery = string.Empty;
 
-#if DEBUG
     /// <summary>
     /// Where dev builds put the browser's DevTools protocol: a free port picked once per
-    /// process. The branch that first built this pinned 9333, and a second Excel then
-    /// either collided or shared a browser cluster with the first, mixing their targets
-    /// on one socket - the developer runs several Excels, so the port is per instance and
-    /// the discovery file (debug-api-{pid}.json) is how tools learn it.
+    /// process, or ZERO in a shipped build, which is how the discovery file says "not here".
+    /// The branch that first built this pinned 9333, and a second Excel then either collided
+    /// or shared a browser cluster with the first, mixing their targets on one socket - the
+    /// developer runs several Excels, so the port is per instance and the discovery file is
+    /// how tools learn it.
+    ///
+    /// THIS ONE DOES NOT SHIP, AND IT IS NOT PART OF THE API. When the xlide api went into the
+    /// release build the natural question was whether this went with it; it does not, and the
+    /// difference is authentication. The api door is token-gated - a caller has to have read a
+    /// file only this user can read. The DevTools protocol is not gated at all, and it is asked
+    /// for here with `--remote-allow-origins=*`: anything that can reach the port drives the
+    /// browser completely, reads the page, and runs script in it, with no credential of any
+    /// kind. That is a different order of capability from the door beside it, nothing in the
+    /// api needs it (the eval route talks to the WebView in-process), and the harness that does
+    /// need it only ever runs against a dev build.
     /// </summary>
     public static readonly int DevToolsPort = PickFreeLoopbackPort();
 
     private static int PickFreeLoopbackPort()
     {
+#if DEBUG
         var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         probe.Start();
         var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         return port;
+#else
+        // No protocol asked for, so no port to name. Zero is what the discovery file carries, and
+        // a client reading zero knows there is nothing to attach to rather than guessing.
+        return 0;
+#endif
     }
 
     /// <summary>Which surface this is, as the message tap names it: "editor" or "palette".</summary>
     public string DebugName { get; set; } = "surface";
 
     /// <summary>
-    /// Runs script in the live page and hands back its result as JSON, for the debug api's
+    /// Runs script in the live page and hands back its result as JSON, for the xlide api's
     /// eval route. The browser answers on the thread that owns it, which is the host thread,
     /// so the caller must already be on it and must not block waiting: the answer arrives
-    /// through the callback, and the api route parks it where the next request can collect
-    /// it. Debug only - the product never runs script it did not ship.
+    /// through the callback, and the api route parks it where the next request can collect it.
+    ///
+    /// IT SHIPS NOW, AND THAT CHANGED WHAT THIS IS. It used to say "the product never runs script
+    /// it did not ship", which was true while this compiled only in Debug. With the api in the
+    /// release build the honest statement is narrower: the product runs no script of its own that
+    /// it did not ship, and runs a caller's script only when someone has opened the api door and
+    /// that caller holds the door's token. The capability is exactly as trusted as the door is.
     /// </summary>
     public bool ExecuteScript(string javaScript, Action<int, string> completed)
     {
@@ -170,7 +191,7 @@ internal sealed class WebView2Surface : IDisposable
     internal void ForgetScriptHandler(object handler) => _pendingScripts.Remove(handler);
 
     /// <summary>
-    /// The last messages over every surface's wire, kept for the debug api's messages
+    /// The last messages over every surface's wire, kept for the xlide api's messages
     /// route. Protocol mysteries ("did the page ever post it?") become one request. A
     /// bounded ring: old traffic falls off, long payloads are cut, and none of this
     /// exists in Release.
@@ -227,7 +248,6 @@ internal sealed class WebView2Surface : IDisposable
             }
         }
     }
-#endif
 
     /// <summary>
     /// Raised with the text of each message the page posts through
@@ -374,9 +394,7 @@ internal sealed class WebView2Surface : IDisposable
             return false;
         }
 
-#if DEBUG
         MessageTap.Record(DebugName, "toPage", json);
-#endif
         return true;
     }
 
@@ -851,9 +869,7 @@ internal sealed class WebView2Surface : IDisposable
             return;
         }
 
-#if DEBUG
         MessageTap.Record(DebugName, "toHost", message);
-#endif
 
         var handler = MessageReceived;
         if (handler is null)
@@ -1023,11 +1039,9 @@ internal sealed class WebView2Surface : IDisposable
         _messageHandler = null;
         _acceleratorHandler = null;
 
-#if DEBUG
         // A surface torn down with script calls in flight will never see them complete, so the
         // handlers that would have un-rooted themselves go here with the rest.
         _pendingScripts.Clear();
-#endif
     }
 }
 
@@ -1086,8 +1100,7 @@ internal sealed partial class ControllerCompletedHandler : ICoreWebView2CreateCo
     }
 }
 
-#if DEBUG
-/// <summary>Receives the JSON result of a script the debug api ran in the page.</summary>
+/// <summary>Receives the JSON result of a script the xlide api ran in the page.</summary>
 [GeneratedComClass]
 internal sealed partial class ExecuteScriptCompletedHandler : ICoreWebView2ExecuteScriptCompletedHandler
 {
@@ -1109,7 +1122,6 @@ internal sealed partial class ExecuteScriptCompletedHandler : ICoreWebView2Execu
         return HResult.Ok;
     }
 }
-#endif
 
 /// <summary>Reports the outcome of each navigation.</summary>
 [GeneratedComClass]

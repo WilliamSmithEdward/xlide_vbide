@@ -7,7 +7,7 @@ using Xlide.Vbe.Shim.Engine;
 namespace Xlide.Vbe.Shim.AddIn;
 
 /// <summary>
-/// The test runner's session half: one brain for the Tests pane and the debug api, so the two
+/// The test runner's session half: one brain for the Tests pane and the xlide api, so the two
 /// doors cannot disagree about what a run is. Discovery, the support-module gate, the run loop
 /// and its per-test streaming all live in <see cref="TestRunService"/>; this partial owns the
 /// standing state - the latest outcome per test, whether a run is in flight - and the message

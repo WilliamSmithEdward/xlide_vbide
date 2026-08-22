@@ -7,7 +7,7 @@ is to be true today, and the version of it that described v0.3.0 was still claim
 four days and three releases after the fact. Everything that belongs to another document has been
 left there. The newest handover (the highest-dated `docs/handoff-*.md`) is what happened and what
 is next, [decisions.md](decisions.md) is the choices that would be expensive to reverse,
-[lessons.md](lessons.md) is the findings behind them, and [debug-api.md](debug-api.md) is the
+[lessons.md](lessons.md) is the findings behind them, and [xlide-api.md](xlide-api.md) is the
 door. If a fact lives in one of those, it does not live here.
 
 ## What the product is
@@ -49,8 +49,8 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 `tools\verify.ps1` is the whole local gate in one command, twelve steps in about twenty seconds:
 vendored spec, engine currency against the analyzer checkout, the variant-as-object guard, page
-typecheck, build and tests, the engine language matrix, the headless page probes, the debug api's
-route audit, the Release build, the unit tests, and the Release-carries-no-debug-api check.
+typecheck, build and tests, the engine language matrix, the headless page probes, the xlide api's
+route audit, the Release build, the unit tests, and the check that Release ships the api shut.
 `-Live` adds the suites that need an open editor.
 
 Counts move, so they are given as of this line rather than as standing facts: 245 unit tests,

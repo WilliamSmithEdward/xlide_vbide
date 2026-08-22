@@ -884,7 +884,6 @@ internal sealed class AnalysisService : IAsyncDisposable
         {
             try
             {
-#if DEBUG
                 var clock = System.Diagnostics.Stopwatch.StartNew();
                 var snapshots = ProjectReader.ReadAll(_editor, generation);
                 clock.Stop();
@@ -897,9 +896,6 @@ internal sealed class AnalysisService : IAsyncDisposable
                 }
                 PerfCounters.HostRead(clock.ElapsedMilliseconds, chars, components, 0);
                 read.TrySetResult(snapshots);
-#else
-                read.TrySetResult(ProjectReader.ReadAll(_editor, generation));
-#endif
             }
             catch (Exception ex)
             {

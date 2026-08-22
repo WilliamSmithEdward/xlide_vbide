@@ -115,9 +115,7 @@ internal static class Log
             return;
         }
 
-#if DEBUG
         PerfCounters.LogLine();
-#endif
 
         try
         {

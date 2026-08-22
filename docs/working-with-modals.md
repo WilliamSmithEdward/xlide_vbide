@@ -18,7 +18,7 @@ When a modal goes up, three things become true at once, and mixing them up is th
 every failure below.
 
 **The thread does not stop.** A modal runs its own message loop and PUMPS. Posted work still
-runs. This was measured on 2026-08-06: with the Macros dialog standing, the debug api's
+runs. This was measured on 2026-08-06: with the Macros dialog standing, the xlide api's
 marshaled requests kept answering normally, and `state` returned in milliseconds.
 
 **The product's own work does stop.** The shim's poll tick does not run inside that loop, so
@@ -52,7 +52,7 @@ after.
 
 ### The Macros dialog: a command aimed at nothing
 
-Pressing Run through the debug api opened the Macros dialog and left it standing. Run acts
+Pressing Run through the xlide api opened the Macros dialog and left it standing. Run acts
 on the CARET, and the host copies the surface's caret into the native pane before every
 command (`SyncCaretToPane`). The caret was on line 1, outside any procedure, so the editor
 did what it always does there: it asked which macro to run, modally, and waited for a person.
@@ -116,11 +116,11 @@ absence of evidence that something else did.
 process, with their buttons, and dismisses one by button caption with the ampersand stripped
 so `&Cancel` answers to `Cancel`. Nothing in it touches the host thread.
 
-The debug api exposes that as `GET dialogs` and `POST dismiss`, and every request that
+The xlide api exposes that as `GET dialogs` and `POST dismiss`, and every request that
 touches the session first sweeps dialogs the door itself raised, using the safe-button rule.
 A request that means to open a dialog passes `keep=1`. `stats` and `dialogs` both report
 `heartbeatAgeMs`, which is how a stuck editor is told from a busy one.
-[debug-api.md](debug-api.md) has the routes.
+[xlide-api.md](xlide-api.md) has the routes.
 
 ## 5. Traps worth keeping
 

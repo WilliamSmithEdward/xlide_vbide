@@ -21,7 +21,7 @@
     any other suite's expectations resting on it. DebugFixture is read by nine suites; a change
     log run against it would be either useless or a landmine for the other eight.
 
-    Built through the debug api, so "Trust access to the VBA project object model" does NOT have
+    Built through the xlide api, so "Trust access to the VBA project object model" does NOT have
     to be on. A Debug build must be registered and loading, which is what makes the door exist.
 
     It COMPILES, so a session holding it is safe to Run and Compile.

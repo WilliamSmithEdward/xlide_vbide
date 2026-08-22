@@ -172,7 +172,7 @@ public sealed record SyncPlan
 ///
 /// Everything here is pure: it is handed the live modules and the folder's files and answers a
 /// plan. The COM and the file system live in the shim's service, which is what makes this half
-/// testable without an Excel, and what lets the dialog and the debug api share one answer rather
+/// testable without an Excel, and what lets the dialog and the xlide api share one answer rather
 /// than each deciding for itself what an import means.
 ///
 /// The strategy follows the companion editor's, because the two products write the same files into

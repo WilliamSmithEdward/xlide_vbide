@@ -48,7 +48,7 @@ export interface ExplorerProcedure {
   line: number;
 }
 
-/** The tree as the debug api reports it. */
+/** The tree as the xlide api reports it. */
 export interface ExplorerSnapshot {
   selected: string | null;
   active: string | null;
@@ -595,7 +595,7 @@ export class Explorer {
   }
 
   /**
-   * The tree as data, for the debug api's `ui` route.
+   * The tree as data, for the xlide api's `ui` route.
    *
    * Reported from the fields the render reads rather than from the rendered rows, so a probe
    * asks what the tree BELIEVES. Scraping `.tree-item` was how this was measured before, and it

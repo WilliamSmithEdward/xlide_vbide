@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Starts Word on a document and opens the editor, so the debug api has something to answer for.
+    Starts Word on a document and opens the editor, so the xlide api has something to answer for.
 
 .DESCRIPTION
     Start-Excel.ps1's twin, built the day Word testing became routine (2026-08-19); the three

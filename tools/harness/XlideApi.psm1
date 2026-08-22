@@ -21,7 +21,7 @@ Set-StrictMode -Version Latest
     Every live xlide session, newest first. Never throws; none answers an empty list.
 
 .DESCRIPTION
-    Enumerates %LOCALAPPDATA%\xlide_vbide\debug-api-*.json and proves each candidate alive by
+    Enumerates %LOCALAPPDATA%\xlide_vbide\xlide-api-*.json and proves each candidate alive by
     asking /state - a discovery file outlives a killed Excel, so answering is the only proof
     of life. Each answer carries:
 
@@ -41,7 +41,7 @@ function Find-XlideApi {
     }
 
     $live = @()
-    foreach ($file in Get-ChildItem $directory -Filter 'debug-api-*.json' -ErrorAction SilentlyContinue) {
+    foreach ($file in Get-ChildItem $directory -Filter 'xlide-api-*.json' -ErrorAction SilentlyContinue) {
         try {
             $entry = Get-Content $file.FullName -Raw | ConvertFrom-Json
         } catch {
@@ -115,7 +115,7 @@ function Get-XlideApi {
     } while ($TimeoutSeconds -gt 0 -and (Get-Date) -lt $deadline)
 
     $who = if ($ProcessId) { "for Excel $ProcessId" } else { 'in any Excel' }
-    throw "no live xlide debug api $who (Release build, Excel not running, or the editor was never opened)"
+    throw "no live xlide xlide api $who (Release build, Excel not running, or the editor was never opened)"
 }
 
 Export-ModuleMember -Function Find-XlideApi, Get-XlideApi

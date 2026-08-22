@@ -14,7 +14,7 @@
  * that asks `xlideUi.state()` cannot be looking at a stale render and calling it the state, and one
  * that calls `xlideUi.act("closeActive")` cannot miss because it guessed the wrong event name.
  *
- * Reached from the debug api's `ui` and `act` routes, and from a devtools console. Shipped in every
+ * Reached from the xlide api's `ui` and `act` routes, and from a devtools console. Shipped in every
  * build: it is a few hundred bytes of read-only reporting over objects the page already holds, and
  * a door that is only there in Debug is a door nobody trusts in the build that matters.
  */
@@ -31,6 +31,7 @@ import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
 import { changesPaneProbe } from "./changespane.js";
+import { agentDialogProbe } from "./agentdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
@@ -111,6 +112,18 @@ export interface UiSnapshot {
    * pointed at, the newest round marked reviewed, and the rounds with one row per module. Null
    * before the pane has been built.
    */
+  /**
+   * The agent card while it stands, null otherwise: whether the api door is open, and the
+   * instruction text as it is - which is what a developer would paste, read from the box they
+   * would paste it out of rather than rebuilt here from the same inputs.
+   */
+  agent: {
+    open: boolean;
+    api: boolean;
+    busy: boolean;
+    text: string;
+    copied: boolean;
+  } | null;
   changes: {
     project: string;
     files: string[];
@@ -653,6 +666,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     statusModule: parts.statusModule(),
     sync: syncDialogProbe()?.state() ?? null,
     changes: changesPaneProbe()?.state() ?? null,
+    agent: agentDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
     search: parts.search.state(),
@@ -1846,6 +1860,31 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * There is no revert here because there is none in the pane: the log shows, and writing is
      * done through `module`, where it lands in the log like any other write.
      */
+    /**
+     * Drives the agent card: `{press}` clicks a named control (toggle, copy, close). `ui.agent`
+     * is the read side and carries the instruction text as it stands.
+     *
+     * THE TOGGLE IS A REAL SWITCH, not a rehearsal - pressing it opens or shuts the api door for
+     * this session and writes the choice to the settings file, exactly as a developer's click
+     * does. A check that drives it is changing the machine's state, which is the point: there is
+     * no other way to prove the door actually moves.
+     */
+    agentCard: (args) => {
+      const card = agentDialogProbe();
+      if (!card) {
+        return { did: false, detail: "the agent card is not open; use command openAgent first" };
+      }
+
+      if (args.press !== undefined) {
+        const control = String(args.press);
+        return card.press(control)
+          ? { did: true, detail: `${control} pressed` }
+          : { did: false, detail: `no control named ${control}; use toggle, copy or close` };
+      }
+
+      return { did: false, detail: "nothing asked; pass press=toggle|copy|close" };
+    },
+
     changesPane: (args) => {
       const pane = changesPaneProbe();
       if (!pane) {

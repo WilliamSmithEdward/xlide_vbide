@@ -12,7 +12,7 @@
     keys were simply absent in regedit.
 
     Which build it registers is inferred: the dev loop publishes Release by default but is routinely
-    run as -Configuration Debug, since the debug api only exists there. It keeps whichever is
+    run as -Configuration Debug, since the xlide api only exists there. It keeps whichever is
     already registered, otherwise takes the most recent publish, and -Configuration overrides both.
 
     RUN THIS FROM YOUR OWN TERMINAL, not from an agent or sandboxed shell. Sandboxed environments
@@ -61,7 +61,7 @@ if (-not $Shim) {
         if (-not $Configuration) {
             # Debug first, and not by timestamp. The gate publishes Release on every run, so the
             # most recently written shim is almost always Release even on a machine that has been
-            # developing against Debug all day. Debug is also the one carrying the debug api, which
+            # developing against Debug all day. Debug is also the one carrying the xlide api, which
             # is what dev testing is for.
             $published = 'Debug', 'Release' |
                 ForEach-Object { [pscustomobject]@{ Name = $_; Path = (Get-ShimPath $_) } } |

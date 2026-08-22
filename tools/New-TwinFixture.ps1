@@ -22,7 +22,7 @@
     pass while reading the wrong workbook's module. So each one says which workbook it is from,
     in text a comparison will notice.
 
-    Built through the debug api, so "Trust access to the VBA project object model" does NOT have
+    Built through the xlide api, so "Trust access to the VBA project object model" does NOT have
     to be on. That setting gates VBComponents.Add through Workbook.VBProject; the add-in is
     already past it, because the host hands it the VBE. A Debug build must be registered and
     loading, which is what makes the door exist.

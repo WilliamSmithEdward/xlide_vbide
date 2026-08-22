@@ -87,6 +87,7 @@ export type HostMessage =
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
   | { type: "changesResult"; id: number; json: string }
+  | { type: "apiResult"; id: number; json: string }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | ({ type: "setTests" } & SetTestsState)
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -466,6 +467,7 @@ export type ClientMessage =
   | { type: "outline"; id: number; module: string; project?: string }
   | ({ type: "sync"; id: number; body: string } & Record<string, string | number>)
   | ({ type: "changes"; id: number } & Record<string, string | number>)
+  | ({ type: "api"; id: number } & Record<string, string | number>)
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
   | { type: "obMembers"; id: number; library: string; typeName: string }
@@ -654,6 +656,7 @@ export class EditorBridge {
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
   private readonly pendingChanges = new RequestTable<Record<string, unknown>>();
+  private readonly pendingApi = new RequestTable<Record<string, unknown>>();
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -1129,7 +1132,7 @@ export class EditorBridge {
    * Asks the host what an import or export would do, or asks for it to be done.
    *
    * The arguments go through untouched and the answer comes back as the host's own JSON, because
-   * the host answers this and the debug api's `sync` route from the SAME call. Shaping it here
+   * the host answers this and the xlide api's `sync` route from the SAME call. Shaping it here
    * would be a second opinion about what a plan is, and second opinions drift.
    *
    * Resolves to an object carrying `error` rather than rejecting: a folder that has gone away is
@@ -1155,6 +1158,21 @@ export class EditorBridge {
       () => ({ error: "the host did not answer in time" }),
       30000,
       (id) => this.transport.post({ type: "changes", id, ...args }));
+  }
+
+  /**
+   * Asks about the api door, or moves it: `{action: "state"}` reads, `{action: "on"|"off"}` opens
+   * or shuts it and answers the state that resulted.
+   *
+   * NOT ASKED THROUGH THE API ITSELF, which would be a door whose only handle is inside the room.
+   * This rides the page's own channel to the host - the same one settings and the change log use -
+   * so it answers whether the door is open or shut.
+   */
+  requestApi(args: Record<string, string>): Promise<Record<string, unknown>> {
+    return this.pendingApi.ask(
+      () => ({ error: "the host did not answer in time" }),
+      10000,
+      (id) => this.transport.post({ type: "api", id, ...args }));
   }
 
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
@@ -1639,6 +1657,16 @@ export class EditorBridge {
         this.pendingChanges.settle(message.id, answer);
         return;
       }
+      case "apiResult": {
+        let answer: Record<string, unknown>;
+        try {
+          answer = JSON.parse(message.json) as Record<string, unknown>;
+        } catch {
+          answer = { error: "the host's answer could not be read" };
+        }
+        this.pendingApi.settle(message.id, answer);
+        return;
+      }
       case "outlineResult":
         // A failed answer is a shrug, not a statement of emptiness.
         this.pendingOutlines.settle(message.id, message.failed ? null : message.procedures);
@@ -1821,7 +1849,7 @@ export class EditorBridge {
   }
 
   /**
-   * What the page is still waiting on, for the debug api's `ui` route.
+   * What the page is still waiting on, for the xlide api's `ui` route.
    *
    * A document request that never comes home fails as a four-second silence, and the surface
    * shows nothing while it does. Without this, "the tab is blank" and "the text has not arrived

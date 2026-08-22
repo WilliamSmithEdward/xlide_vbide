@@ -20,7 +20,7 @@
     it is running - so a session with two files of tests needs two copies, and this fixture is
     also how that per-file gate gets exercised.
 
-    Built through the debug api, so "Trust access to the VBA project object model" does NOT have
+    Built through the xlide api, so "Trust access to the VBA project object model" does NOT have
     to be on.
 
 .EXAMPLE

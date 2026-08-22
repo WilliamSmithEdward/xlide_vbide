@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     The gate was being assembled by hand each time - page typecheck here, page build there,
-    dotnet build, dotnet test, a Release publish, a string check for the debug door - and a
+    dotnet build, dotnet test, a Release publish, a string check for the api door - and a
     hand-assembled gate is one someone eventually runs four fifths of. This runs the lot and
     says PASS or FAIL once, naming what failed.
 
@@ -341,10 +341,10 @@ Step 'close confirm, seams to engine' {
 # reads the routes out of the shim itself, so the documents and the client cannot fall behind the
 # door without the gate saying so (2026-08-07: the reference had all of them, the driving guide
 # had twenty, and one route had no client method at all).
-Step 'debug api is documented and driven' {
+Step 'xlide api is documented and driven' {
     $answer = node (Join-Path $repoRoot 'tools\harness\audit-routes.mjs') 2>&1
     $answer | Where-Object { $_ -notmatch '^ok ' } | ForEach-Object { Write-Host "  $_" }
-    if ($LASTEXITCODE -ne 0) { throw 'a debug api route is undocumented, unreachable, or driven by nothing' }
+    if ($LASTEXITCODE -ne 0) { throw 'a xlide api route is undocumented, unreachable, or driven by nothing' }
     ($answer | Select-Object -Last 1) -replace '^ok\s+', ''
 }
 
@@ -389,18 +389,42 @@ Step 'unit tests' {
     "$total passed"
 }
 
-Step 'Release carries no debug api' {
-    # Verified against the binary rather than trusted: the whole door is one #if away from
-    # shipping, and a door that ships is a port open on a user's machine.
+Step 'Release ships the api shut, and ships no unauthenticated door' {
+    # THE ONE THING ABOUT THE API WORTH PROVING MECHANICALLY. The api is in the release build now
+    # by design, so the old check - that none of it shipped - would fail for the right reason and
+    # tell nobody anything. What matters instead is which way the shipped build LEANS, and that
+    # is a `#if` somebody could write the wrong way round without any test noticing.
+    #
+    # It is readable because the lean is a const and the log line is a ternary over it: the
+    # compiler folds it, so exactly one of the two phrases is in the binary. Proving the absent
+    # one is absent is what makes this a real check rather than a search that always succeeds.
     $shim = Join-Path $repoRoot 'artifacts\bin\Xlide.Vbe.Shim\release_win-x64\Xlide.Vbe.Shim.dll'
     if (-not (Test-Path $shim)) { throw "no Release assembly at $shim" }
 
+    # BOTH ALIGNMENTS. A .NET string literal lives in the #US heap as UTF-16, and nothing makes it
+    # start on an even byte: decoding from offset 0 alone garbles every literal that happens to
+    # land on an odd one, which reads as "not found". This scan had one alignment, so a needle that
+    # WAS in the binary could report absent and the step would pass having checked nothing. Caught
+    # 2026-08-22 by a needle known to be present reading False in both builds.
     $bytes = [IO.File]::ReadAllBytes($shim)
-    $text = [Text.Encoding]::Unicode.GetString($bytes) + [Text.Encoding]::ASCII.GetString($bytes)
-    foreach ($needle in '__xlideConsole', 'unknown benchmark', 'the pending result was lost', 'debug-api-') {
-        if ($text.Contains($needle)) { throw "Release carries the debug api: found '$needle'" }
+    $text = [Text.Encoding]::Unicode.GetString($bytes) +
+        [Text.Encoding]::Unicode.GetString($bytes, 1, $bytes.Length - 1) +
+        [Text.Encoding]::ASCII.GetString($bytes)
+
+    $shut = 'this build keeps the door shut unless told otherwise'
+    $open = 'this build opens the door unless told otherwise'
+    if (-not $text.Contains($shut)) { throw "Release does not say it ships the api shut" }
+    if ($text.Contains($open)) { throw "RELEASE SHIPS THE API OPEN: found '$open'" }
+
+    # And the api arrived, rather than the whole thing having been compiled out by accident.
+    if (-not $text.Contains('xlide-api-')) { throw 'Release carries no api at all' }
+
+    # The DevTools protocol is NOT part of the api and must never ship: it takes no token at all,
+    # and `--remote-allow-origins=*` means anything local that reaches the port drives the page.
+    foreach ($needle in '--remote-debugging-port', '--remote-allow-origins') {
+        if ($text.Contains($needle)) { throw "Release carries an unauthenticated door: found '$needle'" }
     }
-    'no debug strings'
+    'shut by default, no devtools'
 }
 
 if (-not $Quick) {
@@ -534,7 +558,7 @@ if ($Live) {
                 throw "$probe did not pass$named"
             }
         }
-        'debug api, split workspace, churn'
+        'xlide api, split workspace, churn'
     }
 
     # THE NODE SUITES, which existed and passed and which nothing ran.

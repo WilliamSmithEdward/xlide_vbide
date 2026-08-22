@@ -789,7 +789,7 @@ public sealed record DesignerAutoSizeResultMessage(
 /// The answer to an import/export request, carried as the JSON the service produced rather than as
 /// a shape of its own.
 ///
-/// Passing it through verbatim is deliberate: the debug api answers the very same string from the
+/// Passing it through verbatim is deliberate: the xlide api answers the very same string from the
 /// very same call, so the dialog cannot be looking at a different plan from the one a harness
 /// reads. A shape declared twice is a shape that drifts once.
 /// </summary>
@@ -800,9 +800,18 @@ public sealed record SyncResultMessage(
 
 /// <summary>
 /// The change log's answer to something the pane asked, carried as the route's own JSON so the
-/// pane and the debug api are reading one reply rather than two shapes that can disagree.
+/// pane and the xlide api are reading one reply rather than two shapes that can disagree.
 /// </summary>
 public sealed record ChangesResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("json")] string Json);
+
+/// <summary>
+/// The api door's answer to the agent card: whether it is open, and the address it hands out.
+/// Carried as JSON for the same reason the change log's is - one shape, read in one place.
+/// </summary>
+public sealed record ApiResultMessage(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("id")] int Id,
     [property: JsonPropertyName("json")] string Json);
@@ -883,6 +892,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(CanonicalCaseResultMessage))]
 [JsonSerializable(typeof(LoopSyncResultMessage))]
 [JsonSerializable(typeof(ChangesResultMessage))]
+[JsonSerializable(typeof(ApiResultMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]

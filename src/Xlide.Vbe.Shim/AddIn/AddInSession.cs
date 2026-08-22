@@ -124,7 +124,7 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>
     /// Import and export, for whoever is asking.
     ///
-    /// The dialog and the debug api both land here, which is the whole design: an api that wrote
+    /// The dialog and the xlide api both land here, which is the whole design: an api that wrote
     /// files by itself would drift from the button, and the first anyone would know of it is a
     /// harness that passes against a product that is broken. One implementation, two doors.
     /// </summary>
@@ -499,7 +499,7 @@ internal sealed partial class AddInSession : IDisposable
     }
 
     /// <summary>
-    /// The import/export dialog, asking. It goes through the same call the debug api's `sync` route
+    /// The import/export dialog, asking. It goes through the same call the xlide api's `sync` route
     /// goes through, so the dialog cannot be shown a plan the api would not answer, and Apply
     /// cannot leave the project in a state the api would not have left it in.
     /// </summary>
@@ -925,19 +925,10 @@ internal sealed partial class AddInSession : IDisposable
     {
         _settings = updated.Normalized();
 
-        try
-        {
-            var path = SettingsPath;
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, _settings.ToJson());
-            Log.Info($"settings: saved (blockLayout {_settings.BlockLayout}"
-                + $", continueComment {_settings.ContinueCommentOnNewline}"
-                + $", mirrorSpacing {_settings.MirrorCommentSpacing})");
-        }
-        catch (Exception ex)
-        {
-            Log.Error("settings: could not be written; the choice holds for this session only", ex);
-        }
+        SaveSettings();
+        Log.Info($"settings: saved (blockLayout {_settings.BlockLayout}"
+            + $", continueComment {_settings.ContinueCommentOnNewline}"
+            + $", mirrorSpacing {_settings.MirrorCommentSpacing})");
 
         _editorSurface?.ShowSettings(_settings);
     }
@@ -971,7 +962,7 @@ internal sealed partial class AddInSession : IDisposable
     /// each stated once because they are correctness properties, not conveniences: the
     /// evaluator's scratch module is skipped - a fixture that counts it counts wrong, and so
     /// does a tree that lists it - and an entry that cannot be read costs that entry alone,
-    /// never the walk. The walk was hand-rolled three times (twice behind the debug api, once
+    /// never the walk. The walk was hand-rolled three times (twice behind the xlide api, once
     /// in the publish path) with the filter spelled positively in one and negatively in
     /// another, and the projects route's copy had the containment wrong: its per-component
     /// read sat inside the try wrapping the whole project, so one unreadable component dropped
@@ -1133,18 +1124,72 @@ internal sealed partial class AddInSession : IDisposable
         // gray shell. The surface goes up now, showing the empty workspace and the explorer.
         TryShowEmptyWorkspace();
 
-#if DEBUG
-        // The dev build's local door for the harness: state, windows, commands by name.
-        // Compiled out of Release entirely. Re-landed from post-v010-experiments after the
-        // crash storm that retired the first landing was root-caused (the 16-byte variant,
-        // lesson 33); the locals and watches routes now read the ghost reader thread's
-        // published snapshots, which did not exist the first time.
-        _debugServer = DebugServer.Start(AnswerDebugRequest);
+        // The local door: state, windows, commands by name. Shipped in every build and OPENED in
+        // none of them unless someone said so - see ApiWanted for which way each build leans.
+        //
+        // The lean is LOGGED, and said as one of two whole phrases rather than an interpolated
+        // word, because `ApiOpenUnlessTold` is a const: the compiler folds the ternary and only
+        // the taken phrase survives into the binary. So `verify.ps1` can read a published shim
+        // and prove which way it leans, instead of trusting that the `#if` was written the right
+        // way round - which is the one thing about this change worth proving mechanically.
+        Log.Info(ApiOpenUnlessTold
+            ? "xlide api: this build opens the door unless told otherwise"
+            : "xlide api: this build keeps the door shut unless told otherwise");
 
-        // The same routes from INSIDE the process: GetObject(, "Xlide.Api"), for VBA and for
-        // automation clients, via the running object table.
-        OfferInsideDoor();
+        OpenOrCloseApi(ApiWanted(_settings));
+    }
+
+    /// <summary>
+    /// Whether the api door should be listening, from the setting and this build's own lean.
+    ///
+    /// A dev build leans OPEN because the harness is the reason it exists; a shipped build leans
+    /// SHUT because a door nobody asked for should not be listening. An explicit true or false in
+    /// the settings file outranks the lean in both.
+    /// </summary>
+    /// <summary>
+    /// Which way this build leans when the settings file has not said.
+    ///
+    /// THE ONE PLACE THE TWO BUILDS DIFFER, and it is a named constant rather than a bare `#if`
+    /// around the expression so that it reads as a value and cannot be flattened by accident: a
+    /// pass over this file that strips DEBUG directives and keeps the DEBUG branch turns a bare
+    /// conditional into `true` and ships the door open, which is exactly the failure this whole
+    /// change exists to prevent. It happened, to me, within a minute of writing it (2026-08-22).
+    /// `verify.ps1` asserts the shipped default rather than trusting this line.
+    /// </summary>
+    private const bool ApiOpenUnlessTold =
+#if DEBUG
+        true;
+#else
+        false;
 #endif
+
+    private static bool ApiWanted(ProductSettings settings) => settings.ApiEnabled ?? ApiOpenUnlessTold;
+
+    /// <summary>
+    /// Opens the api door, or shuts it. Idempotent, and safe to call before the session is up.
+    ///
+    /// BOTH DOORS MOVE TOGETHER. The HTTP door and the in-process one (GetObject(, "Xlide.Api"))
+    /// are one capability wearing two coats - the same routes, the same authority over the same
+    /// project - so a switch that moved only one of them would be a switch that lies.
+    /// </summary>
+    private void OpenOrCloseApi(bool open)
+    {
+        if (open == (_apiServer is not null))
+        {
+            return;
+        }
+
+        if (open)
+        {
+            _apiServer = ApiServer.Start(AnswerApiRequest);
+            OfferInsideDoor();
+            return;
+        }
+
+        RetireInsideDoor();
+        _apiServer?.Dispose();
+        _apiServer = null;
+        Log.Info("xlide api: the door is shut");
     }
 
     /// <summary>
@@ -1313,7 +1358,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.PicturePickRequested = OnPicturePick;
         _editorSurface.ComponentSelected = OnComponentSelected;
         // The tab's X does not read the outcome: it sees its tab go, or sees the question. The
-        // debug api's caller has neither, so the method answers and this discards.
+        // xlide api's caller has neither, so the method answers and this discards.
         _editorSurface.ModuleCloseRequested = (component, project, action, face) =>
         {
             // A designer tab's unapplied edits live in the PAGE, so nothing here can know to
@@ -1350,6 +1395,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
+        _editorSurface.ApiRequested = OnApiRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
@@ -1424,9 +1470,7 @@ internal sealed partial class AddInSession : IDisposable
                     + "arrive in a moment.");
             }
 
-#if DEBUG
             InstallConsoleRing();
-#endif
         };
 
         // While the loader shows, placement is re-asserted on its heartbeat: the editor is still
@@ -5113,9 +5157,7 @@ internal sealed partial class AddInSession : IDisposable
             : 0;
 
         _editorSurface?.Poll(interval);
-#if DEBUG
         PerfCounters.Poll(interval);
-#endif
     }
 
     /// <summary>
@@ -5245,13 +5287,11 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>One tick of the execution watch.</summary>
     private void PollDebugState()
     {
-#if DEBUG
-        // Stamped per TICK, not per configuration change: this is the pulse the debug api
+        // Stamped per TICK, not per configuration change: this is the pulse the xlide api
         // reports, and it should mean "the host thread ran our periodic work just now".
         // Note the honest limit - an idle editor stops polling altogether, so an old
         // heartbeat means blocked only while something should be watching (see doctor).
         PerfCounters.Beat();
-#endif
 
         /*
          * THE IDLE TIER IS A WORKSPACE WATCH, NOT A DEBUG POLL, and everything below this is
@@ -7544,7 +7584,6 @@ internal sealed partial class AddInSession : IDisposable
 
     private void PublishModules()
     {
-#if DEBUG
         // Timed because this runs on every poll tick and its cost was asserted rather than
         // measured (the audit's B23). Microseconds, because the unchanged pass sits under a
         // millisecond and the sample ring drops zeros; perf().publishUs serves the figures.
@@ -7557,9 +7596,6 @@ internal sealed partial class AddInSession : IDisposable
         {
             PerfCounters.Publish(publishTimer.Elapsed.Ticks / 10);
         }
-#else
-        PublishModulesCore();
-#endif
     }
 
     private void PublishModulesCore()
@@ -9515,9 +9551,7 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-#if DEBUG
         var startedAt = Environment.TickCount64;
-#endif
 
         _editorSurface.Follow(SurfaceBounds(_frame, _documentArea, CanCoverChrome()), visible: true);
 
@@ -9527,9 +9561,7 @@ internal sealed partial class AddInSession : IDisposable
         // the events pause, and then ONE full pass re-derives it all.
         _editorSurface.ArmPlacementSettle(PlacementSettleMilliseconds);
 
-#if DEBUG
         PerfCounters.PlacementFast(Environment.TickCount64 - startedAt);
-#endif
     }
 
     /// <summary>One quiet moment after the last frame event; then the full pass, once.</summary>
@@ -9560,9 +9592,7 @@ internal sealed partial class AddInSession : IDisposable
 
     private void RefreshSurfacePlacement()
     {
-#if DEBUG
         var placementStarted = Environment.TickCount64;
-#endif
         if (_editorSurface is null || !_surfaceShown || _frame == 0 || _documentArea == 0)
         {
             Log.Verbose($"placement: skipped (surface {(_editorSurface is null ? "none" : "up")}, " +
@@ -9623,10 +9653,8 @@ internal sealed partial class AddInSession : IDisposable
             PoliceNativeToolWindows();
         }
 
-#if DEBUG
         // Only a pass that did the full object-model work counts; the early exits are free.
         PerfCounters.PlacementFull(Environment.TickCount64 - placementStarted);
-#endif
     }
 
     /// <summary>
@@ -9894,14 +9922,12 @@ internal sealed partial class AddInSession : IDisposable
         _stopped = true;
         Log.Info("session stopping");
 
-#if DEBUG
         // First out: no debug request may land on a session mid-teardown. The inside door goes
         // with it, and BEFORE the automation references below - it hangs on the add-in object,
         // and clearing that property is itself a COM call.
         RetireInsideDoor();
-        _debugServer?.Dispose();
-        _debugServer = null;
-#endif
+        _apiServer?.Dispose();
+        _apiServer = null;
 
         // Order matters. Hooks and subclasses come out first, then windows, then automation
         // references, so nothing can call back into a half-released session.

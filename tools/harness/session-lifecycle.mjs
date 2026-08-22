@@ -52,15 +52,15 @@ console.log(`  session pid ${before.pid}, port ${before.port}, started ${before.
 
 check("the session is functionally alive before the shutdown", (await alive(before.api)) !== null);
 
-// The reply must arrive BEFORE the teardown - it rides the DebugServer that Stop() disposes.
+// The reply must arrive BEFORE the teardown - it rides the ApiServer that Stop() disposes.
 const said = await before.api.session("cancelledShutdown");
 console.log(`  ${JSON.stringify(said)}`);
 check("the shutdown was accepted, with a reply that beat the teardown", said.ran === true, JSON.stringify(said));
 
 /*
  * The session goes DOWN, then comes back as a NEW one. Proof it actually cycled, rather than
- * that nothing happened, is the discovery file's startedAt moving on: only a fresh DebugServer
- * writes a fresh one, and only a revival starts a fresh DebugServer. Polled, because the
+ * that nothing happened, is the discovery file's startedAt moving on: only a fresh ApiServer
+ * writes a fresh one, and only a revival starts a fresh ApiServer. Polled, because the
  * teardown and the two watchdog ticks take a few seconds, and there is a window mid-cycle when
  * the pid's session answers nothing at all.
  */

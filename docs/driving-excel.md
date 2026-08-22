@@ -1,12 +1,12 @@
 # Driving Excel
 
-How to get a running Excel into a state something can drive, what the debug api can do once it
+How to get a running Excel into a state something can drive, what the xlide api can do once it
 is there, where the api stops, and what still has to go through COM or the harness.
 
 Written 2026-08-07 and **kept current**: anything added to the door, the client, or the harness
 belongs here the same day. A door nobody can find the handle for is a door nobody opens.
 
-> ## 📖 The API reference is [**debug-api.md**](debug-api.md)
+> ## 📖 The API reference is [**xlide-api.md**](xlide-api.md)
 >
 > **That document is the authority on the api itself**: every route with its arguments and what it
 > answers, the reasoning behind each one, and the failures each was built after. Read it when you
@@ -24,14 +24,14 @@ Also: [working-with-modals.md](working-with-modals.md) is the rules for opening 
 and [testing.md](testing.md) is the gate.
 
 **Handing the api to an agent** is one sentence: *read
-`%LOCALAPPDATA%\xlide_vbide\debug-api-*.json`, GET the `agent` URL inside it, and follow
+`%LOCALAPPDATA%\xlide_vbide\xlide-api-*.json`, GET the `agent` URL inside it, and follow
 `next`.* The discovery file names the HOST (excel/word/powerpoint) so the agent knows which
 object model it is writing against, and the `agent` route teaches the rest - the route table
 as data, runnable recipes, the host object model (`model`), the analyzer's rules
 (`analyzer`). Code already running in the host has an even shorter path, no HTTP and no
 setting: `GetObject(, "Xlide.Api").Request("state")` - measured at 0.10ms per call from VBA
 against 0.89ms over HTTP. Both doors are in
-[debug-api.md](debug-api.md#an-agents-first-request).
+[xlide-api.md](xlide-api.md#an-agents-first-request).
 
 **Several hosts at once is a designed state.** Every session - an Excel, a Word, another
 Excel - publishes its own discovery file and answers its own HTTP door concurrently. The
@@ -51,11 +51,16 @@ no per-suite plumbing; the PowerShell suites take `-ProcessId`.
 
 Four things have to be true, and each of them has cost a session.
 
-### The build must be Debug
+### The door has to be open
 
-The whole door is inside `#if DEBUG`. A Release shim has no api, no `/eval`, no DevTools port,
-and the gate has a step that proves it (`Release carries no debug api`). If `discover()` finds
-nothing, check this first.
+Every build carries the api; a RELEASE build keeps it shut until someone turns it on from the
+agent card (the robot button), and remembers the choice in `api.enabled`. A DEV build opens it
+unless `api.enabled` says otherwise - which is a setting a previous session can have left behind,
+so it is worth reading before concluding the machine is broken. If `discover()` finds nothing,
+check this first, then check the build.
+
+A Release shim also has no DevTools port whatever the api is doing: that flag is `#if DEBUG` and
+the gate fails if it appears in a published binary.
 
 ```bash
 dotnet publish src\Xlide.Vbe.Shim\Xlide.Vbe.Shim.csproj -c Debug -r win-x64
@@ -123,7 +128,7 @@ script goes through it.
 
 ### The door must be found
 
-Each session writes `%LOCALAPPDATA%\xlide_vbide\debug-api-<pid>.json` with its port, token and
+Each session writes `%LOCALAPPDATA%\xlide_vbide\xlide-api-<pid>.json` with its port, token and
 DevTools port. The client reads them:
 
 ```js
@@ -233,7 +238,7 @@ a rename crosses modules and stops at the workbook, byte for byte, through renam
 
 ### Every route, and how to call it
 
-The reasoning behind each route is in [debug-api.md](debug-api.md); this is the mapping from route
+The reasoning behind each route is in [xlide-api.md](xlide-api.md); this is the mapping from route
 to client method. **`tools\harness\audit-routes.mjs` proves this table complete**: it reads the
 route cases out of the shim and fails when one is missing here, missing from the reference, or has
 no client method. It runs in the gate, because a route table is exactly the kind of thing that is
@@ -407,6 +412,16 @@ await api.act("changesPane", { round: 3, module: "Ledger", in: "full" });  // pi
                                                 //   onto one comparison, and driving one says
                                                 //   nothing about the other
 await api.act("changesPane", { press: "rail" }); // fold the card's snapshot rail away, or back
+await api.act("toolbar", { command: "openAgent" });  // the agent card: the api's own switch
+await api.act("agentCard", { press: "toggle" }); // OPENS OR SHUTS THE API DOOR, for real, and
+                                                //   writes the choice to the settings file. The
+                                                //   `off` direction cuts the connection you are
+                                                //   driving it over: nothing can turn it back on
+                                                //   through the door, which is the point of it
+await api.act("agentCard", { press: "copy" });  // copy, close are the other two
+ui.agent;                         // the card while it stands, null otherwise: whether the api is
+                                  // on, and the instruction text exactly as a developer would
+                                  // paste it - read from the box, not rebuilt from the same inputs
 ui.changes.full;                  // whether the comparison is up full size
 ui.changes.fullChoices;           // snapshots the card's rail offers; 0 when it is down
 ui.changes.railUp;                // whether the rail is showing
@@ -2069,7 +2084,7 @@ These are not oversights; they are the boundary.
 | Answer a QUESTION dialog automatically | Deliberate. It declines or acknowledges; it never agrees | `dismiss(button)` by name, when you know |
 | Send real mouse or keyboard input to the page | Synthesised DOM events do not reach the editor's own mouse handling | CDP, section 6 |
 | Reach a second Excel process | One door per add-in session | `discover()` lists them, each with its own port |
-| Run in a Release build | The whole door is `#if DEBUG` | - |
+| Reach a Release build nobody turned on | It ships shut, and the switch is in the UI | The agent card's toggle, by hand |
 
 ---
 
@@ -2086,7 +2101,7 @@ outside. It gates `Workbook.VBProject` and `Application.VBE` when they are reach
 | | Needs it | Why |
 | --- | --- | --- |
 | The add-in | **no** | It is a VBE add-in. The host hands it the `VBE` object at `OnConnection`, so it is already inside; it never asks Excel for a project. Every project access in `src/` is `VBE.ActiveVBProject`, never `Workbook.VBProject` |
-| The debug api | **no** | The door runs inside the add-in's own process and calls the same objects |
+| The xlide api | **no** | The door runs inside the add-in's own process and calls the same objects |
 | `Start-Excel.ps1` | **no** | Opens the editor through `CommandBars.ExecuteMso('VisualBasic')` - Excel running its own ribbon button - not through `$excel.VBE` |
 | `Start-Word.ps1` | **no** | Start-Excel's twin for Word (2026-08-19): same window-attach on `_WwG`, same ribbon command, scratch.docm by default - Word testing without a hand on the mouse |
 | Building a fixture | **no** | `api.component()` adds, renames and removes from inside |

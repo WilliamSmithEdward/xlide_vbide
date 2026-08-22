@@ -3,9 +3,9 @@ using System.Text.Json.Serialization;
 namespace Xlide.Vbe.Shim.Changes;
 
 /*
- * The change log's answers, in the shapes the pane and the debug api both read.
+ * The change log's answers, in the shapes the pane and the xlide api both read.
  *
- * NOT IN THE DEBUG SERVER, though the route reads them too. Everything in Diagnostics/DebugServer.cs
+ * NOT IN THE DEBUG SERVER, though the route reads them too. Everything in Diagnostics/ApiServer.cs
  * sits inside `#if DEBUG`, and the Changes PANE is a shipped feature: putting these beside the
  * route's other replies built in Debug and broke Release, where the types simply are not there
  * (2026-08-22, caught by CI within the minute). Sync answers the dialog and the door from one set

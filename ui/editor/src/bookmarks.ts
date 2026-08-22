@@ -47,7 +47,7 @@ export class Bookmarks {
   }
 
   /**
-   * The marks on a model right now, for the debug api's `ui` route.
+   * The marks on a model right now, for the xlide api's `ui` route.
    *
    * Read from the live decorations rather than from the held map, because the decorations ARE
    * the truth: they ride the text as it is edited, so the held copy is only what was last

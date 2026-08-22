@@ -1,5 +1,5 @@
 /*
- * Writes a fixture's components into the open workbook, through the debug api.
+ * Writes a fixture's components into the open workbook, through the xlide api.
  *
  * The whole reason this exists rather than being six lines of PowerShell: VBComponents.Add through
  * `Workbook.VBProject` is exactly what "Trust access to the VBA project object model" gates, and

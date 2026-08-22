@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Runtime.InteropServices;
 using Xlide.Vbe.Shim.Interop;
 
@@ -300,4 +299,3 @@ internal static unsafe class DialogWatch
         text.Replace("&", string.Empty, StringComparison.Ordinal).Trim();
 
 }
-#endif

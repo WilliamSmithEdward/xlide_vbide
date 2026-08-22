@@ -1,6 +1,6 @@
 # Surface audit, 2026-08-11
 
-A whole-repo walk for three things: gaps that stop the debug api from driving and observing Excel
+A whole-repo walk for three things: gaps that stop the xlide api from driving and observing Excel
 first-class, code that can be removed or simplified, and performance opportunities. This is a
 findings document, not a plan. It records what was established and how, so each item can be checked
 against the code rather than taken on trust.
@@ -116,10 +116,10 @@ its own entry.
 
 ## A. API coverage
 
-Gaps that stop a script from driving or observing Excel first-class through the debug api, and
+Gaps that stop a script from driving or observing Excel first-class through the xlide api, and
 defects in the api that already exists.
 
-The debug api covers the keyboard and the shim well and covers clicks, dialogs and second surfaces
+The xlide api covers the keyboard and the shim well and covers clicks, dialogs and second surfaces
 badly. Three shapes recur. First, actions that can be driven answer a constant: five routes wrap a
 `private void` session method and synthesise true, so `command`, `compile`, `pane action=close`,
 `undoRename`, `caret` and `breakpoint` all report the request rather than the outcome, and every
@@ -170,7 +170,7 @@ api, and its driven-check for the `log` route is satisfied by 203 console.log li
 (scopeChanged empties matches/current for every other scope); ui/editor/src/searchwidget.ts:466-477
 (state()); ui/editor/src/searchwidget.ts:322-333 (replace, replaceAll, findAll, prev/next are click
 listeners only); ui/editor/src/searchwidget.ts:195-219 (showSearchResults never touches
-this.matches); docs/debug-api.md:69; docs/driving-excel.md:300,306
+this.matches); docs/xlide-api.md:69; docs/driving-excel.md:300,306
 
 **What.** The search act is open/find/close and nothing else. find() sets the input and fires `input`;
 queryChanged() runs a search only when scope() === "module". open() calls scopeChanged(), which for
@@ -195,7 +195,7 @@ showModuleResults, next, previous, replaceCurrent and replaceAllRun on DevSurfac
 each goes through the method the button's own click handler calls. Add the scoped result to
 UiSnapshot["search"] as NEW fields (the count handed to showSearchResults, truncated, replaced, and
 the grouped rows), read from those arguments rather than from the .search-row DOM, so no existing
-field changes meaning. Update the act row in docs/debug-api.md, the act list in
+field changes meaning. Update the act row in docs/xlide-api.md, the act list in
 docs/driving-excel.md and the client helper.
 
 **Size.** 6 widget methods to expose, roughly 30 lines across devsurface.ts and searchwidget.ts, plus one added record on the search snapshot. Effort medium, risk medium, confidence verified.
@@ -205,7 +205,7 @@ docs/driving-excel.md and the client helper.
 **Where.** src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:1722 (private void), :1756 (`var ran =
 VbeCommands.Execute(_editor, command);`), :1762-1780 (ran used only for three Notify blocks);
 src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:3197-3199 (command route); :1642-1643 and
-:1670-1671 (compile route); src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:709-711 (the field is
+:1670-1671 (compile route); src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:709-711 (the field is
 named `ran`); src/Xlide.Vbe.Shim/Editor/VbeCommands.cs:97-131 (four false returns, including
 `command: {id} is currently disabled`)
 
@@ -233,7 +233,7 @@ explicitly. Add a `detail` field distinguishing "not present" from "disabled". A
 DebugCompileReply so compiled:true, started:false is expressible, and either stop the watch loop
 early once the project's Mode settles or state in the route table that compiled means "no dialog
 appeared within waitMs". No route or field is renamed; ran starts meaning what its name says. 7 call
-sites of ExecuteEditorCommand, 3 of them in the debug api.
+sites of ExecuteEditorCommand, 3 of them in the xlide api.
 
 **Size.** one bool plumbed out of a void method, 7 call sites, one new field on each of two reply records. Effort small, risk low, confidence verified.
 
@@ -254,7 +254,7 @@ data-command attribute and click it, which is what module-sync.mjs and objbrowse
 and what menu-bar.mjs scrapes to assert the strip's contents. The same hole covers editor actions
 registered by id: xlide.undoRename's run() body, its context-menu placement and its notice are never
 executed by any test, only the shim function underneath it is (the undoRename route calls UndoRename
-directly and its bypass is undocumented at docs/debug-api.md:91 and docs/driving-excel.md:210).
+directly and its bypass is undocumented at docs/xlide-api.md:91 and docs/driving-excel.md:210).
 
 **Why it matters.** This is the highest-leverage single act in the list. It is the driver half of the sync dialog, the
 Panes menu, the Object Browser summons and the Undo Rename menu entry, all of which appear
@@ -279,7 +279,7 @@ SetString("Name"), Log.Info, ComponentsChanged, reply);
 src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:3344-3385 (AdoptRename re-keys _writtenModules and
 _breakpoints, moves _propertiesTarget, reloads the shown module, then calls ComponentsChanged
 itself); :3230-3240 (the Properties grid "(Name)" row, the UI equivalent, does call it); :6841-6845
-(RemoveComponent already learned this for removal); docs/debug-api.md:85 (the designation `remove`
+(RemoveComponent already learned this for removal); docs/xlide-api.md:85 (the designation `remove`
 got and `rename` did not)
 
 **What.** The route sets the COM Name and calls ComponentsChanged, which is only PublishModules +
@@ -301,7 +301,7 @@ AddInSession.cs:3349 and :3360 while the route resolves its target from componen
 (DebugApi.cs:2718), so the owner must be threaded in the way RemoveComponent computes it at
 AddInSession.cs:6822, or a rename in a non-shown workbook migrates keys under the wrong one. If the
 bare-COM primitive is wanted deliberately, keep it behind an explicit argument and designate the
-deviation in the three places `remove` designates its: the docs/debug-api.md row, the xlide-api.mjs
+deviation in the three places `remove` designates its: the docs/xlide-api.md row, the xlide-api.mjs
 method comment, and the code. Worth checking with the fix: whether EditorSurface's per-module
 document table re-keys on rename (RemoveComponent additionally calls DiscardEdits at
 AddInSession.cs:6825).
@@ -414,7 +414,7 @@ UndoRename(0) then true); AddInSession.cs:5030 (private void), :5038-5042 ("Ther
 undo" goes to the page for the request id the route invented), :5058-5062 and :5066-5072 (a partial
 revert sets `stopped` and breaks); tools/harness/rename-features.mjs:115-118 (prints the reply,
 never checks it, sleeps 3000) against :82-84 (the forward half checks did/detail);
-docs/debug-api.md:89
+docs/xlide-api.md:89
 
 **What.** Two routes, one shape. Close has two paths that do not close - a workbook that would not save, and a
 dirty module that raised ConfirmClose instead - and both answer ok, so a caller cannot tell "the tab
@@ -475,7 +475,7 @@ while the probe's inner polls run to 10000ms.
 **Where.** src/Xlide.Vbe.Shim/AddIn/XlideAddIn.cs:116-140 (OnBeginShutdown calls _session.Stop() then arms the
 watchdog), :151-230 (OnWatchdogTick revives from retained pointers behind a two-consecutive-tick
 guard), :250-264 (the 2026-08-02 note); src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:7605-7606 (Stop
-disposes the DebugServer first), :7632 (SetNativeChromeBands visible), :7644-7645
+disposes the ApiServer first), :7632 (SetNativeChromeBands visible), :7644-7645
 (RestoreLocalsPalette/RestoreWatchPalette), :7654-7661;
 src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs (no session/stop/shutdown/disconnect/revive case
 in the route switch), :1833 (ComWrappersLive in stats); tools/harness (no reference to shutdown,
@@ -495,10 +495,10 @@ never checked across a teardown, which is where a leak would actually show.
 **Fix.** Add a Debug-only lifecycle route (session?action=beginShutdown, session?action=disconnect) calling
 the same XlideAddIn entry points the host calls through a static reference set in OnConnection, not
 a private teardown of its own - it is OnBeginShutdown that arms the watchdog, and the revival is the
-thing under test. One mechanical constraint: Stop() disposes the DebugServer that is serving the
+thing under test. One mechanical constraint: Stop() disposes the ApiServer that is serving the
 in-flight request, so the teardown must be posted to the host thread after the response is flushed
 and the route documented as answer-less, or every suite using it fails on a transport error rather
-than an assertion. The client reconnects by re-reading debug-api-{pid}.json, which the revived
+than an assertion. The client reconnects by re-reading xlide-api-{pid}.json, which the revived
 session rewrites.
 
 **Size.** one route with two actions plus a static hook in XlideAddIn; unlocks three assertions that are impossible today. Effort medium, risk medium, confidence verified.
@@ -644,7 +644,7 @@ ui/editor/src/devsurface.ts:38-93 and :458-475 (UiSnapshot has no status block);
 ui/editor/src/bridge.ts:1125 (host notice), ui/editor/src/main.ts:526-530 (tree rename summary),
 :833 (F2 rename summary), :1127-1129 (Undo Rename); ui/editor/src/devsurface.ts:751-772 and :745-746
 (the renameModule act calls the bridge directly and its comment claims otherwise);
-docs/debug-api.md:70
+docs/xlide-api.md:70
 
 **What.** notify is the documented reply to actions that were legitimately declined, the deliberate
 alternative to a dialog, and nothing can read it. Host-originated notices do cross the transport as
@@ -662,7 +662,7 @@ that silent: a reader has no reason to add the missing check.
 last-set values rather than textContent, with a flag for whether the notice is still inside its
 five-second window. Then either route the renameModule act through the shell's handler (passed into
 DevSurfaceParts the way openSettings is) so the notice fires, or keep the direct call and designate
-the omission in the act comment, the docs/debug-api.md act row and the client method. The doc half
+the omission in the act comment, the docs/xlide-api.md act row and the client method. The doc half
 is worth doing regardless of the snapshot.
 
 **Size.** three fields, about 15 lines, plus one handler reference or three doc edits. Effort small, risk low, confidence verified.
@@ -673,7 +673,7 @@ is worth doing regardless of the snapshot.
 list), :1114-1115 (the comment designating the difference); ui/editor/src/main.ts:944-948 (the
 wiring), :1139-1147 (the Shift+F12 action and context-menu entry run showReferences), :203-213
 (showReferences calls the same lookup then openReferencesDialog), :1135-1138 (why the dialog exists:
-monaco's peek cannot render a module with no tab open); docs/debug-api.md:70 (references absent from
+monaco's peek cannot render a module with no tab open); docs/xlide-api.md:70 (references absent from
 the do= list); docs/driving-excel.md (references absent from every act example)
 
 **What.** Find All References exists precisely because the editor's own peek window cannot render a module
@@ -687,21 +687,21 @@ document cannot tell the act stops short - the act is not listed in them at all.
 
 **Fix.** Add an open=1 argument that calls the same showReferences the menu entry runs, so the dialog stands
 afterwards and ui.dialogs sees it; keep the data-only form as the default. List references in the
-act row of docs/debug-api.md and in the act examples of docs/driving-excel.md, naming which layer
+act row of docs/xlide-api.md and in the act examples of docs/driving-excel.md, naming which layer
 each form stops at.
 
 **Size.** one argument plus one parts entry, about 20 lines, and two doc rows. Effort small, risk low, confidence verified.
 
 #### A17. The reference document makes five claims the code does not honour, two of them repeated in code comments where the next maintainer will read them
 
-**Where.** docs/debug-api.md:207-208 ("immediate only SCHEDULES") against
+**Where.** docs/xlide-api.md:207-208 ("immediate only SCHEDULES") against
 src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:756-780, 792-794 (it waits, default 15000) and
-:642-657 (the header recording the change); docs/debug-api.md:99 ("ten second wait" against a 15000
+:642-657 (the header recording the change); docs/xlide-api.md:99 ("ten second wait" against a 15000
 default); src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:497-499 (the dispatcher summary repeats
-the retired claim); docs/debug-api.md:59 and :316 ("every request this door has served") against
-src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:235-241; docs/debug-api.md:70 (renameModule "the one
-the tree's Rename item runs"); docs/debug-api.md:91 and docs/driving-excel.md:210 (undoRename, no
-mention that it bypasses the page); docs/debug-api.md:305-307 (the assert claim list says which
+the retired claim); docs/xlide-api.md:59 and :316 ("every request this door has served") against
+src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:235-241; docs/xlide-api.md:70 (renameModule "the one
+the tree's Rename item runs"); docs/xlide-api.md:91 and docs/driving-excel.md:210 (undoRename, no
+mention that it bypasses the page); docs/xlide-api.md:305-307 (the assert claim list says which
 claims exist and never which layer any of them reads, e.g. shownModule reads _editorSurface.Module
 at DebugApi.cs:2104-2110 while the same file reads ActiveCodePane at :2517-2542)
 
@@ -716,12 +716,12 @@ future driver of this api starts, and a doc that claims parity the code does not
 what makes a false negative silent. No risk, no code behaviour changes.
 
 **Fix.** Delete the "only SCHEDULES" paragraph, correct the ten-second figure and name waitMs as the
-override, fix the stale sentence in the AnswerDebugRequest summary, correct the two "every request"
+override, fix the stale sentence in the AnswerApiRequest summary, correct the two "every request"
 sentences, qualify the renameModule and undoRename rows, and say for assert which layer each claim
 reads (or add a nativeModule claim beside shownModule, evaluated from ActiveCodePane the way native
 does).
 
-**Size.** about eight sentences across docs/debug-api.md, docs/driving-excel.md and two code comments. Effort small, risk low, confidence verified.
+**Size.** about eight sentences across docs/xlide-api.md, docs/driving-excel.md and two code comments. Effort small, risk low, confidence verified.
 
 #### A18. The Watch panel can be read and asserted but never populated, so its only live coverage spawns a PowerShell helper that types into the native dialog with WM_CHAR
 
@@ -813,7 +813,7 @@ superseded by Get-Shot.ps1 over the capture route.
 
 **Where.** tools/harness/xlide-api.mjs:426 (command takes only name) and :424 (capture takes only window);
 src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:1894 and :1903 (keep is honoured generically on
-every host-thread route), :583-600 (the crop); docs/debug-api.md:96, :279 ("A request that means to
+every host-thread route), :583-600 (the crop); docs/xlide-api.md:96, :279 ("A request that means to
 open a dialog passes keep=1 and what it opens is exempt"), :66; the only users hand-build the URL:
 tools/harness/Test-DebugApi.ps1:466, :514, :416 and tools/harness/Get-Shot.ps1:54-55; grep of the
 .mjs corpus for .capture( returns zero calls
@@ -835,11 +835,11 @@ capture, :203 for command).
 
 #### A22. history drops five routes from a transcript documented as every request, so the replay script it generates loses exactly the waits that made the session work
 
-**Where.** src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:235-241 (`if (route is "history" or "log" or "journal"
+**Where.** src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:235-241 (`if (route is "history" or "log" or "journal"
 or "state" or "dialogs") return;`), :1034-1039 (DebugHistoryReply carries no exclusion list and no
 dropped count); src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:885-889 ("a bug found by hand
 becomes a probe by copying") and :891-902 (the script builder emits one line per recorded request
-with nothing between them); docs/debug-api.md:59 and :316
+with nothing between them); docs/xlide-api.md:59 and :316
 
 **What.** The exclusion is sound - polled routes would be the whole transcript - but it is invisible, and the
 routes excluded are the log?match=&waitMs= waits and the state polls that sequence everything else.
@@ -869,7 +869,7 @@ tabswitch, layout, or type`) and :1492-1498 (trip)
 {"held":false,"claim":"shownModul","saw":"unknown claim shownModul"}. A check(..., answer.held, ...)
 call site never reads the prose in `saw`, so the typo presents as a failed assertion against the
 product. The claim vocabulary is a string list in three places that can drift: the switch at
-:2093-2150, docs/debug-api.md:306-307, and the client docstring at xlide-api.mjs:592-594.
+:2093-2150, docs/xlide-api.md:306-307, and the client docstring at xlide-api.mjs:592-594.
 
 **Why it matters.** An assertion instrument that reports its own typo as a product failure sends the reader to the wrong
 place, and each occurrence costs the caller its whole timeout.
@@ -986,7 +986,7 @@ across HResult.cs and Win32*.cs, four page-protocol message kinds with no sender
 | 15 | bridge.ts carries ten hand-copied pending-request tables where one helper would do | medium | medium | verified |
 | 16 | WatchReader is a transcription of LocalsReader, including the hardening that came out of the 2026-08-05 crash | medium | medium | verified |
 | 17 | Six dialogs hand-roll the same modal plumbing, five re-declare CSS a general .modal-backdrop rule already provides, and none of the six traps focus | medium | low | verified |
-| 18 | The whole-module read and the component walk are each reimplemented three times, once in production and twice behind the debug api | medium | medium | verified |
+| 18 | The whole-module read and the component walk are each reimplemented three times, once in production and twice behind the xlide api | medium | medium | verified |
 | 19 | The pool-side route switch has no default, so a route whose argument guard fails is marshalled to the host thread it exists to avoid | small | medium | verified |
 | 20 | The import path reads the whole module twice before writing it, and the second read is provably the same text as the first | small | low | verified |
 | 21 | The engine answers a protocol version on initialize and the shim discards it | small | low | verified |
@@ -1012,7 +1012,7 @@ teardown-in-a-living-process callers at src/Xlide.Vbe.Shim/AddIn/XlideAddIn.cs:2
 
 **What.** `private DispatchObject? _hostApp;` is populated by `_hostApp ??= HostApplication.Find();` on the
 WorkbookSaved and SaveWorkbookOf paths, and HostApplication.Find's own doc says the caller owns the
-result. I read Stop() in full: it releases _debugServer, _analysis, _frameSubclass,
+result. I read Stop() in full: it releases _apiServer, _analysis, _frameSubclass,
 _immediateReader, _ghostReaders, _typeLibraries, _browserPalette, _codePanes, _hostChrome,
 _editorSurface and both ghost palettes, and _hostApp appears nowhere; Dispose() is `Stop();
 _addIn?.Dispose(); _editor.Dispose();`. The only two disposals are inside stale-answer catch blocks.
@@ -1054,7 +1054,7 @@ writes the settings file. The debug-api route does the opposite, falling back to
 silently overwrites a planner choice made through the api - persisted to disk, not just to the
 session. It is the api-mirrors-the-UI rule inverted: the only driver in the repo is
 tools/harness/module-sync.mjs:34-36 going through api.settings, so the whole harness passes over a
-broken UI path, and docs/debug-api.md:90 asserts the page's update takes the whole object.
+broken UI path, and docs/xlide-api.md:90 asserts the page's update takes the whole object.
 
 **Fix.** Add `syncEngine: string` to the updateSettings member and pass `settings.syncEngine`. Separately
 make EditorSurface's absent-field branch fall back to the stored value the way the debug-api route
@@ -1119,7 +1119,7 @@ happy-path change.
 
 **Where.** ui/editor/src/settings.ts:10-27 and :49-58; ui/editor/src/bridge.ts:91-99, :300-308, :672-681,
 :1332-1340; src/Xlide.Vbe.Shim/Editor/EditorMessages.cs:84;
-src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:953;
+src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:953;
 src/Xlide.Vbe.Shim/Editor/EditorSurface.cs:1600-1636
 
 **What.** Six independent structural spellings on the page (interface, inbound message member, outbound
@@ -1249,13 +1249,13 @@ is a decision rather than an accident.
 
 **Where.** src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:1014, :1231, :1515, :2469, :2561, :3273
 (anything-but-"0" is true) against :1764 and :2984 (affirmative word required, and :2982-2985
-already has the local tri-state helper); docs/debug-api.md:81
+already has the local tri-state helper); docs/xlide-api.md:81
 
 **What.** Six sites read a flag as `value != "0"` and two require `is "1" or "true" or "yes" or "on"`.
 `perf?reset=false` therefore clears the engine counters and `problems?rules=off` returns the rules,
 while `guard?on=false` correctly leaves the guard off. The two conventions sit 750 lines apart in
 the same switch. They are not arbitrary - the six are per-request toggles the docs only spell as
-`=1`, the two are setters of persisted state where false must mean false - but docs/debug-api.md:81
+`=1`, the two are setters of persisted state where false must mean false - but docs/xlide-api.md:81
 teaches `on=true|false` on this same door, so a caller does meet the word convention before meeting
 a toggle.
 
@@ -1305,7 +1305,7 @@ the authority.
 
 **Where.** src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:2070-2084 (the stranded summary), :2085-2091
 (EvaluateClaim, which it now decorates), :2239 (AnswerBlockedRequest, undocumented), :2272 (the
-wait), :2259 and :2285 (`Retried: false`); src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:744 (the
+wait), :2259 and :2285 (`Retried: false`); src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:744 (the
 field)
 
 **What.** A complete summary beginning 'What to say - and do - when the host thread did not answer' is
@@ -1314,7 +1314,7 @@ summaries and AnswerBlockedRequest carries none. The first summary ends by sayin
 dismissed and the request retried once; the code waits on work already queued
 (`done.Wait(TimeSpan.FromSeconds(3))` under its own comment saying so) and both reply constructions
 pass Retried: false. A grep across src, tools, docs, the page and the engine finds nothing that sets
-it true or reads it, and it is absent from docs/debug-api.md.
+it true or reads it, and it is absent from docs/xlide-api.md.
 
 **Why it matters.** The blocked-request policy is the hardest thing in that file to reason about and its explanation is
 attached to the wrong method and is false where it is read. A client checking `retried` to see
@@ -1328,14 +1328,14 @@ either set Retried honestly or drop it from DebugBlockedReply.
 #### B13. Five duplicated shapes in the debug-api file, each small, all fixable with a local helper the file simply never grew
 
 **Where.** src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs - the on-host error and ok replies (21 sites from
-:2499 to :3339, 6 more at :2916, :2928, :2945, :3261, :3315, :3321, against the pool-side DebugError
+:2499 to :3339, 6 more at :2916, :2928, :2945, :3261, :3315, :3321, against the pool-side ApiError
 at :33); the marshal-and-wait scaffold (:965-987 in journal against :1858-1882 in the main
 dispatch); the page-eval reply shaping (:1058, :1088, :1107, :1731); the wait-for-workspace loop
 (:1532-1543 against :1579-1589); the quantile block (:1411-1422 against :1500-1512, with a third
 copy at src/Xlide.Vbe.Shim/Diagnostics/EngineCounters.cs:122-123 and two more at
 tools/harness/xlide-api.mjs:830 and :871)
 
-**What.** AnswerDebugRequestOnHost returns string rather than DebugReply, so it cannot use DebugError and
+**What.** AnswerDebugRequestOnHost returns string rather than ApiReply, so it cannot use ApiError and
 spells the serializer call out 21 times; the success reply is spelled out 6 more. The journal route
 re-implements the marshal-and-wait (same event, same callback shape, same hardcoded 3s) and is the
 one host crossing missing `PerfCounters.Marshal`, despite the comment at :1880 saying every
@@ -1349,7 +1349,7 @@ place where a copy can drift. The two that already cost something: the journal's
 invisible to the perf and stats routes, and one definition of p95 living in five places means the
 door can report two different quantile conventions.
 
-**Fix.** Add HostError(string) and HostOk(int) beside DebugError; one OnHost(request) helper holding the
+**Fix.** Add HostError(string) and HostOk(int) beside ApiError; one OnHost(request) helper holding the
 event, callback, catch, deadline and the PerfCounters.Marshal sample, with the main dispatch keeping
 the dialog attribution around it; PageReply(tuple) next to RunPageScript;
 WaitForWorkspace(budgetMs); and one Quantiles(what, samples, detail). Roughly 90 lines out and five
@@ -1459,7 +1459,7 @@ keeping only genuinely per-dialog width and padding.
 
 **Size.** 6 copies of ~20 lines of TS plus ~50 lines of CSS; one focus trap instead of six missing ones. Effort medium, risk low, confidence verified.
 
-#### B18. The whole-module read and the component walk are each reimplemented three times, once in production and twice behind the debug api
+#### B18. The whole-module read and the component walk are each reimplemented three times, once in production and twice behind the xlide api
 
 **Where.** ReadSource copies at src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:2534-2540, :4073-4083 and :5005-5012
 against the helper at src/Xlide.Vbe.Shim/Engine/ProjectReader.cs:199-216. Component walk at
@@ -1672,7 +1672,7 @@ Test-DiscardProblems.ps1:33-36, Test-Churn.ps1:31-34, Get-Shot.ps1:44-47,
 Test-ObjectBrowser.ps1:183, Open-VbeIn.ps1:103, tools/page.ps1:70, tools/verify.ps1:352; contrast
 tools/harness/xlide-api.mjs:179-217 and :224, and tools/page.ps1:66-90
 
-**What.** Nine sites build the same `$env:LOCALAPPDATA\xlide_vbide\debug-api-<pid>.json` path and the same
+**What.** Nine sites build the same `$env:LOCALAPPDATA\xlide_vbide\xlide-api-<pid>.json` path and the same
 base URL from port and token. Six take the pid from `Get-Process EXCEL | Select-Object -First 1`.
 None of the six proves the discovery file belongs to a live listener. The node client and page.ps1
 both already do it properly: enumerate the directory, prove each candidate with a /state call, and
@@ -1718,7 +1718,7 @@ so the next dead-code pass does not re-derive the same answer.
 
 #### B27. Native declarations and window helpers written outside Interop, duplicating what Interop already owns
 
-**Where.** src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:488-495 (a private Rect), :463-465 (GetWindowRect),
+**Where.** src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:488-495 (a private Rect), :463-465 (GetWindowRect),
 :478-479 (SelectObject), :481-483 (DeleteObject) against src/Xlide.Vbe.Shim/Interop/Win32.cs:6-13,
 :323, :326 and Win32.Events.cs:88. src/Xlide.Vbe.Shim/Diagnostics/DialogWatch.cs:215-229,
 src/Xlide.Vbe.Shim/Editor/CodePaneTracker.cs:910-924 and
@@ -1731,7 +1731,7 @@ CreateDIBSection are genuinely new and belong there. Separately, the same GetCla
 GetWindowText wrapper is written three times with three buffer capacities (64, 256, 512) and two
 empty conventions (string.Empty in two, null in HostChrome).
 
-**Why it matters.** Modest. The Rect is private and nested so nothing can pick the wrong one, and DebugServer.cs is
+**Why it matters.** Modest. The Rect is private and nested so nothing can pick the wrong one, and ApiServer.cs is
 entirely inside #if DEBUG so nothing ships - this is the Interop folder's
 one-declaration-per-entry-point rule quietly not holding, which means the next person adding a GDI
 or window-inspection call has two or three places to look and no way to tell which is canonical. The
@@ -1750,7 +1750,7 @@ the two empty conventions in the move.
 **Where.** src/Xlide.Vbe.Shim/Editor/VbeCommands.cs:322-361 (the method), :29-30 (the doc comment pointing at
 it), :23 (PreferredBars); the surviving instrument at src/Xlide.Vbe.Shim/Editor/VbeMenus.cs:401,
 driven from src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:2652 and documented at
-docs/debug-api.md:86
+docs/xlide-api.md:86
 
 **What.** A repo-wide grep finds no call site for VbeCommands.Describe; the only reference to the name is the
 Command class's own doc comment telling the reader to re-run it if a host build ever disagrees about
@@ -1986,7 +1986,7 @@ _pendingScripts has one Add and no Clear. Items 4 through 34 rest on the finders
 re-checked by the adversary pass, whose corrections I carried into the text - notably the corrected
 counts (7 fungible engine handlers not 13, twelve Test-*.ps1 not fifteen, three window-text copies
 not two, five timeout budgets not one) and the corrected consequences (no shipped binary cost for
-unreferenced consts or LibraryImports, no client-visible error-shape divergence on the debug api, no
+unreferenced consts or LibraryImports, no client-visible error-shape divergence on the xlide api, no
 z-index inversion between the modals). Item 23 is the only one carrying less than verified
 confidence: the per-tick IDispatch arithmetic is counted from call sites, not measured, and a
 PerfCounters stamp around PublishModules is the measurement that would settle whether the walk
@@ -2280,7 +2280,7 @@ editor.worker.js 304,346. There is no per-input attribution and no ceiling anywh
 assertion in the repo is a lower bound on the worker. Separately, the page posts a full breakdown
 (main.ts:984-997: scriptMs, createMs, totalMs, fetchMs, transferBytes, requestStartMs, htmlMs) and
 DescribeTimings reads each field into a local, formats a string for one Log.Info, and retains
-nothing. Grepping the route switch, the client and docs/debug-api.md for scriptMs or timings finds
+nothing. Grepping the route switch, the client and docs/xlide-api.md for scriptMs or timings finds
 nothing.
 
 **Why it matters.** Startup is the page's largest single cost and every decision about what to cut from that 3.64 MB -
@@ -2294,7 +2294,7 @@ number. Items 14 and 18 both end in 'measure this first' and this is the item th
 dist/metafile.json for esbuild's analyzer, then consider a size assertion in verify.ps1 beside the
 existing warnings check. Separately, retain the parsed timings on the surface as a small record and
 answer them from a NEW debug-api noun (not a field on perf, and no existing route touched),
-documented in both docs/debug-api.md and docs/driving-excel.md and driven by a harness check so
+documented in both docs/xlide-api.md and docs/driving-excel.md and driven by a harness check so
 audit-routes.mjs is satisfied, with the route entry saying plainly that it reports the page's own
 measurement.
 
@@ -3065,7 +3065,7 @@ _12 findings, from the `api-ui-surface` finder._
   in that mode are built by showSearchResults(), which returns early for module scope (`if (id <
   this.pendingSearchId || this.scope() === "module") { return; }`, :199) and appends its own DOM count
   note `${matches.length}${truncated ? "+" : ""} match...` (:217-219) without ever touching
-  this.matches. debug-api.md:69 advertises the ui route as carrying "the find/replace widget's query,
+  this.matches. xlide-api.md:69 advertises the ui route as carrying "the find/replace widget's query,
   scope and match count".
 - **Why:** docs/driving-excel.md:306 shows the canonical drive as `api.act("search", { query: "Recalculate",
   scope: "project" })`. Any assertion of the form search.matches > 0 after that call is asserting on a
@@ -3084,7 +3084,7 @@ _12 findings, from the `api-ui-surface` finder._
   fields. queryChanged() at :557-561 only searches when scope()==="module", and showSearchResults() at
   :195-255 returns early for module scope and builds its own DOM note without touching this.matches.
   So for a non-module scope, ui.search.matches is structurally 0 and ui.search.current is -1
-  regardless of what the panel drew. docs/debug-api.md:69 does advertise the ui route as carrying the
+  regardless of what the panel drew. docs/xlide-api.md:69 does advertise the ui route as carrying the
   widget's match count, and docs/driving-excel.md:300 (`ui.search; // open, query, scope, matches,
   current`) and :306 (`api.act("search", { query: "Recalculate", scope: "project" })`) are the
   canonical pairing. Verified end to end; no other listener on findInput exists (only
@@ -3116,7 +3116,7 @@ _12 findings, from the `api-ui-surface` finder._
   `run=find|findAll|next|previous|replace|replaceAll` and a `replacement` argument, and have
   DevSurfaceParts.search expose the widget methods those press (runScoped, showModuleResults, next,
   previous, replaceCurrent, replaceAllRun) so each goes through the same method the button's click
-  handler calls. Add the argument to the act row in docs/debug-api.md, the act list in
+  handler calls. Add the argument to the act row in docs/xlide-api.md, the act list in
   docs/driving-excel.md, and the client's act helper.
 - **Size:** unmeasured; 6 methods to expose, about 30 lines in devsurface.ts and searchwidget.ts
 - **Adversary:** devsurface.ts:943-962 is the whole search act: close, open, or
@@ -3155,7 +3155,7 @@ _12 findings, from the `api-ui-surface` finder._
 - **Change:** Make moveTab public (or add a thin `dropTab(id, {group, index, split})` beside it) and add an act
   that calls it, mirroring dock; add a `tabMenu` act that fires contextmenu on the tab row the way
   treeMenu does for tree rows, so the existing chooseMenuItem can pick Close Others/Close All.
-  Document both in the act row of docs/debug-api.md and the act list in docs/driving-excel.md.
+  Document both in the act row of docs/xlide-api.md and the act list in docs/driving-excel.md.
 - **Size:** unmeasured; one visibility change plus roughly 40 lines of act code
 - **Adversary:** workspace.ts:996-1000 is `private moveTab(...)`; the strip's auxclick close is at :1126-1136 and the
   contextmenu with Close / Close Others / Close All at :1138-1164; devsurface.ts exposes only
@@ -3234,7 +3234,7 @@ _12 findings, from the `api-ui-surface` finder._
   reported correctly.
 - **Change:** Add a `status: { position, module, notice }` block to UiSnapshot, read from the shell's own last-set
   values rather than from textContent, plus a flag for whether the notice is still within its
-  five-second visible window. Mention the new field in the ui row of docs/debug-api.md.
+  five-second visible window. Mention the new field in the ui row of docs/xlide-api.md.
 - **Size:** unmeasured; three fields, about 15 lines
 - **Adversary:** shell.ts:155-157 declares statusPosition/statusModule/statusNotice, bound at :200-202; notify() at
   :747-760 sets the notice text, adds .visible and clears both after 5000ms; setPosition() at :876-878
@@ -3268,7 +3268,7 @@ _12 findings, from the `api-ui-surface` finder._
   developer cannot see because the pane is closed, and never notice.
 - **Change:** Add `setOpen` to the DevSurfaceParts.panes interface (the concrete object already has it) and an act
   that calls it, answering the pane's open state afterwards from panes.list() so the answer is the
-  outcome rather than the request. Add it to the act row in docs/debug-api.md, the act list in
+  outcome rather than the request. Add it to the act row in docs/xlide-api.md, the act list in
   docs/driving-excel.md, and the client.
 - **Size:** unmeasured; one interface line plus about 15 lines of act code
 - **Adversary:** DevSurfaceParts.panes (devsurface.ts:127-131) declares only list() and moveTo(), and dock
@@ -3296,7 +3296,7 @@ _12 findings, from the `api-ui-surface` finder._
   the handler around it. Its own comment claims otherwise - "The prompt is the only thing skipped ...
   Everything after it is the code the menu item runs" (devsurface.ts:745-746) - and so does the route
   table: "renameModule is the product's rename ... the one the tree's Rename item runs"
-  (docs/debug-api.md:70).
+  (docs/xlide-api.md:70).
 - **Why:** The gap is exactly the half a user sees: the notice saying how many mentions were replaced. A test
   driving renameModule reports did:true with the summary in `detail`, taken from the promise the act
   awaited itself, so a shell handler that stopped notifying - or was never called - passes. The doc
@@ -3304,7 +3304,7 @@ _12 findings, from the `api-ui-surface` finder._
   missing check.
 - **Change:** Either route the act through the shell's renameModule handler (pass it into DevSurfaceParts the way
   openSettings is) so the notice fires, or keep the direct call and designate it in all three places:
-  the act's own comment, the act row in docs/debug-api.md, and the client method, each saying that the
+  the act's own comment, the act row in docs/xlide-api.md, and the client method, each saying that the
   status notice is not raised.
 - **Size:** unmeasured; one handler reference or three doc edits
 - **Adversary:** devsurface.ts:751-772: the act awaits `bridge.requestModuleRename(module, workbook, newName)`
@@ -3312,7 +3312,7 @@ _12 findings, from the `api-ui-surface` finder._
   main.ts:524-530, which calls the same bridge request and then `bridge.shell?.notify(...)` with the
   refusal or the mention summary. So the act does reproduce the request without the handler wrapped
   round it, and its own comment at devsurface.ts:745-746 ("The prompt is the only thing skipped ...
-  Everything after it is the code the menu item runs") and the route table at docs/debug-api.md:70
+  Everything after it is the code the menu item runs") and the route table at docs/xlide-api.md:70
   ("the one the tree's Rename item runs") both claim more than the code does. The deviation is real
   and undesignated.
 - **Correction applied:** The practical loss is smaller than stated: the notice is unreadable by any route today (see
@@ -3333,7 +3333,7 @@ _12 findings, from the `api-ui-surface` finder._
   `openReferencesDialog(word?.word ?? "this symbol", found, { navigate: ... })` (main.ts:210-213). The
   act's comment designates the difference ("The dialog is opened by the same lookup",
   devsurface.ts:1114-1115), but `references` appears in neither the do= list of the act row in
-  docs/debug-api.md:70 nor any act example in docs/driving-excel.md (which lists dock, press, hover,
+  docs/xlide-api.md:70 nor any act example in docs/driving-excel.md (which lists dock, press, hover,
   completions, quickFixes, definition, rename and the rest at lines 304-379, 1108-1109).
 - **Why:** Find All References exists because the editor's own peek window cannot render a module with no tab
   open (main.ts:1135-1138), so the dialog's rendering IS the feature. Nothing opens it, nothing reads
@@ -3342,7 +3342,7 @@ _12 findings, from the `api-ui-surface` finder._
   docs means a reader cannot tell the act stops short.
 - **Change:** Add an `open=1` argument to the references act that calls the same showReferences the menu entry
   runs, so the dialog stands afterwards and ui.dialogs sees it; keep the data-only default. List
-  `references` in the act row of docs/debug-api.md and in the act examples of docs/driving-excel.md,
+  `references` in the act row of docs/xlide-api.md and in the act examples of docs/driving-excel.md,
   naming which layer each form stops at.
 - **Size:** unmeasured; one argument plus one parts entry, about 20 lines
 - **Adversary:** devsurface.ts:1117-1135 ends at the lookup and returns the found list as data; parts.referencesAt is
@@ -3351,7 +3351,7 @@ _12 findings, from the `api-ui-surface` finder._
   at main.ts:203-213 calls the same referencesAt and then openReferencesDialog. Repo grep for
   openReferencesDialog returns only referencesdialog.ts:29 and main.ts:73/210 - nothing in tools or
   docs opens it. The doc gap checks out: `references` is absent from the do= list in
-  docs/debug-api.md:70 and from docs/driving-excel.md (its only hit there is :296, the word inside a
+  docs/xlide-api.md:70 and from docs/driving-excel.md (its only hit there is :296, the word inside a
   ui.dialogs comment). audit-routes.mjs audits ROUTES, not act actions
   (tools/harness/audit-routes.mjs:34-58 parses `switch (request.Route)` cases), so nothing in the gate
   catches this.
@@ -3413,7 +3413,7 @@ _12 findings, from the `api-ui-surface` finder._
   written to the wrong component - is invisible to every automated check that exists.
 - **Change:** Report the pane in the ui snapshot from the rows the shell holds (component, and for each property
   name, value, kind, editable), and add an act that calls the same handlers.editProperty a control's
-  change reaches. Document the field in the ui row and the action in the act row of docs/debug-api.md,
+  change reaches. Document the field in the ui row and the action in the act row of docs/xlide-api.md,
   and add examples to docs/driving-excel.md.
 - **Size:** unmeasured; one snapshot block plus one act, about 40 lines
 - **Adversary:** shell.ts:492 and :539 both call this.handlers.editProperty(this.propertiesComponent, ...) from the
@@ -3454,7 +3454,7 @@ _12 findings, from the `api-ui-surface` finder._
   claimed.
 - **Correction applied:** `await` also takes the surface argument (AddInSession.DebugApi.cs:1119,
   `request.Query.TryGetValue("surface", out var awaitSurface)`, documented in the await row of
-  docs/debug-api.md), so the surface-aware routes are eval, await and capture, not just eval and
+  docs/xlide-api.md), so the surface-aware routes are eval, await and capture, not just eval and
   capture.
 
 ##### `undorename-menu-item-no-driver` NO DRIVER: the Undo Rename context-menu action is unreachable because the route reverses the rename in the shim instead
@@ -3468,7 +3468,7 @@ _12 findings, from the `api-ui-surface` finder._
   "1_modification", ..., run: async () => { const answer = await bridge.requestRenameUndo();
   bridge.shell?.notify(answer.refused ?? `Rename put back: ...`); } })`
   (ui/editor/src/main.ts:1120-1131). No act runs an editor action by id, so nothing exercises that
-  run() body. The route row in docs/debug-api.md:91 describes what it does but does not say it
+  run() body. The route row in docs/xlide-api.md:91 describes what it does but does not say it
   bypasses the page.
 - **Why:** The whole point of this command is that the editor's own undo would leave a half-renamed project, so
   it is the safety net for the product's most cross-cutting edit. The registration, the menu placement
@@ -3488,7 +3488,7 @@ _12 findings, from the `api-ui-surface` finder._
   two suites that touch it - rename-features.mjs:116 and three-copies.mjs:231 - both call
   api.undoRename(), the route. So the registration, the menu placement and the notice are never run by
   anything.
-- **Correction applied:** The doc gap is in two places, not one: neither the route row at docs/debug-api.md:91 nor the client
+- **Correction applied:** The doc gap is in two places, not one: neither the route row at docs/xlide-api.md:91 nor the client
   row at docs/driving-excel.md:210 says the route bypasses the page. Severity is low because the
   reversal logic itself is covered by two live suites; what is uncovered is the menu entry's
   registration and its notice, and the notice is unobservable anyway (see statusbar-no-observer).
@@ -3514,7 +3514,7 @@ _5 findings, from the `api-shim-surface` finder._
   calls ComponentsChanged(). The sibling action in the same route already learned this lesson for
   removal: RemoveComponent (AddInSession.cs:6841-6845) does `foreach (var key in new[] {
   WrittenKey(removed, owner), WrittenKey(removed, null) }) { _writtenModules.Remove(key);
-  _breakpoints.Remove(key); }`, and docs/debug-api.md:85 designates it: "**`remove` runs the product's
+  _breakpoints.Remove(key); }`, and docs/xlide-api.md:85 designates it: "**`remove` runs the product's
   own removal** ... the bare COM call it used to make left all three behind ... a harness removing a
   component left a different machine than a developer removing the same one". No such designation
   exists for `rename` in that row, in tools/harness/xlide-api.mjs:494, or in the code comment, which
@@ -3530,7 +3530,7 @@ _5 findings, from the `api-shim-surface` finder._
 - **Change:** Call AdoptRename(componentName, readBack) after the SetString instead of ComponentsChanged()
   (AdoptRename ends by calling ComponentsChanged itself, so nothing else changes). If the
   fixture-primitive behaviour is wanted deliberately, keep it behind an explicit argument and
-  designate the deviation in all three places `remove` already designates its: the docs/debug-api.md
+  designate the deviation in all three places `remove` already designates its: the docs/xlide-api.md
   row, the xlide-api.mjs method comment, and the code.
 - **Size:** two dictionaries (_writtenModules, _breakpoints) left unmigrated per rename; one route action; the fix is roughly a one-line swap plus a docs row
 - **Adversary:** Read the route myself: src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:2852-2867 is exactly `using
@@ -3543,8 +3543,8 @@ _5 findings, from the `api-shim-surface` finder._
   _breakpoints.Values at DebugApi.cs:2959); the only re-key sites in the whole src tree are
   AdoptRename (AddInSession.cs:3352-3363) and RemoveComponent's drop (6841-6845), which I read. The UI
   equivalent, the Properties grid "(Name)" row, does call AdoptRename (AddInSession.cs:3230-3240). The
-  designation the finding says is missing really is missing: docs/debug-api.md:85 designates only
-  `remove`, docs/debug-api.md:70 and the code comment at DebugApi.cs:2840-2842 designate only the
+  designation the finding says is missing really is missing: docs/xlide-api.md:85 designates only
+  `remove`, docs/xlide-api.md:70 and the code comment at DebugApi.cs:2840-2842 designate only the
   difference from `renameModule` (reference rewriting), and tools/harness/xlide-api.mjs:472-494 says
   nothing about bookkeeping.
 - **Correction applied:** Two corrections. (1) The proposed one-line swap is not safe as written: AdoptRename re-keys against
@@ -3665,12 +3665,12 @@ _5 findings, from the `api-shim-surface` finder._
 
 ##### `native-route-thin-for-background-panes` The native parity route gives background panes only a process-local hash: no caret, no text under text=1, and no key that compares outside the one reply
 
-- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:884`
+- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:884`
 - **Kind:** api-coverage / medium effort, claim derived, confidence verified, severity low
 - **Evidence:** `public sealed record DebugNativePaneRow([property: JsonPropertyName("module")] string Module,
   [property: JsonPropertyName("project")] string? Project, [property: JsonPropertyName("hostContent")]
   string? HostContent, [property: JsonPropertyName("surfaceContent")] string? SurfaceContent);`
-  (DebugServer.cs:884-893). The route fills those rows from ReadOpenModules() and nothing else
+  (ApiServer.cs:884-893). The route fills those rows from ReadOpenModules() and nothing else
   (AddInSession.DebugApi.cs:2570-2589), while caret and text are computed only for the active pane:
   `activePane.InvokeInt32s("GetSelection", selection); caretLine = selection[0]; caretColumn =
   selection[1];` (2523-2527) and `wantText ? nativeText : null, wantText ? surfaceText : null`
@@ -3697,7 +3697,7 @@ _5 findings, from the `api-shim-surface` finder._
   ContentKey(hostText), ContentKey(_editorSurface?.TextOf(pane.Name, pane.Project)))` and nothing
   more, while caret comes only from ActiveCodePane's GetSelection (2528-2533) and `text=1` carries
   only the active pane's two texts (2605-2606). The record has exactly the four fields quoted
-  (DebugServer.cs:884-893), and ContentKey is
+  (ApiServer.cs:884-893), and ContentKey is
   `$"{normalised.Length}:{normalised.GetHashCode(StringComparison.Ordinal)}"`
   (AddInSession.cs:5731-5740), whose hash is per-process randomised.
 - **Correction applied:** The description is right but three of the supporting claims are wrong, and they carry the finding's
@@ -3724,16 +3724,16 @@ _5 findings, from the `api-shim-surface` finder._
   AddInSession(editor, addIn); _session.Start(); _session.HostStartupComplete();`
   (XlideAddIn.cs:205-223), guarding the failure recorded at 252-259 ("observed 2026-08-02 ... the
   developer cancelled, and the editor came back with the add-in dead and nothing listening"). Stop()
-  is what must leave the host whole: `_debugServer?.Dispose(); _debugServer = null;` first
+  is what must leave the host whole: `_apiServer?.Dispose(); _apiServer = null;` first
   (AddInSession.cs:7605-7606), then `SetNativeChromeBands(visible: true);` (7632),
   RestoreLocalsPalette/RestoreWatchPalette (7644-7645), palette and chrome disposal (7654-7661).
   Nothing in the route switch reaches any of it (no session, stop, shutdown or revive case in the grep
   of `case "` over AddInSession.DebugApi.cs), and the harness never exercises it: grep of
   tools/harness for revive|revival|watchdog|OnBeginShutdown|shutdown returns one unrelated hit, `await
   call("shutdown", {})` against the engine's own JSON-RPC in tools/harness/engine-live-probe.mjs:167.
-  The server is per-session and rewrites its discovery file on start (DebugServer.Start at
+  The server is per-session and rewrites its discovery file on start (ApiServer.Start at
   AddInSession.cs:1026; `var discoveryPath = Path.Combine(directory,
-  $"debug-api-{Environment.ProcessId}.json")` at DebugServer.cs:73), so a revived session would be
+  $"xlide-api-{Environment.ProcessId}.json")` at ApiServer.cs:73), so a revived session would be
   rediscoverable.
 - **Why:** Two release-blocking properties live here and neither has a test. Stop() is the only place the
   native menu and toolbar bands, the ghosted Locals and Watches palettes and the host title bar are
@@ -3747,7 +3747,7 @@ _5 findings, from the `api-shim-surface` finder._
   session?action=disconnect, that calls the same XlideAddIn entry points the host calls (reachable
   through a static reference set in OnConnection) rather than a private teardown of its own, so the
   state left behind is the state the host's own call leaves. The server dies with the session by
-  design; the client reconnects by re-reading debug-api-{pid}.json, which the revived session
+  design; the client reconnects by re-reading xlide-api-{pid}.json, which the revived session
   rewrites. That makes three assertions possible for the first time: the native chrome came back, a
   cancelled shutdown revives, and ComWrappersLive returns to its pre-stop level.
 - **Size:** one route with two actions plus a static hook in XlideAddIn; unmeasured
@@ -3763,7 +3763,7 @@ _5 findings, from the `api-shim-surface` finder._
   tools/harness/Test-CloseVbe.ps1, closes the VBE FRAME with WM_SYSCOMMAND SC_CLOSE and reopens it
   through the object model; it never reaches OnBeginShutdown or Stop().
 - **Correction applied:** One mechanical problem with the proposed route that has to be designed around, not a defect in the
-  finding: Stop() disposes the DebugServer FIRST (AddInSession.cs:7605-7606, which is also the
+  finding: Stop() disposes the ApiServer FIRST (AddInSession.cs:7605-7606, which is also the
   listener serving the in-flight request), so a route that calls it synchronously cannot write its own
   reply - the caller sees a dropped connection. The teardown has to be posted to the host thread after
   the response is flushed, and the route documented as answer-less, otherwise every suite using it
@@ -3781,7 +3781,7 @@ _14 findings, from the `api-quality` finder._
 - **Where:** `src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:3197`
 - **Kind:** api-coverage / small effort, claim derived, confidence verified, severity medium
 - **Evidence:** Route: `ExecuteEditorCommand(command); return ... new DebugCommandReply(true, command)`
-  (DebugApi.cs:3197-3199). The reply field is literally named `ran` (DebugServer.cs:709-711:
+  (DebugApi.cs:3197-3199). The reply field is literally named `ran` (ApiServer.cs:709-711:
   `[property: JsonPropertyName("ran")] bool Ran`). `ExecuteEditorCommand` is `private void`
   (AddInSession.cs:1722) and does `var ran = VbeCommands.Execute(_editor, command);` (1756) then uses
   `ran` only to Notify for three specific ids (1762-1779); the value never leaves the method.
@@ -3802,20 +3802,20 @@ _14 findings, from the `api-quality` finder._
   decline reason it already builds for Notify) and put it in `ran`. No route or field is renamed;
   `ran` starts meaning what its name says. Add a `detail` field carrying "not present" / "disabled" so
   a caller can tell the two apart.
-- **Size:** one bool plumbed out of a void method; 9 existing call sites of ExecuteEditorCommand, only 3 in the debug api
+- **Size:** one bool plumbed out of a void method; 9 existing call sites of ExecuteEditorCommand, only 3 in the xlide api
 - **Adversary:** Read src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:3197-3199: `ExecuteEditorCommand(command);
   return ... new DebugCommandReply(true, command)` - the constant is literal.
-  src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:709-711 names the field `ran`.
+  src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:709-711 names the field `ran`.
   src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:1722 is `private void ExecuteEditorCommand(int command)`
   and at 1755 does `var ran = VbeCommands.Execute(_editor, command);`, using `ran` only for the three
   Notify blocks at 1760-1780. src/Xlide.Vbe.Shim/Editor/VbeCommands.cs:90-132 returns false on no
   CommandBars (97-101), control not found (109-114 `Log.Info($"command: {commandId} is not present in
   this host")`), `if (!control.GetBool("Enabled")) { Log.Info($"command: {commandId} is currently
-  disabled"); return false; }` (118-122) and on exception (127-131). docs/debug-api.md:96 documents
+  disabled"); return false; }` (118-122) and on exception (127-131). docs/xlide-api.md:96 documents
   only `name` and `keep`, so nothing designates `ran` as meaning 'the request was posted'.
   tools/harness/immediate-watch.mjs:164-168 checks only `added.error === undefined`.
 - **Correction applied:** The size figure is wrong: ExecuteEditorCommand has 7 call sites, not 9 (AddInSession.cs:1664, 4156,
-  4288, 5363 and DebugApi.cs:712, 1643, 3197); the '3 in the debug api' part is right. Also soften the
+  4288, 5363 and DebugApi.cs:712, 1643, 3197); the '3 in the xlide api' part is right. Also soften the
   blast radius: debugger-features.mjs never reads `.ran` from these calls (it waits for break mode at
   line 101 and re-reads api.native() at 130), so a disabled command costs a delayed and misattributed
   diagnosis rather than a silent pass.
@@ -3851,7 +3851,7 @@ _14 findings, from the `api-quality` finder._
   dialogs seen: `new DebugCompileReply(said.Count == 0, [.. said], ...)`. WaitMilliseconds default is
   6000 at 1647. tools/harness/debugger-features.mjs:74-77 is the precondition gate with the comment
   'It has to compile, or every command below is really a test of the dialog guard.'
-- **Correction applied:** The route table is not silent about the semantics: docs/debug-api.md:82 already says '`compiled` is
+- **Correction applied:** The route table is not silent about the semantics: docs/xlide-api.md:82 already says '`compiled` is
   false when anything appeared', which designates the dialog-derived meaning in one of the three
   required places. What is undesignated is the 'never started' case (the client row
   docs/driving-excel.md:204 says only 'compiles; errors as DATA, modal cleared', and the code comment
@@ -3905,7 +3905,7 @@ _14 findings, from the `api-quality` finder._
   ProjectReader.ReadSource(component)` and 2573-2575 `FindComponent(...)` then
   `ProjectReader.ReadSource(found)`. The comparison is host vs shim, as the title says. (2) The layer
   stops ARE designated, so api rule (b) is satisfied for the routes as documented:
-  docs/debug-api.md:50 says the native reply carries 'what the surface believes it is showing', :83
+  docs/xlide-api.md:50 says the native reply carries 'what the surface believes it is showing', :83
   says `documents` is 'the documents the surface holds TEXT for', :86 says `module?live=1` is 'the
   SURFACE's copy', and the client names its fields `surfaceContent`/`nativeContent` and says of the
   page only that it 'names the same module' (xlide-api.mjs:384-403). What genuinely survives is
@@ -3973,7 +3973,7 @@ _14 findings, from the `api-quality` finder._
   calls `_editorSurface?.Notify(...)` (6512). Twenty lines above, the `open` branch carries the
   comment "And its answer is the show's answer: opening a module that is not there replied ok, which
   is the same lie the write route told about a module that is not there (2026-08-09)"
-  (DebugApi.cs:2910-2913) and returns `showed`'s error. docs/debug-api.md:89 records the open fix and
+  (DebugApi.cs:2910-2913) and returns `showed`'s error. docs/xlide-api.md:89 records the open fix and
   says nothing about close.
 - **Why:** Close is the more interesting half - it is the path with the save/discard/cancel gate the tab's own
   X uses - and a caller cannot tell "the tab closed" from "a Save box is now standing and the tab is
@@ -3991,7 +3991,7 @@ _14 findings, from the `api-quality` finder._
   `private void` at AddInSession.cs:6472; the failed-save return is at 6484-6491 (`Log.Warn($"close:
   {display ?? \"the workbook\"} would not save; {component}'s tab stays"); return;`) and the
   unanswered-confirm return at 6544-6550 (`_editorSurface?.ConfirmClose(component, projectDisplay);
-  return;`). docs/debug-api.md:89 records the open fix and says nothing about the close reply.
+  return;`). docs/xlide-api.md:89 records the open fix and says nothing about the close reply.
 - **Correction applied:** Two non-closing paths, not three. The discard branch whose revert write is refused
   (AddInSession.cs:6506-6512) still falls through to `CloseModule(component, projectDisplay)` at 6540
   - the tab does close, the module simply keeps the abandoned text and the page gets a Notify. Drop it
@@ -4028,11 +4028,11 @@ _14 findings, from the `api-quality` finder._
   None of it reaches the route. tools/harness/rename-features.mjs:115-118 prints the reply and sleeps
   3000; the forward half at :82-84 does `check("the rename was accepted", said.did, said.detail)`.
 
-##### `immediate-doc-contradicts-code` docs/debug-api.md says `immediate` only schedules and waits ten seconds; the handler waits, and its default is fifteen
+##### `immediate-doc-contradicts-code` docs/xlide-api.md says `immediate` only schedules and waits ten seconds; the handler waits, and its default is fifteen
 
-- **Where:** `docs/debug-api.md:207`
+- **Where:** `docs/xlide-api.md:207`
 - **Kind:** api-coverage / small effort, claim observed, confidence verified, severity low
-- **Evidence:** docs/debug-api.md:207-208 still reads "`immediate` only SCHEDULES. A statement that hits a
+- **Evidence:** docs/xlide-api.md:207-208 still reads "`immediate` only SCHEDULES. A statement that hits a
   breakpoint does not return until the developer continues, so an api that waited for it would jam its
   own connection." The same document at line 99 contradicts it - "`ran: false` means the evaluation
   did not finish inside the ten second wait" - and the code contradicts both: the route waits on the
@@ -4049,16 +4049,16 @@ _14 findings, from the `api-quality` finder._
   summary, which is where the next person to touch this file will look. The ten-versus-fifteen second
   figure sets the wrong client timeout: xlide-api.mjs:934 hardcodes 20000, which happens to still
   clear 15000, but only by accident.
-- **Change:** Delete the "only SCHEDULES" paragraph at docs/debug-api.md:207-208, correct "ten second wait" to the
+- **Change:** Delete the "only SCHEDULES" paragraph at docs/xlide-api.md:207-208, correct "ten second wait" to the
   actual fifteen second default (and name `waitMs` as the override), and fix the stale sentence in the
-  AnswerDebugRequest summary at DebugApi.cs:497-499.
+  AnswerApiRequest summary at DebugApi.cs:497-499.
 - **Size:** three sentences across two files
-- **Adversary:** docs/debug-api.md:207-208 reads '`immediate` only SCHEDULES. A statement that hits a breakpoint does
+- **Adversary:** docs/xlide-api.md:207-208 reads '`immediate` only SCHEDULES. A statement that hits a breakpoint does
   not return until the developer continues, so an api that waited for it would jam its own
   connection.' The code waits: DebugApi.cs:756 `var deadline = Environment.TickCount64 +
   WaitMilliseconds(request, 15000);` with the poll at 758-778 and `new DebugImmediateReply(ran,
   outcome, failed)` at 792-794, under a header comment at 642-657 that records the change ('THE
-  OUTCOME, not the request'). docs/debug-api.md:99 says 'ran: false means the evaluation did not
+  OUTCOME, not the request'). docs/xlide-api.md:99 says 'ran: false means the evaluation did not
   finish inside the ten second wait' against a 15000 default. The dispatcher summary at
   DebugApi.cs:497-499 still says 'The immediate route only schedules ... an api that waited on it
   would jam.' xlide-api.mjs:934 is `timeout: 20000`.
@@ -4090,7 +4090,7 @@ _14 findings, from the `api-quality` finder._
   and EditorSurface.cs:119 is `public string? Module => ActiveDoc?.Module;`. The same file answers the
   host's version elsewhere - DebugApi.cs:2517 `_editor.GetObject("ActiveCodePane")` walked to
   `component?.GetString("Name")` at 2542. Checked the designation requirement:
-  docs/debug-api.md:305-307 lists the claim names with no statement of which layer any of them reads,
+  docs/xlide-api.md:305-307 lists the claim names with no statement of which layer any of them reads,
   and the client docstring is no more specific, so the layer stop is undesignated under api rule (b).
 - **Correction applied:** Drop the 'the route's own docstring claims the opposite of what it does' argument. The docstring at
   DebugApi.cs:2086-2089 says the claims are read 'from the snapshots the reader thread publishes and
@@ -4105,7 +4105,7 @@ _14 findings, from the `api-quality` finder._
 - **Evidence:** `command: (name) => call(`command${query({ name })}`, { method: "POST" }),` (xlide-api.mjs:426) - no
   `keep`. The mechanism is generic and documented: every host-thread route honours it
   (`RememberRaisedDialogs(standingBefore, keep: request.Query.ContainsKey("keep"))`, DebugApi.cs:1894)
-  and docs/debug-api.md:96 lists `keep` as an argument of `command`, with the rule at line 279 "A
+  and docs/xlide-api.md:96 lists `keep` as an argument of `command`, with the rule at line 279 "A
   request that means to open a dialog passes `keep=1` and what it opens is exempt." The only users are
   PowerShell probes hand-building the URL: `Invoke-RestMethod "$api/command?name=references&keep=1"`
   (Test-DebugApi.ps1:466) and `"$api/command?name=run&keep=1"` (514). A .mjs suite that opens a dialog
@@ -4114,7 +4114,7 @@ _14 findings, from the `api-quality` finder._
   api.dialogs(); if ((afterCommand.dialogs ?? []).length > 0) { ... await api.dismiss("Cancel") ... }`
   (172-177). Same shape on capture: `capture: (window) => call(`capture${query({ window })}`, { raw:
   true, timeout: 20000 }),` (xlide-api.mjs:424) drops the crop the route supports
-  (DebugApi.cs:585-637) and the reference documents (docs/debug-api.md:66), so Get-Shot.ps1:55 appends
+  (DebugApi.cs:585-637) and the reference documents (docs/xlide-api.md:66), so Get-Shot.ps1:55 appends
   `"&selector=$([uri]::EscapeDataString($Selector))&pad=$Pad"` itself and Test-DebugApi.ps1:416 does
   the same. Grepping the .mjs corpus for `.capture(` returns zero calls.
 - **Why:** `keep` is a safety argument: without it a .mjs suite cannot open a dialog deliberately, so the
@@ -4130,8 +4130,8 @@ _14 findings, from the `api-quality` finder._
   and :424 is `capture: (window) => call(\`capture${query({ window })}\`, { raw: true, timeout: 20000
   }),`. Both arguments exist on the routes: `keep` is honoured generically at DebugApi.cs:1894
   `RememberRaisedDialogs(standingBefore, keep: request.Query.ContainsKey("keep"))` and again at 1903,
-  and documented at docs/debug-api.md:96 and :279; `selector`/`pad` are implemented at
-  DebugApi.cs:583-600 and documented in the capture row at docs/debug-api.md:66. The only users build
+  and documented at docs/xlide-api.md:96 and :279; `selector`/`pad` are implemented at
+  DebugApi.cs:583-600 and documented in the capture row at docs/xlide-api.md:66. The only users build
   the URL by hand: Test-DebugApi.ps1:466 and :514 for keep, Get-Shot.ps1:54-55 (`$query +=
   "&selector=$([uri]::EscapeDataString($Selector))&pad=$Pad"`) and Test-DebugApi.ps1:416 for the crop.
   Grepping tools/harness/*.mjs for `.capture(` returns nothing. immediate-watch.mjs:164-177 does the
@@ -4154,7 +4154,7 @@ _14 findings, from the `api-quality` finder._
   the real client's `call` does: the error-field check `if (answer && typeof answer === "object" &&
   "error" in answer) { throw new Error(...) }` (xlide-api.mjs:296-298), the abort timeout (274-276),
   and the host-death diagnosis (282-289). An error reply is a 200 with an `error` field
-  (DebugServer.cs:216 writes "200 OK" for every answer including DebugError), so in that probe a
+  (ApiServer.cs:216 writes "200 OK" for every answer including ApiError), so in that probe a
   failed route silently becomes an object whose fields are all undefined.
 - **Why:** The probe with the weakest transport is the one driving the live page through CDP, where a route
   failing quietly reads as the page misbehaving. It also means the method verbs, timeouts and
@@ -4172,27 +4172,27 @@ _14 findings, from the `api-quality` finder._
 
 ##### `history-omits-polled-routes` `history` silently drops five routes from the "every request" transcript, and the reply does not say so
 
-- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:237`
+- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:237`
 - **Kind:** api-coverage / small effort, claim observed, confidence verified, severity low
 - **Evidence:** `RecordRequest` opens with `if (route is "history" or "log" or "journal" or "state" or "dialogs") {
   // The routes a probe polls would otherwise be the whole transcript. return; }`
-  (DebugServer.cs:235-241). docs/debug-api.md:59 says "every request this door has served" and line
+  (ApiServer.cs:235-241). docs/xlide-api.md:59 says "every request this door has served" and line
   316 repeats "hands back every request the door has served, plus a runnable script of them"; the
   route's own comment says "The session as a script ... this hands it back ready to run, so a bug
   found by hand becomes a probe by copying" (DebugApi.cs:885-889). Nothing in DebugHistoryReply
-  (DebugServer.cs:1034) carries the exclusion list or a dropped count.
+  (ApiServer.cs:1034) carries the exclusion list or a dropped count.
 - **Why:** The replay script is missing exactly the calls that make a hand-driven session reproducible: the
   `log?match=...&waitMs=` waits and the `state` polls that sequence everything else. Copy the script
   out and the steps run back to back with no waits, so a session that only worked because of its waits
   replays as a race, and the transcript gives no hint that anything was removed.
 - **Change:** Keep the exclusion (the reason for it is sound) but make it visible: add a `notRecorded` field
   listing the five route names, and emit a `# waited on log/state here` marker in the generated script
-  where a polled route was skipped. Correct the two "every request" sentences in docs/debug-api.md.
+  where a polled route was skipped. Correct the two "every request" sentences in docs/xlide-api.md.
 - **Size:** one field plus two doc sentences
-- **Adversary:** DebugServer.cs:235-241: `if (route is "history" or "log" or "journal" or "state" or "dialogs") { //
+- **Adversary:** ApiServer.cs:235-241: `if (route is "history" or "log" or "journal" or "state" or "dialogs") { //
   The routes a probe polls would otherwise be the whole transcript. return; }`. DebugHistoryReply
-  (DebugServer.cs:1034-1039) carries only requests, script and routeCosts - no exclusion list, no
-  dropped count. docs/debug-api.md:59 says 'every request this door has served' and :316 repeats
+  (ApiServer.cs:1034-1039) carries only requests, script and routeCosts - no exclusion list, no
+  dropped count. docs/xlide-api.md:59 says 'every request this door has served' and :316 repeats
   'hands back every request the door has served, plus a runnable script of them'. The script builder
   at DebugApi.cs:891-902 emits one Invoke-RestMethod line per recorded request with nothing between
   them, so the omitted `log?waitMs=` waits leave no marker.
@@ -4280,7 +4280,7 @@ _14 findings, from the `api-quality` finder._
   `{"held":false,"claim":"shownModul","expected":"(none)","saw":"unknown claim shownModul"}`, which
   the client returns as a normal answer (`assert` is not error-shaped, so `call`'s error check at
   xlide-api.mjs:296 does not fire). The vocabulary is a string list in three places that can drift
-  apart - the switch (2093-2150), docs/debug-api.md:306-307, and the client's docstring
+  apart - the switch (2093-2150), docs/xlide-api.md:306-307, and the client's docstring
   (xlide-api.mjs:592-594).
 - **Why:** An assertion instrument that reports a typo as a failed assertion sends the reader to look at the
   product. The only distinguishing signal is prose inside `saw`, which a `check(..., answer.held,
@@ -4296,7 +4296,7 @@ _14 findings, from the `api-quality` finder._
   EvaluateClaim's fallback at 2147-2148 is `default: return (false, $"unknown claim {claim}");` - a
   value, so the reply is a normal DebugAssertReply (935-937) and the client's error check
   (xlide-api.mjs:295-298) does not fire. The precedent the finding cites is real: DebugApi.cs:1368
-  `return DebugError($"unknown benchmark {what}; try tabswitch, layout, or type");` and 1492-1498 for
+  `return ApiError($"unknown benchmark {what}; try tabswitch, layout, or type");` and 1492-1498 for
   trip.
 
 ### AddInSession.cs
@@ -4312,7 +4312,7 @@ _8 findings, from the `complexity-session` finder._
   src/Xlide.Vbe.Shim/AddIn/*.cs` returns exactly 11 hits and the only two Dispose calls are inside
   catch blocks: line 5708 (`// The application answer went stale ...` then `_hostApp?.Dispose();
   _hostApp = null;`) and line 6609 (same pair after `Log.Error($"close: {display} could not be saved",
-  ex);`). I read Stop() in full (7593-7669): it disposes _debugServer, _analysis, _frameSubclass,
+  ex);`). I read Stop() in full (7593-7669): it disposes _apiServer, _analysis, _frameSubclass,
   _immediateReader, _ghostReaders, _typeLibraries, _browserPalette, _codePanes, _hostChrome,
   _editorSurface, and restores both ghost palettes; _hostApp appears nowhere. Dispose() (7733-7740) is
   `Stop(); _addIn?.Dispose(); _editor.Dispose();`. I also confirmed _hostApp is the only cached
@@ -4331,7 +4331,7 @@ _8 findings, from the `complexity-session` finder._
   finalizes it on the finalizer thread, which is the exact FailFast the codebase already paid for
   three times. com-leak.mjs cannot catch this: it compares stats.comWrappersLive across routes while
   the session is alive, and this wrapper is only orphaned at teardown, when nothing is left to answer
-  the debug api.
+  the xlide api.
 - **Change:** Add `_hostApp?.Dispose(); _hostApp = null;` to Stop(), beside the other automation-reference
   releases (after _codePanes, before _hostChrome). Two lines.
 - **Size:** 2 lines added; removes one leaked COM wrapper per non-shutdown session teardown
@@ -4339,7 +4339,7 @@ _8 findings, from the `complexity-session` finder._
   _hostApp;`, populated by `_hostApp ??= HostApplication.Find();` at 5685 and 6583. A repo-wide grep
   for _hostApp returns hits only in AddInSession.cs, and the only Dispose calls are the two
   stale-answer catch blocks at 5708 and 6609. I read Stop() (7593-7666) in full: it releases
-  _debugServer, _analysis, _frameSubclass, _immediateReader, _ghostReaders, _typeLibraries,
+  _apiServer, _analysis, _frameSubclass, _immediateReader, _ghostReaders, _typeLibraries,
   _browserPalette, _codePanes, _hostChrome, _editorSurface and both ghost palettes; _hostApp is
   absent. Dispose() at 7733-7740 is `Stop(); _addIn?.Dispose(); _editor.Dispose();`.
   src/Xlide.Vbe.Shim/Interop/HostApplication.cs:49 returns `window?.GetObject("Application")` with the
@@ -4683,7 +4683,7 @@ _10 findings, from the `complexity-debugapi` finder._
   editor: line 1783 `case "dismiss" when request.Query.TryGetValue("button", out var button) &&
   button.Length > 0:` and line 909 `case "assert" when request.Query.TryGetValue("that", out var
   claim) && claim.Length > 0:`. When a guard does not hold, control leaves the switch and reaches line
-  1839 `var host = _editorSurface;` / 1842 `return DebugError("the surface is not up yet");`, then
+  1839 `var host = _editorSurface;` / 1842 `return ApiError("the surface is not up yet");`, then
   1861 `host.RunOnHostThread(...)` and 1878 `var answered = done.Wait(TimeSpan.FromSeconds(3));`. The
   comment at 503-513 states the design intent this breaks: "dialogs, dismiss and guard all return
   before reaching it, and those are exactly the routes a caller uses while something is standing."
@@ -4706,7 +4706,7 @@ _10 findings, from the `complexity-debugapi` finder._
   default) - none in 516..1837. I listed every `case "` label in that range: 11 carry `when` guards
   (909 assert, 1062 act, 1092 eval, 1111 await, 1218 inspect, 1297 bench, 1425 trip, 1515 layout, 1675
   type, 1735 mark, 1783 dismiss), and an unheld guard leaves the switch and reaches 1839 `var host =
-  _editorSurface;` / 1842 `return DebugError("the surface is not up yet");` and then 1861
+  _editorSurface;` / 1842 `return ApiError("the surface is not up yet");` and then 1861
   RunOnHostThread / 1878 `done.Wait(TimeSpan.FromSeconds(3))`. The consequence claim is where it
   overstates: I read 3323-3344 and the on-host default already answers `$"no route '{request.Route}'
   accepted this request. Either there is no such route, or there is and its required arguments were
@@ -4733,7 +4733,7 @@ _10 findings, from the `complexity-debugapi` finder._
 - **Kind:** complexity / small effort, claim observed, confidence verified, severity low
 - **Evidence:** Lines 963-987 inside `case "journal"`: `using var ready = new ManualResetEventSlim(false);
   journalHost.RunOnHostThread(() => { try { sessionState = AnswerDebugRequestOnHost(new
-  DebugServer.DebugRequest("state", request.Query, string.Empty)); } catch (Exception ex) {
+  ApiServer.ApiRequest("state", request.Query, string.Empty)); } catch (Exception ex) {
   sessionState = $"{{\"error\":\"{ex.GetType().Name}\"}}"; } finally { ready.Set(); } }); if
   (!ready.Wait(TimeSpan.FromSeconds(3))) { sessionState = null; }`. Lines 1859-1878, the main
   dispatch: `using var done = new ManualResetEventSlim(false); ... host.RunOnHostThread(() => { try {
@@ -4750,14 +4750,14 @@ _10 findings, from the `complexity-debugapi` finder._
   copy shapes its error by hand as `{"error":"TypeName"}` rather than through DebugErrorReply, so one
   route on this door emits an error object built by string concatenation while every other one goes
   through the serializer. A third caller added later copies whichever of the two it lands on.
-- **Change:** One private helper - `(bool Answered, string? Answer) OnHost(DebugServer.DebugRequest request)` -
+- **Change:** One private helper - `(bool Answered, string? Answer) OnHost(ApiServer.ApiRequest request)` -
   holding the event, the callback, the catch, the deadline and the PerfCounters.Marshal sample. The
   main dispatch keeps the dialog attribution and the blocked-reply path around it; journal calls the
   helper with its synthetic `state` request.
 - **Size:** about 20 lines removed from the journal case, and the perf/error divergence goes with them
 - **Adversary:** Read both. src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:965-987 in `case "journal"` is `using
   var ready = new ManualResetEventSlim(false); journalHost.RunOnHostThread(() => { try { sessionState
-  = AnswerDebugRequestOnHost(new DebugServer.DebugRequest("state", request.Query, string.Empty)); }
+  = AnswerDebugRequestOnHost(new ApiServer.ApiRequest("state", request.Query, string.Empty)); }
   catch (Exception ex) { sessionState = $"{{\"error\":\"{ex.GetType().Name}\"}}"; } finally {
   ready.Set(); } }); if (!ready.Wait(TimeSpan.FromSeconds(3))) { sessionState = null; }`, and
   1858-1882 is the same event, callback shape and hardcoded 3s deadline. The main copy alone carries
@@ -4768,19 +4768,19 @@ _10 findings, from the `complexity-debugapi` finder._
 - **Correction applied:** The dropped dialog attribution is not a defect: the journal marshals a synthetic read-only `state`
   request, which raises no dialog, so RememberRaisedDialogs would have nothing to attribute. The
   hand-built error is not a shape divergence either - DebugErrorReply is `[property:
-  JsonPropertyName("error")] string Error` at src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:729-730,
+  JsonPropertyName("error")] string Error` at src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:729-730,
   so `{"error":"TypeName"}` is the same wire shape, and it is embedded as a string in
   DebugJournalReply.State, escaped by the outer serializer. The one real divergence is the missing
   PerfCounters.Marshal sample.
 
-##### `host-error-reply-boilerplate` The on-host switch has no DebugError equivalent, so twenty-one error paths spell out the serializer call the pool side does in one line
+##### `host-error-reply-boilerplate` The on-host switch has no ApiError equivalent, so twenty-one error paths spell out the serializer call the pool side does in one line
 
 - **Where:** `src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:2747`
 - **Kind:** complexity / small effort, claim observed, confidence verified, severity low
-- **Evidence:** Line 33 defines the pool-side helper: `private static DebugServer.DebugReply DebugError(string
-  error) => DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(new
+- **Evidence:** Line 33 defines the pool-side helper: `private static ApiServer.ApiReply ApiError(string
+  error) => ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(new
   DebugErrorReply(error), DebugJsonContext.Default.DebugErrorReply));` and it is used 25 times.
-  `AnswerDebugRequestOnHost` at 2289 returns `string` rather than `DebugReply`, so it cannot use it:
+  `AnswerDebugRequestOnHost` at 2289 returns `string` rather than `ApiReply`, so it cannot use it:
   `awk 'NR>=2289 && /new DebugErrorReply\(/'` counts 21 sites, each written out in full.
   Representative, lines 2747-2751: `return System.Text.Json.JsonSerializer.Serialize(new
   DebugErrorReply($"kind '{kindText}' is not one of 1/module/standard, " + "2/class, 3/form"),
@@ -4794,10 +4794,10 @@ _10 findings, from the `complexity-debugapi` finder._
   {ex.Message}"` and the journal at 975 uses raw string concatenation. A client parsing errors sees
   three shapes from one door because nobody could see all three at once.
 - **Change:** Add `private static string HostError(string error)` and `private static string HostOk(int command =
-  0)` beside DebugError, both returning the serialized string the on-host switch already returns.
+  0)` beside ApiError, both returning the serialized string the on-host switch already returns.
   Twenty-seven call sites collapse to one line each.
 - **Size:** about 45 lines removed (21 error sites x 2 lines, 6 ok sites x 1)
-- **Adversary:** Counts check out. src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:33-35 defines `DebugError`, and
+- **Adversary:** Counts check out. src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:33-35 defines `ApiError`, and
   `AnswerDebugRequestOnHost` at 2288 returns `string`, so it cannot use it. `awk 'NR>=2289 && /new
   DebugErrorReply\(/'` gives exactly 21 sites: 2499, 2670, 2686, 2699, 2748, 2761, 2786, 2812, 2829,
   2848, 2856, 2872, 2880, 2918, 2933, 3105, 3194, 3263, 3278, 3289, 3339. `new DebugCommandReply(true,
@@ -4806,7 +4806,7 @@ _10 findings, from the `complexity-debugapi` finder._
 - **Correction applied:** The finding's error-line numbers are each one low (it cited the `return System.Text.Json...` line,
   not the `new DebugErrorReply(` line): 2761, 2786, 2812, 2829, 2848, 2856, 2872, 2880, 3105, 3194,
   3289, 3339. The 'three shapes from one door' claim is wrong and should be dropped: every one of
-  these sites serializes DebugErrorReply, whose only property is `error` (DebugServer.cs:729), and the
+  these sites serializes DebugErrorReply, whose only property is `error` (ApiServer.cs:729), and the
   journal's hand-built object matches it. What differs is the human message text (2880
   `$"{componentAction} failed: {ex.Message.Trim()}"` vs 1869 `$"{ex.GetType().Name}: {ex.Message}"`),
   which a client does not parse. The finding stands as duplication only, not as a client-visible
@@ -4817,8 +4817,8 @@ _10 findings, from the `complexity-debugapi` finder._
 - **Where:** `src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:1085`
 - **Kind:** complexity / small effort, claim observed, confidence verified, severity low
 - **Evidence:** `ui` at 1055-1059, `act` at 1085-1089, `eval` at 1104-1108 and `type` at 1728-1732 are the same five
-  lines with the local renamed: `return act.Error is { } actError ? DebugError(actError) :
-  DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(new
+  lines with the local renamed: `return act.Error is { } actError ? ApiError(actError) :
+  ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(new
   DebugEvalReply(act.Answered, act.ErrorCode, act.Result, Unwrap(act.Result)),
   DebugJsonContext.Default.DebugEvalReply));`. All four consume the same tuple returned by
   RunPageScript, declared at line 68 as `(bool Answered, int ErrorCode, string Result, string?
@@ -4826,13 +4826,13 @@ _10 findings, from the `complexity-debugapi` finder._
 - **Why:** Four copies of the decision "an Error means the transport failed, anything else is an answer even
   when the page said no". A fifth page-driving route is written by copying one of them, and if the
   Unwrap step or the error/answer split ever needs to change, it changes in four places or in three.
-- **Change:** `private static DebugServer.DebugReply PageReply((bool Answered, int ErrorCode, string Result,
+- **Change:** `private static ApiServer.ApiReply PageReply((bool Answered, int ErrorCode, string Result,
   string? Error) run)` next to RunPageScript. Each of the four returns become `return
   PageReply(act);`.
 - **Size:** about 12 lines removed
 - **Adversary:** `grep -n "new DebugEvalReply("` over src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs returns
   exactly 1058, 1088, 1107 and 1731, and I read all four blocks. Each is the identical `X.Error is { }
-  err ? DebugError(err) : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(new
+  err ? ApiError(err) : ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(new
   DebugEvalReply(X.Answered, X.ErrorCode, X.Result, Unwrap(X.Result)),
   DebugJsonContext.Default.DebugEvalReply))` over the tuple RunPageScript declares at line 69 as
   `(bool Answered, int ErrorCode, string Result, string? Error)`. The only per-route variation (the
@@ -4887,7 +4887,7 @@ _10 findings, from the `complexity-debugapi` finder._
   that removed `hostcall` applies to every candidate.
 - **Change:** One `private static DebugBenchReply Quantiles(string what, List<double> samples, string detail)`
   used by both routes. Reduce the `trip` switch to `if (tripWhat is not "pagecall") { return
-  DebugError(...); }` and keep the explanatory message.
+  ApiError(...); }` and keep the explanatory message.
 - **Size:** about 14 lines removed here; the EngineCounters copy can stay, it is over a different element type
 - **Adversary:** Read both. src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:1411-1422 (bench, case at 1297) and
   1500-1512 (trip, case at 1425) build DebugBenchReply with the identical `ordered[0]`,
@@ -4920,7 +4920,7 @@ _10 findings, from the `complexity-debugapi` finder._
   `var completed = pressed is not null && done.Wait(TimeSpan.FromSeconds(3));`, which waits for the
   work already queued, and both DebugBlockedReply constructions pass `Retried: false` (2259 and 2285).
   `grep -rn Retried` over src/, tools/harness and the two api docs finds only those two sites and the
-  record field at src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:744 - nothing ever sets it true and
+  record field at src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:744 - nothing ever sets it true and
   nothing reads it.
 - **Why:** The blocked-request policy is the hardest thing in this file to reason about, and its only
   explanation is attached to the wrong method, where a reader looking at AnswerBlockedRequest will not
@@ -4940,8 +4940,8 @@ _10 findings, from the `complexity-debugapi` finder._
   request asked for was queued before the dialog appeared, so it may complete on its own" - a wait,
   not a retry. Both DebugBlockedReply constructions pass `Retried: false` (2259, 2285). A repo-wide
   grep over src/, tools/, docs/, ui/editor/src and engine/src for `Retried|retried` finds only those
-  two, the record field at src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:744, and unrelated prose;
-  nothing sets it true and nothing reads it. It is absent from docs/debug-api.md, so `retried` is on
+  two, the record field at src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:744, and unrelated prose;
+  nothing sets it true and nothing reads it. It is absent from docs/xlide-api.md, so `retried` is on
   the wire, always false, and undocumented.
 
 ##### `two-boolean-flag-conventions` Query flags are parsed by two incompatible rules in the same switch, so the same argument value means opposite things on different routes
@@ -4958,7 +4958,7 @@ _10 findings, from the `complexity-debugapi` finder._
   opposite behaviour from the next, and the failure is silent - the counters are already cleared by
   the time anyone notices. The two conventions are 750 lines apart in one switch, which is why neither
   author saw the other.
-- **Change:** One `private static bool Flag(DebugServer.DebugRequest request, string name, bool fallback = false)`
+- **Change:** One `private static bool Flag(ApiServer.ApiRequest request, string name, bool fallback = false)`
   used by all eight sites, accepting 1/true/yes/on as true and 0/false/no/off as false and answering
   `fallback` for anything else.
 - **Size:** 8 sites to one helper, about 6 lines; the risk is that any harness call relying on `=false` meaning true changes behaviour, which is the point
@@ -4966,11 +4966,11 @@ _10 findings, from the `complexity-debugapi` finder._
   at 1014 (perf reset), 1231 (problems rules), 1515 (layout reset), 2469 (native text), 2561 (engine
   text), 3273 (module live); `is "1" or "true" or "yes" or "on"` at 1764 (guard on) and 2984
   (settings). The concrete failure is real: `perf?reset=false` satisfies `perfReset != "0"` and clears
-  the engine counters. And the cross-contamination path is documented - docs/debug-api.md:81 teaches
+  the engine counters. And the cross-contamination path is documented - docs/xlide-api.md:81 teaches
   `guard | POST | on=true|false`, so a caller does meet `true|false` on this door before meeting a
   `=1` toggle.
 - **Correction applied:** The two conventions are not arbitrary: they carry different semantics. The six `!= "0"` sites are
-  per-request toggles the docs only ever spell as `=1` (docs/debug-api.md lines 50, 56, 65, 75, 76);
+  per-request toggles the docs only ever spell as `=1` (docs/xlide-api.md lines 50, 56, 65, 75, 76);
   the two word-list sites are SETTERS of persisted state where `false` must mean false -
   `guard?on=false` has to turn the guard off, and the settings route at 2982-2985 already has a local
   `bool Flag(string name, bool current)` doing exactly the tri-state the finding proposes. So the fix
@@ -5132,7 +5132,7 @@ _10 findings, from the `complexity-shim-rest` finder._
   through ComRuntime.TakeWrapper / GiveBackWrapper (ComRuntime.cs 62 and 129), which are the only two
   doors WrappersTaken / WrappersGivenBack / WrappersDisposed count, so `stats` reads balanced while
   the list grows. The whole block is inside `#if DEBUG` (line 84 opens it, 203 closes it; the handler
-  class is inside a second `#if DEBUG` at 1056-1079), and the only caller is the debug api's script
+  class is inside a second `#if DEBUG` at 1056-1079), and the only caller is the xlide api's script
   round trip at AddInSession.DebugApi.cs:221 `browser.ExecuteScript(script, (code, json) => ...)`.
 - **Why:** The eval route is how the harness observes the page, so a live suite makes hundreds of these calls
   in one session and each one adds a managed object plus a CCW that is never released for the life of
@@ -5183,7 +5183,7 @@ _10 findings, from the `complexity-shim-rest` finder._
   Popup, bool Enabled, bool Suppressed)[]`, is called from AddInSession.DebugApi.cs:2652, and its
   comment states the succession outright - "until this existed there was no way to ask the running
   editor for a menu's ids at all - they were measured once by hand and written into a comment, which
-  is how a table of numbers goes quietly out of date." docs/debug-api.md line 86 documents the `menus`
+  is how a table of numbers goes quietly out of date." docs/xlide-api.md line 86 documents the `menus`
   route that serves it.
 - **Why:** Forty lines of live COM enumeration that nothing can reach, presented by the doc comment on Command
   as the way to re-establish the command identifiers against a disagreeing host. A maintainer who
@@ -5200,7 +5200,7 @@ _10 findings, from the `complexity-shim-rest` finder._
   ModuleText.LostCharacter.Describe, WindowEvent.Describe, FolderLock.Describe, VBA fixtures).
   VbeMenus.Describe (src/Xlide.Vbe.Shim/Editor/VbeMenus.cs:401) is live from
   src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs:2652 serving the `menus` route, documented at
-  docs/debug-api.md:86. So the method is unreachable without editing code, while its doc comment tells
+  docs/xlide-api.md:86. So the method is unreachable without editing code, while its doc comment tells
   a maintainer to 'Re-run it if a host build ever disagrees'.
 - **Correction applied:** The 'superseded, strictly more' framing is wrong in one respect that changes the fix.
   VbeMenus.Describe reaches controls only from the MENU BAR: ControlsAt (VbeMenus.cs:480-498) starts
@@ -5248,16 +5248,16 @@ _10 findings, from the `complexity-shim-rest` finder._
 
 ##### `debug-capture-duplicate-interop` DebugCapture re-declares Rect, GetWindowRect, SelectObject and DeleteObject that Interop/Win32 already declares
 
-- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:489`
+- **Where:** `src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:489`
 - **Kind:** dead-code / small effort, claim observed, confidence verified, severity low
-- **Evidence:** DebugServer.cs 489-495 declares `[StructLayout(LayoutKind.Sequential)] private struct Rect { public
+- **Evidence:** ApiServer.cs 489-495 declares `[StructLayout(LayoutKind.Sequential)] private struct Rect { public
   int Left; public int Top; public int Right; public int Bottom; }`. Win32.cs 6-13 already declares
   `[StructLayout(LayoutKind.Sequential)] internal struct Rect` with those four int fields in that
-  order. The imports repeat too: DebugServer.cs:465 `private static partial bool GetWindowRect(nint
+  order. The imports repeat too: ApiServer.cs:465 `private static partial bool GetWindowRect(nint
   window, out Rect rect)` against Win32.Events.cs:88 `public static partial bool GetWindowRect(nint
-  window, Rect* rect)`; DebugServer.cs:479 `private static partial nint SelectObject(nint dc, nint
+  window, Rect* rect)`; ApiServer.cs:479 `private static partial nint SelectObject(nint dc, nint
   gdiObject)` against Win32.cs:326 `public static partial nint SelectObject(nint deviceContext, nint
-  gdiObject)`; DebugServer.cs:483 `private static partial bool DeleteObject(nint gdiObject)` against
+  gdiObject)`; ApiServer.cs:483 `private static partial bool DeleteObject(nint gdiObject)` against
   Win32.cs:323 `public static partial bool DeleteObject(nint gdiObject)`. The class comment (lines
   450-453) justifies raw GDI - "the shim is ahead-of-time compiled and carries no drawing library" -
   which explains reaching for GDI, not declaring a second copy of imports the same assembly already
@@ -5274,16 +5274,16 @@ _10 findings, from the `complexity-shim-rest` finder._
   (`Rect*` against `out Rect`); the pointer form works from a local with `&rect`, which is how
   CodePaneTracker.ReadBounds already calls GetClientRect.
 - **Size:** 1 duplicate struct plus 3 duplicate P/Invokes, about 20 lines
-- **Adversary:** The duplication is exactly as described. src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs:488-495
+- **Adversary:** The duplication is exactly as described. src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs:488-495
   declares a private `Rect` with Left/Top/Right/Bottom; src/Xlide.Vbe.Shim/Interop/Win32.cs:6-13
   already declares `internal struct Rect` with the same four ints in the same order.
-  DebugServer.cs:463-465 GetWindowRect duplicates Win32.Events.cs:88 (`public static partial bool
-  GetWindowRect(nint window, Rect* rect)`); DebugServer.cs:478-479 SelectObject duplicates
-  Win32.cs:326; DebugServer.cs:481-483 DeleteObject duplicates Win32.cs:323. GetDC, ReleaseDC,
+  ApiServer.cs:463-465 GetWindowRect duplicates Win32.Events.cs:88 (`public static partial bool
+  GetWindowRect(nint window, Rect* rect)`); ApiServer.cs:478-479 SelectObject duplicates
+  Win32.cs:326; ApiServer.cs:481-483 DeleteObject duplicates Win32.cs:323. GetDC, ReleaseDC,
   PrintWindow, CreateCompatibleDC, DeleteDC and CreateDIBSection are genuinely new, as claimed.
 - **Correction applied:** Both stated harms are wrong, which drops this to a pure tidiness item. (1) No call site can pick the
   wrong Rect: DebugCapture.Rect is a PRIVATE NESTED struct, invisible outside the class, and its
-  layout is identical to Interop.Win32.Rect anyway. (2) There is no shipped stub cost: DebugServer.cs
+  layout is identical to Interop.Win32.Rect anyway. (2) There is no shipped stub cost: ApiServer.cs
   is wholly inside `#if DEBUG` (line 1 `#if DEBUG`, line 1256 `#endif`), so none of these imports
   exist in Release, and an unreferenced LibraryImport partial is not rooted by ILC in any case. What
   remains is one duplicate struct and three duplicate imports in a Debug-only file, about 20 lines.
@@ -5454,7 +5454,7 @@ _10 findings, from the `complexity-shim-rest` finder._
 - **Evidence:** Checked every public member against the whole repo. Read (199) is called from AddInSession.cs:4207
   `var items = VbeMenus.Read(_editor, path);`. ControlAt (459) from AddInSession.cs:4233 `using var
   control = VbeMenus.ControlAt(_editor, path);`. Describe (401) from AddInSession.DebugApi.cs:2652,
-  serving the `menus` route documented at docs/debug-api.md:86. FindMenuBar (505) from
+  serving the `menus` route documented at docs/xlide-api.md:86. FindMenuBar (505) from
   AddInSession.cs:7196, and its own comment says why it survives the bar's retirement - "Also
   consulted for its height, which is where the loader's ground begins." The private machinery is
   load-bearing for the wrench: Read's `path.Length == 0` branch (256-265) appends the single synthetic
@@ -5478,7 +5478,7 @@ _10 findings, from the `complexity-shim-rest` finder._
   src/Xlide.Vbe.Shim/Editor/VbeMenus.cs gives Read (199), Describe (401), ControlAt (459) and
   FindMenuBar (505) as the only non-private members, and `git grep 'VbeMenus.'` finds a caller for
   each: AddInSession.cs:4207 (Read), AddInSession.DebugApi.cs:2652 (Describe, serving the `menus`
-  route at docs/debug-api.md:86), AddInSession.cs:4233 (ControlAt), AddInSession.cs:7196
+  route at docs/xlide-api.md:86), AddInSession.cs:4233 (ControlAt), AddInSession.cs:7196
   (FindMenuBar). The private machinery is wired too: Read:203-205 routes XlideMenuPosition to
   ReadXlideMenu (274), which is also called from Describe:413; Resolve (335) is called at 208, 428 and
   471; PositionOf (374) at 280 and 349; ExtractShortcut (531) at 238 and 311; ControlsAt (480) at 208,
@@ -5519,7 +5519,7 @@ _9 findings, from the `complexity-page` finder._
   (indent size, block layout) also resets the planner to xlide, so a developer who set it through the
   api or by hand loses it the next time they touch the dialog. This is exactly the api-mirrors-the-UI
   rule inverted: the api route reaches a state the UI cannot, so the whole harness passes over a
-  broken UI path, and docs/debug-api.md:90 asserts the opposite of what is true - "the page's own
+  broken UI path, and docs/xlide-api.md:90 asserts the opposite of what is true - "the page's own
   update takes the whole object".
 - **Change:** Add `syncEngine: string` to the `updateSettings` member of the client message union
   (bridge.ts:300-308) and pass `settings.syncEngine` in bridge.ts:672-681. Separately, make the host's
@@ -5576,7 +5576,7 @@ _9 findings, from the `complexity-page` finder._
 - **Correction applied:** Two numbers to fix. It is six structural spellings on the page side, not five (interface, inbound
   member, outbound member, post body, adopt block, normaliser), and three more on the host side that
   the finding does not count: EditorMessages.cs:84 (SetSettingsMessage carries syncEngine),
-  DebugServer.cs:953 (DebugSettingsReply), and the field-by-field parse at EditorSurface.cs:1600-1636.
+  ApiServer.cs:953 (DebugSettingsReply), and the field-by-field parse at EditorSurface.cs:1600-1636.
   Also, the proposed fix as written would change wire tolerance: the inbound member deliberately marks
   formatIndentSize and syncEngine optional so a host that predates them still type-checks, so the
   shared payload type has to stay optional on the inbound side (`{ type: "setSettings" } &
@@ -6090,14 +6090,14 @@ _15 findings, from the `complexity-tooling` finder._
 
 - **Where:** `tools/harness/Test-DebugApi.ps1:20`
 - **Kind:** complexity / medium effort, claim observed, confidence verified, severity low
-- **Evidence:** `$discoveryPath = Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($excel.Id).json"` then `$api
+- **Evidence:** `$discoveryPath = Join-Path $env:LOCALAPPDATA "xlide_vbide\xlide-api-$($excel.Id).json"` then `$api
   = "http://127.0.0.1:$($d.port)/$($d.token)"`. The same two lines, with the same string literal,
   appear in Get-Shot.ps1:47, Open-VbeIn.ps1:103, Test-Churn.ps1:34, Test-DiscardProblems.ps1:36,
   Test-ObjectBrowser.ps1:183, Test-SplitWorkspace.ps1:23, tools/page.ps1:70 and tools/verify.ps1:352.
   Six of them get the pid from `Get-Process EXCEL | Select-Object -First 1`; Open-VbeIn.ps1 takes a
   `$ProcessId` parameter; page.ps1:66-70 enumerates all Excels and refuses to guess ("Never guesses
   between two Excels: a page deployed into the wrong session is a confusing hour"). The node client
-  does none of this by hand: xlide-api.mjs:180-217 `discover()` reads every debug-api-*.json in the
+  does none of this by hand: xlide-api.mjs:180-217 `discover()` reads every xlide-api-*.json in the
   directory, proves each is alive by calling state(1500), and `open({ pid, workbook })` at line 224
   "Throws with the list when the choice is ambiguous, because guessing which Excel to drive is how a
   test writes into the wrong workbook."
@@ -6111,8 +6111,8 @@ _15 findings, from the `complexity-tooling` finder._
   candidate list rather than picking the first. Convert the eight call sites. Do not change route
   shapes - this is only how the base URL is found.
 - **Size:** 8 hand-rolled copies; 6 of them pick the wrong Excel when two are open
-- **Adversary:** grep for 'debug-api-$' across tools/*.ps1 returns nine sites, all building the same
-  LOCALAPPDATA\xlide_vbide\debug-api-<pid>.json path: Get-Shot.ps1:47, Open-VbeIn.ps1:103,
+- **Adversary:** grep for 'xlide-api-$' across tools/*.ps1 returns nine sites, all building the same
+  LOCALAPPDATA\xlide_vbide\xlide-api-<pid>.json path: Get-Shot.ps1:47, Open-VbeIn.ps1:103,
   Test-Churn.ps1:34, Test-DebugApi.ps1:20, Test-DiscardProblems.ps1:36, Test-ObjectBrowser.ps1:183,
   Test-SplitWorkspace.ps1:23, page.ps1:70, verify.ps1:352. Six take the pid from 'Get-Process EXCEL
   ... Select-Object -First 1' (Get-Shot:44, Test-Churn:31, Test-DebugApi:17, Test-DiscardProblems:33,
@@ -6138,7 +6138,7 @@ _15 findings, from the `complexity-tooling` finder._
   Test-ObjectBrowser.ps1 has the same shape (header legs 1/2/3, leg 3 being objbrowser-live-probe.mjs)
   and verify.ps1:247 likewise runs only objbrowser-page-probe.mjs; grep finds
   objbrowser-live-probe.mjs invoked only from Test-ObjectBrowser.ps1 and mentioned in
-  docs/debug-api.md. Neither wrapper appears in verify.ps1's probe list at line 369.
+  docs/xlide-api.md. Neither wrapper appears in verify.ps1's probe list at line 369.
 - **Why:** The stale-deploy tripwire is gone: docs/testing.md:15-18 keeps seam checks specifically for "a
   rebuilt page that never reached the publish tree has bitten more than once", and the only Test-Seam
   implementation in the repo is in a file nothing runs. So is the engine leg of the stale-problems
@@ -6156,7 +6156,7 @@ _15 findings, from the `complexity-tooling` finder._
   close-confirm-page-probe.mjs directly and verify.ps1:369 lists only Test-DebugApi,
   Test-SplitWorkspace, Test-DiscardProblems, Test-Churn, so neither wrapper is ever invoked. grep
   shows engine-live-probe.mjs invoked only from Test-CloseConfirm.ps1 and objbrowser-live-probe.mjs
-  only from Test-ObjectBrowser.ps1 (plus a docs/debug-api.md:355 mention).
+  only from Test-ObjectBrowser.ps1 (plus a docs/xlide-api.md:355 mention).
 - **Correction applied:** There are two Test-Seam implementations, not one: Test-CloseConfirm.ps1:31 and
   Test-ObjectBrowser.ps1:29. Both files are unrun, so the conclusion that no seam check executes in
   the gate stands. Test-CloseConfirm makes ten seam calls, not eight.
@@ -6173,7 +6173,7 @@ _15 findings, from the `complexity-tooling` finder._
   which verify.ps1:426 runs on RenameFixture.xlsm, drives rename and `api.undoRename()` on the same
   fixture with the workbook/surface/engine comparison rename-features.mjs does not have.
   Get-EditorScreenshot.ps1 (16 KB) is superseded by Get-Shot.ps1 (2.8 KB), which does the same job
-  through the api's /capture route and is the one docs/debug-api.md names. The other three are not
+  through the api's /capture route and is the one docs/xlide-api.md names. The other three are not
   superseded: Test-CloseVbe.ps1 closes the frame via WM_SYSCOMMAND SC_CLOSE three times and checks
   Excel survives ("Guards the 2026-08-04 crash (lesson 27)"), Test-CloseHiddenPane.ps1 checks a hidden
   pane's close still removes its tab, Test-ResizeFollow.ps1 checks the overlay and the browser child
@@ -6366,7 +6366,7 @@ _15 findings, from the `complexity-tooling` finder._
 - **Where:** `docs/testing.md:24`
 - **Kind:** api-coverage / small effort, claim derived, confidence verified, severity low
 - **Evidence:** Line 24: "**Live probes** (`tools\harness\Test-*.ps1`, gated behind `verify.ps1 -Live`). Drive a
-  real editor through the debug api." verify.ps1:369 runs four of the fifteen Test-*.ps1 files. The
+  real editor through the xlide api." verify.ps1:369 runs four of the fifteen Test-*.ps1 files. The
   bulk of -Live is the step at verify.ps1:395-443, whose own comment opens "THE NODE SUITES, which
   existed and passed and which nothing ran", running import-guard.mjs, immediate-watch.mjs,
   analysis-freshness.mjs, menu-bar.mjs, module-sync.mjs twice, format-positions.mjs, three-copies.mjs,
@@ -7146,14 +7146,14 @@ _10 findings, from the `perf-page` finder._
   (EditorSurface.cs:2119-2149) reads each field into a local, formats `$" in {total}ms (bundle
   {script}ms, editor {create}ms{detail}...)"` and returns the string - nothing is retained on the
   surface or the session. Grepping src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs,
-  tools/harness/xlide-api.mjs and docs/debug-api.md for scriptMs, bootMs or timings finds only the
-  unrelated `stats` row about placement-pass timings (docs/debug-api.md:53).
+  tools/harness/xlide-api.mjs and docs/xlide-api.md for scriptMs, bootMs or timings finds only the
+  unrelated `stats` row about placement-pass timings (docs/xlide-api.md:53).
 - **Why:** Startup is named as the highest-value page path and the page already computes the full breakdown,
   but the only consumer is a log line a human reads. No harness suite can assert it, tools/verify.ps1
   cannot regress on it, and a change that adds 400 ms to bundle parse ships without anything failing.
   Every other finding here that claims a startup saving has to be verified by reading a log by hand.
 - **Change:** Retain the parsed timings on the surface as a small record and answer them from a new debug-api
-  route (a new noun, not a change to an existing one), documented in both docs/debug-api.md and
+  route (a new noun, not a change to an existing one), documented in both docs/xlide-api.md and
   docs/driving-excel.md and driven by a harness check, per the repo's own rule that every route
   appears in both and is driven by something. That makes the startup number an observation the gate
   can hold to a ceiling.
@@ -7163,12 +7163,12 @@ _10 findings, from the `perf-page` finder._
   EditorSurface.cs:2119-2150 DescribeTimings reads each field into a local and returns the formatted
   suffix, used only at EditorSurface.cs:1307 Log.Info($"editor surface: ready{DescribeTimings(...)}").
   Only the build stamp survives (EditorSurface.cs:1309 PageBuildStamp, Debug-only). Grepping
-  AddInSession.DebugApi.cs, tools/harness/xlide-api.mjs and docs/debug-api.md for
-  scriptMs/bootMs/timings finds nothing; the totalMs at DebugServer.cs:1031 is DebugRouteCost, the
+  AddInSession.DebugApi.cs, tools/harness/xlide-api.mjs and docs/xlide-api.md for
+  scriptMs/bootMs/timings finds nothing; the totalMs at ApiServer.cs:1031 is DebugRouteCost, the
   door's own per-route cost, unrelated. A new noun for it obeys the repo's rules (new capability as a
   new route, documented in both docs, driven by something).
 - **Correction applied:** 'No harness suite can assert it' overstates the gap. Two partial observations already exist:
-  docs/debug-api.md:54 'log' takes match and waitMs and BLOCKS until a matching line appears, so a
+  docs/xlide-api.md:54 'log' takes match and waitMs and BLOCKS until a matching line appears, so a
   suite can already pull the formatted 'editor surface: ready in Nms (bundle ...)' line, and the
   reload route already answers an elapsed reload-to-ready in ms (AddInSession.DebugApi.cs:1573-1600,
   150ms polling granularity). The real defect is narrower and still worth fixing: the breakdown is not
@@ -7389,8 +7389,8 @@ _10 findings, from the `perf-engine-gate` finder._
   and records elapsed seconds; there is no job, runspace or Start-Job anywhere in the file. Order as
   written: vendored spec (80), engine executable is current (94), no variant is read as an object
   (165), page typecheck (198), page build (207), page tests (219), engine language matrix (229), page
-  probes headless (246), debug api documented and driven (259), solution build Release (272), unit
-  tests (278), Release carries no debug api (288), native publish (302).
+  probes headless (246), xlide api documented and driven (259), solution build Release (272), unit
+  tests (278), Release carries no xlide api (288), native publish (302).
   
   The candidate is CONFIRMED WITH ONE DEPENDENCY. The dotnet chain is NOT independent of the whole
   node chain: src/Xlide.Vbe.Shim/Xlide.Vbe.Shim.csproj:83 globs the page bundle into the build,
@@ -7402,7 +7402,7 @@ _10 findings, from the `perf-engine-gate` finder._
   So 'solution build (Release)' depends on 'page build'. Nothing downstream of the page build does:
   'page tests' (npm test in ui/editor), 'engine language matrix' (node engine/test/language.mjs, which
   spawns its own engine per engine/test/language.mjs:37-38), 'page probes (headless)' (five node
-  scripts) and 'debug api is documented and driven' (node audit-routes.mjs, which reads sources) touch
+  scripts) and 'xlide api is documented and driven' (node audit-routes.mjs, which reads sources) touch
   no dotnet output, and the dotnet steps touch none of their inputs. 'no variant is read as an object'
   (165) is a Select-String over src\**\*.cs and depends on nothing at all.
 - **Why:** The gate is the thing a developer runs before every commit, so its wall clock is paid many times a
@@ -7410,7 +7410,7 @@ _10 findings, from the `perf-engine-gate` finder._
   running are waiting, and vice versa.
 - **Change:** Keep steps 1-5 (through 'page build') serial, then run two groups concurrently: {page tests, engine
   language matrix, page probes, audit routes} and {solution build, unit tests, Release carries no
-  debug api, native publish}, joining before the summary. Start-ThreadJob or two Start-Job handles are
+  xlide api, native publish}, joining before the summary. Start-ThreadJob or two Start-Job handles are
   enough; the Step function already stores per-step Ok/Seconds/Detail into an ordered hashtable
   (verify.ps1:54-78) so the summary table needs only the results merged back in order. Keep the FAILED
   line per step so a failure still names itself.
@@ -7572,7 +7572,7 @@ _10 findings, from the `perf-engine-gate` finder._
   - verify.ps1:165-196, 'no variant is read as an object': a Select-String for
   `\.As<\s*object\s*>\s*\(` over src\**\*.cs. Its own comment records that this defect "has killed
   Excel twice, months apart in code terms" and that com-leak.mjs "cannot catch either one".
-  - verify.ps1:259-264, 'debug api is documented and driven': node tools\harness\audit-routes.mjs,
+  - verify.ps1:259-264, 'xlide api is documented and driven': node tools\harness\audit-routes.mjs,
   which reads the routes out of the shim and fails when one is undocumented or undriven.
   - verify.ps1:246-253, 'page probes (headless)': five node scripts (close-confirm, objbrowser, tree,
   boot-error, sole-workbook) that need no host and no dotnet output.
@@ -7634,7 +7634,7 @@ _10 findings, from the `perf-engine-gate` finder._
   plus CountOfLines per component - and skip ReadSource for a project whose shape and line counts are
   unchanged, falling back to the full read whenever anything differs. The second changes no observable
   behaviour and pays off for every Reanalyse caller, not just this one.
-- **Size:** unmeasured. ProjectReader.cs:19 puts a large project's read at 'tens of milliseconds'; measurable now by timing ProjectReader.ReadAll on the perf fixture, or from the debug api's marshalMs samples around an Immediate line.
+- **Size:** unmeasured. ProjectReader.cs:19 puts a large project's read at 'tens of milliseconds'; measurable now by timing ProjectReader.ReadAll on the perf fixture, or from the xlide api's marshalMs samples around an Immediate line.
 - **Adversary:** src/Xlide.Vbe.Shim/AddIn/AddInSession.cs:4192-4193 reads exactly as quoted, unconditional after
   Evaluate at 4180. AnalysisService.cs:274-308 starts a pass; AnalyseEverythingAsync:845 awaits
   ReadProjectsAsync, which at 810 marshals ReadOnHost -> ProjectReader.ReadAll onto the host thread,
@@ -7684,7 +7684,7 @@ _10 findings, from the `perf-engine-gate` finder._
 - **Change:** Add a new engine method (not a rename of an existing one) alongside debug/liveSource - debug/memos -
   answering per project: entry counts and hit/miss counters for the five maps, with a reset. Surface
   it as a new debug-api route beside perf rather than a new field on perf, since it is the engine's
-  state and not the shim's timing, and give it a client method plus entries in docs/debug-api.md and
+  state and not the shim's timing, and give it a client method plus entries in docs/xlide-api.md and
   docs/driving-excel.md so audit-routes.mjs is satisfied. It answers what the render depends on rather
   than what the render shows, so its route entry should say plainly that it stops at the engine layer.
 - **Size:** five counter pairs and one route; the reporting cost is a JSON object of about twelve numbers per project.
@@ -7757,7 +7757,7 @@ findInModule, showSearchResults, showModuleResults), workspace.ts (snapshot, str
 context menu, moveTab), shell.ts (seat list, paneVisibility, notify, status fields, properties
 writes), main.ts (toolbar dispatch, Ctrl+W/Ctrl+backslash, devsurface wiring, rename provider,
 undoRename and findAllReferences actions, showReferences), paneldocks.ts (public method outline
-only), and the full route table of docs/debug-api.md plus the act examples in docs/driving-excel.md.
+only), and the full route table of docs/xlide-api.md plus the act examples in docs/driving-excel.md.
 Checked drivers against tools/harness/xlide-api.mjs, audit-routes.mjs (which audits routes, not act
 actions - act coverage is unenforced) and grepped the suite directory for each gap.
 
@@ -7773,7 +7773,7 @@ each finding's evidence rests on the direct path, not on that possibility. Nothi
 nothing was written.
 
 **Shim capabilities with no driver or no observer.** Read in full: VbeCommands.cs, GhostReaderThread.cs, XlideAddIn.cs, ProductSettings.cs, and the
-DebugServer.cs reply records for state, native, locals, watches, immediate and windows. Read by
+ApiServer.cs reply records for state, native, locals, watches, immediate and windows. Read by
 section: AddInSession.DebugApi.cs (RunPageScript and its surface routing 68-268; log, messages,
 capture 518-660; immediate, locals, watches, problems 658-850; act 1062-1090; stats and the
 host-thread marshal 1794-1900; the assert vocabulary 2095-2150; state and doctor head 2293-2340;
@@ -7786,7 +7786,7 @@ AttachImmediateReader and OnDebugOutput 3958-4030, OnModuleCloseRequested and Mo
 6472-6580, RemoveComponent tail 6820-6870, Stop 7593-7675, plus the full method index).
 Cross-checked every candidate against the route case list, the client method list in
 tools/harness/xlide-api.mjs, the act table in ui/editor/src/devsurface.ts:514-1481, and the
-docs/debug-api.md rows for state, ui, problems, watches, breakpoints and component. Confirmed that
+docs/xlide-api.md rows for state, ui, problems, watches, breakpoints and component. Confirmed that
 eval?surface=palette and capture?window=palette do reach the Object Browser palette
 (BrowserPalette.Browser at BrowserPalette.cs:33, selected at AddInSession.DebugApi.cs:220), so the
 object browser and the type-library catalog behind it are not reported as gaps; likewise notices
@@ -7805,8 +7805,8 @@ judged sufficient are actually driven today - audit-routes.mjs enforces that sep
 was launched and nothing was written.
 
 **The api as a testing instrument.** Read in full: src/Xlide.Vbe.Shim/AddIn/AddInSession.DebugApi.cs (all 3348 lines, both route switches
-and every helper), tools/harness/audit-routes.mjs, docs/debug-api.md, tools/harness/xlide-api.mjs.
-Read src/Xlide.Vbe.Shim/Diagnostics/DebugServer.cs lines 1-448 (server, request parsing, history,
+and every helper), tools/harness/audit-routes.mjs, docs/xlide-api.md, tools/harness/xlide-api.mjs.
+Read src/Xlide.Vbe.Shim/Diagnostics/ApiServer.cs lines 1-448 (server, request parsing, history,
 durations, reply writing) and the reply-record declarations by name; I did NOT read the DebugCapture
 GDI section (455-660) or every one of the ~50 reply records field by field - I read
 DebugCommandReply, DebugErrorReply, DebugBlockedReply and DebugDialogRow/Reply and skimmed the rest.
@@ -7819,7 +7819,7 @@ builds, no harness, no Excel, no git state changes; the counts I cite (208 vs 5 
 zero `.capture(` calls, zero drainFinalizers callers) come from read-only greps over tools/harness.
 Gaps: HandleSync (AddInSession.cs:254 onward) was not read, so the `sync` route's four actions and
 their error shapes are unaudited; ui/editor/src/devsurface.ts was not opened, so the drift between
-the `do=` enumeration at docs/debug-api.md:70 and the page's real action list is unverified and
+the `do=` enumeration at docs/xlide-api.md:70 and the page's real action list is unverified and
 deliberately not reported; the ghost-reader snapshots behind `locals`/`watches` were not traced to
 their source, so I cannot say whether those two observations are live or recorded; and I did not
 audit the ~47 fixed sleeps in the .mjs suites one by one against the retained-by-design set named at
@@ -7866,7 +7866,7 @@ capture), 909-1200 (assert, journal, perf, ui, act, eval, await), 1297-1620 (ben
 reload, dialogs), 1758-1904 (guard, dismiss, stats, and the host marshal that closes the pool
 switch), 2060-2290 (EvaluateClaim, AnswerBlockedRequest), 2289-2350 (state, doctor head), 2704-2950
 (sync, component, pane), 3034-3348 (projects, project, documents, command, breakpoint, module,
-caret, placement, default). Read in DebugServer.cs: 1-260 (Start, discovery sweep, Loop, Serve,
+caret, placement, default). Read in ApiServer.cs: 1-260 (Start, discovery sweep, Loop, Serve,
 ReadRequest head) plus a full member and record map by grep, and the 52 JsonSerializable entries.
 Read Log.cs 100-200. Whole-file greps that back the counting claims: every `case "..."` label with
 line numbers, every method declaration, every `default:`, every `new
@@ -7878,7 +7878,7 @@ Not read, and therefore not judged: AddInSession.DebugApi.cs lines 670-909 (imme
 watches, problems, drainfinalizers, history), 1200-1297 (console, inspect), 1620-1758 (compile,
 type, mark), 1919-2060 (the dialog-watch internals and RememberRaisedDialogs body), 2350-2704
 (doctor body, engine, native, windows, menus, outline), 2948-3034 (breakpoints, settings).
-DebugServer.cs 260-460 (RecordRequest/RecordDuration bodies, ReadRequest, WriteReply, Dispose) and
+ApiServer.cs 260-460 (RecordRequest/RecordDuration bodies, ReadRequest, WriteReply, Dispose) and
 460-1260 (the GDI capture code and the reply record definitions) were mapped but not read line by
 line. DialogWatch.cs (231 lines) was not opened at all - the dismiss/safe-button logic that
 AnswerBlockedRequest depends on is unexamined.
@@ -7888,8 +7888,8 @@ Diagnostics file except Log.cs is wholly inside #if DEBUG, and the Release solut
 gate is what proves the call sites are guarded, since an unguarded PerfCounters or EngineCounters
 reference would not compile. I found no Debug-only code leaking into a type that ships. The gate
 step at tools/verify.ps1:288 searches the published Release DLL for four literals -
-`__xlideConsole`, `unknown benchmark`, `the pending result was lost`, `debug-api-` - which live in
-DebugApi.cs and DebugServer.cs, so it proves those two files contributed no strings; it does not and
+`__xlideConsole`, `unknown benchmark`, `the pending result was lost`, `xlide-api-` - which live in
+DebugApi.cs and ApiServer.cs, so it proves those two files contributed no strings; it does not and
 cannot prove the absence of Debug-only code that has no distinctive literal, and I did not attempt
 to establish that any such code exists. Two things I checked and dropped rather than report: the
 ManualResetEventSlim disposed while a late host callback may still Set it (Set is documented not to
@@ -7902,12 +7902,12 @@ seventeen cases are guarded on their arguments: it is accurate, eleven pool-side
 GhostReaderThread.cs, Com/ComHandle.cs, Com/ComRuntime.cs, Com/HResult.cs, Interop/TypeLibrary.cs,
 Core/Engine/EngineProtocol.cs, Core/Sync/SyncSettings.cs, Shim/Sync/SyncMessages.cs. Read in part:
 EditorSurface.cs (member list plus 232-411, the Show* block), CodePaneTracker.cs (120-190 and
-600-940), DebugServer.cs (400-500 only), WebView2Surface.cs (100-170, 925-1000, 1050-1085, plus the
+600-940), ApiServer.cs (400-500 only), WebView2Surface.cs (100-170, 925-1000, 1050-1085, plus the
 #if DEBUG map), DialogWatch.cs (150-230), Win32.cs (1-30 plus targeted greps), Win32.Events.cs
 (targeted greps only). Verified dead-code claims by grepping the whole repo excluding node_modules
 and .git, and for the C#-only identifiers (HResult, Win32 constants, command ids) by whole-word
 occurrence counts across src, tests, tools and installer; for message shapes and command names I
-also checked ui/editor/src, docs/debug-api.md and tools/harness, since those dispatch on strings.
+also checked ui/editor/src, docs/xlide-api.md and tools/harness, since those dispatch on strings.
 NOT READ, so this is not a clean bill for them: Engine/AnalysisService.cs (1247 lines),
 Engine/EngineClient.cs (747), Engine/ProjectReader.cs, WebView/WebView2Interop.cs (688),
 WebView/LoopbackPageServer.cs, Editor/TypeLibraryCatalog.cs (611), Editor/OverlayWindow.cs (786),
@@ -7935,7 +7935,7 @@ workspace.ts (layout types, splitLeaf, dissolveEmptyGroups, tabAfter, the method
 paneldocks.ts (pruneUnknown and the drag/zone sites), devsurface.ts (header, UiSnapshot, dialogsUp,
 watchLongTasks), main.ts (imports, dialog wiring, the boot region by grep). Traced into the shim
 where a page claim needed settling: EditorMessages.cs, EditorSurface.cs message switch,
-AddInSession.DebugApi.cs settings route, tools/harness/module-sync.mjs, docs/debug-api.md.
+AddInSession.DebugApi.cs settings route, tools/harness/module-sync.mjs, docs/xlide-api.md.
 
 CSS came back clean and I want that on the record rather than dressed up as a finding. I enumerated
 all 199 distinct class selectors and all 102 id selectors in styles.css and tested each against
@@ -8021,7 +8021,7 @@ internals, the loopback server), LoopbackPageServer.cs, VbeMenus.cs, VbeCommands
 ImmediateEvaluator.cs, LocalsReader.cs and WatchReader.cs internals (only their call sites),
 BrowserPalette.cs, TypeLibraryCatalog.cs, HostChrome.cs, OverlayWindow's paint path,
 Interop/Win32.cs and UiAutomation.cs, Sync/ModuleSyncService.cs and Core/Sync/ModuleSync.cs,
-DebugServer.cs, and the ~50-route switch in AddInSession.DebugApi.cs beyond perf and stats. The
+ApiServer.cs, and the ~50-route switch in AddInSession.DebugApi.cs beyond perf and stats. The
 startup budget in docs/status.md (about 2.1s) is therefore only partly attributed here: I
 established that TypeLibraryCatalog is lazy and ReportOpenProjects is cheap, but I did not read the
 WebView2 environment creation, HideReplacedWindows, HideNativeToolbars or PrepareGhostPalette, which

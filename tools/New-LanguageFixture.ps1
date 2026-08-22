@@ -21,7 +21,7 @@
 
     Every module here compiles except Defects, which is named so nobody wonders.
 
-    Built through the debug api rather than through Workbook.VBProject, so "Trust access to the
+    Built through the xlide api rather than through Workbook.VBProject, so "Trust access to the
     VBA project object model" stays OFF. See New-RenameFixture.ps1 for why that matters.
 
 .EXAMPLE

@@ -1949,7 +1949,7 @@ closing Excel by hand and pressing Cancel.
 
 A debug route can drive it - call the same OnBeginShutdown the host calls, without a real exit, and
 the watchdog reads the standing frame as a cancellation and revives. But OnBeginShutdown's first
-act is Stop(), and Stop() disposes the DebugServer that is serving the request that triggered it.
+act is Stop(), and Stop() disposes the ApiServer that is serving the request that triggered it.
 Triggered inline, the teardown kills the connection before the reply is written, so the client sees
 a dropped socket rather than an answer, and a suite cannot tell "it worked" from "it died".
 
@@ -1960,7 +1960,7 @@ The reply says, in effect, "this port is about to die; reconnect."
 
 And the revival needs a witness that cannot be faked by nothing happening. "The session answers
 again" is satisfied by a session that never went away. The proof it cycled is a NEW session: the
-discovery file carries a startedAt and a port, both written afresh every time a DebugServer starts,
+discovery file carries a startedAt and a port, both written afresh every time a ApiServer starts,
 and only a revival starts one. Assert the startedAt moved, then wait for the fresh session to seed
 - because a session seconds old is still starting its engine, and asking it a host-thread question
 too early times out, which is the same "not ready YET" that reads as a false failure everywhere

@@ -1,14 +1,30 @@
-# The debug api
+# The xlide api
 
 A local HTTP door into a running xlide session: ask what the editor is doing, drive it by
-name, and read what its panels hold. It exists so diagnostics, tests, and performance work
-can act semantically instead of posting mouse messages at measured pixels, and its route
-shapes are deliberately product-grade because the same door is the intended path for
-xlide_vscode and xlide_vbide to talk to each other one day.
+name, and read what its panels hold. It exists so diagnostics, tests, performance work and
+AI agents can act semantically instead of posting mouse messages at measured pixels, and its
+route shapes are product-grade because the same door is the intended path for xlide_vscode
+and xlide_vbide to talk to each other.
 
-**Debug builds only.** A Release shim carries no server, no port, and no route: the whole
-feature is inside `#if DEBUG`, verified by publishing Release and finding none of its
-strings in the binary.
+**It ships, and it ships shut.** Every build carries every route here; a release build opens
+none of them until someone turns the api on from the agent card (the robot button on the
+toolbar). One api, not a debug one and a product one that drift apart.
+
+- The choice is written to `%LOCALAPPDATA%\xlide_vbide\settings.json` as `api.enabled`, and
+  it holds across restarts in both directions.
+- With the key absent, the build decides: a dev build opens the door, because the harness is
+  the reason it exists; a shipped build keeps it shut.
+- `verify.ps1` reads the published Release binary and fails if it says it leans open.
+
+**What being on means.** A loopback listener on a random port, and a token written to a file
+under your profile. Anything running as you can read that file, and anything holding the
+token can read, write and run code in every project the editor can reach. That is the whole
+of the security model: local, and as trusted as your own account.
+
+**The DevTools protocol is NOT part of this and never ships.** Dev builds also ask the
+browser for `--remote-debugging-port` with `--remote-allow-origins=*`, which takes no
+credential at all. It is a harness tool, it is `#if DEBUG`, and the gate fails if a release
+binary carries either flag. `devtoolsPort` reads `0` in a shipped build.
 
 ## Finding an instance
 
@@ -16,7 +32,7 @@ The api belongs to an ADD-IN SESSION, which exists once per Excel process that h
 the VBE. Each session writes a discovery file:
 
 ```text
-%LOCALAPPDATA%\xlide_vbide\debug-api-{pid}.json
+%LOCALAPPDATA%\xlide_vbide\xlide-api-{pid}.json
 {"api":1,"port":61503,"token":"92a9...","devtoolsPort":61501,"pid":21916,"startedAt":"...",
  "product":"xlide_vbide","host":"excel","agent":"http://127.0.0.1:61503/92a9.../agent"}
 ```
@@ -52,7 +68,7 @@ it: every advertised breadcrumb must resolve, and every route the table calls sa
 bare must answer as itself.
 
 So the whole hand-off to an agent is one sentence: *read
-`%LOCALAPPDATA%\xlide_vbide\debug-api-*.json`, GET the `agent` URL inside it, and follow
+`%LOCALAPPDATA%\xlide_vbide\xlide-api-*.json`, GET the `agent` URL inside it, and follow
 `next`.*
 
 ## The inside door: `GetObject(, "Xlide.Api")`
@@ -165,7 +181,7 @@ caller can hold both at once.
 | `pane` | POST | `action=open\|close\|closeNative`, `module`, `project`, `answer=save\|discard`, `face=design` | opens or closes a module's TAB. A close goes through the same gate the tab's own X uses, so unwritten edits raise the question unless `answer` settles it. An open answers `error` when nothing carries that name; it used to answer ok and do nothing. **A close answers `{closed, detail, awaiting}`** for the same reason: a save that would not save, a revert the module refused, and a confirm now standing on screen all left the tab where it was and all replied ok. `awaiting: "confirm"` is the third answer, neither success nor failure - answer it with `act answerCloseConfirm`. **`face=design` opens or closes a FORM's designer tab** - the markup-beside-visual tab - through the same method the page's own gesture uses. The designer tabs are PRODUCT STATE rather than a mirror of the host's pane list: the native designer window stays down on purpose (a live one summons the Toolbox, and a save while one exists restores it on open), so these tabs exist only in this product and `ui.workspace` reports them with `face: "design"`. A non-form is refused; closing a designer face never asks about unwritten edits, because unapplied markup is the page's own state and the page asks its own question. `closeNative` is the OTHER direction and **a designated deviation**: it closes the HOST's own pane window through the editor's pane list, which is the developer's click on the native child's close box - the direction the 2026-08-04 dead-tab defect lived in, where a HIDDEN pane's close fired no Changed and the strip kept the tab. The native close box asks no unwritten-edits question (that question belongs to the page's tab X), so none is asked; the tab disappears because the tracker notices the window go. Until this existed the host-originated close could only be produced through `Application.VBE` from outside, which project trust gates |
 | `settings` | GET/POST | any setting name | the developer's settings, and a POST changes only what it names. the page's own update takes the whole object. `syncEngine=xlide\|builtIn` chooses which planner decides an import or export. **`designerSnap`** is what the form designer's canvas snaps POINTER gestures to - `grid`, `objects` or `off`, one or the other and never both, because two snapping systems that disagree give a control two right answers. `grid` ships, at the `designerGridSize` spacing (six points, the editor's own Align Controls to Grid); `objects` lines up with the edges and centres of the neighbours sharing a container and draws a guide where it lands. An arrow key moves a single point whatever it says, and holding Alt escapes whichever mode is on - `act designerDrag ... alt 1` holds it for a whole synthetic gesture. A suite that changes it is changing the developer's own file, so it puts it back in its `finally` |
 | `palette` | POST | `action=hide` | puts the Object Browser palette away, the way its own close box does: its WM_CLOSE handler HIDES with state intact, so the next summons (the `objectBrowser` command, which means summon and not toggle) presents the same page. Answers `{did, detail, visible}`; `did` is false when no palette exists yet. Existed from 2026-08-12, because every probe that summoned the palette either left it standing in front of the next probe or reached for a window message from outside the process - and the summoning command cannot put it away |
-| `session` | POST | `action=cancelledShutdown` | drives a shutdown that is begun and then cancelled - `OnBeginShutdown` WITHOUT a real process exit - which stops the session and arms the watchdog, and because the editor frame stays standing the watchdog revives the session, exactly as it does when a developer cancels Excel's save prompt. That was the 2026-08-02 field failure (the add-in came back DEAD inside a living Excel) and had no test, because reaching it meant closing Excel by hand. **The reply arrives BEFORE the teardown** - it must, or it would ride the DebugServer that `Stop()` disposes - so after it this port goes dead; the revived session writes a fresh port and `startedAt` into `debug-api-<pid>.json`, and the client reconnects by re-reading it (`discover()` / `open({pid})`). Debug only |
+| `session` | POST | `action=cancelledShutdown` | drives a shutdown that is begun and then cancelled - `OnBeginShutdown` WITHOUT a real process exit - which stops the session and arms the watchdog, and because the editor frame stays standing the watchdog revives the session, exactly as it does when a developer cancels Excel's save prompt. That was the 2026-08-02 field failure (the add-in came back DEAD inside a living Excel) and had no test, because reaching it meant closing Excel by hand. **The reply arrives BEFORE the teardown** - it must, or it would ride the ApiServer that `Stop()` disposes - so after it this port goes dead; the revived session writes a fresh port and `startedAt` into `xlide-api-<pid>.json`, and the client reconnects by re-reading it (`discover()` / `open({pid})`). Debug only |
 | `frame` | POST | `action=close\|show` | the editor window itself: the one pair of gestures every developer makes daily and no route could produce. `close` POSTS the developer's own X click (`SC_CLOSE` delivered by the pump after the reply), so the editor runs its whole close path - the hide, the palette follow, the placement retreat - outside the request; the reply's `visible` still reads true and **the outcome is observed on `state.frameVisible`**, the rule every posted effect on this door lives by. `show` reaches the same end state as Excel's Developer > Visual Basic button, synchronously, so its reply is the outcome. Closing the editor shipped a crash once (lesson 27); until this route the only automated driver was a probe sending window messages from outside |
 | `undoRename` | POST | | puts the last rename back: every module it touched and the component's old name. The editor's own undo cannot, because a rename spans modules and the undo stack is per model. Answers `{undone, from, to, modules, stopped}`, where `stopped` is the half that matters: an undo can restore four modules and be refused the fifth, leaving the project in neither state. It answered a bare true until 2026-08-11, and the sentence saying which of those had happened went to the page under a request id this route invented, where no caller could read it. **A DESIGNATED DEVIATION**: it reaches the session's undo directly, so it proves the operation is reversible and NOT that the context-menu item works. Drive the menu item with `act editorAction id=xlide.undoRename` when that is the question |
 | `breakpoints` | GET | | every recorded breakpoint as `{module, project, lines}`, and the project mode. **`project` is part of the identity**: two open workbooks can each hold a module of the same name, and the record was keyed by the name alone until 2026-08-08, so a breakpoint set in one was reported against the other and a run that should have stopped did not |

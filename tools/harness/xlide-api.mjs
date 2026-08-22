@@ -1,5 +1,5 @@
 /*
- * A client for the shim's debug api: discovery, instance selection, and one method per route.
+ * A client for the shim's xlide api: discovery, instance selection, and one method per route.
  *
  * The api exists once per ADD-IN SESSION, which is once per Excel process that has opened the
  * VBE. A developer with several workbooks open usually has ONE process and one api, and the
@@ -236,7 +236,7 @@ export async function discover() {
 
   const candidates = [];
   for (const name of names) {
-    if (!name.startsWith("debug-api-") || !name.endsWith(".json")) {
+    if (!name.startsWith("xlide-api-") || !name.endsWith(".json")) {
       continue;
     }
 
@@ -377,7 +377,7 @@ function clientFor(entry) {
     windows: () => call("windows"),
 
     // The agent front door and what it teaches: the api explaining itself, and the two
-    // knowledge routes the engine answers. See "An agent's first request" in debug-api.md.
+    // knowledge routes the engine answers. See "An agent's first request" in xlide-api.md.
     agent: () => call("agent"),
     agentRoutes: () => call("agent/routes"),
     agentRoute: (name) => call(`agent/route${query({ name })}`),
@@ -704,7 +704,7 @@ function clientFor(entry) {
      * The session lifecycle. "cancelledShutdown" runs the real OnBeginShutdown without a
      * process exit, so the session stops and the watchdog revives it - the exact path a
      * developer meets when they cancel Excel's save prompt. This reply arrives BEFORE the
-     * teardown (it must, or it would ride the DebugServer that Stop disposes); AFTER it, this
+     * teardown (it must, or it would ride the ApiServer that Stop disposes); AFTER it, this
      * client's port goes dead. Reconnect with a fresh discover()/open({pid}) once the revived
      * session has rewritten the discovery file with a new port and startedAt.
      */

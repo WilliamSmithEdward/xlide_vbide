@@ -174,7 +174,7 @@ provider. The conclusion drawn from them - that the provider is unsafe from anyw
 inside the process and only an out-of-process helper could ever read it - is retired. The
 in-process reader works, and no second process is needed.
 
-The day's tooling (the CDP door, the debug api and its routes) lives on branch
+The day's tooling (the CDP door, the xlide api and its routes) lives on branch
 `post-v010-experiments`. Re-landing it starts by rebasing onto this fix, then goes commit
 by commit with the developer testing between steps.
 

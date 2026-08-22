@@ -38,7 +38,6 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     private int _watchdogTicks;
     private int _watchdogEnabledTicks;
 
-#if DEBUG
     /// <summary>
     /// The live add-in, so the Debug session route can drive the lifecycle the HOST drives.
     /// The cancelled-shutdown revival - the guard against a field failure that left the add-in
@@ -47,7 +46,6 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     /// not compiled into Release, where the route it serves does not exist either.
     /// </summary>
     internal static XlideAddIn? Current { get; private set; }
-#endif
 
     /// <summary>
     /// Releases the session if the host never called OnDisconnection. COM controls this object's
@@ -55,9 +53,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     /// </summary>
     public void Dispose()
     {
-#if DEBUG
         Current = null;
-#endif
         _watchdog?.Dispose();
         _watchdog = null;
 
@@ -98,9 +94,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             _session = new AddInSession(editor, addIn);
             _session.Start();
 
-#if DEBUG
             Current = this;
-#endif
             return HResult.Ok;
         }
         catch (Exception ex)
@@ -284,9 +278,7 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
             RetireWatchdog();
             ReleaseHostPointers();
 
-#if DEBUG
             Current = null;
-#endif
             Log.Info("disconnected cleanly");
             return HResult.Ok;
         }
@@ -297,21 +289,19 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
         }
     }
 
-#if DEBUG
     /// <summary>
     /// Runs OnBeginShutdown WITHOUT a real process exit, which is the cancelled-shutdown path
     /// under test: the session stops and the watchdog arms, and because the editor frame stays
     /// standing, enabled and visible, the watchdog reads a cancellation and revives the session
     /// exactly as it does when a developer presses Cancel on the save prompt. Called on the host
     /// thread by the Debug `session?action=cancelledShutdown` route, which responds before this
-    /// runs so the DebugServer that Stop() disposes is not the one serving the request.
+    /// runs so the ApiServer that Stop() disposes is not the one serving the request.
     /// </summary>
     internal void BeginSimulatedShutdown()
     {
-        Log.Info("session: a cancelled shutdown was requested through the debug door");
+        Log.Info("session: a cancelled shutdown was requested through the api door");
         OnBeginShutdown(0);
     }
-#endif
 
     private void ReleaseHostPointers()
     {

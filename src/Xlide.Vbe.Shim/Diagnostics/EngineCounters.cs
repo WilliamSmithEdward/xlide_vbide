@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
 
@@ -178,4 +177,3 @@ public sealed record EngineSlowCall(
     [property: JsonPropertyName("waitMs")] long WaitMs,
     [property: JsonPropertyName("callMs")] long CallMs,
     [property: JsonPropertyName("atMs")] long AtMs);
-#endif

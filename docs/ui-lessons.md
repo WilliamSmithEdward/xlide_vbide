@@ -90,7 +90,7 @@ and a structural property that MUST hold is stated explicitly rather than left t
 The diagnosis is worth keeping too, because it generalises: walk `document.styleSheets`,
 keep every rule whose selector the element matches, and read what each one says about the
 property in question. Computed style tells you the answer; the rule list tells you who
-decided it. That loop is now the debug api's `inspect?rules=1`, so the next collision costs
+decided it. That loop is now the xlide api's `inspect?rules=1`, so the next collision costs
 one request rather than an hour.
 
 **A flex child does not grow unless told.** Moving the workspace from grid to flex left the
@@ -182,14 +182,14 @@ hunting a bug that was not there. A check that inserts its own text first assert
 not the fixture.
 
 **Synthetic pointer drags work if every handler on the path is synchronous.** They are, here,
-deliberately - which also means the debug door can drive a whole drag in one request.
+deliberately - which also means the api door can drive a whole drag in one request.
 
 **Wait for the condition, not for a duration.** Probes that slept a guess after a split
 raced the thing they were watching: a freshly created editor gets its input element a beat
 after its model. Poll the actual predicate.
 
 **The page's content policy exempts the browser's own evaluation, not its callbacks.** A
-script injected by the host may call `eval` synchronously - the debug door's own script
+script injected by the host may call `eval` synchronously - the api door's own script
 runner relies on it - but the same call from inside a `setTimeout` callback is refused
 ("unsafe-eval is not an allowed source"). A polling waiter written the obvious way therefore
 never ran its predicate and reported every condition unmet. Compile the string to a function

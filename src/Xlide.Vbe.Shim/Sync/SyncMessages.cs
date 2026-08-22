@@ -67,7 +67,7 @@ public sealed record SyncErrorReply([property: JsonPropertyName("error")] string
 /// <summary>
 /// These shapes are the product's, not the dev door's.
 ///
-/// They started out beside the debug api's other replies and could not stay there: that file
+/// They started out beside the xlide api's other replies and could not stay there: that file
 /// compiles only in Debug, and the import/export dialog ships in the release build. A release
 /// carries these types and no server to serve them, which is the right way round.
 /// </summary>

@@ -1,4 +1,3 @@
-#if DEBUG
 namespace Xlide.Vbe.Shim.Diagnostics;
 
 /// <summary>
@@ -254,4 +253,3 @@ internal static class PerfCounters
         }
     }
 }
-#endif

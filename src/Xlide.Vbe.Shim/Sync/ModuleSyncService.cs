@@ -22,7 +22,7 @@ internal sealed record SyncApplyResult(
 /// The half of import/export that touches the editor and the disk.
 ///
 /// The planning is in <see cref="ModuleSync"/> and has no idea either exists, which is what lets
-/// the dialog and the debug api ask the same question and get the same answer. This half reads what
+/// the dialog and the xlide api ask the same question and get the same answer. This half reads what
 /// the project holds, reads what the folder holds, and carries out the rows a caller selected.
 ///
 /// ENCODING is the trap in all of this, and the reason the source is assembled rather than copied.

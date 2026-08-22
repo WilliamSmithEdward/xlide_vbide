@@ -463,7 +463,7 @@ export class SearchWidget {
   }
 
   /**
-   * What the widget is showing, for the debug api's `ui` route.
+   * What the widget is showing, for the xlide api's `ui` route.
    *
    * Reported from the fields the widget acts on, not scraped from its inputs: the two agreeing
    * is what makes the report worth anything, and a scrape could not tell a stale render from

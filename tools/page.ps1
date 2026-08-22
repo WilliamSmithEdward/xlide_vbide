@@ -7,7 +7,7 @@
     publish, no re-registration, no Excel restart - but the loop was being run by hand:
     build, copy the bundle into the published shim's directory, reload the page, wait, look.
     A dozen times in an afternoon (2026-08-06). This is that loop, once, with the waiting
-    done properly through the debug api instead of by sleeping a guess.
+    done properly through the xlide api instead of by sleeping a guess.
 
     The shim keeps its DLL locked while Excel runs, but the page bundle beside it is just
     files: they can be replaced under a live session, and a reload picks them up.

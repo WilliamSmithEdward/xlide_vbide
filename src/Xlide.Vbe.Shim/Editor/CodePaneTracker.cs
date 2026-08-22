@@ -332,9 +332,7 @@ internal sealed class CodePaneTracker : IDisposable
             _openComponents = null;
         }
 
-#if DEBUG
         Diagnostics.PerfCounters.WindowEvent();
-#endif
 
         // A window MOVING somewhere else in the process is not news here.
         //
@@ -428,9 +426,7 @@ internal sealed class CodePaneTracker : IDisposable
 
         _refreshing = true;
 
-#if DEBUG
         var refreshStartedAt = Environment.TickCount64;
-#endif
 
         try
         {
@@ -443,9 +439,7 @@ internal sealed class CodePaneTracker : IDisposable
             }
             while (_refreshQueued && ++passes < 4);
 
-#if DEBUG
             Diagnostics.PerfCounters.Refresh(Environment.TickCount64 - refreshStartedAt);
-#endif
 
             if (_refreshQueued)
             {

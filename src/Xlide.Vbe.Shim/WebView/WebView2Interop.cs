@@ -538,11 +538,10 @@ internal partial interface ICoreWebView2NavigationCompletedEventHandler
     int Invoke(nint sender, nint args);
 }
 
-#if DEBUG
 /// <summary>
 /// Callback raised when ExecuteScript finishes, carrying the result as a JSON string.
 /// Debug only: the product never runs script it did not ship, and the eval route that uses
-/// this exists for diagnosis (see DebugServer).
+/// this exists for diagnosis (see ApiServer).
 /// </summary>
 [GeneratedComInterface]
 [Guid("49511172-cc67-4bb9-9878-4e2b0c6b1e0b")]
@@ -551,7 +550,6 @@ internal partial interface ICoreWebView2ExecuteScriptCompletedHandler
     [PreserveSig]
     int Invoke(int errorCode, [MarshalAs(UnmanagedType.LPWStr)] string resultObjectAsJson);
 }
-#endif
 
 /// <summary>One message the page posted through window.chrome.webview.postMessage.</summary>
 /// <remarks>
@@ -648,9 +646,7 @@ internal static class WebViewIid
     public static readonly Guid EnvironmentCompletedHandler = new("4e8a3389-c9d8-4bd2-b6b5-124fee6cc14d");
     public static readonly Guid ControllerCompletedHandler = new("6c4819f3-c9b7-4260-8127-c9f5bde7f68c");
     public static readonly Guid NavigationCompletedHandler = new("d33a35bf-1c49-4f98-93ab-006e0533fe1c");
-#if DEBUG
     public static readonly Guid ExecuteScriptCompletedHandler = new("49511172-cc67-4bb9-9878-4e2b0c6b1e0b");
-#endif
     public static readonly Guid NavigationCompletedEventArgs = new("30d68b7d-20d9-4752-a9ca-ec8448fbb5c1");
     public static readonly Guid AcceleratorKeyPressedHandler = new("b29c7e28-fa79-41a8-8e44-65811c76dcb2");
     public static readonly Guid AcceleratorKeyPressedEventArgs = new("9f760f8a-fb79-42be-9990-7b56900fa9c7");

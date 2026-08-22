@@ -26,18 +26,16 @@ internal sealed class EditorSurface : IDisposable
     private OverlayWindow? _overlay;
     private WebView2Surface? _browser;
 
-#if DEBUG
-    /// <summary>The page itself, for the debug api's eval route. Debug builds only.</summary>
+    /// <summary>The page itself, for the xlide api's eval route.</summary>
     internal WebView2Surface? Browser => _browser;
 
     /// <summary>
     /// The overlay the page is drawn in - NOT <see cref="Host"/>, which is the document area
     /// the overlay is a child of. The surface covers more than the document area (it draws
     /// the menu bar and the toolbar), so a screenshot crop that used the parent landed tens
-    /// of pixels high. Debug builds only.
+    /// of pixels high.
     /// </summary>
     internal nint SurfaceWindow => _overlay?.Handle ?? 0;
-#endif
 
     /// <summary>
     /// One open module as this surface mirrors it: the workbook it belongs to (display name,
@@ -263,6 +261,9 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>The Changes pane asking the change log something. Read-only, always.</summary>
     public Action<int, IReadOnlyDictionary<string, string>>? ChangesRequested { get; set; }
+
+    /// <summary>The agent card asking about the api door, or asking it to move.</summary>
+    public Action<int, IReadOnlyDictionary<string, string>>? ApiRequested { get; set; }
 
     /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
     public Action<int, int, int>? CodeActionsRequested { get; set; }
@@ -504,6 +505,21 @@ internal sealed class EditorSurface : IDisposable
             EditorMessageContext.Default.ChangesResultMessage));
     }
 
+    /// <summary>The api door's state, back to the card that asked.</summary>
+    public void ShowApiResult(int requestId, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ApiResultMessage("apiResult", requestId, json),
+            EditorMessageContext.Default.ApiResultMessage));
+    }
+
     public void ShowSyncResult(int requestId, string json)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -595,9 +611,7 @@ internal sealed class EditorSurface : IDisposable
             return null;
         }
 
-#if DEBUG
         surface._browser.DebugName = "editor";
-#endif
 
         surface._browser.MessageReceived = surface.OnMessage;
         surface._browser.AcceleratorPressed = key => surface.KeyPressed?.Invoke(key) ?? false;
@@ -673,9 +687,7 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Moves the surface over a pane, or hides it when there is nothing to cover.</summary>
     public void Follow(PixelRect bounds, bool visible)
     {
-#if DEBUG
         var startedAt = Environment.TickCount64;
-#endif
         // Growing gives the browser its new size BEFORE the window reaches it.
         //
         // The overlay grows in one call and the browser catches up in its own time, so for a
@@ -699,9 +711,7 @@ internal sealed class EditorSurface : IDisposable
         }
 
         _overlay?.Place(bounds, visible);
-#if DEBUG
         var placedAt = Environment.TickCount64;
-#endif
 
         // The browser's size normally rides the WM_SIZE the placement above produces; it is
         // asserted here as well, so a size message that never arrived - a raced resize storm -
@@ -713,10 +723,8 @@ internal sealed class EditorSurface : IDisposable
             _browser?.SetBounds(overlay.ClientBounds());
         }
 
-#if DEBUG
         var doneAt = Environment.TickCount64;
         Diagnostics.PerfCounters.Follow(placedAt - startedAt, doneAt - placedAt, _browser is not null);
-#endif
     }
 
     /// <summary>
@@ -1657,12 +1665,10 @@ internal sealed class EditorSurface : IDisposable
                     _lastFindings = null;
                     _lastMarkers.Clear();
                     Log.Info($"editor surface: ready{DescribeTimings(document.RootElement)}");
-#if DEBUG
                     PageBuildStamp = document.RootElement.TryGetProperty("timings", out var readyTimings)
                         && readyTimings.TryGetProperty("build", out var readyBuild)
                         ? readyBuild.GetString()
                         : null;
-#endif
                     // Every live document is (re)opened before anything held is flushed: a page
                     // that reloaded mid-session lost its models, and the messages behind it -
                     // squiggles, tabs - land on models, so the models come first. An open the
@@ -2122,7 +2128,7 @@ internal sealed class EditorSurface : IDisposable
                     // settings did not leave the sixth alone - it overwrote it. That is exactly
                     // what happened to syncEngine, which the page's own updateSettings never
                     // included: changing the indent size reset the developer's chosen planner.
-                    // The debug api's settings route already worked this way.
+                    // The xlide api's settings route already worked this way.
                     var held = _settingsAsSent;
 
                     var layout = document.RootElement.TryGetProperty("blockLayout", out var layoutValue)
@@ -2197,9 +2203,7 @@ internal sealed class EditorSurface : IDisposable
                         // Logged in every configuration. A page that threw is worth a line in a
                         // Release log too, where there is no door to ask afterwards.
                         Log.Warn($"page: {said}");
-#if DEBUG
                         FirstPageError ??= said;
-#endif
                     }
 
                     break;
@@ -2379,7 +2383,7 @@ internal sealed class EditorSurface : IDisposable
                         && changesId.TryGetInt32(out var changesRequestId))
                     {
                         // Everything but the id is the route's own arguments, so the pane and the
-                        // debug api ask the same question in the same words.
+                        // xlide api ask the same question in the same words.
                         var changesArguments = new Dictionary<string, string>(StringComparer.Ordinal);
                         foreach (var field in document.RootElement.EnumerateObject())
                         {
@@ -2400,12 +2404,36 @@ internal sealed class EditorSurface : IDisposable
 
                     break;
 
+                case "api":
+                    if (document.RootElement.TryGetProperty("id", out var apiId)
+                        && apiId.TryGetInt32(out var apiRequestId))
+                    {
+                        var apiArguments = new Dictionary<string, string>(StringComparer.Ordinal);
+                        foreach (var field in document.RootElement.EnumerateObject())
+                        {
+                            if (field.Name is "type" or "id")
+                            {
+                                continue;
+                            }
+
+                            if (field.Value.ValueKind == JsonValueKind.String
+                                && field.Value.GetString() is { Length: > 0 } argument)
+                            {
+                                apiArguments[field.Name] = argument;
+                            }
+                        }
+
+                        ApiRequested?.Invoke(apiRequestId, apiArguments);
+                    }
+
+                    break;
+
                 case "sync":
                     if (document.RootElement.TryGetProperty("id", out var syncId)
                         && syncId.TryGetInt32(out var syncRequestId))
                     {
                         // Everything but the id is passed through as the service's own arguments,
-                        // so the dialog and the debug api hand it identical requests.
+                        // so the dialog and the xlide api hand it identical requests.
                         var syncArguments = new Dictionary<string, string>(StringComparer.Ordinal);
                         foreach (var syncField in document.RootElement.EnumerateObject())
                         {
@@ -2667,9 +2695,8 @@ internal sealed class EditorSurface : IDisposable
     /// Renders what the page reported about its own start-up, so the cost of putting a surface over
     /// a pane is a measured number in the log rather than an impression.
     /// </summary>
-#if DEBUG
     /// <summary>
-    /// The bundle stamp the page reported when it booted, kept for the debug api's doctor
+    /// The bundle stamp the page reported when it booted, kept for the xlide api's doctor
     /// route. A page and a shim built at different times is the commonest cause of "my fix
     /// is not in the log", and the only cure is being able to ask.
     /// </summary>
@@ -2684,7 +2711,6 @@ internal sealed class EditorSurface : IDisposable
     /// not boot BECAUSE".
     /// </summary>
     internal string? FirstPageError { get; private set; }
-#endif
 
     private static string DescribeTimings(JsonElement message)
     {

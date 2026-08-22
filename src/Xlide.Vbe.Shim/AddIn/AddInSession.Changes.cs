@@ -55,7 +55,7 @@ internal sealed partial class AddInSession
     /// <summary>
     /// Who the write in flight belongs to, or null for the developer at the keyboard.
     ///
-    /// A write that arrives through the debug api is never the developer typing - it is a program,
+    /// A write that arrives through the xlide api is never the developer typing - it is a program,
     /// whether or not it says which - so the door sets this for the length of a request and clears
     /// it afterwards. `by=` on the request names the caller; without it the honest answer is that
     /// something wrote and did not say who.

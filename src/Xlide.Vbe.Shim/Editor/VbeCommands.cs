@@ -87,7 +87,7 @@ internal static class VbeCommands
 
     /// <summary>
     /// What became of a command. Most callers want <see cref="CommandRun.Ran"/> and nothing else,
-    /// but a script driving the editor through the debug api needs the rest: "this host has no
+    /// but a script driving the editor through the xlide api needs the rest: "this host has no
     /// such command" and "the item was greyed" are different answers, and a caller handed only
     /// false cannot tell them apart, nor tell either from an exception.
     /// </summary>

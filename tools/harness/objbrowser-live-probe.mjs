@@ -19,7 +19,7 @@ function discoverDoors() {
   const home = join(process.env.LOCALAPPDATA ?? "", "xlide_vbide");
   const sessions = [];
   for (const name of readdirSync(home)) {
-    if (!/^debug-api-\d+\.json$/.test(name)) { continue; }
+    if (!/^xlide-api-\d+\.json$/.test(name)) { continue; }
     try {
       const found = JSON.parse(readFileSync(join(home, name), "utf8"));
       process.kill(found.pid, 0);
@@ -119,7 +119,7 @@ try {
   // whose eval check summons a palette and toggles it hidden again. A pre-existing hidden
   // palette is that probe leaving state as found, not a defect; one left VISIBLE would be.
   let state = await api("state");
-  check("the debug api answers with a ready surface", state.surfaceReady === true);
+  check("the xlide api answers with a ready surface", state.surfaceReady === true);
   check("no palette is showing before the summons",
     state.paletteOpen === false || state.paletteVisible === false,
     state.paletteOpen === false

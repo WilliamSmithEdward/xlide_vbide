@@ -442,7 +442,7 @@ export class Shell {
   }
 
   /** The panes, for the settings dialog's visibility section. */
-  /** The tree itself, for the debug api's `ui` route, which reports its state and drives it. */
+  /** The tree itself, for the xlide api's `ui` route, which reports its state and drives it. */
   explorerTree(): Explorer {
     return this.explorer;
   }

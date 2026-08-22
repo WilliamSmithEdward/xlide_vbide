@@ -11,7 +11,7 @@
     Every module below is labelled in its own comments with what to try and what must NOT move.
     The checklist is in the workbook, not only here, so it is still there next time.
 
-    Built through the debug api, so "Trust access to the VBA project object model" does NOT have
+    Built through the xlide api, so "Trust access to the VBA project object model" does NOT have
     to be on. That setting gates VBComponents.Add through Workbook.VBProject; the add-in is
     already past it, because the host hands it the VBE. A Debug build must be registered and
     loading, which is what makes the door exist.
@@ -193,7 +193,7 @@ End Sub
 #
 # The old shape needed "Trust access to the VBA project object model" turned on, because
 # VBComponents.Add is exactly what that setting gates. The add-in is already past that gate - the
-# host hands it the VBE at OnConnection - so the components go in through the debug api and the
+# host hands it the VBE at OnConnection - so the components go in through the xlide api and the
 # setting can stay OFF, which is where it belongs (2026-08-07).
 #
 # Three phases, because each needs a different thing:

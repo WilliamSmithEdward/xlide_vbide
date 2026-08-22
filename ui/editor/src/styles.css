@@ -5686,3 +5686,202 @@ body.objbrowser-page #objbrowser-card {
   text-overflow: clip;
   padding-right: 24px;
 }
+
+/* -------------------------------------------------------------------------------------------
+   The agent card: the api's switch, and the address it hands out.
+
+   Same backdrop, same card edges, same head as every other dialog here, so it reads as part of
+   the product. What it does NOT borrow is the settings card's quiet row-of-preferences look: this
+   one control opens a door into the developer's projects, and the card is laid out to make the
+   consequence the thing you read before you reach the switch.
+   ------------------------------------------------------------------------------------------- */
+
+#agent-backdrop {
+  padding-top: 8vh;
+  z-index: 90;
+}
+
+#agent-card {
+  width: 720px;
+  max-height: calc(100vh - 8vh - 24px);
+  display: flex;
+  flex-direction: column;
+}
+
+#agent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 8px;
+}
+
+#agent-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#agent-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+#agent-close .codicon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+#agent-close:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+#agent-close:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+#agent-gate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px 0;
+}
+
+#agent-toggle {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--vscode-focusBorder, #0078d4);
+  cursor: pointer;
+}
+
+#agent-toggle-label {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* On or off said in a WORD as well as a colour, so the state does not depend on telling a green
+   pill from a grey one. */
+#agent-lit {
+  font-size: 11px;
+  padding: 0 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.agent-lit-on {
+  color: var(--vscode-charts-green, #89d185);
+}
+
+.agent-lit-off {
+  opacity: 0.6;
+}
+
+/* THE SENTENCE THAT MATTERS. Full width, above the paste, in the body colour rather than a muted
+   one: this is what the switch actually does, and a caption nobody reads is how a capability gets
+   turned on by accident. */
+#agent-consequence {
+  margin: 0;
+  padding: 6px 14px 10px;
+  line-height: 1.5;
+  opacity: 0.85;
+}
+
+#agent-paste {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+#agent-paste-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 6px;
+}
+
+#agent-paste-label {
+  font-weight: 600;
+}
+
+.agent-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid var(--vscode-button-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+  font: inherit;
+  cursor: pointer;
+}
+
+.agent-action:hover:not(:disabled) {
+  background: var(--vscode-button-hoverBackground, #1177bb);
+}
+
+.agent-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.agent-action:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: 1px;
+}
+
+#agent-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 3px;
+  background: var(--vscode-input-background, #1e1e1e);
+  color: var(--vscode-input-foreground, #cccccc);
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+}
+
+#agent-text:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -1px;
+}
+
+/* Shut: the box still stands, holding the sentence that says how to fill it. Emptying the card
+   instead would leave the switch looking like the whole feature. */
+.agent-paste-shut #agent-text {
+  opacity: 0.6;
+  font-family: inherit;
+  white-space: normal;
+}
+
+#agent-said {
+  margin: 0;
+  min-height: 18px;
+  padding-top: 6px;
+  font-size: 11px;
+  opacity: 0.8;
+}

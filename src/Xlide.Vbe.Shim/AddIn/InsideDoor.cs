@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Xlide.Vbe.Shim.Com;
@@ -203,4 +202,3 @@ internal sealed partial class InsideDoor : IDispatch
         return null;
     }
 }
-#endif

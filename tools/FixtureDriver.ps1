@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     The three-phase driver every fixture generator shares: blank workbook, editor session,
-    modules written through the debug api.
+    modules written through the xlide api.
 
 .DESCRIPTION
     Five generators carried this stretch verbatim - the COM maker for the empty .xlsm, the
@@ -128,7 +128,7 @@ function Invoke-FixtureBuild {
         ($plan | ConvertTo-Json -Depth 8),
         (New-Object System.Text.UTF8Encoding $false))
 
-    Write-Host '3. Writing the components through the debug api.'
+    Write-Host '3. Writing the components through the xlide api.'
     try {
         & node (Join-Path $harness 'build-fixture.mjs') $planPath | Write-Host
         if ($LASTEXITCODE -ne 0) { throw 'the fixture could not be built through the api' }

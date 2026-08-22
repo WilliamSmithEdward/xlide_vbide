@@ -1,4 +1,4 @@
-# Standing PASS/FAIL probe for the shim's debug api: every route, and the break-mode round
+# Standing PASS/FAIL probe for the shim's xlide api: every route, and the break-mode round
 # trip that is the whole point of it (push code, set a breakpoint, run, read live locals).
 # Run tools\dev.ps1 -KeepOpen first, or any harness session; Debug builds only.
 # Dev-harness script: uses Application.VBE per decision 10's harness exception.
@@ -619,7 +619,7 @@ Check 'layout reset puts a rearranged workspace back' {
 # --- The agent front door, the knowledge routes, and the inside door ---
 
 Check 'discovery advertises product, host, and a ready agent URL' {
-    $disc = Get-Content (Join-Path $env:LOCALAPPDATA "xlide_vbide\debug-api-$($d.pid).json") -Raw | ConvertFrom-Json
+    $disc = Get-Content (Join-Path $env:LOCALAPPDATA "xlide_vbide\xlide-api-$($d.pid).json") -Raw | ConvertFrom-Json
     $disc.product -eq 'xlide_vbide' -and $disc.host.Length -gt 0 -and $disc.agent -match '/agent$'
 }
 

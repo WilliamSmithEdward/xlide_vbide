@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Starts Excel on a workbook and opens the editor, so the debug api has something to answer for.
+    Starts Excel on a workbook and opens the editor, so the xlide api has something to answer for.
 
 .DESCRIPTION
     Three things here are not obvious, and each one cost a session to learn.
@@ -156,7 +156,7 @@ $excel.DisplayAlerts = $false
 # "Trust access to the VBA project object model" refuses, and with it off they come back NULL -
 # not an exception, a null, so a try/catch reports success and prints nothing. ExecuteMso is
 # Excel executing its own Developer > Visual Basic button, and is not gated. So this script, and
-# everything the debug api does after it, works with that setting OFF (verified 2026-08-07).
+# everything the xlide api does after it, works with that setting OFF (verified 2026-08-07).
 $excel.CommandBars.ExecuteMso('VisualBasic')
 Write-Host 'Editor opened (through the ribbon command, which needs no VBA project trust).'
 

@@ -120,6 +120,20 @@ public sealed record ProductSettings
     [JsonPropertyName("sync.engine")]
     public string SyncEngine { get; set; } = "xlide";
 
+    /// <summary>
+    /// The xlide api: the local, token-gated door an agent drives this session through.
+    ///
+    /// THREE STATES, AND THE THIRD ONE IS THE POINT. Null means "whatever this build defaults
+    /// to" - on in a dev build, where the harness IS the reason the build exists, and off in a
+    /// shipped one, where a door nobody asked for should not be listening. True and false are a
+    /// developer having answered the question, and their answer holds in either build.
+    ///
+    /// It is a capability rather than a preference, which is why it is not in the settings
+    /// dialog: it is turned on from the agent card, next to the address it hands out.
+    /// </summary>
+    [JsonPropertyName("api.enabled")]
+    public bool? ApiEnabled { get; set; }
+
     public static ProductSettings Default { get; } = new();
 
     /// <summary>The settings with every value forced into its legal range.</summary>

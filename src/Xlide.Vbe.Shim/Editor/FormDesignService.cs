@@ -7,7 +7,7 @@ namespace Xlide.Vbe.Shim.Editor;
 
 /// <summary>
 /// The PRODUCT side of the form markup: a UserForm walked into Core's FormSpec and printed as
-/// text, for the markup tab. The debug door's designer routes carry the rich diagnostic walk
+/// text, for the markup tab. The api door's designer routes carry the rich diagnostic walk
 /// (every colour, every font) and the mutations; this walk is the narrow one the markup layer
 /// speaks - identity, containment, geometry, caption - because an unspoken property is one an
 /// apply can never erase (docs/userform-designer.md, the markup layer).

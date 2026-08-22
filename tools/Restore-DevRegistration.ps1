@@ -12,12 +12,12 @@
     registering first and uninstalling second would undo the repair.
 
     Which build it restores is inferred rather than assumed. The dev loop publishes Release by
-    default but is routinely run as -Configuration Debug, since the debug api only exists there, so
+    default but is routinely run as -Configuration Debug, since the xlide api only exists there, so
     a script that hardcoded one of them would quietly move you to the other. It keeps whichever is
     registered now, falls back to the most recently published, and -Configuration overrides both.
 
     The data folder is kept by default. The installed product and the dev build share it, so a
-    plain uninstall would take the dev logs and the debug api's discovery files with it.
+    plain uninstall would take the dev logs and the xlide api's discovery files with it.
 
     RUN THIS FROM YOUR OWN TERMINAL, not from an agent or sandboxed shell. Sandboxed environments
     can virtualize registry writes, leaving a registration only the sandbox can see while Excel
@@ -43,7 +43,7 @@ param(
     [switch] $LeaveInstalled,
 
     # Let the uninstaller remove the shared data folder as well: logs, the WebView2 cache, and the
-    # debug api's discovery files.
+    # xlide api's discovery files.
     [switch] $DiscardData
 )
 

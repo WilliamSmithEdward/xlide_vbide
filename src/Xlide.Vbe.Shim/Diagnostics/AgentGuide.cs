@@ -1,4 +1,3 @@
-#if DEBUG
 namespace Xlide.Vbe.Shim.Diagnostics;
 
 /// <summary>
@@ -6,7 +5,7 @@ namespace Xlide.Vbe.Shim.Diagnostics;
 ///
 /// The audience is an AGENT: a program - usually a language model with an HTTP client - that a
 /// developer has pointed at a running session and asked to work with. A person learns this door
-/// from docs/debug-api.md; an agent gets handed a discovery file and one URL, so everything the
+/// from docs/xlide-api.md; an agent gets handed a discovery file and one URL, so everything the
 /// docs would have told it has to be reachable BY REQUEST, as a breadcrumb trail: the discovery
 /// file names the `agent` route, `agent` names the rest, and every reply carries `next` links so
 /// there is no step at which the caller has to already know the answer.
@@ -478,4 +477,3 @@ internal static class AgentGuide
         ["doctor"] = $"{baseUrl}/doctor",
     };
 }
-#endif

@@ -1,4 +1,3 @@
-#if DEBUG
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -10,31 +9,38 @@ using Xlide.Vbe.Core;
 namespace Xlide.Vbe.Shim.Diagnostics;
 
 /// <summary>
-/// The dev build's local door: a token-gated HTTP endpoint on 127.0.0.1 that answers
-/// questions about the running session and acts on it by name, so the harness can ask and
-/// act semantically instead of posting mouse messages at measured pixels (developer,
-/// 2026-08-05). The route shapes are deliberately product-grade: the developer's stated
-/// vision is xlide_vscode and xlide_vbide talking over this api one day, so routes stay
-/// noun-shaped and stable, and the discovery file carries a schema number.
+/// The xlide api's local door: a token-gated HTTP endpoint on 127.0.0.1 that answers questions
+/// about the running session and acts on it by name, so a caller can ask and act semantically
+/// instead of posting mouse messages at measured pixels (developer, 2026-08-05). The route
+/// shapes were product-grade from the first day on the stated bet that xlide_vscode and
+/// xlide_vbide would talk over this api one day, so routes are noun-shaped and stable and the
+/// discovery file carries a schema number.
 ///
-/// This file compiles ONLY in Debug. A release build carries no server, no port, and no
-/// route; the product's contract is untouched. The port is random, the token is random,
-/// and both are announced in the shim log and in a per-process discovery file that the
-/// session deletes when it stops.
+/// THAT BET WAS CALLED IN (the owner, 2026-08-22): this shipped in the release build, as ONE
+/// api rather than a debug one and a product one that would drift apart. It was `#if DEBUG` for
+/// its whole life before that, which is why so much of the surface below reads like a harness -
+/// because it was one, and the routes a harness needs turn out to be the routes an agent needs.
+///
+/// WHAT SHIPPING IT COSTS, and why the gate is where it is: an open door is a local listener
+/// that can read, write and run code in every project this editor can reach. So a release build
+/// opens it for nobody until someone turns it on from the agent card, the choice is written to
+/// the settings file, and the switch says in plain words what it is switching on. The port is
+/// random, the token is random, and both are announced in the shim log and in a per-process
+/// discovery file that the session deletes when it stops.
 ///
 /// The server owns sockets and nothing else. Every answer comes from the delegate its
 /// owner provides; marshaling to the host thread is the owner's business, and a slow
 /// answer is the owner saying so, not this class guessing.
 /// </summary>
-internal sealed class DebugServer : IDisposable
+internal sealed class ApiServer : IDisposable
 {
     /// <summary>One parsed request: the route, its query arguments, and its body when it sent one.</summary>
-    public sealed record DebugRequest(string Route, IReadOnlyDictionary<string, string> Query, string Body);
+    public sealed record ApiRequest(string Route, IReadOnlyDictionary<string, string> Query, string Body);
 
     /// <summary>One answer: its content type and its bytes. JSON is the norm; capture is not.</summary>
-    public sealed record DebugReply(string ContentType, byte[] Bytes)
+    public sealed record ApiReply(string ContentType, byte[] Bytes)
     {
-        public static DebugReply Json(string body) =>
+        public static ApiReply Json(string body) =>
             new("application/json; charset=utf-8", Encoding.UTF8.GetBytes(body));
     }
 
@@ -42,7 +48,7 @@ internal sealed class DebugServer : IDisposable
     private const int ApiVersion = 1;
 
     private readonly TcpListener _listener;
-    private readonly Func<DebugRequest, DebugReply> _answer;
+    private readonly Func<ApiRequest, ApiReply> _answer;
     private readonly string _token;
     private readonly string _discoveryPath;
     private volatile bool _stopped;
@@ -50,16 +56,26 @@ internal sealed class DebugServer : IDisposable
     /// <summary>This door's root, token included: what every advertised URL is built on.</summary>
     public string BaseUrl { get; }
 
-    private DebugServer(TcpListener listener, string token, string discoveryPath, Func<DebugRequest, DebugReply> answer)
+    /// <summary>The port this door is listening on, for the card that shows the address.</summary>
+    public int Port { get; }
+
+    /// <summary>This door's token. Read from the LIVE server, never from anything remembered.</summary>
+    public string Token => _token;
+
+    /// <summary>The per-process file a client discovers this door through.</summary>
+    public string DiscoveryPath => _discoveryPath;
+
+    private ApiServer(TcpListener listener, string token, string discoveryPath, Func<ApiRequest, ApiReply> answer)
     {
         _listener = listener;
         _token = token;
         _discoveryPath = discoveryPath;
         _answer = answer;
-        BaseUrl = $"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/{token}";
+        Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        BaseUrl = $"http://127.0.0.1:{Port}/{token}";
     }
 
-    public static DebugServer? Start(Func<DebugRequest, DebugReply> answer)
+    public static ApiServer? Start(Func<ApiRequest, ApiReply> answer)
     {
         try
         {
@@ -74,13 +90,13 @@ internal sealed class DebugServer : IDisposable
                 ProductIdentity.DataFolderName);
             Directory.CreateDirectory(directory);
             SweepDeadDiscoveryFiles(directory);
-            var discoveryPath = Path.Combine(directory, $"debug-api-{Environment.ProcessId}.json");
+            var discoveryPath = Path.Combine(directory, $"xlide-api-{Environment.ProcessId}.json");
 
-            var server = new DebugServer(listener, token, discoveryPath, answer);
+            var server = new ApiServer(listener, token, discoveryPath, answer);
 
             // Everything a client needs to pick THIS instance from several running Excels:
             // the file is per pid, and the state route answers with the shown workbook. A
-            // client discovers by globbing debug-api-*.json and probing each state.
+            // client discovers by globbing xlide-api-*.json and probing each state.
             //
             // `host` and `agent` are for a caller that knows NOTHING yet - an agent handed this
             // file cold. The host token says which Office application answered (the add-in loads
@@ -95,12 +111,12 @@ internal sealed class DebugServer : IDisposable
                 $"\"agent\":\"{server.BaseUrl}/agent\"}}");
 
             _ = Task.Run(server.Loop);
-            Log.Info($"debug api: listening on 127.0.0.1:{port}/{token} (dev build only)");
+            Log.Info($"xlide api: listening on 127.0.0.1:{port}/{token}");
             return server;
         }
         catch (Exception ex)
         {
-            Log.Info($"debug api: could not start ({ex.GetType().Name}: {ex.Message})");
+            Log.Info($"xlide api: could not start ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }
@@ -112,12 +128,12 @@ internal sealed class DebugServer : IDisposable
     /// </summary>
     private static void SweepDeadDiscoveryFiles(string directory)
     {
-        foreach (var stale in Directory.EnumerateFiles(directory, "debug-api-*.json"))
+        foreach (var stale in Directory.EnumerateFiles(directory, "xlide-api-*.json"))
         {
             try
             {
                 var name = Path.GetFileNameWithoutExtension(stale);
-                if (int.TryParse(name["debug-api-".Length..], out var pid) && pid != Environment.ProcessId)
+                if (int.TryParse(name["xlide-api-".Length..], out var pid) && pid != Environment.ProcessId)
                 {
                     using var process = System.Diagnostics.Process.GetProcessById(pid);
                 }
@@ -178,7 +194,7 @@ internal sealed class DebugServer : IDisposable
             var (method, target, requestBody) = request;
             if (method is not ("GET" or "POST"))
             {
-                WriteReply(stream, "405 Method Not Allowed", DebugReply.Json("""{"error":"GET or POST"}"""));
+                WriteReply(stream, "405 Method Not Allowed", ApiReply.Json("""{"error":"GET or POST"}"""));
                 return;
             }
 
@@ -202,22 +218,22 @@ internal sealed class DebugServer : IDisposable
             var prefix = $"/{_token}/";
             if (!path.StartsWith(prefix, StringComparison.Ordinal))
             {
-                WriteReply(stream, "404 Not Found", DebugReply.Json("""{"error":"unknown"}"""));
+                WriteReply(stream, "404 Not Found", ApiReply.Json("""{"error":"unknown"}"""));
                 return;
             }
 
             var route = path[prefix.Length..];
             RecordRequest(method, route, query);
 
-            DebugReply body;
+            ApiReply body;
             var servedFrom = Environment.TickCount64;
             try
             {
-                body = _answer(new DebugRequest(route, query, requestBody));
+                body = _answer(new ApiRequest(route, query, requestBody));
             }
             catch (Exception ex)
             {
-                WriteReply(stream, "500 Internal Server Error", DebugReply.Json($"{{\"error\":\"{ex.GetType().Name}\"}}"));
+                WriteReply(stream, "500 Internal Server Error", ApiReply.Json($"{{\"error\":\"{ex.GetType().Name}\"}}"));
                 return;
             }
 
@@ -393,7 +409,7 @@ internal sealed class DebugServer : IDisposable
         {
             // Refused by closing rather than by answering: the request was never fully read, and
             // a 200 for a body that was thrown away is the failure this exists to prevent.
-            Log.Info($"debug api: a body over {LargestBody} bytes was refused rather than truncated");
+            Log.Info($"xlide api: a body over {LargestBody} bytes was refused rather than truncated");
             return null;
         }
 
@@ -424,7 +440,7 @@ internal sealed class DebugServer : IDisposable
         return (parts[0], parts[1], body);
     }
 
-    private static void WriteReply(NetworkStream stream, string status, DebugReply reply)
+    private static void WriteReply(NetworkStream stream, string status, ApiReply reply)
     {
         var header = $"HTTP/1.1 {status}\r\n"
             + $"Content-Type: {reply.ContentType}\r\n"
@@ -1567,4 +1583,3 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugAgentExamplesReply))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class DebugJsonContext : JsonSerializerContext;
-#endif

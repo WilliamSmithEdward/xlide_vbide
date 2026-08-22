@@ -7,7 +7,7 @@
  * how the two ends of a round trip drift apart.
  *
  * NOTHING IS DECIDED HERE. The host works out the plan and the host carries it out; this draws the
- * plan and sends back the rows that are ticked. The debug api's `sync` route reaches the very same
+ * plan and sends back the rows that are ticked. The xlide api's `sync` route reaches the very same
  * call in the host, so a plan read by a harness is the plan drawn here, and Apply leaves the
  * project exactly where the api would have left it. That is the whole reason the dialog is thin.
  */

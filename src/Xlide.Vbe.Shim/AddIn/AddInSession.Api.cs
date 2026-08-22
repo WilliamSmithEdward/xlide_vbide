@@ -13,7 +13,7 @@ using Xlide.Vbe.Shim.Sync;
 namespace Xlide.Vbe.Shim.AddIn;
 
 /// <summary>
-/// The debug api: the session's side of the local HTTP door.
+/// The xlide api: the session's side of the local HTTP door.
 ///
 /// SPLIT OFF AS A PARTIAL RATHER THAN REWRITTEN. Nothing here changed in the move. It lived in
 /// AddInSession.cs, where two of its methods - the route switch and the on-host route switch - ran
@@ -21,14 +21,15 @@ namespace Xlide.Vbe.Shim.AddIn;
 /// of the product. The third longest member in that file is 223 lines, so the bulk was not spread
 /// out: it was here, and it is one concern.
 ///
-/// It is all inside `#if DEBUG`, which is what makes the split so clean: the region was already
-/// contiguous, and a Release build has none of it. The gate proves that separately by looking for
-/// the door's own strings in the published Release binary.
+/// It WAS all inside `#if DEBUG`, which is what made the split so clean: the region was already
+/// contiguous. The gate is a RUNTIME one now (the owner, 2026-08-22: "let's just have one api...
+/// but we just include what we call xlide api in the production build... but it's off by default
+/// in production, so we're not duplicating code"). A shipped build carries every route here and
+/// listens on none of them until someone turns the door on from the agent card.
 /// </summary>
 internal sealed partial class AddInSession
 {
-#if DEBUG
-    private DebugServer? _debugServer;
+    private ApiServer? _apiServer;
 
     /// <summary>
     /// The host UI thread, captured at construction (OnConnection runs there). Two doors need
@@ -43,14 +44,14 @@ internal sealed partial class AddInSession
     private InsideDoor? _insideDoor;
     private Com.DispatchObject? _insideDoorRef;
 
-    private static DebugServer.DebugReply DebugError(string error) =>
-        DebugServer.DebugReply.Json(HostError(error));
+    private static ApiServer.ApiReply ApiError(string error) =>
+        ApiServer.ApiReply.Json(HostError(error));
 
     /// <summary>
     /// The error reply as the ON-HOST switch answers it: the serialized string, because
     /// AnswerDebugRequestOnHost returns strings and the dispatch wraps them. This existing
     /// as a name is what stops the serializer call being spelled out at every refusal -
-    /// it was spelled out twenty-eight times (the audit's B13). DebugError above is the
+    /// it was spelled out twenty-eight times (the audit's B13). ApiError above is the
     /// pool-side wrapping of the same convention.
     /// </summary>
     private static string HostError(string error) =>
@@ -68,7 +69,7 @@ internal sealed partial class AddInSession
     /// failed to start while the in-process door still serves - a caller there gets URLs that
     /// say so rather than URLs that dangle.
     /// </summary>
-    private string AgentBaseUrl() => _debugServer?.BaseUrl ?? "http://(the-http-door-did-not-start)";
+    private string AgentBaseUrl() => _apiServer?.BaseUrl ?? "http://(the-http-door-did-not-start)";
 
     /// <summary>
     /// The designerSaveDirty act's refusal, or null when every dirty document applied. The act
@@ -318,7 +319,7 @@ internal sealed partial class AddInSession
             query["timeoutMs"] = "0";
         }
 
-        var reply = AnswerDebugRequest(new DebugServer.DebugRequest(route, query, body));
+        var reply = AnswerApiRequest(new ApiServer.ApiRequest(route, query, body));
 
         return reply.ContentType.StartsWith("application/json", StringComparison.Ordinal)
             ? System.Text.Encoding.UTF8.GetString(reply.Bytes)
@@ -337,7 +338,7 @@ internal sealed partial class AddInSession
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             Core.ProductIdentity.DataFolderName);
 
-        foreach (var file in Directory.EnumerateFiles(directory, "debug-api-*.json"))
+        foreach (var file in Directory.EnumerateFiles(directory, "xlide-api-*.json"))
         {
             try
             {
@@ -452,11 +453,11 @@ internal sealed partial class AddInSession
 
     /// <summary>Shapes a page script's answer the one way every eval-style route answers it:
     /// the script's error verbatim, or the answer with its result unwrapped for the caller.</summary>
-    private static DebugServer.DebugReply PageReply(
+    private static ApiServer.ApiReply PageReply(
         (bool Answered, int ErrorCode, string Result, string? Error) ran) =>
         ran.Error is { } error
-            ? DebugError(error)
-            : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+            ? ApiError(error)
+            : ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                 new DebugEvalReply(ran.Answered, ran.ErrorCode, ran.Result, Unwrap(ran.Result)),
                 DebugJsonContext.Default.DebugEvalReply));
 
@@ -483,10 +484,10 @@ internal sealed partial class AddInSession
 
     /// <summary>Min, median, p95 and max over the samples - the one quantile convention, so the
     /// bench and trip routes cannot come to mean two different things by p95.</summary>
-    private static DebugServer.DebugReply BenchReply(string what, List<double> samples, string detail)
+    private static ApiServer.ApiReply BenchReply(string what, List<double> samples, string detail)
     {
         var ordered = samples.OrderBy(one => one).ToArray();
-        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+        return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
             new DebugBenchReply(
                 what,
                 ordered.Length,
@@ -573,7 +574,7 @@ internal sealed partial class AddInSession
     /// Absent, or a word neither list knows, answers the fallback: a route's default is the
     /// route's business, and a typo must not silently mean the opposite of what it looks like.
     /// </summary>
-    private static bool Flag(DebugServer.DebugRequest request, string name, bool fallback = false)
+    private static bool Flag(ApiServer.ApiRequest request, string name, bool fallback = false)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -629,7 +630,7 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>A request's wait budget, clamped to something a stuck page cannot outlast.</summary>
-    private static int WaitMilliseconds(DebugServer.DebugRequest request, int fallback)
+    private static int WaitMilliseconds(ApiServer.ApiRequest request, int fallback)
     {
         ArgumentNullException.ThrowIfNull(request);
         return request.Query.TryGetValue("waitMs", out var text) && int.TryParse(text, out var asked)
@@ -1103,7 +1104,7 @@ internal sealed partial class AddInSession
     /// wait; the one thing no deadline outlasts is a line that stops at a real breakpoint,
     /// which is the debugger working.
     /// </summary>
-    private DebugServer.DebugReply AnswerDebugRequest(DebugServer.DebugRequest request)
+    private ApiServer.ApiReply AnswerApiRequest(ApiServer.ApiRequest request)
     {
         // Sweep FIRST, before the routes that answer without the host thread.
         //
@@ -1128,13 +1129,13 @@ internal sealed partial class AddInSession
         if (request.Route == "assert"
             && !(request.Query.TryGetValue("that", out var assertClaim) && assertClaim.Length > 0))
         {
-            return DebugError($"assert needs that=<claim>; known claims are {string.Join(", ", KnownClaims)}");
+            return ApiError($"assert needs that=<claim>; known claims are {string.Join(", ", KnownClaims)}");
         }
 
         if (request.Route == "dismiss"
             && !(request.Query.TryGetValue("button", out var dismissButton) && dismissButton.Length > 0))
         {
-            return DebugError("dismiss needs button=<label>, and takes caption=<title> to pick between dialogs");
+            return ApiError("dismiss needs button=<label>, and takes caption=<title> to pick between dialogs");
         }
 
         // EXPORT FLUSHES THE DESIGNERS FIRST (the owner, 2026-08-19): the designer's document
@@ -1151,7 +1152,7 @@ internal sealed partial class AddInSession
             var flushed = RunPageScript("window.xlideUi.act('designerSaveDirty', {})", null, 20000);
             if (flushed.Error is null && FlushRefusal(flushed.Result) is { } refusal)
             {
-                return DebugError($"the export did not run: a designer document refuses to apply - {refusal}");
+                return ApiError($"the export did not run: a designer document refuses to apply - {refusal}");
             }
         }
 
@@ -1162,7 +1163,7 @@ internal sealed partial class AddInSession
             // has never seen this api is most likely to be asking what it is looking at.
             case "agent":
             {
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     AgentGuide.FrontDoor(
                         AgentBaseUrl(), Engine.HostApp.Name, Environment.ProcessId,
                         _analysis?.IsReady == true, ShimBuiltUtc()),
@@ -1184,13 +1185,13 @@ internal sealed partial class AddInSession
                         fleet[at].Pid == Environment.ProcessId);
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugSessionsReply(rows), DebugJsonContext.Default.DebugSessionsReply));
             }
 
             case "agent/routes":
             {
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     AgentGuide.RouteTable(AgentBaseUrl()),
                     DebugJsonContext.Default.DebugAgentRoutesReply));
             }
@@ -1199,21 +1200,21 @@ internal sealed partial class AddInSession
             {
                 if (AgentGuide.OneRoute(helpName) is not { } row)
                 {
-                    return DebugError(
+                    return ApiError(
                         $"no route named '{helpName}'; the names are "
                         + string.Join(", ", AgentGuide.Routes.Select(one => one.Name)));
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     row, DebugJsonContext.Default.DebugAgentRouteRow));
             }
 
             case "agent/route":
-                return DebugError("agent/route needs name=<route>; agent/routes lists them all");
+                return ApiError("agent/route needs name=<route>; agent/routes lists them all");
 
             case "agent/examples":
             {
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     AgentGuide.Examples(AgentBaseUrl()),
                     DebugJsonContext.Default.DebugAgentExamplesReply));
             }
@@ -1225,7 +1226,7 @@ internal sealed partial class AddInSession
             {
                 if (_analysis?.Engine is not { } modelEngine)
                 {
-                    return DebugError("the analysis engine is not up");
+                    return ApiError("the analysis engine is not up");
                 }
 
                 request.Query.TryGetValue("type", out var modelType);
@@ -1237,12 +1238,12 @@ internal sealed partial class AddInSession
                         .GetAwaiter().GetResult();
 
                     return known is { } model
-                        ? DebugServer.DebugReply.Json(model.GetRawText())
-                        : DebugError("the engine did not answer the model request");
+                        ? ApiServer.ApiReply.Json(model.GetRawText())
+                        : ApiError("the engine did not answer the model request");
                 }
                 catch (Exception ex)
                 {
-                    return DebugError($"model failed: {ex.Message.Trim()}");
+                    return ApiError($"model failed: {ex.Message.Trim()}");
                 }
             }
 
@@ -1250,7 +1251,7 @@ internal sealed partial class AddInSession
             {
                 if (_analysis?.Engine is not { } rulesEngine)
                 {
-                    return DebugError("the analysis engine is not up");
+                    return ApiError("the analysis engine is not up");
                 }
 
                 try
@@ -1260,12 +1261,12 @@ internal sealed partial class AddInSession
                         .GetAwaiter().GetResult();
 
                     return known is { } rules
-                        ? DebugServer.DebugReply.Json(rules.GetRawText())
-                        : DebugError("the engine did not answer the rules request");
+                        ? ApiServer.ApiReply.Json(rules.GetRawText())
+                        : ApiError("the engine did not answer the rules request");
                 }
                 catch (Exception ex)
                 {
-                    return DebugError($"analyzer failed: {ex.Message.Trim()}");
+                    return ApiError($"analyzer failed: {ex.Message.Trim()}");
                 }
             }
 
@@ -1274,7 +1275,7 @@ internal sealed partial class AddInSession
                 var path = Log.Path;
                 if (path is null)
                 {
-                    return DebugError("no log file");
+                    return ApiError("no log file");
                 }
 
                 var since = request.Query.TryGetValue("since", out var sinceText)
@@ -1298,7 +1299,7 @@ internal sealed partial class AddInSession
                     var (lines, next) = ReadLogSlice(path, since, match, max);
                     if (lines.Count > 0 || Environment.TickCount64 >= deadline)
                     {
-                        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                             new DebugLogReply([.. lines], next), DebugJsonContext.Default.DebugLogReply));
                     }
 
@@ -1313,7 +1314,7 @@ internal sealed partial class AddInSession
                 var rows = WebView.WebView2Surface.MessageTap.Snapshot(last)
                     .Select(entry => new DebugMessageRow(entry.Seq, entry.At, entry.Surface, entry.Direction, entry.Text))
                     .ToArray();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugMessagesReply(rows), DebugJsonContext.Default.DebugMessagesReply));
             }
 
@@ -1335,7 +1336,7 @@ internal sealed partial class AddInSession
 
                 if (which == "form" && target == 0)
                 {
-                    return DebugError(wantedCaption is { Length: > 0 }
+                    return ApiError(wantedCaption is { Length: > 0 }
                         ? $"no running form whose caption holds '{wantedCaption}'"
                         : "no form is running");
                 }
@@ -1343,7 +1344,7 @@ internal sealed partial class AddInSession
                 var bytes = DebugCapture.CaptureBmp(target);
                 if (bytes is null)
                 {
-                    return DebugError($"window {which ?? "frame"} would not render");
+                    return ApiError($"window {which ?? "frame"} would not render");
                 }
 
                 // With a selector, the picture is cut down to that element. A whole frame is
@@ -1376,7 +1377,7 @@ internal sealed partial class AddInSession
 
                     if (where.Error is not null || where.Result.Trim() is "null" or "")
                     {
-                        return DebugError($"nothing matches {cropSelector} on that surface");
+                        return ApiError($"nothing matches {cropSelector} on that surface");
                     }
 
                     try
@@ -1396,16 +1397,16 @@ internal sealed partial class AddInSession
                             w + pad * 2, h + pad * 2);
 
                         return cropped is null
-                            ? DebugError($"{cropSelector} is not on screen")
-                            : new DebugServer.DebugReply("image/bmp", cropped);
+                            ? ApiError($"{cropSelector} is not on screen")
+                            : new ApiServer.ApiReply("image/bmp", cropped);
                     }
                     catch (Exception ex)
                     {
-                        return DebugError($"the element's box could not be read ({ex.GetType().Name})");
+                        return ApiError($"the element's box could not be read ({ex.GetType().Name})");
                     }
                 }
 
-                return new DebugServer.DebugReply("image/bmp", bytes);
+                return new ApiServer.ApiReply("image/bmp", bytes);
             }
 
             /*
@@ -1429,14 +1430,14 @@ internal sealed partial class AddInSession
                 var surface = _editorSurface;
                 if (surface is null)
                 {
-                    return DebugError("the surface is not up yet");
+                    return ApiError("the surface is not up yet");
                 }
 
                 request.Query.TryGetValue("text", out var text);
 
                 if (string.IsNullOrEmpty(text))
                 {
-                    return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                         new DebugImmediateReply(false, _immediateReader?.Text() ?? string.Empty, false),
                         DebugJsonContext.Default.DebugImmediateReply));
                 }
@@ -1493,7 +1494,7 @@ internal sealed partial class AddInSession
                             + "editor.";
 
                         Log.Warn($"immediate: {stuck}");
-                        return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                        return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                             new DebugImmediateReply(false, stuck, true),
                             DebugJsonContext.Default.DebugImmediateReply));
                     }
@@ -1558,7 +1559,7 @@ internal sealed partial class AddInSession
                     failed = true;
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugImmediateReply(ran, outcome, failed),
                     DebugJsonContext.Default.DebugImmediateReply));
             }
@@ -1577,7 +1578,7 @@ internal sealed partial class AddInSession
                     rows[i] = new SurfaceLocalRow(row.Expression, row.Value, row.Type);
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugLocalsReply(snapshot?.Context, rows),
                     DebugJsonContext.Default.DebugLocalsReply));
             }
@@ -1594,7 +1595,7 @@ internal sealed partial class AddInSession
 
                 // _inBreak is written on the host thread; a bool read is atomic and a poll
                 // tick of staleness is the nature of this api.
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugWatchesReply(_inBreak, rows),
                     DebugJsonContext.Default.DebugWatchesReply));
             }
@@ -1612,7 +1613,7 @@ internal sealed partial class AddInSession
                         finding.Module, finding.StartLine, finding.StartColumn,
                         finding.Severity, finding.Code ?? string.Empty, finding.Message))
                     .ToArray();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugProblemsReply(rows), DebugJsonContext.Default.DebugProblemsReply));
             }
 
@@ -1643,7 +1644,7 @@ internal sealed partial class AddInSession
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugDrainReply(
                         WrappersLiveBefore: before,
                         WrappersLiveAfter: Com.ComRuntime.WrappersLive,
@@ -1660,22 +1661,22 @@ internal sealed partial class AddInSession
                 // and until now it could only be exercised by closing Excel by hand.
                 if (sessionAction != "cancelledShutdown")
                 {
-                    return DebugError($"unknown action {sessionAction}; use cancelledShutdown");
+                    return ApiError($"unknown action {sessionAction}; use cancelledShutdown");
                 }
 
                 var surface = _editorSurface;
                 if (surface is null)
                 {
-                    return DebugError("the surface is not up; there is nothing to tear down");
+                    return ApiError("the surface is not up; there is nothing to tear down");
                 }
 
                 // RESPOND FIRST, TEAR DOWN AFTER, and the order is the whole trick. Triggering
-                // the shutdown inline would run Stop(), which disposes the very DebugServer
+                // the shutdown inline would run Stop(), which disposes the very ApiServer
                 // writing this reply, so the client would see a dropped connection instead of an
                 // answer. The reply goes out here; a short pool-thread delay lets it flush, and
                 // only then is BeginSimulatedShutdown posted to the HOST thread, where it must
                 // run. The editor frame stays standing, so the watchdog reads a cancelled
-                // shutdown and revives the session - a fresh DebugServer on a fresh port with a
+                // shutdown and revives the session - a fresh ApiServer on a fresh port with a
                 // fresh startedAt, rewritten into the discovery file, which is how the client
                 // reconnects. See lessons on the shutdown watchdog.
                 _ = System.Threading.Tasks.Task.Run(async () =>
@@ -1684,10 +1685,10 @@ internal sealed partial class AddInSession
                     surface.RunOnHostThread(() => XlideAddIn.Current?.BeginSimulatedShutdown());
                 });
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugCommandReply(true, 0,
                         "the session will stop and revive; reconnect by re-reading "
-                        + "debug-api-<pid>.json, whose port and startedAt the revived session rewrites"),
+                        + "xlide-api-<pid>.json, whose port and startedAt the revived session rewrites"),
                     DebugJsonContext.Default.DebugCommandReply));
             }
 
@@ -1696,9 +1697,9 @@ internal sealed partial class AddInSession
                 // The session as a script. After a live investigation the useful sequence is
                 // normally reconstructed from a scrollback and gets a step wrong; this hands
                 // it back ready to run, so a bug found by hand becomes a probe by copying.
-                var requests = DebugServer.Requests();
+                var requests = ApiServer.Requests();
                 var script = new System.Text.StringBuilder();
-                script.AppendLine("# Replay of a debug api session. Point it at a live instance:");
+                script.AppendLine("# Replay of a xlide api session. Point it at a live instance:");
                 script.AppendLine("#   $api = \"http://127.0.0.1:PORT/TOKEN\"");
                 foreach (var line in requests)
                 {
@@ -1710,8 +1711,8 @@ internal sealed partial class AddInSession
                         : $"Invoke-RestMethod \"$api/{rest}\" -TimeoutSec 20");
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
-                    new DebugHistoryReply(requests, script.ToString(), DebugServer.RouteCosts()),
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    new DebugHistoryReply(requests, script.ToString(), ApiServer.RouteCosts()),
                     DebugJsonContext.Default.DebugHistoryReply));
             }
 
@@ -1733,7 +1734,7 @@ internal sealed partial class AddInSession
                 // argument outright; this does the same.
                 if (Array.IndexOf(KnownClaims, claim) < 0)
                 {
-                    return DebugError($"unknown claim {claim}; known claims are {string.Join(", ", KnownClaims)}");
+                    return ApiError($"unknown claim {claim}; known claims are {string.Join(", ", KnownClaims)}");
                 }
 
                 var deadline = Environment.TickCount64 + timeout;
@@ -1751,7 +1752,7 @@ internal sealed partial class AddInSession
                     Thread.Sleep(150);
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugAssertReply(held, claim, expected ?? "(none)", saw ?? "(nothing)"),
                     DebugJsonContext.Default.DebugAssertReply));
             }
@@ -1786,7 +1787,7 @@ internal sealed partial class AddInSession
                         try
                         {
                             sessionState = AnswerDebugRequestOnHost(
-                                new DebugServer.DebugRequest("state", request.Query, string.Empty));
+                                new ApiServer.ApiRequest("state", request.Query, string.Empty));
                         }
                         catch (Exception ex)
                         {
@@ -1800,7 +1801,7 @@ internal sealed partial class AddInSession
                     }
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugJournalReply(
                         CapturedAt: DateTime.Now.ToString("O"),
                         Pid: Environment.ProcessId,
@@ -1834,7 +1835,7 @@ internal sealed partial class AddInSession
                 var (hostReadCount, hostReadChars, hostReadFull, hostReadSkipped, hostReadSamples) = PerfCounters.HostReadSnapshot();
                 _ = hostReadCount;
                 var (publishCount, publishSamples) = PerfCounters.PublishSnapshot();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugPerfReply(
                         placementSamples,
                         marshalSamples,
@@ -1974,7 +1975,7 @@ internal sealed partial class AddInSession
                 var awaited = RunPageScript(waiter, awaitSurface, budget + 4000);
                 if (awaited.Error is { } awaitError)
                 {
-                    return DebugError(awaitError);
+                    return ApiError(awaitError);
                 }
 
                 var met = false;
@@ -1995,7 +1996,7 @@ internal sealed partial class AddInSession
                     detail = $"the page's answer could not be read ({ex.GetType().Name})";
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugAwaitReply(met, elapsed, detail), DebugJsonContext.Default.DebugAwaitReply));
             }
 
@@ -2022,8 +2023,8 @@ internal sealed partial class AddInSession
                     4000);
 
                 return read.Error is { } consoleError
-                    ? DebugError(consoleError)
-                    : DebugServer.DebugReply.Json(read.Result);
+                    ? ApiError(consoleError)
+                    : ApiServer.ApiReply.Json(read.Result);
             }
 
             case "inspect" when request.Query.TryGetValue("selector", out var selector) && selector.Length > 0:
@@ -2101,8 +2102,8 @@ internal sealed partial class AddInSession
 
                 var inspected = RunPageScript(inspect, null, 5000);
                 return inspected.Error is { } inspectError
-                    ? DebugError(inspectError)
-                    : DebugServer.DebugReply.Json(inspected.Result);
+                    ? ApiError(inspectError)
+                    : ApiServer.ApiReply.Json(inspected.Result);
             }
 
             case "bench" when request.Query.TryGetValue("what", out var what) && what.Length > 0:
@@ -2176,7 +2177,7 @@ internal sealed partial class AddInSession
 
                 if (body is null)
                 {
-                    return DebugError($"unknown benchmark {what}; try tabswitch, layout, or type");
+                    return ApiError($"unknown benchmark {what}; try tabswitch, layout, or type");
                 }
 
                 var bench = RunPageScript(
@@ -2191,7 +2192,7 @@ internal sealed partial class AddInSession
 
                 if (bench.Error is { } benchError)
                 {
-                    return DebugError(benchError);
+                    return ApiError(benchError);
                 }
 
                 var samples = new List<double>();
@@ -2211,12 +2212,12 @@ internal sealed partial class AddInSession
                 }
                 catch (Exception ex)
                 {
-                    return DebugError($"the benchmark's answer could not be read ({ex.GetType().Name})");
+                    return ApiError($"the benchmark's answer could not be read ({ex.GetType().Name})");
                 }
 
                 if (samples.Count == 0)
                 {
-                    return DebugError($"the benchmark ran nothing: {detail}");
+                    return ApiError($"the benchmark ran nothing: {detail}");
                 }
 
                 return BenchReply(what, samples, detail);
@@ -2266,7 +2267,7 @@ internal sealed partial class AddInSession
 
                 if (tripSurface is null)
                 {
-                    return DebugError("no surface is up");
+                    return ApiError("no surface is up");
                 }
 
                 switch (tripWhat)
@@ -2280,7 +2281,7 @@ internal sealed partial class AddInSession
                             began.Stop();
                             if (pinged.Error is { } pageError)
                             {
-                                return DebugError(pageError);
+                                return ApiError(pageError);
                             }
                             tripSamples.Add(Math.Round(began.Elapsed.TotalMilliseconds, 3));
                         }
@@ -2290,7 +2291,7 @@ internal sealed partial class AddInSession
                     }
 
                     default:
-                        return DebugError(
+                        return ApiError(
                             $"unknown trip {tripWhat}; pagecall is the only one. Anything that has to "
                             + "observe an effect delivered BY the host thread cannot be measured from in "
                             + "here at all - see the note on this route - and belongs in the client, the "
@@ -2320,7 +2321,7 @@ internal sealed partial class AddInSession
 
                 var restored = WaitForWorkspace(WaitMilliseconds(request, 20000));
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugCommandReply(restored, 0), DebugJsonContext.Default.DebugCommandReply));
             }
 
@@ -2332,8 +2333,8 @@ internal sealed partial class AddInSession
                 // is the argument for it existing (2026-08-06).
                 var layout = RunPageScript(LayoutScript, null, 5000);
                 return layout.Error is { } layoutError
-                    ? DebugError(layoutError)
-                    : DebugServer.DebugReply.Json(layout.Result);
+                    ? ApiError(layoutError)
+                    : ApiServer.ApiReply.Json(layout.Result);
             }
 
             case "reload":
@@ -2345,7 +2346,7 @@ internal sealed partial class AddInSession
                 var reloadHost = _editorSurface;
                 if (reloadHost is null)
                 {
-                    return DebugError("the surface is not up yet");
+                    return ApiError("the surface is not up yet");
                 }
 
                 var startedAt = Environment.TickCount64;
@@ -2358,7 +2359,7 @@ internal sealed partial class AddInSession
 
                 var stamp = reloadHost.PageBuildStamp ?? "(none reported)";
                 var bundle = BundleBuiltUtc();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugReloadReply(
                         ready,
                         (int)(Environment.TickCount64 - startedAt),
@@ -2386,7 +2387,7 @@ internal sealed partial class AddInSession
                     cleared = [.. _guardCleared.TakeLast(5)];
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugDialogsReply(rows, PerfCounters.HeartbeatAgeMs, cleared),
                     DebugJsonContext.Default.DebugDialogsReply));
             }
@@ -2403,7 +2404,7 @@ internal sealed partial class AddInSession
                 // only one still moving while a modal owns the editor.
                 if (_editorSurface is not { } compileSurface)
                 {
-                    return DebugError("the surface is not up yet");
+                    return ApiError("the surface is not up yet");
                 }
 
                 var standing = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
@@ -2471,7 +2472,7 @@ internal sealed partial class AddInSession
                 // compile with a modal or with nothing at all. A caller that needs more than
                 // "nothing objected" should read `errors`, and one that needs to know the
                 // question was even asked should read `started`.
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugCompileReply(
                         startedOk && said.Count == 0,
                         [.. said],
@@ -2555,7 +2556,7 @@ internal sealed partial class AddInSession
 
                 Log.Info($"---- {marker} ----");
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugMarkReply(marker, at),
                     DebugJsonContext.Default.DebugMarkReply));
             }
@@ -2570,7 +2571,7 @@ internal sealed partial class AddInSession
                     // alone rather than turning it off - this one governs whether dialogs are
                     // dismissed, and guessing "off" from a typo is the expensive direction.
                     _guardEverything = Flag(request, "on", _guardEverything);
-                    Log.Info($"debug api: the dialog guard is {(_guardEverything ? "on" : "off")}");
+                    Log.Info($"xlide api: the dialog guard is {(_guardEverything ? "on" : "off")}");
                 }
 
                 string[] cleared;
@@ -2583,7 +2584,7 @@ internal sealed partial class AddInSession
                     }
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugGuardReply(_guardEverything, cleared, DialogWatch.Dialogs().Length),
                     DebugJsonContext.Default.DebugGuardReply));
             }
@@ -2595,7 +2596,7 @@ internal sealed partial class AddInSession
                 // that never meant to open a dialog at all; a person asking by name knows.
                 request.Query.TryGetValue("caption", out var caption);
                 var dismissed = DialogWatch.Dismiss(caption, button);
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugCommandReply(dismissed, 0), DebugJsonContext.Default.DebugCommandReply));
             }
 
@@ -2611,12 +2612,12 @@ internal sealed partial class AddInSession
                 if (string.Equals(formAction, "close", StringComparison.OrdinalIgnoreCase))
                 {
                     var closed = DialogWatch.CloseRunningForm(formCaption);
-                    return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                    return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                         new DebugCommandReply(closed, 0, closed ? "closed" : "no running form matched"),
                         DebugJsonContext.Default.DebugCommandReply));
                 }
 
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugUserFormsReply(DialogWatch.RunningForms()),
                     DebugJsonContext.Default.DebugUserFormsReply));
             }
@@ -2629,7 +2630,7 @@ internal sealed partial class AddInSession
                 var follow = PerfCounters.FollowSnapshot();
                 var messages = WebView.WebView2Surface.MessageTap.Totals;
                 using var self = System.Diagnostics.Process.GetCurrentProcess();
-                return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+                return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                     new DebugStatsReply(
                         UptimeSeconds: (Environment.TickCount64 - PerfCounters.StartedAt) / 1000,
                         ManagedMemoryBytes: GC.GetTotalMemory(forceFullCollection: false),
@@ -2669,7 +2670,7 @@ internal sealed partial class AddInSession
         var host = _editorSurface;
         if (host is null)
         {
-            return DebugError("the surface is not up yet");
+            return ApiError("the surface is not up yet");
         }
 
         // The sweep already ran, at the top of this method, so every route heals - including the
@@ -2714,7 +2715,7 @@ internal sealed partial class AddInSession
 
         if (crossing.Answered && answer is not null)
         {
-            return DebugServer.DebugReply.Json(answer);
+            return ApiServer.ApiReply.Json(answer);
         }
 
         // A request that asked to keep what it opens is not rescued from it: opening a modal
@@ -2787,8 +2788,8 @@ internal sealed partial class AddInSession
             var pressed = answer is not null && DialogWatch.Dismiss(dialog.Caption, answer) ? answer : null;
 
             Log.Info(pressed is null
-                ? $"debug api: \"{dialog.Caption}\" has the editor and offers no safe button; leaving it"
-                : $"debug api: cleared {(mine ? "our" : "a standing")} dialog \"{dialog.Caption}\""
+                ? $"xlide api: \"{dialog.Caption}\" has the editor and offers no safe button; leaving it"
+                : $"xlide api: cleared {(mine ? "our" : "a standing")} dialog \"{dialog.Caption}\""
                     + $"{(dialog.Text.Length > 0 ? $" ({dialog.Text})" : string.Empty)} with {pressed}, "
                     + $"host thread quiet for {PerfCounters.HeartbeatAgeMs}ms");
 
@@ -2872,8 +2873,8 @@ internal sealed partial class AddInSession
                         if (noted)
                         {
                             Log.Info(keep
-                                ? $"debug api: keeping \"{dialog.Caption}\", as the request asked"
-                                : $"debug api: a request raised \"{dialog.Caption}\"; "
+                                ? $"xlide api: keeping \"{dialog.Caption}\", as the request asked"
+                                : $"xlide api: a request raised \"{dialog.Caption}\"; "
                                     + "it will be cleared unless the request asked to keep it");
                         }
                     }
@@ -2881,7 +2882,7 @@ internal sealed partial class AddInSession
             }
             catch (Exception ex)
             {
-                Log.Error("debug api: the dialog watch failed", ex);
+                Log.Error("xlide api: the dialog watch failed", ex);
             }
         });
     }
@@ -3105,7 +3106,7 @@ internal sealed partial class AddInSession
     /// twice. This comment said "retried once" for as long as it sat above the wrong method, and
     /// the reply carried a `retried` field that was the constant false to match.
     /// </summary>
-    private static DebugServer.DebugReply AnswerBlockedRequest(
+    private static ApiServer.ApiReply AnswerBlockedRequest(
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
         Func<string?> answerSoFar,
@@ -3118,7 +3119,7 @@ internal sealed partial class AddInSession
         if (blocking is null)
         {
             var standing = DialogWatch.Dialogs();
-            return DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+            return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                 new DebugBlockedReply(
                     Error: "the host thread did not answer in time",
                     HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
@@ -3132,16 +3133,16 @@ internal sealed partial class AddInSession
         var pressed = safe is not null && DialogWatch.Dismiss(blocking.Caption, safe) ? safe : null;
 
         Log.Info(pressed is null
-            ? $"debug api: \"{blocking.Caption}\" is blocking the host thread and has no safe button"
-            : $"debug api: \"{blocking.Caption}\" was raised by this request; answered with {pressed}");
+            ? $"xlide api: \"{blocking.Caption}\" is blocking the host thread and has no safe button"
+            : $"xlide api: \"{blocking.Caption}\" was raised by this request; answered with {pressed}");
 
         // The dismissal releases the host thread, and the work this request asked for was
         // queued before the dialog appeared, so it may complete on its own.
         var completed = pressed is not null && done.Wait(TimeSpan.FromSeconds(3));
 
         return completed && answerSoFar() is { } answer
-            ? DebugServer.DebugReply.Json(answer)
-            : DebugServer.DebugReply.Json(System.Text.Json.JsonSerializer.Serialize(
+            ? ApiServer.ApiReply.Json(answer)
+            : ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                 new DebugBlockedReply(
                     Error: pressed is null
                         ? "a dialog this request raised is blocking the host thread, and it has no safe button to press"
@@ -3161,13 +3162,13 @@ internal sealed partial class AddInSession
     /// once two agents are working; without it the honest record is that something wrote and did
     /// not say who, which is exactly what `unattributed` means.
     /// </summary>
-    private string AnswerDebugRequestOnHost(DebugServer.DebugRequest request)
+    private string AnswerDebugRequestOnHost(ApiServer.ApiRequest request)
     {
         request.Query.TryGetValue("by", out var by);
         return AttributedTo(by, () => AnswerDebugRouteOnHost(request));
     }
 
-    private unsafe string AnswerDebugRouteOnHost(DebugServer.DebugRequest request)
+    private unsafe string AnswerDebugRouteOnHost(ApiServer.ApiRequest request)
     {
         switch (request.Route)
         {
@@ -4629,5 +4630,4 @@ internal sealed partial class AddInSession
                     + $"Given: {(request.Query.Count == 0 ? "(no arguments)" : string.Join(", ", request.Query.Select(pair => $"{pair.Key}={pair.Value}")))}");
         }
     }
-#endif
 }

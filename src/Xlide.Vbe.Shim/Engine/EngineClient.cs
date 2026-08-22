@@ -759,14 +759,10 @@ internal sealed class EngineClient : IAsyncDisposable
         // the second is the analyzer's doing: a diagnostics pass over a large module delays
         // every keystroke's completion request behind it, and one combined figure reports that
         // as slow completions. See EngineCounters.
-#if DEBUG
         var queued = System.Diagnostics.Stopwatch.StartNew();
-#endif
         await _oneCall.EnterAsync(KindOf(method), deadline.Token).ConfigureAwait(false);
-#if DEBUG
         queued.Stop();
         var refused = false;
-#endif
 
         // TIMED IN EVERY BUILD, not only in a debug one, because the failure this had no words for
         // was a call that stopped answering. A diagnosis of a 64,802-line module cost fifteen
@@ -839,9 +835,7 @@ internal sealed class EngineClient : IAsyncDisposable
                 {
                     var message = error.TryGetProperty("message", out var text) ? text.GetString() : "unknown";
                     Log.Warn($"engine: {method} refused: {message}");
-#if DEBUG
                     refused = true;
-#endif
                     return null;
                 }
 
@@ -863,10 +857,8 @@ internal sealed class EngineClient : IAsyncDisposable
                              ? ", and whoever asked had already given up on it"
                              : string.Empty));
             }
-#if DEBUG
             Diagnostics.EngineCounters.Record(
                 method, queued.ElapsedMilliseconds, served.ElapsedMilliseconds, refused);
-#endif
         }
     }
 
