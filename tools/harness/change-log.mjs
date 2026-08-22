@@ -10,6 +10,10 @@
  * it safe to trust - nothing in it can lose work, because nothing in it writes any. So every
  * check below reads; none of them asks the log to change the project.
  *
+ * AND IT WRITES NO FILE. The log is held in memory for the life of the session, because nothing in
+ * production may depend on an external log file (the owner, 2026-08-22). That is why nothing here
+ * looks on disk for anything.
+ *
  * The questions only this can ask:
  *
  *   - does a round say what it did to a module ONCE, however many times the module was rewritten?
@@ -143,8 +147,14 @@ check("the pane and the route agree about the counts",
   routeNow.rounds.flatMap((round) => round.entries.map((one) => `${one.module}+${one.added}-${one.removed}`)));
 
 check("the pane says what the log does not cover", drawn.covers, routeNow.covers);
-check("and what it does not cover is said out loud",
-  drawn.covers.includes("form designs") && drawn.covers.includes("directly in the VBE"));
+// BOTH HALVES. The exclusions matter, and so does the part a reader doubts: their own typing is
+// recorded, under their own name. The first wording led with the exclusions and called the
+// uncovered case "edits made directly in the VBE", which the owner read - correctly, from inside
+// the VBE - as "anything I type", while their typing was in the log all along.
+check("it says what IS recorded, the developer's own edits included",
+  drawn.covers.includes("yours and an agent's alike"));
+check("and what is not, naming the editor's own window rather than 'the VBE'",
+  drawn.covers.includes("form designs") && drawn.covers.includes("own code window"));
 
 // ---- and the pane opens one module's comparison -------------------------------------------------
 
@@ -164,6 +174,56 @@ check("and it draws rows", rows > 0);
 const accepted = await log({ action: "accept" });
 check("accepting marks the newest round as reviewed", accepted.acceptedAt, accepted.rounds[0]?.round);
 check("and destroys nothing", since(accepted).length, since(routeNow).length);
+
+// ---- a module arriving, being renamed, and leaving --------------------------------------------
+//
+// Only the write path recorded anything at first, so a module could be added, filled and removed
+// and the log would show the filling with no sign of either end (the owner asked, 2026-08-22). A
+// removal is the one change whose "before" cannot be recovered afterwards, which makes it the one
+// most worth having.
+
+const born = `Arrived${process.pid}`;
+const renamed = `Renamed${process.pid}`;
+
+await api.changes({ action: "snapshot", label: "before the component checks", project: project.projectId });
+const beforeComponents = (await log()).rounds[0]?.round ?? 0;
+const componentsSince = (answer) => answer.rounds.filter((round) => round.round > beforeComponents);
+
+await api.component("add", { name: born, kind: "module", project: project.projectId });
+await write(born, ["Option Explicit", "", "Public Sub Hello()", "End Sub"].join("\r\n"), "claude");
+
+// Across the rounds, not within one: the add came through the door unattributed and the write
+// named itself, so they are two rounds by the hand-change rule - which is the rule working.
+const arrivals = componentsSince(await log()).flatMap((round) => round.entries)
+  .filter((entry) => entry.module.toLowerCase() === born.toLowerCase());
+check("a module arriving is recorded as an add",
+  arrivals.some((entry) => entry.kind === "added"), true);
+
+await api.component("rename", { name: born, newName: renamed, project: project.projectId });
+
+const moved = componentsSince(await log()).flatMap((round) => round.entries)
+  .find((entry) => entry.module.toLowerCase() === renamed.toLowerCase());
+check("a rename moves the entry rather than starting another",
+  moved ? `${moved.module} from ${moved.from}` : "(not recorded)", `${renamed} from ${born}`);
+
+const wasHolding = await held(renamed);
+await api.component("remove", { name: renamed, project: project.projectId });
+
+const gone = componentsSince(await log()).flatMap((round) => round.entries)
+  .find((entry) => entry.module.toLowerCase() === renamed.toLowerCase());
+check("a module leaving is recorded", gone ? gone.kind : "(not recorded)", "removed");
+
+// THE ONE TEXT A REMOVAL CANNOT GET BACK. The round that recorded the removal is the newest one
+// naming the module, and its `before` is what the module held when it went.
+const burial = componentsSince(await log()).find(
+  (round) => round.entries.some((entry) =>
+    entry.module.toLowerCase() === renamed.toLowerCase() && entry.kind === "removed"));
+
+const lastWords = await log({
+  action: "text", round: burial?.round ?? 0, module: renamed, which: "before",
+});
+check("and what it held is still readable after it is gone", lastWords.held, true);
+check("and it is what the module actually held", lastWords.text === wasHolding);
 
 // ---- the pane is scoped to ONE file ---------------------------------------------------------------
 //

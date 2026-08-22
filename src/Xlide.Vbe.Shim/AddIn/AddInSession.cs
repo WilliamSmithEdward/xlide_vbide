@@ -4628,6 +4628,13 @@ internal sealed partial class AddInSession : IDisposable
     /// <summary>Moves every record keyed by a component's old name to its new one.</summary>
     private void AdoptRename(string oldName, string newName)
     {
+        // EVERY RENAME PATH FUNNELS THROUGH HERE - the strip's, the panel's (Name) row, the
+        // component route and the undo - which is why the change log is told here and nowhere
+        // else. A rename moves the module's entry rather than starting another, so a module
+        // renamed and then written reads as one module that changed its name.
+        RecordChange(
+            newName, _shownProject, Core.Changes.ChangeKind.Renamed, null, null, from: oldName);
+
         // The baseline key carries the workbook; a rename reaches here for the selected
         // component, whose workbook is the shown one. The bare-name fallback key migrates
         // too, for a baseline recorded before the workbook could be told.
@@ -8942,6 +8949,16 @@ internal sealed partial class AddInSession : IDisposable
 
             Log.Info($"project: inserted {name ?? "?"} (kind {kind})");
 
+            // A MODULE ARRIVING IS A CHANGE. Only the write path recorded anything until now, so
+            // a module could be added, filled and removed and the log would show the filling with
+            // no sign of either end (the owner asked, 2026-08-22).
+            if (name is not null && added is not null)
+            {
+                RecordChange(
+                    name, ProjectIdFromDisplay(projectName) ?? _shownProject,
+                    Core.Changes.ChangeKind.Added, null, ProjectReader.ReadSource(added) ?? string.Empty);
+            }
+
             if (name is not null)
             {
                 ShowModule(name);
@@ -9023,8 +9040,14 @@ internal sealed partial class AddInSession : IDisposable
                 return $"{removed} could not be removed: the project would not open its component list.";
             }
 
+            // WHAT IT HELD, read while it still exists. A removal is the one change whose "before"
+            // cannot be recovered afterwards, which makes it the one most worth having.
+            var lastWords = ProjectReader.ReadSource(doomed);
+
             // Remove takes the COMPONENT, not an index.
             components.InvokeWithObject("Remove", doomed);
+
+            RecordChange(removed, foundIn ?? projectId, Core.Changes.ChangeKind.Removed, lastWords, null);
 
             // The bare-name key as well as the workbook-qualified one: a baseline recorded before
             // the workbook could be told is keyed without it, and the same fallback AdoptRename

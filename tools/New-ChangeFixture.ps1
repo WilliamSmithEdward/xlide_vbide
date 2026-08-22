@@ -144,8 +144,7 @@ Write-Host '  Untouched  edited by nobody, and a different length, so over-repor
 Write-Host '  Ticket     a CLASS, so the log is not exercised over standard modules alone'
 Write-Host '  Sheet1     a document module: the kind that cannot be added or removed'
 Write-Host ''
-Write-Host 'The change log itself lives beside the shim log, per workbook:'
-Write-Host "  $env:LOCALAPPDATA\xlide_vbide\changes\"
+Write-Host 'The change log is held in memory for the life of the session: it writes no file.'
 Write-Host ''
 
 if ($Quiet) {

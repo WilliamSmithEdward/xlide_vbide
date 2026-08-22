@@ -1,11 +1,8 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 
 namespace Xlide.Vbe.Core.Changes;
 
@@ -20,14 +17,19 @@ public enum ChangeKind
 
     /// <summary>The module left it.</summary>
     Removed,
+
+    /// <summary>The module is the same one under a different name.</summary>
+    Renamed,
 }
 
 /// <summary>One module's before and after within a round.</summary>
 /// <param name="Module">The module's name at the time.</param>
 /// <param name="Kind">What happened to it.</param>
-/// <param name="Before">Hash of the text it held when the round began, or null when it did not exist.</param>
-/// <param name="After">Hash of the text it held when the round ended, or null when it no longer exists.</param>
-public sealed record ChangeEntry(string Module, ChangeKind Kind, string? Before, string? After);
+/// <param name="Before">Key of the text it held when the round began, or null when it did not exist.</param>
+/// <param name="After">Key of the text it held when the round ended, or null when it no longer exists.</param>
+/// <param name="From">What it was called when the round began, when that is not what it is called now.</param>
+public sealed record ChangeEntry(
+    string Module, ChangeKind Kind, string? Before, string? After, string? From = null);
 
 /// <summary>
 /// One round: a stretch of writes by one author, ended by a snapshot, by the author changing, by
@@ -46,21 +48,24 @@ public sealed record ChangeRound(
 /// <summary>
 /// A record of what happened to a project's module code, by whom, in rounds.
 ///
-/// APPEND-ONLY, AND IT NEVER WRITES TO THE WORKBOOK. It is a log, not a version control system:
-/// it says what changed and holds the text from before so it can be read, and every operation
-/// that could put text back belongs to whoever is reading it - the developer through the editor,
-/// an agent through the write route. That is the whole reason it can be trusted: nothing in here
-/// can lose work, because nothing in here writes any.
+/// IN MEMORY, AND IT WRITES NOTHING ANYWHERE. It began as a file under the product's own data
+/// directory, which was wrong for a reason worth keeping written down: nothing in production may
+/// depend on an external log file (the owner, 2026-08-22). A pane that only works while a file it
+/// wrote is still on disk has a second way to be wrong, and a shipped feature reading what is
+/// otherwise a developer artifact is a category error however tidy the directory looks. So the log
+/// lives in the session and goes when the session does - which is the span it is for: reviewing
+/// what an agent is doing while it does it.
 ///
-/// WHERE IT LIVES follows from what it is. A record of what happened on THIS machine belongs
-/// beside the diagnostic log, not inside the workbook (which it would bloat, and which VBA can
-/// see) and not in a folder next to it (which a network share or a rename makes a mess of). It
-/// survives closing the workbook because a log that forgets is not a log.
+/// IT NEVER WRITES TO THE WORKBOOK EITHER. It says what changed and holds the text from before so
+/// it can be read; every operation that could put text back belongs to whoever is reading it - the
+/// developer through the editor, an agent through the write route. That is the whole reason it can
+/// be trusted: nothing in here can lose work, because nothing in here writes any.
 ///
 /// WHAT IT COSTS is one copy of a module's text the first time a round touches it, and nothing at
-/// all for modules nobody edited. Texts are stored by content hash, so a module written five
-/// times in one round costs one before and one after, and an after that becomes the next round's
-/// before is stored once between them.
+/// all for modules nobody edited. Texts are kept by content, so a module written five times in one
+/// round costs one before and one after, and an after that becomes the next round's before is one
+/// copy between them. Past <see cref="LargestHeldBytes"/> the oldest rounds let their texts go and
+/// say so, which is a log ageing rather than a session growing without bound.
 /// </summary>
 public sealed class ChangeLog
 {
@@ -69,17 +74,26 @@ public sealed class ChangeLog
 
     /// <summary>
     /// How long a silence ends a round when nobody says so. Long enough that a developer thinking
-    /// between edits stays in one round, short enough that yesterday's work is not in today's.
+    /// between edits stays in one round, short enough that a morning's work is not one round.
     /// </summary>
     public static readonly TimeSpan Silence = TimeSpan.FromMinutes(5);
 
-    private readonly string _root;
-    private readonly string _texts;
-    private readonly string _path;
+    /// <summary>
+    /// How much module text one project's log holds before the oldest rounds let theirs go.
+    ///
+    /// Nothing evicts this for us now that it is memory rather than disk, and the texts are the
+    /// only part with any size to them: at VBA's per-module ceiling one copy is about 1.5 MB, so
+    /// 64 covers a long session over a large module without being able to run a host out of
+    /// memory. A round whose texts have gone keeps its entries and says the text is no longer
+    /// held, which the pane draws rather than hiding.
+    /// </summary>
+    public const long LargestHeldBytes = 64L * 1024 * 1024;
 
     private readonly List<ChangeRound> _rounds = [];
     private readonly Dictionary<string, ChangeEntry> _open = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _texts = new(StringComparer.Ordinal);
 
+    private long _held;
     private int _number;
     private string _author = Unattributed;
     private string? _label;
@@ -87,54 +101,22 @@ public sealed class ChangeLog
     private DateTimeOffset _touched;
     private bool _running;
 
-    private ChangeLog(string root)
-    {
-        _root = root;
-        _texts = Path.Combine(root, "texts");
-        _path = Path.Combine(root, "log.jsonl");
-    }
+    /// <summary>The newest round marked reviewed, or zero when none has been.</summary>
+    public int AcceptedAt { get; private set; }
 
-    /// <summary>
-    /// The log for one project, under <paramref name="home"/>.
-    ///
-    /// The directory is named for the workbook so a developer can find it, and carries a hash of
-    /// its full path so two workbooks with the same file name in different folders are two logs.
-    /// </summary>
-    public static ChangeLog For(string home, string projectId)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(home);
-        ArgumentException.ThrowIfNullOrEmpty(projectId);
-
-        var name = Path.GetFileNameWithoutExtension(projectId);
-        if (string.IsNullOrEmpty(name))
-        {
-            name = "project";
-        }
-
-        foreach (var bad in Path.GetInvalidFileNameChars())
-        {
-            name = name.Replace(bad, '-');
-        }
-
-        var stamp = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(projectId.ToLowerInvariant())))[..8].ToLowerInvariant();
-
-        var log = new ChangeLog(Path.Combine(home, "changes", $"{name}-{stamp}"));
-        log.Load();
-        return log;
-    }
-
-    /// <summary>Where this project's log is kept, for anyone who wants to look at the file.</summary>
-    public string Directory => _root;
+    /// <summary>How much module text this log is holding, in bytes.</summary>
+    public long HeldBytes => _held;
 
     /// <summary>
     /// Records what a write did to a module, opening a round when one is not already running.
     ///
     /// The FIRST time a round touches a module its previous text is kept, and later writes in the
-    /// same round only move the after. So a round says what it did to a module, once, however
-    /// many times an agent rewrote it while thinking.
+    /// same round only move the after. So a round says what it did to a module, once, however many
+    /// times an agent rewrote it while thinking.
     /// </summary>
-    public void Record(string module, ChangeKind kind, string? before, string? after, string? by, DateTimeOffset now)
+    public void Record(
+        string module, ChangeKind kind, string? before, string? after, string? by, DateTimeOffset now,
+        string? from = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(module);
 
@@ -157,38 +139,47 @@ public sealed class ChangeLog
             _started = now;
             _running = true;
             _open.Clear();
-            Append(writer =>
-            {
-                writer.WriteString("k", "open");
-                writer.WriteNumber("n", _number);
-                writer.WriteString("at", Iso(now));
-                writer.WriteString("by", author);
-            });
         }
 
         _touched = now;
 
-        var beforeHash = _open.TryGetValue(module, out var already) ? already.Before : Keep(before);
-        var afterHash = Keep(after);
+        // A RENAME MOVES THE ENTRY RATHER THAN STARTING ANOTHER. The round's entries are keyed by
+        // the module's name, and a rename changes it - so without this a module renamed and then
+        // written reads as two modules, one of which no longer exists. The entry moves to the new
+        // name and remembers what it was called when the round began, which is the honest answer
+        // to "what happened to Ledger": it is called Accounts now.
+        if (kind == ChangeKind.Renamed && from is { Length: > 0 } && _open.Remove(from, out var moved))
+        {
+            _open[module] = moved with { Module = module, From = moved.From ?? from };
+            return;
+        }
+
+        // THE FIRST BEFORE THAT IS KNOWN - and knowing the difference between an absence and a
+        // gap. A module that ARRIVED in this round had no text before it, and that null is the
+        // answer rather than something to fill in. A RENAME's null is a gap: a rename carries no
+        // text of its own, and a removal later in the same round used to inherit that emptiness
+        // instead of recording what the module actually held - which is the one text a removal
+        // can never get back afterwards.
+        _open.TryGetValue(module, out var already);
+        var beforeKey = already switch
+        {
+            null => Keep(before),
+            { Kind: ChangeKind.Added } => null,
+            _ => already.Before ?? Keep(before),
+        };
+        var afterKey = Keep(after);
         var was = already?.Kind ?? kind;
 
-        // Added then written in one round is still an add; written then removed is a removal.
+        // Added then written in one round is still an add; written then removed is a removal; and
+        // a module renamed and then written is still the one that was renamed.
         var settled = kind == ChangeKind.Removed ? ChangeKind.Removed
             : was == ChangeKind.Added ? ChangeKind.Added
+            : was == ChangeKind.Renamed ? ChangeKind.Renamed
             : kind;
 
-        _open[module] = new ChangeEntry(module, settled, beforeHash, afterHash);
-
-        Append(writer =>
-        {
-            writer.WriteString("k", "write");
-            writer.WriteNumber("n", _number);
-            writer.WriteString("at", Iso(now));
-            writer.WriteString("module", module);
-            writer.WriteString("kind", settled.ToString().ToLowerInvariant());
-            WriteHash(writer, "before", beforeHash);
-            WriteHash(writer, "after", afterHash);
-        });
+        _open[module] = new ChangeEntry(
+            module, settled, beforeKey, afterKey,
+            already?.From ?? (kind == ChangeKind.Renamed ? from : null));
     }
 
     /// <summary>
@@ -208,38 +199,18 @@ public sealed class ChangeLog
 
         _running = false;
         _open.Clear();
-
-        Append(writer =>
-        {
-            writer.WriteString("k", "close");
-            writer.WriteNumber("n", _number);
-            writer.WriteString("at", Iso(now));
-            if (_label is { Length: > 0 } said)
-            {
-                writer.WriteString("label", said);
-            }
-        });
+        Age();
     }
 
     /// <summary>
-    /// Marks every round so far as reviewed. None of them are removed - a log that deletes its
-    /// own past is not one - so what this changes is where a reader starts counting from.
+    /// Marks every round so far as reviewed. None of them are removed - a log that deletes its own
+    /// past is not one - so what this changes is where a reader starts counting from.
     /// </summary>
     public void Accept(DateTimeOffset now)
     {
         Close(null, now);
-        Append(writer =>
-        {
-            writer.WriteString("k", "accept");
-            writer.WriteNumber("n", _number);
-            writer.WriteString("at", Iso(now));
-        });
-
         AcceptedAt = _number;
     }
-
-    /// <summary>The newest round marked reviewed, or zero when none has been.</summary>
-    public int AcceptedAt { get; private set; }
 
     /// <summary>Every round, newest first, with the one still running - if any - at the front.</summary>
     public IReadOnlyList<ChangeRound> Rounds(int limit = 200)
@@ -259,32 +230,11 @@ public sealed class ChangeLog
         return all;
     }
 
-    /// <summary>A text this log kept, or null when it was never held or has been let go.</summary>
-    public string? TextOf(string? hash)
-    {
-        if (string.IsNullOrEmpty(hash))
-        {
-            return null;
-        }
+    /// <summary>A text this log holds, or null when it never held one or has let it go.</summary>
+    public string? TextOf(string? key) =>
+        key is { Length: > 0 } && _texts.TryGetValue(key, out var held) ? held : null;
 
-        try
-        {
-            var file = Path.Combine(_texts, $"{hash}.vba");
-            return File.Exists(file) ? File.ReadAllText(file, Encoding.UTF8) : null;
-        }
-        catch (IOException)
-        {
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
-
-    // ---- keeping the texts ------------------------------------------------------------------
-
-    /// <summary>Stores a text under its own hash and answers the hash. Null text, null hash.</summary>
+    /// <summary>Keeps a text under a key of its own content, and answers that key.</summary>
     private string? Keep(string? text)
     {
         if (text is null)
@@ -292,215 +242,51 @@ public sealed class ChangeLog
             return null;
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
-
-        try
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+        if (_texts.TryAdd(key, text))
         {
-            System.IO.Directory.CreateDirectory(_texts);
-            var file = Path.Combine(_texts, $"{hash}.vba");
-            if (!File.Exists(file))
-            {
-                File.WriteAllText(file, text, Encoding.UTF8);
-            }
-        }
-        catch (IOException)
-        {
-            // The hash is still the truth about what the text WAS; only the copy is missing, and
-            // TextOf says so by answering null. A log that cannot store a text must not take the
-            // write down with it.
-        }
-        catch (UnauthorizedAccessException)
-        {
+            _held += text.Length * 2L;
         }
 
-        return hash;
+        return key;
     }
-
-    private static void WriteHash(Utf8JsonWriter writer, string name, string? hash)
-    {
-        if (hash is { Length: > 0 })
-        {
-            writer.WriteString(name, hash);
-        }
-    }
-
-    private static string Iso(DateTimeOffset when) =>
-        when.ToUniversalTime().ToString("o", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// Adds one line to the log.
+    /// The oldest rounds let their texts go, until what is held is back inside the budget.
     ///
-    /// Every line stands alone and is written the moment the thing happened, so a session that
-    /// ends badly still leaves a readable record: a round with an `open` and no `close` reads as
-    /// the round that was running, which is exactly what it was.
+    /// The ROUNDS stay: they are the record, and they cost almost nothing. What goes is the text,
+    /// which is the only part with size - and an entry whose text has gone says so rather than
+    /// drawing an empty comparison, because a log that quietly stops being able to show something
+    /// is worse than one that says it cannot.
     /// </summary>
-    private void Append(Action<Utf8JsonWriter> body)
+    private void Age()
     {
-        try
+        var oldest = 0;
+        while (_held > LargestHeldBytes && oldest < _rounds.Count - 1)
         {
-            System.IO.Directory.CreateDirectory(_root);
+            oldest++;
 
-            using var buffer = new MemoryStream();
-            using (var writer = new Utf8JsonWriter(buffer))
+            var live = new HashSet<string>(StringComparer.Ordinal);
+            for (var at = oldest; at < _rounds.Count; at++)
             {
-                writer.WriteStartObject();
-                body(writer);
-                writer.WriteEndObject();
+                foreach (var entry in _rounds[at].Entries)
+                {
+                    if (entry.Before is { Length: > 0 } before) { live.Add(before); }
+                    if (entry.After is { Length: > 0 } after) { live.Add(after); }
+                }
             }
 
-            buffer.WriteByte((byte)'\n');
-
-            using var file = new FileStream(
-                _path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
-            buffer.Position = 0;
-            buffer.CopyTo(file);
-        }
-        catch (IOException)
-        {
-            // Recording is never worth failing a write over.
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
-    }
-
-    // ---- reading it back --------------------------------------------------------------------
-
-    private void Load()
-    {
-        if (!File.Exists(_path))
-        {
-            return;
-        }
-
-        var entries = new Dictionary<int, Dictionary<string, ChangeEntry>>();
-        var opened = new Dictionary<int, (DateTimeOffset At, string By)>();
-        var closed = new Dictionary<int, (DateTimeOffset At, string? Label)>();
-        var order = new List<int>();
-
-        try
-        {
-            foreach (var line in File.ReadLines(_path))
+            foreach (var entry in _open.Values)
             {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-
-                JsonDocument held;
-                try
-                {
-                    held = JsonDocument.Parse(line);
-                }
-                catch (JsonException)
-                {
-                    // A line torn by a crash mid-write. Everything around it is still readable,
-                    // which is the point of one line per event.
-                    continue;
-                }
-
-                using (held)
-                {
-                    var root = held.RootElement;
-                    if (!root.TryGetProperty("k", out var kind)
-                        || !root.TryGetProperty("n", out var numbered)
-                        || !numbered.TryGetInt32(out var number))
-                    {
-                        continue;
-                    }
-
-                    var at = root.TryGetProperty("at", out var when)
-                        && DateTimeOffset.TryParse(
-                            when.GetString(), CultureInfo.InvariantCulture,
-                            DateTimeStyles.RoundtripKind, out var parsed)
-                        ? parsed
-                        : DateTimeOffset.MinValue;
-
-                    switch (kind.GetString())
-                    {
-                        case "open":
-                            opened[number] = (at, root.TryGetProperty("by", out var by)
-                                ? by.GetString() ?? Unattributed
-                                : Unattributed);
-                            if (!order.Contains(number))
-                            {
-                                order.Add(number);
-                            }
-
-                            break;
-
-                        case "write":
-                        {
-                            if (!root.TryGetProperty("module", out var module))
-                            {
-                                break;
-                            }
-
-                            var name = module.GetString() ?? string.Empty;
-                            var was = entries.TryGetValue(number, out var held2) ? held2 : [];
-                            entries[number] = was;
-
-                            var kindName = root.TryGetProperty("kind", out var said)
-                                ? said.GetString() ?? "written"
-                                : "written";
-                            var settled = kindName switch
-                            {
-                                "added" => ChangeKind.Added,
-                                "removed" => ChangeKind.Removed,
-                                _ => ChangeKind.Written,
-                            };
-
-                            var before = was.TryGetValue(name, out var already)
-                                ? already.Before
-                                : root.TryGetProperty("before", out var first) ? first.GetString() : null;
-                            var after = root.TryGetProperty("after", out var last) ? last.GetString() : null;
-
-                            was[name] = new ChangeEntry(name, settled, before, after);
-                            break;
-                        }
-
-                        case "close":
-                            closed[number] = (at, root.TryGetProperty("label", out var label)
-                                ? label.GetString()
-                                : null);
-                            break;
-
-                        case "accept":
-                            AcceptedAt = number;
-                            break;
-                    }
-                }
-            }
-        }
-        catch (IOException)
-        {
-            return;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return;
-        }
-
-        foreach (var number in order)
-        {
-            if (!closed.TryGetValue(number, out var end))
-            {
-                // Opened and never closed: the session ended while it was running. It is a real
-                // round and it is over, whatever the file says.
-                end = (opened.TryGetValue(number, out var only) ? only.At : DateTimeOffset.MinValue, null);
+                if (entry.Before is { Length: > 0 } before) { live.Add(before); }
+                if (entry.After is { Length: > 0 } after) { live.Add(after); }
             }
 
-            _rounds.Add(new ChangeRound(
-                number,
-                opened.TryGetValue(number, out var start) ? start.At : end.At,
-                end.At,
-                opened.TryGetValue(number, out var who) ? who.By : Unattributed,
-                end.Label,
-                false,
-                number == AcceptedAt,
-                entries.TryGetValue(number, out var mine) ? [.. mine.Values] : []));
+            foreach (var key in _texts.Keys.Where(key => !live.Contains(key)).ToList())
+            {
+                _held -= _texts[key].Length * 2L;
+                _texts.Remove(key);
+            }
         }
-
-        _number = _rounds.Count == 0 ? 0 : _rounds.Max(one => one.Number);
     }
 }

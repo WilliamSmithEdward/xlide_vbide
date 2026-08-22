@@ -3919,6 +3919,16 @@ internal sealed partial class AddInSession
                             var finalName = added.GetString("Name") ?? string.Empty;
                             Log.Info($"component: added {finalName} (kind {kind})");
 
+                            // THE SECOND PLACE A MODULE CAN ARRIVE. The menu's insert has its own
+                            // implementation of this, and hooking one of the two is how the change
+                            // log came to record a module being filled with no sign of it arriving
+                            // (2026-08-22). Both are told now; that there are two is its own
+                            // smell, and one worth taking out separately rather than in a change
+                            // about the log.
+                            RecordChange(
+                                finalName, componentOwner, Core.Changes.ChangeKind.Added,
+                                null, ProjectReader.ReadSource(added) ?? string.Empty);
+
                             // The strip AND the tree. Neither republishes on its own, and they are
                             // separate publishes: the first version of this route refreshed the
                             // tabs only, so the explorer went on listing three components while

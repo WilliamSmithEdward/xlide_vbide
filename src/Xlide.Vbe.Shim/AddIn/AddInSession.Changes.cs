@@ -31,10 +31,21 @@ namespace Xlide.Vbe.Shim.AddIn;
  */
 internal sealed partial class AddInSession
 {
-    /// <summary>In words, what the log watches. Said in its own answer, and drawn in the pane.</summary>
+    /// <summary>
+    /// In words, what the log watches. Said in its own answer, and drawn in the pane.
+    ///
+    /// IT SAYS WHAT IS RECORDED FIRST, because that is the part a reader needs and the part they
+    /// are most likely to doubt: a developer's own typing IS in here, under their own name. The
+    /// first wording led with the exclusions and called the uncovered case "edits made directly in
+    /// the VBE", which reads as "anything I type" to somebody sitting inside the VBE looking at
+    /// this editor - and their typing is recorded, so the sentence said the opposite of the truth
+    /// to the person most likely to read it (the owner, 2026-08-22). The uncovered case is the
+    /// editor's OWN code window, underneath this one.
+    /// </summary>
     private const string ChangeLogCovers =
-        "Module code written through xlide. References, project properties and form designs are "
-        + "not recorded, and edits made directly in the VBE are not either.";
+        "Records module code written through this editor, yours and an agent's alike. Not "
+        + "recorded: references, project properties, form designs, or code typed into the VBE's "
+        + "own code window underneath.";
 
     /// <summary>One log per project, opened when a project is first written to.</summary>
     private readonly Dictionary<string, ChangeLog> _changeLogs = new(StringComparer.OrdinalIgnoreCase);
@@ -91,21 +102,9 @@ internal sealed partial class AddInSession
             return already;
         }
 
-        try
-        {
-            var home = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                ProductIdentity.DataFolderName);
-
-            var opened = ChangeLog.For(home, projectId);
-            _changeLogs[projectId] = opened;
-            return opened;
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"changes: no log could be opened for {projectId}, {ex.Message}");
-            return null;
-        }
+        var opened = new ChangeLog();
+        _changeLogs[projectId] = opened;
+        return opened;
     }
 
     /// <summary>
@@ -115,17 +114,21 @@ internal sealed partial class AddInSession
     /// than no log, so everything here is inside the catch: the write has already happened and is
     /// none of this method's business.
     /// </summary>
-    private void RecordChange(string module, string? projectId, ChangeKind kind, string? before, string? after)
+    private void RecordChange(
+        string module, string? projectId, ChangeKind kind, string? before, string? after,
+        string? from = null)
     {
         try
         {
-            if (before == after)
+            // A write that changed nothing is not a change. A RENAME is, though, and it carries no
+            // text of its own - so it is never the case this turns away.
+            if (kind != ChangeKind.Renamed && before == after)
             {
                 return;
             }
 
-            ChangeLogFor(projectId)?.Record(
-                module, kind, before, after, _writingAs ?? "developer", DateTimeOffset.UtcNow);
+            ChangeLogFor(ChangeLogProject(projectId))?.Record(
+                module, kind, before, after, _writingAs ?? "developer", DateTimeOffset.UtcNow, from);
         }
         catch (Exception ex)
         {
@@ -191,7 +194,7 @@ internal sealed partial class AddInSession
         {
             Log.Error("changes: the pane's question could not be answered", ex);
             answer = System.Text.Json.JsonSerializer.Serialize(
-                new ChangeLogReply(ex.Message.Trim(), string.Empty, string.Empty, 0, ChangeLogCovers, []),
+                new ChangeLogReply(ex.Message.Trim(), string.Empty, 0, ChangeLogCovers, []),
                 ChangeJsonContext.Default.ChangeLogReply);
         }
 
@@ -221,8 +224,7 @@ internal sealed partial class AddInSession
         {
             return System.Text.Json.JsonSerializer.Serialize(
                 new ChangeLogReply(
-                    "no project is shown, and none was named", string.Empty, string.Empty, 0,
-                    ChangeLogCovers, []),
+                    "no project is shown, and none was named", string.Empty, 0, ChangeLogCovers, []),
                 ChangeJsonContext.Default.ChangeLogReply);
         }
 
@@ -243,7 +245,7 @@ internal sealed partial class AddInSession
         return System.Text.Json.JsonSerializer.Serialize(
             new ChangeLogReply(
                 detail, DisplayFromProjectId(wanted) ?? wanted ?? string.Empty,
-                log.Directory, log.AcceptedAt, ChangeLogCovers, rounds),
+                log.AcceptedAt, ChangeLogCovers, rounds),
             ChangeJsonContext.Default.ChangeLogReply);
     }
 
@@ -275,7 +277,7 @@ internal sealed partial class AddInSession
 
         return new ChangeEntryReply(
             entry.Module, entry.Kind.ToString().ToLowerInvariant(),
-            added, removed, entry.Before, entry.After, held);
+            added, removed, entry.From, held);
     }
 
     /// <summary>

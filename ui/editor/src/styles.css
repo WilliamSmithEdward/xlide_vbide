@@ -5416,3 +5416,13 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.6;
   border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
 }
+
+/* The round's own number. Everything else names a round by it - the api's `round=`, a label read
+   back by a driver, a developer asking an agent to look at "round 4" - so the pane says it too. */
+.changes-number {
+  min-width: 18px;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.45;
+}

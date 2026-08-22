@@ -18,8 +18,7 @@ public sealed record ChangeEntryReply(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("added")] int Added,
     [property: JsonPropertyName("removed")] int Removed,
-    [property: JsonPropertyName("before")] string? Before,
-    [property: JsonPropertyName("after")] string? After,
+    [property: JsonPropertyName("from")] string? From,
     [property: JsonPropertyName("held")] bool Held);
 
 /// <summary>
@@ -46,7 +45,6 @@ public sealed record ChangeRoundReply(
 public sealed record ChangeLogReply(
     [property: JsonPropertyName("detail")] string Detail,
     [property: JsonPropertyName("project")] string Project,
-    [property: JsonPropertyName("directory")] string Directory,
     [property: JsonPropertyName("acceptedAt")] int AcceptedAt,
     [property: JsonPropertyName("covers")] string Covers,
     [property: JsonPropertyName("rounds")] ChangeRoundReply[] Rounds);

@@ -257,7 +257,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
-| `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` marks the rounds so far as reviewed. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
+| `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` marks the rounds so far as reviewed. Held in memory for the session: it writes no file anywhere. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass`. **A FORM CARRIES THREE FILES**: its code, the binary sidecar the VBE's own exporter writes beside it, and `Name.form` - the design as xlide's markup, a row of its own that diffs and applies like any other. On import a `.form` goes through the markup's name-keyed diff (the same apply Ctrl+S makes), so an edit made in a text file reaches the control; a `.form` whose form is not in the project is skipped saying to add the form first |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` - and `form` is refused in Access, whose VBA has no UserForms |
 | `defaults` | `controlDefaults(type)` | what a control of a KIND holds UNTOUCHED, by property: the inventory the markup projection compares against to print only what a developer changed. Measured from a bare instance of the coclass MSForms registers - `Forms.CommandButton.1` and the rest, the same ProgIDs the add route takes - so no workbook is opened, no form is created, nothing appears on screen, and no table of ours can rot against the MSForms this machine actually has. Two honest gaps it reports rather than papers over: a control that will not come up outside a container answers few properties or none (a MultiPage answers one), and a bare control's FONT is not the font it would wear on a form, which inherits the form's - so fonts are compared against the form, never against this |
@@ -1129,11 +1129,15 @@ edited. Texts are stored by content hash, so a module written five times in a ro
 before and one after, and an after that becomes the next round's before is stored once between
 them. The counts are worked out when somebody LOOKS, never on the write path.
 
-**Where it lives** is beside the shim's diagnostic log, under `%LOCALAPPDATA%\xlide_vbide\changes\`,
-one directory per workbook. Not in the workbook, which it would bloat and where VBA could see it;
-not in a folder beside it, which a network share or a rename makes a mess of. A record of what
-happened on this machine does not need to travel, and it survives closing the workbook because a
-log that forgets is not a log.
+**It writes nothing anywhere.** The log lives in the session and goes when the session does. It
+began as a file under the product's own data directory and that was wrong: nothing in production
+may depend on an external log file, and a pane that only works while a file it wrote is still on
+disk has a second way to be wrong. The span it covers is the one it is for - reviewing what an
+agent is doing while it does it.
+
+Past 64 MB of held text per project the oldest rounds let their texts go and say so, which the
+pane draws as "text let go" rather than as an empty comparison. The rounds themselves stay: they
+are the record, and they cost almost nothing.
 
 **What it does not cover** is everything that is not module code: references, project properties,
 form designs, and edits made straight into the VBE rather than through this product. It says so in

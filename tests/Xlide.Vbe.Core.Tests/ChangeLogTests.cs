@@ -12,29 +12,12 @@ namespace Xlide.Vbe.Core.Tests;
 /// The clock is a parameter throughout, so the rules that depend on it - a silence ending a round,
 /// a round's own start and end - are tested rather than waited for.
 /// </summary>
-public sealed class ChangeLogTests : IDisposable
+public sealed class ChangeLogTests
 {
-    private readonly string _home = Path.Combine(
-        Path.GetTempPath(), $"xlide-changelog-{Guid.NewGuid():N}");
-
     private static readonly DateTimeOffset Noon =
         new(2026, 8, 21, 12, 0, 0, TimeSpan.Zero);
 
-    private ChangeLog Open() => ChangeLog.For(_home, @"C:\books\Ledger.xlsm");
-
-    public void Dispose()
-    {
-        try
-        {
-            if (Directory.Exists(_home))
-            {
-                Directory.Delete(_home, recursive: true);
-            }
-        }
-        catch (IOException)
-        {
-        }
-    }
+    private static ChangeLog Open() => new();
 
     [Fact]
     public void AWriteOpensARoundAndTheRoundHoldsWhatItDid()
@@ -143,85 +126,87 @@ public sealed class ChangeLogTests : IDisposable
     }
 
     [Fact]
-    public void TheLogSurvivesTheSessionThatWroteIt()
-    {
-        var first = Open();
-        first.Record("Parser", ChangeKind.Written, "old", "new", "claude", Noon);
-        first.Close("a round", Noon.AddSeconds(5));
-
-        var second = Open();
-        var round = Assert.Single(second.Rounds());
-        Assert.Equal("a round", round.Label);
-        Assert.Equal("claude", round.Author);
-        Assert.Equal("old", second.TextOf(Assert.Single(round.Entries).Before));
-    }
-
-    [Fact]
-    public void ARoundLeftRunningWhenTheSessionEndedIsStillReadAsARound()
-    {
-        var first = Open();
-        first.Record("Parser", ChangeKind.Written, "old", "new", "claude", Noon);
-        // No Close: the host went away.
-
-        var second = Open();
-        var round = Assert.Single(second.Rounds());
-        Assert.False(round.Open);
-        Assert.Equal("Parser", Assert.Single(round.Entries).Module);
-    }
-
-    [Fact]
-    public void TheNextSessionCountsOnFromWhereTheLastOneStopped()
-    {
-        var first = Open();
-        first.Record("Parser", ChangeKind.Written, "a", "b", "claude", Noon);
-        first.Close(null, Noon.AddSeconds(1));
-
-        var second = Open();
-        second.Record("Parser", ChangeKind.Written, "b", "c", "claude", Noon.AddMinutes(30));
-
-        Assert.Equal([2, 1], second.Rounds().Select(one => one.Number));
-    }
-
-    [Fact]
-    public void AcceptingDrawsALineWithoutDestroyingAnything()
+    public void AcceptingMarksTheRoundsWithoutDestroyingAnything()
     {
         var log = Open();
         log.Record("Parser", ChangeKind.Written, "a", "b", "claude", Noon);
         log.Accept(Noon.AddSeconds(5));
 
         Assert.Equal(1, log.AcceptedAt);
+
+        // The round is still there, and so is what the module held before it. Accepting moves
+        // where a reader starts counting; it does not remove the past.
         Assert.Single(log.Rounds());
         Assert.Equal("a", log.TextOf(Assert.Single(Assert.Single(log.Rounds()).Entries).Before));
 
-        var later = Open();
-        Assert.Equal(1, later.AcceptedAt);
-        Assert.Single(later.Rounds());
+        // It also ends the round that was running, so what comes next is counted apart.
+        log.Record("Parser", ChangeKind.Written, "b", "c", "claude", Noon.AddSeconds(6));
+        Assert.Equal(2, log.Rounds().Count);
+        Assert.Equal(1, log.AcceptedAt);
     }
 
     [Fact]
-    public void ATextIsKeptOnceHoweverManyRoundsNameIt()
+    public void ATextIsHeldOnceHoweverManyRoundsNameIt()
     {
-        // Content-addressed: the after of one round is the before of the next, and that is one
-        // file. This is what keeps a long session from costing a copy per write.
+        // Kept by content: the after of one round is the before of the next, and that is one copy.
+        // This is what keeps a long session over a large module from costing a copy per write.
         var log = Open();
         log.Record("Parser", ChangeKind.Written, "one", "two", "claude", Noon);
         log.Close(null, Noon.AddSeconds(1));
         log.Record("Parser", ChangeKind.Written, "two", "three", "developer", Noon.AddSeconds(2));
 
-        var texts = Directory.GetFiles(Path.Combine(log.Directory, "texts"));
-        Assert.Equal(3, texts.Length);
+        // "one", "two" and "three" - and "two" only once, though two rounds name it.
+        Assert.Equal(("one".Length + "two".Length + "three".Length) * 2L, log.HeldBytes);
     }
 
     [Fact]
-    public void TwoWorkbooksWithTheSameNameAreTwoLogs()
+    public void TheOldestRoundsLetTheirTextsGoRatherThanGrowingWithoutBound()
     {
-        var left = ChangeLog.For(_home, @"C:\one\Ledger.xlsm");
-        var right = ChangeLog.For(_home, @"C:\two\Ledger.xlsm");
+        // Nothing evicts this now that it is memory rather than disk, so the log ages itself. The
+        // entries stay - they are the record - and what goes is the text, which says so.
+        var log = Open();
+        var big = new string('x', 4 * 1024 * 1024);
 
-        Assert.NotEqual(left.Directory, right.Directory);
+        for (var round = 0; round < 12; round++)
+        {
+            log.Record("Big", ChangeKind.Written, $"{big}{round}", $"{big}{round + 1}", "claude", Noon.AddMinutes(round));
+            log.Close(null, Noon.AddMinutes(round).AddSeconds(1));
+        }
 
-        left.Record("Parser", ChangeKind.Written, "a", "b", "claude", Noon);
-        Assert.Empty(right.Rounds());
+        Assert.True(
+            log.HeldBytes <= ChangeLog.LargestHeldBytes,
+            $"the log is holding {log.HeldBytes} bytes, past its own budget");
+
+        // Every round is still there, and the newest can still show what it did.
+        Assert.Equal(12, log.Rounds().Count);
+        Assert.NotNull(log.TextOf(log.Rounds()[0].Entries[0].After));
+
+        // The oldest has let its text go, and answering null is how it says so.
+        Assert.Null(log.TextOf(log.Rounds()[^1].Entries[0].Before));
+    }
+
+    [Fact]
+    public void ARenameMovesTheEntryRatherThanStartingAnother()
+    {
+        // A round's entries are keyed by the module's name, and a rename changes it - so without
+        // this a module renamed and then written reads as two modules, one of which is gone.
+        var log = Open();
+        log.Record("Ledger", ChangeKind.Written, "before", "after", "claude", Noon);
+        log.Record("Accounts", ChangeKind.Renamed, null, null, "claude", Noon.AddSeconds(1), from: "Ledger");
+        log.Record("Accounts", ChangeKind.Written, "after", "after and more", "claude", Noon.AddSeconds(2));
+
+        var entry = Assert.Single(Assert.Single(log.Rounds()).Entries);
+        Assert.Equal("Accounts", entry.Module);
+        Assert.Equal("Ledger", entry.From);
+
+        // Written, not Renamed: this module was renamed AND its text changed, and `From` is what
+        // says the first while the kind says the second. Collapsing both into Renamed would lose
+        // the more interesting half. A bare rename, with nothing written, is Renamed.
+        Assert.Equal(ChangeKind.Written, entry.Kind);
+
+        // And it still knows what the module held before any of it.
+        Assert.Equal("before", log.TextOf(entry.Before));
+        Assert.Equal("after and more", log.TextOf(entry.After));
     }
 
     [Fact]

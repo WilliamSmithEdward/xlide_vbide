@@ -20,8 +20,8 @@ export interface ChangeEntry {
   kind: string;
   added: number;
   removed: number;
-  before: string | null;
-  after: string | null;
+  /** What it was called when the round began, when a rename moved it. */
+  from: string | null;
   held: boolean;
 }
 
@@ -41,7 +41,6 @@ export interface ChangeRound {
 export interface ChangeLogState {
   detail: string;
   project: string;
-  directory: string;
   acceptedAt: number;
   covers: string;
   rounds: ChangeRound[];
@@ -83,6 +82,7 @@ const KIND_WORD: Record<string, string> = {
   written: "changed",
   added: "added",
   removed: "removed",
+  renamed: "renamed",
 };
 
 /** "2:04 PM", or the date as well once it is not today. */
@@ -273,6 +273,12 @@ export class ChangesPane {
     const head = document.createElement("div");
     head.className = "changes-round-head";
 
+    // The round's own number, because everything else names it by that: the api's `round=`, the
+    // label a driver reads back, and a developer asking an agent to look at "round 4".
+    const number = document.createElement("span");
+    number.className = "changes-number";
+    number.textContent = String(round.round);
+
     const who = document.createElement("span");
     who.className = `changes-by changes-by-${round.by.toLowerCase() === "developer" ? "developer" : "agent"}`;
     who.textContent = round.by;
@@ -286,7 +292,7 @@ export class ChangesPane {
     clock.textContent = when(round.ended || round.started);
     clock.title = `Round ${round.round}, ${new Date(round.started).toLocaleString()}`;
 
-    head.append(who, said, clock);
+    head.append(number, who, said, clock);
     box.appendChild(head);
 
     for (const entry of round.entries) {
@@ -311,7 +317,11 @@ export class ChangesPane {
 
     const what = document.createElement("span");
     what.className = "changes-kind";
-    what.textContent = KIND_WORD[entry.kind] ?? entry.kind;
+    // A rename says what it was, because "renamed" on its own leaves the reader looking for a
+    // module under a name that is no longer in the tree.
+    what.textContent = entry.from
+      ? `renamed from ${entry.from}`
+      : KIND_WORD[entry.kind] ?? entry.kind;
 
     const counts = document.createElement("span");
     counts.className = "changes-counts";
