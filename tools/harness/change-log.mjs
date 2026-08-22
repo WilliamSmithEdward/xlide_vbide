@@ -48,6 +48,18 @@ const check = (name, got, want = true) => {
 const project = (await api.projects()).projects[0];
 console.log(`project: ${project.project}\n`);
 
+// IT WRITES, SO IT CHECKS WHOSE WORKBOOK IT IS IN. Every check below appends to a module and puts
+// it back, which is safe in the fixture built for it and is somebody's actual work anywhere else.
+// The suite took whatever workbook happened to be open and only failed later, on a missing module
+// name - by which point it had already written to two of them (noticed 2026-08-22, with a real
+// project open in the editor).
+if (!/changefixture/i.test(project.project)) {
+  console.log(`FAIL this suite writes to the modules of whatever workbook is open, and this one is`
+    + `\n     ${project.project}, which is not the fixture it was built for. Refusing.`
+    + `\n\n     powershell tools\\harness\\Start-Excel.ps1 -Fresh -Workbook artifacts\\fixtures\\ChangeFixture.xlsm`);
+  process.exit(1);
+}
+
 const held = (name) => api.readModule(name, project.projectId).then((one) => one.text);
 const write = (name, text, by) => api.writeModule(name, text, project.projectId, { by });
 const log = (args = {}) => api.changes({ ...args, project: project.projectId });
@@ -205,6 +217,49 @@ check(`the expand button centres its glyph (off by ${middle.grow})`,
 
 const grew = await api.act("changesPane", { expand: true });
 check("the comparison opens full size", grew.did, true);
+
+// AND A DOUBLE-CLICK ON THE ROW DOES THE SAME. A row is a thing you open, and opening a thing
+// properly is a double-click - the gesture the tree already uses for a module (the owner,
+// 2026-08-22). Driven twice, because the two paths through it are genuinely different:
+//
+//   WARM - the row's comparison is already on screen, so the second click is just the expand.
+//   COLD - nobody had opened the row, so the request is still in flight when the second click
+//          lands. The intent is remembered and honoured by the draw that brings the rows in;
+//          asking the host again instead would be a second whole-module comparison for an
+//          answer already on its way.
+
+await api.act("changesPane", { expand: false });
+const warm = await api.act("changesPane",
+  { round: oneHand[0].round, module: "Ledger", gesture: "double" });
+check("a double-click on a row already showing opens it full size", warm.did, true);
+await waitFor("the card", async () => (await api.ui()).changes.full === true, { budgetMs: 10000 });
+check("and it is up", (await api.ui()).changes.full, true);
+
+await api.act("changesPane", { expand: false });
+await api.act("changesPane", { round: oneHand[0].round, module: second });
+await waitFor("the other row", async () =>
+  (await api.ui()).changes.showing === `${second}@${oneHand[0].round}`, { budgetMs: 10000 });
+
+// Cold: point the pane away first, so Ledger's rows are genuinely not the ones on screen.
+const cold = await api.act("changesPane",
+  { round: oneHand[0].round, module: "Ledger", gesture: "double" });
+check("a double-click on a row nobody had opened opens it too", cold.did, true);
+const arrived = await waitFor("the card to catch up", async () => {
+  const now = await api.ui();
+  return now.changes.full === true ? now.changes.showing : false;
+}, { budgetMs: 15000 });
+check("and it shows the row that was double-clicked, not the one that was on screen",
+  arrived, `Ledger@${oneHand[0].round}`);
+
+const hint = await api.ask(
+  `document.querySelector('#changes-list .changes-entry')?.title ?? ''`);
+check("and the row says the gesture is there at all", /Double-click/.test(String(hint)), true);
+
+await api.act("changesPane", { expand: false });
+await api.act("changesPane", { round: oneHand[0].round, module: "Ledger" });
+await waitFor("the strip back on Ledger", async () =>
+  (await api.ui()).changes.showing === `Ledger@${oneHand[0].round}`, { budgetMs: 10000 });
+await api.act("changesPane", { expand: true });
 
 const bigger = await api.ask(`JSON.stringify((() => {
   const card = document.querySelector('#changes-full-card');

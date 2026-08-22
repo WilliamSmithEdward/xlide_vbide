@@ -84,7 +84,7 @@ export interface ChangesPaneProbe {
    * list, or the full-size card's rail - two controls onto the same comparison, and a harness
    * proving one has not proved the other.
    */
-  show(round: number, module: string, where?: "pane" | "full"): boolean;
+  show(round: number, module: string, where?: "pane" | "full", gesture?: "click" | "double"): boolean;
   /** Points the pane at another open file, through the select's own change event. */
   chooseFile(name: string): boolean;
   /** Opens the comparison on screen full size, or closes it. */
@@ -378,7 +378,12 @@ export class ChangesPane {
     }
 
     row.append(name, what, counts);
+    // A row is a thing you open, and opening a thing properly is a double-click - the same
+    // gesture the tree uses to open a module (the owner, 2026-08-22: "double click on row should
+    // open popout"). Single click still puts it in the strip, which is the cheap look.
+    row.title = `${entry.module}, round ${round.round}. Double-click to see it full size`;
     row.addEventListener("click", () => void this.open(round.round, entry.module));
+    row.addEventListener("dblclick", () => this.openFull(round.round, entry.module));
     return row;
   }
 
@@ -389,7 +394,40 @@ export class ChangesPane {
    * that knows to answer a hopelessly different middle as a block instead of building a table
    * nothing can afford. A second implementation in the page would not know that.
    */
+  /**
+   * The double-click: this row, full size.
+   *
+   * The first click of the double has already asked for the row, so when its rows are here this
+   * is just the expand. When they are not - a double-click on a row nobody had opened yet - the
+   * request is in flight, and asking again would be a second round trip over a whole-module
+   * comparison to get an answer already on its way. So the intent is REMEMBERED instead, and the
+   * draw that lands the rows honours it.
+   */
+  private openFull(round: number, module: string): void {
+    if (this.showing?.round === round
+      && this.showing.module === module
+      && this.showingRows.length > 0) {
+      this.expand();
+      return;
+    }
+
+    this.growWhenDrawn = { round, module };
+    if (this.showing?.round !== round || this.showing.module !== module) {
+      void this.open(round, module);
+    }
+  }
+
+  /** A row asked for full size before its comparison had arrived. */
+  private growWhenDrawn: { round: number; module: string } | null = null;
+
   private async open(round: number, module: string): Promise<void> {
+    // A pending full-size intent belongs to ONE row. Opening a different one is the developer
+    // having moved on, and a flag left standing would pop that later row open by itself.
+    if (this.growWhenDrawn
+      && (this.growWhenDrawn.round !== round || this.growWhenDrawn.module !== module)) {
+      this.growWhenDrawn = null;
+    }
+
     this.showing = { round, module };
     this.draw();
 
@@ -459,6 +497,18 @@ export class ChangesPane {
 
     // And the card, when one is up, from the rows the strip was just given.
     this.drawFullDiff();
+
+    // A double-click that landed before its comparison did. Honoured only for the row that was
+    // actually asked for: a second click elsewhere while the first was in flight has moved on,
+    // and popping open whatever arrived next would be the pane answering a question nobody asked.
+    const waiting = this.growWhenDrawn;
+    if (waiting
+      && this.showing?.round === waiting.round
+      && this.showing.module === waiting.module
+      && rows.length > 0) {
+      this.growWhenDrawn = null;
+      this.expand();
+    }
   }
 
   /**
@@ -881,14 +931,26 @@ export class ChangesPane {
         this.file.dispatchEvent(new Event("change"));
         return true;
       },
-      show: (round, module, where) => {
+      show: (round, module, where, gesture) => {
         const row = where === "full"
           ? this.full?.rail.querySelector<HTMLElement>(
             `.changes-full-entry[data-round="${round}"][data-module="${CSS.escape(module)}"]`) ?? null
           : this.list.querySelector<HTMLElement>(
             `.changes-round[data-round="${round}"] .changes-entry[data-module="${CSS.escape(module)}"]`);
-        row?.click();
-        return row !== null;
+
+        if (!row) {
+          return false;
+        }
+
+        // The REAL gesture: a double-click is a click and then a dblclick, in that order, which
+        // is what the row's own two listeners see from a mouse. Dispatching only the dblclick
+        // would test a path no developer can take.
+        row.click();
+        if (gesture === "double") {
+          row.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+        }
+
+        return true;
       },
     };
   }

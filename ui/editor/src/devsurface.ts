@@ -1857,6 +1857,10 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * pane's list. Two controls onto the same comparison, so a check that drove one has not said
      * anything about the other.
      *
+     * `{round, module, gesture: "double"}` double-clicks the row, which opens it full size. Sent
+     * as a click THEN a dblclick, in that order, because that is what the row's two listeners see
+     * from a mouse - a lone dblclick would exercise a path no developer can take.
+     *
      * There is no revert here because there is none in the pane: the log shows, and writing is
      * done through `module`, where it lands in the log like any other write.
      */
@@ -1902,8 +1906,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         const module = String(args.module);
         const round = Number(args.round ?? 0);
         const where = String(args.in ?? "pane") === "full" ? "full" : "pane";
-        return pane.show(round, module, where)
-          ? { did: true, detail: `showing ${module} from round ${round}, from the ${where}` }
+        const gesture = String(args.gesture ?? "click") === "double" ? "double" : "click";
+        return pane.show(round, module, where, gesture)
+          ? {
+            did: true,
+            detail: `${gesture === "double" ? "double-clicked" : "showing"} ${module}`
+              + ` from round ${round}, from the ${where}`,
+          }
           : { did: false, detail: `the ${where} has no row for ${module} in round ${round}` };
       }
 
