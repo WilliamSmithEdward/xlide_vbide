@@ -13,6 +13,7 @@
  */
 
 import { drawDiffRows, type SyncDiffLine } from "./diffview.js";
+import { openModal } from "./modal.js";
 
 /** One module's before and after within a round, as the host reports it. */
 export interface ChangeEntry {
@@ -69,6 +70,8 @@ export interface ChangesPaneProbe {
       modules: { module: string; added: number; removed: number; held: boolean }[];
     }[];
     showing: string | null;
+    /** Whether the comparison is up full size. */
+    full: boolean;
   };
   /** Presses a named control: refresh, snapshot, accept. False when unknown. */
   press(control: string): boolean;
@@ -76,6 +79,8 @@ export interface ChangesPaneProbe {
   show(round: number, module: string): boolean;
   /** Points the pane at another open file, through the select's own change event. */
   chooseFile(name: string): boolean;
+  /** Opens the comparison on screen full size, or closes it. */
+  expand(open: boolean): boolean;
 }
 
 const KIND_WORD: Record<string, string> = {
@@ -121,6 +126,11 @@ export class ChangesPane {
 
   /** What the select was last built from, so an unchanged session leaves an open popup alone. */
   private fileSignature = "";
+
+  /** The comparison on screen, kept so it can be shown full size without asking again. */
+  private showingRows: SyncDiffLine[] = [];
+  private showingTitle = "";
+  private full: { card: HTMLElement; dismiss: () => void } | null = null;
 
   constructor(root: HTMLElement, private readonly ask: ChangesRequest, private readonly files: OpenFiles) {
     this.list = root.querySelector("#changes-list") as HTMLElement;
@@ -383,8 +393,29 @@ export class ChangesPane {
 
     const head = document.createElement("div");
     head.className = "changes-diff-head";
-    head.textContent = title ?? "";
+
+    const named = document.createElement("span");
+    named.textContent = title ?? "";
+    head.appendChild(named);
+
+    // FULL SIZE, because the pane is a strip along the bottom and a comparison is two columns of
+    // code. Anything past a few lines is read three words at a time down there.
+    if (rows.length > 0) {
+      const grow = document.createElement("button");
+      grow.type = "button";
+      grow.id = "changes-expand";
+      grow.className = "changes-grow";
+      grow.title = "Show this comparison full size";
+      grow.setAttribute("aria-label", "Show this comparison full size");
+      grow.innerHTML = '<span class="codicon codicon-screen-full" aria-hidden="true"></span>';
+      grow.addEventListener("click", () => this.expand());
+      head.appendChild(grow);
+    }
+
     this.diff.appendChild(head);
+
+    this.showingRows = rows;
+    this.showingTitle = title ?? "";
 
     const body = document.createElement("div");
     body.className = "changes-diff-body";
@@ -398,6 +429,52 @@ export class ChangesPane {
     }
 
     this.diff.appendChild(body);
+  }
+
+  /**
+   * Shows the comparison on screen full size, over everything.
+   *
+   * The pane is a strip along the bottom and a comparison is two columns of code, so anything
+   * past a few lines is read three words at a time down there. This is the same rows, drawn by
+   * the same renderer, in a card that fills the window - and it asks the host nothing, because
+   * the rows it is showing are the rows it already has.
+   */
+  expand(): void {
+    if (this.full || this.showingRows.length === 0) {
+      return;
+    }
+
+    const { card, dismiss } = openModal({
+      backdropId: "changes-full-backdrop",
+      cardId: "changes-full-card",
+      label: `What changed in ${this.showingTitle}`,
+      closed: () => {
+        this.full = null;
+      },
+    });
+
+    const head = document.createElement("div");
+    head.id = "changes-full-head";
+
+    const named = document.createElement("span");
+    named.textContent = this.showingTitle;
+
+    const close = document.createElement("button");
+    close.type = "button";
+    close.id = "changes-full-close";
+    close.title = "Close (Esc)";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
+    close.addEventListener("click", () => dismiss());
+
+    head.append(named, close);
+
+    const body = document.createElement("div");
+    body.id = "changes-full-diff";
+    drawDiffRows(body, this.showingRows, "sync");
+
+    card.append(head, body);
+    this.full = { card, dismiss };
   }
 
   /** The pane as the dev surface reads and drives it. */
@@ -423,6 +500,7 @@ export class ChangesPane {
           })),
         })),
         showing: this.showing ? `${this.showing.module}@${this.showing.round}` : null,
+        full: this.full !== null,
       }),
       press: (control) => {
         const button = control === "refresh" ? this.refresh
@@ -431,6 +509,16 @@ export class ChangesPane {
           : null;
         button?.click();
         return button !== null;
+      },
+      expand: (open) => {
+        if (open) {
+          this.expand();
+          return this.full !== null;
+        }
+
+        const was = this.full !== null;
+        this.full?.dismiss();
+        return was;
       },
       chooseFile: (name) => {
         const option = [...this.file.options].find(

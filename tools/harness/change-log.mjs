@@ -169,6 +169,31 @@ const rows = await waitFor("the comparison to draw", async () => {
 }, { budgetMs: 15000 });
 check("and it draws rows", rows > 0);
 
+// ---- and it opens full size ---------------------------------------------------------------------
+//
+// The pane is a strip along the bottom and a comparison is two columns of code, so anything past a
+// few lines is read three words at a time down there.
+
+const grew = await api.act("changesPane", { expand: true });
+check("the comparison opens full size", grew.did, true);
+
+const bigger = await api.ask(`JSON.stringify({
+  card: !!document.querySelector('#changes-full-card'),
+  title: document.querySelector('#changes-full-head span')?.textContent ?? '',
+  closes: !!document.querySelector('#changes-full-close'),
+  rows: [...document.querySelectorAll('#changes-full-diff .sync-diff-row')].length,
+  clipped: getComputedStyle(document.querySelector('#changes-full-diff .sync-code')).textOverflow
+})`);
+const full = JSON.parse(typeof bigger === "string" ? bigger : JSON.stringify(bigger));
+
+check("it draws the same rows, with a way out", { card: full.card, closes: full.closes, drew: full.rows > 0 },
+  { card: true, closes: true, drew: true });
+check("and the code is not clipped, because reading it is the point", full.clipped, "clip");
+check("the pane says it is up", (await api.ui()).changes.full, true);
+
+const shrank = await api.act("changesPane", { expand: false });
+check("and it closes", { did: shrank.did, up: (await api.ui()).changes.full }, { did: true, up: false });
+
 // ---- accepting -------------------------------------------------------------------------
 
 const accepted = await log({ action: "accept" });

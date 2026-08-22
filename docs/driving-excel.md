@@ -400,6 +400,8 @@ await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the ac
 await api.act("format");                        // Format Module; {selection: true} for the selection
 await api.act("changesPane", { press: "refresh" });   // refresh, snapshot, accept
 await api.act("changesPane", { round: 3, module: "Ledger" });  // open one module's comparison
+await api.act("changesPane", { file: "Ledger.xlsm" });  // point it at another open file
+await api.act("changesPane", { expand: true });         // the comparison, full size; false closes it
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a
@@ -1105,6 +1107,11 @@ between logs rather than filtering one - hidden when a single file is open, the 
 panes follow. A file that CLOSES leaves the list and its changes drop out of the pane: the log
 stays on disk, because it is a record, but a workbook nobody has open is not something the pane
 offers, and the session lets go of it.
+
+**Clicking a module's row** lines its before and after up beside the list, and the expand control
+in that header shows the same rows full size over the whole window, with an X and Esc to leave.
+The strip along the bottom is two columns wide; anything past a few lines is read three words at a
+time down there.
 
 **A round** is a stretch of writes by one hand. It ends when somebody says so, when the writing
 hand changes, when the workbook is saved, or after five minutes' silence. The hand-change rule is

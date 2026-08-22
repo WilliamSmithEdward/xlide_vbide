@@ -126,6 +126,7 @@ export interface UiSnapshot {
       modules: { module: string; added: number; removed: number; held: boolean }[];
     }[];
     showing: string | null;
+    full: boolean;
   } | null;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
@@ -1834,8 +1835,9 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
     /**
      * Drives the Changes pane through its own controls: `{press}` clicks a named button (refresh,
-     * snapshot, accept) and `{round, module}` opens one module's comparison, exactly as clicking
-     * its row does. `ui.changes` is the read side.
+     * snapshot, accept), `{round, module}` opens one module's comparison exactly as clicking its
+     * row does, `{file}` points the pane at another open file, and `{expand}` shows the comparison
+     * full size or closes it. `ui.changes` is the read side, and carries `full`.
      *
      * There is no revert here because there is none in the pane: the log shows, and writing is
      * done through `module`, where it lands in the log like any other write.
@@ -1868,7 +1870,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: `${file} is not one of the open files the pane was given` };
       }
 
-      return { did: false, detail: "nothing asked; pass press, file, or module (with round)" };
+      if (args.expand !== undefined) {
+        const open = args.expand !== false && args.expand !== "false";
+        return pane.expand(open)
+          ? { did: true, detail: open ? "the comparison is up full size" : "the comparison was closed" }
+          : { did: false, detail: open ? "there is no comparison on screen to show" : "nothing was up" };
+      }
+
+      return { did: false, detail: "nothing asked; pass press, file, expand, or module (with round)" };
     },
 
     /**
