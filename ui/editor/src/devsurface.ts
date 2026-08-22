@@ -142,6 +142,8 @@ export interface UiSnapshot {
   } | null;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
+  /** Token sets refused because their offsets did not describe the text on screen. */
+  semanticMisfits: number;
   /** How many models and documents are alive, since a leak shows here first. */
   census: { models: number; documents: number };
   /** The find/replace widget: open, its query and scope, and how many matches it holds. */
@@ -395,6 +397,20 @@ interface LongTask {
 }
 
 const longTasks: LongTask[] = [];
+
+/*
+ * Token sets the colouring turned away for describing some other text than the one on screen.
+ *
+ * Reported rather than merely fixed, because the fix is a REFUSAL: the surface quietly declines
+ * to paint and waits for a better answer, which is invisible by design and therefore impossible
+ * to tell apart from the bug never having happened. A number that goes up is the difference
+ * between "the guard is working" and "the guard is dead code".
+ */
+let readSemanticMisfits: () => number = () => 0;
+
+export const reportSemanticMisfits = (read: () => number): void => {
+  readSemanticMisfits = read;
+};
 
 function watchLongTasks(): void {
   // Not every engine ships either type, and a PerformanceObserver constructed with an
@@ -668,6 +684,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     changes: changesPaneProbe()?.state() ?? null,
     agent: agentDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],
+    semanticMisfits: readSemanticMisfits(),
     census: bridge.modelCensus(),
     search: parts.search.state(),
     bookmarks: (() => {

@@ -283,10 +283,19 @@ check("a double-click on a row already showing opens it full size", warm.did, tr
 await waitFor("the card", async () => (await api.ui()).changes.full === true, { budgetMs: 10000 });
 check("and it is up", (await api.ui()).changes.full, true);
 
+// Point the strip at some OTHER row first, so Ledger's comparison is genuinely not the one on
+// screen. Taken from the pane's own state rather than assumed: `second` was written in a later
+// round than `oneHand[0]`, so naming that round asked for a row that does not exist there - the
+// pane was right to decline and the check was wrong to wait for it.
 await api.act("changesPane", { expand: false });
-await api.act("changesPane", { round: oneHand[0].round, module: second });
+const elsewhereRow = (await api.ui()).changes.rounds
+  .flatMap((round) => round.modules.map((one) => ({ round: round.round, module: one.module })))
+  .find((one) => one.module !== "Ledger");
+
+await api.act("changesPane", { round: elsewhereRow.round, module: elsewhereRow.module });
 await waitFor("the other row", async () =>
-  (await api.ui()).changes.showing === `${second}@${oneHand[0].round}`, { budgetMs: 10000 });
+  (await api.ui()).changes.showing === `${elsewhereRow.module}@${elsewhereRow.round}`,
+{ budgetMs: 10000 });
 
 // Cold: point the pane away first, so Ledger's rows are genuinely not the ones on screen.
 const cold = await api.act("changesPane",
@@ -516,9 +525,15 @@ check("and it closes", { did: shrank.did, up: (await api.ui()).changes.full }, {
 
 // ---- accepting -------------------------------------------------------------------------
 
+// Counted RIGHT BEFORE the accept, not from the reading taken further up: what this check means
+// is "accepting removed no rounds", and anything written in between - the overtaken-counts checks
+// above write to Ledger - legitimately adds one. Measured against the older reading it failed for
+// the writes rather than for the accept, which is the check reporting on the wrong thing.
+const beforeAccept = await log();
+
 const accepted = await log({ action: "accept" });
 check("accepting marks the newest round as reviewed", accepted.acceptedAt, accepted.rounds[0]?.round);
-check("and destroys nothing", since(accepted).length, since(routeNow).length);
+check("and destroys nothing", since(accepted).length, since(beforeAccept).length);
 
 // WHERE THE MARK SITS. The list runs newest first, so a mark naming the newest reviewed round
 // belongs IN FRONT of it: everything below has been seen, everything above has not. Drawn after

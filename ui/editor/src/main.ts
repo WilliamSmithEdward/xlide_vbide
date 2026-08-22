@@ -69,7 +69,8 @@ import { ContextKeyExpr } from "monaco-editor/platform/contextkey/common/context
 import "./styles.css";
 import { EditorBridge, MARKER_OWNER, demoTransport, webView2Transport, type HostCompletionItem, type HostLocation, type HostRenameAnswer } from "./bridge.js";
 import { showContextMenu } from "./contextmenu.js";
-import { installDevSurface } from "./devsurface.js";
+import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
+import { tokensFitTheText } from "./semanticfit.js";
 import { openReferencesDialog } from "./referencesdialog.js";
 import { DocumentStore, docKeyOf, docUriOf, type DocumentId } from "./documents.js";
 import { DesignerView } from "./designerview.js";
@@ -1203,6 +1204,10 @@ function boot(): void {
   // that way in an untouched module (caught 2026-08-19: NameBox.SetFocus blue while its hover
   // said "TextBox method"; reloading painted it). Diagnostics arriving is the analysis saying
   // something moved, debounced so a pass burst costs one re-query of the visible models.
+  /** Token sets turned away for describing some other text. Read through the dev surface. */
+  let semanticMisfits = 0;
+  reportSemanticMisfits(() => semanticMisfits);
+
   const semanticRefresh = new monaco.Emitter<void>();
   let semanticRefreshTimer: ReturnType<typeof setTimeout> | undefined;
   bridge.semanticsMayHaveMoved = () => {
@@ -1213,10 +1218,39 @@ function boot(): void {
     onDidChange: semanticRefresh.event,
     getLegend: () => ({ tokenTypes: SEMANTIC_TOKEN_TYPES, tokenModifiers: SEMANTIC_TOKEN_MODIFIERS }),
     provideDocumentSemanticTokens: async (model) => {
+      // THE OFFSETS ARE ABSOLUTE, AND THE TEXT UNDER THEM CAN MOVE.
+      //
+      // A token is a character range into the text the ANALYSER was given, and it is mapped here
+      // against the model as it stands. Those are the same text almost always and not always: the
+      // page holds an edit until typing stops before writing it to the module, and an agent
+      // writing through the api moves the module while the analysis of the previous version is
+      // still in flight. When they differ, every offset lands somewhere that means nothing - and
+      // it does not look like an error, it looks like the colours have come apart. The owner
+      // caught it mid-write and called it exactly that: "colors are glitched". Measured on the
+      // spot: a comment painted as five spans in two colours, breaking at "Idemp|otent" and
+      // "the ol|d on|e", the fragments in the colour of a type.
+      const askedAt = model.getVersionId();
       const tokens = await bridge.requestSemanticTokens(model);
       if (!tokens) {
         // Null keeps what is already painted. Returning an empty set would strip the colouring
         // from a module whose analysis merely took too long.
+        return null;
+      }
+
+      if (model.getVersionId() !== askedAt) {
+        // The text moved out from under the answer. Monaco re-queries on the edit that moved it,
+        // so the right colouring is already on its way; painting this one first would put the
+        // wrong colours on screen for exactly as long as it takes to be corrected.
+        return null;
+      }
+
+      const fits = tokensFitTheText({
+        positionAt: (offset) => model.getPositionAt(offset),
+        lineAt: (lineNumber) => model.getLineContent(lineNumber),
+      }, tokens);
+
+      if (!fits) {
+        semanticMisfits += 1;
         return null;
       }
 
