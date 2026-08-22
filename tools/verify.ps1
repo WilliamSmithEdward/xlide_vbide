@@ -664,6 +664,12 @@ if ($Live) {
             # counted only files holding tests, which with none open is vacuously satisfied
             # (2026-08-21).
             'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm' = @('multi-file.mjs', 'tests-support.mjs')
+            # THE CHANGE LOG GETS ITS OWN WORKBOOK (tools\New-ChangeFixture.ps1), because its
+            # suite edits modules and then asserts on what the log says was edited. Any fixture
+            # another suite reads would be either useless for that or a landmine for the other
+            # suite - DebugFixture alone is read by nine. Its Untouched module is edited by
+            # nobody, which is how "the log did not over-report" is a real question.
+            'ChangeFixture.xlsm' = @('change-log.mjs')
         }
 
         foreach ($fixture in $plan.Keys) {

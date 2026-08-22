@@ -104,6 +104,8 @@ export interface ShellHandlers {
   trace(text: string): void;
   /** The Tests pane came forward; it rediscovers so the tree matches the code as it stands. */
   testsShown(): void;
+  /** The Changes pane came forward; it reads the change log, which it does at no other time. */
+  changesShown(): void;
 }
 
 const SEVERITY_MARK: Record<FindingSeverity, string> = {
@@ -371,6 +373,9 @@ export class Shell {
       seat("locals", "Locals", [this.localsBody]),
       seat("watch", "Watch", [this.watchBody]),
       seat("tests", "Tests", [root.querySelector("#tests") as HTMLElement], () => handlers.testsShown()),
+      // The change log is READ when the pane is opened and not before: every count in it is a
+      // comparison of two whole module texts, and that belongs nowhere near the write path.
+      seat("changes", "Changes", [root.querySelector("#changes") as HTMLElement], () => handlers.changesShown()),
     ];
 
     const dockOf = (side: string) => root.querySelector(`#dock-${side}`) as HTMLElement;

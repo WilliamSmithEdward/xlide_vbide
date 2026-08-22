@@ -77,6 +77,7 @@ import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
+import { ChangesPane } from "./changespane.js";
 import { openSyncDialog } from "./syncdialog.js";
 import { openHelpDialog } from "./helpdialog.js";
 import { openSponsorDialog } from "./sponsordialog.js";
@@ -430,6 +431,7 @@ function boot(): void {
   // Declared before the workspace: its constructor announces the first active group, and the
   // callback below must find an undefined shell, not a const still in its dead zone.
   let shell: Shell | undefined;
+  let changesPane: ChangesPane | undefined;
 
   /** Everything a new group's editor gets, the moment the workspace creates it. */
   const wireEditor = (editor: monaco.editor.IStandaloneCodeEditor): void => {
@@ -765,6 +767,7 @@ function boot(): void {
     requestOutline: (module, workbook) => bridge.requestOutline(module, workbook),
     trace: (text) => bridge.trace(text),
     testsShown: () => bridge.testsAction("show"),
+    changesShown: () => changesPane?.shown(),
   });
   bridge.shell = shell;
 
@@ -777,6 +780,13 @@ function boot(): void {
     navigate: (module, line, file) => bridge.navigate(module, line, 1, true, file),
   });
   bridge.testsChanged = (tests) => testsPane.paint(tests);
+
+  // The Changes pane: the change log, read when the pane is looked at and at no other time.
+  // Its request goes through the same channel the debug api's `changes` route answers, so the
+  // pane and a driver are reading one reply rather than two shapes that can drift.
+  changesPane = new ChangesPane(
+    document.querySelector("#changes") as HTMLElement,
+    (args) => bridge.requestChanges(args));
 
   // Both panes' Current Module scope follows the same tab, and the shell is where every road
   // to a changed active module already meets - the host's own setActive and the workspace's

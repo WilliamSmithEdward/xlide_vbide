@@ -261,6 +261,9 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks for the paired loop rename: (requestId, offset).</summary>
     public Action<int, int>? LoopSyncRequested { get; set; }
 
+    /// <summary>The Changes pane asking the change log something. Read-only, always.</summary>
+    public Action<int, IReadOnlyDictionary<string, string>>? ChangesRequested { get; set; }
+
     /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
     public Action<int, int, int>? CodeActionsRequested { get; set; }
 
@@ -486,6 +489,21 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Answers an import/export request with the service's own JSON, verbatim.</summary>
+    /// <summary>Answers what the Changes pane asked, with the change log route's own JSON.</summary>
+    public void ShowChangesResult(int requestId, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ChangesResultMessage("changesResult", requestId, json),
+            EditorMessageContext.Default.ChangesResultMessage));
+    }
+
     public void ShowSyncResult(int requestId, string json)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -2352,6 +2370,32 @@ internal sealed class EditorSurface : IDisposable
                         && loopOffset >= 0)
                     {
                         LoopSyncRequested?.Invoke(loopRequestId, loopOffset);
+                    }
+
+                    break;
+
+                case "changes":
+                    if (document.RootElement.TryGetProperty("id", out var changesId)
+                        && changesId.TryGetInt32(out var changesRequestId))
+                    {
+                        // Everything but the id is the route's own arguments, so the pane and the
+                        // debug api ask the same question in the same words.
+                        var changesArguments = new Dictionary<string, string>(StringComparer.Ordinal);
+                        foreach (var field in document.RootElement.EnumerateObject())
+                        {
+                            if (field.Name is "type" or "id")
+                            {
+                                continue;
+                            }
+
+                            if (field.Value.ValueKind == JsonValueKind.String
+                                && field.Value.GetString() is { Length: > 0 } argument)
+                            {
+                                changesArguments[field.Name] = argument;
+                            }
+                        }
+
+                        ChangesRequested?.Invoke(changesRequestId, changesArguments);
                     }
 
                     break;

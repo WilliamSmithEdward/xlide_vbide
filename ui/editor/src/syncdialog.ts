@@ -12,15 +12,8 @@
  * project exactly where the api would have left it. That is the whole reason the dialog is thin.
  */
 
+import { drawDiffRows, type SyncDiffLine } from "./diffview.js";
 import { openModal } from "./modal.js";
-
-interface SyncDiffLine {
-  leftNumber: number | null;
-  rightNumber: number | null;
-  left: string;
-  right: string;
-  kind: "equal" | "changed" | "added" | "removed" | "gap";
-}
 
 interface SyncItem {
   id: string;
@@ -690,44 +683,9 @@ export function openSyncDialog(
       return;
     }
 
-    for (const line of lines) {
-      const row = document.createElement("div");
-      row.className = "sync-diff-row";
-      row.dataset.kind = line.kind;
-
-      // A gap is a run of identical lines left out, and it spans the whole width: it belongs to
-      // neither side, so drawing it in the left column would read as a line of the left file.
-      if (line.kind === "gap") {
-        const span = document.createElement("span");
-        span.className = "sync-gap";
-        span.textContent = line.left;
-        row.appendChild(span);
-        diff.appendChild(row);
-        continue;
-      }
-
-      // A line only one side has carries no number for the other, and the host spells that
-      // absence as null rather than as a missing field. Tested for loosely on purpose: `=== undefined`
-      // let a literal "null" through into the gutter.
-      const leftNumber = document.createElement("span");
-      leftNumber.className = "sync-gutter";
-      leftNumber.textContent = line.leftNumber == null ? "" : String(line.leftNumber);
-
-      const leftText = document.createElement("span");
-      leftText.className = "sync-code";
-      leftText.textContent = line.left;
-
-      const rightNumber = document.createElement("span");
-      rightNumber.className = "sync-gutter";
-      rightNumber.textContent = line.rightNumber == null ? "" : String(line.rightNumber);
-
-      const rightText = document.createElement("span");
-      rightText.className = "sync-code";
-      rightText.textContent = line.right;
-
-      row.append(leftNumber, leftText, rightNumber, rightText);
-      diff.appendChild(row);
-    }
+    // Drawn by the shared renderer, which the Changes pane uses too: one idea of what a removed
+    // line looks like, in one place.
+    drawDiffRows(diff, lines, "sync");
   }
 
   function drawWarnings(): void {

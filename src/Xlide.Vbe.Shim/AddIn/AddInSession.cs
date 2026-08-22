@@ -1349,6 +1349,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
+        _editorSurface.ChangesRequested = OnChangesRequested;
         _editorSurface.SemanticTokensRequested = OnSemanticTokensRequested;
         _editorSurface.LiveAnalysisDue = OnLiveAnalysisDue;
         _editorSurface.LiveTextPushed = (module, full, edits) => _analysis?.NotifyLiveText(module, full, edits);
@@ -2495,6 +2496,15 @@ internal sealed partial class AddInSession : IDisposable
                     _editorSurface?.Notify(said);
                 }
             }
+
+            // WHAT THIS WRITE DID, for the change log. The texts are both already in hand - the
+            // baseline is what the diff was computed against and `stored` is what the module holds
+            // now - so recording costs a hash and, the first time a round touches a module, one
+            // copy. Nothing is read, nothing is written to the workbook, and a log that cannot
+            // keep up never fails the write: see RecordChange.
+            RecordChange(
+                component, foundOwner ?? owner, Core.Changes.ChangeKind.Written,
+                baseline, stored ?? text);
 
             _writtenModules[writtenKey] = stored ?? text;
 
@@ -8768,6 +8778,12 @@ internal sealed partial class AddInSession : IDisposable
 
             book.Invoke("Save");
             Log.Info($"close: saved {display}");
+
+            // A SAVE IS A ROUND BOUNDARY. "When I last saved" is already how a developer thinks
+            // about a last-good state, so the change log draws its line in the same place. It
+            // costs nothing - a round is a divider, not a copy - and it means a log read tomorrow
+            // is grouped the way the work actually went.
+            CloseChangeRounds($"saved {display}");
             return true;
         }
         catch (Exception ex)

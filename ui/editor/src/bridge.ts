@@ -86,6 +86,7 @@ export type HostMessage =
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
+  | { type: "changesResult"; id: number; json: string }
   | { type: "setLanguageFacts"; types: string[]; procedures: string[] }
   | ({ type: "setTests" } & SetTestsState)
   | { type: "setLocals"; stopped: boolean; context: string | null; rows: { expression: string; value: string; kind: string }[] }
@@ -464,6 +465,7 @@ export type ClientMessage =
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
   | ({ type: "sync"; id: number; body: string } & Record<string, string | number>)
+  | ({ type: "changes"; id: number } & Record<string, string | number>)
   | { type: "obLibraries"; id: number }
   | { type: "obTypes"; id: number; library: string }
   | { type: "obMembers"; id: number; library: string; typeName: string }
@@ -651,6 +653,7 @@ export class EditorBridge {
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
+  private readonly pendingChanges = new RequestTable<Record<string, unknown>>();
   /** Echo suppression: true while a host edit is being written into the model. */
   private applyingHostEdit = false;
   /** Once the host names a theme, the OS preference stops overriding it. */
@@ -1141,6 +1144,19 @@ export class EditorBridge {
       (id) => this.transport.post({ type: "sync", id, body, ...args }));
   }
 
+  /**
+   * Asks the change log something. Read-only, always: there is no verb here that writes.
+   *
+   * The budget is generous because the answer compares whole module texts to work out its counts
+   * - which is exactly why this is asked when a developer opens the pane and never on a write.
+   */
+  requestChanges(args: Record<string, string>): Promise<Record<string, unknown>> {
+    return this.pendingChanges.ask(
+      () => ({ error: "the host did not answer in time" }),
+      30000,
+      (id) => this.transport.post({ type: "changes", id, ...args }));
+  }
+
   requestOutline(module: string, project?: string): Promise<HostProcedure[] | null> {
     // Held the same way the colouring is, and for the same measurement: a 7,200-procedure module
     // answers 343,317 characters, and the tree asked for it again on every activation.
@@ -1611,6 +1627,16 @@ export class EditorBridge {
           answer = { error: "the host's answer could not be read" };
         }
         this.pendingSyncs.settle(message.id, answer);
+        return;
+      }
+      case "changesResult": {
+        let answer: Record<string, unknown>;
+        try {
+          answer = JSON.parse(message.json) as Record<string, unknown>;
+        } catch {
+          answer = { error: "the host's answer could not be read" };
+        }
+        this.pendingChanges.settle(message.id, answer);
         return;
       }
       case "outlineResult":

@@ -5207,3 +5207,184 @@ body.objbrowser-page #objbrowser-card {
 .designer-handler-mark:hover {
   text-decoration: underline;
 }
+
+/* ---- the Changes pane -------------------------------------------------------------------- */
+
+/* The list on the left and the comparison on the right, the same shape the import dialog uses:
+   choose a thing, see what it did. The comparison rows are dressed as the dialog's, because they
+   are the dialog's - one renderer, one idea of what a removed line looks like. */
+#changes {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+#changes[hidden] {
+  display: none;
+}
+
+#changes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px 4px 10px;
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+#changes-project {
+  margin-left: auto;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+#changes-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) 2fr;
+  flex: 1;
+  overflow: hidden;
+}
+
+#changes-list {
+  overflow: auto;
+  border-right: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+  padding: 4px 0;
+}
+
+#changes-diff {
+  overflow: auto;
+  font-family: var(--vscode-editor-font-family, Consolas, monospace);
+  font-size: 12px;
+}
+
+.changes-diff-head {
+  position: sticky;
+  top: 0;
+  padding: 4px 10px;
+  opacity: 0.7;
+  background: var(--vscode-editor-background, #1e1e1e);
+  border-bottom: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}
+
+.changes-round {
+  padding: 2px 0 6px;
+}
+
+.changes-round-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px 2px;
+}
+
+/* Who wrote it, said plainly. An agent and a developer are told apart by colour AND by the name
+   itself, never by colour alone. */
+.changes-by {
+  font-size: 11px;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.changes-by-agent {
+  color: var(--vscode-charts-purple, #b180d7);
+  border-color: var(--vscode-charts-purple, #b180d7);
+}
+
+.changes-by-developer {
+  color: var(--vscode-charts-blue, #4daafc);
+  border-color: var(--vscode-charts-blue, #4daafc);
+}
+
+.changes-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-when {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.changes-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 10px 2px 22px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-entry:hover {
+  background: var(--vscode-list-hoverBackground, rgba(128, 128, 128, 0.15));
+}
+
+.changes-entry-showing {
+  background: var(--vscode-list-activeSelectionBackground, rgba(128, 128, 128, 0.28));
+}
+
+.changes-module {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.changes-kind {
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+.changes-counts {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.changes-added {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
+}
+
+.changes-removed {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
+}
+
+.changes-gone {
+  opacity: 0.5;
+}
+
+/* The accepted line: everything above it is what has happened since. */
+.changes-accepted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+  margin: 2px 0;
+  font-size: 11px;
+  opacity: 0.7;
+  border-top: 1px dashed var(--vscode-charts-green, #89d185);
+  color: var(--vscode-charts-green, #89d185);
+}
+
+.changes-empty {
+  padding: 10px;
+  opacity: 0.7;
+}
+
+/* What the log does NOT watch, where a reader will see it. A log that is quietly partial about
+   its own scope is worse than no log. */
+#changes-covers {
+  padding: 4px 10px;
+  font-size: 11px;
+  opacity: 0.6;
+  border-top: 1px solid var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.25));
+}

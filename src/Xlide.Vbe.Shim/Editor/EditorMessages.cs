@@ -799,6 +799,15 @@ public sealed record SyncResultMessage(
     [property: JsonPropertyName("json")] string Json);
 
 /// <summary>
+/// The change log's answer to something the pane asked, carried as the route's own JSON so the
+/// pane and the debug api are reading one reply rather than two shapes that can disagree.
+/// </summary>
+public sealed record ChangesResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("json")] string Json);
+
+/// <summary>
 /// The project's own words for the tokenizer: names that denote types and names that denote
 /// procedures, so a name reads as what it is wherever it appears.
 /// </summary>
@@ -873,6 +882,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SmartEnterResultMessage))]
 [JsonSerializable(typeof(CanonicalCaseResultMessage))]
 [JsonSerializable(typeof(LoopSyncResultMessage))]
+[JsonSerializable(typeof(ChangesResultMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]

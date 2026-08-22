@@ -30,6 +30,7 @@ import { colourPickerState, pickColour } from "./colourpicker.js";
 import type { Explorer, ExplorerSnapshot } from "./explorer.js";
 import type { Workspace, WorkspaceSnapshot } from "./workspace.js";
 import { currentSettings } from "./settings.js";
+import { changesPaneProbe } from "./changespane.js";
 import { syncDialogProbe } from "./syncdialog.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
@@ -104,6 +105,26 @@ export interface UiSnapshot {
     busy: boolean;
     status: string;
     rows: { file: string; status: string; detail: string; ticked: boolean; actionable: boolean }[];
+  } | null;
+  /**
+   * The change log as the Changes pane is drawing it: which project, where the accepted line
+   * sits, what the log says it covers, and the rounds with one row per module. Null before the
+   * pane has been built, which is before the page has finished coming up.
+   */
+  changes: {
+    project: string;
+    acceptedAt: number;
+    covers: string;
+    busy: boolean;
+    rounds: {
+      round: number;
+      by: string;
+      label: string | null;
+      open: boolean;
+      accepted: boolean;
+      modules: { module: string; added: number; removed: number; held: boolean }[];
+    }[];
+    showing: string | null;
   } | null;
   /** Main-thread stalls over 50ms, worst first. What the surface felt like, in numbers. */
   longTasks: LongTask[];
@@ -630,6 +651,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     statusPosition: parts.statusPosition(),
     statusModule: parts.statusModule(),
     sync: syncDialogProbe()?.state() ?? null,
+    changes: changesPaneProbe()?.state() ?? null,
     longTasks: [...longTasks],
     census: bridge.modelCensus(),
     search: parts.search.state(),
@@ -1807,6 +1829,38 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       }
 
       return parts.pressToolbar(wanted);
+    },
+
+    /**
+     * Drives the Changes pane through its own controls: `{press}` clicks a named button (refresh,
+     * snapshot, accept) and `{round, module}` opens one module's comparison, exactly as clicking
+     * its row does. `ui.changes` is the read side.
+     *
+     * There is no revert here because there is none in the pane: the log shows, and writing is
+     * done through `module`, where it lands in the log like any other write.
+     */
+    changesPane: (args) => {
+      const pane = changesPaneProbe();
+      if (!pane) {
+        return { did: false, detail: "the Changes pane has not been built yet" };
+      }
+
+      if (args.press !== undefined) {
+        const control = String(args.press);
+        return pane.press(control)
+          ? { did: true, detail: `${control} pressed` }
+          : { did: false, detail: `no control named ${control}; use refresh, snapshot or accept` };
+      }
+
+      if (args.module !== undefined) {
+        const module = String(args.module);
+        const round = Number(args.round ?? 0);
+        return pane.show(round, module)
+          ? { did: true, detail: `showing ${module} from round ${round}` }
+          : { did: false, detail: `round ${round} has no row for ${module} on screen` };
+      }
+
+      return { did: false, detail: "nothing asked; pass press, or module (with round)" };
     },
 
     /**

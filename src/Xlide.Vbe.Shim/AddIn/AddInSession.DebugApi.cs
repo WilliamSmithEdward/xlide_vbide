@@ -3153,7 +3153,21 @@ internal sealed partial class AddInSession
                 DebugJsonContext.Default.DebugBlockedReply));
     }
 
-    private unsafe string AnswerDebugRequestOnHost(DebugServer.DebugRequest request)
+    /// <summary>
+    /// Answers one request, with everything it writes attributed to whoever asked.
+    ///
+    /// A write through this door is never the developer at the keyboard - it is a program, whether
+    /// or not it says which. `by=` names the caller and is what makes a change log worth reading
+    /// once two agents are working; without it the honest record is that something wrote and did
+    /// not say who, which is exactly what `unattributed` means.
+    /// </summary>
+    private string AnswerDebugRequestOnHost(DebugServer.DebugRequest request)
+    {
+        request.Query.TryGetValue("by", out var by);
+        return AttributedTo(by, () => AnswerDebugRouteOnHost(request));
+    }
+
+    private unsafe string AnswerDebugRouteOnHost(DebugServer.DebugRequest request)
     {
         switch (request.Route)
         {
@@ -3626,6 +3640,63 @@ internal sealed partial class AddInSession
                         testsDetail, testsNow.Support, testsNow.Running, testsNow.CurrentTest,
                         testsNow.RanAt, testsNow.Files, testsNow.Rows),
                     DebugJsonContext.Default.DebugTestsReply);
+            }
+
+            /*
+             * THE CHANGE LOG: what happened to this project's module code, by whom, in rounds.
+             *
+             * READ-ONLY, and deliberately so. There is no revert verb here and there is not going
+             * to be one: putting text back is a WRITE, and this product already has a hardened one
+             * at `module`. An agent that wants to undo something reads the text it wants from
+             * `action=text` and writes it, which lands in this log like any other write - so the
+             * clever thing an agent does stays visible, attributable, and reversible by the same
+             * means. Cleverness in the caller, dumbness in the store.
+             *
+             * `action=snapshot&label=` ends the round that is running and names it. It costs
+             * nothing - a round is a divider, not a copy - so call it as often as the work has
+             * shape. Label it after the fact: an agent describes what it DID far better than what
+             * it was about to do, and one that forgets to open a round still leaves a usable one.
+             */
+            case "changes":
+            {
+                request.Query.TryGetValue("action", out var changesAction);
+                request.Query.TryGetValue("project", out var changesProject);
+                request.Query.TryGetValue("module", out var changesModule);
+                request.Query.TryGetValue("label", out var changesLabel);
+                request.Query.TryGetValue("which", out var changesWhich);
+                request.Query.TryGetValue("round", out var changesRound);
+                request.Query.TryGetValue("limit", out var changesLimit);
+
+                var changesAt = int.TryParse(changesRound, out var parsedRound) ? parsedRound : 0;
+                var changesMost = int.TryParse(changesLimit, out var parsedLimit) ? parsedLimit : 200;
+
+                switch (changesAction)
+                {
+                    case "text":
+                        return ChangeTextReply(changesProject, changesAt, changesModule, changesWhich);
+
+                    case "diff":
+                        return ChangeDiffReply(changesProject, changesAt, changesModule);
+
+                    case "snapshot":
+                        CloseChangeRounds(changesLabel);
+                        return ChangesReply(
+                            changesLabel is { Length: > 0 } named
+                                ? $"the round is closed: {named}"
+                                : "the round is closed",
+                            changesProject, changesMost);
+
+                    case "accept":
+                    {
+                        var accepting = ChangeLogFor(
+                            changesProject is { Length: > 0 } ? changesProject : _shownProject);
+                        accepting?.Accept(DateTimeOffset.UtcNow);
+                        return ChangesReply("accepted", changesProject, changesMost);
+                    }
+
+                    default:
+                        return ChangesReply("listed", changesProject, changesMost);
+                }
             }
 
             // What a control of a KIND holds untouched, measured from a bare instance of the

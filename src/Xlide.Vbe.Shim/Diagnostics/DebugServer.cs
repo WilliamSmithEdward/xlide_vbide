@@ -753,6 +753,65 @@ public sealed record DebugTestsReply(
     [property: JsonPropertyName("files")] Xlide.Vbe.Shim.Editor.TestFileMessage[] Files,
     [property: JsonPropertyName("rows")] Xlide.Vbe.Shim.Editor.TestRowMessage[] Rows);
 
+/// <summary>One module's before and after within a round of the change log.</summary>
+public sealed record DebugChangeEntry(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("kind")] string Kind,
+    [property: JsonPropertyName("added")] int Added,
+    [property: JsonPropertyName("removed")] int Removed,
+    [property: JsonPropertyName("before")] string? Before,
+    [property: JsonPropertyName("after")] string? After,
+    [property: JsonPropertyName("held")] bool Held);
+
+/// <summary>
+/// One round: a stretch of writes by one hand, ended by a snapshot, by the hand changing, by a
+/// save, or by a long enough silence.
+/// </summary>
+public sealed record DebugChangeRound(
+    [property: JsonPropertyName("round")] int Round,
+    [property: JsonPropertyName("started")] string Started,
+    [property: JsonPropertyName("ended")] string Ended,
+    [property: JsonPropertyName("by")] string By,
+    [property: JsonPropertyName("label")] string? Label,
+    [property: JsonPropertyName("open")] bool Open,
+    [property: JsonPropertyName("accepted")] bool Accepted,
+    [property: JsonPropertyName("entries")] DebugChangeEntry[] Entries);
+
+/// <summary>
+/// The change log's answer: which project it is about, where it is kept, what the last accepted
+/// line was, and the rounds themselves - newest first, the one still running at the front.
+///
+/// `covers` says in words what the log records, because a log that is silently partial is worse
+/// than no log at all.
+/// </summary>
+public sealed record DebugChangesReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("project")] string Project,
+    [property: JsonPropertyName("directory")] string Directory,
+    [property: JsonPropertyName("acceptedAt")] int AcceptedAt,
+    [property: JsonPropertyName("covers")] string Covers,
+    [property: JsonPropertyName("rounds")] DebugChangeRound[] Rounds);
+
+/// <summary>
+/// One module's change, lined up side by side - the same rows the import/export dialog draws,
+/// from the same bounded comparison, so the two surfaces cannot disagree about what changed.
+/// </summary>
+public sealed record DebugChangeDiffReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("round")] int Round,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("held")] bool Held,
+    [property: JsonPropertyName("rows")] Xlide.Vbe.Shim.Sync.SyncDiffRow[] Rows);
+
+/// <summary>One text the change log kept, asked for by round and module.</summary>
+public sealed record DebugChangeTextReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("round")] int Round,
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("which")] string Which,
+    [property: JsonPropertyName("held")] bool Held,
+    [property: JsonPropertyName("text")] string? Text);
+
 /// <summary>
 /// One control of one editor menu, as GET menus lists them. `suppressed` is whether the surface
 /// leaves it out - the difference between the editor's menu and the product's.
@@ -1497,6 +1556,11 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugUserFormsReply))]
 [JsonSerializable(typeof(DebugSessionsReply))]
 [JsonSerializable(typeof(DebugTestsReply))]
+[JsonSerializable(typeof(DebugChangeEntry))]
+[JsonSerializable(typeof(DebugChangeRound))]
+[JsonSerializable(typeof(DebugChangesReply))]
+[JsonSerializable(typeof(DebugChangeTextReply))]
+[JsonSerializable(typeof(DebugChangeDiffReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]

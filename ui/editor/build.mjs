@@ -229,6 +229,19 @@ const INDEX_HTML = `<!doctype html>
       </div>
       <div id="tests-list" role="tree" aria-label="Tests"></div>
     </div>
+    <div id="changes">
+      <div id="changes-actions" role="toolbar" aria-label="Change log">
+        <button id="changes-refresh" type="button" title="Read the change log again"><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
+        <button id="changes-snapshot" type="button" title="End the round that is running, so what comes next is counted separately"><span class="codicon codicon-history" aria-hidden="true"></span><span class="changes-label-text">Snapshot</span></button>
+        <button id="changes-accept" type="button" title="Draw the accepted line: everything above it is what has happened since"><span class="codicon codicon-check" aria-hidden="true"></span><span class="changes-label-text">Accept</span></button>
+        <span id="changes-project" aria-live="polite"></span>
+      </div>
+      <div id="changes-body">
+        <div id="changes-list" role="list" aria-label="Rounds"></div>
+        <div id="changes-diff" aria-label="What changed"></div>
+      </div>
+      <div id="changes-covers"></div>
+    </div>
   </div>
   <div id="status"><span id="status-position">Ln 1, Col 1</span><span id="status-module"></span><span id="status-notice" role="status" aria-live="polite"></span></div>
 </div>

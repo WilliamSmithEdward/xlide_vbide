@@ -1243,12 +1243,33 @@ function clientFor(entry) {
      * the right habit for a big write, because that one outlives the door's budget and its
      * complaint arrives too late to be the reply (2026-08-09).
      */
-    writeModule: (name, text, project) =>
-      call(`module${query({ name, project })}`, {
+    writeModule: (name, text, project, { by } = {}) =>
+      call(`module${query({ name, project, by })}`, {
         method: "POST",
         body: text,
         timeout: Math.max(10000, Math.ceil(text.length / 1000) * 250),
       }),
+
+    /**
+     * The change log: what happened to a project's module code, by whom, in rounds.
+     *
+     * Bare `changes()` lists the rounds, newest first, with the one still running at the front.
+     * Each round says who wrote it, what it was called if anyone said, and one entry per module
+     * with `+added -removed` worked out from the texts the log kept.
+     *
+     *   await api.changes();                                    // the rounds
+     *   await api.changes({ action: "snapshot", label: "..." }); // end this round and name it
+     *   await api.changes({ action: "accept" });                 // draw the accepted line
+     *   await api.changes({ action: "text", round: 3, module: "Ledger", which: "before" });
+     *
+     * THERE IS NO REVERT HERE AND THERE IS NOT GOING TO BE. Putting text back is a write, and
+     * this product has a hardened one at `writeModule`. Read the text you want from `text` and
+     * write it: the result lands in this log like any other write, so an agent undoing its own
+     * work stays as visible and as reversible as the work it undid.
+     */
+    changes: ({ action, project, module, round, which, label, limit, by } = {}) =>
+      call(`changes${query({ action, project, module, round, which, label, limit, by })}`,
+        { timeout: 30000 }),
 
     /**
      * What an import or an export WOULD do, without doing any of it.

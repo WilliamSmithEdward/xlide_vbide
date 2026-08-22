@@ -257,6 +257,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `caret` | `caret(line, {module, column, project})` | navigates first when a module is named |
 | `command` | `command(name)` | any editor command by name |
 | `compile` | `compile({waitMs})` | compiles; errors as DATA, modal cleared |
+| `changes` | `changes({action, project, module, round, which, label, limit, by})` | the change log: what happened to this project's module code, by whom, in rounds. Bare it lists them newest first with `+added -removed` per module; `action=text` answers what a module held before or after a round; `action=diff` lines the two up; `action=snapshot&label=` ends the round that is running and names it; `action=accept` draws the accepted line. READ-ONLY - to put text back, read it and `writeModule` it, which lands in the log like any other write |
 | `sync` | `syncPlan(direction, {folder, mode, project})`, `syncApply(direction, {folder, mode, ids, select})`, `syncSettings({folder, exportMode, importMode})` | import and export. `syncPlan` answers what would happen without doing any of it; `syncApply` does it and answers what it did. Modes: export `exportAll\|trueUp`, import `updateOnly\|trueUpStandardClass`. **A FORM CARRIES THREE FILES**: its code, the binary sidecar the VBE's own exporter writes beside it, and `Name.form` - the design as xlide's markup, a row of its own that diffs and applies like any other. On import a `.form` goes through the markup's name-keyed diff (the same apply Ctrl+S makes), so an edit made in a text file reaches the control; a `.form` whose form is not in the project is skipped saying to add the form first |
 | `component` | `component(action, {kind, name, newName, project})` | add, rename, remove: what a fixture is made of, from inside. `kind` takes 1/`module`/`standard`, 2/`class`, 3/`form` - and `form` is refused in Access, whose VBA has no UserForms |
 | `defaults` | `controlDefaults(type)` | what a control of a KIND holds UNTOUCHED, by property: the inventory the markup projection compares against to print only what a developer changed. Measured from a bare instance of the coclass MSForms registers - `Forms.CommandButton.1` and the rest, the same ProgIDs the add route takes - so no workbook is opened, no form is created, nothing appears on screen, and no table of ours can rot against the MSForms this machine actually has. Two honest gaps it reports rather than papers over: a control that will not come up outside a container answers few properties or none (a MultiPage answers one), and a bare control's FONT is not the font it would wear on a form, which inherits the form's - so fonts are compared against the form, never against this |
@@ -397,6 +398,8 @@ await api.act("search", { query: "Recalculate", scope: "project", run: "findAll"
 ui.search.scopedMatches;          // the project/workbook answer. `matches` is MODULE SCOPE ONLY
 await api.act("bookmark", { which: "toggle" });   // `do` is reserved for the action name
 await api.act("format");                        // Format Module; {selection: true} for the selection
+await api.act("changesPane", { press: "refresh" });   // refresh, snapshot, accept
+await api.act("changesPane", { round: 3, module: "Ledger" });  // open one module's comparison
 await api.act("dock", { pane: "properties", side: "bottom" });  // panes, through the method a
                                                 //   real drop calls; resetLayout() puts it back
 await api.act("backspace", { times: 1 });       // the one key `type` cannot send; takes back a
@@ -1079,6 +1082,65 @@ after them. `write-fidelity.mjs` pins it, deliberately with a module big enough 
 
 ```bash
 node tools\harness\write-fidelity.mjs
+```
+
+### The change log
+
+An agent has been editing this workbook through the door for twenty minutes. What did it change?
+
+The Changes pane answers that: rounds newest first, who wrote each one, what it was called if
+anybody said, and one row per module with `+added -removed`. Clicking a row lines the module's
+before and after up in the comparison the import dialog draws - the same renderer, from the same
+bounded comparison in the host.
+
+**It only shows.** There is no revert in the pane and there is not going to be one. Putting text
+back is a WRITE, and this product already has a hardened one; a pane that writes is a pane that
+can lose work. So the old text is made reachable instead, and whoever wants it back does it
+themselves - the developer in the editor, where normal undo protects them, or an agent through
+`writeModule`, whose undo then lands in the log as visible and as reversible as the work it undid.
+Cleverness in the caller, dumbness in the store.
+
+**A round** is a stretch of writes by one hand. It ends when somebody says so, when the writing
+hand changes, when the workbook is saved, or after five minutes' silence. The hand-change rule is
+the one that matters: agent, then you by hand, then agent again is three rounds, so your own edit
+sits between two of an agent's rather than folded into either.
+
+```js
+await api.writeModule("Ledger", text, project, { by: "claude" });   // who wrote it
+await api.changes({ action: "snapshot", label: "taught Ledger about dates" });
+await api.changes();                                                 // the rounds
+await api.changes({ action: "diff", round: 4, module: "Ledger" });    // what that one did
+```
+
+Label a round on the way OUT, not on the way in: an agent describes what it did far better than
+what it was about to do, and one that forgets to open a round still leaves a usable one. A
+snapshot costs nothing - a round is a divider, not a copy - so call it whenever the work has
+shape.
+
+**What it costs** is one copy of a module's text the first time a round touches it, which is the
+text the write path had already read to diff against, and nothing at all for modules nobody
+edited. Texts are stored by content hash, so a module written five times in a round costs one
+before and one after, and an after that becomes the next round's before is stored once between
+them. The counts are worked out when somebody LOOKS, never on the write path.
+
+**Where it lives** is beside the shim's diagnostic log, under `%LOCALAPPDATA%\xlide_vbide\changes\`,
+one directory per workbook. Not in the workbook, which it would bloat and where VBA could see it;
+not in a folder beside it, which a network share or a rename makes a mess of. A record of what
+happened on this machine does not need to travel, and it survives closing the workbook because a
+log that forgets is not a log.
+
+**What it does not cover** is everything that is not module code: references, project properties,
+form designs, and edits made straight into the VBE rather than through this product. It says so in
+its own `covers` field and the pane repeats it in a footer, because a log that is quietly partial
+about its own scope is worse than no log - the same lesson as the install chip that read green
+about no files at all.
+
+`change-log.mjs` pins it against a fixture of its own (`tools\New-ChangeFixture.ps1`), whose
+`Untouched` module is edited by nobody, which is how "the log did not over-report" is a real
+question:
+
+```bash
+node tools\harness\change-log.mjs
 ```
 
 ### Waiting, rather than sleeping
