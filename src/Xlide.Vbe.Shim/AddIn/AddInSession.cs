@@ -2347,6 +2347,30 @@ internal sealed partial class AddInSession : IDisposable
     {
         try
         {
+            // A STOPPED PROJECT CANNOT BE EDITED, and asking anyway is not a harmless failure.
+            //
+            // The editor answers an edit made in break mode by asking "This action will reset
+            // your project, proceed anyway?" - a real question, which anything answering dialogs
+            // on our behalf declines, so the write comes back as a bare COM error naming nothing
+            // that happened. And it keeps being asked: a random walk that wrote while stopped
+            // raised and cancelled that dialog over and over, and the editor eventually faulted
+            // in VBE7.DLL with 0xc0000005 and took Excel with it (issue #6, chaos.mjs).
+            //
+            // Refusing is also the only answer here that cannot lose anything. Proceeding means
+            // agreeing to reset the developer's debugging session - their call stack, their
+            // locals, the run they stopped on purpose - and that is theirs to decide.
+            //
+            // Read fresh rather than taken from _inBreak, which is as old as the last poll. The
+            // evaluator learned the same lesson: acting on the cached flag put work into a
+            // stopped project "in ways that have nothing to do with what the developer typed".
+            if (ProjectModeNow() != DesignMode)
+            {
+                Log.Warn($"write: {component} not written - the project is stopped in the debugger");
+                return $"{component} was not written: the project is stopped in the debugger. "
+                    + "Editing now would reset it and lose the run, so it was not attempted. "
+                    + "Press Reset and write again.";
+            }
+
             // A write is normally about the module on the surface, so it goes to the shown
             // project's component - never to a same-named module in another workbook that
             // happened to enumerate first. A caller who knows better says so: the close
@@ -2853,6 +2877,23 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether execution was stopped last time it was looked at.</summary>
     private bool _inBreak;
+
+    /// <summary>
+    /// Whether the immediate window has already asked for a Reset during THIS stopped session.
+    ///
+    /// The pair below is how "did the reset work" gets answered without guessing at a duration.
+    /// Asking is recorded here; arriving back a whole evaluation later, still stopped, is what
+    /// proves it did not take.
+    /// </summary>
+    private bool _immediateResetAsked;
+
+    /// <summary>
+    /// Whether that Reset was refused, so it should stop asking.
+    ///
+    /// Both are cleared the moment the project is seen out of break mode, whoever got it there:
+    /// the refusal is a fact about ONE stopped session, not about the session that follows it.
+    /// </summary>
+    private bool _immediateResetRefused;
 
     /// <summary>
     /// The stop the surface caret was last moved to, as "module:line". The debug poll runs the
@@ -4981,6 +5022,12 @@ internal sealed partial class AddInSession : IDisposable
                     _editorSurface?.ShowCurrentLine(null);
                     _lastStopFollowed = null;
 
+                    // The project is running again, however it got there - a developer pressing
+                    // Reset, the code finishing, anything. Whatever refused the last recovery is
+                    // about a session that is over, so the next one may ask again.
+                    _immediateResetAsked = false;
+                    _immediateResetRefused = false;
+
                     // Forgotten at exit so the NEXT break starts empty: the readings outlive
                     // the break otherwise, and the previous break's variables are exactly
                     // stale enough to mislead.
@@ -6224,11 +6271,46 @@ internal sealed partial class AddInSession : IDisposable
             // reach for COM of its own to fix it.
             evaluator.StoppedUnexpectedly = () =>
             {
+                // ASKED ONCE. A reset that was refused will be refused again for the same reason,
+                // and asking on every evaluation is what turned one stopped project into a loop
+                // that issued Reset, raised its confirmation and tore down panes until the editor
+                // faulted in VBE7.DLL and took Excel with it (issue #6, found by chaos.mjs).
+                // ASKED ONCE, AND JUDGED LATER.
+                //
+                // Whether a reset worked cannot be read the instant the command returns: the
+                // editor's mode does not turn over that fast, and a first attempt at this checked
+                // 9ms afterwards and called a reset refused that had simply not landed yet. The
+                // evidence that it failed is being asked AGAIN - arriving here a second time
+                // means a whole evaluation has passed and the project is still stopped, which is
+                // time that really elapsed rather than a guess about how much would be enough.
+                //
+                // And nothing here sleeps, deliberately. This runs on the host thread, which is
+                // the thread the confirmation's own message loop is on, so waiting for the answer
+                // here would be waiting for a thread this call is standing on.
+                if (_immediateResetAsked)
+                {
+                    if (!_immediateResetRefused)
+                    {
+                        _immediateResetRefused = true;
+                        Log.Warn("immediate: the reset did not take - the project is still "
+                            + "stopped an evaluation later. Something declined its confirmation, "
+                            + "or the editor will not leave break mode. Press Reset in the editor.");
+                    }
+
+                    return;
+                }
+
                 Log.Info("immediate: the line left the project stopped, resetting");
+                _immediateResetAsked = true;
                 try
                 {
-                    ExecuteEditorCommand(VbeCommands.Command.Reset);
-                    Log.Info("immediate: reset executed");
+                    // Reset asks "This action will reset your project, proceed anyway?", and
+                    // whatever answers a dialog blocking the host thread would otherwise decline
+                    // it - correctly, for a question nobody here asked, and fatally for this one.
+                    using (Diagnostics.DialogWatch.ExpectingConfirmation())
+                    {
+                        ExecuteEditorCommand(VbeCommands.Command.Reset);
+                    }
                 }
                 catch (Exception ex)
                 {

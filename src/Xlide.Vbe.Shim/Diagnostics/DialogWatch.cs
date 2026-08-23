@@ -48,6 +48,54 @@ internal static unsafe class DialogWatch
     /// </summary>
     private static readonly string[] Declines = ["Cancel", "No", "Close"];
 
+    /// <summary>Buttons that agree. Only ever pressed inside <see cref="ExpectingConfirmation"/>,
+    /// where the thing being agreed to is the thing this product just asked for.</summary>
+    private static readonly string[] Confirmations = ["OK", "Yes", "Continue"];
+
+    private static int _expecting;
+    private static long _expectingUntil;
+
+    /// <summary>
+    /// Says that a confirmation raised in the next moment is the confirmation of a command THIS
+    /// PRODUCT deliberately issued, so agreeing to it is finishing what we started rather than
+    /// deciding something on the developer's behalf.
+    ///
+    /// WHY THE SCOPE RATHER THAN THE CAPTION. The obvious version matches the dialog's text -
+    /// "This action will reset your project" - and that text is localised, so it would work here
+    /// and quietly stop working on a German or Japanese Office, leaving exactly the deadlock this
+    /// exists to prevent on the machines least able to report it. A scope held around our own call
+    /// needs no words at all.
+    ///
+    /// TIME-BOUNDED, because the dialog is answered by another thread and a scope that leaked
+    /// would turn every later question into a yes. Five seconds is far longer than the gap
+    /// between issuing a command and its confirmation appearing, and far shorter than the gap to
+    /// anything a developer would raise next.
+    /// </summary>
+    public static IDisposable ExpectingConfirmation(int forMs = 5000)
+    {
+        Interlocked.Increment(ref _expecting);
+        Volatile.Write(ref _expectingUntil, Environment.TickCount64 + forMs);
+        return new Expectation();
+    }
+
+    private sealed class Expectation : IDisposable
+    {
+        private int _closed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _closed, 1) == 0)
+            {
+                Interlocked.Decrement(ref _expecting);
+            }
+        }
+    }
+
+    /// <summary>Whether a confirmation standing right now would be one we asked for.</summary>
+    private static bool Expecting =>
+        Volatile.Read(ref _expecting) > 0
+        && Environment.TickCount64 <= Volatile.Read(ref _expectingUntil);
+
     /// <summary>Every visible dialog this process owns.</summary>
     public static DialogRow[] Dialogs()
     {
@@ -108,7 +156,16 @@ internal static unsafe class DialogWatch
     /// A NOTICE - every button an acknowledgement - is always safe: it is reporting, not asking.
     /// That is the case the old policy missed. It would press only Cancel, Close or No, so a
     /// compile error offering OK and Help matched nothing and stood for six minutes with the host
-    /// thread behind it (2026-08-07). A real question is still only ever declined.
+    /// thread behind it (2026-08-07). A real question is still only ever declined - UNLESS it is
+    /// the confirmation of a command this product itself issued a moment ago, which is what
+    /// <see cref="ExpectingConfirmation"/> declares.
+    ///
+    /// That exception exists because declining without it is not neutral either. The immediate
+    /// window recovers a stopped project by issuing Reset; Reset asks "proceed anyway?"; this
+    /// answered Cancel, so the recovery could never complete, and every later evaluation tried
+    /// again until the editor faulted and took Excel with it (issue #6, found by chaos.mjs).
+    /// Declining a question nobody here asked is safe. Declining our own is just a way of never
+    /// finishing anything.
     /// </summary>
     public static string? SafeAnswerFor(DialogRow dialog)
     {
@@ -117,6 +174,13 @@ internal static unsafe class DialogWatch
             return dialog.Buttons.FirstOrDefault(button =>
                 button.Equals("OK", StringComparison.OrdinalIgnoreCase))
                 ?? dialog.Buttons[0];
+        }
+
+        if (Expecting
+            && Confirmations.FirstOrDefault(button =>
+                dialog.Buttons.Contains(button, StringComparer.OrdinalIgnoreCase)) is { } agree)
+        {
+            return agree;
         }
 
         return Declines.FirstOrDefault(button =>

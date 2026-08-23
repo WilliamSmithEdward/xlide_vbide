@@ -23,10 +23,21 @@
  *   the log has no unhandled exception  something threw where nobody was catching
  *   the project still reads             the state survived whatever just happened
  *
- * IT DRIVES A COPY. The workbook is copied to a temporary path and opened from there, so `save`
- * is a legal operation to fuzz - which matters, because the saved file is where a class module's
- * predeclared flag is read from - and no fixture is at risk. It creates and destroys modules
- * under a `Chaos_` prefix and never touches the ones it found.
+ * IT DRIVES A COPY, under `artifacts\chaos\`, so `save` is a legal operation to fuzz - which
+ * matters, because the saved file is where a class module's predeclared flag is read from - and
+ * no fixture is at risk. It creates and destroys modules under a `Chaos_` prefix and never
+ * touches the ones it found.
+ *
+ * AFTER A CRASH RUN, clear the Excel Resiliency key under HKCU and close the recovered workbook
+ * before running the next one. Excel brings a crashed workbook back as an untrusted `.xlsb` with
+ * MACROS BLOCKED, and the banner it shows reads exactly like a trust problem of the machine's
+ * rather than the wreckage of the last run. Leaving it there also means the next launch opens the
+ * recovery instead of the workbook asked for. (This is also why the copy lives beside the
+ * fixtures rather than in %TEMP%, where it was harder still to tell the two apart.)
+ *
+ *   copy artifacts\fixtures\LanguageFixture.xlsm artifacts\chaos\ChaosTarget.xlsm
+ *   tools\harness\Start-Excel.ps1 -Workbook artifacts\chaos\ChaosTarget.xlsm -Fresh
+ *   set XLIDE_CHAOS_PROJECT=ChaosTarget.xlsm
  *
  *   node tools\harness\chaos.mjs                     300 rounds, a fresh seed
  *   node tools\harness\chaos.mjs --rounds=2000       a long walk

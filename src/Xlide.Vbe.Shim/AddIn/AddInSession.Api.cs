@@ -1479,12 +1479,21 @@ internal sealed partial class AddInSession
                 if (ScratchBreakStanding())
                 {
                     Log.Info("immediate: the editor is stopped in the scratch module, clearing it");
-                    surface.RunOnHostThread(() => ExecuteEditorCommand(VbeCommands.Command.Reset));
 
-                    var clearBy = Environment.TickCount64 + 5000;
-                    while (Environment.TickCount64 < clearBy && ScratchBreakStanding())
+                    // Reset asks "proceed anyway?", and the rescue that answers a dialog blocking
+                    // the host thread declines every real question - which is right for a question
+                    // nobody here asked, and leaves THIS one cancelled and the wait below timing
+                    // out for a reason nothing reported (issue #6). Held across the wait, because
+                    // the confirmation appears while the command is still running.
+                    using (Diagnostics.DialogWatch.ExpectingConfirmation(6000))
                     {
-                        Thread.Sleep(100);
+                        surface.RunOnHostThread(() => ExecuteEditorCommand(VbeCommands.Command.Reset));
+
+                        var clearBy = Environment.TickCount64 + 5000;
+                        while (Environment.TickCount64 < clearBy && ScratchBreakStanding())
+                        {
+                            Thread.Sleep(100);
+                        }
                     }
 
                     if (ScratchBreakStanding())
@@ -3841,6 +3850,17 @@ internal sealed partial class AddInSession
                 if (componentUnknown is not null)
                 {
                     return HostError(componentUnknown);
+                }
+
+                // A STOPPED PROJECT WILL NOT TAKE COMPONENTS EITHER, and says so only as a bare
+                // COM error naming nothing - the same shape as the write path's, and refused for
+                // the same reason (issue #6). Adding or removing a module in break mode means
+                // resetting the developer's run, which is theirs to decide.
+                if (ProjectModeNow() != DesignMode)
+                {
+                    return HostError($"the project is stopped in the debugger, so '{componentName}' "
+                        + "was not touched. Changing components now would reset it and lose the run. "
+                        + "Press Reset and ask again.");
                 }
 
                 try
