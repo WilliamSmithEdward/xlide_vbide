@@ -178,6 +178,84 @@ const isDriven = (route) =>
   || new RegExp(`/${escaped(route)}[?"'\`\\s]`).test(corpus);
 
 const gaps = [];
+
+/*
+ * ---- and does the TABLE declare every argument its handler reads? --------------------------
+ *
+ * The api sells itself on not having to guess: the front door says "Follow it rather than
+ * guessing", and `agent/routes` is the table an agent reads INSTEAD of the source. That contract
+ * holds only while the table matches the code, and nothing made them agree - so `module?live=1`
+ * existed in the handler and appeared nowhere an agent could find it, documented only in a
+ * markdown file no caller driving the door ever sees (issue #4).
+ *
+ * Asked the only way that cannot rot: read the arguments each handler actually looks up, and
+ * hold the row to declaring them. The reverse - a declared argument nothing reads - is left
+ * alone deliberately, because a route can legitimately accept an argument it forwards whole.
+ */
+const guide = read("src/Xlide.Vbe.Shim/Diagnostics/AgentGuide.cs");
+
+/** Each route's declared args, from its row in the table. */
+function declaredArgs(source) {
+  const rows = new Map();
+  const pattern = /new\("([a-z/]+)",\s*"[A-Z|]+",\s*("(?:[^"\\]|\\.)*")/g;
+  for (const found of source.matchAll(pattern)) {
+    rows.set(found[1], found[2]);
+  }
+  return rows;
+}
+
+/**
+ * Each route's handler block, from `case "name":` to the next case at the same level. Rough by
+ * design: it only has to be good enough to find the argument reads inside one route.
+ */
+function handlerBlocks(source) {
+  const lines = source.split(/\r?\n/);
+  const blocks = new Map();
+  let current = null;
+  let text = [];
+
+  for (const line of lines) {
+    // A `when` clause can sit on the NEXT line - `case "breakpoint"` alone, then its guard - so a
+    // pattern demanding a colon or a `when` on this line silently fails to open a new block and
+    // hands that route's argument reads to whichever case came before it. It did: five false gaps
+    // on the first run, all of them arguments belonging to a case this had skipped.
+    const opened = line.match(/^\s*case "([a-z/]+)"\s*(?::|when\b|$)/);
+    if (opened) {
+      if (current) { blocks.set(current, (blocks.get(current) ?? "") + text.join("\n")); }
+      current = opened[1];
+      text = [line];
+      continue;
+    }
+    if (current) { text.push(line); }
+  }
+  if (current) { blocks.set(current, (blocks.get(current) ?? "") + text.join("\n")); }
+  return blocks;
+}
+
+const declared = declaredArgs(guide);
+const handlers = handlerBlocks(sessionParts);
+
+// Arguments every route may take without saying so: `project` scopes almost everything, and the
+// door itself reads these before any route sees them.
+const UNIVERSAL = new Set(["project", "by", "waitMs"]);
+
+for (const [route, block] of handlers) {
+  const row = declared.get(route);
+  if (row === undefined) { continue; }
+
+  const reads = new Set();
+  for (const found of block.matchAll(/Query\.TryGetValue\("([a-zA-Z]+)"/g)) { reads.add(found[1]); }
+  for (const found of block.matchAll(/(?:Flag|Arg|Number|Text)\(request, "([a-zA-Z]+)"/g)) { reads.add(found[1]); }
+
+  for (const argument of reads) {
+    if (UNIVERSAL.has(argument)) { continue; }
+    if (!row.includes(argument)) {
+      gaps.push(`${route}: the handler reads "${argument}" and the route table does not declare `
+        + "it, so an agent following agent/routes cannot discover it");
+    }
+  }
+}
+
 for (const route of routes) {
   if (!inReference(route)) { gaps.push(`${route}: not in docs/xlide-api.md`); }
   if (!inDriving(route)) { gaps.push(`${route}: not in docs/driving-excel.md`); }

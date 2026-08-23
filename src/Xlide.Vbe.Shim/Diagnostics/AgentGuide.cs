@@ -115,9 +115,13 @@ internal static class AgentGuide
         new("stats", "GET", "-",
             "Counters: host-thread heartbeat, marshal costs, per-route costs, COM wrapper balance.",
             "GET stats", true, DoorPolicy.Open),
-        new("perf", "GET", "-",
-            "The performance counters the session keeps about itself.",
-            "GET perf", true, DoorPolicy.Open),
+        new("perf", "GET", "reset=1?",
+            "The performance counters the session keeps about itself. `reset=1` forgets the "
+            + "analyzer figures first.",
+            "GET perf", true, DoorPolicy.Open,
+            "Reset before provoking something, so the figures measure what you did rather than "
+            + "everything since the editor opened - session start is the wrong window for asking "
+            + "whether THIS change is slow."),
         new("log", "GET", "since=<tick>? match=<text>? max=<n>? waitMs=<ms>?",
             "The shim log, sliced; with match+waitMs it returns the moment a matching line is written.",
             "GET log?match=modules:%20publish&waitMs=10000", true, DoorPolicy.Open,
@@ -140,17 +144,31 @@ internal static class AgentGuide
             "One project in detail; the shown one when unnamed.",
             "GET project", true, DoorPolicy.Open),
         new("documents", "GET", "-",
-            "The open documents (workbooks here; whatever the host opens elsewhere).",
-            "GET documents", true, DoorPolicy.Open),
-        new("module", "GET|POST", "name=<module> project=<display>? body:<source on POST>",
-            "Reads a module's code, or replaces it with the POSTed body.",
-            "GET module?name=Module1", true, DoorPolicy.Open),
+            "The modules the EDITOR holds text for, one row each: module, project, lines, whether "
+            + "it has unwritten edits, and whether it is active. Not the open workbooks - `projects` "
+            + "answers those. An empty answer means no module has been activated yet, which is the "
+            + "ordinary state of a session nobody has clicked into.",
+            "GET documents", true, DoorPolicy.Open,
+            "A module with a TAB and no text is the state most of a workspace is in, so this list "
+            + "is shorter than the tab strip and shorter still than the project. Reading it as a "
+            + "list of workbooks makes an empty answer look like the api cannot see an open file."),
+        new("module", "GET|POST", "name=<module> project=<display>? live=1? body:<source on POST>",
+            "Reads a module's code, or replaces it with the POSTed body. `live=1` reads the "
+            + "EDITOR's copy instead of the workbook's.",
+            "GET module?name=Module1", true, DoorPolicy.Open,
+            "The two copies differ for as long as the developer has typed and the write-back has "
+            + "not fired, which is the window every typing behaviour lives in: smart Enter, comment "
+            + "continuation and auto-indent all produce text that exists only in the editor until "
+            + "it is written. Without `live=1` there is no way to read what typing produced."),
         new("outline", "GET", "module=<name> project=<display>?",
             "A module's procedures from the analyzer: name, kind, line.",
             "GET outline?module=Module1", true, DoorPolicy.Open),
-        new("engine", "GET", "module=<name>",
-            "The analysis engine's copy of a module's source, for comparing against the host's.",
-            "GET engine?module=Module1", true, DoorPolicy.Open),
+        new("engine", "GET", "module=<name> text=1?",
+            "The analysis engine's copy of a module's source, for comparing against the host's. "
+            + "`text=1` returns both texts rather than only their shapes.",
+            "GET engine?module=Module1", true, DoorPolicy.Open,
+            "The question this answers is which side drifted: a finding was once seen six columns "
+            + "out after a format, with no way to ask whether the engine or the surface had moved."),
         new("problems", "GET", "module=<name>?",
             "The analyzer's findings, optionally for one module.",
             "GET problems", true, DoorPolicy.Open),
@@ -172,9 +190,14 @@ internal static class AgentGuide
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
             "GET menus", true, DoorPolicy.Open),
-        new("native", "GET", "-",
-            "The native code panes as the HOST holds them: which modules, which is active.",
-            "GET native", true, DoorPolicy.Open),
+        new("native", "GET", "text=1?",
+            "The native code panes as the HOST holds them: which modules, which is active, and "
+            + "where the caret is. `text=1` returns the pane's text and the surface's beside it.",
+            "GET native", true, DoorPolicy.Open,
+            "Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE PANE and the caret "
+            + "inside it - not on what the page is showing. A page showing one module while the "
+            + "active pane is another is a Run that executes elsewhere, with nothing on screen to "
+            + "say so."),
         new("pane", "POST", "action=open|close|closeNative module=<name> project=<display>? face=design? answer=save|discard?",
             "Opens or closes an editor tab for a module; face=design opens a form's designer tab.",
             "POST pane?action=open&module=Module1", true, DoorPolicy.Open),
@@ -360,7 +383,7 @@ internal static class AgentGuide
             [
                 "GET agent/routes for the route table.",
                 "GET state to see what the session is showing.",
-                "GET documents and GET projects to see what is open.",
+                "GET projects for the open workbooks, and GET documents for the modules the editor is holding text for - two different questions.",
                 "GET module?name=<module> to read code; POST the body back to write it.",
                 "GET model and GET analyzer for what the language service knows: the host's object model and the diagnostic rules.",
                 "GET agent/examples for full recipes, including the breakpoint round trip.",
