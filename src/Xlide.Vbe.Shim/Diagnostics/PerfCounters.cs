@@ -220,6 +220,55 @@ internal static class PerfCounters
         }
     }
 
+    /// <summary>
+    /// Forgets every timing this class reports, so a before-and-after measures what it provoked.
+    ///
+    /// THE ROUTE'S `reset=1` USED TO FORGET ONLY THE ENGINE'S FIGURES. That is what its
+    /// documentation said, precisely, and the reply carries placement, marshal, host reads and
+    /// publishes beside them - so a reset followed by an experiment compared the new engine
+    /// numbers against sample rings still full of whatever the session had been doing before,
+    /// with nothing to say so. This author read a "calm editing session" off rings a random walk
+    /// had filled, and concluded the wrong thing from it twice (2026-08-23).
+    ///
+    /// A reset on a route now forgets what that route reports. The counts go with the samples:
+    /// half-forgetting is what made the old behaviour hard to notice.
+    /// </summary>
+    public static void Reset()
+    {
+        lock (SampleGate)
+        {
+            Array.Clear(PlacementSamples);
+            Array.Clear(MarshalSamples);
+            Array.Clear(HostReadSamples);
+            Array.Clear(PublishSamples);
+            _placementCursor = 0;
+            _marshalCursor = 0;
+            _hostReadCursor = 0;
+            _publishCursor = 0;
+        }
+
+        Interlocked.Exchange(ref _placementFullPasses, 0);
+        Interlocked.Exchange(ref _placementFastPasses, 0);
+        Interlocked.Exchange(ref _placementLastMs, 0);
+        Interlocked.Exchange(ref _placementMaxMs, 0);
+        Interlocked.Exchange(ref _placementFastTotalMs, 0);
+        Interlocked.Exchange(ref _placementFastMaxMs, 0);
+        Interlocked.Exchange(ref _marshalCount, 0);
+        Interlocked.Exchange(ref _marshalLastMs, 0);
+        Interlocked.Exchange(ref _marshalMaxMs, 0);
+        Interlocked.Exchange(ref _hostReadCount, 0);
+        Interlocked.Exchange(ref _hostReadCharsLast, 0);
+        Interlocked.Exchange(ref _hostReadFullLast, 0);
+        Interlocked.Exchange(ref _hostReadSkipped, 0);
+        Interlocked.Exchange(ref _publishCount, 0);
+        Interlocked.Exchange(ref _refreshPasses, 0);
+        Interlocked.Exchange(ref _refreshTotalMs, 0);
+        Interlocked.Exchange(ref _refreshMaxMs, 0);
+        Interlocked.Exchange(ref _overlayMs, 0);
+        Interlocked.Exchange(ref _browserMs, 0);
+        Interlocked.Exchange(ref _browserCalls, 0);
+    }
+
     /// <summary>The most recent placement and marshal durations, newest last, zeros trimmed.</summary>
     public static (long[] Placement, long[] Marshal) Samples()
     {

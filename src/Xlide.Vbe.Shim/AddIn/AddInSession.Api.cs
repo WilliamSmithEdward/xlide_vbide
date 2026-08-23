@@ -1880,7 +1880,11 @@ internal sealed partial class AddInSession
                 // the wrong window for "is THIS change slow".
                 if (Flag(request, "reset"))
                 {
+                    // BOTH, because this reply carries both. Resetting only the engine's figures
+                    // left every other number in it describing a different stretch of time, with
+                    // nothing saying which - see PerfCounters.Reset.
                     EngineCounters.Reset();
+                    PerfCounters.Reset();
                 }
 
                 var (engineMethods, engineSlowest, engineWindow) = EngineCounters.Snapshot();
