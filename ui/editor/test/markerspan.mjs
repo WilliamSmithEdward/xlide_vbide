@@ -4,6 +4,10 @@
 // place and "the wrong place" is only visible if you happen to be looking at the right line. The
 // rule itself is arithmetic: given a line's text and a range, say where the underline ends.
 //
+// PERMANENT, not a stopgap. Asking the analyzer for a span with width was declined
+// (xlide_vscode#49, won't fix), so zero-width diagnostics keep arriving and this keeps answering
+// them - which makes these checks the specification rather than a holding pattern.
+//
 // The source is TypeScript, so it is compiled to a temporary module first.
 
 import assert from "node:assert/strict";

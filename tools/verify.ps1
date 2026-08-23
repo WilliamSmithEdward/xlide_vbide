@@ -280,8 +280,16 @@ Step 'engine form language' {
     try {
         node test/forms.mjs 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'the engine form suite failed' }
+
+        # A form whose designer could not be READ is a form whose control names cannot be
+        # judged, and that is not the same as a form with no controls. Showing a UserForm makes
+        # the VBE withhold its designer, so the host seeds no list - and the rule treated the
+        # unknown as an emptiness and turned the form's own code-behind red (#5, fixed upstream
+        # as xlide_vscode#48). Held here because the seed is this repo's middle link.
+        node test/form-unvouched.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the unvouched-form suite failed' }
     } finally { Pop-Location }
-    'the #20 acceptance table and the Control base merge, over the pipe'
+    'the #20 acceptance table, the Control base merge, and the unvouched form'
 }
 
 Step 'generated VBA module casing' {

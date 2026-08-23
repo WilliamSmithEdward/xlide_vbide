@@ -11,8 +11,12 @@
  * So the guess is taken away. A finding that names a position with no extent is about the LINE it
  * names, and underlining that line's text says so.
  *
- * The analyzer emitting a zero-width span is its own defect, filed upstream. This stands whatever
- * it decides, because nothing downstream should hand an editor an empty range and hope.
+ * AND THIS IS THE ANSWER, not a stopgap. It was filed upstream as xlide_vscode#49 - emit a span
+ * with some width - and closed as won't fix, so `option-explicit-missing` will go on arriving
+ * with start equal to end, and any later rule about "the module" rather than about a piece of
+ * text may do the same. That makes the widening permanent, and it is the right place for it:
+ * only the side holding the model knows what is on the line being named, and every consumer that
+ * draws a diagnostic needs this answered by somebody.
  */
 
 /** As much of a text model as the widening needs, so the rule can be tested without one. */
