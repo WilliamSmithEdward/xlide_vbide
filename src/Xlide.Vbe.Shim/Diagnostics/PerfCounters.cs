@@ -66,10 +66,22 @@ internal static class PerfCounters
     /// <summary>
     /// One host-thread read of module source over COM, timed - the cost behind a tab switch
     /// (ResyncFromModule) and every analysis pass (ProjectReader.ReadAll), which the audit's C7
-    /// and C8 both name. `chars` is how much text crossed; `fullTransfers` and `skipped` count
-    /// how many components pulled their whole Lines string versus how many a count+CountOfLines
-    /// pre-check let through untouched, so a skip that stops working shows as the transfers
-    /// climbing back up rather than as a stall nobody attributes.
+    /// and C8 both name. `chars` is how much text crossed and `fullTransfers` counts how many
+    /// components pulled their whole Lines string.
+    ///
+    /// `skipped` IS ALWAYS ZERO, AND THAT IS NOT A MEASUREMENT. This used to say the two counted
+    /// full transfers "versus how many a count+CountOfLines pre-check let through untouched, so a
+    /// skip that stops working shows as the transfers climbing back up rather than as a stall
+    /// nobody attributes." There is no such pre-check in ProjectReader.ReadSource: it reads
+    /// CountOfLines only to SIZE the Lines request, and then pulls the whole string every time.
+    /// So the alarm the sentence describes has been in its alarm state since it was written, and
+    /// the argument is a literal 0 at the one call site.
+    ///
+    /// Left in place rather than deleted because the slot is right and the reading is honest once
+    /// something fills it - and a CountOfLines skip would be UNSOUND on its own, since an edit
+    /// inside a line leaves the count alone. Measured with two workbooks open: 175,643 characters
+    /// and 29 full transfers per pass, at about three passes a second, with requests waiting
+    /// around 500ms to reach the host thread behind it (2026-08-23, issue #8).
     /// </summary>
     public static void HostRead(long milliseconds, long chars, int fullTransfers, int skipped)
     {

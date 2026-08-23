@@ -193,9 +193,25 @@ const mine = async (what) => {
   return name;
 };
 
+/** Modules made in a NAMED project, so the twin's are given back too. */
+const claimedIn = [];
+
+/**
+ * A SECOND workbook, when one is open, so the walk can ask the questions a single file cannot.
+ *
+ * Found rather than configured: whatever else the session holds that is not the target. Null when
+ * there is only one, and the moves that need two say so and stand down rather than failing.
+ */
+const twin = ((await api.projects().catch(() => ({ projects: [] }))).projects ?? [])
+  .map((one) => one.display ?? one.project ?? one)
+  .find((one) => typeof one === "string" && one !== project) ?? null;
+
 console.log(`chaos: seed ${SEED}, ${ROUNDS} rounds, pid ${startPid}, project ${project}`);
 console.log(`       found ${known.length} component(s): ${known.join(", ")}`);
-console.log(`       wrappers ${before.comWrappersLive}, handles ${before.handleCount}\n`);
+console.log(`       wrappers ${before.comWrappersLive}, handles ${before.handleCount}`);
+console.log(twin === null
+  ? "       one workbook open, so the cross-workbook checks stand down\n"
+  : `       twin workbook: ${twin}\n`);
 
 // The dialog guard ON, so a modal raised by one operation does not park every later one behind
 // it. A fuzzer that deadlocks on the first message box tests one operation and then nothing.
@@ -254,6 +270,48 @@ const moves = [
     }
 
     return `${name} ${a.length} line(s) intact`;
+  }],
+
+  [5, "twin", async () => {
+    /*
+     * THE SAME MODULE NAME IN TWO WORKBOOKS, which is where this product's nastiest defects have
+     * lived. A module name is not an identity: two open files both hold a Sheet1, and everything
+     * keyed by name alone - the engine's live copy, the write's target, the findings, the
+     * breakpoints - has at some point picked whichever file enumerated first.
+     *
+     * So both get a module of the same name and DIFFERENT text, and each must read back its own.
+     * Nothing else in the harness can ask this: every other suite drives one file.
+     */
+    if (twin === null) { return "no second workbook open"; }
+
+    const name = `Chaos_tw${ops}`;
+    for (const where of [project, twin]) {
+      await api.component("add", { kind: "module", name, project: where });
+      claimedIn.push([where, name]);
+    }
+
+    const textFor = (where) => ["Option Explicit", "", `' this module belongs to ${where}`,
+      `Public Sub Belongs${upTo(1000)}()`, "End Sub"].join(CRLF);
+    const sent = new Map([[project, textFor(project)], [twin, textFor(twin)]]);
+
+    // Written one after the other on purpose: what is being asked is whether the SECOND write
+    // lands on the second file, not whether two concurrent writes are ordered.
+    for (const where of [project, twin]) {
+      await api.writeModule(name, sent.get(where), where);
+    }
+
+    for (const where of [project, twin]) {
+      const back = (await api.readModule(name, where)).text ?? "";
+      if (!back.includes(`belongs to ${where}`)) {
+        const other = where === project ? twin : project;
+        throw new Wrong(`CROSSED WORKBOOKS: ${where}'s ${name} came back holding `
+          + (back.includes(`belongs to ${other}`)
+            ? `${other}'s text. A module name was taken for an identity.`
+            : `neither file's text: ${JSON.stringify(back.slice(0, 80))}`));
+      }
+    }
+
+    return `${name} kept apart in both files`;
   }],
 
   [4, "coherence", async () => {
@@ -647,6 +705,9 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
 // tidy, and saying so twice helps nobody.
 for (const name of claimed) {
   await api.component("remove", { name, project }).catch(() => {});
+}
+for (const [where, name] of claimedIn) {
+  await api.component("remove", { name, project: where }).catch(() => {});
 }
 
 const survived = failures.length === 0;
