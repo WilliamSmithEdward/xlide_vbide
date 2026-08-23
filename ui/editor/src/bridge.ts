@@ -10,6 +10,7 @@ import type { ToolbarCommand } from "./toolbar.js";
 import type { Workspace } from "./workspace.js";
 import { takeFormattingMark } from "./format.js";
 import { applySettings, type EditorSettings, type IncomingSettings } from "./settings.js";
+import { widenIfEmpty } from "./markerspan.js";
 import { type XlideTheme } from "./theme.js";
 import { updateVbaLanguageFacts } from "./vba.js";
 
@@ -2041,15 +2042,22 @@ export class EditorBridge {
   }
 
   private applyMarkers(model: monaco.editor.ITextModel, markers: HostMarker[]): void {
-    const converted: monaco.editor.IMarkerData[] = markers.map((marker) => ({
-      severity: SEVERITY[marker.severity] ?? monaco.MarkerSeverity.Error,
-      message: marker.message,
-      startLineNumber: marker.startLine,
-      startColumn: marker.startColumn,
-      endLineNumber: marker.endLine,
-      endColumn: marker.endColumn,
-      ...(marker.code === undefined ? {} : { code: marker.code }),
-    }));
+    const converted: monaco.editor.IMarkerData[] = markers.map((marker) => {
+      // A marker with no width has no defined rendering; see markerspan.ts.
+      const { endLine, endColumn } = widenIfEmpty({
+        lineCount: () => model.getLineCount(),
+        lastNonWhitespaceColumn: (line) => model.getLineLastNonWhitespaceColumn(line),
+      }, marker);
+      return {
+        severity: SEVERITY[marker.severity] ?? monaco.MarkerSeverity.Error,
+        message: marker.message,
+        startLineNumber: marker.startLine,
+        startColumn: marker.startColumn,
+        endLineNumber: endLine,
+        endColumn,
+        ...(marker.code === undefined ? {} : { code: marker.code }),
+      };
+    });
     monaco.editor.setModelMarkers(model, MARKER_OWNER, converted);
   }
 
