@@ -73,7 +73,7 @@ export interface ChangesPaneProbe {
     showing: string | null;
     /** Whether the comparison is up full size. */
     full: boolean;
-    /** Snapshots the full-size card's own rail offers. Zero when it is down or holds one. */
+    /** Snapshots the full-size card's own rail offers. Zero only when the card is down. */
     fullChoices: number;
     /** Whether the rail is up, and how wide it was left. */
     railUp: boolean;
@@ -786,15 +786,18 @@ export class ChangesPane {
     const state = this.state;
     const rounds = (state?.rounds ?? []).filter((round) => round.entries.length > 0);
 
-    // ONE SNAPSHOT IS NOT A CHOICE - the same rule the file select follows. A rail offering the
-    // single thing already on screen is a column of chrome charging rent for nothing.
-    const only = rounds.reduce((count, round) => count + round.entries.length, 0) < 2;
-    rail.hidden = only;
-    this.full.splitter.hidden = only;
-    this.full.toggle.hidden = only;
-    if (only) {
-      return;
-    }
+    // ALWAYS THERE (the owner, 2026-08-22: "please always show the button / sidebar here").
+    //
+    // This used to fold itself away below two snapshots, on the reasoning that a list offering the
+    // single thing already on screen is chrome charging rent - the rule the file select follows.
+    // It is the wrong rule HERE. The file select sits in a strip that is there either way; this
+    // rail and its button are the card's own furniture, so hiding them moves the title, moves the
+    // code, and takes away the control you would use to bring them back - and it does it exactly
+    // when a log is new, which is the first time anybody opens this card. A stable frame is worth
+    // more than the width, and one row is a perfectly honest list of one.
+    rail.hidden = false;
+    this.full.splitter.hidden = false;
+    this.full.toggle.hidden = false;
 
     let marked = (state?.acceptedAt ?? 0) <= 0;
     for (const round of rounds) {
@@ -968,9 +971,7 @@ export class ChangesPane {
         })),
         showing: this.showing ? `${this.showing.module}@${this.showing.round}` : null,
         full: this.full !== null,
-        fullChoices: this.full && !this.full.rail.hidden
-          ? this.full.rail.querySelectorAll('[role="option"]').length
-          : 0,
+        fullChoices: this.full ? this.full.rail.querySelectorAll('[role="option"]').length : 0,
         railUp: this.full !== null && !this.railHidden && !this.full.rail.hidden,
         railWidth: Math.round(this.full && !this.railHidden
           ? this.full.rail.getBoundingClientRect().width

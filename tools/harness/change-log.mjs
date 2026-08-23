@@ -401,6 +401,22 @@ const nav = JSON.parse(typeof rail === "string" ? rail : JSON.stringify(rail));
 check("the card carries the snapshot list", { listbox: nav.listbox, offered: nav.options > 1 },
   { listbox: "listbox", offered: true });
 
+// AND IT IS THERE WHATEVER THE LOG HOLDS. The rail used to fold itself away below two snapshots,
+// on the rule the file select follows - a list offering the single thing already on screen is
+// chrome charging rent. Wrong rule here: the file select sits in a strip that stands either way,
+// while this rail and its button are the card's own furniture, so hiding them moved the title,
+// moved the code, and took away the control that would bring them back - exactly when a log is
+// new, which is the first time anybody opens the card (the owner, 2026-08-22, looking at a card
+// with no sidebar and no button). The count is not what decides it.
+const furniture = await api.ask(`JSON.stringify({
+  rail: !!document.getElementById('changes-full-list')?.offsetParent,
+  divider: !!document.getElementById('changes-full-splitter')?.offsetParent,
+  button: !!document.getElementById('changes-full-toggle')?.offsetParent,
+})`);
+check("and the rail, its divider and its button stand whatever the log holds",
+  JSON.parse(typeof furniture === "string" ? furniture : JSON.stringify(furniture)),
+  { rail: true, divider: true, button: true });
+
 // The head's own two buttons, held to the same square.
 const heads = await api.ask(`JSON.stringify((() => {
   const off = (id) => {
