@@ -128,6 +128,9 @@ const bodies = [
 
 /* ---- the run --------------------------------------------------------------------------------- */
 
+/** Thrown by a move that has checked something and found it WRONG. Ends the walk. */
+class Wrong extends Error {}
+
 const api = await open({});
 const ledger = [];
 const failures = [];
@@ -141,6 +144,30 @@ const note = (what) => {
 const project = process.env.XLIDE_CHAOS_PROJECT;
 if (!project) {
   console.error("Set XLIDE_CHAOS_PROJECT to the open workbook's file name first.");
+  process.exit(2);
+}
+
+/*
+ * IT WILL NOT RUN AGAINST ANYTHING BUT A CHAOS TARGET, and this is not caution for its own sake.
+ *
+ * `save` is one of the moves, deliberately - the saved file is where a class module's predeclared
+ * flag is read from, so a walk that never saved would not exercise it. That makes this the one
+ * suite here that writes the workbook it is pointed at. Pointed at a fixture, it saves its own
+ * `Chaos_` modules and the immediate window's scratch INTO it, and the next suite to use that
+ * fixture opens a project that no longer compiles.
+ *
+ * Which is exactly what happened on 2026-08-23: LanguageFixture.xlsm came back with eight Chaos
+ * modules and an XlideImmediateScratch baked in, and the next launch raised a Compile error
+ * dialog before anything had run. The convention is enforced rather than remembered.
+ */
+if (!/chaos/i.test(project)) {
+  console.error(`Refusing to run against "${project}".`);
+  console.error("This walk SAVES the workbook it drives, so it only runs against a copy whose");
+  console.error("name says so. Make one and point it there:");
+  console.error("");
+  console.error("  copy artifacts\\fixtures\\LanguageFixture.xlsm artifacts\\chaos\\ChaosTarget.xlsm");
+  console.error("  tools\\harness\\Start-Excel.ps1 -Workbook artifacts\\chaos\\ChaosTarget.xlsm -Fresh");
+  console.error("  set XLIDE_CHAOS_PROJECT=ChaosTarget.xlsm");
   process.exit(2);
 }
 
@@ -170,6 +197,42 @@ const moves = [
     const text = oneOf(bodies)();
     await api.writeModule(name, text, project);
     return `${name} <- ${text.length} chars`;
+  }],
+
+  [6, "roundtrip", async () => {
+    // WRITE, THEN READ BACK, AND COMPARE. Everything else here watches for the product falling
+    // over; this watches for it staying up and being WRONG, which is the worse of the two and
+    // the one nothing in this walk could previously see. A module that comes back different from
+    // what went in is a developer's code quietly altered.
+    const name = oneOf(chaosNames());
+    await api.component("add", { kind: "module", name, project }).catch(() => {});
+
+    // Distinctive, so a mix-up with another module's text is obvious rather than plausible.
+    const stamp = `${SEED}_${ops}`;
+    const sent = ["Option Explicit", "", `' roundtrip ${stamp}`, `Public Sub R${upTo(1000)}()`,
+      `    Debug.Print "${stamp}"`, "End Sub"].join(CRLF);
+
+    // NOT CAUGHT. A write this walk could not make is a refusal, and it has to be COUNTED as
+    // one - swallowing it and returning a tidy string made every roundtrip report `ok` while
+    // comparing nothing at all. Measured: with the comparison deliberately broken, the move
+    // still said "7 ok, 0 refused", because the project happened to be stopped and every write
+    // was being turned away before anything was checked.
+    await api.writeModule(name, sent, project);
+
+    const back = (await api.readModule(name, project)).text ?? "";
+
+    // Line endings are the editor's to decide - it stores what it stores - so the comparison is
+    // on the lines, not the bytes between them. A trailing newline is likewise not a difference.
+    const lines = (text) => text.replace(/\r\n/g, "\n").replace(/\n+$/, "").split("\n");
+    const [a, b] = [lines(sent), lines(back)];
+    if (a.length !== b.length || a.some((line, at) => line !== b[at])) {
+      throw new Wrong(`ROUNDTRIP MISMATCH in ${name}: sent ${a.length} line(s), got back `
+        + `${b.length}. First difference at ${a.findIndex((line, at) => line !== b[at])}: `
+        + `${JSON.stringify(a.find((line, at) => line !== b[at]))} vs `
+        + `${JSON.stringify(b[a.findIndex((line, at) => line !== b[at])])}`);
+    }
+
+    return `${name} ${a.length} line(s) intact`;
   }],
 
   [5, "read", async () => {
@@ -380,6 +443,15 @@ const fire = async () => {
     count(name, "ok");
     note(`ok   ${name}  ${detail}`);
   } catch (err) {
+    // A REFUSAL IS NOT A DEFECT, but some of what a move can discover is. A move that has
+    // CHECKED something and found it wrong throws Wrong, and that ends the walk rather than
+    // being counted among the ordinary noise of asking for things that are not there.
+    if (err instanceof Wrong) {
+      note(`WRONG ${name}  ${err.message}`);
+      fail(`a move found the product wrong: ${name}`, err.message);
+      return;
+    }
+
     // The WHOLE message, keyed by a normalised form. Slicing it to a colon-tail read tidily
     // and threw away which route said it and what it was about, which is most of the value.
     const full = String(err.message);

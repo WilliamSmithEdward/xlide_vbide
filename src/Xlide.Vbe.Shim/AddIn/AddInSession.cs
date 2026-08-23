@@ -2366,9 +2366,14 @@ internal sealed partial class AddInSession : IDisposable
             if (ProjectModeNow() != DesignMode)
             {
                 Log.Warn($"write: {component} not written - the project is stopped in the debugger");
+
+                // NAMES THE WAY OUT, and names it for both kinds of caller. A developer presses
+                // Reset; a caller driving the door has no hands, and a message that only says
+                // "press Reset" leaves it wedged with no move to make. The route exists, so it
+                // is said here rather than left to be discovered.
                 return $"{component} was not written: the project is stopped in the debugger. "
                     + "Editing now would reset it and lose the run, so it was not attempted. "
-                    + "Press Reset and write again.";
+                    + "Press Reset in the editor, or POST command?name=reset, and write again.";
             }
 
             // A write is normally about the module on the surface, so it goes to the shown
@@ -2877,6 +2882,15 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether execution was stopped last time it was looked at.</summary>
     private bool _inBreak;
+
+    /// <summary>
+    /// Whether an evaluation of ours raised a compile error, which drops the project out of design
+    /// mode a moment after the evaluation has returned.
+    ///
+    /// Set on the way OUT, because that is where the compile error is seen, and acted on the way
+    /// IN to the next evaluation, because that is where nothing is in flight to race.
+    /// </summary>
+    private volatile bool _immediateLeftItStopped;
 
     /// <summary>
     /// Whether the immediate window has already asked for a Reset during THIS stopped session.

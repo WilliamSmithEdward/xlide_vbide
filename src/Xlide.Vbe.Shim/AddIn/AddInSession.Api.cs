@@ -1476,9 +1476,31 @@ internal sealed partial class AddInSession
                  * thread is the only one still moving, and what it waits for can actually happen
                  * while it waits.
                  */
-                if (ScratchBreakStanding())
+                /*
+                 * TWO WAYS THIS PRODUCT LEAVES THE EDITOR STOPPED, and both are cleared here.
+                 *
+                 * The first is a line that stopped inside the scratch module, which is what the
+                 * comment above is about. The second is a COMPILE ERROR: evaluating anything in a
+                 * project that will not compile makes the editor raise its box and then drop out
+                 * of design mode a moment AFTER the evaluation has returned - measured at 40ms -
+                 * so nothing on the way out can see it. What was left was an editor answering
+                 * "Not available while execution is stopped" to every later evaluation and
+                 * refusing every write, for ever, over one syntax error somebody was still
+                 * typing. Reproduced in three calls: write a module ending `Public Sub Broken(`,
+                 * evaluate anything, and the project never comes back.
+                 *
+                 * Cleared on the way IN rather than on the way out, and that is the whole point.
+                 * A first attempt recovered right after the evaluation and reset the project
+                 * while the evaluation was still in flight: it turned the useful "Compile error:
+                 * Expected: identifier" into a bare COM error and took seventeen seconds to do
+                 * it. Here there is nothing in flight to race.
+                 */
+                bool StoppedByUs() =>
+                    ScratchBreakStanding() || (_immediateLeftItStopped && _inBreak);
+
+                if (StoppedByUs())
                 {
-                    Log.Info("immediate: the editor is stopped in the scratch module, clearing it");
+                    Log.Info("immediate: the editor is stopped by something this product ran, clearing it");
 
                     // Reset asks "proceed anyway?", and the rescue that answers a dialog blocking
                     // the host thread declines every real question - which is right for a question
@@ -1490,17 +1512,18 @@ internal sealed partial class AddInSession
                         surface.RunOnHostThread(() => ExecuteEditorCommand(VbeCommands.Command.Reset));
 
                         var clearBy = Environment.TickCount64 + 5000;
-                        while (Environment.TickCount64 < clearBy && ScratchBreakStanding())
+                        while (Environment.TickCount64 < clearBy && StoppedByUs())
                         {
                             Thread.Sleep(100);
                         }
                     }
 
-                    if (ScratchBreakStanding())
+                    _immediateLeftItStopped = false;
+
+                    if (StoppedByUs())
                     {
-                        var stuck = "The last line left the editor stopped inside this product's "
-                            + "own scratch module and it could not be cleared. Press Reset in the "
-                            + "editor.";
+                        var stuck = "The last line left the editor stopped and it could not be "
+                            + "cleared. Press Reset in the editor, or POST command?name=reset.";
 
                         Log.Warn($"immediate: {stuck}");
                         return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -1508,7 +1531,10 @@ internal sealed partial class AddInSession
                             DebugJsonContext.Default.DebugImmediateReply));
                     }
 
-                    surface.RunOnHostThread(RemoveScratchModule);
+                    if (!_inBreak)
+                    {
+                        surface.RunOnHostThread(RemoveScratchModule);
+                    }
                 }
 
                 var raisedBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
@@ -1566,6 +1592,23 @@ internal sealed partial class AddInSession
                 {
                     outcome = string.Join(" ", complained).Replace("\r", " ").Replace("\n", " ").Trim();
                     failed = true;
+                }
+
+                // A COMPILE ERROR DROPS THE PROJECT OUT OF DESIGN MODE, a moment after this
+                // returns - measured at 40ms, which is why nothing here can watch it happen. So
+                // it is only NOTED here, and the next evaluation through this route clears it on
+                // the way in, where there is no evaluation still in flight to race. A first
+                // attempt reset from here instead, and turned the useful "Compile error:
+                // Expected: identifier" into a bare COM error seventeen seconds late.
+                //
+                // Only when the evaluation did not RUN, and that is the whole safety of it: a
+                // compile error means nothing of the developer's ever started, so there is no
+                // session to lose. An evaluation that ran and stopped - in their code, at their
+                // own breakpoint - is theirs, and is never touched. Read off whether it ran,
+                // rather than off the box's words, which are localised.
+                if (!ran && complained.Count > 0)
+                {
+                    _immediateLeftItStopped = true;
                 }
 
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -3860,7 +3903,7 @@ internal sealed partial class AddInSession
                 {
                     return HostError($"the project is stopped in the debugger, so '{componentName}' "
                         + "was not touched. Changing components now would reset it and lose the run. "
-                        + "Press Reset and ask again.");
+                        + "Press Reset in the editor, or POST command?name=reset, and ask again.");
                 }
 
                 try
