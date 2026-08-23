@@ -18,6 +18,7 @@ import {
     type VbaProjectAnalysisOptions,
     type VbaProjectModuleInput,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
+import { analyzerInputFor } from './analyzerInput.js';
 import { currentHostModelOverride, hostApp } from './hostApp.js';
 import type { HostObjectModel } from '../../../xlide_vscode/src/analyzer';
 import type { ModulePayload } from './protocol';
@@ -114,18 +115,12 @@ function sharedProjectIndex(seeded: readonly ModulePayload[]): SharedProjectInde
 
     let built: SharedProjectIndex | null = null;
     try {
-        const inputs: VbaProjectModuleInput[] = seeded.map((module) => ({
-            moduleName: module.moduleName,
-            source: module.source,
-            type: module.type ?? 'standard',
-            documentType: module.documentType as EventHandlerDocumentType | undefined,
-            // A form's designer-declared controls. The index folds them into the form's member
-            // surface, which is what lets ANOTHER module's `EntryForm.NameBox` resolve - the
-            // form's own code-behind gets them separately, through the per-request context.
-            // Left out until the #77 matrix measured every cross-module caller seeing the form
-            // surface and no controls (2026-08-19).
-            implicitMembers: module.implicitMembers,
-        }));
+        // The host's facts about each module, translated once (see analyzerInput.ts). What rides
+        // along matters here as much as the source: a form's designer-declared controls, so that
+        // ANOTHER module's `EntryForm.NameBox` resolves off the form's member surface, and a
+        // class's default-instance bit, so that `Ticket.ChangeTest` is offered against a
+        // predeclared class and not against a plain one.
+        const inputs: VbaProjectModuleInput[] = seeded.map(analyzerInputFor);
         built = buildLiveVbaProjectIndex(inputs);
     } catch {
         built = null;

@@ -13,7 +13,19 @@ public sealed record EngineModule(
     /// controls, name and type each, read off the designer. The analyzer resolves them and
     /// completion offers their types' members (xlide_vscode#17); absent for every other kind.
     /// </summary>
-    [property: JsonPropertyName("implicitMembers")] EngineImplicitMember[]? ImplicitMembers = null);
+    [property: JsonPropertyName("implicitMembers")] EngineImplicitMember[]? ImplicitMembers = null,
+    /// <summary>
+    /// True when the module carries `Attribute VB_PredeclaredId = True`, which gives a class a
+    /// default instance and so makes its own name usable as a value: `Ticket.ChangeTest` compiles
+    /// against a predeclared class and is `Variable not defined` against a plain one
+    /// (xlide_vscode#47).
+    ///
+    /// THREE STATES, and null is not false. The attribute never appears in a code pane, so it is
+    /// read from the document already saved on disk (<see cref="Vba.SavedModules"/>) and a module
+    /// the file cannot answer for stays null. A null sent as false would put a red squiggle under
+    /// every use of every predeclared singleton in the project.
+    /// </summary>
+    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null);
 
 /// <summary>One implicit member: the control's name, and the type completion resolves it as.</summary>
 public sealed record EngineImplicitMember(

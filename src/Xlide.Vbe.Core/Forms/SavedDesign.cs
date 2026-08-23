@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.IO.Compression;
 
 namespace Xlide.Vbe.Core.Forms;
 
@@ -27,14 +26,18 @@ namespace Xlide.Vbe.Core.Forms;
 /// </summary>
 public sealed class SavedDesign
 {
-    /// <summary>Where a workbook keeps its VBA project inside the package.</summary>
-    private const string ProjectPath = "xl/vbaProject.bin";
-
-    /// <summary>A ceiling on the project stream, so a hostile or corrupt package cannot ask this
-    /// to allocate the machine. Real projects are kilobytes; a form full of pictures is a few
-    /// megabytes.</summary>
-    private const int MostProjectBytes = 64 * 1024 * 1024;
-
+    /// <summary>
+    /// Read workbooks by path, with the write time they were read at. GUARDED BY ITSELF: every
+    /// read and every write of it holds `lock (Cache)`.
+    ///
+    /// Not because there is a race today - the designer projection marshals through
+    /// `RunOnHostThread`, so every caller arrives on the host's user interface thread - but
+    /// because this is a public static entry point, and the cost of being wrong about that is not
+    /// a lost entry. An unsynchronised Dictionary written by two threads at once can corrupt its
+    /// buckets and spin, inside the thread that draws the editor. The twin reader
+    /// <see cref="Vba.SavedModules"/> was given this treatment on 2026-08-23 after two test
+    /// classes running in parallel were enough to make one read go the long way round.
+    /// </summary>
     private static readonly Dictionary<string, (DateTime Stamp, SavedDesign? Design)> Cache =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -70,13 +73,25 @@ public sealed class SavedDesign
             }
 
             var stamp = File.GetLastWriteTimeUtc(workbookPath);
-            if (Cache.TryGetValue(workbookPath, out var held) && held.Stamp == stamp)
+            lock (Cache)
             {
-                return held.Design;
+                if (Cache.TryGetValue(workbookPath, out var held) && held.Stamp == stamp)
+                {
+                    return held.Design;
+                }
             }
 
+            // Walked OUTSIDE the lock, because it is the expensive half - a whole package, every
+            // form's storage - and two callers arriving together should wait on each other for the
+            // dictionary rather than for the disk. The worst that costs is one duplicated walk;
+            // holding the lock across it could park the user interface thread behind somebody
+            // else's file read.
             var design = Read(workbookPath);
-            Cache[workbookPath] = (stamp, design);
+            lock (Cache)
+            {
+                Cache[workbookPath] = (stamp, design);
+            }
+
             return design;
         }
         catch
@@ -112,7 +127,7 @@ public sealed class SavedDesign
 
     private static SavedDesign? Read(string workbookPath)
     {
-        var project = ProjectBytes(workbookPath);
+        var project = Vba.OfficePackage.ProjectBytes(workbookPath);
         if (project is null || CompoundFile.TryRead(project) is not { } cfb)
         {
             return null;
@@ -135,25 +150,6 @@ public sealed class SavedDesign
         }
 
         return design;
-    }
-
-    /// <summary>xl/vbaProject.bin out of the package, or null when the workbook has no VBA in
-    /// it. Opened read-only and shared, because Excel has the file open.</summary>
-    private static byte[]? ProjectBytes(string workbookPath)
-    {
-        using var file = new FileStream(
-            workbookPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-        using var zip = new ZipArchive(file, ZipArchiveMode.Read);
-        var entry = zip.GetEntry(ProjectPath);
-        if (entry is null || entry.Length is <= 0 or > MostProjectBytes)
-        {
-            return null;
-        }
-
-        var bytes = new byte[entry.Length];
-        using var stream = entry.Open();
-        stream.ReadExactly(bytes);
-        return bytes;
     }
 
     /* ---- the walk, [MS-OFORMS] 2.2.10 ------------------------------------------------------ */

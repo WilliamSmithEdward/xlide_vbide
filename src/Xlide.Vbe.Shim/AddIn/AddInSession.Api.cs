@@ -4389,6 +4389,13 @@ internal sealed partial class AddInSession
                 }
 
                 var rows = new List<DebugComponentRow>();
+
+                // The saved document's attribute headers, which is the only place the
+                // default-instance flag can be read from - and therefore the only way a caller
+                // can see why the analyzer did or did not report a bare class name. Read once
+                // for the whole walk; null throughout for a project never saved.
+                var savedHeaders = Xlide.Vbe.Core.Vba.SavedModules.For(Engine.ProjectReader.SavedPathOf(project));
+
                 ForEachRealComponent(project, (component, name) =>
                 {
                     var type = component.GetInt32("Type");
@@ -4405,7 +4412,12 @@ internal sealed partial class AddInSession
                         ComponentKind(type),
                         type,
                         code?.GetInt32("CountOfLines") ?? 0,
-                        open));
+                        open,
+                        // Asked for a CLASS and nothing else, exactly as the seed asks it: a
+                        // document and a form have a default instance by their kind and a
+                        // standard module cannot have one, so the flag is only ever consulted
+                        // here, and answering it for the others would invite reading it as one.
+                        type == 2 ? savedHeaders?.PredeclaredIdOf(name) : null));
                 });
 
                 // The identity of the project THIS REPLY DESCRIBES, read off that project.

@@ -927,7 +927,18 @@ public sealed record DebugComponentRow(
     [property: JsonPropertyName("kind")] string Kind,
     [property: JsonPropertyName("type")] int Type,
     [property: JsonPropertyName("lines")] int Lines,
-    [property: JsonPropertyName("hasPane")] bool HasPane);
+    [property: JsonPropertyName("hasPane")] bool HasPane,
+    /// <summary>
+    /// For a CLASS module, whether it carries `Attribute VB_PredeclaredId = True` and so has a
+    /// default instance - which decides whether its own bare name is a value or a type, and
+    /// therefore whether the analyzer reports `Ticket.ChangeTest`.
+    ///
+    /// Null for every other kind, and for a class the saved document cannot answer for: the
+    /// attribute is invisible in a code pane, so it is read from the package on disk, and a class
+    /// added since the last save is not in it. Null here is what the analyzer is sent, and what
+    /// keeps it silent - so this field is how a caller sees WHY a finding did or did not appear.
+    /// </summary>
+    [property: JsonPropertyName("predeclaredId")] bool? PredeclaredId = null);
 
 /// <summary>
 /// What a workbook's VBA project actually contains, read from the object model.

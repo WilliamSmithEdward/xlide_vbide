@@ -18,7 +18,7 @@ import {
     projectAnalysisOptionsForModule,
     projectProcedureSignatures,
 } from '../../../xlide_vscode/src/vbaProjectAnalysis';
-import type { EventHandlerDocumentType } from '../../../xlide_vscode/src/analyzer';
+import { analyzerInputFor } from './analyzerInput.js';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
@@ -131,19 +131,20 @@ function crossModuleFingerprint(
     if (held === undefined) {
         held = null;
         try {
-            const index = buildVbaProjectIndex(seeded.map((module) => ({
-                moduleName: module.moduleName,
-                source: module.source,
-                type: module.type,
-                documentType: module.documentType as EventHandlerDocumentType | undefined,
-                // A form's controls are cross-module analyzer input (xlide_vscode#22, #26):
-                // without them here, a designer change that touched no source produced the
-                // SAME fingerprint, and the memo below replayed pre-change findings - a
-                // removed control kept resolving as a ghost (the 2026-08-19 hunt, found
-                // through three layers: no reseed poke, then a source-only sameness gate,
-                // then this, the fingerprint that could not see what changed).
-                implicitMembers: module.implicitMembers,
-            })));
+            // EVERY host-supplied fact belongs in the fingerprint, not just the source. A
+            // designer change that touched no source once produced the SAME fingerprint as
+            // before it, and the memo below replayed pre-change findings - a removed control
+            // kept resolving as a ghost (the 2026-08-19 hunt, found through three layers: no
+            // reseed poke, then a source-only sameness gate, then this, the fingerprint that
+            // could not see what changed). The default-instance bit has exactly the same
+            // shape, so both arrive through the one translation rather than being remembered
+            // here separately (xlide_vscode#22, #26, #47).
+            //
+            // Measured, not assumed: with `predeclaredId` passed to the worker seed but held
+            // back from HERE, `test/class-predeclared.mjs` reseeds a project whose class flips
+            // to `false` and the memo answers with the old silence. This line is what makes
+            // that finding appear.
+            const index = buildVbaProjectIndex(seeded.map(analyzerInputFor));
             const procedures = projectProcedureSignatures(index);
 
             held = new Map<string, string>();
@@ -473,16 +474,11 @@ export class Dispatcher {
             kind: 'seed',
             workbookKey: params.projectId,
             generation: params.generation,
-            modules: modules.map((module) => ({
-                moduleName: module.moduleName,
-                source: module.source,
-                type: module.type,
-                documentType: module.documentType,
-                // A form's controls, host-read: the worker resolves them (request -> seed ->
-                // header parse) and the header parse is dead for Excel forms, so the seed is
-                // what keeps every form analysable without a per-request supply.
-                implicitMembers: module.implicitMembers,
-            })),
+            // The worker resolves each host-supplied fact request -> seed -> parse the module's
+            // own text, and that last fallback is DEAD for anything the VBE hands us: the text
+            // is a code pane's, with no .frm designer and no Attribute lines. So the seed is
+            // the only rung that ever answers, and it has to carry all of them.
+            modules: modules.map(analyzerInputFor),
         });
 
         this.generations.set(params.projectId, params.generation);

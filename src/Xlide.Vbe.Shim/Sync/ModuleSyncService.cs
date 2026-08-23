@@ -222,6 +222,7 @@ internal static class ModuleSyncService
                     case SyncStatus.WillRemove:
                         RemoveComponent(project, item.ModuleName);
                         removed.Add(item.ModuleName);
+                        DoubtSavedHeader(plan.ProjectId, item.ModuleName);
                         break;
 
                     // IMPORT COUNTS A ROW CHANGED ONLY IF THE MODULE TOOK IT.
@@ -242,6 +243,7 @@ internal static class ModuleSyncService
                         else
                         {
                             changed.Add(item.ModuleName);
+                            DoubtSavedHeader(plan.ProjectId, item.ModuleName);
                         }
 
                         break;
@@ -708,6 +710,22 @@ internal static class ModuleSyncService
             Log.Warn($"sync: the import staging folder could not be removed ({ex.Message})");
         }
     }
+
+    /// <summary>
+    /// Tells the saved-header reader that this module is no longer the one the file describes.
+    ///
+    /// The analyzer learns a class module's `VB_PredeclaredId` from the document already saved on
+    /// disk, because a code pane never shows it. Import is the only thing that can put a module
+    /// carrying it into a project - the editor's own New Class Module always writes False - so a
+    /// name this run creates or removes must answer UNKNOWN until a save makes the file true
+    /// again, rather than answering about a module that has been replaced.
+    ///
+    /// The project id IS the document's path for a saved project, which is the only kind that has
+    /// a saved header to be wrong about; an unsaved project's id matches nothing and the call is
+    /// a no-op, which is correct.
+    /// </summary>
+    private static void DoubtSavedHeader(string? projectId, string moduleName) =>
+        Xlide.Vbe.Core.Vba.SavedModules.Doubt(projectId, moduleName);
 
     private static void RemoveComponent(DispatchObject project, string moduleName)
     {

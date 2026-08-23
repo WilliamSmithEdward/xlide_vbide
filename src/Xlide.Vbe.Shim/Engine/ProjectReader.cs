@@ -1,4 +1,5 @@
 using Xlide.Vbe.Core.Engine;
+using Xlide.Vbe.Core.Vba;
 using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Diagnostics;
 
@@ -111,6 +112,121 @@ internal static class ProjectReader
     }
 
     /// <summary>
+    /// The class modules each project held last pass, so one that APPEARS can be spotted.
+    ///
+    /// A class that has just arrived may not be the class the saved file describes under that
+    /// name, and the saved file is where its default-instance flag is read from. The sync's own
+    /// import says so directly (<see cref="Core.Vba.SavedModules.Doubt"/>), but the editor's own
+    /// File / Import File goes nowhere near this product - so the appearance is noticed here
+    /// instead, where every component is already walked on every pass, and every route in is
+    /// covered by one rule rather than by remembering to call one thing from each of them.
+    /// </summary>
+    private static readonly Dictionary<string, HashSet<string>> ClassesLastPass =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Notes the class modules this pass found, and doubts the ones that were not here before.
+    ///
+    /// The FIRST pass for a project doubts nothing: everything is new to it, and doubting the
+    /// whole project would mean the flag never answered at all. What it is watching for is a name
+    /// arriving into a project already being watched.
+    /// </summary>
+    private static void DoubtClassesThatJustArrived(string? savedPath, HashSet<string> classes)
+    {
+        if (savedPath is null)
+        {
+            // Never saved, so there is no saved answer to be wrong, and nothing to doubt.
+            return;
+        }
+
+        if (ClassesLastPass.TryGetValue(savedPath, out var before))
+        {
+            foreach (var name in classes)
+            {
+                if (!before.Contains(name))
+                {
+                    Log.Info($"seed: class {name} was not here last pass, so the saved file's "
+                        + "header is not trusted for it until the document is saved again");
+                    Core.Vba.SavedModules.Doubt(savedPath, name);
+                }
+            }
+        }
+
+        ClassesLastPass[savedPath] = classes;
+    }
+
+    /// <summary>
+    /// Puts each class module's default-instance flag onto the modules the walk built.
+    ///
+    /// FOR CLASS MODULES AND NOTHING ELSE. The analyzer consults the flag only for `class`,
+    /// because a document module and a form have a default instance by their kind and a standard
+    /// module cannot have one at all - so answering for the others would only invite reading it
+    /// as a claim about them.
+    ///
+    /// The answer comes from the SAVED document, because the editor has no property for it and
+    /// would only give it up through an export (xlide_vscode#50). So a class created since the
+    /// last save answers null, and null is the state that keeps the analyzer quiet - which is the
+    /// right way round: the loud state is a false `Variable not defined` on correct code.
+    /// </summary>
+    private static void FillInPredeclaredIds(
+        DispatchObject project, List<EngineModule> modules, HashSet<string> classNames)
+    {
+        var savedPath = SavedPathOf(project);
+
+        // Recorded even when the set is empty, so that removing a project's last class and
+        // importing it back is still seen as an arrival rather than as nothing having happened.
+        DoubtClassesThatJustArrived(savedPath, classNames);
+
+        if (classNames.Count == 0)
+        {
+            // No class module, so nothing asks the question, and a project without one does not
+            // pay to have it answered.
+            return;
+        }
+
+        var saved = SavedModules.For(savedPath);
+
+        for (var at = 0; at < modules.Count; at++)
+        {
+            var module = modules[at];
+            if (module.Type != "class")
+            {
+                continue;
+            }
+
+            var predeclaredId = saved?.PredeclaredIdOf(module.ModuleName);
+            Log.Verbose($"seed: class {module.ModuleName} is "
+                + predeclaredId switch
+                {
+                    true => "predeclared (its bare name is a value)",
+                    false => "not predeclared (its bare name is a type)",
+                    null => "unanswered - the saved file cannot vouch for it",
+                });
+
+            modules[at] = module with { PredeclaredId = predeclaredId };
+        }
+    }
+
+    /// <summary>
+    /// Where the project's document sits on disk, or null when it has never been saved.
+    ///
+    /// Not <see cref="Identity"/>'s id, which is lowercased for comparison and falls back to a
+    /// name plus a COM pointer when there is no file. This wants the real path or nothing.
+    /// </summary>
+    public static string? SavedPathOf(DispatchObject project)
+    {
+        try
+        {
+            return project.GetString("FileName") is { Length: > 0 } fileName ? fileName : null;
+        }
+        catch (Exception)
+        {
+            // Unsaved: the property raises rather than answering empty.
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The canonical IUnknown pointer for an object, which is COM's own definition of identity:
     /// two references to the same object always answer the same value, and two different objects
     /// never do. Zero when it cannot be asked, in which case the caller falls back to the name.
@@ -159,6 +275,12 @@ internal static class ProjectReader
             var count = components.GetInt32("Count");
             var modules = new List<EngineModule>(count);
 
+            // Which components are classes, gathered as the walk goes. The default-instance flag
+            // cannot be filled in DURING the walk: whether the saved file may be trusted for a
+            // class depends on whether that class was here last pass, and that is only knowable
+            // once every component has been seen. So the walk collects, and the flags go on after.
+            var classNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             for (var i = 1; i <= count; i++)
             {
                 using var component = components.GetItem(i);
@@ -199,8 +321,15 @@ internal static class ProjectReader
                             + (members.Length == 0 ? string.Empty : $": {string.Join(", ", members.Select(m => m.Name))}")));
                 }
 
+                if (componentType == 2)
+                {
+                    classNames.Add(moduleName);
+                }
+
                 modules.Add(new EngineModule(moduleName, source, TypeName(componentType), members));
             }
+
+            FillInPredeclaredIds(project, modules, classNames);
 
             var (id, displayName) = Identity(project);
             return new ProjectSnapshot(id, displayName, generation, [.. modules]);

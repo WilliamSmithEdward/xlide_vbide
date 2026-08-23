@@ -12,14 +12,16 @@
 //
 // In the VBE a developer saw seven of them at once on code the compiler had just accepted.
 //
-// NOT IN THE GATE YET, DELIBERATELY. Its third check fails on current behaviour, and a suite that
-// is expected to fail is a suite people learn to skip. It goes into engine/package.json's test
-// script the moment xlide_vscode#48 lands, and its failing until then is the point: it is the
-// reproduction that issue was filed with.
+// IN THE GATE, since xlide_vscode#48 landed in 4.1.4. It was written as the reproduction that
+// issue was filed with - the third check failing was the point - and it now guards the fix.
+//
+// The MIDDLE check is the one worth keeping an eye on. A "fix" that silenced the rule inside form
+// modules altogether would pass the third check and break the second, and the distinction between
+// them is the whole claim: an unread designer proves nothing, a read-and-empty one proves absence.
 //
 // The host half needs nothing: the reader already seeds null rather than empty, and measured on
 // a live session the findings clear the instant the form is unloaded and the designer answers
-// again. What is left is only this.
+// again.
 //
 //   node test/form-unvouched.mjs
 

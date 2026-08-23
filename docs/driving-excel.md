@@ -282,7 +282,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `agent` | `agent()` / `agentRoutes()` / `agentRoute(name)` / `agentExamples()` | the api explaining itself: identity and HOST (excel/word/powerpoint), the route table as data, one route's detail, runnable recipes. The discovery file's `agent` URL points here, so an agent handed that file is one GET from the whole surface |
 | `model` | `model(type)` | what the language service knows about this host's object model: the type inventory bare, one type's members when named. `known:false` with a note in a host with no model yet |
 | `analyzer` | `analyzer()` | the analyzer's whole rule catalogue: codes, severities, categories, evidence kinds, and MS-VBAL authorities |
-| `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes |
+| `project` | `project(project)` | what the VBA project CONTAINS: components, kinds, line counts, panes, and for a CLASS its `predeclaredId`. That last one is `Attribute VB_PredeclaredId`, which the object model has no property for and a code pane never shows - it is read out of the SAVED package on disk, and it is what decides whether `Ticket.ChangeTest` compiles or reports. `true`/`false`/`null`, and null is a class the saved file cannot answer for (one added since the last save), which is the state that keeps the analyzer silent |
 | `console` | `console(last)` | what the page said to itself |
 | `dialogs` | `dialogs()` | what is standing, with its TEXT. Needs no host thread |
 | `dismiss` | `dismiss(button, caption)` | presses a button by name. Will press OK if asked |

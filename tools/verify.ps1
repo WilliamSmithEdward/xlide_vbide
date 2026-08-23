@@ -270,12 +270,16 @@ Step 'engine language matrix' {
     '18 scripts through open, diagnose, outline, definition and rename'
 }
 
-Step 'engine form language' {
-    # A form's controls are declared by the DESIGNER, not the text: the host seeds them and the
-    # engine passes them through to the analyzer (xlide_vscode#17..#20). The middle link of that
-    # chain is this repo's, and this holds it headlessly - the call-colouring acceptance table,
-    # the Control base-class merge, and the meType gate - so a break fails a commit rather than
-    # a live run.
+Step 'engine host-supplied facts' {
+    # THE FACTS A CODE PANE CANNOT CARRY, and the analyzer therefore has to be told: a form's
+    # designer-declared controls, and a class module's default-instance flag. The host reads
+    # them and the engine passes them through (xlide_vscode#17..#20, #47..#50). The middle link
+    # of that chain is this repo's, and this holds it headlessly - the call-colouring acceptance
+    # table, the Control base-class merge, and the meType gate - so a break fails a commit
+    # rather than a live run.
+    #
+    # Every one of them is THREE-STATE, and every defect in the family has been the same
+    # mistake: reading absent as the negative one, and reporting correct code as broken.
     Push-Location (Join-Path $repoRoot 'engine')
     try {
         node test/forms.mjs 2>&1 | Out-Host
@@ -288,8 +292,17 @@ Step 'engine form language' {
         # as xlide_vscode#48). Held here because the seed is this repo's middle link.
         node test/form-unvouched.mjs 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'the unvouched-form suite failed' }
+
+        # And a CLASS module's `VB_PredeclaredId`, which decides whether its own bare name is a
+        # value or a type - so whether `Ticket.ChangeTest` compiles or is `Variable not defined`.
+        # The attribute never appears in a code pane, so the host reads it out of the saved
+        # package (Core/Vba/SavedModules.cs) and it rides the seed. Held here because the wrong
+        # answer is not a missed finding: it is a red squiggle under working code, once for every
+        # use of every predeclared singleton in the project.
+        node test/class-predeclared.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the predeclared-class suite failed' }
     } finally { Pop-Location }
-    'the #20 acceptance table, the Control base merge, and the unvouched form'
+    'the #20 acceptance table, the Control base merge, the unvouched form, the predeclared class'
 }
 
 Step 'generated VBA module casing' {

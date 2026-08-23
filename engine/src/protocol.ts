@@ -59,6 +59,17 @@ export interface ModulePayload {
      * header for the analyzer to parse them from.
      */
     implicitMembers?: { name: string; type: string }[];
+    /**
+     * `Attribute VB_PredeclaredId = True`, which gives a class module a default instance and so
+     * makes its own name usable as a value: `Ticket.ChangeTest` is legal against a predeclared
+     * class and `Variable not defined` against a plain one (xlide_vscode#47).
+     *
+     * THREE STATES, and absent is not false. The attribute is invisible in the code pane, so a
+     * host that has not read the export header must send NOTHING rather than guess: a wrong
+     * `false` puts a red squiggle on every use of a legitimately predeclared singleton, and the
+     * stdVBA library alone is a dozen of them. Only a vouched-for `false` reports.
+     */
+    predeclaredId?: boolean;
 }
 
 /** project/open: replaces everything the engine knows about a project. */

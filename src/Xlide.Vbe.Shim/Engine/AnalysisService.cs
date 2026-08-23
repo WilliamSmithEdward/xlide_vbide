@@ -1325,16 +1325,26 @@ internal sealed class AnalysisService : IAsyncDisposable
     /// </summary>
     private static string SeedOf(EngineModule module)
     {
-        if (module.ImplicitMembers is not { } members)
+        if (module.ImplicitMembers is null && module.PredeclaredId is null)
         {
             return module.Source;
         }
 
         var seed = new System.Text.StringBuilder(module.Source.Length + 32).Append(module.Source).Append('\0');
-        foreach (var member in members)
+
+        if (module.ImplicitMembers is { } members)
         {
-            seed.Append(member.Name).Append(':').Append(member.Type).Append(';');
+            foreach (var member in members)
+            {
+                seed.Append(member.Name).Append(':').Append(member.Type).Append(';');
+            }
         }
+
+        // A class whose default-instance answer arrives - which is what a SAVE does, since the
+        // flag is read from the saved file - has changed what the analyzer will say about every
+        // bare use of its name, without a character of its source moving. Folded in so the pass
+        // that notices is this one rather than whichever unrelated edit reseeds next.
+        seed.Append('\0').Append(module.PredeclaredId switch { true => '1', false => '0', null => '?' });
 
         return seed.ToString();
     }
