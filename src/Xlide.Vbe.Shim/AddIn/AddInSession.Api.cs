@@ -4570,6 +4570,21 @@ internal sealed partial class AddInSession
                 // not there and did nothing.
                 var alreadySet = _editorSurface?.Module is { } shownModule
                     && BreakpointsFor(shownModule).Contains(breakLine);
+                // A STATE THIS DOES NOT KNOW IS REFUSED, not quietly taken as a toggle.
+                //
+                // Absent means toggle, which is the documented default and what the glyph margin
+                // sends. But `state=set` - a perfectly reasonable guess at the vocabulary, and one
+                // this author made - used to fall into that same default, so asking twice for a
+                // breakpoint to BE set left it clear, and nothing said the word had not been
+                // understood. That is the trap the analyzer's own host contract names for
+                // `moduleKind`: an unrecognised string that degrades silently is worse than one
+                // that fails, because the caller is told it worked.
+                if (wanted is { Length: > 0 } && wanted is not ("on" or "off"))
+                {
+                    return HostError($"'{wanted}' is not a breakpoint state; pass on, off, "
+                        + "or leave it out to toggle");
+                }
+
                 var shouldSet = wanted switch
                 {
                     "on" => true,

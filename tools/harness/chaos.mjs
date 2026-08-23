@@ -185,8 +185,26 @@ const chaosNames = () => Array.from({ length: 6 }, (_, at) => `Chaos_${at}`);
  * for a race of the harness's own making. Named per operation and left behind; the walk removes
  * its own modules at the end.
  */
+/**
+ * Clears a stopped project before a move that means to write, the way the refusal message tells
+ * a caller to.
+ *
+ * NOT POLITENESS - COVERAGE. Between rounds was not often enough: an evaluation stops the project
+ * again within the round, and the assertion moves were being turned away before they compared
+ * anything. Measured over two walks of 640 and 679 operations, the cross-workbook check landed 2
+ * times out of 32 and then 0 out of 52. A check that cannot run is not a check, so the moves that
+ * need design mode ask for it first, and the count of how often stays in the summary as #7's size.
+ */
+const readyToWrite = async () => {
+  if ((await api.state().catch(() => ({}))).debugMode !== "break") { return; }
+  unwedged += 1;
+  await api.command("reset").catch(() => {});
+  await wait(250);
+};
+
 const claimed = [];
 const mine = async (what) => {
+  await readyToWrite();
   const name = `Chaos_${what}${ops}`;
   await api.component("add", { kind: "module", name, project });
   claimed.push(name);
@@ -284,6 +302,7 @@ const moves = [
      */
     if (twin === null) { return "no second workbook open"; }
 
+    await readyToWrite();
     const name = `Chaos_tw${ops}`;
     for (const where of [project, twin]) {
       await api.component("add", { kind: "module", name, project: where });
@@ -472,7 +491,7 @@ const moves = [
 
   [2, "breakpoint", async () => {
     const name = oneOf([...known, ...chaosNames()]);
-    await api.breakpoint(name, 1 + upTo(30), { project, state: oneOf(["set", "clear", "toggle"]) });
+    await api.breakpoint(name, 1 + upTo(30), { project, state: oneOf(["on", "off", undefined]) });
     return `${name}`;
   }],
 
@@ -612,6 +631,7 @@ const alive = (pid) => {
 };
 
 let unwedged = 0;
+let stalls = 0;
 let peakWrappers = before.comWrappersLive;
 let peakHandles = before.handleCount;
 
@@ -685,9 +705,27 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
     break;
   }
 
-  const readable = await api.project(project).catch((err) => String(err.message));
+  /*
+   * A STALL THAT CLEARS IS NOT A HANG, and the difference decides whether the walk stops.
+   *
+   * The host thread is a single lane, and every analysis pass reads every project along it, so
+   * under a burst a request can miss its three-second crossing and answer "the host thread did
+   * not answer in time" (issue #8). That is worth counting and not worth stopping for: treating
+   * it as a hang ends the walk at the first busy moment and hides everything it would have found
+   * afterwards.
+   *
+   * So it is asked TWICE, with a pause. Answering the second time means the thread was busy;
+   * still refusing means it is gone, which is the thing this check is actually for.
+   */
+  let readable = await api.project(project).catch((err) => String(err.message));
   if (typeof readable === "string") {
-    fail("the project stopped reading", readable);
+    stalls += 1;
+    await wait(3000);
+    readable = await api.project(project).catch((err) => String(err.message));
+  }
+
+  if (typeof readable === "string") {
+    fail("the project stopped reading, twice, three seconds apart", readable);
     break;
   }
 
@@ -728,6 +766,7 @@ console.log(`wrappers    ${before.comWrappersLive} at rest, peak ${peakWrappers}
 console.log(`handles     ${before.handleCount} at rest, peak ${peakHandles}`);
 console.log(`log         ${angry.length} line(s) naming an unhandled fault`);
 console.log(`unwedged    ${unwedged} time(s) - found stopped and reset, which is issue #7's size`);
+console.log(`stalled     ${stalls} time(s) - a crossing missed its budget and caught up (#8)`);
 console.log("");
 console.log("what landed, and what was turned away:");
 for (const [name, held] of [...tally.entries()].sort((a, b) => (b[1].ok + b[1].refused) - (a[1].ok + a[1].refused))) {
