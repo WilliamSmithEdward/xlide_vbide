@@ -7460,7 +7460,24 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        ExecuteEditorCommand(command);
+        // A BUTTON THAT DID NOTHING SAYS SO.
+        //
+        // The editor disables its own commands by state - Reset unless something is stopped,
+        // Break unless something is running - and this discarded that answer, so pressing a
+        // button the editor would not honour looked exactly like pressing one it did. The strip
+        // draws Reset enabled whatever the host thinks, so the developer clicks, nothing happens,
+        // and nothing anywhere says why (the owner, 2026-08-23, pointing at Reset on a project
+        // stopped in an Enum: "I think you'd need to trigger this" - it had been pressed, and it
+        // had been refused, silently).
+        //
+        // Noticing costs one line and is the difference between a product that will not do
+        // something and a product that appears broken.
+        var outcome = ExecuteEditorCommand(command);
+        if (!outcome.Ran)
+        {
+            Log.Info($"command: the strip's '{name}' was refused ({outcome.Detail})");
+            _editorSurface?.Notify($"{name}: the editor refused it - {outcome.Detail}.");
+        }
     }
 
     /// <summary>

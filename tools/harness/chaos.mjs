@@ -176,6 +176,23 @@ const before = await api.stats();
 const known = (await api.project(project)).components.map((one) => one.name);
 const chaosNames = () => Array.from({ length: 6 }, (_, at) => `Chaos_${at}`);
 
+/**
+ * A module belonging to ONE operation, so a check that compares what it wrote against what came
+ * back is comparing its own text and nobody else's.
+ *
+ * The shared pool above is deliberately contended - that is what most of the walk is for - but a
+ * move that ASSERTS needs a subject no other move is writing to, or it reports the product wrong
+ * for a race of the harness's own making. Named per operation and left behind; the walk removes
+ * its own modules at the end.
+ */
+const claimed = [];
+const mine = async (what) => {
+  const name = `Chaos_${what}${ops}`;
+  await api.component("add", { kind: "module", name, project });
+  claimed.push(name);
+  return name;
+};
+
 console.log(`chaos: seed ${SEED}, ${ROUNDS} rounds, pid ${startPid}, project ${project}`);
 console.log(`       found ${known.length} component(s): ${known.join(", ")}`);
 console.log(`       wrappers ${before.comWrappersLive}, handles ${before.handleCount}\n`);
@@ -204,8 +221,12 @@ const moves = [
     // over; this watches for it staying up and being WRONG, which is the worse of the two and
     // the one nothing in this walk could previously see. A module that comes back different from
     // what went in is a developer's code quietly altered.
-    const name = oneOf(chaosNames());
-    await api.component("add", { kind: "module", name, project }).catch(() => {});
+    // ITS OWN MODULE, not one from the shared pool. Two of these landing in the same burst wrote
+    // the same name and each read back the other's text, and the walk called the product WRONG
+    // for something no contract covers: two writers to one module have no defined outcome. It
+    // still races everything else - pane opens, analysis, saves, the reseed - which is the part
+    // worth racing.
+    const name = await mine("rt");
 
     // Distinctive, so a mix-up with another module's text is obvious rather than plausible.
     const stamp = `${SEED}_${ops}`;
@@ -233,6 +254,34 @@ const moves = [
     }
 
     return `${name} ${a.length} line(s) intact`;
+  }],
+
+  [4, "coherence", async () => {
+    // DOES THE SURFACE AGREE WITH THE WORKBOOK? `live=1` is what the editor holds and the bare
+    // read is what the module holds, and after a write-back the two must be the same text. When
+    // they are not, the analyzer is diagnosing something nobody can see: it is what left the
+    // problems of a discarded edit alive after a close and a reopen, and what made a workbook
+    // hold 42 lines while the editor showed an empty document and refused every breakpoint on it.
+    // Its own module, for the same reason the roundtrip has one.
+    const name = await mine("co");
+    await api.pane("open", { module: name, project });
+
+    const stamp = `${SEED}_${ops}`;
+    await api.writeModule(name, ["Option Explicit", "", `' coherence ${stamp}`,
+      `Public Sub C${upTo(1000)}()`, "End Sub"].join(CRLF), project);
+
+    const stored = (await api.readModule(name, project)).text ?? "";
+    const live = (await api.readModule(name, project, { live: true })).text ?? "";
+
+    const flat = (text) => text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+    if (flat(stored) !== flat(live)) {
+      throw new Wrong(`SURFACE AND WORKBOOK DISAGREE about ${name}: the module holds `
+        + `${flat(stored).length} chars, the editor shows ${flat(live).length}. `
+        + `stored ${JSON.stringify(flat(stored).slice(0, 90))} vs `
+        + `live ${JSON.stringify(flat(live).slice(0, 90))}`);
+    }
+
+    return `${name} agrees, ${flat(stored).length} chars`;
   }],
 
   [5, "read", async () => {
@@ -504,6 +553,7 @@ const alive = (pid) => {
   }
 };
 
+let unwedged = 0;
 let peakWrappers = before.comWrappersLive;
 let peakHandles = before.handleCount;
 
@@ -516,6 +566,24 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
   // And usually no pause at all, so operations land inside each other's debounce windows and
   // inside each other's host-thread crossings.
   if (chance(0.25)) { await wait(upTo(30)); }
+
+  /*
+   * UNWEDGE, the way the product tells a caller to.
+   *
+   * An evaluation against a project that will not compile leaves it stopped, and while it is
+   * stopped every write and every component change is refused (issue #7). Left alone, the walk
+   * wedges in the first few rounds and spends the rest of its life being turned away: measured
+   * at 2 roundtrips landing and 35 refused, which is a fuzzer that has stopped fuzzing.
+   *
+   * So it does what the refusal message says to do. That is not the harness working around the
+   * product - it is the harness behaving like the competent caller the message is addressed to,
+   * and the COUNT below is worth as much as the coverage it buys: how often a random walk has
+   * to reach for the escape hatch is the size of #7, measured rather than argued.
+   */
+  if ((await api.state().catch(() => ({}))).debugMode === "break") {
+    unwedged += 1;
+    await api.command("reset").catch(() => {});
+  }
 
   if (round % 10 !== 0) { continue; }
 
@@ -574,6 +642,13 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
 
 /* ---- and what the host thought of it all ----------------------------------------------------- */
 
+// The per-operation modules go back, so a long walk does not leave hundreds of them behind for
+// the next one to enumerate. Best effort: a walk that ended because the host died has nothing to
+// tidy, and saying so twice helps nobody.
+for (const name of claimed) {
+  await api.component("remove", { name, project }).catch(() => {});
+}
+
 const survived = failures.length === 0;
 
 let logTail = "";
@@ -591,6 +666,7 @@ console.log(`host        pid ${startPid} ${alive(startPid) ? "still running" : "
 console.log(`wrappers    ${before.comWrappersLive} at rest, peak ${peakWrappers}`);
 console.log(`handles     ${before.handleCount} at rest, peak ${peakHandles}`);
 console.log(`log         ${angry.length} line(s) naming an unhandled fault`);
+console.log(`unwedged    ${unwedged} time(s) - found stopped and reset, which is issue #7's size`);
 console.log("");
 console.log("what landed, and what was turned away:");
 for (const [name, held] of [...tally.entries()].sort((a, b) => (b[1].ok + b[1].refused) - (a[1].ok + a[1].refused))) {
