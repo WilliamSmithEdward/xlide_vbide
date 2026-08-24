@@ -828,8 +828,30 @@ internal sealed partial class AddInSession
         List<(TestFile File, List<TestRunService.TestCase> Tests)> chosen)
     {
         _testsRunning = true;
+        _testsBreakCleared = false;
         _testsCurrent = null;
         _testsCurrentProject = null;
+
+        /*
+         * WHAT IS ABOUT TO BE RUN HAS NO RESULT UNTIL IT HAS RUN.
+         *
+         * Outcomes used to survive until something overwrote them, which is fine when every
+         * chosen test lands and a lie when one does not. Measured against a project with one
+         * unrelated module that would not parse: the run could not execute a line, and the pane
+         * went on showing five rows reading `passed` from the run before the code was broken,
+         * with a sixth stuck on `running`. A developer looking at that sees green.
+         *
+         * Only the CHOSEN ones. A rerun of one file must not blank another file's results, which
+         * is the same reason the pane keeps painting every discovered test throughout.
+         */
+        foreach (var (file, tests) in chosen)
+        {
+            foreach (var test in tests)
+            {
+                _testOutcomes.Remove(TestKey(file.ProjectId, test.Id));
+            }
+        }
+
         _testsLive = Shown(everything);
         PublishTests();
         var watch = System.Diagnostics.Stopwatch.StartNew();

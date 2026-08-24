@@ -263,6 +263,40 @@ internal static unsafe class DialogWatch
     /// ampersand the accelerator uses ("&amp;Cancel" answers to "Cancel"). Posted, not sent,
     /// so a dialog that raises another one cannot hold this thread inside it.
     /// </summary>
+    /// <summary>
+    /// What this watch last took off the screen, and the tick it did it on.
+    ///
+    /// Evidence, for callers that have to tell one kind of stop from another and have nothing
+    /// else to go on. Empty until something has been answered.
+    /// </summary>
+    public static (string Said, long At) LastAnswered { get; private set; } = (string.Empty, 0);
+
+    /// <summary>Whether this watch answered something matching `phrase` within the last `withinMs`.</summary>
+    public static bool AnsweredRecently(string phrase, int withinMs = 15000)
+    {
+        var (said, at) = LastAnswered;
+        return at > 0
+            && Environment.TickCount64 - at <= withinMs
+            && said.Contains(phrase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>What a dialog's static text says, joined - the same reading `Dialogs` reports.</summary>
+    private static string Said(nint dialog)
+    {
+        var said = new List<string>();
+        foreach (var child in ChildrenOf(dialog))
+        {
+            if (Win32.ReadClassName(child).Equals("Static", StringComparison.OrdinalIgnoreCase)
+                && Win32.ReadWindowText(child) is { Length: > 0 } line
+                && said.Count < 8)
+            {
+                said.Add(line.Trim());
+            }
+        }
+
+        return string.Join(" ", said).Trim();
+    }
+
     public static bool Dismiss(string? caption, string button)
     {
         foreach (var dialog in TopLevelDialogs())
@@ -283,6 +317,14 @@ internal static unsafe class DialogWatch
 
                 if (Plain(Win32.ReadWindowText(child)).Equals(Plain(button), StringComparison.OrdinalIgnoreCase))
                 {
+                    // WHAT IT SAID, KEPT, and read BEFORE the click - a dismissed dialog cannot
+                    // be asked afterwards. Every VBA compile error wears the same caption, so
+                    // the caption alone tells a caller nothing; the body is the only thing that
+                    // separates "Compile error" from any other box this answers. A test run
+                    // stopped behind a compile error and a developer's own breakpoint inside a
+                    // test look identical from every other angle, and one of them must never be
+                    // cleared (#10).
+                    LastAnswered = (Said(dialog), Environment.TickCount64);
                     Log.Info($"dialog watch: answering \"{title}\" with \"{button}\"");
                     Win32.PostMessage(child, BmClick, 0, 0);
                     return true;

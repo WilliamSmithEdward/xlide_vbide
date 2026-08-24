@@ -138,6 +138,19 @@ internal static partial class TestRunService
         return tests;
     }
 
+    /// <summary>
+    /// The modules a RUN generates and removes again - never XlideAssert, which is the
+    /// developer's and stays in their project between runs.
+    ///
+    /// The difference matters exactly once, and it is the difference between recovering a break
+    /// and destroying a developer's debugging session: a stop inside one of these is ours,
+    /// because they exist only while a run is in flight and nobody can be looking at them.
+    /// </summary>
+    internal static bool IsRunScaffolding(string? name) =>
+        name is { Length: > 0 }
+        && (string.Equals(name, DispatchModuleName, StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith(RunnerModulePrefix, StringComparison.OrdinalIgnoreCase));
+
     internal static bool IsGeneratedModule(string name) =>
         string.Equals(name, AssertModuleName, StringComparison.OrdinalIgnoreCase)
         || string.Equals(name, DispatchModuleName, StringComparison.OrdinalIgnoreCase)
@@ -658,8 +671,31 @@ internal static partial class TestRunService
                 : $"'{file}'!{runnerName}.RunTest";
 
             var stopped = false;
+
+            /*
+             * A REFUSAL IS ABOUT THE PROJECT, NOT ABOUT ONE TEST, so it stops the run.
+             *
+             * The generated runner wraps every test and hands back JSON, so a test that raises a
+             * runtime error comes back as a RESULT. A throw out of Application.Run is the
+             * dispatcher itself refusing to be invoked - a compile error somewhere in the project,
+             * macros disabled, the developer having pressed Reset - and none of those get better
+             * for the next test. Walking on cost 36 seconds per test behind a dialog the guard
+             * kept dismissing, and the run never returned at all: the pane was left with a row
+             * reading "running" for ever and every later run refused as already in flight.
+             */
+            string? refusal = null;
+
             foreach (var test in runnable)
             {
+                if (refusal is not null)
+                {
+                    var untouched = Resolve(test, "error",
+                        $"Not run: the project would not run anything. {refusal}", 0, []);
+                    results.Add(untouched);
+                    landed(untouched);
+                    continue;
+                }
+
                 if (stopped)
                 {
                     var held = Resolve(test, "skipped", "Not run because fail-fast stopped the run.", 0, []);
@@ -680,9 +716,19 @@ internal static partial class TestRunService
                 catch (Exception ex)
                 {
                     watch.Stop();
+
                     // Run itself refused: a compile error in the project, macros disabled, or
-                    // the developer pressed Reset mid-test. The editor's message is the answer.
-                    row = Resolve(test, "error", ex.Message.Trim(), watch.Elapsed.TotalMilliseconds, []);
+                    // the developer pressed Reset mid-test. The editor's message is the answer -
+                    // and when it has none of its own, the CONDITION is named instead, because
+                    // "Unexpected HRESULT has been returned from a call to a COM component" is
+                    // what this reads as against a project that will not compile, and that
+                    // sentence has never helped anyone.
+                    var said = ex.Message.Trim();
+                    refusal = said.Contains("HRESULT", StringComparison.Ordinal)
+                        ? "VBA runs nothing while any module in the project has a compile error - "
+                            + "compile it and look at what the editor stops on."
+                        : said;
+                    row = Resolve(test, "error", refusal, watch.Elapsed.TotalMilliseconds, []);
                 }
 
                 results.Add(row);

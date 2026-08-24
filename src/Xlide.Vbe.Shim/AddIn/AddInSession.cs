@@ -5404,9 +5404,41 @@ internal sealed partial class AddInSession : IDisposable
                     Log.Info("debug: this stop was our own compile error, clearing it");
                     ClearOurOwnBreak();
                 }
+
             }
 
             _inBreak = true;
+
+            /*
+             * A RUN STOPPED BY A COMPILE ERROR IS OURS, and this is the only frame that can
+             * clear it.
+             *
+             * A project that will not compile answers every test with the editor's compile box;
+             * dismissing it leaves VBA STOPPED, so the `Application.Run` that started the test
+             * NEVER RETURNS - and the run's own finally, the flag it clears and the rows it
+             * would settle all sit beneath that suspended frame. The pane was left with a row
+             * reading "running" for ever and every later run refused as already in flight, for
+             * the rest of the session (#10). The evaluator learned this in the same words.
+             *
+             * THE DISCRIMINATOR IS THE DIALOG, NOT THE MODULE. The first attempt asked whether
+             * the stop was inside the generated runner, on the reasoning that nobody can be
+             * looking at a module that exists only during a run. It never once matched: a
+             * compile error stops at the line the COMPILER named, which is the developer's own
+             * module, not the frame that is suspended. What separates this from a developer's
+             * breakpoint inside a test - which must never be cleared, and which `tests?
+             * action=debug` exists to sit in - is that the guard has just taken a "Compile
+             * error" box off the screen.
+             *
+             * Asked once per run, for issue #6's reason: a reset that was refused will be
+             * refused again, and asking every tick is what tore the editor down.
+             */
+            if (_testsRunning && !_testsBreakCleared && GuardClearedACompileError())
+            {
+                _testsBreakCleared = true;
+                Log.Warn("tests: the run is stopped behind a compile error, which it cannot "
+                    + "return from - clearing it so the run can finish and say why");
+                ClearOurOwnBreak();
+            }
         }
         catch (Exception ex)
         {
@@ -5422,6 +5454,16 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether the current episode of unreadable execution state has been reported.</summary>
     private bool _debugReadFailureLogged;
+
+    /// <summary>
+    /// Whether this run's stop inside its own scaffolding has already been cleared once.
+    ///
+    /// Asked once per run, for the reason the evaluator's own recovery is: a reset that was
+    /// refused will be refused again, and asking every tick is what turned one stopped project
+    /// into a loop that issued Reset, raised its confirmation and tore down panes until the
+    /// editor faulted in VBE7.DLL (issue #6).
+    /// </summary>
+    private bool _testsBreakCleared;
 
     /// <summary>
     /// Polls remaining before the Design Mode toggle is read back.

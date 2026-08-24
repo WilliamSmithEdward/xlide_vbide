@@ -2942,6 +2942,42 @@ internal sealed partial class AddInSession
     /// <summary>What the guard has taken off the screen, so a run can report what it swallowed.</summary>
     private readonly List<string> _guardCleared = [];
 
+    /// <summary>
+    /// Whether the last thing the guard took off the screen was a compile error.
+    ///
+    /// The one piece of evidence that separates a test run stopped by a project that will not
+    /// compile - which nothing can continue from, and which the debug poll clears - from a
+    /// developer's own breakpoint inside a test, which is theirs and is never touched.
+    ///
+    /// Under the gate, like every read of this list: it is written from a watcher on a pool
+    /// thread while request threads enumerate it.
+    /// </summary>
+    private bool GuardClearedACompileError()
+    {
+        // THE WATCH ANSWERS MOST OF THEM, and it is the one that answers this. `_guardCleared`
+        // is the api guard's own record, and it deliberately leaves out a dialog raised by the
+        // request that is running - which a test run's compile box always is. Asking only that
+        // list found nothing, every time, while the log showed the watch answering the box on
+        // another thread two lines earlier.
+        if (Diagnostics.DialogWatch.AnsweredRecently("Compile error"))
+        {
+            return true;
+        }
+
+        lock (_dialogGate)
+        {
+            for (var at = _guardCleared.Count - 1; at >= 0 && at >= _guardCleared.Count - 3; at--)
+            {
+                if (_guardCleared[at].Contains("Compile error", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
 
     /// <summary>
     /// Watches, briefly and on a pool thread, for a dialog this request raised. The delays
