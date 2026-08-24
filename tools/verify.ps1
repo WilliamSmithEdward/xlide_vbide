@@ -809,6 +809,26 @@ if ($Deep) {
         (Invoke-SuiteGroup 'DebugFixture.xlsm' @('reconstruct-branch.mjs')) -join '; '
     }
 
+    Step 'deep: a workbook Excel will not run' {
+        # THE STATE ISSUE #9 IS MADE OF. Excel puts itself into design mode for a workbook whose
+        # macros are disabled and will not come out: every Reset control greys, the Design Mode
+        # toggle stays pressed however often it is pressed, and nothing the product offers clears
+        # it - the way out is closing the workbook and opening it again with macros enabled.
+        #
+        # Its own Excel, built and torn down by the script, because it has to open a workbook a
+        # particular way and no shared session can be in that state. It builds its probe through
+        # the VBA project object model, so it SKIPS out loud when that trust is off rather than
+        # failing - nothing this product ships requires the switch.
+        $answer = powershell -NoProfile -ExecutionPolicy Bypass `
+            -File (Join-Path $repoRoot 'tools\harness\Test-MacrosDisabled.ps1') 2>&1
+        $answer | Where-Object { $_ -match 'FAIL|SKIPPED|passed' } | ForEach-Object { Write-Host "  $_" }
+        if ($answer -match 'SKIPPED') { return 'skipped: VBA project object model trust is off' }
+        if (($answer | Select-String '^PASS' | Select-Object -Last 1) -eq $null) {
+            throw 'Test-MacrosDisabled.ps1 did not pass'
+        }
+        'design mode Excel will not leave, and the product names why'
+    }
+
     Step 'deep: non-ASCII round trip, then the randomized walk' {
         # language-live-probe writes 14 scripts through COM, the door, the page and the outline
         # (23s of settles by construction); surface-walk runs last because it churns the whole

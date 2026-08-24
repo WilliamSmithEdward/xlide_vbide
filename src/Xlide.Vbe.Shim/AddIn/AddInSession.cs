@@ -2177,6 +2177,14 @@ internal sealed partial class AddInSession : IDisposable
         var stoppedBeforeThis = command == VbeCommands.Command.DesignMode
             && ProjectModeNow() == BreakMode;
 
+        // And the toggle as it stands, so the poll can tell a press that MOVED it from one that
+        // did nothing. Excel holds design mode down while a workbook's macros are disabled, and
+        // the button reports success either way.
+        if (command == VbeCommands.Command.DesignMode)
+        {
+            _designModeBefore = VbeCommands.HostIsInDesignMode(_editor);
+        }
+
         var outcome = VbeCommands.Execute(_editor, command);
         var ran = outcome.Ran;
 
@@ -2205,6 +2213,18 @@ internal sealed partial class AddInSession : IDisposable
         {
             _designModePressedWhileStopped = stoppedBeforeThis;
             _designModePresses = 3;
+
+            // A press we ALREADY know does nothing is not reported as having done something. The
+            // first one cannot know - the toggle is read back a tick later - but the second
+            // onwards can, and a button that answers "executed" while nothing moves is the
+            // false success this door has been cleaning out all week.
+            if (_designModeStuck)
+            {
+                outcome = VbeCommands.CommandRun.No(
+                    "Excel will not leave design mode, which usually means this workbook's macros "
+                    + "are disabled; close it and reopen it with macros enabled");
+                ran = false;
+            }
         }
 
         // AND A COMMAND GREYED BY IT SAYS WHICH STATE GREYED IT. A refusal that names only the
@@ -2215,11 +2235,23 @@ internal sealed partial class AddInSession : IDisposable
             && command != VbeCommands.Command.DesignMode
             && VbeCommands.HostIsInDesignMode(_editor))
         {
-            Log.Info($"command: {command} is greyed because Excel is in design mode");
+            // TWO DESIGN MODES, AND THE ADVICE IS DIFFERENT. One the developer pressed, which the
+            // toggle undoes; one EXCEL is holding down because the workbook's macros are disabled,
+            // which it will not. Telling the second to press Design Mode is advice that cannot
+            // work - measured: the toggle stays -1 and Reset stays 0 of 6 however many times it
+            // is pressed, while the button answers "executed" every time.
+            Log.Info($"command: {command} is greyed because Excel is in design mode"
+                + (_designModeStuck ? ", which it will not leave" : string.Empty));
             outcome = VbeCommands.CommandRun.No($"{outcome.Detail} - Excel is in DESIGN MODE, so "
-                + "nothing will run; press Design Mode to leave it");
-            _editorSurface?.Notify("Excel is in design mode, so that command is greyed. "
-                + "Press Design Mode to leave it.");
+                + (_designModeStuck
+                    ? "nothing will run, and it will not leave it - which usually means this "
+                        + "workbook's macros are disabled; close it and reopen with macros enabled"
+                    : "nothing will run; press Design Mode to leave it"));
+            _editorSurface?.Notify(_designModeStuck
+                ? "Excel is in design mode and will not leave it, so that command is greyed. That "
+                    + "usually means this workbook's macros are disabled - close it and reopen it "
+                    + "with macros enabled."
+                : "Excel is in design mode, so that command is greyed. Press Design Mode to leave it.");
         }
 
         // A RESET THE EDITOR GREYS WHILE SOMETHING IS STOPPED HAS ONE MORE THING TO TRY.
@@ -5154,18 +5186,38 @@ internal sealed partial class AddInSession : IDisposable
             if (_designModePresses > 0 && --_designModePresses == 0)
             {
                 var nowInDesignMode = VbeCommands.HostIsInDesignMode(_editor);
+
+                /*
+                 * A PRESS THAT MOVED NOTHING IS THE INTERESTING ONE.
+                 *
+                 * Excel holds design mode down for a workbook whose macros are DISABLED, and it
+                 * will not let go of it: measured on a one-module workbook opened with macros
+                 * off, the toggle stays -1 and every Reset control stays greyed however many
+                 * times the button is pressed, while the button answers "executed" each time.
+                 * Nothing the product offers clears that, which is the whole of issue #9's
+                 * "only restarting Excel works" - and the way out is not this button at all, it
+                 * is opening the workbook again with macros enabled.
+                 */
+                _designModeStuck = nowInDesignMode && _designModeBefore == nowInDesignMode;
+
                 Log.Info($"design mode: the host is now {(nowInDesignMode ? "IN" : "out of")} it"
-                    + (nowInDesignMode && _designModePressedWhileStopped
+                    + (_designModeStuck ? " and would not leave when asked" : string.Empty)
+                    + (nowInDesignMode && !_designModeStuck && _designModePressedWhileStopped
                         ? ", and the break it was in has gone with it"
                         : string.Empty));
-                _editorSurface?.Notify(nowInDesignMode
-                    ? (_designModePressedWhileStopped
-                        ? "Excel is now in design mode, which ended the run you had stopped. "
-                            + "Nothing will run, and Reset stays greyed, until you press Design "
-                            + "Mode again."
-                        : "Excel is now in design mode. Nothing will run, and Reset, Break and "
-                            + "Step Out stay greyed, until you press Design Mode again.")
-                    : "Excel has left design mode. Code will run again.");
+
+                _editorSurface?.Notify(_designModeStuck
+                    ? "Excel would not leave design mode. That usually means this workbook's "
+                        + "macros are disabled - nothing will run and Reset stays greyed until it "
+                        + "is closed and reopened with macros enabled."
+                    : nowInDesignMode
+                        ? (_designModePressedWhileStopped
+                            ? "Excel is now in design mode, which ended the run you had stopped. "
+                                + "Nothing will run, and Reset stays greyed, until you press "
+                                + "Design Mode again."
+                            : "Excel is now in design mode. Nothing will run, and Reset, Break "
+                                + "and Step Out stay greyed, until you press Design Mode again.")
+                        : "Excel has left design mode. Code will run again.");
             }
 
             if (mode != BreakMode)
@@ -5382,6 +5434,18 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether that press caught the project stopped, which is a run it threw away.</summary>
     private bool _designModePressedWhileStopped;
+
+    /// <summary>The toggle as it stood before the press, so a press that moved nothing is visible.</summary>
+    private bool _designModeBefore;
+
+    /// <summary>
+    /// Whether Excel is holding design mode down and will not let go.
+    ///
+    /// Two states read as design mode and want opposite advice: one the developer pressed, which
+    /// the toggle undoes, and one Excel is enforcing because the workbook's macros are disabled,
+    /// which it will not. Telling the second to press Design Mode is advice that cannot work.
+    /// </summary>
+    private bool _designModeStuck;
 
     /// <summary>
     /// Whether the current stop is one the surface cannot point at, and has already said so.
