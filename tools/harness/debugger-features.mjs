@@ -168,7 +168,79 @@ try {
 
   check("and it says design once the run is over",
     (await captionNow()).includes("[design]"), await captionNow());
+  /* ---- where the commands live, and the state that greys them --------------------------- */
+
+  /*
+   * A COMMAND IS OFFERED IN SEVERAL PLACES AT ONCE, and this surface hides most of them.
+   *
+   * Reset is on six controls here, five on bars that report Visible False - the product replaces
+   * the editor's chrome. `VbeCommands.Execute` used to take whichever copy it met first and
+   * report that copy's Enabled as the editor's answer, so a greyed reply could be a toolbar
+   * nobody can see. `bars` is the reading that tells one from the other.
+   */
+  const places = await api.bars("reset");
+  check("reset is offered in more than one place",
+    places.places.length > 1, `${places.places.length} control(s)`);
+  check("and most of them are on bars nobody can see",
+    places.places.some((one) => !one.barVisible), JSON.stringify(places.places.map((o) => o.bar)));
+  check("with the editor idle, every copy of reset can run",
+    places.enabledCount === places.places.length,
+    `${places.enabledCount} of ${places.places.length}: `
+      + places.places.map((o) => `${o.bar}=${o.enabled}`).join(" "));
+  check("and the live project mode comes with it",
+    places.mode === 2 && places.modeError === null,
+    `mode ${places.mode}, publishedMode ${places.publishedMode}, modeError ${places.modeError}`);
+
+  /*
+   * EXCEL'S DESIGN MODE IS THE ONE STATE THAT GREYS RESET.
+   *
+   * It is the HOST's toggle, not the editor's: while it is on nothing runs at all, Reset, Break
+   * and Step Out are greyed on every bar carrying them, and the project still reports design - so
+   * `debugMode` alone cannot tell it from an idle editor. Pressing it while stopped also throws
+   * the developer's run away. A developer who pressed it by accident used to see every debug
+   * command refuse with nothing saying why, and the way out is the same button (issue #9).
+   */
+  const toggleBefore = await api.bars("designMode");
+  check("design mode is off to begin with",
+    toggleBefore.places.every((one) => one.state === 0),
+    JSON.stringify(toggleBefore.places.map((o) => o.state)));
+
+  await api.command("designMode");
+  await wait(1200);
+
+  const inDesignMode = await api.bars("designMode");
+  const resetThere = await api.bars("reset");
+  check("pressing Design Mode presses the toggle",
+    inDesignMode.places.every((one) => one.state === -1),
+    JSON.stringify(inDesignMode.places.map((o) => o.state)));
+  check("and it greys EVERY copy of reset",
+    resetThere.enabledCount === 0,
+    `${resetThere.enabledCount} of ${resetThere.places.length} still enabled`);
+
+  const refused = await api.command("reset");
+  check("a reset refused there names design mode and the way out",
+    refused.ran === false && refused.detail.includes("DESIGN MODE")
+      && refused.detail.includes("press Design Mode"),
+    refused.detail);
+
+  await api.command("designMode");
+  await wait(1200);
+  const after = await api.bars("reset");
+  check("pressing it again gives every copy back",
+    after.enabledCount === after.places.length,
+    `${after.enabledCount} of ${after.places.length}`);
+  check("and the toggle is up again",
+    (await api.bars("designMode")).places.every((one) => one.state === 0), "state");
 } finally {
+  // Design mode is a HOST state and it outlives this process. A suite that leaves it on leaves
+  // every suite after it unable to run anything at all, with nothing saying why.
+  if ((await api.bars("designMode").catch(() => ({ places: [] })))
+    .places.some((one) => one.state === -1)) {
+    console.log("  leaving Excel's design mode");
+    await api.command("designMode").catch(() => {});
+    await wait(1000);
+  }
+
   // Whatever happened, leave break mode and take the breakpoint out: a session left stopped
   // blocks everything afterwards, and the next reader cannot tell why.
   await api.command("reset").catch(() => {});
