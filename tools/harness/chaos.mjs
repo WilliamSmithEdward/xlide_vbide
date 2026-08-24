@@ -774,28 +774,33 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
      * route has to answer promptly first. A host that is really gone never gets there, which is
      * the thing this check is for, and the wait is bounded so a genuine hang still ends the walk.
      */
-    const idleBy = Date.now() + 45000;
-    let freed = false;
-    while (Date.now() < idleBy && !freed) {
-      const began = Date.now();
-      freed = (await api.state().catch(() => null)) !== null && Date.now() - began < 1000;
-      if (!freed) { await wait(1000); }
+    /*
+     * AND IT KEEPS ASKING THE SAME QUESTION, rather than asking an easier one.
+     *
+     * The first version of this waited until `state` answered promptly and took that as the lane
+     * being free. It is not: `state` is served from cached fields and window handles and never
+     * crosses to the host thread at all, so it answers just as fast while the thread is owned by
+     * a runaway loop. It reported "the lane freed after 0.2s" on a walk where nothing had been
+     * measured - the check could not have failed.
+     *
+     * So the retry is the READ, repeated. That cannot be fooled about the one thing it is for,
+     * and a host that is really gone never answers it.
+     */
+    const until = Date.now() + 45000;
+    while (typeof readable === "string" && Date.now() < until) {
+      await wait(2000);
+      readable = await api.project(project).catch((err) => String(err.message));
     }
 
-    laneWaited = Math.round((45000 - (idleBy - Date.now())) / 100) / 10;
-    laneFreed = freed;
-    console.log(`  the lane was blocked at round ${round}; `
-      + `${freed ? "it freed" : "it never freed"} after ${laneWaited}s`);
-    readable = await api.project(project).catch((err) => String(err.message));
+    laneWaited = Math.round((45000 - (until - Date.now())) / 100) / 10;
+    laneFreed = typeof readable !== "string";
+    console.log(`  the project stopped reading at round ${round}; `
+      + `${laneFreed ? "it came back" : "it never came back"} after ${laneWaited}s`);
   }
 
   if (typeof readable === "string") {
-    // The two answers are different failures and the words say which. A lane that freed and
-    // still would not read is the product; a lane that never freed in 45 seconds is a host
-    // with something running in it, and a runaway loop looks exactly like that from here.
-    fail("the project stopped reading, twice",
-      `${readable} - and the host thread `
-      + (laneFreed ? `freed after ${laneWaited}s in between` : `never freed in ${laneWaited}s`));
+    fail("the project stopped reading",
+      `${readable} - asked again every two seconds for ${laneWaited}s and it never answered`);
     break;
   }
 

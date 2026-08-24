@@ -5194,14 +5194,41 @@ internal sealed partial class AddInSession : IDisposable
             // the tick still runs: the recovery below is about the SESSION, not about what is on
             // screen, and skipping it here is how a break that clears itself stopped clearing.
             var placed = name is not null && name == _editorSurface?.Module;
-            if (!placed)
+
+            /*
+             * AND A LINE THAT CANNOT CARRY A STATEMENT CANNOT BE THE CURRENT ONE.
+             *
+             * VBA compiles the whole project before it runs anything, so one module that does not
+             * parse stops every procedure in every other module - and the editor answers by
+             * stopping on the line the COMPILER complained about. For a declarations-section
+             * error that is `Option Explicit`, an `Enum` member or a `Type` field: measured at
+             * line 1 of a module whose only fault was a duplicate Enum member, with the active
+             * project still reading design mode. Nothing is executing there and nothing ever
+             * could, so a current-statement marker on it is the same false claim the breakpoint
+             * margin used to make on those lines, and the rule that stopped that one answers this.
+             *
+             * Judged once per stop. The rule needs the WHOLE module - whether a line sits inside
+             * a Type or an Enum is not something the line can say - and this runs on every poll.
+             */
+            var stopKey = $"{name}:{line}";
+            if (placed && stopKey != _markerJudgedFor)
+            {
+                _markerJudgedFor = stopKey;
+                _markerCarries = Core.Editor.Breakpoints.CanCarry(SurfaceLines(), line);
+            }
+
+            if (!placed || !_markerCarries)
             {
                 if (!_debugStopUnplaced)
                 {
                     _debugStopUnplaced = true;
                     Log.Info($"debug: stopped at line {line} of "
-                        + $"{name ?? "a module that would not name itself"}, which is not what the "
-                        + "surface is showing - no current-line marker was drawn");
+                        + $"{name ?? "a module that would not name itself"}, "
+                        + (placed
+                            ? "which is not an executable statement - the editor stops on the line "
+                                + "a compile error names, and nothing is running there"
+                            : "which is not what the surface is showing")
+                        + " - no current-line marker was drawn");
                 }
 
                 _editorSurface?.ShowCurrentLine(null);
@@ -5219,7 +5246,6 @@ internal sealed partial class AddInSession : IDisposable
                 // misdirection about where a Step acts, found by the first suite that asked the
                 // bar (2026-08-12). Once per stop and not per tick, so the developer's mid-break
                 // clicks are not fought; a step to a NEW line is a new stop and follows again.
-                var stopKey = $"{name}:{line}";
                 if (stopKey != _lastStopFollowed)
                 {
                     _lastStopFollowed = stopKey;
@@ -5290,6 +5316,12 @@ internal sealed partial class AddInSession : IDisposable
     /// the other one.
     /// </summary>
     private bool _debugStopUnplaced;
+
+    /// <summary>The stop whose line was last judged executable, so the whole module is split once.</summary>
+    private string? _markerJudgedFor;
+
+    /// <summary>Whether that line can carry a statement at all - see Core.Editor.Breakpoints.</summary>
+    private bool _markerCarries;
 
     /// <summary>Whether the developer is looking at the Immediate panel.</summary>
     private bool _watchingImmediate;
