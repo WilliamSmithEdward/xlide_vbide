@@ -214,7 +214,12 @@ const readyToWrite = async () => {
 const claimed = [];
 const mine = async (what) => {
   await readyToWrite();
-  const name = `Chaos_${what}${ops}`;
+
+  // THE SEED IS IN THE NAME, because the operation counter restarts every run and Excel does not.
+  // Two walks against one instance both reached `Chaos_rt104`, and the second was refused as a
+  // name already taken - which the summary reported eleven times as though the product had done
+  // something wrong. A run's modules are its own.
+  const name = `Chaos_${what}${SEED.toString(36)}_${ops}`;
   await api.component("add", { kind: "module", name, project });
   claimed.push(name);
   return name;
@@ -312,7 +317,9 @@ const moves = [
     if (twin === null) { return "no second workbook open"; }
 
     await readyToWrite();
-    const name = `Chaos_tw${ops}`;
+
+    // Seeded like the others, so two walks against one Excel do not collide on a name.
+    const name = `Chaos_tw${SEED.toString(36)}_${ops}`;
     for (const where of [project, twin]) {
       await api.component("add", { kind: "module", name, project: where });
       claimedIn.push([where, name]);

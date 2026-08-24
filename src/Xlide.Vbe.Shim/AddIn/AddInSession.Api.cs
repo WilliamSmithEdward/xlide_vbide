@@ -3959,6 +3959,20 @@ internal sealed partial class AddInSession
                                     $"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
                             }
 
+                            // A NAME ALREADY TAKEN IS SAID IN WORDS. The editor answers a
+                            // duplicate with a bare `Unexpected HRESULT`, which names neither the
+                            // problem nor the module - a caller reads it as the product having
+                            // broken rather than as a name it can simply change. Measured
+                            // eighteen times across two chaos walks before anyone worked out the
+                            // two runs had chosen the same name.
+                            if (componentName is { Length: > 0 }
+                                && FindComponent(componentName, componentOwner, out _) is { } taken)
+                            {
+                                taken.Dispose();
+                                return HostError($"'{componentName}' is already a component of "
+                                    + "this project; choose another name or remove that one first");
+                            }
+
                             // The api mirrors the UI: Access's VBE has no MSForms, offers no
                             // Insert > UserForm, and would fail the Add(3) with a COM mumble.
                             // The refusal is designated instead (the owner, 2026-08-19).
