@@ -94,6 +94,15 @@ export interface UiSnapshot {
   statusPosition: string;
   statusModule: string;
   /**
+   * The line the current-statement marker is drawn on, or null when none is drawn.
+   *
+   * The one thing on screen that claims to say where execution is, and until this existed it
+   * could only be read by scraping a decoration class out of the DOM. Issue #9's photograph is
+   * this marker on an `Enum` member of a module that had never run, and no probe could have
+   * caught that: the surface knew the number and nothing asked it.
+   */
+  currentLine: number | null;
+  /**
    * The sync dialog while it is open, null otherwise: direction, folder, mode, busy, the
    * status sentence, and every row with its tick. Before this the dialog's rows could only be
    * read by querySelector from a harness file, which is a test of the selector as much as of
@@ -681,6 +690,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     statusNotice: parts.statusNotice(),
     statusPosition: parts.statusPosition(),
     statusModule: parts.statusModule(),
+    currentLine: bridge.currentLineDrawn(),
     sync: syncDialogProbe()?.state() ?? null,
     changes: changesPaneProbe()?.state() ?? null,
     agent: agentDialogProbe()?.state() ?? null,

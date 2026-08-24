@@ -1863,6 +1863,24 @@ export class EditorBridge {
   }
 
   /**
+   * The line the current-statement marker is on, or null when none is drawn.
+   *
+   * Read from the DECORATION rather than from the number that was last sent, because those are
+   * different claims: the marker follows the model's own edits once it is placed, and the one
+   * worth reporting is where it actually sits. Issue #9's photograph is this marker on an `Enum`
+   * member of a module that had never run, and nothing could ask the surface where it was.
+   */
+  currentLineDrawn(): number | null {
+    const held = this.currentLineDecor;
+    const [first] = held?.ids ?? [];
+    if (!held || first === undefined) {
+      return null;
+    }
+
+    return held.model.getDecorationRange(first)?.startLineNumber ?? null;
+  }
+
+  /**
    * What the page is still waiting on, for the xlide api's `ui` route.
    *
    * A document request that never comes home fails as a four-second silence, and the surface

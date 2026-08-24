@@ -391,6 +391,9 @@ ui.statusNotice;                  // what the status line is saying, "" when it 
 ui.statusPosition;                // the bar's caret readout, "Ln 4, Col 7" - the developer's own
                                   // answer to where a Run would land, so hold it to the native caret
 ui.statusModule;                  // the bar's module name
+ui.currentLine;                   // the line the current-statement marker is on, null when none -
+                                  // the one thing on screen claiming to say where execution is,
+                                  // and read from the DECORATION rather than the number last sent
 ui.search;                        // open, query, scope, matches, current
 ui.sync;                          // the sync dialog while open, null otherwise: direction, folder,
                                   // mode, busy, status, and every row with its tick - the statuses

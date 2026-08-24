@@ -665,6 +665,10 @@ const alive = (pid) => {
 };
 
 let unwedged = 0;
+
+/** How the lane behaved the last time a read of the project missed its crossing. */
+let laneWaited = 0;
+let laneFreed = false;
 let stalls = 0;
 let stuck = 0;
 let peakWrappers = before.comWrappersLive;
@@ -755,12 +759,43 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
   let readable = await api.project(project).catch((err) => String(err.message));
   if (typeof readable === "string") {
     stalls += 1;
-    await wait(3000);
+
+    /*
+     * AND THE RETRY WAITS FOR THE LANE, rather than for a fixed three seconds.
+     *
+     * A fixed pause ended two walks at 855 and 504 operations, both on the same words, and the
+     * host log says what was happening in each: the thread went quiet for just over three
+     * seconds and the next thing it did was publish. This walk WRITES 65,000-character modules,
+     * and a write of that size is the editor's own parse - documented at seventeen seconds for
+     * the largest one measured. Everything else queues behind it, including this read, and
+     * calling that a hang is the harness reporting its own load as a defect.
+     *
+     * So the second attempt only happens once the lane is moving again: a cheap host-thread
+     * route has to answer promptly first. A host that is really gone never gets there, which is
+     * the thing this check is for, and the wait is bounded so a genuine hang still ends the walk.
+     */
+    const idleBy = Date.now() + 45000;
+    let freed = false;
+    while (Date.now() < idleBy && !freed) {
+      const began = Date.now();
+      freed = (await api.state().catch(() => null)) !== null && Date.now() - began < 1000;
+      if (!freed) { await wait(1000); }
+    }
+
+    laneWaited = Math.round((45000 - (idleBy - Date.now())) / 100) / 10;
+    laneFreed = freed;
+    console.log(`  the lane was blocked at round ${round}; `
+      + `${freed ? "it freed" : "it never freed"} after ${laneWaited}s`);
     readable = await api.project(project).catch((err) => String(err.message));
   }
 
   if (typeof readable === "string") {
-    fail("the project stopped reading, twice, three seconds apart", readable);
+    // The two answers are different failures and the words say which. A lane that freed and
+    // still would not read is the product; a lane that never freed in 45 seconds is a host
+    // with something running in it, and a runaway loop looks exactly like that from here.
+    fail("the project stopped reading, twice",
+      `${readable} - and the host thread `
+      + (laneFreed ? `freed after ${laneWaited}s in between` : `never freed in ${laneWaited}s`));
     break;
   }
 
