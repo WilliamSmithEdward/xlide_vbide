@@ -198,7 +198,16 @@ const chaosNames = () => Array.from({ length: 6 }, (_, at) => `Chaos_${at}`);
 const readyToWrite = async () => {
   if ((await api.state().catch(() => ({}))).debugMode !== "break") { return; }
   unwedged += 1;
-  await api.command("reset").catch(() => {});
+
+  // THE SIGNATURE OF ISSUE #9. A reset that answers "currently disabled" while the editor says it
+  // is stopped is the break nothing can leave: every debug command refused, no dialog standing,
+  // no form showing, and only restarting Excel clears it. Counted apart from the ordinary wedge,
+  // because the two look identical from here until the reset answers.
+  const said = await api.command("reset").catch(() => ({ ran: false, detail: "unreachable" }));
+  if (said.ran === false && String(said.detail).includes("disabled")) {
+    stuck += 1;
+  }
+
   await wait(250);
 };
 
@@ -632,6 +641,7 @@ const alive = (pid) => {
 
 let unwedged = 0;
 let stalls = 0;
+let stuck = 0;
 let peakWrappers = before.comWrappersLive;
 let peakHandles = before.handleCount;
 
@@ -767,6 +777,7 @@ console.log(`handles     ${before.handleCount} at rest, peak ${peakHandles}`);
 console.log(`log         ${angry.length} line(s) naming an unhandled fault`);
 console.log(`unwedged    ${unwedged} time(s) - found stopped and reset, which is issue #7's size`);
 console.log(`stalled     ${stalls} time(s) - a crossing missed its budget and caught up (#8)`);
+console.log(`STUCK       ${stuck} time(s) - stopped with Reset itself disabled, which is #9`);
 console.log("");
 console.log("what landed, and what was turned away:");
 for (const [name, held] of [...tally.entries()].sort((a, b) => (b[1].ok + b[1].refused) - (a[1].ok + a[1].refused))) {
