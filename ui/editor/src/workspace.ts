@@ -23,6 +23,7 @@
  */
 
 import * as monaco from "monaco-editor/editor/editor.api.js";
+import { closeContextMenu } from "./contextmenu.js";
 import { installEdgeScroll, type EdgeScroll } from "./edgescroll.js";
 import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
@@ -269,6 +270,24 @@ class EditorGroup {
   }
 
   private setActive(id: DocumentId): void {
+    /*
+     * A CONTEXT MENU IS ABOUT THE THING THAT WAS CLICKED, so it goes when that thing stops being
+     * what is on screen.
+     *
+     * The designer's canvas menu was photographed standing over `Runner`, a standard code module:
+     * Bring to Front, Send to Back, Center in Container, Size to Grid, Tab Order, none of which
+     * mean anything there. It cannot be OPENED over one - the menu hangs off a contextmenu
+     * listener on the canvas - it survived the tab switching beneath it, and in the photograph it
+     * had survived the form being DELETED as well.
+     *
+     * Not merely wrong to look at: every item on it acts on the designer's remembered selection,
+     * so Delete on that menu deletes a control from a form the developer is no longer looking at.
+     *
+     * Closed here because this is the one place every path through show() arrives at - the design
+     * face, the code face, and the re-activation of a model already loaded.
+     */
+    closeContextMenu();
+
     this.active = id;
     this.pending = null;
 

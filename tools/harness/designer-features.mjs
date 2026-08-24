@@ -2585,6 +2585,53 @@ try {
   check("two overlapping labels, and the later one is on top to start with",
     overlapped.blue > overlapped.red && overlapped.red > 0, JSON.stringify(overlapped));
 
+  /*
+   * A CONTEXT MENU GOES WITH THE VIEW IT IS ABOUT.
+   *
+   * The owner photographed this canvas menu - Bring to Front, Send to Back, Center in Container,
+   * Size to Grid, Tab Order - standing over a standard CODE module, where none of it means
+   * anything. It cannot be opened there; it survived the tab switching beneath it, and in that
+   * photograph it had survived the form being deleted as well. Every item acts on the designer's
+   * remembered selection, so Delete on a stale menu deletes a control from a form nobody is
+   * looking at.
+   *
+   * It was also corrupting the row below: the ZOrder check photographs a running form, and a menu
+   * standing over the canvas made both photographs identical, so the row failed deterministically
+   * and nothing said why.
+   */
+  const menuNow = () => api.ask(`(() => {
+    const menu = document.querySelector(".menu-dropdown");
+    return menu
+      ? { open: true, items: [...menu.querySelectorAll(".menu-item")].map((o) => (o.textContent || "").trim()) }
+      : { open: false, items: [] };
+  })()`);
+
+  const rightClicked = await api.ask(`(() => {
+    const control = document.querySelector(".dc[data-control]");
+    if (!control) { return "no control on the canvas"; }
+    const box = control.getBoundingClientRect();
+    const x = Math.round(box.left + box.width / 2);
+    const y = Math.round(box.top + box.height / 2);
+    control.dispatchEvent(new PointerEvent("pointerdown", {
+      bubbles: true, cancelable: true, pointerId: 1, isPrimary: true, button: 2, buttons: 2,
+      clientX: x, clientY: y,
+    }));
+    control.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: x, clientY: y }));
+    return "right-clicked " + control.dataset.control;
+  })()`);
+  const onCanvas = await menuNow();
+  check("the canvas offers its own menu on a right-click", onCanvas?.open === true,
+    `${rightClicked}: ${JSON.stringify(onCanvas?.items ?? []).slice(0, 90)}`);
+
+  await api.pane("open", { module: "ThisWorkbook", project });
+  await new Promise((settle) => setTimeout(settle, 1200));
+  const afterSwitch = await menuNow();
+  check("and it goes when the view under it does - a stale one acts on a form nobody is showing",
+    afterSwitch?.open === false, JSON.stringify(afterSwitch?.items ?? []).slice(0, 90));
+
+  await api.pane("open", { module: form, project, face: "design" });
+  await new Promise((settle) => setTimeout(settle, 1200));
+
   const raised = await api.act("designerZOrder", { module: form, control: "ZRed", front: 1 });
   check("Bring to Front is accepted", raised.did === true, raised.detail);
   check("and it leaves the DOCUMENT alone - depth is the one gesture the dialect cannot say",
