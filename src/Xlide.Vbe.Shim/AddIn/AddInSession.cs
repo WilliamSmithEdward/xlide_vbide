@@ -2173,6 +2173,35 @@ internal sealed partial class AddInSession : IDisposable
             return VbeCommands.CommandRun.Ok("the breakpoint was toggled");
         }
 
+        /*
+         * RUN RUNS THE PROCEDURE THE CURSOR IS IN, and it used to say "executed" when the cursor
+         * was not in one.
+         *
+         * Measured with a witness only running can write - a module-level String the procedure
+         * assigns - because "ran: true" is the claim under test and cannot also be the evidence:
+         *
+         *   caret inside the Sub          ran=true executed   witness "" -> "YES"
+         *   caret on a declaration        ran=true executed   witness "" -> ""
+         *   caret on Option Explicit      ran=true executed   witness "" -> ""
+         *
+         * Same answer, opposite outcomes, and no dialog to hint otherwise. That is the same false
+         * success as the toolbar press that reported Reset while the command was greyed, and as
+         * the Design Mode button that reported a toggle Excel was holding down.
+         *
+         * DESIGN MODE ONLY. In break, Run is CONTINUE - it resumes the stopped procedure and has
+         * nothing to do with where the caret is sitting.
+         */
+        if (command == VbeCommands.Command.Run && ProjectModeNow() == DesignMode
+            && ProcedureAtCaret() is null)
+        {
+            Log.Info("run: the caret is not inside a procedure, so there is nothing to run");
+            _editorSurface?.Notify("Run runs the procedure the cursor is in. "
+                + "Put the cursor inside one, or pick a test or a form to run.");
+            return VbeCommands.CommandRun.No(
+                "the cursor is not inside a procedure, so Run has nothing to run - "
+                + "put it inside the Sub or Function you mean");
+        }
+
         // PRESSING DESIGN MODE THROWS THE DEVELOPER'S RUN AWAY. Read before, said after.
         var stoppedBeforeThis = command == VbeCommands.Command.DesignMode
             && ProjectModeNow() == BreakMode;
@@ -3108,6 +3137,48 @@ internal sealed partial class AddInSession : IDisposable
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The procedure the native caret is sitting in, or null when it is not in one.
+    ///
+    /// Asked of the EDITOR, through the code module's own ProcOfLine, rather than of the
+    /// analyzer: this is the same question the Run command answers for itself, so the same
+    /// source gives the same answer, and it cannot be stale the way a parsed outline can be
+    /// between a keystroke and the next analysis pass.
+    /// </summary>
+    private string? ProcedureAtCaret()
+    {
+        try
+        {
+            using var pane = _editor.GetObject("ActiveCodePane");
+            if (pane is null)
+            {
+                return null;
+            }
+
+            Span<int> selection = stackalloc int[4];
+            pane.InvokeInt32s("GetSelection", selection);
+            var line = selection[0];
+            if (line < 1)
+            {
+                return null;
+            }
+
+            using var module = pane.GetObject("CodeModule");
+
+            // vbext_pk_Proc: the procedure itself rather than a Property Get or Let leg, which is
+            // what Run acts on. A line outside every procedure raises rather than answering, and
+            // that raise IS the answer.
+            var found = module?.CallToString("ProcOfLine", line, 0);
+            return string.IsNullOrWhiteSpace(found) ? null : found;
+        }
+        catch (Exception)
+        {
+            // The declarations section answers by raising. So does a pane mid-teardown, and both
+            // mean the same thing here: there is nothing under the caret to run.
+            return null;
+        }
     }
 
     /// <summary>The active project's mode right now, read fresh; design when nothing answers.</summary>

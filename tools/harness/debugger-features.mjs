@@ -20,6 +20,7 @@ const api = await open({});
 const project = await api.project();
 
 const { check, done } = reporter();
+const CRLF = "\r\n";
 
 async function until(what, predicate, budgetMs = 20000) {
   const deadline = Date.now() + budgetMs;
@@ -168,6 +169,66 @@ try {
 
   check("and it says design once the run is over",
     (await captionNow()).includes("[design]"), await captionNow());
+  /* ---- Run runs the procedure the cursor is in ------------------------------------------- */
+
+  /*
+   * "ran: true" IS THE CLAIM UNDER TEST, so it cannot also be the evidence.
+   *
+   * Run acts on the host's active pane and the caret inside it, so a caret that is not inside a
+   * procedure has nothing to run - and the editor did that silently, with no dialog, while the
+   * command answered "executed". The witness is a module-level String only the procedure can
+   * write.
+   */
+  // Named off this process, so two runs against one Excel do not collide.
+  // Named off this process, so two runs against one Excel do not collide.
+  const witnessName = `RunWitness${process.pid % 10000}`;
+  await api.component("remove", { name: witnessName, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name: witnessName, project: project.projectId });
+  await api.writeModule(witnessName, [
+    "Option Explicit", "",
+    "Public Sub LeavesATrace()",
+    '    ThisWorkbook.Worksheets(1).Range("Z99").Value = "YES"',
+    "End Sub",
+  ].join(CRLF), project.projectId);
+  await until("the witness module to be there",
+    async () => (await api.readModule(witnessName, project.projectId).catch(() => null)) !== null,
+    15000);
+
+  /*
+   * A CELL, NOT A MODULE-LEVEL VARIABLE. The first version of this used a Public String the
+   * procedure assigns, and the control failed while the procedure had plainly run: reading that
+   * variable back goes through the Immediate window, the evaluator adds its scratch procedure to
+   * do it, and ADDING A PROCEDURE RESETS THE PROJECT - which clears every module-level variable,
+   * including the witness. A cell outlives a reset.
+   */
+  const witnessCell = async () =>
+    String((await api.immediate('?ThisWorkbook.Worksheets(1).Range("Z99").Value')
+      .catch(() => ({ text: "" }))).text ?? "");
+
+  const ranIt = async (line) => {
+    await api.command("reset").catch(() => {});
+    await api.immediate('ThisWorkbook.Worksheets(1).Range("Z99").ClearContents').catch(() => {});
+    await api.caret(line, { module: witnessName, column: 1, project: project.projectId }).catch(() => {});
+    await wait(500);
+    const said = await api.command("run").catch(() => ({ ran: null, detail: "threw" }));
+    await wait(2000);
+    return { said, actually: (await witnessCell()).includes("YES") };
+  };
+
+  const inside = await ranIt(4);
+  check("Run runs the procedure the cursor is in",
+    inside.said.ran === true && inside.actually,
+    `ran=${inside.said.ran}, the cell it writes says ${JSON.stringify(await witnessCell())}`);
+
+  const outside = await ranIt(1);
+  check("and says so rather than reporting success when the cursor is not in one",
+    outside.said.ran === false && !outside.actually
+      && /not inside a procedure/.test(String(outside.said.detail)),
+    `ran=${outside.said.ran}, ran anything=${outside.actually}, ${outside.said.detail}`);
+
+  await api.immediate('ThisWorkbook.Worksheets(1).Range("Z99").ClearContents').catch(() => {});
+  await api.component("remove", { name: witnessName, project: project.projectId }).catch(() => {});
+
   /* ---- where the commands live, and the state that greys them --------------------------- */
 
   /*
@@ -232,6 +293,9 @@ try {
   check("and the toggle is up again",
     (await api.bars("designMode")).places.every((one) => one.state === 0), "state");
 } finally {
+  await api.component("remove", { name: `RunWitness${process.pid % 10000}`, project: project.projectId })
+    .catch(() => {});
+
   // Design mode is a HOST state and it outlives this process. A suite that leaves it on leaves
   // every suite after it unable to run anything at all, with nothing saying why.
   if ((await api.bars("designMode").catch(() => ({ places: [] })))
