@@ -792,7 +792,8 @@ public sealed record DebugMenusReply(
 public sealed record DebugBarRow(
     [property: JsonPropertyName("bar")] string Bar,
     [property: JsonPropertyName("barVisible")] bool BarVisible,
-    [property: JsonPropertyName("enabled")] bool Enabled);
+    [property: JsonPropertyName("enabled")] bool Enabled,
+    [property: JsonPropertyName("state")] int State);
 
 /// <summary>
 /// Every copy of one editor command, with the live project mode beside it.

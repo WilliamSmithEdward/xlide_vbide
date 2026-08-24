@@ -107,7 +107,10 @@ internal static class VbeCommands
     /// copy a lookup lands on first is one nobody can see. Which copy answered is the difference
     /// between "the editor will not do this" and "the copy we asked cannot".
     /// </summary>
-    public readonly record struct CommandPlace(string Bar, bool BarVisible, bool Enabled);
+    public readonly record struct CommandPlace(string Bar, bool BarVisible, bool Enabled, int State);
+
+    /// <summary>A toggle control that is pressed, as Office numbers button states.</summary>
+    public const int ButtonDown = -1;
 
     /// <summary>
     /// Executes a command by identifier.
@@ -210,6 +213,9 @@ internal static class VbeCommands
         /// <summary>Whether to carry on after finding a runnable copy, for the reading routes.</summary>
         public bool KeepLooking { get; init; }
 
+        /// <summary>Stop at the first copy found, enabled or not - for reading a toggle's state.</summary>
+        public bool StopAtFirst { get; init; }
+
         public int Found { get; set; }
 
         public int Skipped { get; set; }
@@ -220,11 +226,47 @@ internal static class VbeCommands
 
         public List<CommandPlace> Places { get; } = [];
 
-        public bool Done => Runnable is not null && !KeepLooking;
+        public bool Done => StopAtFirst ? Found > 0 : Runnable is not null && !KeepLooking;
 
         /// <summary>The bars the copies were found on, for a refusal that has to be believable.</summary>
         public string Where => string.Join(", ", Places.Select(place =>
             $"{place.Bar}{(place.BarVisible ? string.Empty : " [hidden]")}"));
+    }
+
+    /// <summary>
+    /// Whether the HOST is in design mode - Excel's, not the editor's idea of design.
+    ///
+    /// Two very different states read as "design" from the project's own Mode: nothing is running,
+    /// and the host will not RUN anything. In the second, Reset, Break and Step Out are all greyed
+    /// and the way back is this same toggle, so a developer who pressed it by accident sees every
+    /// debug command refuse and nothing saying why. Pressing it while stopped also discards the
+    /// break, silently.
+    /// </summary>
+    public static bool HostIsInDesignMode(DispatchObject editor)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+
+        try
+        {
+            using var bars = editor.GetObject("CommandBars");
+            if (bars is null)
+            {
+                return false;
+            }
+
+            // The first copy is enough: they all carry the host's one answer, measured -1 on all
+            // three bars that offer it the moment design mode goes on, and 0 on all three the
+            // moment it goes off. A full walk here would run on every refusal.
+            var search = new Search(Command.DesignMode) { StopAtFirst = true };
+            FindRunnable(bars, search);
+            search.Runnable?.Dispose();
+            return search.Places.Count > 0 && search.Places[0].State == ButtonDown;
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"design mode: the host would not say ({ex.GetType().Name})");
+            return false;
+        }
     }
 
     /// <summary>Walks the bars for a command, likeliest first, until one that can run is found.</summary>
@@ -307,8 +349,18 @@ internal static class VbeCommands
                     enabled = false;
                 }
 
+                int state;
+                try
+                {
+                    state = control.GetInt32("State");
+                }
+                catch (Exception)
+                {
+                    state = 0;
+                }
+
                 search.Found++;
-                search.Places.Add(new CommandPlace(barName, barVisible, enabled));
+                search.Places.Add(new CommandPlace(barName, barVisible, enabled, state));
 
                 if (enabled && search.Runnable is null)
                 {

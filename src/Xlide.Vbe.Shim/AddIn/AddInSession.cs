@@ -2173,8 +2173,54 @@ internal sealed partial class AddInSession : IDisposable
             return VbeCommands.CommandRun.Ok("the breakpoint was toggled");
         }
 
+        // PRESSING DESIGN MODE THROWS THE DEVELOPER'S RUN AWAY. Read before, said after.
+        var stoppedBeforeThis = command == VbeCommands.Command.DesignMode
+            && ProjectModeNow() == BreakMode;
+
         var outcome = VbeCommands.Execute(_editor, command);
         var ran = outcome.Ran;
+
+        /*
+         * EXCEL'S DESIGN MODE IS A STATE, AND IT USED TO BE AN INVISIBLE ONE.
+         *
+         * The toggle is the host's, not the editor's: while it is on, nothing runs at all, and
+         * Reset, Break and Step Out are greyed on every bar that carries them - measured 0 of 6
+         * Reset controls enabled, with the project reading design mode, no dialog standing, no
+         * form showing and Excel's own surface still interactive. Pressing it while stopped also
+         * discards the break: `published break, live 1, marker 6` becomes `published design,
+         * live 2, marker none` on the next tick, silently.
+         *
+         * That is a developer's run gone and every debug command refusing, with a title bar
+         * reading exactly as it would if the run had simply finished, and the way out is the same
+         * button that greyed everything else. This says so, both ways.
+         */
+        //
+        // ANSWERED FROM THE NEXT POLL, not from here. The toggle's own state does not change
+        // under `Execute` - Office refreshes command bar state on its own schedule - so reading
+        // it on the line after the press returns what it was BEFORE, and the first version of
+        // this said "the host is now out of design mode" at the moment it went in. Caught in the
+        // log by pressing it while stopped. The poll owns the host thread on an ordinary frame
+        // and reads it a tick later, by which time it is true.
+        if (command == VbeCommands.Command.DesignMode && ran)
+        {
+            _designModePressedWhileStopped = stoppedBeforeThis;
+            _designModePresses = 3;
+        }
+
+        // AND A COMMAND GREYED BY IT SAYS WHICH STATE GREYED IT. A refusal that names only the
+        // control is a dead end; this one names the way out. Asked only when a command was
+        // actually turned away as greyed, so the extra read costs nothing on the usual path.
+        if (!ran
+            && outcome.Detail.StartsWith("currently disabled", StringComparison.Ordinal)
+            && command != VbeCommands.Command.DesignMode
+            && VbeCommands.HostIsInDesignMode(_editor))
+        {
+            Log.Info($"command: {command} is greyed because Excel is in design mode");
+            outcome = VbeCommands.CommandRun.No($"{outcome.Detail} - Excel is in DESIGN MODE, so "
+                + "nothing will run; press Design Mode to leave it");
+            _editorSurface?.Notify("Excel is in design mode, so that command is greyed. "
+                + "Press Design Mode to leave it.");
+        }
 
         // A RESET THE EDITOR GREYS WHILE SOMETHING IS STOPPED HAS ONE MORE THING TO TRY.
         //
@@ -5104,6 +5150,24 @@ internal sealed partial class AddInSession : IDisposable
             // The read answered, so the busy episode, if there was one, is over.
             _debugReadFailureLogged = false;
 
+            // What the Design Mode press actually did, read once Office has refreshed the toggle.
+            if (_designModePresses > 0 && --_designModePresses == 0)
+            {
+                var nowInDesignMode = VbeCommands.HostIsInDesignMode(_editor);
+                Log.Info($"design mode: the host is now {(nowInDesignMode ? "IN" : "out of")} it"
+                    + (nowInDesignMode && _designModePressedWhileStopped
+                        ? ", and the break it was in has gone with it"
+                        : string.Empty));
+                _editorSurface?.Notify(nowInDesignMode
+                    ? (_designModePressedWhileStopped
+                        ? "Excel is now in design mode, which ended the run you had stopped. "
+                            + "Nothing will run, and Reset stays greyed, until you press Design "
+                            + "Mode again."
+                        : "Excel is now in design mode. Nothing will run, and Reset, Break and "
+                            + "Step Out stay greyed, until you press Design Mode again.")
+                    : "Excel has left design mode. Code will run again.");
+            }
+
             if (mode != BreakMode)
             {
                 if (_inBreak)
@@ -5306,6 +5370,18 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether the current episode of unreadable execution state has been reported.</summary>
     private bool _debugReadFailureLogged;
+
+    /// <summary>
+    /// Polls remaining before the Design Mode toggle is read back.
+    ///
+    /// Office refreshes command bar state on its own schedule, so the toggle still reads its old
+    /// value on the line after the press. Counted down on the poll, which runs on the host thread
+    /// on an ordinary frame and is where every other after-the-fact reading in here happens.
+    /// </summary>
+    private int _designModePresses;
+
+    /// <summary>Whether that press caught the project stopped, which is a run it threw away.</summary>
+    private bool _designModePressedWhileStopped;
 
     /// <summary>
     /// Whether the current stop is one the surface cannot point at, and has already said so.

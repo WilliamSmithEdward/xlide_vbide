@@ -3715,7 +3715,8 @@ internal sealed partial class AddInSession
                 }
 
                 var places = VbeCommands.Places(_editor, barsId)
-                    .Select(place => new DebugBarRow(place.Bar, place.BarVisible, place.Enabled))
+                    .Select(place => new DebugBarRow(
+                        place.Bar, place.BarVisible, place.Enabled, place.State))
                     .ToArray();
 
                 string? activeProject = null;

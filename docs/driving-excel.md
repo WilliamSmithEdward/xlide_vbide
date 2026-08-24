@@ -501,10 +501,17 @@ await api.menus([900]);     // the composed xlide menu, and the real id behind e
 // once - Reset is on six of them, and every toolbar the editor came with is hidden under this
 // surface. So a refusal was the opinion of whichever hidden copy the lookup met first.
 await api.bars("reset");
-// -> { places: [{ bar: "Debug", barVisible: false, enabled: true }, ...], enabledCount: 6,
-//      activeProject: "VBAProject", mode: 1, publishedMode: "break", modeError: null }
+// -> { places: [{ bar: "Debug", barVisible: false, enabled: true, state: 0 }, ...],
+//      enabledCount: 6, activeProject: "VBAProject", mode: 1, publishedMode: "break",
+//      modeError: null }
 // enabledCount 0 is the editor really refusing. `mode` disagreeing with `publishedMode` is a
 // page told something that stopped being true - the debug poll swallows its own failures.
+
+// AND `state` IS HOW EXCEL'S DESIGN MODE IS READ. -1 is a pressed toggle. While it is pressed
+// nothing runs at all, Reset/Break/Step Out are greyed on every bar, and the project still
+// reports design - so `debugMode` alone cannot tell that state from an idle one.
+await api.bars("designMode");   // -> places[].state === -1 means the host is in design mode
+// Pressing it while stopped DISCARDS the break. The editor says so on screen and in the log.
 
 // The tree's right-click menus, and the one destructive thing on them.
 await api.act("treeMenu", { module: "Helpers" });        // -> detail is the menu, " | " separated
