@@ -1560,7 +1560,12 @@ internal sealed partial class AddInSession
                 var complained = new List<string>();
                 var deadline = Environment.TickCount64 + WaitMilliseconds(request, 15000);
 
-                while (Environment.TickCount64 < deadline && !evaluated.IsSet)
+                // Set when a dialog has been answered that the evaluation cannot come back from,
+                // so the wait below stops rather than running out its budget - see the note at
+                // the break.
+                var nothingLeftToWaitFor = false;
+
+                while (Environment.TickCount64 < deadline && !evaluated.IsSet && !nothingLeftToWaitFor)
                 {
                     evaluated.Wait(120);
 
@@ -1599,6 +1604,30 @@ internal sealed partial class AddInSession
                         if (!evaluated.IsSet)
                         {
                             _immediateLeftItStopped = true;
+
+                            /*
+                             * AND STOP WAITING FOR A COMPLETION THAT CANNOT COME.
+                             *
+                             * The loop's condition is `!evaluated.IsSet`, and a compile error is
+                             * raised INSTEAD of running the line - so the evaluation never
+                             * completes, the event is never set, and this waited out the whole
+                             * fifteen-second budget before giving up. Two more seconds followed
+                             * it. Measured three times at 17.0, 17.1 and 17.1 seconds, on the
+                             * host thread, for a developer who typed in the Immediate window
+                             * while their project had a syntax error somewhere - which is the
+                             * ordinary state of a project being edited.
+                             *
+                             * The answer was already in hand at that point: the box's own words
+                             * are the outcome, recorded a few lines above. Nothing was gained by
+                             * the remaining fourteen and a half seconds except a frozen editor.
+                             *
+                             * A short grace first, because dismissing the box is occasionally
+                             * what lets the evaluation finish, and a result is better than a
+                             * complaint when both are available.
+                             */
+                            evaluated.Wait(500);
+                            nothingLeftToWaitFor = true;
+                            break;
                         }
                     }
                 }
