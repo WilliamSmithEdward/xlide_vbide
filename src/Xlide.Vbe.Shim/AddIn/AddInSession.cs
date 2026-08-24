@@ -2986,55 +2986,17 @@ internal sealed partial class AddInSession : IDisposable
     /// module-level declaration does, and a breakpoint on the opening line of a procedure is
     /// perfectly legal, so it is what follows the modifiers that decides.
     /// </summary>
-    private static bool CanBreakOn(string? line)
-    {
-        var code = line?.Trim();
-        if (string.IsNullOrEmpty(code))
-        {
-            return false;
-        }
-
-        if (code.StartsWith('\'') || code.StartsWith("Rem ", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (StartsWithWord(code, "Option", "Attribute", "Declare", "Dim", "Const", "Type", "Enum", "End Type", "End Enum"))
-        {
-            return false;
-        }
-
-        // A modifier followed by anything that is not a procedure is a declaration.
-        foreach (var modifier in (string[])["Public", "Private", "Friend", "Static", "Global"])
-        {
-            if (StartsWithWord(code, modifier))
-            {
-                var rest = code[modifier.Length..].TrimStart();
-                return StartsWithWord(rest, "Sub", "Function", "Property");
-            }
-        }
-
-        return true;
-    }
-
-    private static bool StartsWithWord(string text, params ReadOnlySpan<string> words)
-    {
-        foreach (var word in words)
-        {
-            if (!text.StartsWith(word, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            // A whole word, so "Constant" is not "Const" and "Dimension" is not "Dim".
-            if (text.Length == word.Length || !char.IsLetterOrDigit(text[word.Length]) && text[word.Length] != '_')
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    /// <summary>
+    /// The shown module's lines, as the surface holds them - which is what the developer is
+    /// clicking in, and so what the breakpoint rule has to be judged against.
+    ///
+    /// Empty when there is no document, which the rule reads as "no line can carry one": a
+    /// margin click on nothing is not a breakpoint.
+    /// </summary>
+    private string[] SurfaceLines() =>
+        _editorSurface?.Text is { } text
+            ? text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n')
+            : [];
 
     /// <summary>
     /// Answers the Search panel: the engine searches the modules it holds - live text where a
@@ -3673,12 +3635,16 @@ internal sealed partial class AddInSession : IDisposable
         var key = BreakpointKey(module);
         var clearing = _breakpoints.TryGetValue(key, out var recorded) && recorded.Lines.Contains(line);
 
-        if (!clearing && !CanBreakOn(_editorSurface?.LineAt(line)))
+        // THE WHOLE MODULE, not the one line. Whether a line can carry a breakpoint depends on
+        // whether it sits inside a Type or an Enum, which the line itself cannot say - see
+        // Core.Editor.Breakpoints, and the margin dots on Enum members that came of asking it
+        // one line at a time.
+        if (!clearing && !Core.Editor.Breakpoints.CanCarry(SurfaceLines(), line))
         {
             // Refused silently on screen, by design (the developer, 2026-08-04): the hover
             // preview already showed an orange cross where no breakpoint can go, and a click
             // there draws nothing - nothing may ever appear that looks like a breakpoint the
-            // developer did not get. The page mirrors CanBreakOn for that preview.
+            // developer did not get. The page mirrors Core.Editor.Breakpoints for that preview.
             Log.Info($"breakpoint: {module}({line}) is not an executable statement");
             return;
         }

@@ -2120,7 +2120,7 @@ export class EditorBridge {
     // The preview tells the truth before the click: a dim dot where a breakpoint can go, an
     // orange cross where one cannot - and a click on a refused line does nothing at all, so
     // the red dot only ever appears where it is real (the developer's design, 2026-08-04).
-    const breakable = lineCanCarryBreakpoint(this.model()?.getLineContent(line) ?? "");
+    const breakable = lineCanCarryBreakpoint(this.model()?.getLinesContent() ?? [], line);
 
     hover.set([
       {
@@ -2197,12 +2197,65 @@ function safeParse(text: string): unknown {
 }
 
 /**
- * Whether a line can carry a breakpoint. The mirror of the host's CanBreakOn, so the hover
- * preview and the host's verdict on the click always agree; a preview that promises what the
- * click then refuses is worse than no preview.
+ * Whether a line can carry a breakpoint. The mirror of the host's `Core.Editor.Breakpoints`, so
+ * the hover preview and the host's verdict on the click always agree; a preview that promises
+ * what the click then refuses is worse than no preview.
+ *
+ * IT TAKES THE MODULE, NOT THE LINE, and that is the whole of the fix it carries. A line cannot
+ * say whether it sits inside a `Type` or an `Enum`, so the old line-local pair offered every
+ * member of every Enum and every field of every Type - the editor answered each with a modal,
+ * and the host recorded them as set. Blocks do not nest in VBA, so one flag is the bookkeeping.
  */
-function lineCanCarryBreakpoint(line: string): boolean {
-  const code = line.trim();
+function lineCanCarryBreakpoint(lines: readonly string[], line: number): boolean {
+  if (line < 1 || line > lines.length) {
+    return false;
+  }
+
+  let insideBlock = false;
+  for (let at = 0; at < line; at++) {
+    const code = (lines[at] ?? "").trim();
+
+    if (insideBlock) {
+      if (/^end\s+(type|enum)\b/i.test(code)) {
+        insideBlock = false;
+      }
+      if (at === line - 1) {
+        return false;
+      }
+      continue;
+    }
+
+    if (opensDeclarationBlock(code)) {
+      insideBlock = true;
+      if (at === line - 1) {
+        return false;
+      }
+      continue;
+    }
+
+    if (at === line - 1) {
+      return lineCanCarryAlone(code);
+    }
+  }
+
+  return false;
+}
+
+/** True for a line that opens a `Type` or `Enum` block, with or without modifiers. */
+function opensDeclarationBlock(code: string): boolean {
+  let rest = code;
+  for (const modifier of ["Public", "Private", "Friend", "Global"]) {
+    if (startsWithWord(rest, modifier)) {
+      rest = rest.slice(modifier.length).trimStart();
+      break;
+    }
+  }
+
+  return startsWithWord(rest, "Type", "Enum");
+}
+
+/** What the line says about itself, ignoring where it sits. */
+function lineCanCarryAlone(code: string): boolean {
   if (code.length === 0 || code.startsWith("'") || startsWithWord(code, "Rem")) {
     return false;
   }
