@@ -3222,10 +3222,37 @@ internal sealed partial class AddInSession
         if (blocking is null)
         {
             var standing = DialogWatch.Dialogs();
+
+            /*
+             * WHY IT DID NOT ANSWER, as far as this side can tell without it.
+             *
+             * "The host thread did not answer in time" is true and tells a caller nothing it can
+             * act on. The commonest cause by far is the developer's own code RUNNING - a loop
+             * with no exit condition owns that thread until it finishes, and this door's own
+             * Break and Reset are marshalled onto the same thread, so they queue behind the very
+             * thing they exist to stop. Measured 2026-08-24: `Do ... Loop` with no exit left
+             * Excel not responding, every route timing out, and break and reset among them.
+             *
+             * The heartbeat is the evidence. It is stamped by the host thread's own tick, so an
+             * old one means that thread has not been round its loop - which is exactly the
+             * difference between a door that is broken and a door waiting behind running code.
+             * A caller told that can act; a caller told "did not answer" cannot.
+             *
+             * The remedy is named because this door does not have one. Ctrl+Break is a keyboard
+             * interrupt VBA's own pump handles, and nothing marshalled can substitute for it.
+             */
+            var asleep = PerfCounters.HeartbeatAgeMs;
+            var why = asleep > 2000
+                ? $"the host thread has not answered for {asleep}ms. That usually means VBA is "
+                    + "running your code - a loop with no exit owns the editor's thread until it "
+                    + "ends, and this door's own Break and Reset need that same thread, so they "
+                    + "cannot interrupt it. Press Ctrl+Break in the editor."
+                : "the host thread did not answer in time";
+
             return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                 new DebugBlockedReply(
-                    Error: "the host thread did not answer in time",
-                    HeartbeatAgeMs: PerfCounters.HeartbeatAgeMs,
+                    Error: why,
+                    HeartbeatAgeMs: asleep,
                     BlockedBy: standing.Length > 0 ? standing[0].Caption : null,
                     Buttons: standing.Length > 0 ? standing[0].Buttons : [],
                     Dismissed: null),
