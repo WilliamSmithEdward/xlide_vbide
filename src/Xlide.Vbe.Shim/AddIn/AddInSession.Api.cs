@@ -1579,6 +1579,27 @@ internal sealed partial class AddInSession
                         var pressed = DialogWatch.SafeAnswerFor(raised) ?? "OK";
                         DialogWatch.Dismiss(raised.Caption, pressed);
                         Log.Info($"immediate: \"{raised.Text}\" answered with {pressed}");
+
+                        // MARKED HERE, not after the reply is composed, because the editor drops
+                        // out of design mode about forty milliseconds from now and the poll that
+                        // notices runs every hundred and fifty. Setting this at the end of the
+                        // route lost that race every time: the poll saw the break, found the flag
+                        // still false, and left it standing (measured 2026-08-24).
+                        //
+                        // AND ONLY IF THE EVALUATION HAS NOT COMPLETED, which is the whole safety
+                        // of it and is knowable right here. A compile error is raised INSTEAD of
+                        // running, so the line never started and there is no session to lose. A
+                        // dialog raised after the evaluation completed belongs to code that DID
+                        // run - `Debug.Print TheirFunction()` failing inside their own procedure -
+                        // and the stop that follows is theirs, with their call stack on it. That
+                        // is never cleared for them.
+                        //
+                        // Read off the completion event rather than off the `ran` computed later:
+                        // later is exactly what loses the race to the poll.
+                        if (!evaluated.IsSet)
+                        {
+                            _immediateLeftItStopped = true;
+                        }
                     }
                 }
 
@@ -1594,21 +1615,18 @@ internal sealed partial class AddInSession
                     failed = true;
                 }
 
-                // A COMPILE ERROR DROPS THE PROJECT OUT OF DESIGN MODE, a moment after this
-                // returns - measured at 40ms, which is why nothing here can watch it happen. So
-                // it is only NOTED here, and the next evaluation through this route clears it on
-                // the way in, where there is no evaluation still in flight to race. A first
-                // attempt reset from here instead, and turned the useful "Compile error:
-                // Expected: identifier" into a bare COM error seventeen seconds late.
+                // TAKEN BACK IF THE EVALUATION RAN. The flag was set optimistically the moment
+                // the editor complained, because the project drops out of design mode about
+                // forty milliseconds later and the poll that clears it runs every hundred and
+                // fifty - so noting it at the end of this route lost the race every time.
                 //
-                // Only when the evaluation did not RUN, and that is the whole safety of it: a
-                // compile error means nothing of the developer's ever started, so there is no
-                // session to lose. An evaluation that ran and stopped - in their code, at their
-                // own breakpoint - is theirs, and is never touched. Read off whether it ran,
-                // rather than off the box's words, which are localised.
-                if (!ran && complained.Count > 0)
+                // Running is what distinguishes the two stops. A compile error means nothing of
+                // the developer's ever started, so there is no session to lose and the break is
+                // ours to clear. An evaluation that RAN and then stopped may be sitting at their
+                // own breakpoint, in their own code, and that stop is theirs.
+                if (ran)
                 {
-                    _immediateLeftItStopped = true;
+                    _immediateLeftItStopped = false;
                 }
 
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(

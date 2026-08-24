@@ -5115,6 +5115,34 @@ internal sealed partial class AddInSession : IDisposable
             if (!_inBreak)
             {
                 Log.Info($"debug: stopped at {name}({line})");
+
+                /*
+                 * A BREAK THIS PRODUCT CAUSED IS CLEARED HERE, which is what closes issue #7.
+                 *
+                 * Evaluating anything in a project that will not compile drops it out of design
+                 * mode a moment after the evaluation returns. Everything then refuses: writes,
+                 * component changes, later evaluations - and the fix for the broken module IS a
+                 * write, so the developer could not get out without knowing to reset first.
+                 *
+                 * Cleared from THE POLL and not from the routes, after two attempts that were not
+                 * sound. Resetting on the way out of the evaluation raced the evaluation still
+                 * running and turned "Compile error: Expected: identifier" into a bare COM error
+                 * seventeen seconds late. Resetting inside the module write route exceeded that
+                 * route's own three-second host crossing and turned a clear refusal into a
+                 * timeout. This tick is on the host thread on an ORDINARY frame, inside nobody's
+                 * budget and racing nothing - which is what both of those wanted and neither had.
+                 *
+                 * ONLY OUR BREAK. `_immediateLeftItStopped` is set when one of our evaluations
+                 * did not RUN and the editor complained, so nothing of the developer's ever
+                 * started and there is no session to lose. A developer at their own breakpoint
+                 * never matches, and their stop is theirs.
+                 */
+                if (_immediateLeftItStopped)
+                {
+                    _immediateLeftItStopped = false;
+                    Log.Info("debug: this stop was our own compile error, clearing it");
+                    ClearOurOwnBreak();
+                }
             }
 
             _inBreak = true;
@@ -7478,6 +7506,70 @@ internal sealed partial class AddInSession : IDisposable
             Log.Info($"command: the strip's '{name}' was refused ({outcome.Detail})");
             _editorSurface?.Notify($"{name}: the editor refused it - {outcome.Detail}.");
         }
+    }
+
+    /// <summary>
+    /// Issues Reset for a break this product's own evaluation caused, off the host thread.
+    ///
+    /// OFF IT, deliberately. The caller is a poll tick ON the host thread, and Reset raises a
+    /// confirmation whose message loop is that same thread - so issuing it inline would park the
+    /// tick inside a modal and there would be nothing left to answer it. The command is marshalled
+    /// back instead, from a pool thread that stays free, which is the shape the immediate route's
+    /// own long note arrived at: the door's thread issues, the host thread pumps, the frame
+    /// unwinds.
+    ///
+    /// The confirmation is answered by the expectation's own watcher, which is why that had to
+    /// start answering rather than only choosing.
+    /// </summary>
+    private void ClearOurOwnBreak()
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        _ = System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                using (Diagnostics.DialogWatch.ExpectingConfirmation(6000))
+                {
+                    surface.RunOnHostThread(() => ExecuteEditorCommand(VbeCommands.Command.Reset));
+
+                    // WAITED ON THE POLLED FLAG, not on ProjectModeNow. That reads the project
+                    // over COM, and this is a pool thread: an apartment-bound object touched from
+                    // the wrong thread is how this product has killed Excel before, and it does
+                    // not fail politely. The poll owns the host thread and publishes what it saw;
+                    // reading its bool from here is free and safe.
+                    var backBy = Environment.TickCount64 + 5000;
+                    while (Environment.TickCount64 < backBy && _inBreak)
+                    {
+                        System.Threading.Thread.Sleep(100);
+                    }
+                }
+
+                // SAID ON SCREEN, not only in the log. This clears a stop without being asked,
+                // which is right when the stop is ours and nothing of the developer's is on the
+                // stack - but a state that changes by itself and says nothing is the shape of
+                // every silent thing found today. If the discrimination is ever wrong, the person
+                // it is wrong for should be able to see what happened rather than wonder.
+                if (!_inBreak)
+                {
+                    Log.Info("debug: the compile-error break is cleared; the project is back in design mode");
+                    _editorSurface?.Notify("The compile error stopped the project, so it was reset. "
+                        + "Nothing had run, so nothing was lost.");
+                }
+                else
+                {
+                    Log.Info("debug: the compile-error break would NOT clear; press Reset in the editor");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Info($"debug: clearing our own break failed ({ex.GetType().Name}: {ex.Message})");
+            }
+        });
     }
 
     /// <summary>

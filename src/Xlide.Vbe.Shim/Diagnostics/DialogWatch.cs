@@ -71,16 +71,87 @@ internal static unsafe class DialogWatch
     /// between issuing a command and its confirmation appearing, and far shorter than the gap to
     /// anything a developer would raise next.
     /// </summary>
+    /// <remarks>
+    /// IT ALSO ANSWERS, and that is not a convenience. Until now this only decided WHAT an
+    /// answerer would press, and the only answerer is the api's rescue for a request stuck behind
+    /// a dialog - so the mechanism worked exactly where a request happened to be in flight and
+    /// nowhere else. A caller with no request behind it - a timer, a poll, anything reacting to
+    /// the editor rather than to somebody asking - would have issued its command, raised a
+    /// confirmation, and left the host thread parked on a modal nobody was going to press.
+    ///
+    /// So the scope carries its own short-lived watcher on a pool thread. What it will press is
+    /// tightly bounded, because pressing OK on the wrong dialog is the one thing worse than
+    /// pressing nothing:
+    ///
+    ///   only a dialog that was NOT already standing when the scope opened, so a question the
+    ///     developer raised a moment earlier is never touched;
+    ///   only ONE, after which the watcher stops, so a scope cannot become a policy;
+    ///   only until the scope is disposed or its deadline passes.
+    /// </remarks>
     public static IDisposable ExpectingConfirmation(int forMs = 5000)
     {
         Interlocked.Increment(ref _expecting);
         Volatile.Write(ref _expectingUntil, Environment.TickCount64 + forMs);
-        return new Expectation();
+
+        var expectation = new Expectation();
+
+        // What was ALREADY on screen. Anything in here is somebody else's question.
+        var standing = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var dialog in Dialogs())
+            {
+                standing.Add(dialog.Window);
+            }
+        }
+        catch
+        {
+            // A window list that will not read leaves the set empty, which only makes the
+            // watcher more cautious: every dialog then looks pre-existing and none is pressed.
+            return expectation;
+        }
+
+        // A plain blocking loop rather than an async one: this file is compiled unsafe, so it
+        // cannot await, and a pool thread sleeping 60ms at a time for a few seconds is what the
+        // pool is for.
+        _ = Task.Run(() =>
+        {
+            var until = Environment.TickCount64 + forMs;
+            while (Environment.TickCount64 < until && !expectation.Closed)
+            {
+                try
+                {
+                    foreach (var dialog in Dialogs())
+                    {
+                        if (standing.Contains(dialog.Window) || SafeAnswerFor(dialog) is not { } press)
+                        {
+                            continue;
+                        }
+
+                        Log.Info($"dialog watch: \"{dialog.Caption}\" arrived inside an expected "
+                            + $"confirmation; answering with {press}");
+                        Dismiss(dialog.Caption, press);
+                        return;
+                    }
+                }
+                catch
+                {
+                    // The window list is a best effort; a tick that cannot read it tries again.
+                }
+
+                Thread.Sleep(60);
+            }
+        });
+
+        return expectation;
     }
 
     private sealed class Expectation : IDisposable
     {
         private int _closed;
+
+        /// <summary>Whether the scope has been let go, so its watcher can stop.</summary>
+        public bool Closed => Volatile.Read(ref _closed) == 1;
 
         public void Dispose()
         {
