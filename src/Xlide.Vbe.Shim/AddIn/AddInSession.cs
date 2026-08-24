@@ -5162,30 +5162,73 @@ internal sealed partial class AddInSession : IDisposable
                 return;
             }
 
-            if (name is not null && name != _editorSurface?.Module)
+            // THE STOPPED MODULE IS NAMED WITH ITS WORKBOOK, and the marker is only drawn once
+            // the surface is showing it.
+            //
+            // A bare name resolves shown-project-first, so with two workbooks each holding a
+            // Shapes a stop in one of them switched the surface to the OTHER one's - and the
+            // marker below went on regardless, at a line number belonging to a module that never
+            // ran. That is the reading in issue #9's photograph: a current-statement marker on an
+            // `Enum` member, a line no debugger can stop at, in a module the developer had not
+            // launched. A marker on the wrong line is worse than none, because it is the one
+            // thing on screen that says where execution is.
+            string? stoppedIn = null;
+            try
             {
-                ShowModuleInSurface(name);
+                using var collection = component?.GetObject("Collection");
+                using var owner = collection?.GetObject("Parent");
+                stoppedIn = owner is null ? null : ProjectReader.Identity(owner).Id;
+            }
+            catch (Exception)
+            {
+                // The workbook simply stays unnamed, and the checks below take the safer branch.
             }
 
-            _editorSurface?.ShowCurrentLine(line);
-
-            // THE CARET FOLLOWS THE STOP, once per stop. The host put its own caret on the
-            // stopped statement - the native pane reads line 18 while stopped there - and the
-            // native editor, like every reference debugger, moves the caret to each stop. The
-            // surface only scrolled, so its caret (and the status bar reading it) stayed
-            // wherever the developer last clicked: a bar saying "Ln 9" over a stop at 18 is
-            // misdirection about where a Step acts, found by the first suite that asked the
-            // bar (2026-08-12). Once per stop and not per tick, so the developer's mid-break
-            // clicks are not fought; a step to a NEW line is a new stop and follows again.
-            var stopKey = $"{name}:{line}";
-            if (stopKey != _lastStopFollowed)
+            if (name is not null && (name != _editorSurface?.Module || stoppedIn != _shownProject))
             {
-                _lastStopFollowed = stopKey;
-                _editorSurface?.SetCaret(line, Math.Max(1, selection[1]));
+                ShowModuleInSurface(name, stoppedIn);
+            }
+
+            // Nothing to point at when the stop could not be placed - the surface keeps whatever
+            // it was showing, with no marker claiming to be the current statement. The rest of
+            // the tick still runs: the recovery below is about the SESSION, not about what is on
+            // screen, and skipping it here is how a break that clears itself stopped clearing.
+            var placed = name is not null && name == _editorSurface?.Module;
+            if (!placed)
+            {
+                if (!_debugStopUnplaced)
+                {
+                    _debugStopUnplaced = true;
+                    Log.Info($"debug: stopped at line {line} of "
+                        + $"{name ?? "a module that would not name itself"}, which is not what the "
+                        + "surface is showing - no current-line marker was drawn");
+                }
+
+                _editorSurface?.ShowCurrentLine(null);
             }
             else
             {
-                _editorSurface?.Reveal(line);
+                _debugStopUnplaced = false;
+                _editorSurface?.ShowCurrentLine(line);
+
+                // THE CARET FOLLOWS THE STOP, once per stop. The host put its own caret on the
+                // stopped statement - the native pane reads line 18 while stopped there - and the
+                // native editor, like every reference debugger, moves the caret to each stop. The
+                // surface only scrolled, so its caret (and the status bar reading it) stayed
+                // wherever the developer last clicked: a bar saying "Ln 9" over a stop at 18 is
+                // misdirection about where a Step acts, found by the first suite that asked the
+                // bar (2026-08-12). Once per stop and not per tick, so the developer's mid-break
+                // clicks are not fought; a step to a NEW line is a new stop and follows again.
+                var stopKey = $"{name}:{line}";
+                if (stopKey != _lastStopFollowed)
+                {
+                    _lastStopFollowed = stopKey;
+                    _editorSurface?.SetCaret(line, Math.Max(1, selection[1]));
+                }
+                else
+                {
+                    _editorSurface?.Reveal(line);
+                }
             }
 
             if (!_inBreak)
@@ -5237,6 +5280,16 @@ internal sealed partial class AddInSession : IDisposable
 
     /// <summary>Whether the current episode of unreadable execution state has been reported.</summary>
     private bool _debugReadFailureLogged;
+
+    /// <summary>
+    /// Whether the current stop is one the surface cannot point at, and has already said so.
+    ///
+    /// A stop the surface is not showing gets NO marker. Drawing one anyway put a current-line
+    /// marker on an `Enum` member of a module that had never run (issue #9's photograph), because
+    /// the module was named without its workbook and the switch landed on a same-named module in
+    /// the other one.
+    /// </summary>
+    private bool _debugStopUnplaced;
 
     /// <summary>Whether the developer is looking at the Immediate panel.</summary>
     private bool _watchingImmediate;
