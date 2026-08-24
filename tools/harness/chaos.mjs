@@ -206,6 +206,24 @@ const readyToWrite = async () => {
   const said = await api.command("reset").catch(() => ({ ran: false, detail: "unreachable" }));
   if (said.ran === false && String(said.detail).includes("disabled")) {
     stuck += 1;
+
+    // AND THE READING IS TAKEN WHILE IT IS STANDING, because that state was reached twice and
+    // described from memory both times. `bars` says which copy of Reset refused and whether any
+    // copy would have run; `mode` against `publishedMode` says whether the break is real or the
+    // last thing the page happened to be told. Printed rather than counted: one occurrence with
+    // this attached is worth more than another tally of how often it happened.
+    const [where, forms, dialogs] = await Promise.all([
+      api.bars("reset").catch((err) => ({ error: String(err.message).slice(0, 90) })),
+      api.userforms().catch(() => ({ userforms: [] })),
+      api.dialogs().catch(() => ({ dialogs: [] })),
+    ]);
+    console.log(`\nSTUCK at operation ${ops}: reset answered "${said.detail}"`);
+    console.log(`  reset lives on: ${JSON.stringify(where.places ?? where.error)}`);
+    console.log(`  enabled copies: ${where.enabledCount}   active project: ${where.activeProject}`);
+    console.log(`  mode live: ${where.mode}   published: ${where.publishedMode}`
+      + `   ${where.modeError ? `mode read failed: ${where.modeError}` : ""}`);
+    console.log(`  forms: ${(forms.userforms ?? []).length}   `
+      + `dialogs: ${JSON.stringify((dialogs.dialogs ?? []).map((one) => one.text))}\n`);
   }
 
   await wait(250);

@@ -190,6 +190,15 @@ internal static class AgentGuide
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
             "GET menus", true, DoorPolicy.Open),
+        new("bars", "GET", "name=<command>",
+            "Every control carrying one editor command - the bar it sits on, whether that bar is "
+            + "on screen, and whether that copy is enabled - with the ACTIVE project's live mode "
+            + "beside the mode the page was last told.",
+            "GET bars?name=reset", true, DoorPolicy.Open,
+            "This is what a greyed command means. A command is offered in several places at once "
+            + "(Reset is on six), and this surface hides every toolbar the editor came with, so "
+            + "`command` answering \"currently disabled\" used to be one hidden copy's opinion. "
+            + "`mode` against `publishedMode` separates a real break from a stale reading."),
         new("native", "GET", "text=1?",
             "The native code panes as the HOST holds them: which modules, which is active, and "
             + "where the caret is. `text=1` returns the pane's text and the surface's beside it.",

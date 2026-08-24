@@ -786,6 +786,33 @@ public sealed record DebugMenusReply(
     [property: JsonPropertyName("items")] DebugMenuRow[] Items);
 
 /// <summary>
+/// One control carrying a command, as GET bars lists them: the bar it sits on, whether that bar
+/// is on screen, and what this copy says about itself.
+/// </summary>
+public sealed record DebugBarRow(
+    [property: JsonPropertyName("bar")] string Bar,
+    [property: JsonPropertyName("barVisible")] bool BarVisible,
+    [property: JsonPropertyName("enabled")] bool Enabled);
+
+/// <summary>
+/// Every copy of one editor command, with the live project mode beside it.
+///
+/// `publishedMode` is what the page was last told and `mode` is what the active project says
+/// RIGHT NOW - they are separate fields because the poll that publishes swallows its failures,
+/// so the two can drift apart and a session can go on reporting break with nothing stopped.
+/// `modeError` is why the live read failed, when it did.
+/// </summary>
+public sealed record DebugBarsReply(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("places")] DebugBarRow[] Places,
+    [property: JsonPropertyName("enabledCount")] int EnabledCount,
+    [property: JsonPropertyName("activeProject")] string? ActiveProject,
+    [property: JsonPropertyName("mode")] int Mode,
+    [property: JsonPropertyName("publishedMode")] string? PublishedMode,
+    [property: JsonPropertyName("modeError")] string? ModeError);
+
+/// <summary>
 /// What POST command, placement, breakpoint, and immediate answer.
 ///
 /// `ran` means the editor ran it, not that the door was asked to. It used to mean the second thing:
@@ -1525,6 +1552,7 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugSessionsReply))]
 [JsonSerializable(typeof(DebugTestsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
+[JsonSerializable(typeof(DebugBarsReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]
 [JsonSerializable(typeof(DebugUndoRenameReply))]

@@ -314,6 +314,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
 | `menus` | `menus(path)` | the editor's own menus with their ids, `suppressed` on each; `menus([900])` is the composed xlide menu and the real control behind each position |
+| `bars` | `bars(name)` | every control carrying ONE command - its bar, whether that bar is on screen, whether that copy is enabled - with the active project's live `mode` beside the `publishedMode` the page was told |
 | `native` | `native({text})` / `inSync()` / `parityAll()` | the HOST's own panes, caret and CONTENT, under the surface |
 | `engine` | `engineSource(module, {text})` | what the ENGINE is holding for a module, against what the surface holds |
 
@@ -492,6 +493,15 @@ await api.dialogs();
 await api.menus();          // the bar: File, Edit, View ... each with `suppressed`
 await api.menus([8]);       // one menu's items
 await api.menus([900]);     // the composed xlide menu, and the real id behind each position
+
+// WHY A COMMAND IS GREY. `command` answers one word, and a command sits in several places at
+// once - Reset is on six of them, and every toolbar the editor came with is hidden under this
+// surface. So a refusal was the opinion of whichever hidden copy the lookup met first.
+await api.bars("reset");
+// -> { places: [{ bar: "Debug", barVisible: false, enabled: true }, ...], enabledCount: 6,
+//      activeProject: "VBAProject", mode: 1, publishedMode: "break", modeError: null }
+// enabledCount 0 is the editor really refusing. `mode` disagreeing with `publishedMode` is a
+// page told something that stopped being true - the debug poll swallows its own failures.
 
 // The tree's right-click menus, and the one destructive thing on them.
 await api.act("treeMenu", { module: "Helpers" });        // -> detail is the menu, " | " separated

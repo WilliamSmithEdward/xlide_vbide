@@ -3690,6 +3690,64 @@ internal sealed partial class AddInSession
                     DebugJsonContext.Default.DebugMenusReply);
             }
 
+            case "bars" when request.Query.TryGetValue("name", out var barsName) && barsName.Length > 0:
+            {
+                /*
+                 * WHERE A COMMAND LIVES, AND WHICH COPY ANSWERS.
+                 *
+                 * `command` reports one word - "currently disabled" - and until this existed there
+                 * was no way to ask which of the several controls carrying that command said it.
+                 * Reset alone is on the menu bar, on two toolbars and on three context menus, and
+                 * this surface hides every toolbar the editor came with, so a greyed answer could
+                 * be a copy nobody can see. Issue #9 is a break with every debug command refused
+                 * and no visible cause; a reading that cannot name the copy cannot tell a real
+                 * refusal from a stale one.
+                 *
+                 * `mode` beside it is the ACTIVE PROJECT's, read live rather than from the polled
+                 * value the page is told, because a stale published mode looks exactly the same
+                 * from the outside.
+                 */
+                var barsId = VbeCommands.ForName(barsName);
+                if (barsId == 0 && !int.TryParse(barsName, out barsId))
+                {
+                    return HostError($"unknown command name {barsName}; pass a name "
+                        + "VbeCommands.ForName knows, or a bare identifier");
+                }
+
+                var places = VbeCommands.Places(_editor, barsId)
+                    .Select(place => new DebugBarRow(place.Bar, place.BarVisible, place.Enabled))
+                    .ToArray();
+
+                string? activeProject = null;
+                var liveMode = -1;
+                string? modeError = null;
+                try
+                {
+                    using var active = _editor.GetObject("ActiveVBProject");
+                    activeProject = active?.GetString("Name");
+                    liveMode = active?.GetInt32("Mode") ?? -1;
+                }
+                catch (Exception ex)
+                {
+                    // NAMED, NEVER SWALLOWED. The debug-state poll swallows this same failure and
+                    // leaves the page holding whatever mode it last heard, which is one of the
+                    // ways a session can report break long after the break is over.
+                    modeError = $"{ex.GetType().Name}: {ex.Message}";
+                }
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugBarsReply(
+                        barsName,
+                        barsId,
+                        places,
+                        places.Count(row => row.Enabled),
+                        activeProject,
+                        liveMode,
+                        _lastPublishedMode,
+                        modeError),
+                    DebugJsonContext.Default.DebugBarsReply);
+            }
+
             case "outline" when request.Query.TryGetValue("module", out var outlineModule) && outlineModule.Length > 0:
             {
                 // A module's shape, from the analyzer, so a caller can assert on structure rather

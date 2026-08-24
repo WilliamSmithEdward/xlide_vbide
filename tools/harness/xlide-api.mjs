@@ -404,6 +404,22 @@ function clientFor(entry) {
     menus: (path = []) => call(`menus${query({ path: path.join(",") || undefined })}`),
 
     /**
+     * Where one editor command lives, and which copy of it answers.
+     *
+     * A command is offered in several places at once - Reset is on the menu bar, on two toolbars
+     * and on three context menus - and this surface hides every toolbar the editor came with. So
+     * `command` answering "currently disabled" was, until this existed, the opinion of whichever
+     * copy the walk met first, from a bar nobody can see.
+     *
+     *   const where = await api.bars("reset");
+     *   where.places;        // [{ bar: "Debug", barVisible: false, enabled: true }, ...]
+     *   where.enabledCount;  // 0 means the editor really will not do it
+     *   where.mode;          // the ACTIVE project's mode, read live: 0 run, 1 break, 2 design
+     *   where.publishedMode; // what the page was last told - a drift between these is a stale UI
+     */
+    bars: (name) => call(`bars${query({ name })}`),
+
+    /**
      * The HOST's own editor, underneath the surface that covers it.
      *
      * Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret

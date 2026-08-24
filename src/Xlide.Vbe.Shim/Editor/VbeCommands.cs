@@ -99,6 +99,17 @@ internal static class VbeCommands
     }
 
     /// <summary>
+    /// One place a command is offered: the bar it sits on, whether that bar is on screen, and
+    /// what that copy of the control says about itself.
+    ///
+    /// A command is almost never in one place. Reset is on the menu bar, on two toolbars and on
+    /// three context menus, and this product hides every toolbar the editor came with - so the
+    /// copy a lookup lands on first is one nobody can see. Which copy answered is the difference
+    /// between "the editor will not do this" and "the copy we asked cannot".
+    /// </summary>
+    public readonly record struct CommandPlace(string Bar, bool BarVisible, bool Enabled);
+
+    /// <summary>
     /// Executes a command by identifier.
     /// </summary>
     /// <returns>Whether it ran, and when it did not, why not.</returns>
@@ -121,24 +132,42 @@ internal static class VbeCommands
             // only at the top level of each bar unless told otherwise, and every command here is a
             // menu item, which is one level further in. It also returned nothing rather than
             // failing, so using it looked exactly like a host that has no Run command.
-            using var control = Find(bars, commandId);
+            //
+            // AND THE WALK LOOKS FOR ONE THAT CAN RUN, not merely for one that exists. It used to
+            // take whichever copy it met first and report that copy's `Enabled` as the editor's
+            // answer. Every bar this searches first is HIDDEN here - the surface replaces the
+            // editor's chrome - so a greyed answer could be coming from a toolbar nobody has
+            // shown, while the same command sits enabled on the menu bar a pass later. That is
+            // the reading issue #9 rests on, and a refusal that cannot say which copy it came
+            // from cannot be told from one that is real.
+            var search = new Search(commandId);
+            FindRunnable(bars, search);
+
+            using var control = search.Runnable;
             if (control is null)
             {
-                Log.Info($"command: {commandId} is not present in this host");
-                return CommandRun.No("not present in this host");
-            }
+                if (search.Found == 0)
+                {
+                    Log.Info($"command: {commandId} is not present in this host");
+                    return CommandRun.No("not present in this host");
+                }
 
-            // A command that cannot run right now is not a failure worth reporting as one: Break is
-            // disabled unless something is running, and Reset unless something is stopped.
-            if (!control.GetBool("Enabled"))
-            {
-                Log.Info($"command: {commandId} is currently disabled");
-                return CommandRun.No("currently disabled");
+                // A command that cannot run right now is not a failure worth reporting as one:
+                // Break is disabled unless something is running, and Reset unless something is
+                // stopped. The wording opens with the same phrase it always did, because callers
+                // match on it; what follows is the evidence that it was every copy and not one.
+                Log.Info($"command: {commandId} is currently disabled on all {search.Found} "
+                    + $"control(s) that carry it ({search.Where})");
+                return CommandRun.No($"currently disabled - all {search.Found} control(s) "
+                    + $"carrying it are greyed ({search.Where})");
             }
 
             control.Invoke("Execute");
-            Log.Info($"command: {commandId} executed");
-            return CommandRun.Ok();
+            Log.Info($"command: {commandId} executed from '{search.RunnableBar}'"
+                + (search.Skipped > 0 ? $", after {search.Skipped} greyed copy(s)" : string.Empty));
+            return CommandRun.Ok(search.Skipped > 0
+                ? $"executed from '{search.RunnableBar}', past {search.Skipped} greyed copy(s)"
+                : "executed");
         }
         catch (Exception ex)
         {
@@ -147,17 +176,68 @@ internal static class VbeCommands
         }
     }
 
-    /// <summary>Finds a control by identifier, looking at the likeliest bars first.</summary>
-    private static DispatchObject? Find(DispatchObject bars, int commandId)
+    /// <summary>
+    /// Every control that carries a command, with the bar it is on and what it reports.
+    ///
+    /// Debug only, through the api, and the companion of <see cref="VbeMenus.Describe"/>: that
+    /// one reads the menu bar, this one reads everywhere else as well. A greyed command with no
+    /// visible cause is unreadable without it, because the answer depends on WHICH copy replied.
+    /// </summary>
+    public static CommandPlace[] Places(DispatchObject editor, int commandId)
+    {
+        ArgumentNullException.ThrowIfNull(editor);
+
+        using var bars = editor.GetObject("CommandBars");
+        if (bars is null)
+        {
+            return [];
+        }
+
+        var search = new Search(commandId) { KeepLooking = true };
+        FindRunnable(bars, search);
+        search.Runnable?.Dispose();
+        return [.. search.Places];
+    }
+
+    /// <summary>
+    /// What a walk of the bars has learned so far: how many copies of the command it met, where
+    /// they were, and the first one that could actually run.
+    /// </summary>
+    private sealed class Search(int commandId)
+    {
+        public int CommandId { get; } = commandId;
+
+        /// <summary>Whether to carry on after finding a runnable copy, for the reading routes.</summary>
+        public bool KeepLooking { get; init; }
+
+        public int Found { get; set; }
+
+        public int Skipped { get; set; }
+
+        public DispatchObject? Runnable { get; set; }
+
+        public string? RunnableBar { get; set; }
+
+        public List<CommandPlace> Places { get; } = [];
+
+        public bool Done => Runnable is not null && !KeepLooking;
+
+        /// <summary>The bars the copies were found on, for a refusal that has to be believable.</summary>
+        public string Where => string.Join(", ", Places.Select(place =>
+            $"{place.Bar}{(place.BarVisible ? string.Empty : " [hidden]")}"));
+    }
+
+    /// <summary>Walks the bars for a command, likeliest first, until one that can run is found.</summary>
+    private static void FindRunnable(DispatchObject bars, Search search)
     {
         var count = bars.GetInt32("Count");
 
         // Two passes: the bars that carry these commands, then everything else. The first pass
         // almost always answers, and the second means a host that arranges its menus differently
         // still works rather than silently doing nothing.
-        for (var pass = 0; pass < 2; pass++)
+        for (var pass = 0; pass < 2 && !search.Done; pass++)
         {
-            for (var i = 1; i <= count; i++)
+            for (var i = 1; i <= count && !search.Done; i++)
             {
                 using var bar = bars.GetItem(i);
                 if (bar is null)
@@ -165,24 +245,30 @@ internal static class VbeCommands
                     continue;
                 }
 
-                var preferred = Array.IndexOf(PreferredBars, bar.GetString("Name")) >= 0;
+                var name = bar.GetString("Name") ?? $"bar {i}";
+                var preferred = Array.IndexOf(PreferredBars, name) >= 0;
                 if (preferred != (pass == 0))
                 {
                     continue;
                 }
 
-                if (FindOn(bar, commandId) is { } found)
+                bool visible;
+                try
                 {
-                    return found;
+                    visible = bar.GetBool("Visible");
                 }
+                catch (Exception)
+                {
+                    visible = false;
+                }
+
+                FindOn(bar, name, visible, search);
             }
         }
-
-        return null;
     }
 
     /// <summary>
-    /// Finds a control by identifier on a bar, descending into its menus.
+    /// Finds a command's controls on a bar, descending into its menus.
     ///
     /// The descent is what lets commands that live only inside a menu (References, Project
     /// Properties) be found at all. It is only sound for identifiers that are unique across the
@@ -190,7 +276,8 @@ internal static class VbeCommands
     /// whichever came first. Everything in <see cref="Command"/> is unique; menu replication,
     /// which cannot make that promise, addresses by position instead.
     /// </summary>
-    private static DispatchObject? FindOn(DispatchObject bar, int commandId, int depth = 0)
+    private static void FindOn(
+        DispatchObject bar, string barName, bool barVisible, Search search, int depth = 0)
     {
         const int popupControl = 10;
         const int deepestMenu = 3;
@@ -198,7 +285,7 @@ internal static class VbeCommands
         using var controls = bar.GetObject("Controls");
         var count = controls?.GetInt32("Count") ?? 0;
 
-        for (var i = 1; i <= count; i++)
+        for (var i = 1; i <= count && !search.Done; i++)
         {
             var control = controls!.GetItem(i);
             if (control is null)
@@ -206,9 +293,37 @@ internal static class VbeCommands
                 continue;
             }
 
-            if (control.GetInt32("Id") == commandId)
+            if (control.GetInt32("Id") == search.CommandId)
             {
-                return control;
+                bool enabled;
+                try
+                {
+                    enabled = control.GetBool("Enabled");
+                }
+                catch (Exception)
+                {
+                    // A copy that will not say is not a copy to press. Counted as a place so the
+                    // refusal still names it, never taken as the answer.
+                    enabled = false;
+                }
+
+                search.Found++;
+                search.Places.Add(new CommandPlace(barName, barVisible, enabled));
+
+                if (enabled && search.Runnable is null)
+                {
+                    search.Runnable = control;
+                    search.RunnableBar = barName;
+                    continue;
+                }
+
+                if (!enabled)
+                {
+                    search.Skipped++;
+                }
+
+                control.Dispose();
+                continue;
             }
 
             if (depth < deepestMenu)
@@ -223,17 +338,14 @@ internal static class VbeCommands
                     controlType = 0;
                 }
 
-                if (controlType == popupControl && FindOn(control, commandId, depth + 1) is { } found)
+                if (controlType == popupControl)
                 {
-                    control.Dispose();
-                    return found;
+                    FindOn(control, barName, barVisible, search, depth + 1);
                 }
             }
 
             control.Dispose();
         }
-
-        return null;
     }
 
     /// <summary>

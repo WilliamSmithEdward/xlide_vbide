@@ -2176,6 +2176,30 @@ internal sealed partial class AddInSession : IDisposable
         var outcome = VbeCommands.Execute(_editor, command);
         var ran = outcome.Ran;
 
+        // A RESET THE EDITOR GREYS WHILE SOMETHING IS STOPPED HAS ONE MORE THING TO TRY.
+        //
+        // Issue #9: a break in which every debug command answered "currently disabled", nothing
+        // the product offered could leave it, and the only remedy was restarting Excel - which
+        // costs the developer every unsaved workbook in the host, not just their debugging
+        // session. Run, Break, Reset, Design Mode, Step Out and Compile are all aimed at the
+        // ACTIVE project, and this surface covers the editor's own windows, so the editor can be
+        // left attending to a project that is not the stopped one.
+        //
+        // What a person does then is click the stopped project in the Project Explorer. So does
+        // this: it brings a code pane of the stopped project forward and asks again, once. If the
+        // refusal was real the second answer is the same one and nothing has been lost.
+        if (!ran && command == VbeCommands.Command.Reset && AttendToStoppedProject() is { } woken)
+        {
+            outcome = VbeCommands.Execute(_editor, command);
+            ran = outcome.Ran;
+            Log.Info($"reset: refused, so {woken} was brought forward and it was asked again - "
+                + (ran ? "it ran" : $"still refused ({outcome.Detail})"));
+            outcome = ran
+                ? VbeCommands.CommandRun.Ok($"executed after bringing {woken} forward")
+                : VbeCommands.CommandRun.No(
+                    $"{outcome.Detail}; {woken} is stopped and was brought forward first");
+        }
+
         // A refused Call Stack looked broken rather than declined ("won't appear again",
         // 2026-08-05: the break had ended and the native command was disabled). The button
         // greys with the debug mode now, but a race between click and mode change still
@@ -2921,6 +2945,92 @@ internal sealed partial class AddInSession : IDisposable
     private const int RunMode = 0;
     private const int BreakMode = 1;
     private const int DesignMode = 2;
+
+    /// <summary>
+    /// Brings a code pane of a STOPPED project forward, so the editor's project-scoped commands
+    /// have it to act on, and answers which project that was.
+    ///
+    /// <see cref="ProjectModeNow"/> reads the ACTIVE project, which is the right reading for
+    /// "may this be edited" and the wrong one for "is anything stopped": with two workbooks open
+    /// the stopped one need not be the one the editor is attending to, and every command that
+    /// would leave the break is aimed at the one it is. This looks at all of them.
+    ///
+    /// Null when nothing is stopped, or when nothing in the stopped project would come forward -
+    /// both of which mean the caller has nothing further to try.
+    /// </summary>
+    private string? AttendToStoppedProject()
+    {
+        try
+        {
+            using var projects = _editor.GetObject("VBProjects");
+            var count = projects?.GetInt32("Count") ?? 0;
+
+            for (var i = 1; i <= count; i++)
+            {
+                using var project = projects!.GetItem(i);
+                if (project is null)
+                {
+                    continue;
+                }
+
+                int mode;
+                try
+                {
+                    mode = project.GetInt32("Mode");
+                }
+                catch (Exception)
+                {
+                    // A project that will not say is not one to reach into.
+                    continue;
+                }
+
+                if (mode == DesignMode)
+                {
+                    continue;
+                }
+
+                var name = project.GetString("Name") ?? $"project {i}";
+                using var components = project.GetObject("VBComponents");
+                var componentCount = components?.GetInt32("Count") ?? 0;
+
+                for (var c = 1; c <= componentCount; c++)
+                {
+                    using var component = components!.GetItem(c);
+                    using var module = component?.GetObject("CodeModule");
+
+                    // Reading CodePane opens one where none was open, which is what makes this
+                    // work at all on a project whose windows the developer never touched.
+                    using var pane = module?.GetObject("CodePane");
+                    if (pane is null)
+                    {
+                        continue;
+                    }
+
+                    pane.Invoke("Show");
+                    try
+                    {
+                        _editor.SetObject("ActiveCodePane", pane);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Info($"stopped project: {name} would not take the active pane "
+                            + $"({ex.GetType().Name})");
+                    }
+
+                    return name;
+                }
+
+                Log.Info($"stopped project: {name} is stopped and has no code pane to bring forward");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"stopped project: the projects would not be walked ({ex.GetType().Name})");
+        }
+
+        return null;
+    }
 
     /// <summary>The active project's mode right now, read fresh; design when nothing answers.</summary>
     private int ProjectModeNow()
