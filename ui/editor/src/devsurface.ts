@@ -2826,6 +2826,14 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         return { did: false, detail: `${id} is not registered on this editor` };
       }
 
+      // SAID HONESTLY. Monaco's run() silently resolves without executing when the action's
+      // precondition is false, so "ran" here used to be a claim this probe could not check -
+      // and it reported success for an action that never ran (2026-08-27, the suppression
+      // menu items behind their finding-at-cursor key).
+      if (!found.isSupported()) {
+        return { did: false, detail: `${id} is not available here (its precondition is false)` };
+      }
+
       return Promise.resolve(found.run()).then(() => ({ did: true, detail: `ran ${id}` }));
     },
   };

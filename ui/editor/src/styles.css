@@ -5984,10 +5984,35 @@ body.objbrowser-page #objbrowser-card {
   align-items: center;
 }
 
-.analysis-rule-fixed {
+/*
+ * The row's one right-hand container. The row itself is flex space-between; loose children
+ * spread into ragged middle columns, so everything on the right lives in here, right-aligned,
+ * and the checkboxes share one edge whether or not a hint sits beside them.
+ */
+.analysis-rule-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+.analysis-rule-control input[type="checkbox"] {
+  margin: 0;
+}
+
+.analysis-rule-hint {
   font-size: 11px;
   white-space: nowrap;
   color: var(--vscode-descriptionForeground, #9d9d9d);
+  cursor: pointer;
+}
+
+.analysis-rules-always-on {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
 }
 
 .analysis-rule-focused {

@@ -75,6 +75,10 @@ export interface ShellHandlers {
   suppressFinding(module: string, workbook: string | null, line: number, code: string): void;
   /** The developer asked to turn one analyzer rule off machine-wide, from the same menu. */
   turnOffRule(code: string): void;
+  /** Whether the analyzer permits turning this rule off - the menu leaves the item out otherwise. */
+  canTurnOffRule(code: string): boolean;
+  /** Whether an inline suppression makes sense for this code - false for the directive rule itself. */
+  canSuppressRule(code: string): boolean;
   /** The developer asked for the analyzer rules dialog, focused on one rule when named. */
   openAnalysisRules(focusCode?: string): void;
   /** The developer entered a line in the Immediate panel. */
@@ -439,18 +443,27 @@ export class Shell {
       ];
 
       if (code.length > 0 && module.length > 0 && line >= 1) {
-        items.push(
-          {},
-          {
+        items.push({});
+
+        // CURATED, the way every menu in this product is: an entry that can never apply to this
+        // finding is left out rather than shown disabled. The directive rule's own findings take
+        // no suppression comment, and a rule the analyzer will not allow off has no machine-wide
+        // switch to offer - the dialog's Always-on section is where that fact lives.
+        if (this.handlers.canSuppressRule(code)) {
+          items.push({
             label: `Suppress '${code}' Here (inline comment)`,
             run: () => this.handlers.suppressFinding(module, workbook, line, code),
-          },
-          {
+          });
+        }
+
+        if (this.handlers.canTurnOffRule(code)) {
+          items.push({
             label: `Turn Off '${code}' on This Machine`,
             run: () => this.handlers.turnOffRule(code),
-          },
-          { label: "Analyzer Rules...", run: () => this.handlers.openAnalysisRules(code) },
-        );
+          });
+        }
+
+        items.push({ label: "Analyzer Rules...", run: () => this.handlers.openAnalysisRules(code) });
       }
 
       showContextMenu(event.clientX, event.clientY, items);

@@ -79,6 +79,20 @@ import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
 import { openAnalysisRulesDialog } from "./analysisrulesdialog.js";
+
+/**
+ * The rule codes the analyzer permits turning off machine-wide, once the catalog has answered;
+ * null is "not known yet", never "none". Shared between the lightbulb, the editor context menu's
+ * precondition, and the problems pane's menu, so all three offer the same truth.
+ */
+let turnOffableCodes: Set<string> | null = null;
+
+/** Re-evaluators for the per-editor context keys, run when the catalog lands. */
+const refreshRuleKeys: Array<() => void> = [];
+
+/** The directive rule's own findings take no suppression comment - suppressing the suppression
+ * machinery with itself is a loop nobody means. Upstream's quick fix excludes it the same way. */
+const SUPPRESSION_DIRECTIVE_CODE = "analysis-suppression-directive";
 import { ChangesPane } from "./changespane.js";
 import { openSyncDialog } from "./syncdialog.js";
 import { openAgentDialog } from "./agentdialog.js";
@@ -658,6 +672,8 @@ function boot(): void {
     suppressFinding: (module, workbook, line, code) =>
       bridge.suppressFinding(module, workbook, line, code),
     turnOffRule: (code) => bridge.setRuleSeverity(code, "off"),
+    canTurnOffRule: (code) => turnOffableCodes?.has(code) ?? false,
+    canSuppressRule: (code) => code !== SUPPRESSION_DIRECTIVE_CODE,
     openAnalysisRules,
     command: (command) => {
       // The settings dialog is the page's own, not a Monaco action and not the host's.
@@ -1032,13 +1048,13 @@ function boot(): void {
   // the lightbulb asks again every time the caret settles.
   const TURN_OFF_RULE_COMMAND = "xlide.analysis.turnOffRule";
 
+
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
   let offRulesMemo: Promise<Set<string>> | null = null;
   const offRules = (): Promise<Set<string>> => {
     offRulesMemo ??= bridge.requestAnalysisRules().then((answer) => {
       if (!answer) {
         // "Not yet" rather than "none": the next lightbulb asks again.
-        bridge.trace("offRules: no catalog answer");
         offRulesMemo = null;
         return new Set<string>();
       }
@@ -1046,7 +1062,13 @@ function boot(): void {
       const set = new Set((answer.rules ?? [])
         .filter((rule) => (rule.allowed ?? []).includes("off"))
         .map((rule) => rule.code));
-      bridge.trace(`offRules: ${set.size} of ${(answer.rules ?? []).length} rule(s) can be off`);
+
+      // The SYNCHRONOUS copy, for the menus. A context menu builds its items in one tick and a
+      // Monaco precondition is read in one tick; neither can await, so they read this and it
+      // fills shortly after boot. Until then the machine-wide entries stay hidden, which errs
+      // the right way - a menu item that appears late beats one that appears and cannot apply.
+      turnOffableCodes = set;
+      refreshRuleKeys.forEach((refresh) => refresh());
       return set;
     });
     return offRulesMemo;
@@ -1595,6 +1617,110 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
       run: () => bridge.runCommand({ id: command, target: "host", icon: "", label }),
     });
   }
+
+  /*
+   * SUPPRESSION FROM THE CODE'S OWN RIGHT-CLICK, beside the problems pane and the lightbulb
+   * (the owner, 2026-08-27). The menu entries are static - Monaco fixes an action's label at
+   * registration - so a context key shows them only while the cursor is on a finding, and the
+   * run() re-reads the marker it is standing on.
+   *
+   * Both go through the HOST's one mechanism: the inline writer picks the right directive by
+   * the rule's scope, and the machine-wide change is validated against the analyzer's own
+   * guard - a rule that permits nothing gets the refusal in words, not a silent nothing.
+   */
+  const findingAtCursor = editor.createContextKey<boolean>("xlideFindingAtCursor", false);
+  const offableAtCursor = editor.createContextKey<boolean>("xlideRuleOffableAtCursor", false);
+
+  const markerAtCursor = (): monaco.editor.IMarker | null => {
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    if (!model || !position) {
+      return null;
+    }
+
+    const markers = monaco.editor
+      .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
+      .filter((marker) => marker.startLineNumber <= position.lineNumber
+        && marker.endLineNumber >= position.lineNumber
+        && (typeof marker.code === "string" ? marker.code : marker.code?.value ?? "").length > 0);
+
+    // The tightest match first: a marker whose columns contain the cursor beats one that merely
+    // shares the line, so a line holding two findings suppresses the one under the pointer.
+    return markers.find((marker) =>
+      marker.startLineNumber === position.lineNumber
+      && marker.startColumn <= position.column
+      && (marker.endLineNumber > position.lineNumber || marker.endColumn >= position.column))
+      ?? markers[0]
+      ?? null;
+  };
+
+  /*
+   * RE-EVALUATED ON EVERY WAY THE ANSWER CAN CHANGE, not only on cursor movement. The first
+   * build listened to onDidChangeCursorPosition alone, and the key stayed false forever in the
+   * commonest case: a fresh pane opens at (1,1), the finding sits at (1,1), and a cursor that
+   * never MOVES fires no event - so the menu items never appeared exactly where the squiggle
+   * was. Markers also arrive and leave under a still cursor with every analysis pass.
+   */
+  const refreshFindingAtCursor = (): void => {
+    const marker = markerAtCursor();
+    const code = marker
+      ? (typeof marker.code === "string" ? marker.code : marker.code?.value ?? "")
+      : "";
+
+    // The directive rule's own findings take no suppression comment, so the item is LEFT OUT
+    // there rather than offered - the same curation rule every menu in this product follows.
+    findingAtCursor.set(marker !== null && code !== SUPPRESSION_DIRECTIVE_CODE);
+
+    // And the machine-wide entry only where the analyzer permits off. Hidden, not greyed:
+    // Monaco preconditions hide, and a rule that mirrors a VBE compile failure is not "cannot
+    // run right now" - it can never apply, which is this product's definition of left out
+    // (the owner, 2026-08-27). The host's worded refusal stays as the backstop for every
+    // other entry point.
+    offableAtCursor.set(marker !== null && (turnOffableCodes?.has(code) ?? false));
+  };
+  editor.onDidChangeCursorPosition(refreshFindingAtCursor);
+  editor.onDidChangeModel(refreshFindingAtCursor);
+  monaco.editor.onDidChangeMarkers(refreshFindingAtCursor);
+  refreshRuleKeys.push(refreshFindingAtCursor);
+  refreshFindingAtCursor();
+
+  const codeOf = (marker: monaco.editor.IMarker): string =>
+    typeof marker.code === "string" ? marker.code : marker.code?.value ?? "";
+
+  editor.addAction({
+    id: "xlide.suppressFinding",
+    label: "Suppress Finding Here (inline comment)",
+    // Its own group, not "1_xlide": Monaco draws its dividers BETWEEN groups, so a distinct id
+    // is what puts a line above and below the suppression pair (the owner, 2026-08-27).
+    contextMenuGroupId: "1_xlide_suppress",
+    contextMenuOrder: 1,
+    precondition: "xlideFindingAtCursor",
+    run: () => {
+      const marker = markerAtCursor();
+      const model = editor.getModel();
+      const identity = model ? bridge.documents.idOf(model) : null;
+      if (!marker || !identity) {
+        return;
+      }
+
+      bridge.suppressFinding(
+        identity.module, identity.project ?? null, marker.startLineNumber, codeOf(marker));
+    },
+  });
+
+  editor.addAction({
+    id: "xlide.turnOffRule",
+    label: "Turn Off This Rule on This Machine",
+    contextMenuGroupId: "1_xlide_suppress",
+    contextMenuOrder: 2,
+    precondition: "xlideRuleOffableAtCursor",
+    run: () => {
+      const marker = markerAtCursor();
+      if (marker) {
+        bridge.setRuleSeverity(codeOf(marker), "off");
+      }
+    },
+  });
 
   // The VBE's Last Position steps back through where the caret has been. So does this, and it
   // steps back through every move rather than only the ones that were jumps. It keeps a menu

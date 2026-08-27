@@ -111,6 +111,17 @@ export function openAnalysisRulesDialog(
     const canTurnOff = rule.allowed.includes("off");
     const canDowngrade = rule.defaultSeverity === "error" && rule.allowed.includes("warning");
 
+    /*
+     * ONE right-hand container per row, whatever it holds. The row is flex space-between, so
+     * three loose children - text, a label, a checkbox - spread into three ragged columns, which
+     * is exactly what the first build looked like. Two children pin the text left and the
+     * control right, and the checkboxes land on one shared edge whether or not a label sits
+     * beside them.
+     */
+    const control = document.createElement("div");
+    control.className = "analysis-rule-control";
+    row.appendChild(control);
+
     if (canTurnOff) {
       const tick = document.createElement("input");
       tick.type = "checkbox";
@@ -121,7 +132,7 @@ export function openAnalysisRulesDialog(
         if (tick.checked) { overrides.delete(rule.code); } else { overrides.set(rule.code, "off"); }
         access.set(rule.code, tick.checked ? "default" : "off");
       });
-      row.appendChild(tick);
+      control.appendChild(tick);
     } else if (canDowngrade) {
       const tick = document.createElement("input");
       tick.type = "checkbox";
@@ -132,19 +143,14 @@ export function openAnalysisRulesDialog(
         if (tick.checked) { overrides.set(rule.code, "warning"); } else { overrides.delete(rule.code); }
         access.set(rule.code, tick.checked ? "warning" : "default");
       });
-      const asWarning = document.createElement("span");
-      asWarning.className = "analysis-rule-fixed";
+      const asWarning = document.createElement("label");
+      asWarning.className = "analysis-rule-hint";
       asWarning.textContent = "as warning";
-      row.append(asWarning, tick);
-    } else {
-      // Not an omission: the analyzer permits no override here, and a control that looked
-      // changeable and did nothing would be this product's least favourite kind of button.
-      const fixed = document.createElement("span");
-      fixed.className = "analysis-rule-fixed";
-      fixed.textContent = "always on";
-      fixed.title = "Mirrors a VBE compile failure; the analyzer allows no override.";
-      row.appendChild(fixed);
+      asWarning.htmlFor = tick.id;
+      control.append(asWarning, tick);
     }
+    // A rule that permits nothing gets NO control at all: those live together in the
+    // "Always on" section at the bottom, whose heading says why once instead of 99 times.
 
     return row;
   };
@@ -168,8 +174,17 @@ export function openAnalysisRulesDialog(
       return;
     }
 
+    /*
+     * THE ADJUSTABLE RULES FIRST, grouped by category; everything the analyzer permits no
+     * override on gathers into one "Always on" section at the bottom (the owner, 2026-08-27).
+     * Ninety-nine of the 122 rules are fixed - interleaved, they buried the twenty-three a
+     * person can actually change, and every one of them repeated the same badge.
+     */
+    const adjustable = shown.filter((rule) => rule.allowed.length > 0);
+    const fixed = shown.filter((rule) => rule.allowed.length === 0);
+
     let category = "";
-    for (const rule of shown) {
+    for (const rule of adjustable) {
       if (rule.category !== category) {
         category = rule.category;
         const heading = document.createElement("div");
@@ -179,6 +194,24 @@ export function openAnalysisRulesDialog(
       }
 
       body.appendChild(rowFor(rule));
+    }
+
+    if (fixed.length > 0) {
+      const heading = document.createElement("div");
+      heading.className = "analysis-rules-category analysis-rules-always-on";
+      heading.textContent = "Always on";
+      body.appendChild(heading);
+
+      const why = document.createElement("div");
+      why.className = "settings-description";
+      why.textContent = "These mirror VBE compile failures or deterministic runtime errors, so "
+        + "the analyzer allows no override. An inline suppression comment still works on a "
+        + "single finding.";
+      body.appendChild(why);
+
+      for (const rule of fixed) {
+        body.appendChild(rowFor(rule));
+      }
     }
 
     if (focusCode !== undefined && wanted.length === 0) {

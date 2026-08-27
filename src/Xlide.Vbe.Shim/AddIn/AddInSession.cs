@@ -1396,7 +1396,21 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.AnalysisRulesRequested = OnAnalysisRulesRequested;
         _editorSurface.SuppressFindingRequested = OnSuppressFindingRequested;
         _editorSurface.RuleSeverityChangeRequested = (code, severity) =>
-            _ = Task.Run(() => ApplyRuleSeverityAsync(code, severity));
+            _ = Task.Run(async () =>
+            {
+                // SAID ON SCREEN, whatever happened. A page-initiated change has no reply
+                // channel of its own, and the difference between "off everywhere" and "cannot
+                // be off, the analyzer allows warning" is exactly what the person clicking a
+                // menu item needs to hear - silence on the refusal was how the first build made
+                // an always-on rule's Turn Off look like a button that did nothing.
+                var said = await ApplyRuleSeverityAsync(code, severity).ConfigureAwait(false);
+
+                // On the browser's own thread, like every message to the page: posted from this
+                // pool thread the notice answers UI_E_WRONG_THREAD and never arrives - measured,
+                // the refusal for an always-on rule was sent and nothing showed.
+                var surface = _editorSurface;
+                surface?.RunOnHostThread(() => surface.Notify(said));
+            });
         _editorSurface.NavigationRequested = OnNavigationRequested;
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
