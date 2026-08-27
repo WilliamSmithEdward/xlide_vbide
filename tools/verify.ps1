@@ -305,6 +305,22 @@ Step 'engine host-supplied facts' {
     'the #20 acceptance table, the Control base merge, the unvouched form, the predeclared class'
 }
 
+Step 'engine inline comment features' {
+    # THE TWO INLINE COMMENT SYNTAXES the shared analyzer defines, held through this engine's
+    # wrapper: `' @xlide-analysis-disable-*` suppression directives (every scope, plus the
+    # directive diagnostics for malformed ones) and `'''` XML doc comments riding hover,
+    # completion and signature help. Both could be dropped by this repo's glue without upstream
+    # noticing - the worker filter, the `documentation` field, and the suppression quick fix all
+    # cross it - and the owner's rule for this library is that everything stays INLINE, with no
+    # sidecar metadata files, so the inline route is the whole feature.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        node test/inline-comments.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the inline-comment suite failed' }
+    } finally { Pop-Location }
+    'suppression scopes, directive diagnostics, doc comments, and the suppression fix'
+}
+
 Step 'generated VBA module casing' {
     # VBA cases identifiers project-wide to the latest declaration it sees, so a lowercase
     # parameter in a module this product INSTALLS re-spells the developer's own code - every
@@ -655,7 +671,8 @@ if ($Live) {
                                      'debugger-features.mjs', 'step-into-features.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
-                                     'pane-scope.mjs', 'write-rollback.mjs')
+                                     'pane-scope.mjs', 'write-rollback.mjs',
+                                     'inline-comments-live.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.

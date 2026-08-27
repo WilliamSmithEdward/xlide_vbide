@@ -726,7 +726,33 @@ node tools\harness\debugger-features.mjs   # the run-and-stop cycle, parity at e
 node tools\harness\format-positions.mjs    # where a squiggle lands after Format Module
 node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
 node tools\harness\analysis-freshness.mjs  # findings stay true while the work behind them is skipped
+node tools\harness\inline-comments-live.mjs # suppression directives and ''' docs on the live surface
 ```
+
+### Inline suppression directives and `'''` doc comments
+
+Both are the shared analyzer's, defined upstream (xlide_vscode's
+`docs/xlide_vba_analysis_suppression_comments.md` and its `src/analyzer/docs/` model), and both
+are wholly INLINE - ordinary comments in the module, no sidecar files, which is the rule for this
+library. This product ships no sidecar metadata loader at all.
+
+```vba
+' @xlide-analysis-disable-next-line undeclared-variable -- reason after two dashes
+missing1 = 1                          ' suppressed; scopes: -file, -next-member, -line,
+                                      ' -next-line, -block/-enable-block; codes or `all`
+
+''' <summary>Doubles a count.</summary>
+''' <param name="n">how many to start from</param>
+Public Function Twice(ByVal n As Long) As Long
+```
+
+From the door, suppression is observable as the FINDINGS moving: `problems()` loses the row when a
+directive lands, keeps it (plus an `analysis-suppression-directive` row) when the directive is
+malformed or names an unknown code, and `act("quickFixes", { line, column })` offers
+`Suppress '<code>' on next line` at any finding. The docs ride the `documentation` field through
+hover, completion and signature help - `act("hover", { line, column })` answers Monaco's own
+rendering, summary and `<param>` text included. Held by `engine/test/inline-comments.mjs`
+(headless, every scope and the applied fix) and `inline-comments-live.mjs` above.
 
 ### Work that is skipped, and how to see that it was skipped
 
