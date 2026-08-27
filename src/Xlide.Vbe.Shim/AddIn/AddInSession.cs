@@ -925,6 +925,10 @@ internal sealed partial class AddInSession : IDisposable
     {
         _settings = updated.Normalized();
 
+        // The analyzer's copy of the machine-wide rule choices follows the record wherever the
+        // change came from - the dialog, the door, or a hand edit adopted at the next change.
+        _analysis?.UseSeverityOverrides(_settings.AnalysisRuleSeverityOverrides);
+
         SaveSettings();
         Log.Info($"settings: saved (blockLayout {_settings.BlockLayout}"
             + $", continueComment {_settings.ContinueCommentOnNewline}"
@@ -1389,6 +1393,10 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.CanonicalCaseRequested = OnCanonicalCaseRequested;
         _editorSurface.LoopSyncRequested = OnLoopSyncRequested;
         _editorSurface.CodeActionsRequested = OnCodeActionsRequested;
+        _editorSurface.AnalysisRulesRequested = OnAnalysisRulesRequested;
+        _editorSurface.SuppressFindingRequested = OnSuppressFindingRequested;
+        _editorSurface.RuleSeverityChangeRequested = (code, severity) =>
+            _ = Task.Run(() => ApplyRuleSeverityAsync(code, severity));
         _editorSurface.NavigationRequested = OnNavigationRequested;
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
@@ -1757,6 +1765,7 @@ internal sealed partial class AddInSession : IDisposable
         try
         {
             _analysis = new AnalysisService(_editor);
+            _analysis.UseSeverityOverrides(_settings.AnalysisRuleSeverityOverrides);
 
             // The Tests pane rediscovers whenever a pass finds the text moved, from the very
             // snapshot the pass just read - no read of its own, and silent unless the
@@ -7183,6 +7192,266 @@ internal sealed partial class AddInSession : IDisposable
             },
             (surface, actions) => surface.ShowCodeActions(requestId, actions),
             actions => $"{actions.Length} fix(es)");
+
+    /// <summary>
+    /// The analyzer's rule catalog, fetched once per session.
+    ///
+    /// The catalog is a build-time table - it changes when the engine binary does and never
+    /// otherwise - so the first asker pays the round trip and everyone after reads the cache.
+    /// Null until the engine has answered once; a caller that gets null says "not yet", never
+    /// "no rules".
+    /// </summary>
+    private EngineAnalysisRules? _analysisRuleCatalog;
+
+    private async Task<EngineAnalysisRules?> AnalysisRuleCatalogAsync()
+    {
+        if (_analysisRuleCatalog is { } held)
+        {
+            return held;
+        }
+
+        if (_analysis is not { } analysis)
+        {
+            return null;
+        }
+
+        var fetched = await analysis.RulesAsync(CancellationToken.None).ConfigureAwait(false);
+        if (fetched is not null)
+        {
+            _analysisRuleCatalog = fetched;
+        }
+
+        return fetched;
+    }
+
+    /// <summary>
+    /// Changes one analyzer rule's severity FOR THIS MACHINE, from any entry point: the rules
+    /// modal, the problems pane's menu, the lightbulb, and the xlide api all arrive here, so
+    /// every one of them behaves identically and persists identically.
+    ///
+    /// Validated against the analyzer's own catalog before anything is written, because the
+    /// engine IGNORES a disallowed override rather than failing - a caller who turned an
+    /// error-severity rule "off" would see nothing change and nothing say why. The refusal
+    /// happens here, in words, with the moves that ARE legal named.
+    ///
+    /// "default" clears the override. The change is saved to the settings file, handed to the
+    /// analysis service, and a reanalysis is provoked so every open workbook's findings move.
+    /// </summary>
+    /// <returns>What happened, in words - for the route's reply and the page's notice.</returns>
+    private async Task<string> ApplyRuleSeverityAsync(string code, string severity)
+    {
+        var ruleCode = (code ?? string.Empty).Trim().ToLowerInvariant();
+        var wanted = (severity ?? string.Empty).Trim().ToLowerInvariant();
+
+        var catalog = await AnalysisRuleCatalogAsync().ConfigureAwait(false);
+        if (catalog is null)
+        {
+            return "the analysis engine is not up, so nothing was changed";
+        }
+
+        var rule = catalog.Rules.FirstOrDefault(one =>
+            string.Equals(one.Code, ruleCode, StringComparison.OrdinalIgnoreCase));
+        if (rule is null)
+        {
+            return $"'{ruleCode}' is not an analyzer rule; GET analysis lists them";
+        }
+
+        if (wanted is not ("default" or "off" or "warning" or "error" or "information"))
+        {
+            return $"'{wanted}' is not a severity; pass off, warning, error, information, "
+                + "or default to clear the override";
+        }
+
+        if (wanted != "default" && !rule.Allowed.Contains(wanted, StringComparer.OrdinalIgnoreCase))
+        {
+            return rule.Allowed.Length == 0
+                ? $"{rule.Code} cannot be changed: its default is {rule.DefaultSeverity} and the "
+                    + "analyzer allows no override - most error rules mirror a VBE compile failure"
+                : $"{rule.Code} cannot be '{wanted}'; the analyzer allows: "
+                    + string.Join(", ", rule.Allowed);
+        }
+
+        var overrides = new Dictionary<string, string>(
+            _settings.AnalysisRuleSeverityOverrides ?? [], StringComparer.Ordinal);
+        var stood = overrides.TryGetValue(rule.Code, out var previous) ? previous : null;
+
+        if (wanted == "default")
+        {
+            if (stood is null)
+            {
+                return $"{rule.Code} already stands at its default ({rule.DefaultSeverity})";
+            }
+
+            overrides.Remove(rule.Code);
+        }
+        else
+        {
+            if (string.Equals(stood, wanted, StringComparison.Ordinal))
+            {
+                return $"{rule.Code} is already {wanted} on this machine";
+            }
+
+            overrides[rule.Code] = wanted;
+        }
+
+        OnSettingsChanged(_settings with
+        {
+            AnalysisRuleSeverityOverrides = overrides.Count > 0 ? overrides : null,
+        });
+
+        // The findings on screen are about the OLD policy until a pass runs under the new one.
+        _analysis?.Reanalyse();
+
+        Log.Info($"analysis: {rule.Code} -> "
+            + $"{(wanted == "default" ? $"default ({rule.DefaultSeverity})" : wanted)} for this machine");
+        return wanted == "default"
+            ? $"{rule.Code} is back to its default ({rule.DefaultSeverity}) on this machine"
+            : $"{rule.Code} is {wanted} everywhere on this machine";
+    }
+
+    /// <summary>
+    /// Writes an inline suppression above a finding's line, in any module of any open workbook.
+    ///
+    /// The directive's shape mirrors the analyzer's own suppression quick fix
+    /// (diagnosticCodeActions.ts): the finding line's leading whitespace, then
+    /// `' @xlide-analysis-disable-next-line <code>`. The lightbulb path applies the engine's
+    /// edit; this one exists for the problems pane, whose findings live in modules that need not
+    /// be open - so it goes through WriteModule, the hardened write, and inherits its refusals:
+    /// a stopped project answers in words rather than raising the editor's reset dialog.
+    /// </summary>
+    private void OnSuppressFindingRequested(string module, string? projectDisplay, int line, string code)
+    {
+        if (SuppressFinding(module, projectDisplay, line, code) is { } refused)
+        {
+            _editorSurface?.Notify(refused);
+        }
+    }
+
+    /// <summary>
+    /// The mechanism behind it, shared with the analysis route so the api and the pane cannot
+    /// drift. Null when the directive was written; the refusal in words otherwise.
+    /// </summary>
+    private string? SuppressFinding(string module, string? projectDisplay, int line, string code)
+    {
+        try
+        {
+            // The developer's unwritten keystrokes reach the module first, so the directive is
+            // inserted into the text as typed rather than as last written back.
+            _editorSurface?.FlushEdits();
+
+            var projectId = ProjectIdFromDisplay(projectDisplay);
+            using var found = FindComponent(module, projectId, out var owner);
+            if (found is null)
+            {
+                return $"Nothing named {module} to suppress in.";
+            }
+
+            var source = ProjectReader.ReadSource(found);
+            if (source is null)
+            {
+                return $"{module}'s text could not be read.";
+            }
+
+            var lines = source.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+            if (line > lines.Length)
+            {
+                return $"{module} has no line {line} to suppress at.";
+            }
+
+            var ruleCode = code.Trim().ToLowerInvariant();
+
+            /*
+             * THE DIRECTIVE IS CHOSEN BY THE RULE'S OWN SCOPE, read from the catalog.
+             *
+             * A module-scoped finding - option-explicit-missing is the owner's example - anchors
+             * at (1,1), and a disable-next-line above it covers the line BELOW the directive,
+             * which the re-anchored finding never sits on: the comment suppressed nothing, the
+             * squiggle moved onto the directive itself, and the pane kept the row (the owner's
+             * screenshot, 2026-08-27). Those rules take the FILE directive, at the very top,
+             * which is the one place the analyzer accepts it. Everything line-anchored keeps the
+             * next-line directive above the finding. The analyzer's own quick fix offers only
+             * next-line today, module-scoped rules included - filed upstream.
+             */
+            var scopes = AnalysisRuleCatalogAsync().GetAwaiter().GetResult()?.Rules
+                .FirstOrDefault(one => string.Equals(one.Code, ruleCode, StringComparison.OrdinalIgnoreCase))
+                ?.SuppressionScopes ?? [];
+            var wholeModule = scopes.Contains("module", StringComparer.OrdinalIgnoreCase)
+                && !scopes.Contains("line", StringComparer.OrdinalIgnoreCase);
+
+            string rewritten;
+            if (wholeModule)
+            {
+                var directive = $"' @xlide-analysis-disable-file {ruleCode}";
+                rewritten = string.Join("\r\n", [directive, .. lines]);
+            }
+            else
+            {
+                var at = lines[line - 1];
+                var indent = at[..(at.Length - at.TrimStart().Length)];
+                var directive = $"{indent}' @xlide-analysis-disable-next-line {ruleCode}";
+                rewritten = string.Join("\r\n", [.. lines[..(line - 1)], directive, .. lines[(line - 1)..]]);
+            }
+
+            if (WriteModule(module, rewritten, owner ?? projectId, hostRewrite: true) is { } refused)
+            {
+                return refused;
+            }
+
+            Log.Info($"analysis: suppressed {ruleCode} at {module}({line}) with an inline "
+                + $"{(wholeModule ? "disable-file" : "disable-next-line")} directive");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"analysis: suppressing {code} at {module}({line}) failed", ex);
+            return "The suppression could not be written; the log says why.";
+        }
+    }
+
+    /// <summary>
+    /// Answers the surface's request for the rule catalog and the standing overrides - the one
+    /// payload the rules modal renders from.
+    /// </summary>
+    private void OnAnalysisRulesRequested(int requestId)
+    {
+        var surface = _editorSurface;
+        if (surface is null)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            SurfaceAnalysisRule[] rules = [];
+            var failed = true;
+            try
+            {
+                var catalog = await AnalysisRuleCatalogAsync().ConfigureAwait(false);
+                rules = catalog?.Rules
+                    .Select(rule => new SurfaceAnalysisRule(
+                        rule.Code, rule.Title, rule.Category, rule.DefaultSeverity, rule.Allowed))
+                    .ToArray() ?? [];
+                failed = catalog is null;
+            }
+            catch (Exception ex)
+            {
+                Log.Error("analysis: the rules request failed", ex);
+            }
+
+            // THE REPLY CROSSES ON THE BROWSER'S OWN THREAD, like every reply in this file.
+            // Posted from this pool thread it never arrives at all: PostWebMessageAsString
+            // answers UI_E_WRONG_THREAD, the error lands in the log, and the page's ask times
+            // out into "no catalog answer" - which is how the first build of this shipped a
+            // lightbulb entry and a modal that could never load (2026-08-27, and the reason
+            // AnswerFromEngine ends with RunOnHostThread).
+            surface.RunOnHostThread(() => surface.ShowAnalysisRules(
+                requestId,
+                rules,
+                _settings.AnalysisRuleSeverityOverrides
+                    ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                failed));
+        });
+    }
 
     /// <summary>
     /// Answers an outline request from the surface: a module's procedures for its tree node.

@@ -2340,6 +2340,24 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       };
     },
 
+    /** The analyzer rule catalog as the RULES MODAL fetches it, through the same bridge call. */
+    analysisRules: async () => {
+      const answer = await bridge.requestAnalysisRules();
+      if (!answer) {
+        return { did: false, detail: "no catalog answer (engine down, or the request timed out)" };
+      }
+
+      return {
+        did: true,
+        detail: `${answer.rules.length} rule(s), ${Object.keys(answer.overrides).length} override(s)`,
+        data: {
+          offable: answer.rules.filter((rule) => rule.allowed.includes("off")).length,
+          overrides: answer.overrides,
+          sample: answer.rules.slice(0, 3).map((rule) => rule.code),
+        },
+      };
+    },
+
     quickFixes: async (args) => {
       const where = positionFrom(args);
       if (!where) { return { did: false, detail: "nothing open, or no such word" }; }

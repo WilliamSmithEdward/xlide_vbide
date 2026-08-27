@@ -314,6 +314,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `watches` | `watches()` | the Watch panel |
 | `windows` | `windows()` | every editor window |
 | `menus` | `menus(path)` | the editor's own menus with their ids, `suppressed` on each; `menus([900])` is the composed xlide menu and the real control behind each position |
+| `analysis` | `analysis({rule, severity, module, line, code, project})` | machine-wide rule overrides (guarded by the analyzer's own `allowed` list, persisted in user-space settings.json) and the inline suppression writer - one mechanism with the rules modal, the problems menu and the lightbulb |
 | `bars` | `bars(name)` | every control carrying ONE command - its bar, whether that bar is on screen, whether that copy is enabled - with the active project's live `mode` beside the `publishedMode` the page was told |
 | `native` | `native({text})` / `inSync()` / `parityAll()` | the HOST's own panes, caret and CONTENT, under the surface |
 | `engine` | `engineSource(module, {text})` | what the ENGINE is holding for a module, against what the surface holds |
@@ -727,6 +728,7 @@ node tools\harness\format-positions.mjs    # where a squiggle lands after Format
 node tools\harness\three-copies.mjs        # all three, after every operation that touches a module
 node tools\harness\analysis-freshness.mjs  # findings stay true while the work behind them is skipped
 node tools\harness\inline-comments-live.mjs # suppression directives and ''' docs on the live surface
+node tools\harness\analysis-rules-live.mjs  # machine-wide rule overrides, the catalog, and the inline writer
 ```
 
 ### Inline suppression directives and `'''` doc comments
@@ -753,6 +755,16 @@ malformed or names an unknown code, and `act("quickFixes", { line, column })` of
 hover, completion and signature help - `act("hover", { line, column })` answers Monaco's own
 rendering, summary and `<param>` text included. Held by `engine/test/inline-comments.mjs`
 (headless, every scope and the applied fix) and `inline-comments-live.mjs` above.
+
+The machine-wide layer sits beside the inline one. `analysis()` lists every rule with the moves
+the analyzer permits and what stands on this machine;
+`analysis({ rule: "option-explicit-missing", severity: "off" })` turns a rule off for this user
+everywhere (persisted in `%LOCALAPPDATA%\xlide_vbide\settings.json`, `severity: "default"`
+clears); `analysis({ module, line, code })` writes the inline directive from outside, exactly as
+the problems pane's right-click does. The UI's three entry points - the toolbar's Analyzer rules
+dialog, the problems row's menu, and the lightbulb's "Turn off '<code>' on this machine" - all
+run the identical host mechanism. Held by `engine/test/rule-overrides.mjs` and
+`analysis-rules-live.mjs`.
 
 ### Work that is skipped, and how to see that it was skipped
 

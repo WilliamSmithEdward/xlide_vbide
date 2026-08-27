@@ -10,6 +10,11 @@ import { hostApp, setHostApp } from './hostApp.js';
 import { analyzerKnowledge, objectModelKnowledge } from './knowledge.js';
 import { syncPlan, type SyncPlanParams } from './sync.js';
 import { AnalysisWorkerState } from '../../../xlide_vscode/src/analysisWorkerLogic';
+import {
+    DIAGNOSTIC_RULES,
+    STRUCTURAL_DIAGNOSTIC_RULES,
+    allowedDiagnosticSeverityOverridesForCode,
+} from '../../../xlide_vscode/src/analyzer';
 import type { AnalysisWorkerRequest } from '../../../xlide_vscode/src/analysisWorkerProtocol';
 import type { VbaModuleAnalysisDiagnostic } from '../../../xlide_vscode/src/vbaModuleAnalysis';
 import {
@@ -41,6 +46,8 @@ import {
     ErrorCode,
     type CanonicalCaseParams,
     type CanonicalCaseResult,
+    type AnalysisRulePayload,
+    type AnalysisRulesResult,
     type CodeActionParams,
     type CodeActionResult,
     type CompletionParams,
@@ -366,6 +373,9 @@ export class Dispatcher {
 
             case 'textDocument/loopSync':
                 return this.loopSync(this.require<LoopSyncParams>(params));
+
+            case 'analysis/rules':
+                return this.analysisRules();
 
             case 'textDocument/codeAction':
                 return this.codeAction(this.require<CodeActionParams>(params));
@@ -781,6 +791,35 @@ export class Dispatcher {
 
         this.semanticMemo.set(key, { source, result });
         return result;
+    }
+
+    /**
+     * The analyzer's rule catalog, with each rule's legal severity moves.
+     *
+     * Enumerated from the analyzer that is actually BUNDLED, not from a list written down here:
+     * the modal and the api render exactly what this build can enforce, and a rule added
+     * upstream appears the day the engine is rebuilt. The allowed list is upstream's own guard -
+     * warning and information rules take 'off'; error rules take at most 'warning', and only
+     * where the analyzer marks the downgrade safe.
+     */
+    private analysisRules(): AnalysisRulesResult {
+        const catalog = [
+            ...Object.values(DIAGNOSTIC_RULES),
+            ...Object.values(STRUCTURAL_DIAGNOSTIC_RULES),
+        ];
+
+        const rules: AnalysisRulePayload[] = catalog
+            .map((rule) => ({
+                code: rule.code,
+                title: rule.title,
+                category: rule.category,
+                defaultSeverity: rule.defaultSeverity,
+                allowed: [...allowedDiagnosticSeverityOverridesForCode(rule.code)],
+                suppressionScopes: [...((rule as { suppressionScopes?: readonly string[] }).suppressionScopes ?? ['line'])],
+            }))
+            .sort((a, b) => a.category.localeCompare(b.category) || a.code.localeCompare(b.code));
+
+        return { rules };
     }
 
     private codeAction(params: CodeActionParams): CodeActionResult {

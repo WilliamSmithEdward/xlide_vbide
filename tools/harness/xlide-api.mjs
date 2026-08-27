@@ -420,6 +420,25 @@ function clientFor(entry) {
     bars: (name) => call(`bars${query({ name })}`),
 
     /**
+     * Machine-wide analyzer rule settings, and the inline suppression, one route for both.
+     *
+     *   await api.analysis();                                          // the whole catalog + overrides
+     *   await api.analysis({ rule: "option-explicit-missing", severity: "off" });
+     *   await api.analysis({ rule: "option-explicit-missing", severity: "default" });  // clear
+     *   await api.analysis({ module: "Ledger", line: 12, code: "undeclared-variable" });
+     *
+     * Each rule row carries `allowed` - the moves the ANALYZER permits - and `override`, what
+     * stands on this machine. An illegal move is refused in `detail`, in words, because the
+     * engine would silently ignore it. Overrides persist in user-space settings.json
+     * (`settingsPath` in the reply names the file) and apply to every workbook this user opens;
+     * the module/line/code form writes the same `' @xlide-analysis-disable-next-line` comment
+     * the problems pane's menu writes, which travels with the code instead.
+     */
+    analysis: ({ rule, severity, module, line, code, project } = {}) =>
+      call(`analysis${query({ rule, severity, module, line, code, project })}`,
+        { timeout: 20000 }),
+
+    /**
      * The HOST's own editor, underneath the surface that covers it.
      *
      * Run, Step, Compile and ToggleBreakpoint act on the native ACTIVE CODE PANE and the caret

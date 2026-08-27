@@ -81,6 +81,7 @@ export type HostMessage =
   | { type: "signatureHelpResult"; id: number; signature: HostSignatureInfo | null }
   | { type: "canonicalCaseResult"; id: number; edits: HostTextEdit[] }
   | { type: "codeActionResult"; id: number; actions: HostCodeAction[] }
+  | { type: "analysisRulesResult"; id: number; rules: HostAnalysisRule[]; overrides: Record<string, string>; failed?: boolean }
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
@@ -319,6 +320,22 @@ export interface HostTextEdit {
  * that apply it. The code and span belong to the finding, so the fix can be attached to the
  * squiggle it belongs to rather than floating free of it.
  */
+/** One analyzer rule as the host lists it, with the override values the analyzer permits. */
+export interface HostAnalysisRule {
+  code: string;
+  title: string;
+  category: string;
+  defaultSeverity: string;
+  /** Empty means the rule cannot be changed - most error rules mirror a VBE compile failure. */
+  allowed: string[];
+}
+
+/** The rules modal's one payload: catalog and standing machine-wide overrides together. */
+export interface HostAnalysisRules {
+  rules: HostAnalysisRule[];
+  overrides: Record<string, string>;
+}
+
 export interface HostCodeAction {
   title: string;
   isPreferred: boolean;
@@ -482,6 +499,9 @@ export type ClientMessage =
   // setting that could not be changed but a setting that got RESET: every other change posted a
   // payload with no syncEngine in it, and the host read the absence as the default.
   | ({ type: "updateSettings" } & EditorSettings)
+  | { type: "analysisRules"; id: number }
+  | { type: "setRuleSeverity"; code: string; severity: string }
+  | { type: "suppressFinding"; module: string; project: string | null; line: number; code: string }
   | { type: "testsAction"; action: string; test?: string; file?: string }
   | { type: "trace"; text: string };
 
@@ -651,6 +671,7 @@ export class EditorBridge {
   private readonly pendingSignatures = new RequestTable<HostSignatureInfo | null>();
   private readonly pendingCanonicalCases = new RequestTable<HostTextEdit[]>();
   private readonly pendingCodeActions = new RequestTable<HostCodeAction[]>();
+  private readonly pendingAnalysisRules = new RequestTable<HostAnalysisRules | null>();
   private readonly pendingSemanticTokens = new RequestTable<HostSemanticToken[] | null>();
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
@@ -1098,6 +1119,34 @@ export class EditorBridge {
    * Asks the host what can be fixed over a span. Resolves empty rather than rejecting: a fix that
    * fails is a lightbulb that does not appear, which is what an unfixable line looks like anyway.
    */
+  /**
+   * Asks the host for the analyzer rule catalog and the machine's standing overrides. Null when
+   * the engine is not up yet - which is "not yet", never "no rules", so a caller keeps what it
+   * has rather than rendering an empty catalog as the truth.
+   */
+  requestAnalysisRules(): Promise<HostAnalysisRules | null> {
+    return this.pendingAnalysisRules.ask(() => null, 5000, (id) =>
+      this.transport.post({ type: "analysisRules", id }));
+  }
+
+  /**
+   * Changes one analyzer rule's severity for this machine: off, warning, error, information, or
+   * "default" to clear the override. The host validates against the analyzer's own guard, saves
+   * to the settings file, and provokes the reanalysis that moves every pane's findings.
+   */
+  setRuleSeverity(code: string, severity: string): void {
+    this.transport.post({ type: "setRuleSeverity", code, severity });
+  }
+
+  /**
+   * Asks the host to write an inline suppression - `' @xlide-analysis-disable-next-line <code>`
+   * above the finding's line - into a module by name, open or not. The host flushes the active
+   * editor first, so the directive lands in the text as typed.
+   */
+  suppressFinding(module: string, project: string | null, line: number, code: string): void {
+    this.transport.post({ type: "suppressFinding", module, project, line, code });
+  }
+
   requestCodeActions(start: number, end: number): Promise<HostCodeAction[]> {
     return this.pendingCodeActions.ask(() => [], 2000, (id) =>
       this.transport.post({ type: "codeAction", id, start, end }));
@@ -1629,6 +1678,12 @@ export class EditorBridge {
       case "canonicalCaseResult":
         this.pendingCanonicalCases.settle(message.id, message.edits);
         return;
+      case "analysisRulesResult":
+        this.pendingAnalysisRules.settle(
+          message.id,
+          message.failed ? null : { rules: message.rules, overrides: message.overrides });
+        break;
+
       case "codeActionResult":
         this.pendingCodeActions.settle(message.id, message.actions);
         return;

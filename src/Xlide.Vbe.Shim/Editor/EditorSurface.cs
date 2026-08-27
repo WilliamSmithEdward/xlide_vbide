@@ -268,6 +268,18 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Raised when the page asks what can be fixed over a span: (requestId, start, end).</summary>
     public Action<int, int, int>? CodeActionsRequested { get; set; }
 
+    /// <summary>The page asking for the analyzer rule catalog and the standing overrides.</summary>
+    public Action<int>? AnalysisRulesRequested { get; set; }
+
+    /// <summary>
+    /// The page asking for an inline suppression: (module, project, 1-based line, code). The
+    /// module need not be open - the problems pane lists findings from every module.
+    /// </summary>
+    public Action<string, string?, int, string>? SuppressFindingRequested { get; set; }
+
+    /// <summary>The page changing one rule's machine-wide severity: (code, severity).</summary>
+    public Action<string, string>? RuleSeverityChangeRequested { get; set; }
+
     /// <summary>
     /// Raised when the page asks where a symbol is declared or used:
     /// (requestId, offset, wantsReferences, includeDeclaration).
@@ -387,6 +399,26 @@ internal sealed class EditorSurface : IDisposable
     }
 
     /// <summary>Answers one quick-fix request. Never held: the caret moves and the offer lapses.</summary>
+    /// <summary>Answers one rules-modal request: the catalog and the standing overrides.</summary>
+    public void ShowAnalysisRules(
+        int requestId,
+        SurfaceAnalysisRule[] rules,
+        IReadOnlyDictionary<string, string> overrides,
+        bool failed)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(overrides);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new AnalysisRulesResultMessage("analysisRulesResult", requestId, rules, overrides, failed),
+            EditorMessageContext.Default.AnalysisRulesResultMessage));
+    }
+
     public void ShowCodeActions(int requestId, SurfaceCodeAction[] actions)
     {
         ArgumentNullException.ThrowIfNull(actions);
@@ -2173,7 +2205,13 @@ internal sealed class EditorSurface : IDisposable
                         ? gridAsked
                         : held.DesignerGridSize;
 
-                    SettingsChangeRequested?.Invoke(new ProductSettings
+                    // FROM THE HELD RECORD, not from a fresh one. `new ProductSettings { ... }`
+                    // names eight fields and zeroes the rest, so a page settings change silently
+                    // wiped everything the dialog does not carry - the developer's api.enabled
+                    // answer, and the analyzer rule overrides the moment they existed. The same
+                    // absent-means-unchanged rule as the fields above, applied to the fields the
+                    // page has never heard of.
+                    SettingsChangeRequested?.Invoke((held with
                     {
                         BlockLayout = layout,
                         ContinueCommentOnNewline = continueComment,
@@ -2183,7 +2221,7 @@ internal sealed class EditorSurface : IDisposable
                         SyncEngine = syncEngine,
                         DesignerSnap = snapMode,
                         DesignerGridSize = gridSize,
-                    }.Normalized());
+                    }).Normalized());
                     break;
                 }
 
@@ -2298,6 +2336,44 @@ internal sealed class EditorSurface : IDisposable
                             && headerElement.ValueKind == JsonValueKind.True;
 
                         CanonicalCaseRequested?.Invoke(caseRequestId, caseStart, caseEnd, single, completeHeader);
+                    }
+
+                    break;
+
+                case "analysisRules":
+                    if (document.RootElement.TryGetProperty("id", out var rulesId)
+                        && rulesId.TryGetInt32(out var rulesRequestId))
+                    {
+                        AnalysisRulesRequested?.Invoke(rulesRequestId);
+                    }
+
+                    break;
+
+                case "suppressFinding":
+                    if (document.RootElement.TryGetProperty("module", out var suppressModuleElement)
+                        && suppressModuleElement.GetString() is { Length: > 0 } suppressModule
+                        && document.RootElement.TryGetProperty("line", out var suppressLineElement)
+                        && suppressLineElement.TryGetInt32(out var suppressLine)
+                        && suppressLine >= 1
+                        && document.RootElement.TryGetProperty("code", out var suppressCodeElement)
+                        && suppressCodeElement.GetString() is { Length: > 0 } suppressCode)
+                    {
+                        var suppressProject = document.RootElement.TryGetProperty("project", out var suppressProjectElement)
+                            ? suppressProjectElement.GetString()
+                            : null;
+                        SuppressFindingRequested?.Invoke(
+                            suppressModule, suppressProject, suppressLine, suppressCode);
+                    }
+
+                    break;
+
+                case "setRuleSeverity":
+                    if (document.RootElement.TryGetProperty("code", out var ruleCodeElement)
+                        && ruleCodeElement.GetString() is { Length: > 0 } ruleCode
+                        && document.RootElement.TryGetProperty("severity", out var ruleSeverityElement)
+                        && ruleSeverityElement.GetString() is { Length: > 0 } ruleSeverity)
+                    {
+                        RuleSeverityChangeRequested?.Invoke(ruleCode, ruleSeverity);
                     }
 
                     break;

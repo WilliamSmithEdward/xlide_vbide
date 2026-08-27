@@ -293,6 +293,17 @@ internal sealed class EngineClient : IAsyncDisposable
         _ = await CallAsync("project/close", payload, cancellation).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// The analyzer's rule catalog, with each rule's legal severity moves. The truth for the
+    /// rules modal and the api both: enumerated from the analyzer actually bundled, so what is
+    /// offered is exactly what this build can enforce.
+    /// </summary>
+    public async Task<EngineAnalysisRules?> RulesAsync(CancellationToken cancellation)
+    {
+        var result = await CallAsync("analysis/rules", [], cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineAnalysisRules);
+    }
+
     /// <summary>Analyses one module and returns its findings.</summary>
     public async Task<EngineDiagnostics?> DiagnoseAsync(
         string projectId,
@@ -301,7 +312,8 @@ internal sealed class EngineClient : IAsyncDisposable
         string moduleType,
         string? source,
         CancellationToken cancellation,
-        int? activeIncompleteExpressionOffset = null)
+        int? activeIncompleteExpressionOffset = null,
+        IReadOnlyDictionary<string, string>? severityOverrides = null)
     {
         var payload = ModulePayload(projectId, moduleName, moduleType, source);
         payload["documentKey"] = $"{projectId}/{moduleName}";
@@ -310,6 +322,14 @@ internal sealed class EngineClient : IAsyncDisposable
         if (activeIncompleteExpressionOffset is { } activeOffset)
         {
             payload["activeIncompleteExpressionOffset"] = activeOffset;
+        }
+
+        // The developer's machine-wide rule choices. Omitted when empty rather than sent as an
+        // empty object, the same manners as `source`: the engine keys its memo on the request's
+        // shape, and two spellings of "no overrides" would be two cache entries for one answer.
+        if (severityOverrides is { Count: > 0 })
+        {
+            payload["severityOverrides"] = severityOverrides;
         }
 
         var result = await CallAsync("textDocument/diagnostics", payload, cancellation).ConfigureAwait(false);
@@ -718,6 +738,8 @@ internal sealed class EngineClient : IAsyncDisposable
         "textDocument/canonicalCase" => CallKind.Interactive,
         "textDocument/smartEnter" => CallKind.Interactive,
         "textDocument/codeAction" => CallKind.Interactive,
+        // A pure read of a build-time table; it depends on no seeded state and moves none.
+        "analysis/rules" => CallKind.Interactive,
         "textDocument/loopSync" => CallKind.Interactive,
 
         "textDocument/diagnostics" => CallKind.Background,

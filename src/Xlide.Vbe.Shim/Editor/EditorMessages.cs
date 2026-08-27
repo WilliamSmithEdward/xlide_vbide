@@ -691,6 +691,30 @@ public sealed record SurfaceCodeAction(
     [property: JsonPropertyName("end")] int End,
     [property: JsonPropertyName("edits")] SurfaceTextEdit[] Edits);
 
+/// <summary>
+/// One analyzer rule for the rules modal: its stable code, its words, its default severity, and
+/// the override values the analyzer permits. An empty `allowed` renders as fixed - most error
+/// rules mirror a VBE compile failure and take no override at all.
+/// </summary>
+public sealed record SurfaceAnalysisRule(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("defaultSeverity")] string DefaultSeverity,
+    [property: JsonPropertyName("allowed")] string[] Allowed);
+
+/// <summary>
+/// The rules modal's one payload: the catalog and the machine's standing overrides together,
+/// because a list of rules with the ticks read from somewhere else is two requests that can
+/// disagree. `failed` distinguishes "the engine is not up yet" from a catalog of none.
+/// </summary>
+public sealed record AnalysisRulesResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("rules")] SurfaceAnalysisRule[] Rules,
+    [property: JsonPropertyName("overrides")] IReadOnlyDictionary<string, string> Overrides,
+    [property: JsonPropertyName("failed")] bool Failed);
+
 /// <summary>The answer to one quick-fix request; empty means nothing on that span can be fixed.</summary>
 public sealed record CodeActionResultMessage(
     [property: JsonPropertyName("type")] string Type,
@@ -905,6 +929,8 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ChangesStampMessage))]
 [JsonSerializable(typeof(SurfaceCodeAction))]
 [JsonSerializable(typeof(CodeActionResultMessage))]
+[JsonSerializable(typeof(SurfaceAnalysisRule))]
+[JsonSerializable(typeof(AnalysisRulesResultMessage))]
 [JsonSerializable(typeof(SurfaceSemanticToken))]
 [JsonSerializable(typeof(SemanticTokensResultMessage))]
 [JsonSerializable(typeof(RenameResultMessage))]

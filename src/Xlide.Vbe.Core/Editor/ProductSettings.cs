@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Collections.Generic;
+using System.Linq;
+using System;
 using System.Text.Json.Serialization;
 
 namespace Xlide.Vbe.Core.Editor;
@@ -121,6 +124,25 @@ public sealed record ProductSettings
     public string SyncEngine { get; set; } = "xlide";
 
     /// <summary>
+    /// Machine-wide analyzer rule severity overrides, keyed by the rule's stable diagnostic
+    /// code - the same key and vocabulary as the companion editor's
+    /// `xlide.analysis.ruleSeverityOverrides`, so a team can carry one convention across both.
+    ///
+    /// The values are GUARDED BY THE ANALYZER, not by this record: a warning or information
+    /// rule may be set to "off"; a rule whose default severity is error may at most be
+    /// downgraded to "warning", and only where the analyzer marks that safe. An entry the
+    /// analyzer does not allow is carried in the file but changes nothing - the guard lives in
+    /// one place, upstream, and this record does not restate it because a restatement is a
+    /// second copy that drifts.
+    ///
+    /// Machine-wide means this user on this machine: the file lives in user space and every
+    /// workbook and session reads it. Suppressing one finding at one line is a different tool -
+    /// the inline `' @xlide-analysis-disable-*` comments, which travel with the code.
+    /// </summary>
+    [JsonPropertyName("analysis.ruleSeverityOverrides")]
+    public Dictionary<string, string>? AnalysisRuleSeverityOverrides { get; set; }
+
+    /// <summary>
     /// The xlide api: the local, token-gated door an agent drives this session through.
     ///
     /// THREE STATES, AND THE THIRD ONE IS THE POINT. Null means "whatever this build defaults
@@ -139,6 +161,21 @@ public sealed record ProductSettings
     /// <summary>The settings with every value forced into its legal range.</summary>
     public ProductSettings Normalized() => this with
     {
+        // Lower-cased and sorted so the file is stable under hand edits and diffs read clean.
+        // Unknown codes and values survive normalization on purpose: validation against the
+        // catalog is the analyzer's, and a file written by a newer build must not be trimmed by
+        // an older one reading it.
+        AnalysisRuleSeverityOverrides = AnalysisRuleSeverityOverrides is { Count: > 0 } overrides
+            ? overrides
+                .Where(entry => !string.IsNullOrWhiteSpace(entry.Key)
+                    && !string.IsNullOrWhiteSpace(entry.Value))
+                .GroupBy(entry => entry.Key.Trim().ToLowerInvariant(), StringComparer.Ordinal)
+                .OrderBy(group => group.Key, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Last().Value.Trim().ToLowerInvariant(),
+                    StringComparer.Ordinal)
+            : null,
         BlockLayout = string.Equals(BlockLayout, "compact", StringComparison.OrdinalIgnoreCase)
             ? "compact"
             : "comfy",

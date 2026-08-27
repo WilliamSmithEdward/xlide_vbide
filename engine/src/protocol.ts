@@ -374,6 +374,34 @@ export interface LoopSyncResult {
  * saw. Same liveness rule as completion - the source of the module being typed in travels with
  * the request, since a fix must edit the text on screen and not the text last written back.
  */
+/**
+ * analysis/rules: the analyzer's whole rule catalog, with each rule's LEGAL severity moves.
+ *
+ * The guard is upstream's, not ours: a warning or information rule may be turned 'off'; a rule
+ * whose default is 'error' may at most be downgraded to 'warning', and only where the analyzer
+ * marks that safe - most error rules mirror a VBE compile failure and allow nothing. The modal
+ * and the api both render from this, so neither can offer a move the analyzer would ignore.
+ */
+export interface AnalysisRulePayload {
+    code: string;
+    title: string;
+    category: string;
+    defaultSeverity: string;
+    /** The override values this rule accepts; empty means the rule cannot be changed. */
+    allowed: string[];
+    /**
+     * Where a suppression comment can aim for this rule, in the analyzer's own vocabulary
+     * ('line', 'module', ...). A module-scoped finding anchors at (1,1) and no next-line
+     * directive can cover it - the file directive is the one that works, and a writer that
+     * does not know the scope writes comments that suppress nothing.
+     */
+    suppressionScopes: string[];
+}
+
+export interface AnalysisRulesResult {
+    rules: AnalysisRulePayload[];
+}
+
 export interface CodeActionParams {
     projectId: string;
     moduleName: string;

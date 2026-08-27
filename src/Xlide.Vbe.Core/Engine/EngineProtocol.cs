@@ -62,6 +62,22 @@ public sealed record EngineDiagnostics(
     [property: JsonPropertyName("diagnostics")] EngineDiagnostic[] Diagnostics,
     [property: JsonPropertyName("mode")] string? Mode);
 
+/// <summary>
+/// One analyzer rule as `analysis/rules` lists it: its stable code, its words, and the severity
+/// moves the analyzer permits. An empty `allowed` is a rule that cannot be changed - most error
+/// rules mirror a VBE compile failure and take no override at all.
+/// </summary>
+public sealed record EngineAnalysisRule(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("defaultSeverity")] string DefaultSeverity,
+    [property: JsonPropertyName("allowed")] string[] Allowed,
+    [property: JsonPropertyName("suppressionScopes")] string[] SuppressionScopes);
+
+public sealed record EngineAnalysisRules(
+    [property: JsonPropertyName("rules")] EngineAnalysisRule[] Rules);
+
 /// <summary>One completion, in the analyzer's own vocabulary of kinds.</summary>
 public sealed record EngineCompletionItem(
     [property: JsonPropertyName("label")] string Label,
@@ -226,6 +242,11 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineImplicitMember[]))]
 [JsonSerializable(typeof(EngineDiagnostic))]
 [JsonSerializable(typeof(EngineDiagnostics))]
+[JsonSerializable(typeof(EngineAnalysisRule))]
+[JsonSerializable(typeof(EngineAnalysisRules))]
+// Severity overrides ride the request dictionary boxed, like the booleans above.
+[JsonSerializable(typeof(IReadOnlyDictionary<string, string>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 [JsonSerializable(typeof(EngineSpan))]
 [JsonSerializable(typeof(EnginePosition))]
 [JsonSerializable(typeof(EngineCompletionItem))]

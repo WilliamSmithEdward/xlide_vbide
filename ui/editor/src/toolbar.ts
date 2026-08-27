@@ -95,6 +95,7 @@ export const COMMANDS: ToolbarCommand[] = [
   { id: "openSync", target: "editor", icon: "repo-sync", label: "Import and export modules", separatorBefore: true },
   { id: "openAgent", target: "editor", icon: "robot", label: "Work with an AI agent" },
   { id: "openPanes", target: "editor", icon: "layout", label: "Panes", separatorBefore: true },
+  { id: "openAnalysisRules", target: "editor", icon: "checklist", label: "Analyzer rules" },
   { id: "openSettings", target: "editor", icon: "settings-gear", label: "Settings" },
   { id: "openHelp", target: "editor", icon: "question", label: "About xlide" },
   { id: "openSponsor", target: "editor", icon: "heart", label: "Support xlide" },

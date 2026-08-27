@@ -71,6 +71,12 @@ export interface ShellHandlers {
   command(command: ToolbarCommand): void;
   /** Whether an editor command exists in this build. Buttons for missing ones are not drawn. */
   commandAvailable(command: ToolbarCommand): boolean;
+  /** The developer asked to suppress one finding inline, from the problems pane's menu. */
+  suppressFinding(module: string, workbook: string | null, line: number, code: string): void;
+  /** The developer asked to turn one analyzer rule off machine-wide, from the same menu. */
+  turnOffRule(code: string): void;
+  /** The developer asked for the analyzer rules dialog, focused on one rule when named. */
+  openAnalysisRules(focusCode?: string): void;
   /** The developer entered a line in the Immediate panel. */
   evaluate(text: string): void;
   /** Which panel is showing, and whether the panel is open at all. */
@@ -412,10 +418,42 @@ export class Shell {
 
       event.preventDefault();
       const message = row.querySelector(".message")?.textContent ?? "";
-      showContextMenu(event.clientX, event.clientY, [
+
+      /*
+       * A PROBLEMS row carries its finding's code, and the code is what earns the extra items:
+       * the locals and watch panels share this list element, and their rows get the plain menu.
+       *
+       * Two scopes on purpose, named so the difference is legible in the menu itself: the inline
+       * suppression is a comment that travels with the code, the machine-wide switch is this
+       * user's settings file. The third item opens the dialog focused on the rule, for reading
+       * what the rule IS before deciding which of the two to reach for.
+       */
+      const code = row.dataset.code ?? "";
+      const module = row.dataset.moduleName ?? "";
+      const line = Number(row.dataset.line ?? "0");
+      const workbook = row.dataset.project || null;
+
+      const items: ContextMenuItem[] = [
         { label: "Go To", run: () => this.goTo(row) },
         { label: "Copy Message", run: () => void navigator.clipboard.writeText(message) },
-      ]);
+      ];
+
+      if (code.length > 0 && module.length > 0 && line >= 1) {
+        items.push(
+          {},
+          {
+            label: `Suppress '${code}' Here (inline comment)`,
+            run: () => this.handlers.suppressFinding(module, workbook, line, code),
+          },
+          {
+            label: `Turn Off '${code}' on This Machine`,
+            run: () => this.handlers.turnOffRule(code),
+          },
+          { label: "Analyzer Rules...", run: () => this.handlers.openAnalysisRules(code) },
+        );
+      }
+
+      showContextMenu(event.clientX, event.clientY, items);
     });
 
     this.immediateLog.addEventListener("contextmenu", (event) => {
@@ -1805,6 +1843,7 @@ export class Shell {
       row.dataset.line = String(finding.line);
       row.dataset.column = String(finding.column);
       row.dataset.project = finding.project ?? "";
+      row.dataset.code = finding.code ?? "";
 
       // The severity is carried by a glyph and by the text, never by colour alone.
       const mark = document.createElement("span");

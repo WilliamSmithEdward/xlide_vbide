@@ -317,8 +317,15 @@ Step 'engine inline comment features' {
     try {
         node test/inline-comments.mjs 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'the inline-comment suite failed' }
+
+        # And the machine-wide layer beside the inline one: the rule catalog with each rule's
+        # LEGAL moves, an override silencing a warning rule, the permitted error-to-warning
+        # downgrade, and the illegal move the engine ignores - which is why the shim refuses it
+        # in words before it gets there.
+        node test/rule-overrides.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the rule-override suite failed' }
     } finally { Pop-Location }
-    'suppression scopes, directive diagnostics, doc comments, and the suppression fix'
+    'suppression scopes, doc comments, the suppression fix, and the guarded rule overrides'
 }
 
 Step 'generated VBA module casing' {
@@ -672,7 +679,7 @@ if ($Live) {
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
                                      'pane-scope.mjs', 'write-rollback.mjs',
-                                     'inline-comments-live.mjs')
+                                     'inline-comments-live.mjs', 'analysis-rules-live.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.

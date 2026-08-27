@@ -3726,6 +3726,88 @@ internal sealed partial class AddInSession
                     DebugJsonContext.Default.DebugMenusReply);
             }
 
+            case "analysis":
+            {
+                /*
+                 * MACHINE-WIDE ANALYZER RULE SETTINGS, the same mechanism the rules modal, the
+                 * problems pane's menu and the lightbulb use - one ApplyRuleSeverityAsync for
+                 * all of them, so the api cannot drift from the UI.
+                 *
+                 * GET lists every rule the bundled analyzer ships, each with the override values
+                 * it PERMITS and the override standing on this machine. `rule=` with `severity=`
+                 * changes one: off, warning, error, information, or default to clear. The guard
+                 * is the analyzer's own - an illegal move is refused here in words, because the
+                 * engine would silently ignore it and nothing would say why.
+                 *
+                 * This is policy for the MACHINE, persisted in settings.json in user space. One
+                 * finding at one line wants the inline directives instead, which travel with the
+                 * code; the suppression quick fix writes those.
+                 */
+                request.Query.TryGetValue("rule", out var analysisRule);
+                request.Query.TryGetValue("severity", out var analysisSeverity);
+
+                string? analysisDetail = null;
+
+                // The INLINE half, drivable from the same route: module + line + code writes the
+                // directive the problems pane's menu writes, through the identical mechanism.
+                if (request.Query.TryGetValue("module", out var suppressModule)
+                    && suppressModule.Length > 0)
+                {
+                    if (!request.Query.TryGetValue("line", out var suppressLineText)
+                        || !int.TryParse(suppressLineText, out var suppressLine)
+                        || suppressLine < 1
+                        || !request.Query.TryGetValue("code", out var suppressCode)
+                        || suppressCode.Length == 0)
+                    {
+                        return HostError("suppressing inline takes module=, line= (1-based) "
+                            + "and code=");
+                    }
+
+                    request.Query.TryGetValue("project", out var suppressProject);
+                    analysisDetail = SuppressFinding(
+                        suppressModule, suppressProject, suppressLine, suppressCode)
+                        ?? $"suppressed {suppressCode} at {suppressModule}({suppressLine}) "
+                            + "with an inline directive";
+                }
+
+                if (analysisRule is { Length: > 0 } || analysisSeverity is { Length: > 0 })
+                {
+                    if (analysisRule is not { Length: > 0 } || analysisSeverity is not { Length: > 0 })
+                    {
+                        return HostError("changing a rule takes both rule= and severity=; "
+                            + "a bare GET lists the catalog");
+                    }
+
+                    analysisDetail = ApplyRuleSeverityAsync(analysisRule, analysisSeverity)
+                        .GetAwaiter().GetResult();
+                }
+
+                var analysisCatalog = AnalysisRuleCatalogAsync().GetAwaiter().GetResult();
+                if (analysisCatalog is null)
+                {
+                    return HostError("the analysis engine is not up, so the rule catalog "
+                        + "cannot be read");
+                }
+
+                var standing = _settings.AnalysisRuleSeverityOverrides;
+                var analysisRows = analysisCatalog.Rules
+                    .Select(rule => new DebugAnalysisRuleRow(
+                        rule.Code,
+                        rule.Title,
+                        rule.Category,
+                        rule.DefaultSeverity,
+                        rule.Allowed,
+                        rule.SuppressionScopes,
+                        standing is not null && standing.TryGetValue(rule.Code, out var held)
+                            ? held
+                            : null))
+                    .ToArray();
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugAnalysisReply(analysisDetail, SettingsPath, analysisRows),
+                    DebugJsonContext.Default.DebugAnalysisReply);
+            }
+
             case "bars" when request.Query.TryGetValue("name", out var barsName) && barsName.Length > 0:
             {
                 /*
@@ -4511,7 +4593,12 @@ internal sealed partial class AddInSession
                     bool Flag(string name, bool current) =>
                         AddInSession.Flag(request, name, current);
 
-                    settings = new ProductSettings
+                    // FROM THE CURRENT RECORD, not a fresh one: `new ProductSettings { ... }`
+                    // names the queryable fields and zeroes the rest, so changing the indent
+                    // size over the door wiped the developer's api.enabled answer and the
+                    // analyzer rule overrides. Same absent-means-unchanged rule as the page's
+                    // updateSettings, same fix.
+                    settings = (settings with
                     {
                         BlockLayout = request.Query.TryGetValue("blockLayout", out var layout)
                             ? layout
@@ -4529,7 +4616,7 @@ internal sealed partial class AddInSession
                             : settings.DesignerSnap,
                         DesignerGridSize = request.Query.TryGetValue("designerGridSize", out var grid)
                             && int.TryParse(grid, out var gridAsked) ? gridAsked : settings.DesignerGridSize,
-                    }.Normalized();
+                    }).Normalized();
 
                     OnSettingsChanged(settings);
                 }

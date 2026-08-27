@@ -39,6 +39,47 @@ internal sealed class AnalysisService : IAsyncDisposable
     private int _generation;
 
     /// <summary>
+    /// The developer's machine-wide rule severity overrides, riding every diagnostics request.
+    ///
+    /// A volatile swap of an immutable dictionary rather than a lock: the passes read it on
+    /// their own threads, the session writes it when the settings change, and a pass that reads
+    /// the old edition for one more module is indistinguishable from the settings having changed
+    /// a moment later. The REANALYSIS the session provokes after a change is what makes the new
+    /// edition land everywhere.
+    /// </summary>
+    private volatile IReadOnlyDictionary<string, string>? _severityOverrides;
+
+    /// <summary>
+    /// A number that moves when the override POLICY moves, folded into the unchanged-project
+    /// skip. The skip compares sources, and an override changes no source: without this, turning
+    /// a rule off answered in words, wrote the settings file, provoked a pass - and the pass
+    /// served every project its old findings, computed under the old policy, because the text
+    /// had not moved. Measured live: the pane held `option-explicit-missing` through the whole
+    /// suite's patience after the override that silences it.
+    /// </summary>
+    private int _policyEdition;
+
+    /// <summary>Adopts the developer's rule overrides for every analysis from here on.</summary>
+    public void UseSeverityOverrides(IReadOnlyDictionary<string, string>? overrides)
+    {
+        var adopted = overrides is { Count: > 0 } ? overrides : null;
+        var stood = _severityOverrides;
+
+        var same = adopted is null && stood is null
+            || adopted is not null && stood is not null
+                && adopted.Count == stood.Count
+                && adopted.All(entry =>
+                    stood.TryGetValue(entry.Key, out var held)
+                    && string.Equals(held, entry.Value, StringComparison.Ordinal));
+
+        _severityOverrides = adopted;
+        if (!same)
+        {
+            Interlocked.Increment(ref _policyEdition);
+        }
+    }
+
+    /// <summary>
     /// What a project was last seeded into the engine with, and what came of it.
     ///
     /// The sources are held so a pass can tell whether a project needs re-seeding at all. Most
@@ -55,7 +96,8 @@ internal sealed class AnalysisService : IAsyncDisposable
         Dictionary<string, string> Seeds,
         IReadOnlyList<Finding> Findings,
         IReadOnlyList<string> Types,
-        IReadOnlyList<string> Procedures);
+        IReadOnlyList<string> Procedures,
+        int PolicyEdition);
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, SeededProject> _seeded =
         new(StringComparer.OrdinalIgnoreCase);
@@ -228,6 +270,27 @@ internal sealed class AnalysisService : IAsyncDisposable
 
     /// <summary>True once an engine is running and answering.</summary>
     public bool IsReady => _engine is { IsRunning: true };
+
+    /// <summary>The analyzer's rule catalog, or null while the engine is not up.</summary>
+    public async Task<EngineAnalysisRules?> RulesAsync(CancellationToken cancellation)
+    {
+        var engine = _engine;
+        if (engine is not { IsRunning: true })
+        {
+            return null;
+        }
+
+        try
+        {
+            return await engine.RulesAsync(cancellation).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log.Info($"engine: the rule catalog could not be read ({ex.GetType().Name})");
+            return null;
+        }
+    }
+
 
     /// <summary>
     /// The running engine, for callers that need to ask it something this service does not itself
@@ -1004,7 +1067,11 @@ internal sealed class AnalysisService : IAsyncDisposable
                  * happened and the sources say whether anything came of it. Most passes come from
                  * gestures that write nothing back.
                  */
-                if (held is not null && SameSeed(held.Seeds, snapshot.Modules))
+                // The policy is part of the freshness: findings computed under an older set of
+                // rule overrides are findings about a policy nobody holds any more, however
+                // unchanged the text is.
+                if (held is not null && held.PolicyEdition == _policyEdition
+                    && SameSeed(held.Seeds, snapshot.Modules))
                 {
                     // The homes map is not rebuilt either: it is derived from the module set, and
                     // the comparison above has just established that the module set is the same.
@@ -1099,7 +1166,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                         module.ModuleName,
                         module.Type,
                         null,
-                        _stopping.Token).ConfigureAwait(false);
+                        _stopping.Token,
+                        severityOverrides: _severityOverrides).ConfigureAwait(false);
                     asking.Stop();
 
                     if (asking.ElapsedMilliseconds >= 50)
@@ -1140,7 +1208,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                         snapshot.Modules.ToDictionary(m => m.ModuleName, SeedOf, StringComparer.Ordinal),
                         findings,
                         opened.Types ?? [],
-                        opened.Procedures ?? []);
+                        opened.Procedures ?? [],
+                        _policyEdition);
                 }
                 else
                 {
@@ -1388,7 +1457,8 @@ internal sealed class AnalysisService : IAsyncDisposable
                     home.ModuleType,
                     null,
                     cancellation,
-                    caretOffset)
+                    caretOffset,
+                    _severityOverrides)
                 .ConfigureAwait(false);
 
             return result is null ? null : [.. Convert(home.ProjectId, moduleName, source, result.Diagnostics)];

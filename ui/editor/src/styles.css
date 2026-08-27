@@ -5941,3 +5941,56 @@ body.objbrowser-page #objbrowser-card {
   border-top: 1px dashed var(--vscode-editorGroup-border, rgba(128, 128, 128, 0.35));
   margin-top: 4px;
 }
+
+/* ---- the analyzer rules dialog ---------------------------------------------------------------- */
+
+#analysis-rules-card {
+  width: min(560px, calc(100vw - 48px));
+}
+
+.analysis-rules-scope {
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+
+#analysis-rules-search {
+  margin: 8px 16px;
+  padding: 4px 8px;
+  width: calc(100% - 32px);
+  box-sizing: border-box;
+  background: var(--vscode-input-background, #3c3c3c);
+  color: var(--vscode-input-foreground, #cccccc);
+  border: 1px solid var(--vscode-input-border, #3c3c3c);
+  border-radius: 2px;
+}
+
+#analysis-rules-body {
+  max-height: min(420px, calc(100vh - 260px));
+  overflow-y: auto;
+  padding: 0 16px 12px;
+}
+
+.analysis-rules-category {
+  margin: 10px 0 2px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+
+.analysis-rule-row {
+  align-items: center;
+}
+
+.analysis-rule-fixed {
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--vscode-descriptionForeground, #9d9d9d);
+}
+
+.analysis-rule-focused {
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 2px;
+}

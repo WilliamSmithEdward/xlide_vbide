@@ -78,6 +78,7 @@ import { SearchWidget } from "./searchwidget.js";
 import { registerFormatting } from "./format.js";
 import { currentSettings, onSettingsApplied } from "./settings.js";
 import { openPanesMenu, openSettingsDialog } from "./settingsdialog.js";
+import { openAnalysisRulesDialog } from "./analysisrulesdialog.js";
 import { ChangesPane } from "./changespane.js";
 import { openSyncDialog } from "./syncdialog.js";
 import { openAgentDialog } from "./agentdialog.js";
@@ -627,6 +628,13 @@ function boot(): void {
     }, 150);
   });
 
+  const analysisRulesAccess = {
+    fetch: () => bridge.requestAnalysisRules(),
+    set: (code: string, severity: string) => bridge.setRuleSeverity(code, severity),
+  };
+  const openAnalysisRules = (focusCode?: string): void =>
+    openAnalysisRulesDialog(analysisRulesAccess, () => workspace.activeEditor().focus(), focusCode);
+
   shell = new Shell(document.body, {
     activateModule: (name, workbook) => bridge.activateModule(name, workbook),
     openDesigner: (name, workbook) => bridge.activateModule(name, workbook, "design"),
@@ -647,6 +655,10 @@ function boot(): void {
             : () => bridge.navigate(payload.module, payload.line!, 1, true, payload.workbook),
         }),
     layoutChanged: () => workspace.editors().forEach((editor) => editor.layout()),
+    suppressFinding: (module, workbook, line, code) =>
+      bridge.suppressFinding(module, workbook, line, code),
+    turnOffRule: (code) => bridge.setRuleSeverity(code, "off"),
+    openAnalysisRules,
     command: (command) => {
       // The settings dialog is the page's own, not a Monaco action and not the host's.
       if (command.id === "openSettings") {
@@ -656,6 +668,11 @@ function boot(): void {
 
       // The agent card: the api's own switch, and the address it hands out. Its own dialog rather
       // than a settings row, because turning it on is opening a door rather than setting a taste.
+      if (command.id === "openAnalysisRules") {
+        openAnalysisRules();
+        return;
+      }
+
       if (command.id === "openAgent") {
         openAgentDialog(
           (args) => bridge.requestApi(args),
@@ -729,6 +746,7 @@ function boot(): void {
       command.id === "undo" || command.id === "redo"
       || command.id === "openSettings" || command.id === "openPanes" || command.id === "openHelp"
       || command.id === "openSponsor" || command.id === "openSync" || command.id === "openAgent"
+      || command.id === "openAnalysisRules"
       || workspace.activeEditor().getAction(command.id) !== null,
     evaluate: (text) => bridge.evaluate(text),
     panelChanged: (name, open) => bridge.panelChanged(name, open),
@@ -1012,6 +1030,28 @@ function boot(): void {
   // Quick fixes. Every fix answers a finding, so the squiggles already on screen say whether
   // there can be any: no marker touching the range means no round trip, which matters because
   // the lightbulb asks again every time the caret settles.
+  const TURN_OFF_RULE_COMMAND = "xlide.analysis.turnOffRule";
+
+  /** The codes the analyzer permits turning off, fetched once - a build-time table. */
+  let offRulesMemo: Promise<Set<string>> | null = null;
+  const offRules = (): Promise<Set<string>> => {
+    offRulesMemo ??= bridge.requestAnalysisRules().then((answer) => {
+      if (!answer) {
+        // "Not yet" rather than "none": the next lightbulb asks again.
+        bridge.trace("offRules: no catalog answer");
+        offRulesMemo = null;
+        return new Set<string>();
+      }
+
+      const set = new Set((answer.rules ?? [])
+        .filter((rule) => (rule.allowed ?? []).includes("off"))
+        .map((rule) => rule.code));
+      bridge.trace(`offRules: ${set.size} of ${(answer.rules ?? []).length} rule(s) can be off`);
+      return set;
+    });
+    return offRulesMemo;
+  };
+
   const codeActionProvider: monaco.languages.CodeActionProvider = {
     provideCodeActions: async (model, range) => {
       const none = { actions: [], dispose: () => { } };
@@ -1062,9 +1102,43 @@ function boot(): void {
         };
       });
 
+      /*
+       * BESIDE the engine's edits, the machine-wide switch - a command, not an edit, because
+       * turning a rule off everywhere changes a settings file and not this module's text.
+       *
+       * Offered only where the analyzer PERMITS off, read from the same catalog the rules modal
+       * renders: an entry that the engine would silently ignore is an entry that teaches people
+       * the menu lies. The catalog is fetched once and remembered - it is a build-time table.
+       */
+      const turnOffable = await offRules();
+      bridge.trace(`quickFixes: ${markers.length} marker(s), codes `
+        + markers.map((m) => JSON.stringify(m.code)).join(",") + `; offable ${turnOffable.size}`);
+      const offeredCodes = new Set<string>();
+      for (const marker of markers) {
+        const code = typeof marker.code === "string" ? marker.code : marker.code?.value ?? "";
+        if (code.length === 0 || offeredCodes.has(code) || !turnOffable.has(code)) {
+          continue;
+        }
+
+        offeredCodes.add(code);
+        actions.push({
+          title: `Turn off '${code}' on this machine`,
+          kind: "quickfix",
+          diagnostics: [marker],
+          command: { id: TURN_OFF_RULE_COMMAND, title: "Turn off rule", arguments: [code] },
+        });
+      }
+
       return { actions, dispose: () => { } };
     },
   };
+
+  // The command the lightbulb's machine-wide entry runs. Registered once, page-wide: Monaco
+  // routes a code action's `command` through its command service, and an unregistered id is a
+  // menu item that silently does nothing.
+  monaco.editor.registerCommand(TURN_OFF_RULE_COMMAND, (_accessor, code: string) => {
+    bridge.setRuleSeverity(code, "off");
+  });
 
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built

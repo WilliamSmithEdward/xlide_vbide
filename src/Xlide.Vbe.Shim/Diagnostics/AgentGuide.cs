@@ -190,6 +190,15 @@ internal static class AgentGuide
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
             "GET menus", true, DoorPolicy.Open),
+        new("analysis", "GET", "rule=<code>?&severity=off|warning|error|information|default?&module=?&line=?&code=?&project=?",
+            "The analyzer rule catalog with each rule's LEGAL severity moves and this machine's "
+            + "standing overrides. rule+severity changes one, machine-wide, persisted in "
+            + "user-space settings.json; module+line+code writes the inline "
+            + "@xlide-analysis-disable-next-line comment instead, which travels with the code.",
+            "GET analysis?rule=option-explicit-missing&severity=off", true, DoorPolicy.Open,
+            "The guard is the analyzer's own: warning and information rules take off; error "
+            + "rules take at most warning, and only where marked downgrade-safe. An illegal "
+            + "move is refused in words here, because the engine would silently ignore it."),
         new("bars", "GET", "name=<command>",
             "Every control carrying one editor command - the bar it sits on, whether that bar is "
             + "on screen, and whether that copy is enabled - with the ACTIVE project's live mode "

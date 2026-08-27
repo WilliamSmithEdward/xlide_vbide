@@ -781,6 +781,25 @@ public sealed record DebugMenuRow(
     [property: JsonPropertyName("enabled")] bool Enabled,
     [property: JsonPropertyName("suppressed")] bool Suppressed);
 
+/// <summary>One analyzer rule as GET analysis lists it, with its legal severity moves.</summary>
+public sealed record DebugAnalysisRuleRow(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("title")] string Title,
+    [property: JsonPropertyName("category")] string Category,
+    [property: JsonPropertyName("defaultSeverity")] string DefaultSeverity,
+    [property: JsonPropertyName("allowed")] string[] Allowed,
+    [property: JsonPropertyName("suppressionScopes")] string[] SuppressionScopes,
+    [property: JsonPropertyName("override")] string? Override);
+
+/// <summary>
+/// The analyzer's rule catalog with the machine's standing overrides folded in, and - when the
+/// request changed something - what happened, in words. `detail` is null on a bare read.
+/// </summary>
+public sealed record DebugAnalysisReply(
+    [property: JsonPropertyName("detail")] string? Detail,
+    [property: JsonPropertyName("settingsPath")] string SettingsPath,
+    [property: JsonPropertyName("rules")] DebugAnalysisRuleRow[] Rules);
+
 public sealed record DebugMenusReply(
     [property: JsonPropertyName("path")] string Path,
     [property: JsonPropertyName("items")] DebugMenuRow[] Items);
@@ -1553,6 +1572,8 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugSessionsReply))]
 [JsonSerializable(typeof(DebugTestsReply))]
 [JsonSerializable(typeof(DebugMenusReply))]
+[JsonSerializable(typeof(DebugAnalysisRuleRow))]
+[JsonSerializable(typeof(DebugAnalysisReply))]
 [JsonSerializable(typeof(DebugBarsReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
 [JsonSerializable(typeof(DebugCloseReply))]
