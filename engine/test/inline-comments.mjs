@@ -179,6 +179,46 @@ check("completion's item carries the doc",
   String(twice?.documentation ?? "").includes("Doubles a count"),
   JSON.stringify(twice?.documentation ?? null)?.slice(0, 90));
 
+/* ---- all three grammars on one member, in the order that survives ----------------------------- */
+
+console.log("\nstacking:\n");
+
+// Suppression, then the test directive, then the doc block DIRECTLY above the member: the one
+// order in which all three coexist (measured as a five-order matrix, 2026-08-27). The doc scan
+// takes only a contiguous block immediately above the member, so doc-last is load-bearing - and
+// this check is the tripwire for xlide_vscode#53 landing, which would make the other orders
+// work too.
+const stackedSource = [
+  "Option Explicit", "",
+  "' @xlide-analysis-disable-next-member event-handler-module-scope -- stacked",
+  "' @xlide-test tags=\"stack\"",
+  "''' <summary>Documented, suppressed, and a test.</summary>",
+  "Public Sub Workbook_Open()",
+  "    Debug.Print 1",
+  "End Sub",
+].join(CRLF);
+
+await call("project/open", {
+  projectId: "stack", generation: 1, host: "excel",
+  modules: [{ moduleName: "Stacked", source: stackedSource, type: "standard" }],
+});
+
+const stackedFindings = await call("textDocument/diagnostics", {
+  documentKey: "stack/Stacked", projectId: "stack", generation: 1,
+  source: stackedSource, moduleName: "Stacked", moduleType: "standard", host: "excel",
+});
+check("the member suppression pierces the test directive and the doc block",
+  (stackedFindings.diagnostics ?? []).length === 0,
+  (stackedFindings.diagnostics ?? []).map((d) => d.code).join(",") || "(none)");
+
+const stackedHover = await call("textDocument/hover", {
+  projectId: "stack", moduleName: "Stacked", source: stackedSource,
+  offset: stackedSource.indexOf("Workbook_Open()") + 2, moduleType: "standard",
+});
+check("and the ''' block directly above the member still reaches hover",
+  String(stackedHover.hover?.documentation ?? "").includes("Documented, suppressed"),
+  JSON.stringify(stackedHover.hover?.documentation ?? null)?.slice(0, 80));
+
 /* ---- the suppression quick fix, applied and re-measured --------------------------------------- */
 
 console.log("\nthe suppression quick fix:\n");
