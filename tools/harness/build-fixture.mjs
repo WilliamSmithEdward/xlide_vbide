@@ -14,7 +14,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { open } from "./xlide-api.mjs";
+import { hostBusy, open } from "./xlide-api.mjs";
 
 const planPath = process.argv[2];
 if (!planPath) {
@@ -60,8 +60,10 @@ async function writeAndCheck(name, code) {
       // is standing" instead of hanging forever. A big module takes longer than that to write and
       // the write goes on regardless: 65,000 lines was accepted after 17.4 seconds, all of it the
       // EDITOR's own parse (measured 2026-08-08). Treating that timeout as a failure would make
-      // the largest module the one fixture that could never be built.
-      if (!/did not answer in time/.test(String(error?.message))) {
+      // the largest module the one fixture that could never be built. `hostBusy` rather than a
+      // spelling: the door has TWO busy messages, and matching one of them is how
+      // write-rollback aborted on a healthy product (2026-08-28).
+      if (!hostBusy(error)) {
         throw error;
       }
 
@@ -83,7 +85,7 @@ async function writeAndCheck(name, code) {
         lines = project.components.find((component) => component.name === name)?.lines ?? 0;
         asked = true;
       } catch (error) {
-        if (!/did not answer in time|aborted/i.test(String(error?.message))) {
+        if (!hostBusy(error)) {
           throw error;
         }
       }

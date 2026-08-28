@@ -115,7 +115,11 @@ Three things to know, all reported by the door itself:
 
 Read routes are GET, acting routes are POST. Everything answers JSON except `capture`.
 Routes that touch the session cross to the host thread with a three second deadline and
-answer `{"error":"the host thread did not answer in time"}` rather than hanging.
+answer `{"error":"the host thread did not answer in time"}` rather than hanging - or, once the
+heartbeat has been quiet past two seconds, the longer spelling: "the host thread has not
+answered for Nms. That usually means VBA is running your code...". A caller tolerating the busy
+state matches BOTH, through the client's `hostBusy(error)`; matching one spelling is how
+write-rollback aborted mid-poll on a healthy product (2026-08-28).
 
 **Boolean arguments read the same way everywhere.** `1`, `true`, `yes` and `on` are true;
 `0`, `false`, `no` and `off` are false; anything else, and anything absent, is the route's own

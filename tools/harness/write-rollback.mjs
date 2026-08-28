@@ -29,15 +29,17 @@
  *
  * Then restart Excel. The script says so at the end, and means it.
  */
-import { open, reporter } from "./xlide-api.mjs";
+import { hostBusy, open, reporter } from "./xlide-api.mjs";
 
 const api = await open();
 const project = await api.project();
 const name = `RollbackProbe${Date.now().toString().slice(-5)}`;
 
-/** The door gives the host thread three seconds; a large write outlives that and goes on. */
+/** The door gives the host thread three seconds; a large write outlives that and goes on.
+ * `hostBusy` knows both of the door's busy spellings - matching one of them here is how this
+ * suite aborted mid-poll on a healthy product (2026-08-28). */
 const tolerate = (error) => {
-  if (!/did not answer in time|aborted/i.test(String(error?.message))) { throw error; }
+  if (!hostBusy(error)) { throw error; }
   return null;
 };
 
@@ -98,7 +100,7 @@ try {
 
   let reported = null;
   await api.writeModule(name, refusedBody(50_000), project.projectId).catch((error) => {
-    if (/did not answer in time|aborted/i.test(String(error?.message))) { return; }
+    if (hostBusy(error)) { return; }
     reported = error.message;
   });
 

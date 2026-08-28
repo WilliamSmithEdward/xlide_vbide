@@ -110,6 +110,18 @@ function describeDeath(rows) {
 export const wait = (ms) => new Promise((settle) => setTimeout(settle, ms));
 
 /**
+ * True for the door's host-thread-busy refusal, in BOTH spellings the shim uses: "did not
+ * answer in time" when the heartbeat is fresh, and "has not answered for Nms" with the
+ * VBA-loop hypothesis once it has been quiet past two seconds - which a giant write always
+ * makes it. Two suites each matched only the first spelling and read the second as a real
+ * failure: write-rollback aborted mid-poll on a healthy product, deterministically, and the
+ * -Live gate fell over it (2026-08-28). Match the condition through this ONE door, so the
+ * next rewording rots one line instead of every caller.
+ */
+export const hostBusy = (error) =>
+  /did not answer in time|has not answered for|aborted/i.test(String(error?.message));
+
+/**
  * The reporter every live suite prints through. check(what, ok, detail) logs one line and
  * counts it; done() prints the verdict, lists the failures, and answers the exit code.
  *
