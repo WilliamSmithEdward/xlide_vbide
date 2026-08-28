@@ -260,10 +260,11 @@ export interface DesignerViewDeps {
   /** Subscribe to the vocabulary; returns the unwatch. Not keyed by form - the language is the
    * same in every document, so whichever tab asked, every tab is answered. */
   watchVocabulary(listener: (kinds: FormMarkupKind[]) => void): () => void;
-  /** Save the workbook, the host's own File Save - the second half of the designer's
-   * Ctrl+S, after a successful apply. With `run`, the host launches the form after the
-   * save, which is what F5 over a designer tab asks for. */
-  saveWorkbook(run: boolean): void;
+  /** Finish the gesture that asked for the apply, once the form holds the document.
+   * Ctrl+S's second half is the host's raw File Save; F5's is the launch INSTEAD - the
+   * native editor never saves on Run, and the save that rode under F5 raised Save As over
+   * a never-saved workbook and wedged it behind the modal form (the owner, 2026-08-27). */
+  saveOrRun(run: boolean): void;
   /** Subscribe to the HOST's Ctrl+S and F5: neither accelerator reaches the page, so the host
    * asks the tab to apply-then-save through this - `run` is F5's - and returns the unwatch. */
   watchApplySave(listener: (run: boolean) => void): () => void;
@@ -764,8 +765,8 @@ export class DesignerView {
       this.showLint(findings);
       this.previewDraft(findings, draft);
     });
-    // The REAL Ctrl+S: a host accelerator the page never sees as a key. The host's Save,
-    // finding this tab active, asks for the apply-then-save here.
+    // The REAL Ctrl+S and F5: host accelerators the page never sees as keys. The host,
+    // finding this tab active, asks for the apply here - then the raw save, or the launch.
     this.unwatchApplySave = deps.watchApplySave((run) => this.applyNow(run));
 
     // The language's vocabulary: the host measures it, the page holds it for its whole life,
@@ -802,8 +803,8 @@ export class DesignerView {
   /** Set when an apply should be followed by the host's save - every Ctrl+S is, because
    * Ctrl+S means "save the workbook" everywhere else in the product and the designer must
    * not quietly mean less (the owner, 2026-08-15: "CTRL+S in designer isn't saving"). `run`
-   * carries F5's extra half through the apply, so the launch waits for the same save. */
-  private pendingSave: { run: boolean } | null = null;
+   * carries F5's half through the apply - the launch, and never a save (2026-08-27). */
+  private pendingFinish: { run: boolean } | null = null;
 
   /** Ctrl+S: the document to the form, then the workbook to disk. A clean document has
    * nothing to apply and just saves. F5 comes through here too, with `run`, because the
@@ -811,11 +812,11 @@ export class DesignerView {
   applyNow(run = false): void {
     this.errorStrip.hidden = true;
     if (!this.dirty) {
-      this.deps.saveWorkbook(run);
+      this.deps.saveOrRun(run);
       return;
     }
 
-    this.pendingSave = { run };
+    this.pendingFinish = { run };
     this.deps.apply(this.model.getValue());
   }
 
@@ -838,7 +839,7 @@ export class DesignerView {
     return new Promise((settle) => {
       this.pendingActOutcome = settle;
       this.errorStrip.hidden = true;
-      this.pendingSave = { run: false };
+      this.pendingFinish = { run: false };
       this.deps.apply(this.model.getValue());
     });
   }
@@ -852,7 +853,7 @@ export class DesignerView {
     return new Promise((settle) => {
       this.pendingActOutcome = settle;
       this.errorStrip.hidden = true;
-      this.pendingSave = { run: false };
+      this.pendingFinish = { run: false };
       this.deps.apply(this.model.getValue());
     });
   }
@@ -1123,8 +1124,8 @@ export class DesignerView {
     this.pendingActOutcome?.(outcome);
     this.pendingActOutcome = null;
 
-    const saveNext = this.pendingSave;
-    this.pendingSave = null;
+    const finish = this.pendingFinish;
+    this.pendingFinish = null;
 
     if (outcome.ok) {
       this.errorStrip.hidden = true;
@@ -1136,12 +1137,12 @@ export class DesignerView {
         this.deps.dirtyChanged(false);
       }
 
-      // The second half of Ctrl+S: what just landed on the form reaches the file. Only
-      // after an OK - a refused apply saves nothing, because the file would then hold a
-      // form the developer was just told did not take their document, and a refused F5
-      // launches nothing rather than launching yesterday's form.
-      if (saveNext) {
-        this.deps.saveWorkbook(saveNext.run);
+      // The second half of the gesture: Ctrl+S's raw save, or F5's launch. Only after an
+      // OK - a refused apply saves nothing, because the file would then hold a form the
+      // developer was just told did not take their document, and a refused F5 launches
+      // nothing rather than launching yesterday's form.
+      if (finish) {
+        this.deps.saveOrRun(finish.run);
       }
 
       return;

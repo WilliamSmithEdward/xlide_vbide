@@ -918,7 +918,8 @@ export class EditorBridge {
   private readonly formMarkupLintWatchers = new Map<string, (findings: FormMarkupLintFinding[], draft: FormMarkupDraft | null) => void>();
 
   /** The host's Ctrl+S asking a designer tab to apply-then-save; keyed by the form. `run` is
-   * F5 asking for the same thing with the form launched after the save. */
+   * F5 asking for the same apply with the form launched INSTEAD of the save - Run never
+   * writes the file. */
   onDesignerApplySave(module: string, project: string | null, watcher: (run: boolean) => void): () => void {
     const key = docKeyOf(module, project);
     this.designerApplySaveWatchers.set(key, watcher);

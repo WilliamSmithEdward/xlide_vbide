@@ -572,6 +572,21 @@ the host-owns-membership invariant survives.
     takes and rides its callback, so the window that opens is the document. A refused apply
     launches nothing and says why at the document, which is the right way round: the old
     behaviour would have run yesterday's form and said nothing at all.
+
+    **And the save half of that handshake came OUT on 2026-08-27** (the owner, from a fresh
+    unsaved workbook: "when I add a user form, run it, close it... it brings up a save as
+    dialog... and if i hit cancel it crashes soemtimes"). F5 had taken Ctrl+S's callback
+    wholesale, so every run also saved the workbook - a parity break, since the native editor
+    never saves on Run, and on a never-saved workbook a trap: the Save command raised the
+    Save As dialog, the posted Run launched the form OVER it, the dialog waited out the
+    form's modal loop and appeared the moment the form closed, and cancelling it then unwound
+    two interleaved modal loops, which the editor did not always survive. What the 2026-08-16
+    bullet actually needed - the window that opens is the document - is the APPLY, and the
+    form catches up on the apply, not on the file write; the runtime builds a launching form
+    from the in-memory design and never reads the disk for it. So F5's callback is now
+    `runOnly`, the launch alone; the file is written by Ctrl+S and nothing else, exactly as
+    the native editor has it. The suite's F5 section pins both halves: the launched form is
+    the document, and the SAVED baseline is byte-identical across the run.
   - *And the Properties panel joins the transaction* - **landed 2026-08-17** (the owner: "when
     I make a change using the property pane, ctrl+z is not undoing it", then "ctrl+z updates
     the markdown editor, but not the designer"). A row edited while that form's designer tab
@@ -597,9 +612,10 @@ the host-owns-membership invariant survives.
     document was dirty, whether it was typed or set from the panel.
 
     The intent travels WITH the request (`designerApplySave` carries `run`, and the page
-    calls back through `saveOnlyThenRun`) rather than being remembered on the host, because
-    a refused apply calls nothing back: a flag waiting for a callback that never comes would
-    have fired on somebody's unrelated Ctrl+S minutes later.
+    calls back through `runOnly` - the launch alone since 2026-08-27, the save having proved
+    to be both a parity break and a modal-loop trap) rather than being remembered on the
+    host, because a refused apply calls nothing back: a flag waiting for a callback that
+    never comes would have fired on somebody's unrelated Ctrl+S minutes later.
 
     *And the OTHER half of that row, the one with no designer tab* - **driven and pinned
     2026-08-18**. The panel writing a colour as text was filed as a live defect: a `#5ce05c`

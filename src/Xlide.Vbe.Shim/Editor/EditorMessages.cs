@@ -68,9 +68,11 @@ public sealed record FormMarkupLintMessage(
 /// so the host cannot flush it itself the way it flushes code edits before a save.
 ///
 /// `Run` is the same handshake asked for by F5, and the callback it comes back through is
-/// "saveOnlyThenRun". The intent travels WITH the request rather than being remembered here,
-/// because a refused apply calls nothing back at all: a flag waiting on the host for a
-/// callback that never comes would fire on somebody else's Ctrl+S minutes later.
+/// "runOnly" - the launch with no save, because the native editor never saves on Run and the
+/// guarantee F5 needs, that the window which opens is the document, is the apply itself. The
+/// intent travels WITH the request rather than being remembered here, because a refused apply
+/// calls nothing back at all: a flag waiting on the host for a callback that never comes
+/// would fire on somebody else's Ctrl+S minutes later.
 /// </summary>
 public sealed record DesignerApplySaveMessage(
     [property: JsonPropertyName("type")] string Type,

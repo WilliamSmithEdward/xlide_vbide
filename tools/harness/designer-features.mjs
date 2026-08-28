@@ -1565,14 +1565,17 @@ try {
   { budgetMs: 15000 });
   check("a drag past the top-left stops at the parent's corner rather than going negative", true);
 
-  // ---- F5 runs the DOCUMENT, not whatever was saved last ----
+  // ---- F5 runs the DOCUMENT, and touches nothing else ----
   //
-  // The document is the transaction log and the form catches up on a save, so a run that
-  // skipped the save launched the last one: undo a move, press F5, and the form standing on
-  // screen still holds the move while the canvas beside it does not (the owner, 2026-08-16,
-  // with a screenshot of a Hold button in two places). Run applies and saves first now, which
-  // is worth pinning precisely because the two pictures agree again afterwards and nothing in
-  // the canvas or the document could show the gap.
+  // Two pins with one run. The form catches up on an APPLY, so a run that skipped it launched
+  // the last one: undo a move, press F5, and the form standing on screen still holds the move
+  // while the canvas beside it does not (the owner, 2026-08-16, with a screenshot of a Hold
+  // button in two places). Run applies first now - and applies ONLY: the save that once rode
+  // under F5 broke parity with the native editor, and on a never-saved workbook raised the
+  // Save As dialog behind the modal form, where cancelling it after the form closed unwound
+  // two interleaved modal loops and sometimes killed the host (the owner, 2026-08-27). So the
+  // second pin is the SAVED baseline read before and after the run, byte-identical: the
+  // launched window is the document, and the file never felt it.
 
   const stale = (await api.designer(form, project)).controls.find((c) => c.name === "RegionPick");
   check("the form has not caught up with the document yet - which IS the hazard",
@@ -1600,6 +1603,11 @@ try {
     console.log(`  .... paused before the dirty run; the session is yours (form ${form})`);
     await new Promise((resume) => setTimeout(resume, 600000));
   }
+
+  // The file's word BEFORE the run, through the workbook's own storage. Read here rather
+  // than at the section top so a slow apply from the rows above cannot sit between the two
+  // reads and blur what the run itself did.
+  const fileBefore = JSON.stringify(await api.designerBaseline(form, project));
 
   const ranDirty = api.command("run");
   // SAYS WHY WHEN IT DOES NOT STAND, rather than throwing a bare timeout. A run that fails here
@@ -1640,18 +1648,28 @@ try {
     await api.designer(form, project).then(() => true, () => false), { budgetMs: 20000 });
 
   const ranWith = (await api.designer(form, project)).controls.find((c) => c.name === "RegionPick");
-  check("and what it launched was the DOCUMENT - applied and saved on the way to the form",
+  check("and what it launched was the DOCUMENT - applied on the way to the form",
     Math.abs(Number(ranWith?.left)) < 0.51 && Math.abs(Number(ranWith?.top)) < 0.51,
     `the form holds ${ranWith?.left},${ranWith?.top} and the document said 0,0`);
 
-  check("so the tab is clean afterwards, the way any other save leaves it",
+  check("so the tab is clean afterwards, the way an apply leaves it",
     (await api.act("designerCanvas", { module: form })).data?.dirty === false,
     `the canvas reports dirty ${JSON.stringify((await api.act("designerCanvas", { module: form })).data?.dirty)}`);
 
-  // And the form goes back where the rows below expect it. That F5 SAVED is the whole point of
-  // the section, so it is this section's business to undo what it wrote to the form: the reset
-  // the resize rows open with sets the document, and a document set against a form that moved
-  // under it is dirty for ever.
+  // The 2026-08-27 half: the run wrote the FORM and nothing further. A red here on an old
+  // build reads "the baselines differ", which is the save this pin exists to keep out.
+  const fileAfter = JSON.stringify(await api.designerBaseline(form, project));
+  check("and the SAVED baseline never felt the run - F5 does not write the file",
+    fileAfter === fileBefore,
+    fileAfter === fileBefore ? "byte-identical across the run"
+      : `before ${fileBefore.length} chars, after ${fileAfter.length} chars, first diff at `
+        + [...fileBefore].findIndex((ch, at) => fileAfter[at] !== ch));
+
+  // And the form goes back where the rows below expect it. F5 moved the FORM (the apply is
+  // the point of the first pin) while the file kept the old position, so this section's
+  // business is to put both back: the document set to what the rows found, and one real save
+  // to re-anchor the file - the reset the resize rows open with sets the document, and a
+  // document set against a form that moved under it is dirty for ever.
   await api.act("designerSetMarkup", { module: form, markup: String(tabMarkup.data) });
   await api.command("save");
   await waitFor("the form back where the F5 rows found it", async () =>

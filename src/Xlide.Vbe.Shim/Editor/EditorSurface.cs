@@ -912,7 +912,8 @@ internal sealed class EditorSurface : IDisposable
 
     /// <summary>Asks the designer tab's view to apply its document and call back for the raw
     /// save - the designer's half of the host's Ctrl+S. With <paramref name="run"/> the callback
-    /// asks for the form to be launched after the save, which is F5's half of the same.</summary>
+    /// asks for the form to be launched INSTEAD of the save, which is F5's half: Run never
+    /// saves, it only needs the form to hold the document before it stands.</summary>
     public void RequestDesignerApplySave(string moduleName, string? project, bool run = false)
     {
         if (!_loaded)

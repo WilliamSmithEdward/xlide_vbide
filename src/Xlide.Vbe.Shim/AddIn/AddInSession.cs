@@ -2132,12 +2132,14 @@ internal sealed partial class AddInSession : IDisposable
         // code-behind may hold unwritten page edits, and running stale code is the same bug
         // running a stale module was.
         //
-        // AND THE DOCUMENT IS FLUSHED THE SAME WAY, through the tab's own apply-and-save. The
-        // designer's document is the transaction log and the form only catches up on a save, so
-        // a run that skipped it launched the last SAVE: undo a control move, press F5, and the
-        // form on screen still holds the move while the canvas beside it does not (the owner,
+        // AND THE DOCUMENT IS FLUSHED THE SAME WAY, through the tab's own apply. The designer's
+        // document is the transaction log and the form only catches up on an apply, so a run
+        // that skipped it launched the last one: undo a control move, press F5, and the form on
+        // screen still holds the move while the canvas beside it does not (the owner,
         // 2026-08-16, with a screenshot of a Hold button in two places). The run rides the
-        // save's own callback, so a refused apply launches nothing and says why at the document.
+        // apply's callback, so a refused apply launches nothing and says why at the document.
+        // The FILE is not written on the way: Run never saves in the native editor, and the
+        // save that once rode here is the 2026-08-27 story at the "runOnly" callback.
         if (command == VbeCommands.Command.Run && _activeDesignerTab is { } designTab)
         {
             // A second launch aimed while the project is ALREADY running writes a design over a
@@ -2169,7 +2171,7 @@ internal sealed partial class AddInSession : IDisposable
                 {
                     _editorSurface?.RequestDesignerApplySave(
                         designTab.Module, DisplayFromProjectId(designTab.ProjectId), run: true);
-                    return VbeCommands.CommandRun.Ok("the designer tab applies and saves, then runs");
+                    return VbeCommands.CommandRun.Ok("the designer tab applies, then runs");
                 }
 
                 return RunFormFromDesigner(designTab.Module, designTab.ProjectId);
@@ -8169,11 +8171,16 @@ internal sealed partial class AddInSession : IDisposable
             return;
         }
 
-        // F5's callback: the same save, and then the form - which by now is the document, the
-        // whole point of routing a run through here.
-        if (string.Equals(name, "saveOnlyThenRun", StringComparison.Ordinal))
+        // F5's callback: the launch alone, no save. The native editor never saves on Run, and
+        // the save that used to sit here was worse than a parity break: on a never-saved
+        // workbook it raised the Save As dialog, the posted Run launched the form OVER it, the
+        // dialog waited out the form's modal loop and appeared the moment the form closed, and
+        // cancelling it then unwound two interleaved modal loops, which the editor did not
+        // always survive (the owner, 2026-08-27: "it brings up a save as dialog... and if i
+        // hit cancel it crashes"). What F5 must guarantee - the window that opens is the
+        // document - is the APPLY, which already happened on the way here.
+        if (string.Equals(name, "runOnly", StringComparison.Ordinal))
         {
-            ExecuteEditorCommand(VbeCommands.Command.Save, skipDesignerApply: true);
             ExecuteEditorCommand(VbeCommands.Command.Run, skipDesignerApply: true);
             return;
         }

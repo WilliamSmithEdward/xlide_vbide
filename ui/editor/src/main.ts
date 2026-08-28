@@ -519,9 +519,12 @@ function boot(): void {
         watchVocabulary: (listener) => bridge.onFormMarkupVocabulary(listener),
         // The RAW File Save - "saveOnly" skips the host's designer branch, which is what
         // asked this view to apply in the first place; "save" here would loop forever. F5
-        // comes back through the sibling that saves and then launches the form.
-        saveWorkbook: (run) => bridge.runCommand({
-          id: run ? "saveOnlyThenRun" : "saveOnly", target: "host", icon: "", label: "Save",
+        // comes back through "runOnly", the launch alone: the native editor never saves on
+        // Run, and the save that used to ride here raised Save As over a never-saved
+        // workbook, wedged it behind the modal form, and cancelling that dialog after the
+        // form closed could take the host down (the owner, 2026-08-27).
+        saveOrRun: (run) => bridge.runCommand({
+          id: run ? "runOnly" : "saveOnly", target: "host", icon: "", label: run ? "Run" : "Save",
         }),
         watchApplySave: (listener) => bridge.onDesignerApplySave(id.module, id.project ?? null, listener),
         eventStub: (control) => {

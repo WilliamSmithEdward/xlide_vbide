@@ -1936,9 +1936,11 @@ keyboard gestures by hand - arrows nudge, Shift+arrows resize, Ctrl+Z undoes - d
 that attribute rather than at a bare `.designer-canvas-scroll`: a session can hold several
 designer tabs, and only one view is mounted at a time.
 
-`command run` over a designer tab APPLIES AND SAVES the document first, then launches the form,
-so what opens is what the canvas shows rather than whatever was saved last (a refused apply
-launches nothing and says why at the document). Two things follow for a probe. The form it
+`command run` over a designer tab APPLIES the document first, then launches the form - and
+saves nothing, since 2026-08-27: the native editor never saves on Run, and the save that rode
+here raised Save As over a never-saved workbook behind the modal form, where cancelling it
+sometimes killed the host. What opens is what the canvas shows rather than whatever the form
+last held (a refused apply launches nothing and says why at the document). Two things follow for a probe. The form it
 launched can be photographed - `capture("form", "Quarter Entry")`, the only picture of a
 designer's work anything can take, since MSForms draws windowless and the designer's collection
 describes the stored form. And after `userform?action=close` the component answers "no designer
