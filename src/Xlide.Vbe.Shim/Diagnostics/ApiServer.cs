@@ -1529,7 +1529,18 @@ public sealed record DebugStatsReply(
     [property: JsonPropertyName("comWrappersTaken")] long ComWrappersTaken,
     [property: JsonPropertyName("comWrappersGivenBack")] long ComWrappersGivenBack,
     [property: JsonPropertyName("comWrappersDisposed")] long ComWrappersDisposed,
-    [property: JsonPropertyName("comWrappersLive")] long ComWrappersLive);
+    [property: JsonPropertyName("comWrappersLive")] long ComWrappersLive,
+    /// <summary>
+    /// The marshal lane's own eyes. The lane is a single file of work items crossing to the
+    /// host thread, and one item that will not finish starves every request behind it while
+    /// the heartbeat ticks on - a door dark for four minutes read as "VBA is running your
+    /// code" when the holder was a reload's teardown (#12, chaos seed 2009959200). `laneHolder`
+    /// is the route whose work is ON the host thread right now, null when the lane is free;
+    /// `laneHeldMs` is how long it has held. Served without the host thread, which is the
+    /// point: this is readable precisely when the lane is not.
+    /// </summary>
+    [property: JsonPropertyName("laneHolder")] string? LaneHolder,
+    [property: JsonPropertyName("laneHeldMs")] long LaneHeldMs);
 
 /// <summary>The `agent` front door: identity, orientation, and the trail onward.</summary>
 public sealed record DebugAgentReply(

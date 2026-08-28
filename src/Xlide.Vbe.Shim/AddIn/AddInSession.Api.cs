@@ -513,6 +513,12 @@ internal sealed partial class AddInSession
         public void Dispose() => Done.Dispose();
     }
 
+    /// <summary>The route whose marshaled work is ON the host thread right now - the lane's
+    /// current holder - and the tick it took the lane. Written from the host thread, read by
+    /// `stats` on a pool thread, hence the volatile and the interlocked ticks.</summary>
+    private volatile string? _laneHolder;
+    private long _laneHeldSince;
+
     private HostCrossing CrossToHost(EditorSurface host, Action work)
     {
         // Already on the host thread - a request through the inside door. Queueing here would
@@ -2765,7 +2771,11 @@ internal sealed partial class AddInSession
                         ComWrappersTaken: Com.ComRuntime.WrappersTaken,
                         ComWrappersGivenBack: Com.ComRuntime.WrappersGivenBack,
                         ComWrappersDisposed: Com.ComRuntime.WrappersDisposed,
-                        ComWrappersLive: Com.ComRuntime.WrappersLive),
+                        ComWrappersLive: Com.ComRuntime.WrappersLive,
+                        LaneHolder: _laneHolder,
+                        LaneHeldMs: _laneHolder is null
+                            ? 0
+                            : Environment.TickCount64 - System.Threading.Interlocked.Read(ref _laneHeldSince)),
                     DebugJsonContext.Default.DebugStatsReply));
             }
         }
@@ -2794,6 +2804,15 @@ internal sealed partial class AddInSession
         string? answer = null;
         using var crossing = CrossToHost(host, () =>
         {
+            // THE LANE'S OWN EYES. One work item that will not finish starves every request
+            // behind it while the heartbeat ticks on - a door dark for four minutes was read
+            // as "VBA is running your code" when the holder was a reload's teardown, and
+            // nothing anywhere could name it (#12, chaos seed 2009959200). The route is
+            // recorded while its work is ON the thread, `stats` serves it without needing
+            // that thread, and a hold past five seconds writes itself into the log so a
+            // post-mortem needs no live observer.
+            _laneHolder = request.Route;
+            System.Threading.Interlocked.Exchange(ref _laneHeldSince, Environment.TickCount64);
             try
             {
                 answer = AnswerDebugRequestOnHost(request);
@@ -2801,6 +2820,17 @@ internal sealed partial class AddInSession
             catch (Exception ex)
             {
                 answer = HostError($"{ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                var heldMs = Environment.TickCount64
+                    - System.Threading.Interlocked.Read(ref _laneHeldSince);
+                if (heldMs > 5000)
+                {
+                    Log.Info($"marshal: '{request.Route}' held the host lane for {heldMs}ms");
+                }
+
+                _laneHolder = null;
             }
         });
 
