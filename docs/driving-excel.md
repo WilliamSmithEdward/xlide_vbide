@@ -982,6 +982,37 @@ Two details are load-bearing, and both were added after the walk lied about a cl
   project argument: the walk opened both workbooks' `Helpers`, reported `collision=0`, and was
   right.
 
+### Letting chaos drive
+
+```bash
+copy artifacts\fixtures\LanguageFixture.xlsm artifacts\chaos\ChaosTarget.xlsm
+tools\harness\Start-Excel.ps1 -Workbook artifacts\chaos\ChaosTarget.xlsm -Fresh
+set XLIDE_CHAOS_PROJECT=ChaosTarget.xlsm
+node tools\harness\chaos.mjs                # 300 rounds, a fresh seed, printed for replay
+node tools\harness\chaos.mjs --seed=N       # replay one exactly
+```
+
+The aggressive sibling of the walk above: seeded random operations, some fired together,
+watching for the class of defect a scripted suite structurally cannot find - a crash, a hang,
+a wrapper or handle climb over a long walk, an unhandled fault in the log. It found #6. An
+individual refusal is not a failure; what is watched lives between rounds, and the summary
+counts what landed, what was turned away, and how often the session was found stopped (#7),
+stalled (#8) or STUCK (#9).
+
+Two refusals are enforced rather than remembered, both paid for. It runs only against a
+target whose NAME says chaos, because it saves the workbook it drives (2026-08-23:
+LanguageFixture came back with eight Chaos modules baked in). And it refuses a target that
+already HOLDS `Chaos_` modules, because the fresh-copy half of the ritual can silently fail -
+a target still open in the old Excel refuses the overwrite - and a stale target boots the next
+session into the VBE's own compile-error modal, wedged from the first round (2026-08-28).
+
+Its patience with a dark host thread is four minutes, not forty-five seconds: at 102
+components a 65-character write set VBE7 parsing past the old bound, and the session came
+back healthy after the walk had declared it dead. A stall that ends is counted and ridden
+through; only one that outlasts the editor's real worst chew earns the name hang. After a
+CRASH run, clear Excel's Resiliency key and close the recovered workbook before the next
+one - the recovery banner reads exactly like a machine trust problem, and it is wreckage.
+
 ### Measuring what a person actually waits for
 
 ```js

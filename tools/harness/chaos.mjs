@@ -174,6 +174,23 @@ if (!/chaos/i.test(project)) {
 const startPid = api.pid;
 const before = await api.stats();
 const known = (await api.project(project)).components.map((one) => one.name);
+
+/*
+ * AND NOT AGAINST A COPY THAT IS ALREADY WRECKAGE. The walk saves broken code into its target
+ * by design, so a target reused across runs boots the NEXT session into the VBE's own
+ * compile-error modal before anything has run - which owns the host thread and reads as a
+ * product hang from the first round. Measured 2026-08-28: a target still open in the old Excel
+ * refused the fresh copy SILENTLY, the stale file reopened, and a replay broke 680 operations
+ * earlier than the run it was replaying, on a session that was wedged at birth. The fresh copy
+ * per run is the ritual; this enforces the half of it a locked file can quietly skip.
+ */
+const wreckage = known.filter((one) => /^Chaos_/i.test(one));
+if (wreckage.length > 0) {
+  console.error(`Refusing to run: "${project}" already holds ${wreckage.length} Chaos_ module(s) from an earlier walk.`);
+  console.error("Copy the fixture fresh first - and check the copy LANDED: a target still open");
+  console.error("in the old Excel refuses the overwrite and leaves the wreckage in place.");
+  process.exit(2);
+}
 const chaosNames = () => Array.from({ length: 6 }, (_, at) => `Chaos_${at}`);
 
 /**
@@ -786,13 +803,20 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
      * So the retry is the READ, repeated. That cannot be fooled about the one thing it is for,
      * and a host that is really gone never answers it.
      */
-    const until = Date.now() + 45000;
+    // FOUR MINUTES, because forty-five seconds called the editor's own homework a hang. The
+    // bound was set when the largest measured chew was seventeen seconds; at round 270 of seed
+    // 2009959200 this walk had grown the project to 102 components, a 65-character write set
+    // VBE7 parsing for somewhere past the old bound, and the session came back healthy - flat
+    // wrappers, no fault, heartbeat ticking - after the walk had already declared it dead
+    // (2026-08-28). A genuine hang still ends the walk; it just has to outlast the editor's
+    // real worst chew to earn the name.
+    const until = Date.now() + 240000;
     while (typeof readable === "string" && Date.now() < until) {
       await wait(2000);
       readable = await api.project(project).catch((err) => String(err.message));
     }
 
-    laneWaited = Math.round((45000 - (until - Date.now())) / 100) / 10;
+    laneWaited = Math.round((240000 - (until - Date.now())) / 100) / 10;
     laneFreed = typeof readable !== "string";
     console.log(`  the project stopped reading at round ${round}; `
       + `${laneFreed ? "it came back" : "it never came back"} after ${laneWaited}s`);
