@@ -305,6 +305,22 @@ Step 'engine host-supplied facts' {
     'the #20 acceptance table, the Control base merge, the unvouched form, the predeclared class'
 }
 
+Step 'engine knowledge routes' {
+    # WHAT THE LANGUAGE SERVICE KNOWS, SERVED AS DATA: the rule catalogue answering before
+    # initialize, a host's object model by type name, and the host registry switching whole -
+    # a project opened as word answers WORD's model, and an unmodelled host says known:false
+    # rather than wearing Excel's types. The suite existed with 21 green checks and NOTHING
+    # collected them - not this gate, not CI - found on the 2026-08-28 hunt. The api's model
+    # and analyzer routes answer FROM these routes, so a break here is an agent taught wrong
+    # terrain by a door that sounds sure of itself.
+    Push-Location (Join-Path $repoRoot 'engine')
+    try {
+        node test/knowledge.mjs 2>&1 | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'the knowledge-route suite failed' }
+    } finally { Pop-Location }
+    'the catalogue before initialize, per-host models, the registry switching whole'
+}
+
 Step 'engine inline comment features' {
     # THE TWO INLINE COMMENT SYNTAXES the shared analyzer defines, held through this engine's
     # wrapper: `' @xlide-analysis-disable-*` suppression directives (every scope, plus the

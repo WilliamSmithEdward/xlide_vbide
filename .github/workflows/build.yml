@@ -129,6 +129,17 @@ jobs:
         working-directory: xlide_vbide/engine
         run: node test/pass-cost.mjs
 
+      # What the language service knows, served as data: the rule catalogue answering before
+      # initialize, per-host object models by type name, and the host registry switching
+      # whole - a project opened as word answers WORD's model, and an unmodelled host answers
+      # known:false rather than Excel's types wearing its name. The SECOND suite found written
+      # and then run by nothing (Freshness above was the first): 21 green checks nobody was
+      # collecting until the 2026-08-28 hunt. It also runs in verify.ps1; here too because the
+      # host registry is the analyzer's and the checkout beside this one is unpinned.
+      - name: Knowledge
+        working-directory: xlide_vbide/engine
+        run: node test/knowledge.mjs
+
   build:
     # Windows is required: the product is a native COM server for a Windows host, and ahead-of-time
     # publishing needs the platform linker, which the Windows runner image already carries.
