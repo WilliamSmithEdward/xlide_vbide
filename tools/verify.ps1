@@ -671,6 +671,12 @@ if ($Live) {
             # line reading `()` to any module holding a `Declare` broken over a continuation
             # when it is filled with AddFromString, which cost the owner a module that would
             # not compile, pasted from a file that was fine (2026-08-21).
+            # inline-comments-live and analysis-rules-live both ADD components (the carrier
+            # modules their checks write on), so they run before write-rollback like everything
+            # that needs the session able to add. For one day they sat wired after it, where a
+            # full -Live pass fed them a session write-rollback had already spent: both died on
+            # "no xlide instance is answering" and the gate read it as their failure (2026-08-28,
+            # found the first time the full pass ran after they landed).
             'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'write-fidelity.mjs',
@@ -678,8 +684,9 @@ if ($Live) {
                                      'debugger-features.mjs', 'step-into-features.mjs',
                                      'properties-pane.mjs', 'window-routes.mjs',
                                      'designer-features.mjs', 'test-runner.mjs',
-                                     'pane-scope.mjs', 'write-rollback.mjs',
-                                     'inline-comments-live.mjs', 'analysis-rules-live.mjs')
+                                     'pane-scope.mjs',
+                                     'inline-comments-live.mjs', 'analysis-rules-live.mjs',
+                                     'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
