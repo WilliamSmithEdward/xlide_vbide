@@ -308,6 +308,12 @@ internal sealed class EditorSurface : IDisposable
     /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
     public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
 
+    /// <summary>The marshal queue's depth and drain/enqueue ages, for the stats route to serve
+    /// when a request has timed out and laneHolder cannot say why. Zeroed shape when the overlay
+    /// is not up yet.</summary>
+    public (int Depth, long LastDrainAgeMs, long LastEnqueueAgeMs) MarshalQueueState() =>
+        _overlay?.MarshalQueueState() ?? (0, -1, -1);
+
     /// <summary>Answers one completion request. Never held: an answer outlives no keystroke.</summary>
     public void ShowCompletions(int requestId, SurfaceCompletionItem[] items)
     {

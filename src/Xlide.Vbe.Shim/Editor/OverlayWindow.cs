@@ -236,6 +236,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
         }
 
         _actions.Enqueue(action);
+        System.Threading.Interlocked.Exchange(ref _lastEnqueueTick, Environment.TickCount64);
 
         // The fast path, and the one that may do nothing.
         Win32.PostMessage(_handle, Win32.WmApp + 1, 0, 0);
@@ -247,6 +248,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// <summary>Runs everything queued for the host thread. Only the window's thread calls this.</summary>
     private void DrainActions()
     {
+        System.Threading.Interlocked.Exchange(ref _lastDrainTick, Environment.TickCount64);
         while (_actions.TryDequeue(out var action))
         {
             try
@@ -260,6 +262,32 @@ internal sealed unsafe class OverlayWindow : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// The marshal queue as three numbers, for the moment a request times out and no other
+    /// instrument can see why. Depth is how many actions are waiting; the two ages say when
+    /// the drain last RAN and when an action was last ENQUEUED, both in ms. Read from a pool
+    /// thread while stats answers, written from both the host thread (drain) and pool threads
+    /// (enqueue), hence the interlocked ticks.
+    ///
+    /// The distinction it draws that laneHolder cannot: a jam with depth high and a stale
+    /// drain age is the WndProc not dispatching the drain at all - message starvation, not
+    /// blocked work - which is the shape #12's four-minute freeze wore, with the debug poll's
+    /// own timer still firing beside a queue nobody emptied.
+    /// </summary>
+    public (int Depth, long LastDrainAgeMs, long LastEnqueueAgeMs) MarshalQueueState()
+    {
+        var now = Environment.TickCount64;
+        var drain = System.Threading.Interlocked.Read(ref _lastDrainTick);
+        var enqueue = System.Threading.Interlocked.Read(ref _lastEnqueueTick);
+        return (
+            _actions.Count,
+            drain == 0 ? -1 : now - drain,
+            enqueue == 0 ? -1 : now - enqueue);
+    }
+
+    private long _lastDrainTick;
+    private long _lastEnqueueTick;
 
     /// <summary>Creates the overlay as a child of <paramref name="parent"/>.</summary>
     public static OverlayWindow? Create(nint parent, PixelRect bounds)

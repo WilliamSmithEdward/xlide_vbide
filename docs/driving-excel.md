@@ -309,7 +309,7 @@ stands: `drainfinalizers`, which is a bisecting tool rather than an assertion.
 | `problems` | `problems(module)` | the analyzer's findings |
 | `reload` | `reload({waitMs})` | reloads the page and waits for it |
 | `state` | `state(timeout)` | shown module, mode, handles, rects, DevTools port |
-| `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters, the COM WRAPPER counts - and the marshal lane's own eyes: `laneHolder` names the route whose work is ON the host thread right now (null when free) and `laneHeldMs` how long it has held, served without that thread, which is the point - a door dark for minutes used to blame "VBA running your code" with nothing anywhere naming the real holder (#12). A hold past five seconds also writes itself into the log |
+| `stats` | `stats()` | uptime, memory, handles, GC, placement and marshal counters, the COM WRAPPER counts - and the marshal lane's own eyes: `laneHolder` names the route whose work is ON the host thread right now (null when free) and `laneHeldMs` how long it has held; `marshalQueueDepth`/`marshalLastDrainMs`/`marshalLastEnqueueMs` are the layer under it - what is WAITING and whether the drain is running at all. Both served without the host thread, which is the point (#12: seed 2009959200 reads holder null AND depth 0 AND both ages climbing together through a four-minute jam - the marshal machinery is idle, so the freeze is upstream of it). A lane hold past five seconds also writes itself into the log |
 | `trip` | `trip("pagecall", {n})` / `tripCaret()` | times what a person waits for, ACROSS the boundary |
 | `ui` | `ui()` | the surface as the page describes it: tabs, tree, panes, dialogs, caret |
 | `watches` | `watches()` | the Watch panel |

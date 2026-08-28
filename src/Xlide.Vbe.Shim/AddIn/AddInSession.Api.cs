@@ -2737,6 +2737,9 @@ internal sealed partial class AddInSession
                 var marshal = PerfCounters.MarshalSnapshot();
                 var refresh = PerfCounters.RefreshSnapshot();
                 var follow = PerfCounters.FollowSnapshot();
+                // Read from THIS pool thread, never crossed to the host: the whole value of
+                // these is that they answer while the host thread is the thing that is stuck.
+                var queue = _editorSurface?.MarshalQueueState() ?? (Depth: 0, LastDrainAgeMs: -1L, LastEnqueueAgeMs: -1L);
                 var messages = WebView.WebView2Surface.MessageTap.Totals;
                 using var self = System.Diagnostics.Process.GetCurrentProcess();
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -2775,7 +2778,10 @@ internal sealed partial class AddInSession
                         LaneHolder: _laneHolder,
                         LaneHeldMs: _laneHolder is null
                             ? 0
-                            : Environment.TickCount64 - System.Threading.Interlocked.Read(ref _laneHeldSince)),
+                            : Environment.TickCount64 - System.Threading.Interlocked.Read(ref _laneHeldSince),
+                        MarshalQueueDepth: queue.Depth,
+                        MarshalLastDrainMs: queue.LastDrainAgeMs,
+                        MarshalLastEnqueueMs: queue.LastEnqueueAgeMs),
                     DebugJsonContext.Default.DebugStatsReply));
             }
         }

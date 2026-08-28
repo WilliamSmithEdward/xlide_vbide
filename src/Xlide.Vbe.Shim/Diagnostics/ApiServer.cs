@@ -1540,7 +1540,19 @@ public sealed record DebugStatsReply(
     /// point: this is readable precisely when the lane is not.
     /// </summary>
     [property: JsonPropertyName("laneHolder")] string? LaneHolder,
-    [property: JsonPropertyName("laneHeldMs")] long LaneHeldMs);
+    [property: JsonPropertyName("laneHeldMs")] long LaneHeldMs,
+    /// <summary>
+    /// The marshal QUEUE, the layer under the lane holder. `marshalQueueDepth` is how many
+    /// actions are waiting to reach the host thread; `marshalLastDrainMs` how long since the
+    /// drain last ran; `marshalLastEnqueueMs` how long since one was queued. laneHolder says
+    /// what is EXECUTING; this says what is WAITING and whether the drain is running at all -
+    /// depth high with a stale drain age is the WndProc not dispatching the drain, which is
+    /// the shape #12's freeze wore while the debug poll's own timer kept firing. -1 ages mean
+    /// the counter has not fired yet.
+    /// </summary>
+    [property: JsonPropertyName("marshalQueueDepth")] int MarshalQueueDepth,
+    [property: JsonPropertyName("marshalLastDrainMs")] long MarshalLastDrainMs,
+    [property: JsonPropertyName("marshalLastEnqueueMs")] long MarshalLastEnqueueMs);
 
 /// <summary>The `agent` front door: identity, orientation, and the trail onward.</summary>
 public sealed record DebugAgentReply(
