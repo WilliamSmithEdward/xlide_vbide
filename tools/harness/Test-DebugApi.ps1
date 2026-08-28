@@ -542,23 +542,24 @@ Check 'a page exception reaches the shim log' {
 # VBA modal pumps messages, so no timeout ever fires and only an explicit sweep can help.
 $script:modalDetail = $null
 Check 'a modal this door raised is seen, and the door sweeps it' {
-    # THE HARDENING MOVED AND THIS CHECK DID NOT. It used to raise the Macros dialog, see it
-    # standing, and expect the NEXT request to sweep it. The door clears a dialog its own request
-    # raised within THAT request now, so there was nothing left to see and the check read the
-    # empty list as a failure to raise one (2026-08-08).
+    # THE RAISER MOVED AND THIS CHECK DID NOT, twice now. It used to raise the Macros dialog
+    # with Run aimed at line one of CleanModule - and Run learned to refuse a caret outside
+    # any procedure in words (2026-08-23), so the gesture stopped raising anything at all, and
+    # the first full -Live pass after that found this check reading "saw nothing" (2026-08-28).
+    # References is the raiser now: a real native modal the door can still open on demand,
+    # whose safe answer is Cancel - the same dialog the keep=1 check above opens. That one
+    # proves keep PROTECTS it; this one proves the door SWEEPS it when nobody asked to keep it.
     #
     # Asked in two halves, because the two claims need opposite conditions. `keep=1` holds the
     # dialog long enough to prove it was raised and to read its buttons WITHOUT the host thread
     # it is holding, which is the property that matters: a door that cannot see a modal cannot
     # report why everything else timed out. Then the same gesture without `keep`, which must come
     # back with nothing standing and the poll beating.
-    Invoke-RestMethod "$api/caret?module=CleanModule&line=1" -Method Post -TimeoutSec 8 | Out-Null
-    Start-Sleep -Milliseconds 500
-    Invoke-RestMethod "$api/command?name=run&keep=1" -Method Post -TimeoutSec 20 | Out-Null
-    Start-Sleep -Milliseconds 1200
+    Invoke-RestMethod "$api/command?name=references&keep=1" -Method Post -TimeoutSec 20 | Out-Null
+    Start-Sleep -Seconds 3
 
     $seen = Invoke-RestMethod "$api/dialogs" -TimeoutSec 8
-    $sawIt = $seen.dialogs.Count -ge 1 -and $seen.dialogs[0].caption -eq 'Macros'
+    $sawIt = $seen.dialogs.Count -ge 1 -and $seen.dialogs[0].caption -like 'References*'
     $buttons = if ($sawIt) { $seen.dialogs[0].buttons -join ', ' } else { '' }
 
     # Kept on purpose, so it has to be answered here. Leaving it standing is what made an earlier
@@ -566,13 +567,22 @@ Check 'a modal this door raised is seen, and the door sweeps it' {
     Invoke-RestMethod "$api/dismiss?button=Cancel" -Method Post -TimeoutSec 15 | Out-Null
     Start-Sleep -Milliseconds 2000
 
-    Invoke-RestMethod "$api/caret?module=CleanModule&line=1" -Method Post -TimeoutSec 8 | Out-Null
-    Start-Sleep -Milliseconds 500
-    Invoke-RestMethod "$api/command?name=run" -Method Post -TimeoutSec 20 | Out-Null
-    Start-Sleep -Milliseconds 2000
+    # Bare this time: the delayed watch records it as the door's own, and the next request's
+    # entry sweep answers it with its safe answer. Two looks, because the first IS that next
+    # request - it triggers the sweep on the way in - and the second reads the settled truth.
+    Invoke-RestMethod "$api/command?name=references" -Method Post -TimeoutSec 20 | Out-Null
+    Start-Sleep -Seconds 3
+    Invoke-RestMethod "$api/dialogs" -TimeoutSec 8 | Out-Null
+    Start-Sleep -Milliseconds 1500
 
     $after = Invoke-RestMethod "$api/dialogs" -TimeoutSec 8
     $cleared = $after.dialogs.Count -eq 0
+
+    # And the healing left a trace. An empty list alone cannot say whether anything ever
+    # stood - that is what recentlyCleared is FOR - and until 2026-08-28 the door's own
+    # sweeps never fed it, so this exact sequence answered [] while References had been
+    # raised and swept underneath it.
+    $traced = @(@($after.recentlyCleared) -like '*References*').Count -ge 1
 
     # Recovered: the poll is ticking again, which is what a person would call unstuck.
     Start-Sleep -Milliseconds 1500
@@ -580,8 +590,8 @@ Check 'a modal this door raised is seen, and the door sweeps it' {
 
     # Out of the pipeline on purpose: anything written here joins the return value and
     # makes the check pass on its own, which is how this check first went green wrongly.
-    $script:modalDetail = "saw '$(if ($sawIt) { 'Macros' } else { 'nothing' })' buttons [$buttons], swept $cleared, beating $beating"
-    [bool] ($sawIt -and $cleared -and $beating)
+    $script:modalDetail = "saw '$(if ($sawIt) { 'References' } else { 'nothing' })' buttons [$buttons], swept $cleared, traced $traced, beating $beating"
+    [bool] ($sawIt -and $cleared -and $traced -and $beating)
 }
 
 # Last, deliberately: this one RESTARTS the page. Every check above depends on host state

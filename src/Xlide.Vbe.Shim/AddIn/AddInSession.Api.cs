@@ -2903,7 +2903,16 @@ internal sealed partial class AddInSession
                 // being written during someone else's enumeration: rare, and an exception in a
                 // watcher rather than a wrong answer. It matters more now that `dialogs` reads it
                 // too, so there are two readers and one writer instead of one of each.
-                if (pressed is not null && !mine)
+                //
+                // OUR OWN SWEEPS LAND HERE TOO. They used to be left out (`!mine`), so a dialog
+                // this door raised and healed left no trace anywhere a caller could read:
+                // `recentlyCleared` answered empty, and "raised and swept" was indistinguishable
+                // from "never raised" - the exact ambiguity the field exists to resolve, and the
+                // same confusion that once had a suite read an empty list as a failure to raise
+                // (2026-08-08). Measured 2026-08-28: a bare References raise, swept on the next
+                // request, with recentlyCleared answering [] throughout. The compile-error
+                // detection below had already paid for the gap once and routes around it.
+                if (pressed is not null)
                 {
                     _guardCleared.Add($"{dialog.Caption}: {dialog.Text}".Trim().TrimEnd(':'));
                 }
@@ -2955,10 +2964,11 @@ internal sealed partial class AddInSession
     private bool GuardClearedACompileError()
     {
         // THE WATCH ANSWERS MOST OF THEM, and it is the one that answers this. `_guardCleared`
-        // is the api guard's own record, and it deliberately leaves out a dialog raised by the
-        // request that is running - which a test run's compile box always is. Asking only that
-        // list found nothing, every time, while the log showed the watch answering the box on
-        // another thread two lines earlier.
+        // used to leave out a dialog raised by the request that is running - which a test run's
+        // compile box always is - so asking only that list found nothing, every time, while the
+        // log showed the watch answering the box on another thread two lines earlier. The list
+        // carries the door's own sweeps too since 2026-08-28; the watch stays first because it
+        // answers the boxes that never cross the sweep at all.
         if (Diagnostics.DialogWatch.AnsweredRecently("Compile error"))
         {
             return true;
