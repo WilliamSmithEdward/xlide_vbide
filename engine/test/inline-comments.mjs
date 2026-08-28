@@ -179,15 +179,15 @@ check("completion's item carries the doc",
   String(twice?.documentation ?? "").includes("Doubles a count"),
   JSON.stringify(twice?.documentation ?? null)?.slice(0, 90));
 
-/* ---- all three grammars on one member, in the order that survives ----------------------------- */
+/* ---- all three grammars on one member, in any order --------------------------------------------- */
 
 console.log("\nstacking:\n");
 
-// Suppression, then the test directive, then the doc block DIRECTLY above the member: the one
-// order in which all three coexist (measured as a five-order matrix, 2026-08-27). The doc scan
-// takes only a contiguous block immediately above the member, so doc-last is load-bearing - and
-// this check is the tripwire for xlide_vscode#53 landing, which would make the other orders
-// work too.
+// Suppression, then the test directive, then the doc block DIRECTLY above the member: the order
+// that worked even before the doc scan learned tolerance (measured as a five-order matrix,
+// 2026-08-27, when it was the ONLY order all three survived). These two checks were the
+// tripwire for xlide_vscode#53 landing; it landed as c67487a, and the checks after them now
+// pin the tolerance itself.
 const stackedSource = [
   "Option Explicit", "",
   "' @xlide-analysis-disable-next-member event-handler-module-scope -- stacked",
@@ -218,6 +218,58 @@ const stackedHover = await call("textDocument/hover", {
 check("and the ''' block directly above the member still reaches hover",
   String(stackedHover.hover?.documentation ?? "").includes("Documented, suppressed"),
   JSON.stringify(stackedHover.hover?.documentation ?? null)?.slice(0, 80));
+
+// THE ORDERS THAT USED TO LOSE THE DOCS. Before c67487a the doc scan took only a contiguous
+// ''' block immediately above the member, so xlide's own directives between the block and the
+// Sub silently detached it - hover just went quiet, with nothing anywhere saying why
+// (xlide_vscode#53, filed off the 2026-08-27 matrix). The scan reads through xlide's grammar
+// now: doc FIRST with both directives under it, and doc BETWEEN the directives, both keep all
+// three features alive. A red here means the tolerance regressed upstream.
+const docFirstSource = [
+  "Option Explicit", "",
+  "''' <summary>Doc first, directives after.</summary>",
+  "' @xlide-analysis-disable-next-member event-handler-module-scope -- doc first",
+  "' @xlide-test tags=\"docfirst\"",
+  "Public Sub Workbook_Activate()",
+  "    Debug.Print 1",
+  "End Sub", "",
+  "''' <summary>Doc between the directives.</summary>",
+  "' @xlide-analysis-disable-next-member event-handler-module-scope -- doc between",
+  "''' <remarks>A second block, nearer the member, still one voice.</remarks>",
+  "' @xlide-test tags=\"between\"",
+  "Public Sub Workbook_Deactivate()",
+  "    Debug.Print 1",
+  "End Sub",
+].join(CRLF);
+
+await call("project/open", {
+  projectId: "stack2", generation: 1, host: "excel",
+  modules: [{ moduleName: "Tolerant", source: docFirstSource, type: "standard" }],
+});
+
+const tolerantFindings = await call("textDocument/diagnostics", {
+  documentKey: "stack2/Tolerant", projectId: "stack2", generation: 1,
+  source: docFirstSource, moduleName: "Tolerant", moduleType: "standard", host: "excel",
+});
+check("suppression still lands in both re-ordered stacks",
+  (tolerantFindings.diagnostics ?? []).length === 0,
+  (tolerantFindings.diagnostics ?? []).map((d) => d.code).join(",") || "(none)");
+
+const docFirstHover = await call("textDocument/hover", {
+  projectId: "stack2", moduleName: "Tolerant", source: docFirstSource,
+  offset: docFirstSource.indexOf("Workbook_Activate()") + 2, moduleType: "standard",
+});
+check("a doc block above the directives reaches hover through them",
+  String(docFirstHover.hover?.documentation ?? "").includes("Doc first"),
+  JSON.stringify(docFirstHover.hover?.documentation ?? null)?.slice(0, 80));
+
+const docBetweenHover = await call("textDocument/hover", {
+  projectId: "stack2", moduleName: "Tolerant", source: docFirstSource,
+  offset: docFirstSource.indexOf("Workbook_Deactivate()") + 2, moduleType: "standard",
+});
+check("and a doc block threaded between the directives reaches hover too",
+  String(docBetweenHover.hover?.documentation ?? "").includes("Doc between"),
+  JSON.stringify(docBetweenHover.hover?.documentation ?? null)?.slice(0, 80));
 
 /* ---- the suppression quick fix, applied and re-measured --------------------------------------- */
 

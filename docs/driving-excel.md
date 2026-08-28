@@ -757,17 +757,19 @@ rendering, summary and `<param>` text included. Held by `engine/test/inline-comm
 (headless, every scope and the applied fix) and `inline-comments-live.mjs` above.
 
 **Stacking all three on one member** - a suppression directive, a `'''` doc block, and a
-`' @xlide-test` directive - works, in one order: suppression first, the test directive next, and
-the doc block LAST, directly above the `Sub`. The doc scanner is the strict one: it takes only a
-contiguous `'''` block immediately above the member, so any line between - including xlide's own
-other directives - silently detaches the docs (hover just stops showing them; xlide_vscode#53
-asks for the scan to see through xlide's own grammar). Test discovery and `disable-next-member`
-both tolerate every order. Measured as a five-order matrix, 2026-08-27.
+`' @xlide-test` directive - works in ANY order since upstream c67487a (xlide_vscode#53, fixed
+2026-08-28). It did not always: the doc scanner took only a contiguous `'''` block immediately
+above the member, so xlide's own other directives between the block and the `Sub` silently
+detached the docs, and the 2026-08-27 five-order matrix found exactly one order all three
+survived (suppression, test directive, doc block last). The scan reads through xlide's grammar
+now - a doc block above the directives, or threaded between them, still reaches hover, and
+split `'''` fragments around a directive merge into one voice. `engine/test/inline-comments.mjs`
+pins the tolerance in both re-ordered shapes; a red there is the tolerance regressing upstream.
 
 ```vba
+''' <summary>Documented, suppressed, and a test - in whichever order reads best.</summary>
 ' @xlide-analysis-disable-next-member event-handler-module-scope -- pinned by a suite
 ' @xlide-test tags="smoke"
-''' <summary>Documented, suppressed, and a test - the one order all three survive.</summary>
 Public Sub Workbook_Open()
 ```
 
