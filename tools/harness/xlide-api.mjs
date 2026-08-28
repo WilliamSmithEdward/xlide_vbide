@@ -800,6 +800,18 @@ function clientFor(entry) {
      */
     projects: () => call("projects"),
 
+    /**
+     * Closes one open workbook, the save question answered in the request rather than by a
+     * dialog: `saveChanges` is required, 0 discards and 1 saves. The ONE safe route for the
+     * gesture - an immediate line runs inside the active project, so `Workbooks(2).Close`
+     * typed there tears down its own host and kills the editor (#13); the evaluator refuses
+     * those lines and points here.
+     *
+     *   await api.workbook("close", { project: "Book1", saveChanges: 0 });
+     */
+    workbook: (action, { project, saveChanges } = {}) =>
+      call(`workbook${query({ action, project, saveChanges })}`, { method: "POST" }),
+
     /** The open workbook holding a module, by name. Null when no open workbook has one. */
     async projectHolding(moduleName) {
       const wanted = moduleName.toLowerCase();
@@ -1440,6 +1452,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       //   xlide-api.mjs outline Runner    xlide-api.mjs caret 12 Runner
       case "native": return api.native({ text: rest[0] === "text" });
       case "projects": return api.projects();
+      // xlide-api.mjs workbook close Book1 0      close it, 0 discards / 1 saves
+      case "workbook": return api.workbook(rest[0] ?? "close", { project: rest[1], saveChanges: rest[2] });
       case "console": return api.console(Number(rest[0] ?? 20));
       // The face is named rather than counted: it arrived after the positionals were spent,
       // and `pane open EntryForm face design` reads better than a fourth silent slot.

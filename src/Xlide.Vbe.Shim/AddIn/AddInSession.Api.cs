@@ -4707,6 +4707,62 @@ internal sealed partial class AddInSession
                     new DebugProjectsReply([.. found]), DebugJsonContext.Default.DebugProjectsReply);
             }
 
+            case "workbook" when request.Query.TryGetValue("action", out var workbookAction)
+                && string.Equals(workbookAction, "close", StringComparison.OrdinalIgnoreCase):
+            {
+                /*
+                 * THE ONE SAFE WAY TO CLOSE A WORKBOOK FROM OUTSIDE. The immediate window used
+                 * to be the only route with the reach, and it is the one route that cannot
+                 * survive the gesture: its line runs as a procedure IN the active project, so
+                 * closing that project's workbook tears the code out from under itself and the
+                 * editor dies with it - measured 2026-08-28, one try, one dead Excel (#13). The
+                 * evaluator refuses those lines now and points here. This close is a plain COM
+                 * call on the host thread with no VBA running, which is exactly the state the
+                 * teardown is safe in.
+                 *
+                 * `saveChanges` is REQUIRED and explicit - the native close asks the developer
+                 * this exact question, and a route that picked silently would either lose work
+                 * or write a file nobody asked for. NOT named `keep`: this door reserves that
+                 * word for dialog protection on every request. A DESIGNATED DEVIATION from the
+                 * prompt itself: the caller answers the question in the request instead of
+                 * meeting the dialog, which is what makes the route drivable at all. saveChanges
+                 * on a never-saved workbook raises the host's own Save As, which the door's
+                 * dialog watch then handles like any dialog this door raised.
+                 */
+                request.Query.TryGetValue("project", out var closeTarget);
+                if (closeTarget is not { Length: > 0 })
+                {
+                    return HostError("workbook?action=close needs project=<name>; "
+                        + "a close aimed at nothing closes nothing");
+                }
+
+                if (!(request.Query.TryGetValue("saveChanges", out var saveWord)
+                    && saveWord is "0" or "1" or "true" or "false"))
+                {
+                    return HostError("workbook?action=close needs saveChanges=0|1 - the same "
+                        + "question the native close asks, answered in the request");
+                }
+
+                var closeId = ProjectIdFromDisplay(closeTarget);
+                var closeDisplay = closeId is null ? null : DisplayFromProjectId(closeId);
+                using var book = closeDisplay is null ? null : FindWorkbookByDisplay(closeDisplay);
+                if (book is null)
+                {
+                    return HostError($"no open workbook answers to '{closeTarget}'. "
+                        + $"Open: {string.Join(", ", _projectNames.Values)}");
+                }
+
+                // VT_I4 on the wire: the host coerces 0/1 to SaveChanges' boolean, the same
+                // road every argumented Invoke here takes.
+                var saveIt = saveWord is "1" or "true";
+                book.Invoke("Close", saveIt ? 1 : 0);
+                Log.Info($"workbook: closed {closeDisplay}, changes {(saveIt ? "saved" : "discarded")}");
+
+                return System.Text.Json.JsonSerializer.Serialize(
+                    new DebugWorkbookReply(true, closeDisplay!, saveIt),
+                    DebugJsonContext.Default.DebugWorkbookReply);
+            }
+
             case "project":
             {
                 // What is actually THERE, as opposed to what the surface is showing.

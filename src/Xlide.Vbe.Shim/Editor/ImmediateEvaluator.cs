@@ -21,7 +21,7 @@ namespace Xlide.Vbe.Shim.Editor;
 /// would end the debugging session the developer is in the middle of, and losing that is a far
 /// worse answer than declining.
 /// </summary>
-internal sealed class ImmediateEvaluator
+internal sealed partial class ImmediateEvaluator
 {
     /// <summary>
     /// Name of the module a line is compiled into. Removed after every evaluation.
@@ -146,6 +146,32 @@ internal sealed class ImmediateEvaluator
         }
 
         var text = line.Trim();
+
+        /*
+         * A LINE THAT CLOSES ITS OWN HOST IS REFUSED, because the evaluator cannot survive it.
+         *
+         * The line runs as a real procedure IN the active project - that is the whole mechanism
+         * described above - so `Workbooks(2).Close False` aimed at that project's own workbook
+         * tears the module out from under its executing code, and the editor does not survive
+         * the teardown: measured 2026-08-28, one try, one dead Excel, recovery banner and all
+         * (#13). The native Immediate window runs its line without materialising a procedure,
+         * so the same line is survivable there - this is the mechanism's one sharp edge, and a
+         * refusal in words beats a crash that takes unsaved work with it.
+         *
+         * The shapes named are the honest single-line spellings, workbook-close and host-quit.
+         * A two-step evasion - Set w = Workbooks(2), then w.Close - still compiles and still
+         * kills, which is why the refusal points at the door's own close instead of pretending
+         * to be a parser. `Close #1` is the FILE statement and passes untouched.
+         */
+        if (SelfDestructive().IsMatch(text))
+        {
+            return new Result(
+                "Closing a workbook or quitting the host from here would tear down the very "
+                + "project this line runs in, and the editor does not survive that. Close a "
+                + "workbook through the door instead: "
+                + "workbook?action=close&project=<name>&saveChanges=0|1.",
+                Failed: true);
+        }
         var wantsValue = text.StartsWith('?');
         var body = wantsValue ? text[1..].Trim() : text;
 
@@ -367,4 +393,15 @@ internal sealed class ImmediateEvaluator
         var message = ex.Message.Trim();
         return message.Length == 0 ? ex.GetType().Name : message;
     }
+
+    /// <summary>
+    /// The single-line spellings of "close the workbook this line runs in" and "quit the host":
+    /// Workbooks(...).Close and Workbooks.Close, ActiveWorkbook.Close, ThisWorkbook.Close, and
+    /// Application.Quit. A variable that happens to be called workbooks is over-matched and told
+    /// why; `Close #1`, the file statement, never is.
+    /// </summary>
+    [System.Text.RegularExpressions.GeneratedRegex(
+        @"\bworkbooks?\s*[(.][^']*?\bclose\b|\bactiveworkbook\s*\.\s*close\b|\bthisworkbook\s*\.\s*close\b|\bapplication\s*\.\s*quit\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+    private static partial System.Text.RegularExpressions.Regex SelfDestructive();
 }

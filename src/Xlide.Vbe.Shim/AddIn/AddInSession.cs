@@ -8921,12 +8921,15 @@ internal sealed partial class AddInSession : IDisposable
             /*
              * TWO UNSAVED WORKBOOKS ARE BOTH CALLED "VBAProject", AND THE TREE SHOWED BOTH.
              *
-             * A workbook that has never been saved has no file name, so the only name it can be
-             * called is the project's own, and that is "VBAProject" for every new workbook. Two
-             * of them side by side in the explorer are two identical rows, and there is nothing
-             * in the tree to tell the developer which is which (reported 2026-08-08).
+             * A workbook that has never been saved has no file name, and for a while the only
+             * name the tree could call it was the project's own - "VBAProject" for every new
+             * workbook, two of them two identical rows (reported 2026-08-08). The display walks
+             * the same axis as saved workbooks now: the host's own name, "Book1", unique by the
+             * host's construction (#14). The numbering below stays as the backstop for any name
+             * collision that still arises - a host that answers no document name falls back to
+             * the project name, and two of THOSE side by side still need telling apart.
              *
-             * So a name shared by more than one project is numbered: "VBAProject 01",
+             * A name shared by more than one project is numbered: "VBAProject 01",
              * "VBAProject 02", in the order the editor lists them. A name that is unique is left
              * exactly as it is, because "Book1.xlsm 01" would be noise.
              *
@@ -9033,7 +9036,72 @@ internal sealed partial class AddInSession : IDisposable
             // Unsaved: the property raises rather than answering empty.
         }
 
-        return project.GetString("Name") ?? "VBAProject";
+        // A workbook never saved still has a name - the one the host gave it. "Book1" is what
+        // the titlebar, the native explorer ("VBAProject (Book1)") and Workbooks("Book1") all
+        // say, and the host numbers those unique by construction. Naming these by the PROJECT
+        // instead made two new workbooks two identical "VBAProject" rows - the reason the
+        // numbering below exists at all - and left Book1 unaddressable through every route,
+        // while the refusal promised that "a display name resolves" (#14). The saved case above
+        // is already Workbook.Name; this keeps the unsaved case on the same axis.
+        return UnsavedWorkbookName(project) ?? project.GetString("Name") ?? "VBAProject";
+    }
+
+    /// <summary>
+    /// The host's own name for a never-saved workbook ("Book1", "Document1"), read off the
+    /// document module's Properties - the road the Properties panel already reads workbook
+    /// rows by, so the trust switch stays out of it. The module is found by SHAPE, not name:
+    /// "ThisWorkbook" is localized, a string-valued "FullName" property among a document
+    /// component's rows is not, and only the workbook's own module carries one. Null when no
+    /// component answers the shape, and the caller's project-name fallback is the name these
+    /// workbooks had before this existed.
+    /// </summary>
+    private static string? UnsavedWorkbookName(DispatchObject project)
+    {
+        try
+        {
+            using var components = project.GetObject("VBComponents");
+            var count = components?.GetInt32("Count") ?? 0;
+            for (var i = 1; i <= count; i++)
+            {
+                using var component = components!.GetItem(i);
+                if (component?.GetInt32("Type") != 100)
+                {
+                    continue;
+                }
+
+                if (DocumentPropertyValue(component, "FullName") is not { Length: > 0 })
+                {
+                    continue;   // document-shaped, but a sheet: no FullName row
+                }
+
+                if (DocumentPropertyValue(component, "Name") is { Length: > 0 } answer)
+                {
+                    return answer;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // A project mid-teardown answers nothing; so does a host with no document modules.
+        }
+
+        return null;
+    }
+
+    /// <summary>One string-valued row of a document component's Properties, or null - a
+    /// component that does not carry the row answers by throwing, and that is an answer.</summary>
+    private static string? DocumentPropertyValue(DispatchObject component, string property)
+    {
+        try
+        {
+            using var properties = component.GetObject("Properties");
+            using var row = properties?.CallObject("Item", property);
+            return row?.GetString("Value");
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>

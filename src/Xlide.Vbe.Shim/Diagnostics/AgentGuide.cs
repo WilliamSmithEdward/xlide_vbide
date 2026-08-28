@@ -190,6 +190,15 @@ internal static class AgentGuide
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
             "GET menus", true, DoorPolicy.Open),
+        new("workbook", "POST", "action=close&project=<name>&saveChanges=0|1",
+            "Closes one open workbook, the host's own File Close with the save question answered "
+            + "in the request. The ONE safe route for the gesture: an immediate-window line runs "
+            + "inside the active project, so a close typed there tears down its own host and "
+            + "kills the editor - the evaluator refuses those lines and points here.",
+            "POST workbook?action=close&project=Book1&saveChanges=0", false, DoorPolicy.Open,
+            "saveChanges is required - a close that picked silently would lose work or write a "
+            + "file nobody asked for. saveChanges=1 on a never-saved workbook raises the host's "
+            + "own Save As dialog."),
         new("analysis", "GET", "rule=<code>?&severity=off|warning|error|information|default?&module=?&line=?&code=?&project=?",
             "The analyzer rule catalog with each rule's LEGAL severity moves and this machine's "
             + "standing overrides. rule+severity changes one, machine-wide, persisted in "

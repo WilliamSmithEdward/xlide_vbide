@@ -846,6 +846,16 @@ public sealed record DebugCommandReply(
     [property: JsonPropertyName("command")] int Command,
     [property: JsonPropertyName("detail")] string Detail = "");
 
+/// <summary>
+/// A workbook closed through the door: which one, and what happened to its changes. The one
+/// close no other route can perform safely - the immediate window's line runs inside the very
+/// project a close would tear down (#13).
+/// </summary>
+public sealed record DebugWorkbookReply(
+    [property: JsonPropertyName("closed")] bool Closed,
+    [property: JsonPropertyName("workbook")] string Workbook,
+    [property: JsonPropertyName("savedChanges")] bool SavedChanges);
+
 /// <summary>A slice of the shim log, from a byte offset the caller advances.</summary>
 public sealed record DebugLogReply(
     [property: JsonPropertyName("lines")] string[] Lines,
@@ -1576,6 +1586,7 @@ public sealed record DebugAgentExamplesReply(
 [JsonSerializable(typeof(DebugAnalysisReply))]
 [JsonSerializable(typeof(DebugBarsReply))]
 [JsonSerializable(typeof(DebugCommandReply))]
+[JsonSerializable(typeof(DebugWorkbookReply))]
 [JsonSerializable(typeof(DebugCloseReply))]
 [JsonSerializable(typeof(DebugUndoRenameReply))]
 [JsonSerializable(typeof(DebugLogReply))]
