@@ -223,7 +223,12 @@ internal sealed unsafe class OverlayWindow : IDisposable
     /// nothing is worse than before. The drain is idempotent, so both arriving costs an empty
     /// queue check.
     /// </summary>
-    public void RunOnHostThread(Action action)
+    /// <summary>
+    /// Queues work for the host thread. FALSE means it was not queued and never will run, which
+    /// the caller must not mistake for slowness: a dropped action that answers like a busy one
+    /// costs the caller its whole timeout and then blames the wrong thing.
+    /// </summary>
+    public bool RunOnHostThread(Action action)
     {
         ArgumentNullException.ThrowIfNull(action);
 
@@ -232,7 +237,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
             // Dropped, and said so: a marshal that vanishes silently once cost two days of
             // completions that never arrived.
             Log.Info("overlay: an action for the host thread was dropped, the window is gone");
-            return;
+            return false;
         }
 
         _actions.Enqueue(action);
@@ -243,6 +248,7 @@ internal sealed unsafe class OverlayWindow : IDisposable
 
         // The guarantee.
         Win32.SetTimer(_handle, ActionTimerId, 0, 0);
+        return true;
     }
 
     /// <summary>Runs everything queued for the host thread. Only the window's thread calls this.</summary>

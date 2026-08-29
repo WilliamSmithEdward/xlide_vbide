@@ -305,8 +305,27 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, moduleName, workbook or null, newName).</summary>
     public Action<int, string, string?, string>? ModuleRenameRequested { get; set; }
 
-    /// <summary>Runs an action on the host thread, which owns the browser and the object model.</summary>
-    public void RunOnHostThread(Action action) => _overlay?.RunOnHostThread(action);
+    /// <summary>
+    /// Runs an action on the host thread, which owns the browser and the object model. FALSE
+    /// means there was nowhere to queue it and it will never run.
+    ///
+    /// THE NULL OVERLAY USED TO SWALLOW THE ACTION IN SILENCE - `_overlay?.` and nothing else -
+    /// and the caller then waited its whole three-second budget for work that had gone nowhere,
+    /// and was told "the host thread has not answered... that usually means VBA is running your
+    /// code". Measured at session teardown on 2026-08-29, where every in-flight request got that
+    /// message while the truth was that the surface was being taken down. Saying so costs one
+    /// bool and turns a misleading wait into an immediate, honest refusal.
+    /// </summary>
+    public bool RunOnHostThread(Action action)
+    {
+        if (_overlay is { } overlay)
+        {
+            return overlay.RunOnHostThread(action);
+        }
+
+        Log.Info("editor surface: an action for the host thread was dropped, there is no overlay");
+        return false;
+    }
 
     /// <summary>The marshal queue's depth and drain/enqueue ages, for the stats route to serve
     /// when a request has timed out and laneHolder cannot say why. Zeroed shape when the overlay

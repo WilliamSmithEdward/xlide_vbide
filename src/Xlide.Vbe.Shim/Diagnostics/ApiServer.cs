@@ -1552,7 +1552,21 @@ public sealed record DebugStatsReply(
     /// </summary>
     [property: JsonPropertyName("marshalQueueDepth")] int MarshalQueueDepth,
     [property: JsonPropertyName("marshalLastDrainMs")] long MarshalLastDrainMs,
-    [property: JsonPropertyName("marshalLastEnqueueMs")] long MarshalLastEnqueueMs);
+    [property: JsonPropertyName("marshalLastEnqueueMs")] long MarshalLastEnqueueMs,
+    /// <summary>
+    /// The .NET thread pool, which is what actually runs this door: the listener hands every
+    /// connection to `Task.Run`, and a request that is waiting on the host thread OCCUPIES its
+    /// pool thread for the whole three-second budget. Enough of those at once and the pool has
+    /// no thread left to start the next `Serve` - so a request arrives at the socket and is
+    /// never processed at all, which looks from outside exactly like a door that has gone dark
+    /// while the machinery it would have used sits idle. That is the shape #12's freeze wore
+    /// (marshal queue empty, requests not arriving), and these three are how it is told apart
+    /// from a genuinely stuck host thread. `poolBusyWorkers` is threads in use, `poolPending`
+    /// work items queued and not yet started, `poolThreads` the pool's current size.
+    /// </summary>
+    [property: JsonPropertyName("poolBusyWorkers")] int PoolBusyWorkers,
+    [property: JsonPropertyName("poolPending")] long PoolPending,
+    [property: JsonPropertyName("poolThreads")] int PoolThreads);
 
 /// <summary>The `agent` front door: identity, orientation, and the trail onward.</summary>
 public sealed record DebugAgentReply(

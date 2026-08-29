@@ -508,7 +508,11 @@ internal sealed partial class AddInSession
     /// The caller owns disposal, because the dispatch's blocked path keeps waiting on Done
     /// after dismissing the dialog that owned the thread.
     /// </summary>
-    private readonly record struct HostCrossing(bool Answered, ManualResetEventSlim Done) : IDisposable
+    /// <summary><paramref name="Queued"/> is false when the work never reached the host thread's
+    /// queue at all - a different thing from work that was queued and did not finish, and the
+    /// caller must answer them differently.</summary>
+    private readonly record struct HostCrossing(bool Answered, ManualResetEventSlim Done, bool Queued)
+        : IDisposable
     {
         public void Dispose() => Done.Dispose();
     }
@@ -538,14 +542,15 @@ internal sealed partial class AddInSession
                 throw;
             }
 
-            return new HostCrossing(true, inline);
+            return new HostCrossing(true, inline, Queued: true);
         }
 
         var done = new ManualResetEventSlim(false);
         var began = Environment.TickCount64;
+        bool queued;
         try
         {
-            host.RunOnHostThread(() =>
+            queued = host.RunOnHostThread(() =>
             {
                 try
                 {
@@ -563,9 +568,17 @@ internal sealed partial class AddInSession
             throw;
         }
 
+        // WORK THAT WAS NEVER QUEUED IS NOT WORK THAT IS SLOW. Waiting the full budget for an
+        // action nobody holds only delays a wrong answer - the caller was told the host thread
+        // was busy with VBA when the surface had simply gone (2026-08-29).
+        if (!queued)
+        {
+            return new HostCrossing(false, done, Queued: false);
+        }
+
         var answered = done.Wait(TimeSpan.FromSeconds(3));
         PerfCounters.Marshal(Environment.TickCount64 - began);
-        return new HostCrossing(answered, done);
+        return new HostCrossing(answered, done, Queued: true);
     }
 
     /// <summary>
@@ -2740,6 +2753,8 @@ internal sealed partial class AddInSession
                 // Read from THIS pool thread, never crossed to the host: the whole value of
                 // these is that they answer while the host thread is the thing that is stuck.
                 var queue = _editorSurface?.MarshalQueueState() ?? (Depth: 0, LastDrainAgeMs: -1L, LastEnqueueAgeMs: -1L);
+                System.Threading.ThreadPool.GetMaxThreads(out var poolMaxWorkers, out _);
+                System.Threading.ThreadPool.GetAvailableThreads(out var poolFreeWorkers, out _);
                 var messages = WebView.WebView2Surface.MessageTap.Totals;
                 using var self = System.Diagnostics.Process.GetCurrentProcess();
                 return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
@@ -2781,7 +2796,10 @@ internal sealed partial class AddInSession
                             : Environment.TickCount64 - System.Threading.Interlocked.Read(ref _laneHeldSince),
                         MarshalQueueDepth: queue.Depth,
                         MarshalLastDrainMs: queue.LastDrainAgeMs,
-                        MarshalLastEnqueueMs: queue.LastEnqueueAgeMs),
+                        MarshalLastEnqueueMs: queue.LastEnqueueAgeMs,
+                        PoolBusyWorkers: poolMaxWorkers - poolFreeWorkers,
+                        PoolPending: System.Threading.ThreadPool.PendingWorkItemCount,
+                        PoolThreads: System.Threading.ThreadPool.ThreadCount),
                     DebugJsonContext.Default.DebugStatsReply));
             }
         }
@@ -2803,7 +2821,26 @@ internal sealed partial class AddInSession
         // in flight was raised BY it, and only those may be answered automatically: a dialog
         // the developer opened is theirs, and closing it under them would be worse than any
         // hang. See the timeout path below.
+        //
+        // TIMED, because this snapshot is on the critical path of every marshaled request and
+        // it reads OTHER processes' windows. A cross-process window text read is a SendMessage
+        // under the skin, and one aimed at a thread that is not pumping blocks the caller - so
+        // this line, which needs no host thread in principle, can hold a request before it ever
+        // reaches the queue. That is one of the two ways #12's freeze could keep the marshal
+        // queue idle while `project` times out (measured: depth 0 and both queue ages climbing
+        // in lockstep for 100+ seconds), and the trace below tells them apart.
+        var snapshotBegan = Environment.TickCount64;
         var standingBefore = DialogWatch.Dialogs().Select(row => row.Window).ToHashSet(StringComparer.Ordinal);
+        var snapshotMs = Environment.TickCount64 - snapshotBegan;
+
+        // WHEN the crossing began, which is what the timeout trace compares the queue's enqueue
+        // age against. Comparing the age against a BEFORE reading is the obvious thing and it is
+        // wrong - ages grow with the clock, so after a three-second wait the age always exceeds
+        // whatever was read first, and the trace reported "enqueued NO" for a request whose own
+        // action was demonstrably queued and drained (caught by breaking it on purpose, 2026-08-29).
+        // An enqueue that happened during this crossing has an age no larger than the crossing's
+        // own elapsed time, which is true whatever the clock has done.
+        var crossingBegan = Environment.TickCount64;
 
         // The crossing samples PerfCounters.Marshal itself: every marshaled request doubles as
         // a probe of the host thread's responsiveness, and the stats route serves the sample.
@@ -2857,9 +2894,51 @@ internal sealed partial class AddInSession
             return ApiServer.ApiReply.Json(answer);
         }
 
+        // Never queued: answer at once and say the true thing. The old path waited the whole
+        // budget and then blamed VBA for work that had gone nowhere.
+        if (!crossing.Queued)
+        {
+            Log.Info($"marshal: '{request.Route}' was not queued - the surface has no overlay");
+            return ApiError("the editor surface has no window to run work on, so nothing was run - "
+                + "the session is shutting down or the surface is being rebuilt");
+        }
+
+        /*
+         * THE TIMEOUT SAYS WHERE THE TIME WENT, because "the host thread did not answer" is the
+         * least useful true statement this door makes, and #12 is the proof: a four-minute
+         * freeze where the busy message blamed VBA, the marshal queue was measurably idle
+         * (depth 0, both ages climbing in lockstep), and nothing recorded what the request
+         * itself had done. One line at the one moment it matters, so a post-mortem reads the
+         * answer instead of inferring it:
+         *
+         *   snapshot     how long the pre-crossing dialog read took - a cross-process window
+         *                read blocking is a hold BEFORE the queue, invisible to every other eye
+         *   enqueued     whether this request's own action reached the queue at all
+         *   depth/ages   the queue as it stands now
+         *   heartbeat    what the busy message is about to blame
+         */
+        var queueAfter = host.MarshalQueueState();
+        var crossingMs = Environment.TickCount64 - crossingBegan;
+        var enqueued = queueAfter.LastEnqueueAgeMs >= 0
+            && queueAfter.LastEnqueueAgeMs <= crossingMs;
+        Log.Info($"marshal: '{request.Route}' timed out - snapshot {snapshotMs}ms, "
+            + $"enqueued {(enqueued ? "yes" : "NO")}, depth {queueAfter.Depth}, "
+            + $"drain age {queueAfter.LastDrainAgeMs}ms, enqueue age {queueAfter.LastEnqueueAgeMs}ms, "
+            + $"heartbeat {PerfCounters.HeartbeatAgeMs}ms");
+
         // A request that asked to keep what it opens is not rescued from it: opening a modal
-        // was the point, and the caller dismisses it when finished.
-        return AnswerBlockedRequest(standingBefore, crossing.Done, () => answer, request.Query.ContainsKey("keep"));
+        // was the point, and the caller dismisses it when finished. The lane's holder rides
+        // along so the refusal can name our own long-running route instead of blaming VBA.
+        var holderNow = _laneHolder;
+        return AnswerBlockedRequest(
+            standingBefore,
+            crossing.Done,
+            () => answer,
+            request.Query.ContainsKey("keep"),
+            holderNow,
+            holderNow is null
+                ? 0
+                : Environment.TickCount64 - System.Threading.Interlocked.Read(ref _laneHeldSince));
     }
 
     /// <summary>
@@ -3295,7 +3374,9 @@ internal sealed partial class AddInSession
         HashSet<string> standingBefore,
         ManualResetEventSlim done,
         Func<string?> answerSoFar,
-        bool keep)
+        bool keep,
+        string? laneHolder = null,
+        long laneHeldMs = 0)
     {
         var blocking = keep
             ? null
@@ -3323,13 +3404,31 @@ internal sealed partial class AddInSession
              * The remedy is named because this door does not have one. Ctrl+Break is a keyboard
              * interrupt VBA's own pump handles, and nothing marshalled can substitute for it.
              */
+            /*
+             * OUR OWN WORK IS THE COMMONEST HOLDER, and blaming VBA for it sent an investigation
+             * four hours the wrong way (#12). The debug poll stamps the heartbeat on the SAME
+             * thread this door marshals onto, so a route of ours that runs long ages the
+             * heartbeat past two seconds and then reads as "VBA is running your code" - with the
+             * developer's project sitting idle in design mode. Measured 2026-08-29: `project`
+             * over a hundred-component project held the thread for 6,359ms and every caller was
+             * told to press Ctrl+Break.
+             *
+             * `laneHolder` is the truth when it is set: the route whose work is on the thread
+             * right now, which is nearly always the caller's own previous request or a sibling.
+             * It is named FIRST, and VBA is blamed only when nothing of ours holds the lane.
+             */
             var asleep = PerfCounters.HeartbeatAgeMs;
-            var why = asleep > 2000
-                ? $"the host thread has not answered for {asleep}ms. That usually means VBA is "
-                    + "running your code - a loop with no exit owns the editor's thread until it "
-                    + "ends, and this door's own Break and Reset need that same thread, so they "
-                    + "cannot interrupt it. Press Ctrl+Break in the editor."
-                : "the host thread did not answer in time";
+            var why = laneHolder is { Length: > 0 } holder
+                ? $"the host thread is busy inside this door's own '{holder}' work, {laneHeldMs}ms "
+                    + "so far. Nothing is stuck: that route is taking longer than the three-second "
+                    + "budget a request waits, which a large project can do on its own. Ask again, "
+                    + "or give the caller a longer wait."
+                : asleep > 2000
+                    ? $"the host thread has not answered for {asleep}ms. That usually means VBA is "
+                        + "running your code - a loop with no exit owns the editor's thread until it "
+                        + "ends, and this door's own Break and Reset need that same thread, so they "
+                        + "cannot interrupt it. Press Ctrl+Break in the editor."
+                    : "the host thread did not answer in time";
 
             return ApiServer.ApiReply.Json(System.Text.Json.JsonSerializer.Serialize(
                 new DebugBlockedReply(

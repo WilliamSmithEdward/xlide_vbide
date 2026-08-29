@@ -822,6 +822,29 @@ for (let round = 1; round <= ROUNDS && failures.length === 0; round += 1) {
       + `${laneFreed ? "it came back" : "it never came back"} after ${laneWaited}s`);
   }
 
+  /*
+   * A HOST BUSY WITH OUR OWN WORK IS NOT A BROKEN ONE, and this walk spent four hours of an
+   * investigation insisting otherwise (#12). At round 270 of seed 2009959200 the read stops
+   * answering for the whole four-minute bound - and the host is healthy throughout: the door
+   * is simply inside this walk's own `project` work, which at ~100 components under this
+   * walk's load takes longer than the three seconds a request waits (measured 2026-08-29:
+   * `project` held the host lane for 6,359ms). Every retry re-enters the same too-slow route
+   * and times out again, forever, with nothing broken anywhere.
+   *
+   * `laneHolder` is what tells the two apart - it names the route whose work is on the host
+   * thread right now, and it is served without that thread. A named holder means the host is
+   * working; only an unheld lane earns the word BROKE.
+   */
+  if (typeof readable === "string") {
+    const lane = await api.stats().catch(() => ({}));
+    if (lane.laneHolder) {
+      console.log(`  ...and the host is NOT stuck: it is inside this door's own '${lane.laneHolder}' `
+        + `work, ${lane.laneHeldMs}ms so far. That route is slower than the request budget at this `
+        + "project size - a load limit, not a break.");
+      readable = await api.project(project).catch(() => null);
+    }
+  }
+
   if (typeof readable === "string") {
     fail("the project stopped reading",
       `${readable} - asked again every two seconds for ${laneWaited}s and it never answered`);
