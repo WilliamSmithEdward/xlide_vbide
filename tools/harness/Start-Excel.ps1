@@ -38,7 +38,19 @@ param(
 
     # Close any Excel already running first. A publish needs this anyway, because a host holds an
     # add-in library open for its lifetime.
+    #
+    # IT CLOSES EVERY EXCEL ON THE MACHINE, including workbooks that are none of this harness's
+    # business. Use it when the machine is yours; leave it off when somebody is working beside you.
     [switch] $Fresh,
+
+    # Start a SEPARATE Excel process rather than letting Excel reuse the one already running.
+    #
+    # Excel puts every workbook in one process by default, which is what makes several fixtures
+    # one session and one door - usually the point. The opposite state is its own thing: two
+    # PROCESSES means two add-in loads, two doors, and two registrations of the one inside-door
+    # name, which is where the fleet behaviour lives (#11) and which nothing here could set up.
+    # `/x` is Excel's own switch for it.
+    [switch] $Separate,
 
     # Seconds to wait for the host's window to appear.
     [int] $TimeoutSeconds = 90
@@ -135,6 +147,7 @@ foreach ($version in @('16.0', '15.0')) {
 # Quoted individually: a fixture path with a space in it becomes two arguments otherwise, and
 # Excel then opens neither and offers to create them.
 $arguments = @($Workbook | ForEach-Object { '"{0}"' -f $_ })
+if ($Separate) { $arguments = @('/x') + $arguments }
 $process = Start-Process -FilePath (Find-ExcelExecutable) -ArgumentList $arguments -PassThru
 $names = ($Workbook | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
 Write-Host "Started Excel as process $($process.Id) on $names."

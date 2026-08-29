@@ -985,6 +985,27 @@ Two details are load-bearing, and both were added after the walk lied about a cl
   project argument: the walk opened both workbooks' `Helpers`, reported `collision=0`, and was
   right.
 
+### Two processes, and the one inside-door name
+
+```bash
+tools\harness\Start-Excel.ps1 -Workbook artifacts\fixtures\TwinFixture.xlsm -Separate
+tools\harness\Test-InsideDoorFleet.ps1
+```
+
+`-Separate` passes Excel's own `/x`, which is the only way to get a second PROCESS: several
+workbooks on one command line are one process, one add-in load and one door, which is usually
+the point. Two processes means two registrations of the single inside-door name, and that is
+where the fleet behaviour lives.
+
+`Test-InsideDoorFleet.ps1` measures what a force-killed holder does to it: start A, start B in
+its own process, ask the name who holds it, kill the holder, then ask again every two seconds.
+Measured twice on 2026-08-29, identically - **the first bind after the kill fails with RPC
+0x800706BE (it reaches the dead holder), and the live session answers by +2s.** A killed SOLO
+session leaves the name clean instead, refusing with `MK_E_UNAVAILABLE` exactly as an
+unregistered name does. So the rule for any caller of `GetObject(, "Xlide.Api")` is to retry
+once on an RPC failure; there is nothing to sweep, because a dead process's registration is
+Windows' to clear and it clears it.
+
 ### Letting chaos drive
 
 ```bash

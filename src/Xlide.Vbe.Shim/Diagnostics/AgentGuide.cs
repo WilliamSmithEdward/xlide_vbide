@@ -404,8 +404,11 @@ internal static class AgentGuide
                 + "GetObject(, \"Xlide.Api\").Request(\"route?args\"[, body]) answers the same "
                 + "JSON, and .Guide answers this very reply. No Trust Center setting is "
                 + "required. With several Office instances running, GetObject binds one of "
-                + "them; check pid in Request(\"agent\"). Routes marked httpOnly in the table "
-                + "answer only at this HTTP door.",
+                + "them; check pid in Request(\"agent\"). RETRY ONCE ON AN RPC FAILURE "
+                + "(0x800706BE): the name outlives a session that was killed rather than closed, "
+                + "and the bind reaches that dead holder until Windows clears it - measured at "
+                + "about two seconds, after which a live session answers. Routes marked httpOnly "
+                + "in the table answer only at this HTTP door.",
             StartHere:
             [
                 "GET agent/routes for the route table.",

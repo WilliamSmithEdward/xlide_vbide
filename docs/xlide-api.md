@@ -110,6 +110,14 @@ Three things to know, all reported by the door itself:
   address by pid. A proxied route also escapes this door's host-thread limits: the peer
   answers on its own pool, so even `httpOnly` routes answer through `@`. `Request("agent")`
   still carries `pid` for callers that need to check who holds the name.
+- **Retry once on an RPC failure** (`0x800706BE`). A session that is KILLED rather than closed
+  leaves its registration behind for a moment, and the next bind reaches that dead holder -
+  measured twice on 2026-08-29 with `Test-InsideDoorFleet.ps1`, two Excel processes and the
+  name-holder force-killed: the first bind fails with RPC, and the surviving session answers
+  by +2s. There is nothing for this product to sweep, because a dead process's ROT entry is
+  Windows' to clear and it clears it; a caller only has to ask twice. A killed SOLO session
+  leaves no corpse at all - the name refuses with `MK_E_UNAVAILABLE`, exactly as an
+  unregistered one does.
 
 ## Routes
 
