@@ -39,50 +39,20 @@ internal sealed partial class InsideDoor : IDispatch
         _answer = answer;
     }
 
-    public int GetTypeInfoCount(out uint count)
-    {
-        count = 0;
-        return HResult.Ok;
-    }
+    public int GetTypeInfoCount(out uint count) => Dispatch.NoTypeInfoCount(out count);
 
-    public int GetTypeInfo(uint typeInfoIndex, uint lcid, out nint typeInfo)
-    {
-        typeInfo = 0;
-        return HResult.Fail;
-    }
+    public int GetTypeInfo(uint typeInfoIndex, uint lcid, out nint typeInfo) =>
+        Dispatch.NoTypeInfo(out typeInfo);
 
-    public unsafe int GetIDsOfNames(in Guid riid, nint names, uint nameCount, uint lcid, nint dispIds)
-    {
-        if (names == 0 || dispIds == 0 || nameCount == 0)
+    public int GetIDsOfNames(in Guid riid, nint names, uint nameCount, uint lcid, nint dispIds) =>
+        // Case-insensitive, unlike the extensibility interface: the callers here are people
+        // typing into the Immediate window, not a host reading a vtable.
+        Dispatch.ResolveNames(names, nameCount, dispIds, name => name?.ToUpperInvariant() switch
         {
-            return HResult.InvalidArg;
-        }
-
-        var namePointers = (char**)names;
-        var results = (int*)dispIds;
-        var resolvedAll = true;
-
-        for (var i = 0u; i < nameCount; i++)
-        {
-            // Case-insensitive, unlike the extensibility interface above: the callers here are
-            // people typing into the Immediate window, not a host reading a vtable.
-            var name = Marshal.PtrToStringUni((nint)namePointers[i]);
-            var dispId = name?.ToUpperInvariant() switch
-            {
-                "REQUEST" => RequestDispId,
-                "GUIDE" => GuideDispId,
-                _ => DispId.Unknown,
-            };
-
-            results[i] = dispId;
-            if (dispId == DispId.Unknown)
-            {
-                resolvedAll = false;
-            }
-        }
-
-        return resolvedAll ? HResult.Ok : HResult.DispUnknownName;
-    }
+            "REQUEST" => RequestDispId,
+            "GUIDE" => GuideDispId,
+            _ => DispId.Unknown,
+        });
 
     public unsafe int Invoke(
         int dispIdMember,

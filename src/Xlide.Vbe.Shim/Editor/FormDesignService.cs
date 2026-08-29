@@ -1102,7 +1102,6 @@ internal static partial class FormDesignService
         }
     }
 
-    /// <summary>The toolbox name for an extender's internal interface, unknown names untouched.</summary>
     /// <summary>A control's toolbox kind, read off the live dispatch; "Control" when it
     /// will not answer.</summary>
     internal static string FriendlyTypeOf(DispatchObject control)
@@ -1129,6 +1128,9 @@ internal static partial class FormDesignService
         _ => "Click",
     };
 
+    /// <summary>The toolbox name for an extender's internal interface, unknown names untouched.
+    /// The ONE copy of this table: the debug walk read it from a second one until 2026-08-29,
+    /// which is one place for the mapping to rot when MSForms grows a control.</summary>
     private static string FriendlyType(string raw) => raw switch
     {
         "ILabelControl" => "Label",

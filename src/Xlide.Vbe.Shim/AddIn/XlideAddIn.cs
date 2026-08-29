@@ -321,43 +321,13 @@ internal sealed partial class XlideAddIn : IDTExtensibility2, IDispatch, IDispos
     // The remaining members complete the dual interface. The editor binds through the vtable, but
     // a host is free to late-bind, and an incomplete dual interface fails obscurely when it does.
 
-    public int GetTypeInfoCount(out uint count)
-    {
-        count = 0;
-        return HResult.Ok;
-    }
+    public int GetTypeInfoCount(out uint count) => Dispatch.NoTypeInfoCount(out count);
 
-    public int GetTypeInfo(uint typeInfoIndex, uint lcid, out nint typeInfo)
-    {
-        typeInfo = 0;
-        return HResult.Fail;
-    }
+    public int GetTypeInfo(uint typeInfoIndex, uint lcid, out nint typeInfo) =>
+        Dispatch.NoTypeInfo(out typeInfo);
 
-    public unsafe int GetIDsOfNames(in Guid riid, nint names, uint nameCount, uint lcid, nint dispIds)
-    {
-        if (names == 0 || dispIds == 0 || nameCount == 0)
-        {
-            return HResult.InvalidArg;
-        }
-
-        var namePointers = (char**)names;
-        var results = (int*)dispIds;
-        var resolvedAll = true;
-
-        for (var i = 0u; i < nameCount; i++)
-        {
-            var name = Marshal.PtrToStringUni((nint)namePointers[i]);
-            var dispId = DispIdForName(name);
-            results[i] = dispId;
-
-            if (dispId == DispId.Unknown)
-            {
-                resolvedAll = false;
-            }
-        }
-
-        return resolvedAll ? HResult.Ok : HResult.DispUnknownName;
-    }
+    public int GetIDsOfNames(in Guid riid, nint names, uint nameCount, uint lcid, nint dispIds) =>
+        Dispatch.ResolveNames(names, nameCount, dispIds, DispIdForName);
 
     public unsafe int Invoke(
         int dispIdMember,

@@ -543,21 +543,16 @@ internal sealed partial class AddInSession
     }
 
     /// <summary>
-    /// A collection's items in order, whichever end it counts from. The forms runtime indexes
-    /// from zero and the editor's own collections from one; probing the first item once decides,
-    /// and a probe that fails both ways is an empty answer rather than an error.
+    /// One control as the debug walk reports it: its kind, where it sits, and the first ring of
+    /// appearance. Every read is tolerant per property, because controls differ and a member a
+    /// control does not carry is an answer rather than an error.
     /// </summary>
-     private static DebugDesignerControl ReadDesignerControl(DispatchObject control, string name)
+    private static DebugDesignerControl ReadDesignerControl(DispatchObject control, string name)
     {
-        string type;
-        try
-        {
-            type = FriendlyControlType(control.TypeName() ?? "Control");
-        }
-        catch
-        {
-            type = "Control";
-        }
+        // The design service's own reading of a control's kind, table and "Control" fallback
+        // included. This carried a second copy of that fifteen-row table, which is one place
+        // for the mapping to rot when MSForms grows a control.
+        var type = FriendlyTypeOf(control);
 
         return new DebugDesignerControl(
             name,
@@ -656,23 +651,4 @@ internal sealed partial class AddInSession
     /// stable, documented-by-observation, and useless on a canvas. A name not in this table
     /// passes through untouched, so a third-party control stays honestly itself.
     /// </summary>
-    private static string FriendlyControlType(string raw) => raw switch
-    {
-        "ILabelControl" => "Label",
-        "IMdcText" => "TextBox",
-        "IMdcCombo" => "ComboBox",
-        "IMdcList" => "ListBox",
-        "IMdcCheckBox" => "CheckBox",
-        "IMdcOptionButton" => "OptionButton",
-        "IMdcToggleButton" => "ToggleButton",
-        "IOptionFrame" => "Frame",
-        "ICommandButton" => "CommandButton",
-        "ITabStrip" => "TabStrip",
-        "IMultiPage" => "MultiPage",
-        "IPage" => "Page",
-        "IScrollbar" or "IScrollBar" => "ScrollBar",
-        "ISpinbutton" or "ISpinButton" => "SpinButton",
-        "IImage" => "Image",
-        _ => raw,
-    };
 }
