@@ -24,7 +24,7 @@
  *   node tools\harness\immediate-watch.mjs
  */
 
-import { open, wait } from "./xlide-api.mjs";
+import { open, wait, reporter } from "./xlide-api.mjs";
 
 const api = await open({});
 /*
@@ -54,18 +54,7 @@ const project = runnable
   ? await api.project(home.project)
   : { project: "(none open)", components: [] };
 
-let passed = 0;
-const failures = [];
-
-function check(what, ok, detail) {
-  if (ok) {
-    passed++;
-    console.log(`  ok   ${what}${detail ? `  -- ${detail}` : ""}`);
-  } else {
-    failures.push(`${what}${detail ? `: ${detail}` : ""}`);
-    console.log(`  FAIL ${what}${detail ? `\n       ${detail}` : ""}`);
-  }
-}
+const { check, done } = reporter();
 
 console.log(`against ${project.project}\n`);
 
@@ -198,10 +187,5 @@ check("no COM wrapper was leaked by any of it",
   stats.comWrappersLive < 100,
   `${stats.comWrappersLive} live, ${stats.comWrappersTaken} taken`);
 
-console.log(`\n${passed} passed, ${failures.length} failed`);
-for (const failure of failures) {
-  console.log(`  ${failure}`);
-}
-
-process.exitCode = failures.length === 0 ? 0 : 1;
+process.exitCode = done();
 }

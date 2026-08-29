@@ -14,11 +14,9 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { open, wait, waitFor, waitUntilStable } from "./xlide-api.mjs";
+import { open, wait, waitFor, waitUntilStable, comparingReporter } from "./xlide-api.mjs";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
 
 // WHICH PLANNER. Everything below runs identically against either, which is the point of having
 // two: the choice decides who works out what an import would do, never who does it or what the
@@ -37,17 +35,7 @@ if (chosen !== planner) {
 console.log(`planner: ${planner}
 `);
 
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 // UNIQUE PER RUN. A fixed name inherits the previous run's module when a cleanup did not take,
 // and then the plan reads "unchanged" instead of "will-create" and the suite reports a defect that
@@ -488,5 +476,4 @@ try {
   await cleanUp();
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

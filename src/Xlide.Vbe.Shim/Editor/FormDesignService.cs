@@ -954,6 +954,11 @@ internal static partial class FormDesignService
         }
     }
 
+    /// <summary>
+    /// A collection's items in order, whichever end it counts from. The forms runtime indexes
+    /// from zero and the editor's own collections from one; probing the first item once decides,
+    /// and a probe that fails both ways is an empty answer rather than an error.
+    /// </summary>
     internal static IEnumerable<DispatchObject> ItemsOf(DispatchObject collection)
     {
         int count;

@@ -29,7 +29,7 @@
  *   node tools\harness\com-leak.mjs 40      # more rounds, for a slower leak
  */
 
-import { open, wait } from "./xlide-api.mjs";
+import { open, wait, reporter } from "./xlide-api.mjs";
 import { buildForm } from "./form-plan.mjs";
 
 const api = await open({});
@@ -57,22 +57,11 @@ if (!sample) {
 console.log(`sweeping against ${project.project}, sampling module ${sample}
 `);
 
-let passed = 0;
 let totalRounds = 0;
 
 /** Each row's handle delta, kept so one jump can be told apart from a leak spread over the sweep. */
 const handleRows = [];
-const failures = [];
-
-function check(what, ok, detail) {
-  if (ok) {
-    passed++;
-    console.log(`ok   ${what}`);
-  } else {
-    failures.push(`${what}${detail ? `: ${detail}` : ""}`);
-    console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`);
-  }
-}
+const { check, done } = reporter();
 
 /**
  * What an operation is holding afterwards, in all three currencies that can run out.
@@ -516,9 +505,4 @@ check("every wrapper given back was actually released",
   + `${notReleased} wrappers are counted home with their reference still held, and the finalizer `
   + "thread has them. This is the shape of the defect that killed Excel five times.");
 
-console.log(`\n${passed} passed, ${failures.length} failed`);
-for (const failure of failures) {
-  console.log(`  ${failure}`);
-}
-
-process.exitCode = failures.length === 0 ? 0 : 1;
+process.exitCode = done();

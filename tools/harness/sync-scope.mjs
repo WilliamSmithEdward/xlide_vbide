@@ -25,23 +25,10 @@
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
-
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 const projects = (await api.projects()).projects;
 if (projects.length < 2) {
@@ -130,5 +117,4 @@ await api.act("syncDialog", { press: "close" });
 rmSync(folder, { recursive: true, force: true });
 rmSync(`${folder}-other`, { recursive: true, force: true });
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

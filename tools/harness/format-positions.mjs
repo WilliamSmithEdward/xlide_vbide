@@ -24,7 +24,7 @@
  *   node tools\harness\format-positions.mjs
  */
 
-import { open, wait, waitFor, waitUntilStable } from "./xlide-api.mjs";
+import { open, wait, waitFor, waitUntilStable, reporter } from "./xlide-api.mjs";
 
 const api = await open({});
 /*
@@ -80,18 +80,7 @@ const ambiguousOriginal = runnable
   ? (await api.readModule(AMBIGUOUS, project.projectId)).text ?? ""
   : "";
 
-let passed = 0;
-const failures = [];
-
-function check(what, ok, detail) {
-  if (ok) {
-    passed++;
-    console.log(`ok   ${what}`);
-  } else {
-    failures.push(`${what}${detail ? `: ${detail}` : ""}`);
-    console.log(`FAIL ${what}${detail ? `\n     ${detail}` : ""}`);
-  }
-}
+const { check, done } = reporter();
 
 // The offending statement at COLUMN 1, which is the developer's own recipe.
 const SEED = [
@@ -570,10 +559,5 @@ if (runnable) try {
     || ((await api.readModule(AMBIGUOUS, project.projectId)).text ?? "").trim() === ambiguousOriginal.trim();
   console.log(`\n${target} restored: ${restored}, ${AMBIGUOUS} restored: ${ambiguousBack}`);
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const failure of failures) {
-    console.log(`  ${failure}`);
-  }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }

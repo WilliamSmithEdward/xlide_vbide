@@ -527,7 +527,11 @@ internal sealed unsafe class TypeLibraryCatalog : IDisposable
                 return "Integer";
             case VtI8:
                 return "LongLong";
-            case VtDecimal:
+            // Both say Variant, and both are named rather than left to the default: Decimal
+            // because VBA has no Decimal type of its own, and Variant because a VARIANT-typed
+            // member reaching the default arm would be indistinguishable from one this table
+            // has never heard of.
+            case VtDecimal or VtVariant:
                 return "Variant";
             default:
                 return "Variant";

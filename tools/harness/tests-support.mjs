@@ -24,23 +24,10 @@
  *   node tools\harness\tests-support.mjs
  */
 
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
-
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 const projects = (await api.projects()).projects;
 if (projects.length < 2) {
@@ -151,5 +138,4 @@ for (const [file, support] of before) {
   }
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

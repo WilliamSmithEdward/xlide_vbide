@@ -27,23 +27,10 @@
  *   node tools\harness\change-log.mjs
  */
 
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
-
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 const project = (await api.projects()).projects[0];
 console.log(`project: ${project.project}\n`);
@@ -680,5 +667,4 @@ check("Untouched is exactly as the fixture built it", (await held("Untouched")) 
 await write("Ledger", ledgerWas, "change-log.mjs cleanup");
 await write(second, (await held(second)).replace("\r\n' back to the agent", ""), "change-log.mjs cleanup");
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

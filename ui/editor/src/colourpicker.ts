@@ -31,11 +31,6 @@ export function setSystemColours(colours: SystemColour[]): void {
   systemList = colours;
 }
 
-/** What the System half will show - and what a probe compares the panel against. */
-export function systemColours(): SystemColour[] {
-  return systemList;
-}
-
 /**
  * The palette, generated from one ramp so it is even and inspectable: a row of greys, then eight
  * hues down seven lightnesses. Written as code rather than as sixty-four literals because a

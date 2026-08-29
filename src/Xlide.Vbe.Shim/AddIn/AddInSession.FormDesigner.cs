@@ -4,6 +4,8 @@ using Xlide.Vbe.Shim.Com;
 using Xlide.Vbe.Shim.Editor;
 using Xlide.Vbe.Shim.Diagnostics;
 
+using static Xlide.Vbe.Shim.Editor.FormDesignService;
+
 namespace Xlide.Vbe.Shim.AddIn;
 
 /// <summary>
@@ -545,57 +547,7 @@ internal sealed partial class AddInSession
     /// from zero and the editor's own collections from one; probing the first item once decides,
     /// and a probe that fails both ways is an empty answer rather than an error.
     /// </summary>
-    private static IEnumerable<DispatchObject> ItemsOf(DispatchObject collection)
-    {
-        int count;
-        try
-        {
-            count = collection.GetInt32("Count");
-        }
-        catch
-        {
-            yield break;
-        }
-
-        if (count <= 0)
-        {
-            yield break;
-        }
-
-        var basis = 0;
-        try
-        {
-            using var probe = collection.GetItem(0);
-            if (probe is null)
-            {
-                basis = 1;
-            }
-        }
-        catch
-        {
-            basis = 1;
-        }
-
-        for (var i = 0; i < count; i++)
-        {
-            DispatchObject? item = null;
-            try
-            {
-                item = collection.GetItem(i + basis);
-            }
-            catch
-            {
-                // One unreadable item does not end the walk.
-            }
-
-            if (item is not null)
-            {
-                yield return item;
-            }
-        }
-    }
-
-    private static DebugDesignerControl ReadDesignerControl(DispatchObject control, string name)
+     private static DebugDesignerControl ReadDesignerControl(DispatchObject control, string name)
     {
         string type;
         try
@@ -657,78 +609,7 @@ internal sealed partial class AddInSession
             TryInt(control, "PicturePosition"));
     }
 
-    // ------------------------------------------------------------------ finding
-
-    /// <summary>The Controls collection of the named container: a Frame's own, or a Page's by page name.</summary>
     // ------------------------------------------------------------------ tolerant reads
-
-    private static string? TryText(DispatchObject target, string name)
-    {
-        if (target.GetDispId(name) == DispId.Unknown)
-        {
-            return null;
-        }
-
-        try
-        {
-            return target.GetString(name);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static double? TryNumber(DispatchObject target, string name)
-    {
-        if (target.GetDispId(name) == DispId.Unknown)
-        {
-            return null;
-        }
-
-        try
-        {
-            return target.GetDouble(name);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int? TryInt(DispatchObject target, string name)
-    {
-        if (target.GetDispId(name) == DispId.Unknown)
-        {
-            return null;
-        }
-
-        try
-        {
-            return target.GetInt32(name);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static bool? TryFlag(DispatchObject target, string name)
-    {
-        if (target.GetDispId(name) == DispId.Unknown)
-        {
-            return null;
-        }
-
-        try
-        {
-            return target.GetBool(name);
-        }
-        catch
-        {
-            return null;
-        }
-    }
 
     private static DebugDesignerFont? TryFont(DispatchObject control)
     {

@@ -119,7 +119,9 @@ export const wait = (ms) => new Promise((settle) => setTimeout(settle, ms));
  * next rewording rots one line instead of every caller.
  */
 export const hostBusy = (error) =>
-  /did not answer in time|has not answered for|aborted/i.test(String(error?.message));
+  error?.hostBusy === true
+  || /did not answer in time|has not answered for|is busy inside this door|aborted/i.test(
+    String(error?.message));
 
 /**
  * The reporter every live suite prints through. check(what, ok, detail) logs one line and
@@ -144,15 +146,50 @@ export function reporter() {
     }
   };
 
-  const done = () => {
-    console.log(`\n${passed} passed, ${failures.length} failed`);
-    for (const one of failures) {
-      console.log(`  ${one}`);
+  return { check, done: () => verdict(() => passed, failures) };
+}
+
+/**
+ * The same reporter for suites that assert by COMPARISON - `check(what, got, want = true)`,
+ * which prints both sides when they differ and needs no sentence written twice.
+ *
+ * It exists because five suites were left behind when the boolean reporter above was pulled
+ * out of nine of them: their assertions are got/want and rewriting ninety-eight of them to
+ * read `check(what, a === b)` would lose the printed comparison and risk inverting one.
+ * Sharing the VERDICT is the half that matters - that spelling is the only thing the gate
+ * parses, and five hand-rolled copies of it are five chances to un-learn the lesson its
+ * sibling above records.
+ *
+ * The failure line is indented like the other reporter's, so the gate's own scan for a named
+ * failure finds these too; their hand-rolled copies printed it hard against the margin and
+ * were invisible to it.
+ */
+export function comparingReporter() {
+  let passed = 0;
+  const failures = [];
+
+  const check = (what, got, want = true) => {
+    const ok = JSON.stringify(got) === JSON.stringify(want);
+    if (ok) {
+      passed += 1;
+      console.log(`  ok   ${what}`);
+    } else {
+      failures.push(`${what} (got ${JSON.stringify(got)}, want ${JSON.stringify(want)})`);
+      console.log(`  FAIL ${what}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
     }
-    return failures.length === 0 ? 0 : 1;
+    return ok;
   };
 
-  return { check, done };
+  return { check, done: () => verdict(() => passed, failures) };
+}
+
+/** The one verdict spelling the gate parses, printed in one place for both reporters. */
+function verdict(passed, failures) {
+  console.log(`\n${passed()} passed, ${failures.length} failed`);
+  for (const one of failures) {
+    console.log(`  ${one}`);
+  }
+  return failures.length === 0 ? 0 : 1;
 }
 
 /**
@@ -369,7 +406,16 @@ function clientFor(entry) {
 
       const answer = await response.json();
       if (answer && typeof answer === "object" && "error" in answer) {
-        throw new Error(`${route}: ${answer.error}`);
+        const failure = new Error(`${route}: ${answer.error}`);
+        // A BUSY reply is told apart by its SHAPE, not by its sentence. Only the blocked path
+        // carries heartbeatAgeMs, and marking it here is what lets `hostBusy` stop matching
+        // prose that the product is free to reword - which it did, twice, and the second time
+        // broke write-rollback the same day the first was fixed (2026-08-29).
+        if ("heartbeatAgeMs" in answer) {
+          failure.hostBusy = true;
+        }
+
+        throw failure;
       }
       return answer;
     } finally {

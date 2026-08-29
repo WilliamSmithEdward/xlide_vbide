@@ -43,7 +43,6 @@ internal sealed unsafe class OverlayWindow : IDisposable
     private const uint LoaderBackground = 0x001E1E1E;
     private const uint LoaderForeground = 0x00CCCCCC;
     private const uint LoaderDimmed = 0x00404040;
-    private const uint LoaderHint = 0x00808080;
 
     private static bool _classRegistered;
     private static readonly Lock ClassGate = new();

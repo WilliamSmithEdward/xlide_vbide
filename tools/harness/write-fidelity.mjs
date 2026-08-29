@@ -27,23 +27,10 @@
  *   node tools\harness\write-fidelity.mjs
  */
 
-import { open, waitFor, scratchModule } from "./xlide-api.mjs";
+import { open, waitFor, scratchModule, comparingReporter } from "./xlide-api.mjs";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
-
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 const project = (await api.projects()).projects[0];
 console.log(`project: ${project.projectId}\n`);
@@ -138,5 +125,4 @@ try {
   await scratch.dispose();
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

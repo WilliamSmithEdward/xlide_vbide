@@ -53,7 +53,7 @@
  * seconds: the old budget meant the suite was slowest exactly when it was failing.
  */
 
-import { open, wait, waitFor } from "./xlide-api.mjs";
+import { open, wait, waitFor, reporter } from "./xlide-api.mjs";
 
 const api = await open({});
 
@@ -97,18 +97,7 @@ const twoArguments = [
   "",
 ].join("\r\n");
 
-let passed = 0;
-const failures = [];
-
-function check(what, ok, detail) {
-  if (ok) {
-    passed += 1;
-    console.log(`  ok    ${what}`);
-  } else {
-    failures.push(`${what}${detail ? ` (${detail})` : ""}`);
-    console.log(`  FAIL  ${what}${detail ? ` (${detail})` : ""}`);
-  }
-}
+const { check, done } = reporter();
 
 async function findingsFor(moduleName) {
   const answer = await api.problems(moduleName);
@@ -336,16 +325,9 @@ if (!project?.projectId) {
 
     const left = (await api.project(project.projectId)).components
       .filter((component) => made.includes(component.name));
-    console.log(`\nthe modules it brought were taken away: ${left.length === 0}`);
-    if (left.length > 0) {
-      failures.push(`left ${left.map((component) => component.name).join(", ")} behind`);
-    }
+    check("the modules it brought were taken away", left.length === 0,
+      left.length > 0 ? `left ${left.map((component) => component.name).join(", ")} behind` : undefined);
 
-    console.log(`\n${passed} passed, ${failures.length} failed`);
-    for (const failure of failures) {
-      console.log(`  ${failure}`);
-    }
-
-    process.exitCode = failures.length === 0 ? 0 : 1;
+    process.exitCode = done();
   }
 }

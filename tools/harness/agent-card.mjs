@@ -20,25 +20,12 @@
  * the switch on costs.
  */
 
-import { open, waitFor } from "./xlide-api.mjs";
+import { open, waitFor, comparingReporter } from "./xlide-api.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const api = await open();
-let passed = 0;
-let failed = 0;
-
-const check = (name, got, want = true) => {
-  const ok = JSON.stringify(got) === JSON.stringify(want);
-  if (ok) {
-    passed++;
-    console.log(`ok   ${name}`);
-  } else {
-    failed++;
-    console.log(`FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(want)}`);
-  }
-  return ok;
-};
+const { check, done } = comparingReporter();
 
 // The door as it stands, read from OUTSIDE the page: the discovery file is what a client finds.
 const folder = join(process.env.LOCALAPPDATA, "xlide_vbide");
@@ -142,5 +129,4 @@ check("the card closes", { did: shut.did, gone: (await api.ui()).agent }, { did:
 const missing = await api.act("agentCard", { press: "copy" });
 check("and once closed it declines rather than pretending", missing.did, false);
 
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed === 0 ? 0 : 1);
+process.exit(done());

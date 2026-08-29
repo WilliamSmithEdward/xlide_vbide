@@ -23,7 +23,7 @@
  *   node tools\harness\three-copies.mjs
  */
 
-import { open, wait, waitFor } from "./xlide-api.mjs";
+import { open, wait, waitFor, reporter } from "./xlide-api.mjs";
 
 const api = await open({});
 const target = "HelpersExtra";
@@ -42,18 +42,7 @@ if (!runnable) {
 const project = runnable ? await api.project(home.project) : { projectId: null };
 const original = runnable ? (await api.readModule(target, project.projectId)).text ?? "" : "";
 
-let passed = 0;
-const failures = [];
-
-function check(what, ok, detail) {
-  if (ok) {
-    passed++;
-    console.log(`  ok   ${what}`);
-  } else {
-    failures.push(`${what}${detail ? `: ${detail}` : ""}`);
-    console.log(`  FAIL ${what}${detail ? `\n       ${detail}` : ""}`);
-  }
-}
+const { check, done } = reporter();
 
 /**
  * THE OPERATION HAS LANDED SOMEWHERE, which is a different question from the three agreeing.
@@ -243,10 +232,5 @@ if (runnable) try {
   const restored = ((await api.readModule(target, project.projectId)).text ?? "").trim() === original.trim();
   console.log(`\n${target} restored: ${restored}`);
 
-  console.log(`\n${passed} passed, ${failures.length} failed`);
-  for (const failure of failures) {
-    console.log(`  ${failure}`);
-  }
-
-  process.exitCode = failures.length === 0 ? 0 : 1;
+  process.exitCode = done();
 }
