@@ -545,10 +545,24 @@ if ($Live) {
         foreach ($suite in $suites) {
             $parts = $suite -split ' '
             $answer = node (Join-Path $repoRoot "tools\harness\$($parts[0])") @($parts | Select-Object -Skip 1) 2>&1
+            $exitCode = $LASTEXITCODE
             $answer | Out-Host
 
             $verdict = $answer | Select-String '(\d+) passed, (\d+) failed' | Select-Object -Last 1
             if (-not $verdict) { throw "$suite reported no verdict" }
+
+            # A GREEN VERDICT AND A NON-ZERO EXIT DISAGREE, and the verdict is the one that lies.
+            # A suite that dies after its first check prints what it managed - "1 passed, 0
+            # failed" - and every guard below reads that as a pass, because they only ever look
+            # at the text. write-rollback did exactly that on 2026-08-29: it threw on its second
+            # step, reported one passing check out of four, and the gate went green over a suite
+            # that never reached the defect it exists to pin (#15). The exception it died on set
+            # the exit code, which nothing was reading.
+            if ($exitCode -ne 0 -and "$verdict" -match ', 0 failed') {
+                throw ("$suite exited $exitCode while reporting '$("$verdict".Trim())' - it died " +
+                    'after its checks rather than failing one, so the verdict is only what it ' +
+                    'reached, not what it set out to do')
+            }
             # "0 passed, 0 failed" is not a verdict either: it is what a suite prints when it
             # died before its first check, and reading it as green is how a run that checked
             # NOTHING passed a gate (2026-08-12, properties-pane refused at its first add).

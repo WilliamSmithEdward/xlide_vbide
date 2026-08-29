@@ -52,6 +52,19 @@ check("frame close answers posted, not done", closed.did === true && closed.visi
   `${JSON.stringify(closed)} - the pump delivers SC_CLOSE after the reply, so visible must still read true here`);
 
 await waitFor("the frame to leave the screen", async () => (await state()).frameVisible === false);
+
+// THE PALETTE GOES DOWN SEPARATELY, and waiting for the frame is not waiting for it. The two
+// are one gesture but two observations, and reading both from the snapshot that satisfied the
+// FRAME's wait is a race the gate lost once (2026-08-29: green standalone and on the next run,
+// red in between, with nothing changed).
+//
+// Waited for, and the wait may NOT throw - which is the whole point. A wait that names the
+// assertion launders it into the setup and leaves a check that can only ever time out; this
+// one gives the palette a bounded moment and then lets the check below do the judging, so a
+// palette that never goes down is still a FAILURE with its state printed, not a stack.
+await waitFor("the palette to follow the frame down", async () =>
+  (await state()).paletteVisible === false, { budgetMs: 5000 }).catch(() => null);
+
 const whileClosed = await state();
 check("the frame is off screen", whileClosed.frameVisible === false);
 check("and the palette followed it down, not left floating over the workbook",
