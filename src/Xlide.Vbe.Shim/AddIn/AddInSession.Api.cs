@@ -523,6 +523,118 @@ internal sealed partial class AddInSession
     private volatile string? _laneHolder;
     private long _laneHeldSince;
 
+    /// <summary>
+    /// The whole of `component?action=add`: read the kind, refuse a name the project already
+    /// holds or a form in a host with no MSForms, add the component, name it - taking the add
+    /// back out when the name is refused - and tell the change log and the surface.
+    ///
+    /// It is one operation with one outcome, and it sat inline in the route's switch, which is
+    /// how that switch came to nest ten levels deep - the deepest point in this codebase
+    /// (measured 2026-08-29). Every refusal below is the same sentence it was inline; the only
+    /// thing that changed is where it lives.
+    /// </summary>
+    /// <returns>The reply to send: the component reply, or a refusal in words.</returns>
+    private string AddComponent(
+        string? kindText, string? componentName, string? componentProject, string? componentOwner)
+    {
+        // 1 standard, 2 class, 3 form, the VBE's own numbering, and the words for them as well.
+        //
+        // The words matter because this only parsed an int, and anything else fell through to
+        // the default: "kind=class" handed back a STANDARD module and still answered ok, so a
+        // caller asking for a class got one that could not hold a Friend member, and the
+        // analyzer was right to complain about it. Nothing said no. An unparseable kind is now
+        // refused rather than guessed at.
+        var kind = (kindText ?? string.Empty).Trim().ToLowerInvariant() switch
+        {
+            "" => 1,
+            "1" or "module" or "standard" => 1,
+            "2" or "class" => 2,
+            "3" or "form" or "userform" => 3,
+            _ => 0,
+        };
+
+        if (kind == 0)
+        {
+            return HostError($"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
+        }
+
+        // A NAME ALREADY TAKEN IS SAID IN WORDS. The editor answers a duplicate with a bare
+        // `Unexpected HRESULT`, which names neither the problem nor the module - a caller reads
+        // it as the product having broken rather than as a name it can simply change. Measured
+        // eighteen times across two chaos walks before anyone worked out the two runs had
+        // chosen the same name.
+        if (componentName is { Length: > 0 }
+            && FindComponent(componentName, componentOwner, out _) is { } taken)
+        {
+            taken.Dispose();
+            return HostError($"'{componentName}' is already a component of "
+                + "this project; choose another name or remove that one first");
+        }
+
+        // The api mirrors the UI: Access's VBE has no MSForms, offers no Insert > UserForm, and
+        // would fail the Add(3) with a COM mumble. The refusal is designated instead (the
+        // owner, 2026-08-19).
+        if (kind == 3 && !HostApp.CarriesMsForms)
+        {
+            return HostError(
+                $"{HostApp.Name} VBA has no UserForms, so kind=form cannot be added here");
+        }
+
+        using var project = FindProjectByDisplayName(componentProject)
+            ?? _editor.GetObject("ActiveVBProject");
+        using var components = project?.GetObject("VBComponents");
+        using var added = components?.CallObject("Add", kind);
+        if (added is null)
+        {
+            return HostError("the project would not add a component");
+        }
+
+        // Named here rather than left as Module1, because a fixture is its names. The editor
+        // refuses some outright - Circle is owned by the Excel object library - and says so with
+        // a bare HRESULT, so the refusal is reported with the name that caused it.
+        if (componentName is { Length: > 0 })
+        {
+            try
+            {
+                added.SetString("Name", componentName);
+            }
+            catch (Exception ex)
+            {
+                // Taken back out. A refused name otherwise leaves a Module1 nobody asked for, in
+                // a project a fixture is about to make claims about - and the next run finds it
+                // and is confused by it. Add either produces the component that was asked for or
+                // produces nothing.
+                try { components?.InvokeWithObject("Remove", added); }
+                catch (Exception undo) { Log.Warn($"component: could not undo the add ({undo.GetType().Name})"); }
+
+                return HostError(
+                    $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})");
+            }
+        }
+
+        var finalName = added.GetString("Name") ?? string.Empty;
+        Log.Info($"component: added {finalName} (kind {kind})");
+
+        // THE SECOND PLACE A MODULE CAN ARRIVE. The menu's insert has its own implementation of
+        // this, and hooking one of the two is how the change log came to record a module being
+        // filled with no sign of it arriving (2026-08-22). Both are told now; that there are two
+        // is its own smell, and one worth taking out separately rather than in a change about
+        // the log.
+        RecordChange(
+            finalName, componentOwner, Core.Changes.ChangeKind.Added,
+            null, ProjectReader.ReadSource(added) ?? string.Empty);
+
+        // The strip AND the tree. Neither republishes on its own, and they are separate
+        // publishes: the first version of this route refreshed the tabs only, so the explorer
+        // went on listing three components while the strip showed eight - a surface describing
+        // two different projects at once (the developer, 2026-08-07).
+        ComponentsChanged();
+
+        return System.Text.Json.JsonSerializer.Serialize(
+            new DebugComponentReply(true, finalName, "add"),
+            DebugJsonContext.Default.DebugComponentReply);
+    }
+
     private HostCrossing CrossToHost(EditorSurface host, Action work)
     {
         // Already on the host thread - a request through the inside door. Queueing here would
@@ -4312,111 +4424,8 @@ internal sealed partial class AddInSession
                     {
                         case "add":
                         {
-                            // 1 standard, 2 class, 3 form, the VBE's own numbering, and the
-                            // words for them as well.
-                            //
-                            // The words matter because this only parsed an int, and anything
-                            // else fell through to the default: "kind=class" handed back a
-                            // STANDARD module and still answered ok, so a caller asking for a
-                            // class got one that could not hold a Friend member, and the
-                            // analyzer was right to complain about it. Nothing said no. An
-                            // unparseable kind is now refused rather than guessed at.
                             request.Query.TryGetValue("kind", out var kindText);
-                            var kind = (kindText ?? string.Empty).Trim().ToLowerInvariant() switch
-                            {
-                                "" => 1,
-                                "1" or "module" or "standard" => 1,
-                                "2" or "class" => 2,
-                                "3" or "form" or "userform" => 3,
-                                _ => 0,
-                            };
-
-                            if (kind == 0)
-                            {
-                                return HostError(
-                                    $"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
-                            }
-
-                            // A NAME ALREADY TAKEN IS SAID IN WORDS. The editor answers a
-                            // duplicate with a bare `Unexpected HRESULT`, which names neither the
-                            // problem nor the module - a caller reads it as the product having
-                            // broken rather than as a name it can simply change. Measured
-                            // eighteen times across two chaos walks before anyone worked out the
-                            // two runs had chosen the same name.
-                            if (componentName is { Length: > 0 }
-                                && FindComponent(componentName, componentOwner, out _) is { } taken)
-                            {
-                                taken.Dispose();
-                                return HostError($"'{componentName}' is already a component of "
-                                    + "this project; choose another name or remove that one first");
-                            }
-
-                            // The api mirrors the UI: Access's VBE has no MSForms, offers no
-                            // Insert > UserForm, and would fail the Add(3) with a COM mumble.
-                            // The refusal is designated instead (the owner, 2026-08-19).
-                            if (kind == 3 && !HostApp.CarriesMsForms)
-                            {
-                                return HostError(
-                                    $"{HostApp.Name} VBA has no UserForms, so kind=form cannot be added here");
-                            }
-
-                            using var project = FindProjectByDisplayName(componentProject)
-                                ?? _editor.GetObject("ActiveVBProject");
-                            using var components = project?.GetObject("VBComponents");
-                            using var added = components?.CallObject("Add", kind);
-                            if (added is null)
-                            {
-                                return HostError("the project would not add a component");
-                            }
-
-                            // Named here rather than left as Module1, because a fixture is its
-                            // names. The editor refuses some outright - Circle is owned by the
-                            // Excel object library - and says so with a bare HRESULT, so the
-                            // refusal is reported with the name that caused it.
-                            if (componentName is { Length: > 0 })
-                            {
-                                try
-                                {
-                                    added.SetString("Name", componentName);
-                                }
-                                catch (Exception ex)
-                                {
-                                    // Taken back out. A refused name otherwise leaves a Module1
-                                    // nobody asked for, in a project a fixture is about to make
-                                    // claims about - and the next run finds it and is confused by
-                                    // it. Add either produces the component that was asked for or
-                                    // produces nothing.
-                                    try { components?.InvokeWithObject("Remove", added); }
-                                    catch (Exception undo) { Log.Warn($"component: could not undo the add ({undo.GetType().Name})"); }
-
-                                    return HostError(
-                                        $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})");
-                                }
-                            }
-
-                            var finalName = added.GetString("Name") ?? string.Empty;
-                            Log.Info($"component: added {finalName} (kind {kind})");
-
-                            // THE SECOND PLACE A MODULE CAN ARRIVE. The menu's insert has its own
-                            // implementation of this, and hooking one of the two is how the change
-                            // log came to record a module being filled with no sign of it arriving
-                            // (2026-08-22). Both are told now; that there are two is its own
-                            // smell, and one worth taking out separately rather than in a change
-                            // about the log.
-                            RecordChange(
-                                finalName, componentOwner, Core.Changes.ChangeKind.Added,
-                                null, ProjectReader.ReadSource(added) ?? string.Empty);
-
-                            // The strip AND the tree. Neither republishes on its own, and they are
-                            // separate publishes: the first version of this route refreshed the
-                            // tabs only, so the explorer went on listing three components while
-                            // the strip showed eight - a surface describing two different
-                            // projects at once (the developer, 2026-08-07).
-                            ComponentsChanged();
-
-                            return System.Text.Json.JsonSerializer.Serialize(
-                                new DebugComponentReply(true, finalName, "add"),
-                                DebugJsonContext.Default.DebugComponentReply);
+                            return AddComponent(kindText, componentName, componentProject, componentOwner);
                         }
 
                         case "remove":

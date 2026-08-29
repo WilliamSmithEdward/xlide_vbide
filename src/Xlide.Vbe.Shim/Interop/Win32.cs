@@ -40,17 +40,6 @@ internal struct Size
     public int Height;
 }
 
-/// <summary>
-/// OLE SIZEL. An embedded object's extent is expressed in HIMETRIC units, which are hundredths of
-/// a millimetre, not pixels.
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct SizeL
-{
-    public int Width;
-    public int Height;
-}
-
 /// <summary>Win32 window class registration block, wide character variant.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct WndClassExW
@@ -89,19 +78,6 @@ internal unsafe struct CreateStructW
     public char* Name;
     public char* Class;
     public uint ExStyle;
-}
-
-/// <summary>Win32 message, as delivered to accelerator translation.</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct Msg
-{
-    public nint Window;
-    public uint Message;
-    public nint WParam;
-    public nint LParam;
-    public uint Time;
-    public int PointX;
-    public int PointY;
 }
 
 /// <summary>

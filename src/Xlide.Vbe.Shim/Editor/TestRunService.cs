@@ -115,8 +115,6 @@ internal static partial class TestRunService
     /// Private target. (xlide_vscode discovers them and then fails the whole generated module;
     /// filed there rather than copied here.)
     /// </summary>
-    internal static List<TestCase> Discover(DispatchObject project) => DiscoverFrom(ReadStandardModules(project));
-
     internal static List<TestCase> DiscoverFrom(IReadOnlyList<(string Name, string Source)> modules)
     {
         var tests = new List<TestCase>();
@@ -142,9 +140,11 @@ internal static partial class TestRunService
     /// The modules a RUN generates and removes again - never XlideAssert, which is the
     /// developer's and stays in their project between runs.
     ///
-    /// The difference matters exactly once, and it is the difference between recovering a break
-    /// and destroying a developer's debugging session: a stop inside one of these is ours,
-    /// because they exist only while a run is in flight and nobody can be looking at them.
+    /// That boundary is the whole point: these exist only while a run is in flight and nobody
+    /// can be looking at them, so a run may take them away without asking, while removing the
+    /// developer's own module would be destroying their work. The teardown asks THIS rather
+    /// than spelling the two names again, which is where the pair had drifted into a second
+    /// copy of itself.
     /// </summary>
     internal static bool IsRunScaffolding(string? name) =>
         name is { Length: > 0 }
@@ -899,9 +899,7 @@ internal static partial class TestRunService
         {
             using var candidate = components.GetItem(i);
             var name = candidate?.GetString("Name") ?? string.Empty;
-            if (candidate is not null
-                && (name.StartsWith(RunnerModulePrefix, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(name, DispatchModuleName, StringComparison.OrdinalIgnoreCase)))
+            if (candidate is not null && IsRunScaffolding(name))
             {
                 components.InvokeWithObject("Remove", candidate);
             }
