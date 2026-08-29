@@ -33,7 +33,12 @@ param(
 
     # Close any Word already running first. Word only - an Excel session beside it is somebody
     # else's work and stays.
+    # It closes every Word on the machine, so it REFUSES when one of them holds a document this
+    # harness did not open - see the guard below. -Force sweeps anyway.
     [switch] $Fresh,
+
+    # Sweep even when a document that is none of this harness's business is open.
+    [switch] $Force,
 
     # Seconds to wait for the host's window to appear.
     [int] $TimeoutSeconds = 90
@@ -130,6 +135,45 @@ $Document = @($Document | ForEach-Object {
 })
 
 if ($Fresh) {
+    # THE SAME GUARD Start-Excel.ps1 carries, and for the same reason: -Fresh closes every Word
+    # on the machine, and a document this harness did not open is somebody's actual work. A
+    # process whose documents cannot be read counts as a stranger, because unreadable is not
+    # empty. -Force is the way through when the machine really is yours.
+    $mine = @(
+        (Join-Path $repoRoot 'artifacts\fixtures'),
+        (Join-Path $repoRoot 'artifacts\chaos')
+    ) | ForEach-Object {
+        if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
+    }
+
+    $strangers = @()
+    foreach ($running in @(Get-Process WINWORD -ErrorAction SilentlyContinue)) {
+        $held = $null
+        try {
+            $itsWindow = [XlideHarness.AttachWord]::DocumentWindowOf($running.Id)
+            if ($null -ne $itsWindow) {
+                $held = @($itsWindow.Application.Documents | ForEach-Object { $_.FullName })
+            }
+        }
+        catch { $held = $null }
+
+        if ($null -eq $held) {
+            $strangers += "pid $($running.Id) (its documents could not be read)"
+            continue
+        }
+
+        foreach ($document in $held) {
+            if ($mine -notcontains $document) { $strangers += "$document (pid $($running.Id))" }
+        }
+    }
+
+    if ($strangers.Count -gt 0 -and -not $Force) {
+        throw ("-Fresh closes every Word, and these are not this harness's to close:" +
+            [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
+            [Environment]::NewLine +
+            'Close them yourself, or pass -Force if the machine is yours to sweep.')
+    }
+
     Get-Process WINWORD -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 }

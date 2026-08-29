@@ -39,9 +39,13 @@ param(
     # Close any Excel already running first. A publish needs this anyway, because a host holds an
     # add-in library open for its lifetime.
     #
-    # IT CLOSES EVERY EXCEL ON THE MACHINE, including workbooks that are none of this harness's
-    # business. Use it when the machine is yours; leave it off when somebody is working beside you.
+    # It closes every Excel on the machine, so it REFUSES when one of them holds a workbook this
+    # harness did not put there - see the guard below. -Force sweeps anyway.
     [switch] $Fresh,
+
+    # Sweep even when a workbook that is none of this harness's business is open. For a machine
+    # that is genuinely yours; it is the switch that says "yes, I know, close them".
+    [switch] $Force,
 
     # Start a SEPARATE Excel process rather than letting Excel reuse the one already running.
     #
@@ -132,6 +136,57 @@ $Workbook = @($Workbook | ForEach-Object {
 })
 
 if ($Fresh) {
+    <#
+        -Fresh CLOSES EXCEL WITHOUT ASKING, and for a long time it did that to every Excel on
+        the machine. That is right for the fixtures this harness owns and catastrophic for
+        anything else: the developer works in their own workbooks beside these runs, and on
+        2026-08-29 one of theirs survived a sweep only because they had just reopened it. The
+        gate carries the same call, so a live run started while a real workbook was open would
+        have taken it down with everything unsaved in it.
+
+        So a workbook this harness did not put there stops the sweep and says which one. The
+        answer comes from the WORKBOOKS each process holds rather than its title bar, because a
+        title names only the active one and the developer's file is routinely the second in a
+        window. A process that cannot be read counts as a stranger: unreadable is not empty,
+        and guessing wrong here costs somebody their morning.
+
+        -Force is the way through when the machine really is yours.
+    #>
+    $mine = @(
+        (Join-Path $repoRoot 'artifacts\fixtures'),
+        (Join-Path $repoRoot 'artifacts\chaos')
+    ) | ForEach-Object {
+        if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
+    }
+
+    $strangers = @()
+    foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
+        $held = $null
+        try {
+            $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
+            if ($null -ne $itsWindow) {
+                $held = @($itsWindow.Application.Workbooks | ForEach-Object { $_.FullName })
+            }
+        }
+        catch { $held = $null }
+
+        if ($null -eq $held) {
+            $strangers += "pid $($running.Id) (its workbooks could not be read)"
+            continue
+        }
+
+        foreach ($book in $held) {
+            if ($mine -notcontains $book) { $strangers += "$book (pid $($running.Id))" }
+        }
+    }
+
+    if ($strangers.Count -gt 0 -and -not $Force) {
+        throw ("-Fresh closes every Excel, and these are not this harness's to close:" +
+            [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
+            [Environment]::NewLine +
+            'Close them yourself, or pass -Force if the machine is yours to sweep.')
+    }
+
     Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
 }
