@@ -985,6 +985,28 @@ Two details are load-bearing, and both were added after the walk lied about a cl
   project argument: the walk opened both workbooks' `Helpers`, reported `collision=0`, and was
   right.
 
+### The api's own switch
+
+```bash
+node tools\harness\agent-card.mjs        # in the gate: the card as the page draws it
+tools\harness\Test-ApiSwitch.ps1         # BY HAND: the door actually shutting
+```
+
+The question splits in two, and only half of it can be asked from here. `agent-card.mjs` asks
+whether the card reads the door honestly, hands out THIS session's address, and says what
+turning the switch on costs. It presses copy and close and never the toggle, which is what
+makes it safe in the gate.
+
+The other half cannot be: turning the door off severs the connection every suite drives over.
+`Test-ApiSwitch.ps1` asks it from outside the process - is the discovery file gone, is anything
+still listening, does the port refuse - and then across a restart, whether a remembered `false`
+keeps the door shut in a build that leans open. It restarts Excel twice and puts the setting
+back. **It is deliberately not in the gate**: a run that dies partway leaves the door shut, and
+the only way back in is the card or the settings file, by hand. Run it when the switch changes.
+
+Both were written with care and run by NOTHING until 2026-08-29 - neither was in the gate, and
+no document named either of them, which is the failure mode a suite has when it is invisible.
+
 ### Two processes, and the one inside-door name
 
 ```bash

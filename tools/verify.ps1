@@ -717,6 +717,15 @@ if ($Live) {
                                      'pane-scope.mjs',
                                      'inline-comments-live.mjs', 'analysis-rules-live.mjs',
                                      'unsaved-workbook.mjs',
+                                     # The api's own switch, read from outside the page: the card
+                                     # says whether the door is open, hands out THIS session's
+                                     # address, and says what turning it on costs. It presses
+                                     # copy and close and never the toggle, which is what makes
+                                     # it safe here - turning the door off would sever the
+                                     # connection every suite after it drives over, and that half
+                                     # is Test-ApiSwitch.ps1's, by hand. Written with care and
+                                     # run by nothing until 2026-08-29.
+                                     'agent-card.mjs',
                                      'write-rollback.mjs')
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
