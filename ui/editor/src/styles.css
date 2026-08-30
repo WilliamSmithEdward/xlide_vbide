@@ -4130,7 +4130,12 @@ body.objbrowser-page #objbrowser-card {
    the two sides cannot drift out of step with each other. */
 .sync-diff-row {
   display: grid;
-  grid-template-columns: 44px 1fr 44px 1fr;
+  /* minmax(0, 1fr), not bare 1fr: each row is its own grid, and a bare 1fr track keeps a
+     content-sized minimum - so a row holding one long unwrappable line resolved its halves
+     wider than its neighbours' (measured: 598px against 541.958px on the very next row) and
+     the right column wandered row by row (the owner's popout screenshot). A zero floor makes
+     every row's halves identical, and the long line ellipsizes as .sync-code always meant. */
+  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
   white-space: pre;
 }
 
@@ -5857,12 +5862,49 @@ body.objbrowser-page #objbrowser-card {
   font-size: 12px;
 }
 
-/* Full size, the code is the point: long lines scroll rather than being clipped with an ellipsis.
-   The pane's own strip keeps the ellipsis, where a horizontal scrollbar under 60 pixels of height
-   would be worse than the truncation. */
+/* Full size, the code is the point: long lines scroll rather than being clipped with an
+   ellipsis. The pane's own strip keeps the ellipsis, where a horizontal scrollbar under 60
+   pixels of height would be worse than the truncation.
+
+   ONE GRID FOR EVERY ROW. Each row used to be its own grid with min-width: max-content, which
+   sized every row to its own longest line - so the right column wandered row by row, worst
+   exactly where a comment ran long (the owner's popout screenshot; measured as five distinct
+   track widths across twenty rows). The rows dissolve into the card's single grid instead:
+   the columns are shared, so one width per column across the whole comparison, the widest
+   line sets it, and the body's scrollbar does the rest. */
+#changes-full-diff {
+  display: grid;
+  grid-template-columns: max-content minmax(min-content, 1fr) max-content minmax(min-content, 1fr);
+  align-content: start;
+}
+
 #changes-full-diff .sync-diff-row {
-  grid-template-columns: 44px minmax(0, 1fr) 44px minmax(0, 1fr);
-  min-width: max-content;
+  display: contents;
+}
+
+/* display: contents dissolves the row's own box, so the kind's tint moves to the cells. */
+#changes-full-diff .sync-diff-row[data-kind="changed"] > span {
+  background: rgba(226, 192, 141, 0.12);
+}
+
+#changes-full-diff .sync-diff-row[data-kind="added"] > span {
+  background: rgba(129, 184, 139, 0.14);
+}
+
+#changes-full-diff .sync-diff-row[data-kind="removed"] > span {
+  background: rgba(199, 78, 57, 0.14);
+}
+
+/* The gap's stripe lived on the row's own box; the box is gone, so the span wears it. */
+#changes-full-diff .sync-diff-row[data-kind="gap"] > .sync-gap {
+  grid-column: 1 / -1;
+  background: var(--vscode-editorWidget-background, #252526);
+  border-top: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-bottom: 1px solid var(--vscode-editorWidget-border, #454545);
+}
+
+#changes-full-diff .sync-gutter {
+  min-width: 44px;
 }
 
 #changes-full-diff .sync-code {

@@ -315,7 +315,10 @@ const bigger = await api.ask(`JSON.stringify((() => {
   const body = document.querySelector('#changes-full-diff');
   const drawn = [...document.querySelectorAll('#changes-full-diff .sync-diff-row')];
   const box = card?.getBoundingClientRect() ?? { top: -1, bottom: -1, left: -1, right: -1 };
-  const first = drawn[0]?.getBoundingClientRect() ?? { top: 0 };
+  // The row is display:contents in the full card - no box of its own - so the head-room is
+  // measured off its first CELL, which has one. Measuring the row read top 0 and answered
+  // -90px of air over a layout that actually breathes (2026-08-30).
+  const first = (drawn[0]?.firstElementChild ?? drawn[0])?.getBoundingClientRect() ?? { top: 0 };
   return {
     card: !!card,
     title: document.querySelector('#changes-full-head span')?.textContent ?? '',
