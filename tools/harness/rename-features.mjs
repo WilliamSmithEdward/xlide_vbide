@@ -210,6 +210,17 @@ check("references lists the symbol's uses across modules",
   refList.did && Array.isArray(refList.data) && refList.data.length >= 2,
   `${(refList.data ?? []).length} reference(s)`);
 
+// EACH REFERENCE SAYS WHAT IT DOES - read, write, or readwrite - classified by the analyzer
+// from the statement it sits in (xlide_vscode#55, wired through 2026-08-30). Extract Method's
+// whole signature rests on this field, so its absence must be a red check, not a quiet null.
+// A Sub's declaration writes the name it introduces; every call site reads it.
+const kinds = (refList.data ?? []).map((one) => one.kind);
+check("every reference carries a kind",
+  kinds.every((one) => one === "read" || one === "write" || one === "readwrite"),
+  kinds.join(","));
+check("the declaration writes and the call sites read",
+  kinds.includes("write") && kinds.includes("read"), kinds.join(","));
+
 // The DATA form leaves nothing on screen; the dialog is the feature, and this is what the
 // audit's A16 was about - the act stopped one step short of the thing it is named for.
 const dialogsBeforeOpen = (await api.ui()).dialogs.map((d) => d.id);

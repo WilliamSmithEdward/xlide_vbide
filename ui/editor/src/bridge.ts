@@ -368,6 +368,8 @@ export interface HostLocation {
   length: number;
   /** The line it sits on, so a module with no tab open can still be listed. */
   preview?: string | null;
+  /** read | write | readwrite, from the analyzer; absent where nothing classifies. */
+  kind?: string | null;
 }
 
 /** What a rename did, or the reason it did nothing. */

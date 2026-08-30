@@ -748,7 +748,9 @@ public sealed record SurfaceLocation(
     [property: JsonPropertyName("column")] int Column,
     [property: JsonPropertyName("length")] int Length,
     /// <summary>The line it sits on, which is what makes an unopened module renderable.</summary>
-    [property: JsonPropertyName("preview")] string? Preview = null);
+    [property: JsonPropertyName("preview")] string? Preview = null,
+    /// <summary>read | write | readwrite, from the analyzer; null where nothing classifies.</summary>
+    [property: JsonPropertyName("kind")] string? Kind = null);
 
 /// <summary>
 /// The answer to one navigation request: where a symbol is declared, or everywhere it is used.

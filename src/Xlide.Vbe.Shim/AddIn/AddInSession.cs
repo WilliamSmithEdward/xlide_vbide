@@ -8009,7 +8009,7 @@ internal sealed partial class AddInSession : IDisposable
 
                 locations = [.. answered.Select(location => new SurfaceLocation(
                     location.Module, workbook, location.Line, location.Column, location.Length,
-                    location.Preview))];
+                    location.Preview, location.Kind))];
 
                 Log.Info($"{(references ? "references" : "definition")}: {module}@{offset} -> {locations.Length}");
             }

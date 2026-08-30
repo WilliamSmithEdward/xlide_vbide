@@ -1181,25 +1181,14 @@ function boot(): void {
         position.lineNumber,
         word.endColumn);
 
-      // A COMPLETION THAT CANNOT BE TYPED IS NOT A COMPLETION.
-      //
-      // The host model carries the type library's hidden plumbing - `_CodeName`, `_Default`,
-      // `_NewEnum`, `_Evaluate`, `_Run2` - 24 of them across the twenty commonest Excel types.
-      // A VBA identifier begins with a letter, so none can be written after a dot, and the VBE
-      // says so itself: `?ThisWorkbook._CodeName` answers "Compile error: Syntax error" where
-      // `?ThisWorkbook.CodeName` answers ThisWorkbook. Accepting one inserted code that would
-      // not compile (the owner, 2026-08-30, on `_CodeName` offered under ThisWorkbook).
-      //
-      // The leading underscore rather than a full identifier test, because that is the whole
-      // measured defect and a broader rule would reach things that may legitimately not look
-      // like a bare identifier - a bracketed name, or a snippet with tab stops. The native
-      // editor hides these for the same reason; a hidden member's home is the Object Browser,
-      // behind its own switch. Filtered here rather than upstream because the analyzer's model
-      // is right to be complete - what a surface OFFERS is the surface's own decision - and
-      // xlide_vscode#56 asks it to mark them so this can stop keying on a naming convention.
-      const offerable = items.filter((item) => !(item.insertText ?? item.label).startsWith("_"));
-
-      return { suggestions: offerable.map((item) => toSuggestion(item, range)) };
+      // A completion that cannot be typed is not a completion - `_CodeName` under ThisWorkbook
+      // inserted a line the VBE refuses outright (the owner, 2026-08-30). The page filtered on
+      // the leading underscore for one day; xlide_vscode#56 then gave the model the type
+      // library's own hidden attribute and the analyzer's completion declines those members
+      // itself, so the convention-keyed stopgap retired in favour of the real mechanism. The
+      // behaviour stays pinned in language-features.mjs: if the upstream filter ever loses its
+      // data, the gate goes red rather than the menu going wrong.
+      return { suggestions: items.map((item) => toSuggestion(item, range)) };
     },
   };
 

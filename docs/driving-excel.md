@@ -447,6 +447,10 @@ await api.act("completions", { line: 7, column: 12 });
 await api.act("quickFixes", { word: "Recalcualte" });
 await api.act("definition", { word: "Recalculate" });   // where F12 would go, caret unmoved
 await api.act("references", { word: "Recalculate" });   // the list Find All References would show
+// -> data rows carry `kind`: read | write | readwrite, classified by the analyzer from the
+//    statement each occurrence sits in (a declaration writes what it introduces; both sides of
+//    `total = total + 1` come back as separate rows, write and read). A ByRef argument position
+//    stays a read on purpose: the write claim would need call-site resolution.
 await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the dialog standing,
                                                 //   as Shift+F12 does; ui.dialogs then sees it
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE

@@ -178,6 +178,13 @@ function memberRow(member: HostMember): KnowledgeModelMemberRow {
     if (member.doc?.summary !== undefined) {
         row.doc = member.doc.summary;
     }
+    if (member.hidden === true) {
+        // The type library's own hidden/restricted attribute (xlide_vscode#56): completion
+        // upstream already declines these, and a consumer deciding what to OFFER - an Object
+        // Browser's "show hidden members" switch - filters on this rather than on the naming
+        // convention that happens to hold for Excel's library.
+        row.hidden = true;
+    }
     return row;
 }
 

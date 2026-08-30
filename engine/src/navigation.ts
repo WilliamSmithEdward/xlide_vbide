@@ -200,6 +200,9 @@ export function referencesFor(
         column: span.column + 1,
         length: span.length,
         preview: lineAt(byModule.get(span.moduleName.toLowerCase())?.source, span.line),
+        // The classification the analyzer now makes (#55), which this map dropped on the floor
+        // for the first day of its existence - Extract Method's whole signature rests on it.
+        ...(span.kind !== undefined ? { kind: span.kind } : {}),
     }));
 }
 

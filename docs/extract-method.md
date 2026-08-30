@@ -130,8 +130,11 @@ suite can drive every refusal above.
 
 ## The order of work
 
-1. **Upstream, filed as xlide_vscode#55**: a `kind` on each reference - `read`, `write`,
-   `readwrite`. That turned out to be the whole ask. With kinds plus positions, a consumer
+1. **Upstream, filed as xlide_vscode#55 - LANDED 2026-08-30** (`9277e10`), wired through the
+   engine, the shim and the act the same day and pinned in rename-features.mjs. Measured on the
+   spike's own module: `total = total + i` answers write@9 and read@17 as separate rows, the Dim
+   and the assignments write, `Debug.Print total` reads. A `kind` on each reference - `read`,
+   `write`, `readwrite`. That turned out to be the whole ask. With kinds plus positions, a consumer
    computes the signature itself: a local whose first in-range reference is a read is a
    parameter; one written in range with a read after the end is the return or a `ByRef`; one
    written and never read after moves its `Dim`. No liveness engine, because extraction refuses
@@ -141,5 +144,5 @@ suite can drive every refusal above.
 2. **Here**: the transformation, the refusals, the lightbulb entry, the name box, the api route,
    and the suite.
 
-Step 1 is the whole risk. Step 2 is ordinary work on top of the rename machinery, which already
-applies multi-site edits through the host and has an undo.
+Step 1 was the whole risk and it is done. Step 2 is ordinary work on top of the rename
+machinery, which already applies multi-site edits through the host and has an undo.

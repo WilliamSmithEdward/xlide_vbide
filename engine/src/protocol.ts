@@ -459,6 +459,14 @@ export interface LocationPayload {
     column: number;
     length: number;
     /**
+     * What the occurrence DOES - 'read' | 'write' | 'readwrite' - classified upstream from the
+     * statement it sits in (xlide_vscode#55). Absent on paths that do not classify: a type
+     * name's occurrences, and a definition answer. The gray zone is deliberate upstream: a
+     * variable passed where a ByRef parameter might write it stays a read, because the write
+     * claim needs call-site resolution and is wrong for every ByVal.
+     */
+    kind?: string;
+    /**
      * The line the reference sits on, trimmed for a results list.
      *
      * Carried because the surface's own references list renders TEXT rather than editor models,
@@ -660,6 +668,8 @@ export interface KnowledgeModelMemberRow {
     signature?: string;
     /** The reference doc's one-line summary, when the model carries one. */
     doc?: string;
+    /** The type library marks it hidden or restricted; present only when true (#56). */
+    hidden?: boolean;
 }
 
 export interface KnowledgeModelResult {

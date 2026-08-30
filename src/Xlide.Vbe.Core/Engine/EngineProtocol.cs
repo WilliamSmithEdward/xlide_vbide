@@ -173,7 +173,13 @@ public sealed record EngineLocation(
     [property: JsonPropertyName("column")] int Column,
     [property: JsonPropertyName("length")] int Length,
     /// <summary>The line it sits on, so a module with no tab open can still be listed.</summary>
-    [property: JsonPropertyName("preview")] string? Preview = null);
+    [property: JsonPropertyName("preview")] string? Preview = null,
+    /// <summary>
+    /// What the occurrence does - read, write, or readwrite - classified by the analyzer from
+    /// the statement it sits in (xlide_vscode#55). Null where nothing classifies: definitions,
+    /// and a type name's occurrences.
+    /// </summary>
+    [property: JsonPropertyName("kind")] string? Kind = null);
 
 /// <summary>Where a symbol is declared, or everywhere it is used. Never crosses a workbook.</summary>
 public sealed record EngineLocations(
