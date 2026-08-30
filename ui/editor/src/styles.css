@@ -5593,15 +5593,24 @@ body.objbrowser-page #objbrowser-card {
 }
 
 #changes-full-restore {
-  /* The label stays one line whatever the card's width leaves it: squeezed, it wrapped into a
-     three-line tower beside the close button (the owner's screenshot, "see oddity"). The title
-     is the element that gives; a control's words are not. */
-  flex: 0 0 auto;
+  /* One line, always - squeezed, this wrapped into a three-line tower - and when the head truly
+     runs out of room the LABEL gives with an ellipsis rather than the row overflowing into the
+     close button (the owner's second screenshot: "still broken", the text running under the X).
+     The icon and the close stay whole; words are what can shorten. */
+  flex: 0 1 auto;
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+}
+
+#changes-full-close {
+  flex: 0 0 auto;
 }
 
 #changes-full-restore .changes-label-text {
   margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .changes-grow {

@@ -1262,8 +1262,10 @@ export class ChangesPane {
 
     // The listing is stale the moment the restore lands - it is a new round - so it is re-read
     // before the outcome is shown, and the card the developer reads sits over a list that
-    // already agrees with it.
-    this.showing = null;
+    // already agrees with it. `showing` is KEPT: a round's comparison is history and history
+    // does not move, and nulling it here orphaned the card's own Restore-this-module control -
+    // whose handler reads `showing` - so the button went silent after its first use (the owner,
+    // 2026-08-30: "after clicking restore... the button no longer fires").
     await this.reload();
 
     card.replaceChildren();

@@ -853,6 +853,40 @@ const acceptCleared = await waitFor("accept to clear the summary", async () => {
 }, { budgetMs: 20000 }).catch(() => false);
 check("accept through the pane clears the hybrid button", acceptCleared, true);
 
+// THE CARD'S OWN RESTORE FIRES TWICE. Its first use reloaded the listing and nulled the
+// selection it reads its target from, so the second press silently did nothing (the owner,
+// 2026-08-30: "after clicking restore, and restoring, and closing restore modal, the restore
+// this module button no longer fires"). History does not move, so the selection survives.
+await write("Ledger", `${summaryBase}\r\n' twice restored ${process.pid}`, "claude");
+await log({ action: "snapshot", label: "for the double" });
+const doubleRound = (await log()).rounds.filter((one) => !one.open)[0].round;
+
+// The pane redraws on its own debounce; clicking a row that is not drawn yet lands on nothing.
+await waitFor("the pane to list the round", async () =>
+  ((await api.ui()).changes?.rounds ?? []).some((one) => one.round === doubleRound),
+  { budgetMs: 20000 });
+const rowClick = await api.act("changesPane", { round: doubleRound, module: "Ledger" });
+check("the round's row clicks", rowClick.did, true);
+await waitFor("the comparison to arrive", async () =>
+  (await api.ui()).changes?.showing === `Ledger@${doubleRound}`, { budgetMs: 15000 });
+await api.act("changesPane", { expand: true });
+
+const firstPress = await api.act("changesPane", { restore: doubleRound, module: "Ledger" });
+check("the card restore fires once", firstPress.did, true);
+await waitFor("the outcome card", async () =>
+  (await api.ask("document.getElementById('changes-restore-done') !== null")) === true,
+  { budgetMs: 15000 });
+await api.ask("document.getElementById('changes-restore-done')?.click(), true");
+
+const secondPress = await api.act("changesPane", { restore: doubleRound, module: "Ledger" });
+check("and fires again after the outcome closes", secondPress.did, true);
+await waitFor("the second outcome card", async () =>
+  (await api.ask("document.getElementById('changes-restore-done') !== null")) === true,
+  { budgetMs: 15000 }).catch(() => {});
+await api.ask("document.getElementById('changes-restore-done')?.click(), true");
+await api.act("changesPane", { expand: false });
+await log({ action: "reject", by: "claude" });
+
 // ---- the pane is scoped to ONE file ---------------------------------------------------------------
 //
 // Every project keeps its own log, so the pane's file select is choosing between logs rather than
