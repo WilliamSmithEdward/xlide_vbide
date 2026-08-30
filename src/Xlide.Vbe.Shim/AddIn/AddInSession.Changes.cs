@@ -17,10 +17,13 @@ namespace Xlide.Vbe.Shim.AddIn;
  * workbook through the door for twenty minutes - what did it change? The log answers that at a
  * glance, and holds the text from before so the answer can be read rather than described.
  *
- * IT NEVER WRITES TO THE WORKBOOK. Not a revert button, not an undo stack: a log. Putting text
- * back is the reader's to do - the developer through the editor, where normal undo protects them,
- * or an agent through the write route, where its work lands in this log like anything else. That
- * is what makes it safe to trust: nothing here can lose work, because nothing here writes any.
+ * THE LOG NEVER WRITES TO THE WORKBOOK; since 2026-08-30 the SESSION restores from it. Those are
+ * different claims and both matter. The log keeps facts and holds texts - it still cannot lose
+ * work, because it still writes none. Restore (the owner: "full ability to restore from any
+ * arbitrary snapshot, and revert to last accepted") is the session acting on the log's answers,
+ * through the same WriteModule every write takes, and every restore lands as a round of its own -
+ * so the log can always take back its own restores, which is what preserves the original
+ * principle's substance now that the button exists.
  *
  * WHAT IT COVERS is module code and nothing else. Not references, not project properties, not a
  * form's design. A log that is quietly partial about what it watches is worse than no log, so it
@@ -118,7 +121,7 @@ internal sealed partial class AddInSession
     /// </summary>
     private void RecordChange(
         string module, string? projectId, ChangeKind kind, string? before, string? after,
-        string? from = null)
+        string? from = null, string? componentKind = null)
     {
         try
         {
@@ -130,7 +133,8 @@ internal sealed partial class AddInSession
             }
 
             ChangeLogFor(ChangeLogProject(projectId))?.Record(
-                module, kind, before, after, _writingAs ?? "developer", DateTimeOffset.UtcNow, from);
+                module, kind, before, after, _writingAs ?? "developer", DateTimeOffset.UtcNow, from,
+                componentKind);
 
             // A TAP ON THE SHOULDER, CARRYING NO COUNTS. The pane reads the log when it is opened
             // and when the developer asks again, never on the write path, because every count in
@@ -206,6 +210,11 @@ internal sealed partial class AddInSession
                 "diff" => ChangeDiffReply(wanted, at, module),
                 "snapshot" => Snapshotted(wanted, label),
                 "accept" => Accepted(wanted),
+                // The pane's own restore is the developer at the keyboard, so no `by`: the round
+                // it lands as says "developer", exactly as their typing does.
+                "restore" => ChangeRestoreReply(wanted, at, module, null),
+                "reject" => ChangeRestoreReply(
+                    wanted, ChangeLogFor(ChangeLogProject(wanted))?.AcceptedAt ?? 0, module, null),
                 _ => ChangesReply("listed", wanted, 200),
             };
         }
@@ -337,6 +346,293 @@ internal sealed partial class AddInSession
             new Changes.ChangeDiffReply(
                 held ? "held" : "the text is no longer held", round, entry.Module, held, rows),
             ChangeJsonContext.Default.ChangeDiffReply);
+    }
+
+    /*
+     * RESTORE: make what the log remembers true again.
+     *
+     * THE DESIGN REVERSAL, SAID PLAINLY. The pane shipped show-only, on the principle that a pane
+     * that writes is a pane that can lose work - and the owner reversed it (2026-08-30: "full
+     * ability to restore from any arbitrary snapshot, and revert to last accepted"). What keeps
+     * the principle's substance is that a restore is ITSELF A ROUND: every text it replaces is
+     * recorded on the way, so the log can always take back its own restores, and nothing this
+     * does is out of reach of the next restore. The log still writes nothing; the session does,
+     * through the same WriteModule every other write takes - the stopped-debugger refusal, the
+     * long-line refusal, the put-back on a refused replace, the engine and surface sync, all of
+     * it, for free.
+     *
+     * WHAT "TO ROUND N" MEANS: the state when round N ended. A module's text then is the BEFORE
+     * of the first round after N that touched it - the one fact the log was built to keep - so
+     * only modules touched since the boundary are visited at all, and each is written once with
+     * its final text rather than replayed through every round between. That is the whole
+     * performance story: a restore costs one write per module that actually differs, nothing
+     * per module that does not, and no walk of any history at apply time.
+     *
+     * ORDER: removes, then renames, then adds, then writes. Removes first because a name freed
+     * by a removal may be needed by a rename-back or a re-add; renames before adds so a re-add
+     * cannot land on a name a rename-back is about to reclaim; writes last, to modules that by
+     * then all exist under their boundary names.
+     */
+    private string ChangeRestoreReply(string? projectId, int boundary, string? onlyModule, string? by)
+    {
+        var wanted = ChangeLogProject(projectId);
+        var log = ChangeLogFor(wanted);
+        if (log is null)
+        {
+            return RestoreRefused(boundary, "no project is shown, and none was named");
+        }
+
+        // The same refusal every write path opens with, asked ONCE here so a stopped project
+        // answers one sentence rather than one per module.
+        if (ProjectModeNow() != DesignMode)
+        {
+            return RestoreRefused(boundary,
+                "the project is stopped in the debugger. Restoring now would reset it and lose "
+                + "the run, so nothing was touched. Press Reset in the editor, or POST "
+                + "command?name=reset, and restore again.");
+        }
+
+        // The running round closes first, so work still open counts as "after the boundary" and
+        // the restore lands as a round of its own rather than folding into somebody's edits.
+        log.Close(null, DateTimeOffset.UtcNow);
+
+        if (boundary < 0 || boundary > log.NewestClosedRound)
+        {
+            return RestoreRefused(boundary,
+                $"the log holds no round {boundary}; it runs 1 to {log.NewestClosedRound}");
+        }
+
+        var targets = log.RestoreTargets(boundary);
+        if (onlyModule is { Length: > 0 })
+        {
+            targets = [.. targets.Where(one =>
+                string.Equals(one.Module, onlyModule, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(one.NameNow, onlyModule, StringComparison.OrdinalIgnoreCase))];
+            if (targets.Count == 0)
+            {
+                return RestoreRefused(boundary,
+                    $"nothing about {onlyModule} has changed since round {boundary}, so there is "
+                    + "nothing to restore");
+            }
+        }
+
+        var display = DisplayFromProjectId(wanted);
+        var outcomes = new List<ChangeRestoreOutcome>();
+
+        AttributedTo(by ?? "developer", () =>
+        {
+            ApplyRestore(log, targets, display, wanted, outcomes);
+            return 0;
+        });
+
+        log.Close(
+            onlyModule is { Length: > 0 }
+                ? $"restore {onlyModule} to round {boundary}"
+                : $"restore to round {boundary}",
+            DateTimeOffset.UtcNow);
+
+        var restored = outcomes.Count(one => one.Did is "written" or "added" or "removed" or "renamed");
+        var skipped = outcomes.Count(one => one.Did is "skipped" or "failed");
+        var summary = $"{restored} restored, {skipped} skipped, "
+            + $"{outcomes.Count - restored - skipped} already right, to round {boundary}";
+
+        Log.Info($"changes: {summary}");
+        return System.Text.Json.JsonSerializer.Serialize(
+            new ChangeRestoreReply(
+                summary, boundary, restored, skipped, [.. outcomes], log.NewestClosedRound),
+            ChangeJsonContext.Default.ChangeRestoreReply);
+    }
+
+    private static string RestoreRefused(int boundary, string why) =>
+        System.Text.Json.JsonSerializer.Serialize(
+            new ChangeRestoreReply(why, boundary, 0, 0, [], 0),
+            ChangeJsonContext.Default.ChangeRestoreReply);
+
+    /// <summary>Applies one restore plan, module by module, recording each outcome.</summary>
+    private void ApplyRestore(
+        ChangeLog log, IReadOnlyList<RestoreTarget> targets,
+        string? display, string? projectId, List<ChangeRestoreOutcome> outcomes)
+    {
+        // REMOVES FIRST: a module that did not exist at the boundary goes, freeing its name.
+        foreach (var target in targets.Where(one => !one.ExistedAtBoundary))
+        {
+            using var standing = FindComponent(target.NameNow, projectId, out _);
+            if (standing is null)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.NameNow, "unchanged", "already absent"));
+                continue;
+            }
+
+            if (_editorSurface?.HasUnwritten(target.NameNow, display) == true)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.NameNow, "skipped",
+                    "it holds edits you have not written yet - save or discard them, then restore again"));
+                continue;
+            }
+
+            var gone = RemoveComponent(target.NameNow, display);
+            outcomes.Add(gone is null
+                ? new ChangeRestoreOutcome(target.NameNow, "removed", null)
+                : new ChangeRestoreOutcome(target.NameNow, "failed", gone));
+        }
+
+        // RENAMES BACK, in passes: a rename whose target name is still occupied waits for the
+        // pass that frees it. Two modules that swapped names deadlock any single order, so a
+        // pass that gets nowhere breaks the tie through a temporary name - each temp guarantees
+        // the next pass progresses, which bounds the loop.
+        var renames = targets
+            .Where(one => one.ExistedAtBoundary
+                && !string.Equals(one.Module, one.NameNow, StringComparison.OrdinalIgnoreCase))
+            .Select(one => (From: one.NameNow, To: one.Module))
+            .ToList();
+        var tempCount = 0;
+        while (renames.Count > 0)
+        {
+            var progressed = false;
+            for (var at = renames.Count - 1; at >= 0; at--)
+            {
+                var (from, to) = renames[at];
+                using var taken = FindComponent(to, projectId, out _);
+                if (taken is not null)
+                {
+                    continue;
+                }
+
+                var moved = RestoreRename(from, to, projectId);
+                outcomes.Add(moved is null
+                    ? new ChangeRestoreOutcome(to, "renamed", $"was {from}")
+                    : new ChangeRestoreOutcome(to, "failed", moved));
+                renames.RemoveAt(at);
+                progressed = true;
+            }
+
+            if (!progressed && renames.Count > 0)
+            {
+                var (from, to) = renames[0];
+                var temp = $"XlideRestoreTmp{++tempCount}";
+                var moved = RestoreRename(from, temp, projectId);
+                if (moved is not null)
+                {
+                    outcomes.Add(new ChangeRestoreOutcome(to, "failed", moved));
+                    renames.RemoveAt(0);
+                    continue;
+                }
+
+                renames[0] = (temp, to);
+            }
+        }
+
+        // RE-ADDS: a module removed since the boundary comes back, with its recorded kind.
+        foreach (var target in targets.Where(one => one.ExistedAtBoundary))
+        {
+            using var standing = FindComponent(target.Module, projectId, out _);
+            if (standing is not null)
+            {
+                continue;
+            }
+
+            if (target.ComponentKind == "form")
+            {
+                // The log records module CODE and says so in `covers`: a form's design is not in
+                // it, and a re-added form holding the right code over an empty canvas is a trap,
+                // not a restore.
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
+                    "it is a form, and a form's design is not recorded - only its code would come back"));
+                continue;
+            }
+
+            var addKind = target.ComponentKind switch
+            {
+                "class" => 2,
+                "module" or null => 1,
+                _ => 0,
+            };
+            if (addKind == 0)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
+                    $"a {target.ComponentKind} cannot be re-added"));
+                continue;
+            }
+
+            var added = AddComponentCore(addKind, target.Module, display, projectId, out _);
+            if (added is not null)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "failed", added));
+                continue;
+            }
+
+            var body = log.TextOf(target.TextKey);
+            if (body is null)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "added",
+                    target.TextKey is null ? null : "its text is no longer held, so it came back empty"));
+                continue;
+            }
+
+            var filled = WriteModule(target.Module, body, projectId, hostRewrite: true);
+            outcomes.Add(filled is null
+                ? new ChangeRestoreOutcome(target.Module, "added", null)
+                : new ChangeRestoreOutcome(target.Module, "failed", filled));
+        }
+
+        // WRITES: everything else that existed and changed text since the boundary.
+        foreach (var target in targets.Where(one => one.ExistedAtBoundary && one.TextKey is not null))
+        {
+            using var standing = FindComponent(target.Module, projectId, out _);
+            if (standing is null)
+            {
+                // Re-added above, or its add failed - either way the outcome is already listed.
+                continue;
+            }
+
+            var body = log.TextOf(target.TextKey);
+            if (body is null)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
+                    "the text is no longer held - the log has aged it out"));
+                continue;
+            }
+
+            if (outcomes.Any(one => one.Module.Equals(target.Module, StringComparison.OrdinalIgnoreCase)
+                && one.Did == "added"))
+            {
+                continue;
+            }
+
+            if (_editorSurface?.HasUnwritten(target.Module, display) == true)
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
+                    "it holds edits you have not written yet - save or discard them, then restore again"));
+                continue;
+            }
+
+            var wrote = WriteModule(target.Module, body, projectId, hostRewrite: true);
+            outcomes.Add(wrote is null
+                ? new ChangeRestoreOutcome(target.Module, "written", null)
+                : new ChangeRestoreOutcome(target.Module, "failed", wrote));
+        }
+    }
+
+    /// <summary>A rename on the restore path: the component's own name, then the session's adoption.</summary>
+    private string? RestoreRename(string from, string to, string? projectId)
+    {
+        try
+        {
+            using var component = FindComponent(from, projectId, out _);
+            if (component is null)
+            {
+                return $"nothing named {from} to rename back";
+            }
+
+            component.SetString("Name", to);
+            AdoptRename(from, to);
+            ComponentsChanged();
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"{from} would not take the name {to} back: {ex.Message.Trim()}";
+        }
     }
 
     /// <summary>A text the log kept, named by round and module.</summary>

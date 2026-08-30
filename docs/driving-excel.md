@@ -1287,12 +1287,25 @@ anybody said, and one row per module with `+added -removed`. Clicking a row line
 before and after up in the comparison the import dialog draws - the same renderer, from the same
 bounded comparison in the host.
 
-**It only shows.** There is no revert in the pane and there is not going to be one. Putting text
-back is a WRITE, and this product already has a hardened one; a pane that writes is a pane that
-can lose work. So the old text is made reachable instead, and whoever wants it back does it
-themselves - the developer in the editor, where normal undo protects them, or an agent through
-`writeModule`, whose undo then lands in the log as visible and as reversible as the work it undid.
-Cleverness in the caller, dumbness in the store.
+**It restores, since 2026-08-30.** The pane shipped show-only and the owner reversed it. What
+kept the old rule's substance is that a restore lands as a ROUND: every text it replaces is
+recorded first, so the log can always take back its own restores - aim the next restore at the
+round before it. The store stays dumb (the log itself still writes nothing); the session does
+the writing, through the same hardened `writeModule` every write takes.
+
+```js
+await api.changes({ action: "restore", round: 4, by: "claude" });     // the project, to after round 4
+await api.changes({ action: "restore", round: 4, module: "Ledger" }); // one module only
+await api.changes({ action: "reject", by: "claude" });                // back to the accept mark
+// -> { detail, outcomes: [{module, did: written|added|removed|renamed|unchanged|skipped|failed, why}], newRound }
+```
+
+Adds, removals and renames all come back: restoring to before a module existed removes it,
+restoring forward re-adds it with its recorded kind and text, and a rename since the boundary is
+carried back name and all. The refusals answer in words per module - a stopped debugger, unwritten
+edits, a form whose design was never recorded, text the log aged out. Cost: one write per module
+that differs, nothing per module that does not, no history replay - 446ms to restore away from a
+15,002-line module; restoring forward costs the write itself.
 
 **It is scoped to one file.** Every project keeps its own log, so the pane's file select chooses
 between logs rather than filtering one - hidden when a single file is open, the rule the list

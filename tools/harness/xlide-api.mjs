@@ -1393,10 +1393,20 @@ function clientFor(entry) {
      *   await api.changes({ action: "accept" });                 // draw the accepted line
      *   await api.changes({ action: "text", round: 3, module: "Ledger", which: "before" });
      *
-     * THERE IS NO REVERT HERE AND THERE IS NOT GOING TO BE. Putting text back is a write, and
-     * this product has a hardened one at `writeModule`. Read the text you want from `text` and
-     * write it: the result lands in this log like any other write, so an agent undoing its own
-     * work stays as visible and as reversible as the work it undid.
+     * AND THE WAY BACK, since 2026-08-30 (the owner reversed the show-only rule):
+     *
+     *   await api.changes({ action: "restore", round: 4, by: "claude" });   // the whole project,
+     *                                            // back to the state after round 4 (0 = before
+     *                                            // everything the log saw)
+     *   await api.changes({ action: "restore", round: 4, module: "Ledger" }); // one module only
+     *   await api.changes({ action: "reject", by: "claude" });   // back to the accept mark
+     *
+     * A restore lands as a ROUND, attributed to `by`, so it is as visible and as reversible as
+     * the work it undid - restore the round before it and the restore itself is taken back. The
+     * answer carries `outcomes`, one per module, because a restore can partially decline and say
+     * why: a stopped debugger refuses everything, a module with unwritten edits is skipped by
+     * name, a removed form is not re-added (its design was never recorded), and text the log
+     * aged out is said to be gone rather than written as empty.
      */
     changes: ({ action, project, module, round, which, label, limit, by } = {}) =>
       call(`changes${query({ action, project, module, round, which, label, limit, by })}`,

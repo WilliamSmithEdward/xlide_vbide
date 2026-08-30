@@ -558,6 +558,31 @@ internal sealed partial class AddInSession
             return HostError($"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
         }
 
+        var refused = AddComponentCore(kind, componentName, componentProject, componentOwner, out var finalName);
+        if (refused is not null)
+        {
+            return HostError(refused);
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(
+            new DebugComponentReply(true, finalName, "add"),
+            DebugJsonContext.Default.DebugComponentReply);
+    }
+
+    /// <summary>
+    /// Adds one component, in words on refusal and with the settled name on success.
+    ///
+    /// Split from the route so the restore path can add through the SAME code - the taken-name
+    /// check, the MSForms refusal, the change-log recording and the republish - rather than
+    /// growing a third way for a module to arrive (the comment at the recording site already
+    /// calls two a smell).
+    /// </summary>
+    private string? AddComponentCore(
+        int kind, string? componentName, string? componentProject, string? componentOwner,
+        out string finalName)
+    {
+        finalName = string.Empty;
+
         // A NAME ALREADY TAKEN IS SAID IN WORDS. The editor answers a duplicate with a bare
         // `Unexpected HRESULT`, which names neither the problem nor the module - a caller reads
         // it as the product having broken rather than as a name it can simply change. Measured
@@ -567,8 +592,8 @@ internal sealed partial class AddInSession
             && FindComponent(componentName, componentOwner, out _) is { } taken)
         {
             taken.Dispose();
-            return HostError($"'{componentName}' is already a component of "
-                + "this project; choose another name or remove that one first");
+            return $"'{componentName}' is already a component of "
+                + "this project; choose another name or remove that one first";
         }
 
         // The api mirrors the UI: Access's VBE has no MSForms, offers no Insert > UserForm, and
@@ -576,8 +601,7 @@ internal sealed partial class AddInSession
         // owner, 2026-08-19).
         if (kind == 3 && !HostApp.CarriesMsForms)
         {
-            return HostError(
-                $"{HostApp.Name} VBA has no UserForms, so kind=form cannot be added here");
+            return $"{HostApp.Name} VBA has no UserForms, so kind=form cannot be added here";
         }
 
         using var project = FindProjectByDisplayName(componentProject)
@@ -586,7 +610,7 @@ internal sealed partial class AddInSession
         using var added = components?.CallObject("Add", kind);
         if (added is null)
         {
-            return HostError("the project would not add a component");
+            return "the project would not add a component";
         }
 
         // Named here rather than left as Module1, because a fixture is its names. The editor
@@ -607,12 +631,11 @@ internal sealed partial class AddInSession
                 try { components?.InvokeWithObject("Remove", added); }
                 catch (Exception undo) { Log.Warn($"component: could not undo the add ({undo.GetType().Name})"); }
 
-                return HostError(
-                    $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})");
+                return $"'{componentName}' was refused as a name, so nothing was added ({ex.Message.Trim()})";
             }
         }
 
-        var finalName = added.GetString("Name") ?? string.Empty;
+        finalName = added.GetString("Name") ?? string.Empty;
         Log.Info($"component: added {finalName} (kind {kind})");
 
         // THE SECOND PLACE A MODULE CAN ARRIVE. The menu's insert has its own implementation of
@@ -622,7 +645,8 @@ internal sealed partial class AddInSession
         // the log.
         RecordChange(
             finalName, componentOwner, Core.Changes.ChangeKind.Added,
-            null, ProjectReader.ReadSource(added) ?? string.Empty);
+            null, ProjectReader.ReadSource(added) ?? string.Empty,
+            componentKind: ComponentKind(kind));
 
         // The strip AND the tree. Neither republishes on its own, and they are separate
         // publishes: the first version of this route refreshed the tabs only, so the explorer
@@ -630,9 +654,7 @@ internal sealed partial class AddInSession
         // two different projects at once (the developer, 2026-08-07).
         ComponentsChanged();
 
-        return System.Text.Json.JsonSerializer.Serialize(
-            new DebugComponentReply(true, finalName, "add"),
-            DebugJsonContext.Default.DebugComponentReply);
+        return null;
     }
 
     private HostCrossing CrossToHost(EditorSurface host, Action work)
@@ -4235,6 +4257,8 @@ internal sealed partial class AddInSession
                 var changesAt = int.TryParse(changesRound, out var parsedRound) ? parsedRound : 0;
                 var changesMost = int.TryParse(changesLimit, out var parsedLimit) ? parsedLimit : 200;
 
+                request.Query.TryGetValue("by", out var changesBy);
+
                 switch (changesAction)
                 {
                     case "text":
@@ -4242,6 +4266,26 @@ internal sealed partial class AddInSession
 
                     case "diff":
                         return ChangeDiffReply(changesProject, changesAt, changesModule);
+
+                    // Make what the log remembers true again: the project - or one module - back
+                    // to the state after `round`. The restore lands as a round of its own, so it
+                    // can always be restored away in its turn.
+                    case "restore" when changesRound is { Length: > 0 }:
+                        return ChangeRestoreReply(changesProject, changesAt, changesModule, changesBy);
+
+                    case "restore":
+                        return HostError("restore needs round=N - the boundary to restore to, "
+                            + "0 meaning before everything the log saw");
+
+                    // Reject everything since the accept mark: restore to the newest round marked
+                    // reviewed, or to before the log began when none has been.
+                    case "reject":
+                    {
+                        var log = ChangeLogFor(ChangeLogProject(changesProject));
+                        return log is null
+                            ? HostError("no project is shown, and none was named")
+                            : ChangeRestoreReply(changesProject, log.AcceptedAt, changesModule, changesBy);
+                    }
 
                     case "snapshot":
                         CloseChangeRounds(changesLabel);

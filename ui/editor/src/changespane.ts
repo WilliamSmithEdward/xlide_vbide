@@ -1,11 +1,14 @@
 /*
- * The Changes pane: what happened to this project's module code, by whom, in rounds.
+ * The Changes pane: what happened to this project's module code, by whom, in rounds - and, since
+ * 2026-08-30, the way back.
  *
- * IT ONLY SHOWS. There is no revert button here and there is not going to be one. Putting text
- * back is a write, and a pane that writes is a pane that can lose work - so the old text is made
- * REACHABLE instead: read the diff, open what a module held before, copy what you want, and make
- * the change yourself in the editor where normal undo protects you. An agent does the same thing
- * through the write route, and its undo lands in this log like any other round.
+ * IT SHOWED ONLY, AND THE OWNER REVERSED THAT ("full ability to restore from any arbitrary
+ * snapshot, and revert to last accepted"). The principle the show-only rule protected - a pane
+ * that writes is a pane that can lose work - survives in the shape of the restore: every restore
+ * lands as a ROUND, recorded like any other write, so the pane can always take back its own
+ * restores. Restore to any round, restore one module to a round, or Reject everything since the
+ * accept mark; each asks first, each reports what it did module by module, and the host refuses
+ * the ones it must (a stopped debugger, unwritten edits, a form whose design was never recorded).
  *
  * IT PULLS RATHER THAN BEING PUSHED. Every count in here is a comparison of two whole texts, and
  * this product has learned twice what that costs when it happens per keystroke. So the host is
@@ -83,8 +86,14 @@ export interface ChangesPaneProbe {
     /** Rounds in the log, against the rounds on screen. */
     total: number;
   };
-  /** Presses a named control: refresh, snapshot, accept. False when unknown. */
+  /** Presses a named control: refresh, snapshot, accept, reject. False when unknown. */
   press(control: string): boolean;
+  /**
+   * Presses a row's own Restore control - the round's, or one module's in the full-size card -
+   * and then the confirm the modal raises, which is the whole gesture a hand makes. False when
+   * no such control is on screen.
+   */
+  restore(round: number, module?: string): boolean;
   /**
    * Opens one round's module diff, as clicking its row does. `where` says WHICH row: the pane's
    * list, or the full-size card's rail - two controls onto the same comparison, and a harness
@@ -130,6 +139,7 @@ export class ChangesPane {
   private readonly refresh: HTMLButtonElement;
   private readonly snapshot: HTMLButtonElement;
   private readonly accept: HTMLButtonElement;
+  private readonly reject: HTMLButtonElement;
 
   private readonly file: HTMLSelectElement;
   private readonly newer: HTMLElement;
@@ -185,6 +195,7 @@ export class ChangesPane {
     this.refresh = root.querySelector("#changes-refresh") as HTMLButtonElement;
     this.snapshot = root.querySelector("#changes-snapshot") as HTMLButtonElement;
     this.accept = root.querySelector("#changes-accept") as HTMLButtonElement;
+    this.reject = root.querySelector("#changes-reject") as HTMLButtonElement;
 
     this.file = root.querySelector("#changes-file") as HTMLSelectElement;
     this.newer = root.querySelector("#changes-newer") as HTMLElement;
@@ -205,6 +216,12 @@ export class ChangesPane {
     this.refresh.addEventListener("click", () => void this.reload());
     this.snapshot.addEventListener("click", () => void this.reload({ action: "snapshot" }));
     this.accept.addEventListener("click", () => void this.reload({ action: "accept" }));
+    this.reject.addEventListener("click", () => this.confirmRestore(
+      { action: "reject" },
+      "Reject the changes since the accept mark?",
+      "Every module goes back to how it was when Accept was last pressed, or to before the log "
+        + "began if it never was. The restore is recorded as a round, so it can itself be "
+        + "restored away."));
 
     this.draw();
   }
@@ -321,6 +338,7 @@ export class ChangesPane {
     this.refresh.disabled = on;
     this.snapshot.disabled = on;
     this.accept.disabled = on;
+    this.reject.disabled = on;
   }
 
   private draw(): void {
@@ -406,6 +424,29 @@ export class ChangesPane {
     clock.title = `Round ${round.round}, ${new Date(round.started).toLocaleString()}`;
 
     head.append(number, who, said, clock);
+
+    // The way back, on every CLOSED round: put the whole project where it stood when this round
+    // ended. The running round has no end to stand at yet.
+    if (!round.open) {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.className = "changes-restore";
+      back.dataset.round = String(round.round);
+      back.title = `Restore the project to how it stood after round ${round.round}`;
+      back.setAttribute("aria-label", `Restore to after round ${round.round}`);
+      back.innerHTML = '<span class="codicon codicon-history" aria-hidden="true"></span>';
+      back.addEventListener("click", (event) => {
+        // The row behind this opens a comparison on click; this press is not that.
+        event.stopPropagation();
+        this.confirmRestore(
+          { action: "restore", round: String(round.round) },
+          `Restore the project to after round ${round.round}?`,
+          "Every module touched since goes back to how it stood when the round ended. Nothing "
+            + "is lost: what stands now is recorded before it is replaced.");
+      });
+      head.appendChild(back);
+    }
+
     box.appendChild(head);
 
     for (const entry of round.entries) {
@@ -630,6 +671,26 @@ export class ChangesPane {
     const named = document.createElement("span");
     named.id = "changes-full-title";
 
+    // One module, back to this round - the surgical version of the row's whole-project restore,
+    // offered where the reader is already looking at exactly what would change.
+    const restoreOne = document.createElement("button");
+    restoreOne.type = "button";
+    restoreOne.id = "changes-full-restore";
+    restoreOne.className = "toolbar-button";
+    restoreOne.innerHTML = '<span class="codicon codicon-history" aria-hidden="true"></span>'
+      + '<span class="changes-label-text">Restore this module</span>';
+    restoreOne.addEventListener("click", () => {
+      const showing = this.showing;
+      if (!showing) {
+        return;
+      }
+
+      this.confirmRestore(
+        { action: "restore", round: String(showing.round), module: showing.module },
+        `Restore ${showing.module} to after round ${showing.round}?`,
+        "Only this module goes back; everything else stays as it is.");
+    });
+
     const close = document.createElement("button");
     close.type = "button";
     close.id = "changes-full-close";
@@ -638,7 +699,7 @@ export class ChangesPane {
     close.innerHTML = '<span class="codicon codicon-close" aria-hidden="true"></span>';
     close.addEventListener("click", () => dismiss());
 
-    head.append(toggle, named, close);
+    head.append(toggle, named, restoreOne, close);
 
     const split = document.createElement("div");
     split.id = "changes-full-split";
@@ -948,6 +1009,122 @@ export class ChangesPane {
     this.full.body.scrollTop = 0;
   }
 
+  /**
+   * Asks first, does it, and says what happened - one modal for the whole conversation.
+   *
+   * The question and the outcome share a card because they are one exchange: a confirm that
+   * vanishes into silence leaves the developer reading the round list for clues about what just
+   * happened, and several modules can be skipped for reasons worth reading (unwritten edits, a
+   * form's unrecorded design, text the log aged out). The outcome list is those reasons, module
+   * by module, exactly as the host answered them.
+   */
+  private confirmRestore(args: Record<string, string>, question: string, consequence: string): void {
+    if (this.busy) {
+      return;
+    }
+
+    const { card, dismiss } = openModal({
+      backdropId: "changes-restore-backdrop",
+      cardId: "changes-restore-card",
+      label: question,
+      role: "alertdialog",
+    });
+
+    const asked = document.createElement("div");
+    asked.id = "changes-restore-question";
+    asked.className = "modal-title";
+    asked.textContent = question;
+
+    const said = document.createElement("div");
+    said.id = "changes-restore-consequence";
+    said.className = "modal-detail";
+    said.textContent = consequence;
+    card.setAttribute("aria-describedby", said.id);
+
+    const buttons = document.createElement("div");
+    buttons.id = "changes-restore-buttons";
+    buttons.className = "modal-buttons";
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.id = "changes-restore-cancel";
+    cancel.className = "modal-button";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => dismiss());
+
+    const go = document.createElement("button");
+    go.type = "button";
+    go.id = "changes-restore-confirm";
+    // Primary rather than danger: a restore is recoverable by design - it lands as a round the
+    // next restore can take back - and danger is reserved for the unrecoverable.
+    go.className = "modal-button primary";
+    go.textContent = "Restore";
+    go.addEventListener("click", () => {
+      go.disabled = true;
+      cancel.disabled = true;
+      // The card stays up while the host works, so the button says so instead of going quiet.
+      go.textContent = "Restoring...";
+      void this.runRestore(args, card, dismiss);
+    });
+
+    // Cancel is what focus lands on, the same stance the tree's remove takes: the destructive
+    // answer is a deliberate reach, never the default press.
+    buttons.append(go, cancel);
+    card.append(asked, said, buttons);
+    cancel.focus();
+  }
+
+  private async runRestore(
+    args: Record<string, string>, card: HTMLElement, dismiss: () => void): Promise<void> {
+    let outcome: Record<string, unknown>;
+    try {
+      outcome = await this.ask(this.file.value ? { project: this.file.value, ...args } : args);
+    } catch (failed) {
+      outcome = { detail: failed instanceof Error ? failed.message : String(failed), outcomes: [] };
+    }
+
+    // The listing is stale the moment the restore lands - it is a new round - so it is re-read
+    // before the outcome is shown, and the card the developer reads sits over a list that
+    // already agrees with it.
+    this.showing = null;
+    await this.reload();
+
+    card.replaceChildren();
+
+    const summary = document.createElement("div");
+    summary.id = "changes-restore-summary";
+    summary.className = "modal-title";
+    summary.setAttribute("role", "status");
+    summary.textContent = String(outcome.detail ?? "");
+
+    const list = document.createElement("div");
+    list.id = "changes-restore-outcomes";
+    const rows = (outcome.outcomes as { module: string; did: string; why: string | null }[] | undefined) ?? [];
+    for (const row of rows) {
+      const line = document.createElement("div");
+      line.className = `changes-restore-outcome changes-restore-${row.did}`;
+      line.textContent = row.why ? `${row.module}: ${row.did} - ${row.why}` : `${row.module}: ${row.did}`;
+      list.appendChild(line);
+    }
+
+    const done = document.createElement("button");
+    done.type = "button";
+    done.id = "changes-restore-done";
+    done.className = "modal-button primary";
+    done.textContent = "Close";
+    done.addEventListener("click", () => dismiss());
+
+    // The same row the question's buttons sat in, so the card keeps its shape between its two
+    // faces - and the button stops sitting flush against the outcome list (the owner, live:
+    // "needs padding").
+    const closing = document.createElement("div");
+    closing.className = "modal-buttons";
+    closing.appendChild(done);
+
+    card.append(summary, list, closing);
+    done.focus();
+  }
+
   /** The pane as the dev surface reads and drives it. */
   probe(): ChangesPaneProbe {
     return {
@@ -983,11 +1160,29 @@ export class ChangesPane {
         const button = control === "refresh" ? this.refresh
           : control === "snapshot" ? this.snapshot
           : control === "accept" ? this.accept
+          : control === "reject" ? this.reject
           // The card's own control, so a driver can put the snapshots away and bring them back.
           : control === "rail" ? this.full?.toggle ?? null
           : null;
         button?.click();
         return button !== null;
+      },
+      restore: (round, module) => {
+        // The real controls, pressed in the order a hand presses them: the row's button (or the
+        // card's, for one module), then the confirm the modal raises. Reaching past them to the
+        // request would prove the route and skip the pane, which is the half being tested.
+        const button = module !== undefined
+          ? document.querySelector<HTMLButtonElement>("#changes-full-restore")
+          : this.list.querySelector<HTMLButtonElement>(
+            `.changes-restore[data-round="${round}"]`);
+        if (!button) {
+          return false;
+        }
+
+        button.click();
+        const confirm = document.querySelector<HTMLButtonElement>("#changes-restore-confirm");
+        confirm?.click();
+        return confirm !== null;
       },
       expand: (open) => {
         if (open) {

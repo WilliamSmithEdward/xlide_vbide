@@ -5429,6 +5429,79 @@ body.objbrowser-page #objbrowser-card {
    horizontal padding, the icon took the button's baseline and sat high and left of the middle -
    which is what the focus ring then drew a rectangle around (the owner, 2026-08-22: "glyph is not
    centered in button"). Same geometry as the surface's toolbar buttons, at the strip's scale. */
+/* The round row's way back: same quiet footprint as the expand control, sitting after the
+   clock. Hidden until the row is hovered or it holds focus, the same rule the tree's plus
+   follows - a control on every row is furniture; a control where the hand is, is an offer. */
+.changes-restore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.changes-round-head:hover .changes-restore,
+.changes-restore:focus-visible {
+  opacity: 0.7;
+}
+
+.changes-restore:hover {
+  opacity: 1;
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+.changes-restore:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #0078d4);
+  outline-offset: -2px;
+}
+
+#changes-restore-card {
+  width: 460px;
+  padding: 16px;
+}
+
+/* The outcome list: one line per module, the host's own words. Scrolls rather than growing,
+   because a project-wide reject can answer for every module it has. */
+#changes-restore-outcomes {
+  margin-top: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+#changes-restore-outcomes:empty {
+  display: none;
+}
+
+.changes-restore-outcome {
+  padding: 2px 0;
+}
+
+.changes-restore-skipped,
+.changes-restore-failed {
+  color: var(--vscode-editorWarning-foreground, #cca700);
+}
+
+.changes-restore-failed {
+  color: var(--vscode-errorForeground, #f14c4c);
+}
+
+#changes-restore-summary {
+  margin-top: 0;
+}
+
+#changes-full-restore .changes-label-text {
+  margin-left: 4px;
+}
+
 .changes-grow {
   margin-left: auto;
   display: inline-flex;

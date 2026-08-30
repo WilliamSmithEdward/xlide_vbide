@@ -28,8 +28,32 @@ public enum ChangeKind
 /// <param name="Before">Key of the text it held when the round began, or null when it did not exist.</param>
 /// <param name="After">Key of the text it held when the round ended, or null when it no longer exists.</param>
 /// <param name="From">What it was called when the round began, when that is not what it is called now.</param>
+/// <param name="ComponentKind">
+/// What sort of component it is - "standard", "class", "form", "document" - or null where the
+/// recording site did not know. Restore needs it for exactly one thing: re-adding a module that
+/// was removed, where adding the wrong sort silently produces a module that cannot hold what the
+/// text says (a class's Friend members, a form's code-behind).
+/// </param>
 public sealed record ChangeEntry(
-    string Module, ChangeKind Kind, string? Before, string? After, string? From = null);
+    string Module, ChangeKind Kind, string? Before, string? After, string? From = null,
+    string? ComponentKind = null);
+
+/// <summary>
+/// One module's state at a restore boundary: what to make true again.
+/// </summary>
+/// <param name="Module">Its name at the boundary, which is the name to restore.</param>
+/// <param name="NameNow">The name the log last saw it under, when a rename since moved it.</param>
+/// <param name="ExistedAtBoundary">
+/// Whether it existed at the boundary at all. False means it arrived afterwards, so restoring
+/// means removing it.
+/// </param>
+/// <param name="TextKey">
+/// Key of its text at the boundary. Null with <paramref name="ExistedAtBoundary"/> true means
+/// the text never changed after the boundary - only the name did - so there is nothing to write.
+/// </param>
+/// <param name="ComponentKind">Its kind, from the first entry after the boundary that knew.</param>
+public sealed record RestoreTarget(
+    string Module, string NameNow, bool ExistedAtBoundary, string? TextKey, string? ComponentKind);
 
 /// <summary>
 /// One round: a stretch of writes by one author, ended by a snapshot, by the author changing, by
@@ -116,7 +140,7 @@ public sealed class ChangeLog
     /// </summary>
     public void Record(
         string module, ChangeKind kind, string? before, string? after, string? by, DateTimeOffset now,
-        string? from = null)
+        string? from = null, string? componentKind = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(module);
 
@@ -150,7 +174,12 @@ public sealed class ChangeLog
         // to "what happened to Ledger": it is called Accounts now.
         if (kind == ChangeKind.Renamed && from is { Length: > 0 } && _open.Remove(from, out var moved))
         {
-            _open[module] = moved with { Module = module, From = moved.From ?? from };
+            _open[module] = moved with
+            {
+                Module = module,
+                From = moved.From ?? from,
+                ComponentKind = moved.ComponentKind ?? componentKind,
+            };
             return;
         }
 
@@ -179,7 +208,8 @@ public sealed class ChangeLog
 
         _open[module] = new ChangeEntry(
             module, settled, beforeKey, afterKey,
-            already?.From ?? (kind == ChangeKind.Renamed ? from : null));
+            already?.From ?? (kind == ChangeKind.Renamed ? from : null),
+            already?.ComponentKind ?? componentKind);
     }
 
     /// <summary>
@@ -244,6 +274,118 @@ public sealed class ChangeLog
     /// <summary>A text this log holds, or null when it never held one or has let it go.</summary>
     public string? TextOf(string? key) =>
         key is { Length: > 0 } && _texts.TryGetValue(key, out var held) ? held : null;
+
+    /// <summary>The newest closed round's number, or zero when none has closed.</summary>
+    public int NewestClosedRound => _rounds.Count > 0 ? _rounds[^1].Number : 0;
+
+    /// <summary>
+    /// What each module held at a boundary, worked out from the rounds after it.
+    ///
+    /// The boundary is "after round <paramref name="boundary"/> ended" - zero meaning before the
+    /// log's first round. Only modules TOUCHED after the boundary come back, because everything
+    /// else already holds its boundary state: a module's text at the boundary is the BEFORE of
+    /// the first round after it that touched it, which is the one fact the log was built to keep.
+    ///
+    /// A restore is planned from this and applied by the session, never here: this log still
+    /// writes nothing, holds no undo stack, and cannot lose work. What changed on 2026-08-30 is
+    /// that acting on its answers stopped being left entirely to the reader (the owner: "full
+    /// ability to restore from any arbitrary snapshot") - and the acting half lives with the
+    /// session's write path, where every guard already is.
+    ///
+    /// RENAMES ARE FOLLOWED, not treated as new modules. An identity is tracked from its name at
+    /// the boundary through every rename since, so "restore Ledger" finds the module now called
+    /// Accounts and knows to carry the name back too. A PURE rename entry holds no text, so it
+    /// settles the identity's existence and not its text - the text settles at the first entry
+    /// after the boundary that actually carries a before.
+    ///
+    /// Only CLOSED rounds are read. The caller closes the running round first, so a restore is
+    /// planned against a complete record and lands as a round of its own.
+    /// </summary>
+    public IReadOnlyList<RestoreTarget> RestoreTargets(int boundary)
+    {
+        // A LIST, not a name-keyed map, because a name is not an identity: remove Ledger, add a
+        // new Ledger, and there are two modules in this story with one name between them. Keyed
+        // by name, the reborn one's first touch would clobber the original's settled state. So
+        // identities accumulate here and only the CURRENT name is a map, dropped on removal so a
+        // rebirth starts a fresh identity - the removes-then-adds apply order sorts them out.
+        var identities = new List<Identity>();
+        var byCurrentName = new Dictionary<string, Identity>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var round in _rounds)
+        {
+            if (round.Number <= boundary)
+            {
+                continue;
+            }
+
+            foreach (var entry in round.Entries)
+            {
+                // The name this entry began the round under links it to an identity the walk
+                // already knows; an unknown one is first touched here, and its boundary name IS
+                // that starting name.
+                var startName = entry.From ?? entry.Module;
+                if (!byCurrentName.TryGetValue(startName, out var identity))
+                {
+                    identity = new Identity
+                    {
+                        BoundaryName = startName,
+                        NameNow = startName,
+                        // The first touch says whether it existed at the boundary: a module that
+                        // ARRIVED in this round did not; a write, rename or removal can only
+                        // happen to something standing.
+                        Existed = entry.Kind != ChangeKind.Added,
+                    };
+                    identities.Add(identity);
+                    byCurrentName[startName] = identity;
+                }
+
+                if (!identity.TextSettled && (entry.Before is not null || entry.Kind == ChangeKind.Added))
+                {
+                    // The before of the first text-carrying touch is the boundary text. A pure
+                    // rename's null is a gap, not an absence, so it does not settle this.
+                    identity.TextKey = entry.Before;
+                    identity.TextSettled = true;
+                }
+
+                identity.Kind ??= entry.ComponentKind;
+
+                // A rename moves the identity's current name; later rounds meet it there.
+                if (!string.Equals(entry.Module, identity.NameNow, StringComparison.OrdinalIgnoreCase))
+                {
+                    byCurrentName.Remove(identity.NameNow);
+                    byCurrentName[entry.Module] = identity;
+                    identity.NameNow = entry.Module;
+                }
+
+                // A removal frees the name: whatever answers to it afterwards is a new module.
+                if (entry.Kind == ChangeKind.Removed)
+                {
+                    byCurrentName.Remove(identity.NameNow);
+                }
+            }
+        }
+
+        return [.. identities
+            .Select(one => new RestoreTarget(
+                one.BoundaryName,
+                one.NameNow,
+                one.Existed,
+                // An identity that existed and never settled a text changed only its name.
+                one.Existed ? one.TextKey : null,
+                one.Kind))
+            .OrderBy(target => target.Module, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>One module's story since a restore boundary, while the walk is still telling it.</summary>
+    private sealed class Identity
+    {
+        public required string BoundaryName { get; init; }
+        public required string NameNow { get; set; }
+        public required bool Existed { get; init; }
+        public bool TextSettled { get; set; }
+        public string? TextKey { get; set; }
+        public string? Kind { get; set; }
+    }
 
     /// <summary>Keeps a text under a key of its own content, and answers that key.</summary>
     private string? Keep(string? text)

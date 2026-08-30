@@ -1979,7 +1979,23 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         const control = String(args.press);
         return pane.press(control)
           ? { did: true, detail: `${control} pressed` }
-          : { did: false, detail: `no control named ${control}; use refresh, snapshot, accept or rail` };
+          : { did: false, detail: `no control named ${control}; use refresh, snapshot, accept, reject or rail` };
+      }
+
+      if (args.restore !== undefined) {
+        // The pane's own gesture: the row's Restore control (or the full card's, when a module
+        // is named) and then the confirm its modal raises - so a suite that drives this proves
+        // the buttons, not merely the route they share a worker with.
+        const round = Number(args.restore);
+        const module = args.module === undefined ? undefined : String(args.module);
+        return pane.restore(round, module)
+          ? { did: true, detail: `restore pressed and confirmed for round ${round}${module ? ` (${module})` : ""}` }
+          : {
+            did: false,
+            detail: module
+              ? "no full-size comparison is up to restore from - open one first"
+              : `no closed round ${round} offers a restore control`,
+          };
       }
 
       if (args.module !== undefined) {

@@ -2733,7 +2733,8 @@ internal sealed partial class AddInSession : IDisposable
             // keep up never fails the write: see RecordChange.
             RecordChange(
                 component, foundOwner ?? owner, Core.Changes.ChangeKind.Written,
-                baseline, stored ?? text);
+                baseline, stored ?? text,
+                componentKind: ComponentKind(found.GetInt32("Type")));
 
             _writtenModules[writtenKey] = stored ?? text;
 
@@ -9969,7 +9970,8 @@ internal sealed partial class AddInSession : IDisposable
             {
                 RecordChange(
                     name, ProjectIdFromDisplay(projectName) ?? _shownProject,
-                    Core.Changes.ChangeKind.Added, null, ProjectReader.ReadSource(added) ?? string.Empty);
+                    Core.Changes.ChangeKind.Added, null, ProjectReader.ReadSource(added) ?? string.Empty,
+                    componentKind: ComponentKind(kind));
             }
 
             if (name is not null)
@@ -10056,11 +10058,14 @@ internal sealed partial class AddInSession : IDisposable
             // WHAT IT HELD, read while it still exists. A removal is the one change whose "before"
             // cannot be recovered afterwards, which makes it the one most worth having.
             var lastWords = ProjectReader.ReadSource(doomed);
+            var lastKind = ComponentKind(doomed.GetInt32("Type"));
 
             // Remove takes the COMPONENT, not an index.
             components.InvokeWithObject("Remove", doomed);
 
-            RecordChange(removed, foundIn ?? projectId, Core.Changes.ChangeKind.Removed, lastWords, null);
+            RecordChange(
+                removed, foundIn ?? projectId, Core.Changes.ChangeKind.Removed, lastWords, null,
+                componentKind: lastKind);
 
             // The bare-name key as well as the workbook-qualified one: a baseline recorded before
             // the workbook could be told is keyed without it, and the same fallback AdoptRename

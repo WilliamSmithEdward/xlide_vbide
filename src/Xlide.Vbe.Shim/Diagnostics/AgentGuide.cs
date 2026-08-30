@@ -190,6 +190,19 @@ internal static class AgentGuide
         new("menus", "GET", "path=<Menu%20Path>?",
             "The editor's menu tree, or one menu's items with their enabled state.",
             "GET menus", true, DoorPolicy.Open),
+        new("changes", "GET", "action=text|diff|snapshot|accept|restore|reject, project=, module=, round=, which=, label=, limit=, by=",
+            "The change log: what happened to this project's module code, by whom, in rounds - "
+            + "and the way back. Bare, the rounds newest first. text/diff read what a round held; "
+            + "snapshot closes the running round with a label; accept marks everything reviewed. "
+            + "restore&round=N puts the project - or one module, with module= - back to the state "
+            + "after round N (0 = before everything), and reject restores to the accept mark. A "
+            + "restore lands as a round of its own, attributed to by=, so it can be restored away "
+            + "in its turn: nothing this route does is out of its own reach.",
+            "GET changes?action=restore&round=4&by=claude", true, DoorPolicy.Open,
+            "Restore refuses in words while the debugger is stopped, skips modules holding "
+            + "unwritten edits (naming them), and answers every module's outcome. A removed FORM "
+            + "is not re-added - its design is not recorded - and a module whose text the log "
+            + "aged out says so."),
         new("workbook", "POST", "action=close&project=<name>&saveChanges=0|1",
             "Closes one open workbook, the host's own File Close with the save question answered "
             + "in the request. The ONE safe route for the gesture: an immediate-window line runs "

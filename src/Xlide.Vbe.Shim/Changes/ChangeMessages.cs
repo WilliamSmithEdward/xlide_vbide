@@ -78,10 +78,31 @@ public sealed record ChangeDiffReply(
     [property: JsonPropertyName("held")] bool Held,
     [property: JsonPropertyName("rows")] Sync.SyncDiffRow[] Rows);
 
+/// <summary>One module a restore touched or could not, and what happened to it.</summary>
+public sealed record ChangeRestoreOutcome(
+    [property: JsonPropertyName("module")] string Module,
+    /// <summary>written | added | removed | renamed | unchanged | skipped | failed.</summary>
+    [property: JsonPropertyName("did")] string Did,
+    [property: JsonPropertyName("why")] string? Why);
+
+/// <summary>
+/// What a restore did: the boundary it aimed at, each module's outcome, and the round the whole
+/// operation landed as - which is what makes a restore restorable in its turn.
+/// </summary>
+public sealed record ChangeRestoreReply(
+    [property: JsonPropertyName("detail")] string Detail,
+    [property: JsonPropertyName("round")] int Round,
+    [property: JsonPropertyName("restored")] int Restored,
+    [property: JsonPropertyName("skipped")] int Skipped,
+    [property: JsonPropertyName("outcomes")] ChangeRestoreOutcome[] Outcomes,
+    [property: JsonPropertyName("newRound")] int NewRound);
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ChangeEntryReply))]
 [JsonSerializable(typeof(ChangeRoundReply))]
 [JsonSerializable(typeof(ChangeLogReply))]
 [JsonSerializable(typeof(ChangeTextReply))]
 [JsonSerializable(typeof(ChangeDiffReply))]
+[JsonSerializable(typeof(ChangeRestoreOutcome))]
+[JsonSerializable(typeof(ChangeRestoreReply))]
 internal sealed partial class ChangeJsonContext : JsonSerializerContext;

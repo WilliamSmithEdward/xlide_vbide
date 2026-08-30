@@ -51,6 +51,18 @@ const held = (name) => api.readModule(name, project.projectId).then((one) => one
 const write = (name, text, by) => api.writeModule(name, text, project.projectId, { by });
 const log = (args = {}) => api.changes({ ...args, project: project.projectId });
 
+// EVERY CHECK BELOW WRITES, and a project that is running or stopped refuses writes - rightly.
+// Without this the first write THREW, the throw was unhandled, and node buried the one useful
+// sentence under a libuv teardown assertion: the developer was running a FORM in the same
+// session while the suite started (2026-08-30), and the report looked like a broken product
+// instead of a busy host. A suite that cannot run says so and stops; it does not die mid-word.
+const modeNow = (await api.state()).debugMode ?? "design";
+if (modeNow !== "design") {
+  console.log(`FAIL the project is in ${modeNow} mode, so nothing here can write. Is a form or`
+    + " a run standing? Stop it (or POST command?name=reset), then run this again.");
+  process.exit(1);
+}
+
 // THE SECOND MODULE, BY KIND RATHER THAN BY NAME. The checks below need a component of another
 // kind joining a round, which the fixture ships as a class - but RENAMING is one of the things
 // this product does, and a suite holding the name its fixture shipped with breaks the first time
@@ -637,6 +649,135 @@ const lastWords = await log({
 });
 check("and what it held is still readable after it is gone", lastWords.held, true);
 check("and it is what the module actually held", lastWords.text === wasHolding);
+
+// ---- RESTORE: make what the log remembers true again ------------------------------------------
+//
+// The pane shipped show-only and the owner reversed it (2026-08-30: "full ability to restore from
+// any arbitrary snapshot, and revert to last accepted"). What keeps the old rule's substance is
+// checked here first and hardest: a restore lands as a ROUND, so the log can always take back its
+// own restores, and nothing it does is out of its own reach.
+
+const restoreBase = await held("Ledger");
+await log({ action: "snapshot", label: "restore baseline" });
+const boundary = (await log()).rounds[0]?.round ?? 0;
+
+await write("Ledger", `${restoreBase}\r\n' restore probe A`, "claude");
+await log({ action: "snapshot", label: "A" });
+const afterA = await held("Ledger");
+const boundaryA = (await log()).rounds[0].round;
+
+await write("Ledger", `${restoreBase}\r\n' restore probe A\r\n' restore probe B`, "claude");
+await write(second, `${await held(second)}\r\n' restore probe B`, "claude");
+await log({ action: "snapshot", label: "B" });
+
+const restoreStarted = Date.now();
+const backToA = await log({ action: "restore", round: boundaryA, by: "claude" });
+const restoreTook = Date.now() - restoreStarted;
+check("restore answers each module's outcome",
+  (backToA.outcomes ?? []).map((one) => `${one.module}:${one.did}`).sort().join(","),
+  [`Ledger:written`, `${second}:written`].sort().join(","));
+check(`and it is quick (${restoreTook}ms for two modules)`, restoreTook < 5000, true);
+
+check("the project is byte-for-byte at the chosen boundary",
+  (await held("Ledger")) === afterA && !(await held(second)).includes("restore probe B"), true);
+
+const restoreRound = (await log()).rounds.find((round) => !round.open);
+check("the restore landed as a round of its own",
+  `${restoreRound?.label} by ${restoreRound?.by}`, `restore to round ${boundaryA} by claude`);
+
+// THE RESTORE IS RESTORABLE. The boundary to aim at is the round BEFORE the restore's own:
+// "after the restore round" is the restored state, which is where we already stand.
+await log({ action: "restore", round: backToA.newRound - 1, by: "claude" });
+check("restoring the restore away brings the newest text back",
+  (await held("Ledger")).includes("restore probe B"), true);
+
+// One module only, back past both probes - the second module must not move.
+const secondNow = await held(second);
+await log({ action: "restore", round: boundary, module: "Ledger", by: "claude" });
+check("a per-module restore reverts that module byte-for-byte",
+  (await held("Ledger")) === restoreBase, true);
+check("and leaves every other module alone", (await held(second)) === secondNow, true);
+
+// REJECT: everything since the accept mark. Accept here, change, reject, compare.
+await log({ action: "accept" });
+const acceptedText = await held("Ledger");
+await write("Ledger", `${acceptedText}\r\n' past the mark`, "claude");
+await log({ action: "snapshot", label: "past the mark" });
+
+await log({ action: "reject", by: "claude" });
+check("reject restores to the accept mark", (await held("Ledger")) === acceptedText, true);
+
+// A component round trip: add a CLASS, write it, restore to before - it must LEAVE - then
+// restore forward again - it must come BACK, as a class, holding its text.
+const phoenix = `Phoenix${process.pid}`;
+await log({ action: "snapshot", label: "before the phoenix" });
+const beforePhoenix = (await log()).rounds[0].round;
+
+await api.component("add", { name: phoenix, kind: "class", project: project.projectId });
+await write(phoenix, ["Option Explicit", "", "Public Sub Rise()", "End Sub"].join("\r\n"), "claude");
+await log({ action: "snapshot", label: "the phoenix stands" });
+const phoenixText = await held(phoenix);
+const phoenixStands = (await log()).rounds[0].round;
+
+await log({ action: "restore", round: beforePhoenix, by: "claude" });
+const components = (proj) => (proj.components ?? []).map((one) => one.name.toLowerCase());
+check("restoring to before an add removes the module",
+  components(await api.project(project.project)).includes(phoenix.toLowerCase()), false);
+
+await log({ action: "restore", round: phoenixStands, by: "claude" });
+const reborn = (await api.project(project.project)).components
+  ?.find((one) => one.name.toLowerCase() === phoenix.toLowerCase());
+check("restoring forward re-adds it", reborn !== undefined, true);
+check("as the class it was", reborn?.kind, "class");
+check("holding the text it held", (await held(phoenix)) === phoenixText, true);
+await api.component("remove", { name: phoenix, project: project.projectId });
+
+// A rename round trip: the restore carries the NAME back as well as the text.
+const wanderer = `Wander${process.pid}`;
+const returned = `Return${process.pid}`;
+await api.component("add", { name: wanderer, kind: "module", project: project.projectId });
+await write(wanderer, "Option Explicit\r\n' the wanderer", "claude");
+await log({ action: "snapshot", label: "before the wander" });
+const beforeWander = (await log()).rounds[0].round;
+
+await api.component("rename", { name: wanderer, newName: returned, project: project.projectId });
+await write(returned, "Option Explicit\r\n' the wanderer\r\n' far from home", "claude");
+
+await log({ action: "restore", round: beforeWander, by: "claude" });
+const namesNow = components(await api.project(project.project));
+check("a restore across a rename carries the name back",
+  namesNow.includes(wanderer.toLowerCase()) && !namesNow.includes(returned.toLowerCase()), true);
+check("and the text with it", (await held(wanderer)) === "Option Explicit\r\n' the wanderer", true);
+await api.component("remove", { name: wanderer, project: project.projectId });
+
+// The refusals answer in words, not in silence.
+const noSuch = await log({ action: "restore", round: 9999 });
+check("a boundary the log does not hold is refused in words",
+  /holds no round 9999/.test(noSuch.detail ?? ""), true);
+
+// Without a round the door answers an ERROR, which the client surfaces as a throw - the same
+// contract every other malformed request has.
+const noArg = await log({ action: "restore" }).then(() => "(answered)").catch((ex) => ex.message);
+check("restore without a round asks for one", /needs round=N/.test(noArg), true);
+
+// AND THE PANE'S OWN GESTURE, which is the path a hand takes: the row's Restore control, then
+// the confirm its modal raises. Proving only the route would prove the worker and skip the
+// buttons, which are the half a developer touches.
+await write("Ledger", `${restoreBase}\r\n' pane probe`, "claude");
+await log({ action: "snapshot", label: "for the pane" });
+const paneListing = await log();
+const paneBoundary = paneListing.rounds.filter((one) => !one.open)[1]?.round;
+
+await api.act("changesPane", { press: "refresh" });
+await waitFor("the pane to hold the rounds", async () =>
+  ((await api.ui()).changes?.rounds ?? []).length > 0, { budgetMs: 15000 }).catch(() => {});
+
+const pressed = await api.act("changesPane", { restore: paneBoundary });
+check(`the pane's restore control presses and confirms (${pressed.detail})`, pressed.did, true);
+await waitFor("the pane's restore to land", async () =>
+  !(await held("Ledger")).includes("' pane probe"), { budgetMs: 20000 }).catch(() => {});
+check("and the pane path restores like the route does",
+  (await held("Ledger")).includes("' pane probe"), false);
 
 // ---- the pane is scoped to ONE file ---------------------------------------------------------------
 //
