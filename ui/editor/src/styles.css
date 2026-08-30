@@ -5433,12 +5433,19 @@ body.objbrowser-page #objbrowser-card {
   border-radius: 4px;
 }
 
-/* A quiet upright rule between the counts and the module tally, so the two readings do not run
-   together (the owner: "feels cramped, maybe add a subtle separator"). */
+/* Air between the two counts: the green and the red are one reading, not one word (the owner:
+   "need padding to left of the red"). */
+#changes-summary .changes-removed {
+  margin-left: 3px;
+}
+
+/* An upright rule between the counts and the module tally, so the two readings do not run
+   together - stepped up from the widget-border grey after it read as barely there (the owner:
+   "make divider slightly less subtle"). */
 #changes-summary .changes-summary-files {
   opacity: 0.75;
   padding-left: 9px;
-  border-left: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-left: 1px solid rgba(140, 140, 140, 0.6);
 }
 
 #changes-summary.changes-summary-open {
