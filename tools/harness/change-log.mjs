@@ -513,11 +513,19 @@ const pull = async (by) => {
   return (await api.ui()).changes.railWidth;
 };
 
-check("the divider drags", await pull(80), wide + 80);
-check("and stops before the rail is too small to use", await pull(-4000), 140);
-
+// HOW FAR IT CAN DRAG DEPENDS ON THE WINDOW, so the distance comes from the room that exists.
+// The ceiling is 40% of the card, and a fixed pull of 80 asserted a rail of 280 inside a card
+// that allows 247 - measured on a 644px frame, where this failed as "the divider drags" about a
+// divider that had dragged exactly as far as it is permitted to. That is #17's shape: an ambient
+// geometry read as a broken feature. The room is checked on its own line so that a window with
+// none fails saying so, rather than passing this vacuously on a pull of zero.
 const ceiling = Number(await api.ask(
   `Math.round(document.getElementById('changes-full-card').clientWidth * 0.4)`));
+const room = Math.min(80, ceiling - wide);
+check(`the card is wide enough to have a drag to test (rail ${wide}, ceiling ${ceiling})`,
+  room >= 20, true);
+check("the divider drags", await pull(room), wide + room);
+check("and stops before the rail is too small to use", await pull(-4000), 140);
 check("and before it has eaten the code", await pull(4000), ceiling);
 
 const separator = await api.ask(`JSON.stringify((() => {
