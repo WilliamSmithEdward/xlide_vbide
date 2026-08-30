@@ -79,6 +79,15 @@ function findEdge() {
 function launchEdge(profile) {
   const edge = spawn(findEdge(), [
     "--headless", "--remote-debugging-port=0", "--remote-allow-origins=*",
+    // THE VIEWPORT IS STATED, NOT INHERITED. These probes assert on geometry - a 24px hit target,
+    // a pane that must be on screen, a splitter that must have room to grow - and the window they
+    // measured was whatever headless Edge defaults to, which was 800x600 giving a 756x488
+    // viewport (measured 2026-08-30). An unstated input to a geometry check is how a green suite
+    // turns red on a browser update with nothing in the diff, and how a check comes to pass only
+    // because the window was cramped. Both halves of that were live defects this month: a colour
+    // read below the fold of a short editor (#17) and a divider that could not travel its asserted
+    // 80px in a narrow card.
+    "--window-size=1280,900",
     `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check",
     "--disable-gpu", "--disable-extensions", "about:blank",
   ]);
