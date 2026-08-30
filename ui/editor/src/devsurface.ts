@@ -1982,6 +1982,13 @@ export function installDevSurface(parts: DevSurfaceParts): void {
           : { did: false, detail: `no control named ${control}; use refresh, snapshot, accept, reject or rail` };
       }
 
+      if (args.summaryRow !== undefined) {
+        const module = String(args.summaryRow);
+        return pane.summaryRow(module)
+          ? { did: true, detail: `summary row ${module} clicked` }
+          : { did: false, detail: `the summary list shows no row for ${module} - press summary first` };
+      }
+
       if (args.restore !== undefined) {
         // The pane's own gesture: the row's Restore control (or the full card's, when a module
         // is named) and then the confirm its modal raises - so a suite that drives this proves

@@ -1408,8 +1408,8 @@ function clientFor(entry) {
      * name, a removed form is not re-added (its design was never recorded), and text the log
      * aged out is said to be gone rather than written as empty.
      */
-    changes: ({ action, project, module, round, which, label, limit, by } = {}) =>
-      call(`changes${query({ action, project, module, round, which, label, limit, by })}`,
+    changes: ({ action, project, module, round, which, label, limit, by, since } = {}) =>
+      call(`changes${query({ action, project, module, round, which, label, limit, by, since })}`,
         { timeout: 30000 }),
 
     /**

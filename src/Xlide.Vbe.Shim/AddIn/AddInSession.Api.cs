@@ -4258,11 +4258,15 @@ internal sealed partial class AddInSession
                 var changesMost = int.TryParse(changesLimit, out var parsedLimit) ? parsedLimit : 200;
 
                 request.Query.TryGetValue("by", out var changesBy);
+                request.Query.TryGetValue("since", out var changesSince);
 
                 switch (changesAction)
                 {
                     case "text":
                         return ChangeTextReply(changesProject, changesAt, changesModule, changesWhich);
+
+                    case "diff" when changesSince == "accept":
+                        return ChangeSinceDiffReply(changesProject, changesModule);
 
                     case "diff":
                         return ChangeDiffReply(changesProject, changesAt, changesModule);

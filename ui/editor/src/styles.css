@@ -5429,6 +5429,75 @@ body.objbrowser-page #objbrowser-card {
    horizontal padding, the icon took the button's baseline and sat high and left of the middle -
    which is what the focus ring then drew a rectangle around (the owner, 2026-08-22: "glyph is not
    centered in button"). Same geometry as the surface's toolbar buttons, at the strip's scale. */
+/* The hybrid summary: counts on the button, the changed modules behind the click. It sits in
+   the actions strip, so the strip's own button rules dress it; these add only the parts that
+   make it a reading rather than a label. */
+#changes-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#changes-summary .changes-summary-files {
+  opacity: 0.75;
+}
+
+#changes-summary.changes-summary-open {
+  background: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, 0.2));
+}
+
+/* The counts sit in a COLUMN beside the names, not flung to the far edge (the owner: "so
+   numbers are not so far"). One grid for the list and subgrid rows keep the column straight
+   across every row, whatever the longest name is. */
+.changes-summary-list {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-content: start;
+  column-gap: 16px;
+}
+
+.changes-summary-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  text-align: left;
+}
+
+/* The editor's own reading of a change: green where lines arrived or changed, a red top edge
+   where lines left. Backgrounds, not text colour, so the syntax colouring stays legible under
+   them - and quiet enough to read code through. */
+.changes-line-added {
+  background: rgba(63, 185, 80, 0.14);
+}
+
+/* A deleted line's ghost, drawn the way inline diffs draw them: the text at full strength on a
+   red tint - struck-through or greyed text defeats the point, which is READING what left - with
+   the old line number sitting in the gutter, dimmed the way line numbers are. A reading, not
+   code: it cannot be edited, selected into, or reached by the pointer. */
+.changes-phantom {
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.changes-phantom-line {
+  display: flex;
+  background: rgba(248, 81, 73, 0.14);
+  color: var(--vscode-editor-foreground, #d4d4d4);
+}
+
+.changes-phantom-number {
+  flex: 0 0 auto;
+  text-align: right;
+  padding-right: 8px;
+  color: var(--vscode-editorLineNumber-foreground, #858585);
+}
+
+.changes-phantom-text {
+  flex: 1 1 auto;
+}
+
 /* The round row's way back: same quiet footprint as the expand control, sitting after the
    clock. Hidden until the row is hovered or it holds focus, the same rule the tree's plus
    follows - a control on every row is furniture; a control where the hand is, is an offer. */

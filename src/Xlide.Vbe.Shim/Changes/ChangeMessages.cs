@@ -56,7 +56,9 @@ public sealed record ChangeLogReply(
     /// history - a developer looking for an edit they remember, or an agent told to review what it
     /// changed - and this log's stance everywhere else is to say what it cannot show.
     /// </summary>
-    [property: JsonPropertyName("total")] int Total = 0);
+    [property: JsonPropertyName("total")] int Total = 0,
+    /// <summary>The changes since the accept mark, summed - or null when nothing has changed.</summary>
+    [property: JsonPropertyName("sinceAccept")] ChangeSinceReply? SinceAccept = null);
 
 /// <summary>One text the change log kept, asked for by round and module.</summary>
 public sealed record ChangeTextReply(
@@ -77,6 +79,22 @@ public sealed record ChangeDiffReply(
     [property: JsonPropertyName("module")] string Module,
     [property: JsonPropertyName("held")] bool Held,
     [property: JsonPropertyName("rows")] Sync.SyncDiffRow[] Rows);
+
+/// <summary>One module's share of the changes since the accept mark.</summary>
+public sealed record ChangeSinceEntry(
+    [property: JsonPropertyName("module")] string Module,
+    [property: JsonPropertyName("added")] int Added,
+    [property: JsonPropertyName("removed")] int Removed);
+
+/// <summary>
+/// Everything since the accept mark, summed: what the Reject button would take back, worn as a
+/// number the developer can read without opening anything.
+/// </summary>
+public sealed record ChangeSinceReply(
+    [property: JsonPropertyName("files")] int Files,
+    [property: JsonPropertyName("added")] int Added,
+    [property: JsonPropertyName("removed")] int Removed,
+    [property: JsonPropertyName("entries")] ChangeSinceEntry[] Entries);
 
 /// <summary>One module a restore touched or could not, and what happened to it.</summary>
 public sealed record ChangeRestoreOutcome(
@@ -105,4 +123,6 @@ public sealed record ChangeRestoreReply(
 [JsonSerializable(typeof(ChangeDiffReply))]
 [JsonSerializable(typeof(ChangeRestoreOutcome))]
 [JsonSerializable(typeof(ChangeRestoreReply))]
+[JsonSerializable(typeof(ChangeSinceEntry))]
+[JsonSerializable(typeof(ChangeSinceReply))]
 internal sealed partial class ChangeJsonContext : JsonSerializerContext;

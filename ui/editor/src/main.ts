@@ -832,6 +832,203 @@ function boot(): void {
   // The Changes pane: the change log, read when the pane is looked at and at no other time.
   // Its request goes through the same channel the xlide api's `changes` route answers, so the
   // pane and a driver are reading one reply rather than two shapes that can drift.
+  /*
+   * THE PANE'S WAY INTO THE EDITOR: a summary row's click opens the module and paints its
+   * since-accept changes on the lines themselves - green where lines arrived or changed, a red
+   * top edge where lines left. Lives here because monaco lives here; the pane only asks.
+   *
+   * The decorations belong to ONE module at a time - painting a second module takes the first
+   * one's paint away, so the highlights read as "what I just asked about" rather than slowly
+   * wallpapering every open tab. They ride the model, so they move with edits and go with the
+   * tab; a repaint is one summary-row click away.
+   */
+  let changePaint: {
+    model: monaco.editor.ITextModel;
+    ids: string[];
+    editor: monaco.editor.IStandaloneCodeEditor;
+    zones: string[];
+  } | null = null;
+  const takeDownPaint = (): void => {
+    if (!changePaint) {
+      return;
+    }
+
+    if (!changePaint.model.isDisposed()) {
+      changePaint.model.deltaDecorations(changePaint.ids, []);
+    }
+
+    const ghosts = changePaint.zones;
+    try {
+      changePaint.editor.changeViewZones((zoner) => {
+        for (const id of ghosts) {
+          zoner.removeZone(id);
+        }
+      });
+    } catch {
+      // An editor torn down since takes its zones with it.
+    }
+
+    changePaint = null;
+  };
+
+  const highlightChanges = async (
+    module: string, project: string | null, reveal: boolean,
+  ): Promise<{ added: number; removed: number } | null> => {
+    const answer = await bridge.requestChanges({
+      action: "diff", since: "accept", module, ...(project ? { project } : {}) });
+    const rows = (answer.rows as {
+      leftNumber: number | null; rightNumber: number | null; left: string | null; kind: string;
+    }[] | undefined) ?? [];
+
+    if (reveal) {
+      bridge.navigate(module, 1, 1, false, project ?? undefined);
+    }
+
+    // The model may still be opening when revealing; the navigate above is what asks for it.
+    // Waited on rather than assumed, and bounded: a module that never arrives answers null,
+    // not a hang. A quiet repaint takes whichever open model carries the module and NAVIGATES
+    // NOWHERE - a module no longer open just takes its old paint down.
+    const arrived = await new Promise<monaco.editor.ITextModel | null>((settle) => {
+      const began = Date.now();
+      const look = (): void => {
+        const model = reveal
+          ? workspace.activeEditor().getModel()
+          : monaco.editor.getModels().find((one) =>
+            (one.uri.path.split("/").pop() ?? "").toLowerCase() === module.toLowerCase()) ?? null;
+        const name = model?.uri.path.split("/").pop() ?? "";
+        if (model && name.toLowerCase() === module.toLowerCase()) {
+          settle(model);
+          return;
+        }
+
+        if (!reveal || Date.now() - began > 5000) {
+          settle(null);
+          return;
+        }
+
+        setTimeout(look, 50);
+      };
+      look();
+    });
+
+    if (!arrived) {
+      takeDownPaint();
+      return null;
+    }
+
+    const paint: monaco.editor.IModelDeltaDecoration[] = [];
+    // A deleted line's CONTENT, not just a mark where it was (the owner, 2026-08-30: "possible
+    // to show phantom lines that were removed?"). Consecutive deletions share one ghost block,
+    // anchored after the last line that still exists above them.
+    const phantoms: { after: number; lines: { number: number | null; text: string }[] }[] = [];
+    let added = 0;
+    let removed = 0;
+    let lastRight = 0;
+    for (const row of rows) {
+      if ((row.kind === "added" || row.kind === "changed") && row.rightNumber) {
+        added += 1;
+        paint.push({
+          range: new monaco.Range(row.rightNumber, 1, row.rightNumber, 1),
+          options: {
+            isWholeLine: true,
+            className: "changes-line-added",
+            // The scrollbar carries the map: a change out of sight is still findable.
+            overviewRuler: {
+              color: "rgba(63, 185, 80, 0.7)",
+              position: monaco.editor.OverviewRulerLane.Left,
+            },
+          },
+        });
+      }
+
+      if (row.kind === "removed" || row.kind === "changed") {
+        removed += 1;
+        if (row.kind === "removed") {
+          const ghost = { number: row.leftNumber, text: row.left ?? "" };
+          const last = phantoms[phantoms.length - 1];
+          if (last && last.after === lastRight) {
+            last.lines.push(ghost);
+          } else {
+            phantoms.push({ after: lastRight, lines: [ghost] });
+          }
+        }
+      }
+
+      if (row.rightNumber !== null && row.rightNumber > 0) {
+        lastRight = row.rightNumber;
+      }
+    }
+
+    const showing = monaco.editor.getEditors()
+      .find((one) => one.getModel() === arrived) as monaco.editor.IStandaloneCodeEditor | undefined;
+    const editor = showing ?? workspace.activeEditor();
+    takeDownPaint();
+
+    // The ghost lines follow the conventions inline diffs have settled on: the deleted text
+    // readable at full strength on a red tint - not struck through, not greyed, because the
+    // point is READING what left - with the OLD line number in the gutter where a line number
+    // goes, in the editor's own measured type, aligned to the content edge. aria-hidden,
+    // because it is a picture of absent text: the accessible reading is the diff pane's rows.
+    const viewLine = editor.getDomNode()?.querySelector(".view-line");
+    const typeface = viewLine ? getComputedStyle(viewLine).font : "";
+    const layout = editor.getLayoutInfo();
+
+    // Zones are per EDITOR, and a background tab's model has none showing it: painting its
+    // ghosts onto whichever editor is active would float deleted lines into another module.
+    // Decorations ride the model and wait for their tab; the ghosts wait for a paint that can
+    // see its editor.
+    const zoneIds: string[] = [];
+    if (showing) editor.changeViewZones((zoner) => {
+      for (const ghost of phantoms) {
+        const dom = document.createElement("div");
+        dom.className = "changes-phantom";
+        dom.setAttribute("aria-hidden", "true");
+        if (typeface) {
+          dom.style.font = typeface;
+        }
+
+        for (const line of ghost.lines) {
+          const row = document.createElement("div");
+          row.className = "changes-phantom-line";
+
+          const number = document.createElement("span");
+          number.className = "changes-phantom-number";
+          number.style.width = `${Math.max(layout.contentLeft - 8, 0)}px`;
+          number.textContent = line.number === null ? "" : String(line.number);
+
+          const text = document.createElement("span");
+          text.className = "changes-phantom-text";
+          text.textContent = line.text.length > 0 ? line.text : " ";
+
+          row.append(number, text);
+          dom.appendChild(row);
+        }
+
+        zoneIds.push(zoner.addZone({
+          afterLineNumber: ghost.after,
+          heightInLines: ghost.lines.length,
+          domNode: dom,
+        }));
+
+        // The scrollbar's red mark for the deletion, carried by a zero-width decoration on the
+        // line the ghost hangs from, so removals register on the map like additions do.
+        const anchor = Math.min(Math.max(ghost.after, 1), arrived.getLineCount());
+        paint.push({
+          range: new monaco.Range(anchor, 1, anchor, 1),
+          options: {
+            overviewRuler: {
+              color: "rgba(248, 81, 73, 0.7)",
+              position: monaco.editor.OverviewRulerLane.Left,
+            },
+          },
+        });
+      }
+    });
+
+    changePaint = { model: arrived, ids: arrived.deltaDecorations([], paint), editor, zones: zoneIds };
+    return { added, removed };
+  };
+
   changesPane = new ChangesPane(
     document.querySelector("#changes") as HTMLElement,
     (args) => bridge.requestChanges(args),
@@ -840,7 +1037,8 @@ function boot(): void {
     () => ({
       names: (shell?.currentProjects() ?? []).map((one) => one.name),
       current: workspace.activeDocument()?.project ?? null,
-    }));
+    }),
+    highlightChanges);
 
   // The host's tap on the shoulder when it records a change. It does NOT make the pane re-read -
   // the pane's counts are whole-text comparisons and are never taken on the write path - it only

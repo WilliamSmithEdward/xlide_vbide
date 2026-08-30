@@ -41,6 +41,21 @@ export interface ChangeRound {
   entries: ChangeEntry[];
 }
 
+/** One module's share of the changes since the accept mark. */
+export interface ChangeSinceEntry {
+  module: string;
+  added: number;
+  removed: number;
+}
+
+/** Everything since the accept mark, summed - what Reject would take back, as a number. */
+export interface ChangeSince {
+  files: number;
+  added: number;
+  removed: number;
+  entries: ChangeSinceEntry[];
+}
+
 /** The change log's whole answer. */
 export interface ChangeLogState {
   detail: string;
@@ -50,6 +65,8 @@ export interface ChangeLogState {
   rounds: ChangeRound[];
   /** How many rounds the log holds, which is not always how many are in `rounds`. */
   total: number;
+  /** The changes since the accept mark, or null when nothing has changed. */
+  sinceAccept?: ChangeSince | null;
 }
 
 /** How the pane reaches the host. One function, because there is only one kind of request. */
@@ -57,6 +74,14 @@ export type ChangesRequest = (args: Record<string, string>) => Promise<Record<st
 
 /** The files this session has open, and the one the developer is looking at. */
 export type OpenFiles = () => { names: string[]; current: string | null };
+
+/**
+ * Opens a module in the EDITOR and paints its since-accept changes as line highlights - green
+ * where lines arrived or changed, red edges where lines left. Lives with the workspace, which
+ * owns monaco; the pane only asks. Answers the counts painted, or null when nothing could be.
+ */
+export type HighlightChanges = (module: string, project: string | null, reveal: boolean)
+  => Promise<{ added: number; removed: number } | null>;
 
 /** What the pane can be driven and read through, for the dev surface. */
 export interface ChangesPaneProbe {
@@ -85,6 +110,12 @@ export interface ChangesPaneProbe {
     behind: boolean;
     /** Rounds in the log, against the rounds on screen. */
     total: number;
+    /** The summary button's numbers, or null while it has nothing to say. */
+    sinceAccept: { files: number; added: number; removed: number } | null;
+    /** Whether the diff strip is showing the summary's module list. */
+    summaryShowing: boolean;
+    /** What the last editor highlight painted, or null before any did. */
+    highlighted: { module: string; added: number; removed: number } | null;
   };
   /** Presses a named control: refresh, snapshot, accept, reject. False when unknown. */
   press(control: string): boolean;
@@ -94,6 +125,8 @@ export interface ChangesPaneProbe {
    * no such control is on screen.
    */
   restore(round: number, module?: string): boolean;
+  /** Clicks a module row in the summary list, as a hand does. False when no such row shows. */
+  summaryRow(module: string): boolean;
   /**
    * Opens one round's module diff, as clicking its row does. `where` says WHICH row: the pane's
    * list, or the full-size card's rail - two controls onto the same comparison, and a harness
@@ -140,6 +173,7 @@ export class ChangesPane {
   private readonly snapshot: HTMLButtonElement;
   private readonly accept: HTMLButtonElement;
   private readonly reject: HTMLButtonElement;
+  private readonly summary: HTMLButtonElement;
 
   private readonly file: HTMLSelectElement;
   private readonly newer: HTMLElement;
@@ -167,6 +201,12 @@ export class ChangesPane {
   private showing: { round: number; module: string } | null = null;
   private busy = false;
 
+  /** The diff strip is showing the summary's module list rather than one round's comparison. */
+  private summaryShowing = false;
+
+  /** What the last editor highlight painted, kept for the probe. */
+  private highlighted: { module: string; added: number; removed: number } | null = null;
+
   /** What the select was last built from, so an unchanged session leaves an open popup alone. */
   private fileSignature = "";
 
@@ -188,7 +228,11 @@ export class ChangesPane {
   private railWidth = 200;
   private railHidden = false;
 
-  constructor(root: HTMLElement, private readonly ask: ChangesRequest, private readonly files: OpenFiles) {
+  constructor(
+    root: HTMLElement,
+    private readonly ask: ChangesRequest,
+    private readonly files: OpenFiles,
+    private readonly highlight: HighlightChanges) {
     this.list = root.querySelector("#changes-list") as HTMLElement;
     this.diff = root.querySelector("#changes-diff") as HTMLElement;
     this.title = root.querySelector("#changes-project") as HTMLElement;
@@ -196,6 +240,7 @@ export class ChangesPane {
     this.snapshot = root.querySelector("#changes-snapshot") as HTMLButtonElement;
     this.accept = root.querySelector("#changes-accept") as HTMLButtonElement;
     this.reject = root.querySelector("#changes-reject") as HTMLButtonElement;
+    this.summary = root.querySelector("#changes-summary") as HTMLButtonElement;
 
     this.file = root.querySelector("#changes-file") as HTMLSelectElement;
     this.newer = root.querySelector("#changes-newer") as HTMLElement;
@@ -216,6 +261,15 @@ export class ChangesPane {
     this.refresh.addEventListener("click", () => void this.reload());
     this.snapshot.addEventListener("click", () => void this.reload({ action: "snapshot" }));
     this.accept.addEventListener("click", () => void this.reload({ action: "accept" }));
+    // ALWAYS INTO THE PREVIEW, never a toggle (the owner, 2026-08-30: "click always shows
+    // preview, even if it's already showing") - and through a reload, so the click that means
+    // "show me" also means "as it stands now" rather than as it stood at the last read.
+    this.summary.addEventListener("click", () => {
+      this.summaryShowing = true;
+      this.showing = null;
+      void this.reload();
+    });
+
     this.reject.addEventListener("click", () => this.confirmRestore(
       { action: "reject" },
       "Reject the changes since the accept mark?",
@@ -242,7 +296,20 @@ export class ChangesPane {
     if (!wasBehind) {
       this.showNewer();
     }
+
+    // AND THE PANE FOLLOWS, a quiet moment later (the owner, 2026-08-30: "possible for this to
+    // auto update with changes?"). The pull-only rule was about COST - never a whole-text
+    // comparison per keystroke - and it holds: stamps arrive when writes flush, on pauses in
+    // typing, and this waits a further beat after the last of them, so a burst of writes is one
+    // re-read. Nothing is re-read before the first look; a pane nobody has opened stays free.
+    if (this.state) {
+      clearTimeout(this.followTimer);
+      this.followTimer = setTimeout(() => void this.reload(), 1500);
+    }
   }
+
+  /** The debounced follow-up to a host stamp, so a burst of writes is one re-read. */
+  private followTimer: ReturnType<typeof setTimeout> | undefined;
 
   private showNewer(): void {
     const behind = this.hostStamp > this.drawnStamp;
@@ -331,6 +398,7 @@ export class ChangesPane {
       this.busy = false;
       this.setBusy(false);
       this.draw();
+      void this.repaintHighlight();
     }
   }
 
@@ -339,11 +407,13 @@ export class ChangesPane {
     this.snapshot.disabled = on;
     this.accept.disabled = on;
     this.reject.disabled = on;
+    this.summary.disabled = on;
   }
 
   private draw(): void {
     const state = this.state;
     this.title.textContent = state?.project ?? "";
+    this.drawSummaryButton();
 
     this.list.replaceChildren();
 
@@ -538,6 +608,7 @@ export class ChangesPane {
   private growWhenDrawn: { round: number; module: string } | null = null;
 
   private async open(round: number, module: string): Promise<void> {
+    this.summaryShowing = false;
     // A pending full-size intent belongs to ONE row. Opening a different one is the developer
     // having moved on, and a flag left standing would pop that later row open by itself.
     if (this.growWhenDrawn
@@ -563,12 +634,26 @@ export class ChangesPane {
   }
 
   private drawDiff(rows?: SyncDiffLine[], title?: string, detail?: string): void {
+    if (this.summaryShowing) {
+      this.drawSummaryList();
+      return;
+    }
+
     this.diff.replaceChildren();
 
     if (rows === undefined) {
+      // The idle strip says what is actually on offer, and nothing when nothing is (the owner,
+      // 2026-08-30: "this is misleading, if there's nothing to show"). A log whose rounds hold
+      // no clickable change gets silence, not an instruction pointing at rows that cannot answer.
+      const clickable = (this.state?.rounds ?? []).some((round) => round.entries.length > 0);
+      const since = this.state?.sinceAccept;
       const hint = document.createElement("div");
       hint.className = "changes-empty";
-      hint.textContent = this.state?.rounds.length ? "Choose a module to see what changed." : "";
+      hint.textContent = !clickable
+        ? ""
+        : since && since.files > 0
+          ? "Pick a change to compare it - or the +/- summary above for everything since the accept mark."
+          : "Pick a change to compare it.";
       this.diff.appendChild(hint);
       return;
     }
@@ -1010,6 +1095,116 @@ export class ChangesPane {
   }
 
   /**
+   * The hybrid button's face: the whole story since the accept mark in one glance, or nothing
+   * at all - a "+0 -0 / 0 files" would be furniture, so the button leaves when it has nothing
+   * to say.
+   */
+  private drawSummaryButton(): void {
+    const since = this.state?.sinceAccept ?? null;
+    if (!since || since.files === 0) {
+      this.summary.hidden = true;
+      if (this.summaryShowing) {
+        this.summaryShowing = false;
+      }
+      return;
+    }
+
+    this.summary.hidden = false;
+    this.summary.replaceChildren();
+
+    const added = document.createElement("span");
+    added.className = "changes-added";
+    added.textContent = `+${since.added}`;
+    const removed = document.createElement("span");
+    removed.className = "changes-removed";
+    removed.textContent = `-${since.removed}`;
+    const files = document.createElement("span");
+    files.className = "changes-summary-files";
+    files.textContent = `${since.files} module${since.files === 1 ? "" : "s"}`;
+    this.summary.append(added, removed, files);
+    this.summary.setAttribute("aria-label",
+      `${since.added} lines added and ${since.removed} removed across ${since.files} `
+      + `module${since.files === 1 ? "" : "s"} since the accept mark. Show them.`);
+    this.summary.classList.toggle("changes-summary-open", this.summaryShowing);
+  }
+
+  /**
+   * The summary's own view in the diff strip: every module changed since the accept mark, one
+   * row each, counts beside the name. A row is the way INTO the editor - clicking one opens the
+   * module with its changes highlighted in place, green where lines arrived, red edges where
+   * they left, which is where a change is actually read.
+   */
+  private drawSummaryList(): void {
+    this.diff.replaceChildren();
+
+    const head = document.createElement("div");
+    head.className = "changes-diff-head";
+    const named = document.createElement("span");
+    named.textContent = "Changed since the accept mark";
+    head.appendChild(named);
+    this.diff.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "changes-diff-body changes-summary-list";
+
+    for (const entry of this.state?.sinceAccept?.entries ?? []) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "changes-entry changes-summary-row";
+      row.dataset.module = entry.module;
+      row.title = `Open ${entry.module} with its changes highlighted`;
+
+      const name = document.createElement("span");
+      name.className = "changes-module";
+      name.textContent = entry.module;
+
+      const counts = document.createElement("span");
+      counts.className = "changes-counts";
+      const added = document.createElement("span");
+      added.className = "changes-added";
+      added.textContent = `+${entry.added}`;
+      const removed = document.createElement("span");
+      removed.className = "changes-removed";
+      removed.textContent = `-${entry.removed}`;
+      counts.append(added, removed);
+
+      row.append(name, counts);
+      row.addEventListener("click", () => void this.openHighlighted(entry.module));
+      body.appendChild(row);
+    }
+
+    this.diff.appendChild(body);
+  }
+
+  /** A summary row's click: the module in the editor, its changes painted on the lines. */
+  private async openHighlighted(module: string): Promise<void> {
+    const painted = await this.highlight(module, this.file.value || null, true);
+    if (painted) {
+      this.highlighted = { module, ...painted };
+    }
+  }
+
+  /**
+   * The paint follows the truth it was painted from. An accept moves the mark, a reject or a
+   * restore moves the text, a write moves both - and a tab still wearing yesterday's green over
+   * today's mark is the pane lying in the editor's own margins. So after every re-read the
+   * highlighted module is repainted IN PLACE - no navigation, no focus stolen - and a module
+   * with nothing left to show takes its paint down (the owner, 2026-08-30, three times over:
+   * the tab, the button, and the summary view all follow).
+   */
+  private async repaintHighlight(): Promise<void> {
+    const held = this.highlighted;
+    if (!held) {
+      return;
+    }
+
+    const painted = await this.highlight(held.module, this.file.value || null, false);
+    this.highlighted = painted && painted.added + painted.removed > 0
+      ? { module: held.module, ...painted }
+      : null;
+  }
+
+  /**
    * Asks first, does it, and says what happened - one modal for the whole conversation.
    *
    * The question and the outcome share a card because they are one exchange: a confirm that
@@ -1155,17 +1350,33 @@ export class ChangesPane {
           : 0),
         behind: this.hostStamp > this.drawnStamp,
         total: this.state?.total ?? 0,
+        sinceAccept: this.state?.sinceAccept
+          ? {
+            files: this.state.sinceAccept.files,
+            added: this.state.sinceAccept.added,
+            removed: this.state.sinceAccept.removed,
+          }
+          : null,
+        summaryShowing: this.summaryShowing,
+        highlighted: this.highlighted,
       }),
       press: (control) => {
         const button = control === "refresh" ? this.refresh
           : control === "snapshot" ? this.snapshot
           : control === "accept" ? this.accept
           : control === "reject" ? this.reject
+          : control === "summary" ? this.summary
           // The card's own control, so a driver can put the snapshots away and bring them back.
           : control === "rail" ? this.full?.toggle ?? null
           : null;
         button?.click();
         return button !== null;
+      },
+      summaryRow: (module) => {
+        const row = this.diff.querySelector<HTMLButtonElement>(
+          `.changes-summary-row[data-module="${CSS.escape(module)}"]`);
+        row?.click();
+        return row !== null;
       },
       restore: (round, module) => {
         // The real controls, pressed in the order a hand presses them: the row's button (or the

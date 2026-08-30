@@ -806,6 +806,63 @@ await waitFor("the pane's restore to land", async () =>
 check("and the pane path restores like the route does",
   (await held("Ledger")).includes("' pane probe"), false);
 
+// ---- the SUMMARY: what Reject would take back, worn as a number -------------------------------
+//
+// A hybrid control beside Accept/Reject (the owner, 2026-08-30): the whole story since the
+// accept mark in one glance, the changed modules behind the click, and a module's row the way
+// into the editor with the changes highlighted on the lines themselves. Text against text, not
+// rounds added up: a module written +5 and hand-reverted -5 has changed nothing.
+
+await log({ action: "accept" });
+const summaryBase = await held("Ledger");
+
+// DELETE one line and ADD two unique ones, rather than replacing a line with fixed text: a
+// fixed marker already sitting on that line - an earlier probe, a prior run - makes the
+// replacement a no-op and the counts collapse (exactly how this check first failed). A
+// deletion and two pid-stamped tails read the same whatever the baseline holds.
+const baseLines = summaryBase.split(/\r?\n/);
+baseLines.splice(3, 1);
+baseLines.push(`' tail one ${process.pid}`, `' tail two ${process.pid}`);
+await write("Ledger", baseLines.join("\r\n"), "claude");
+await write(second, `${await held(second)}\r\n' summary tail ${process.pid}`, "claude");
+
+const summarised = (await log()).sinceAccept;
+check("the summary counts text against text, per module and in total",
+  JSON.stringify(summarised),
+  JSON.stringify({ files: 2, added: 3, removed: 1, entries: [
+    { module: "Ledger", added: 2, removed: 1 },
+    { module: second, added: 1, removed: 0 },
+  ] }));
+
+const sinceRows = await log({ action: "diff", since: "accept", module: "Ledger" });
+check("the since-accept diff lines the mark against the LIVE text",
+  (sinceRows.rows ?? []).filter((row) => row.kind !== "equal")
+    .map((row) => `${row.kind}@${row.rightNumber}`).join(","),
+  `removed@null,added@${baseLines.length - 1},added@${baseLines.length}`);
+
+// The pane's own gesture: press the hybrid button, click a module row, and the module opens in
+// the EDITOR with the changes painted - which the probe reports as what the paint counted.
+await api.act("changesPane", { press: "refresh" });
+await waitFor("the pane to hold the summary", async () =>
+  (await api.ui()).changes?.sinceAccept?.files === 2, { budgetMs: 15000 });
+const summaryPress = await api.act("changesPane", { press: "summary" });
+check("the summary button presses", summaryPress.did, true);
+const summaryRowClick = await api.act("changesPane", { summaryRow: "Ledger" });
+check("and its module row clicks", summaryRowClick.did, true);
+
+const painted = await waitFor("the editor to open Ledger with the paint", async () => {
+  const ui = await api.ui();
+  return ui.statusModule === "Ledger" && ui.changes?.highlighted?.module === "Ledger"
+    ? ui.changes.highlighted : false;
+}, { budgetMs: 20000 });
+check("the module opens in the editor with its changes painted",
+  `+${painted.added} -${painted.removed}`, "+2 -1");
+
+// Reject takes it all back, and the summary stands down - the button with nothing to say leaves.
+await log({ action: "reject", by: "claude" });
+check("reject clears what the summary was counting", (await log()).sinceAccept, null);
+check("and the texts are back at the mark", (await held("Ledger")) === summaryBase, true);
+
 // ---- the pane is scoped to ONE file ---------------------------------------------------------------
 //
 // Every project keeps its own log, so the pane's file select is choosing between logs rather than

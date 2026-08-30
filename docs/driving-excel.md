@@ -1300,6 +1300,16 @@ await api.changes({ action: "reject", by: "claude" });                // back to
 // -> { detail, outcomes: [{module, did: written|added|removed|renamed|unchanged|skipped|failed, why}], newRound }
 ```
 
+The summary rides the same answers:
+
+```js
+(await api.changes()).sinceAccept
+// -> { files, added, removed, entries: [{module, added, removed}] } - or null when clean
+await api.changes({ action: "diff", since: "accept", module: "Ledger" });  // mark vs LIVE text
+await api.act("changesPane", { press: "summary" });      // the hybrid button's module list
+await api.act("changesPane", { summaryRow: "Ledger" });  // opens it painted in the editor
+```
+
 Adds, removals and renames all come back: restoring to before a module existed removes it,
 restoring forward re-adds it with its recorded kind and text, and a rename since the boundary is
 carried back name and all. The refusals answer in words per module - a stopped debugger, unwritten

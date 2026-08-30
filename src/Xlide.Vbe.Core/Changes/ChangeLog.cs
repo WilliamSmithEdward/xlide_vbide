@@ -301,7 +301,18 @@ public sealed class ChangeLog
     /// Only CLOSED rounds are read. The caller closes the running round first, so a restore is
     /// planned against a complete record and lands as a round of its own.
     /// </summary>
-    public IReadOnlyList<RestoreTarget> RestoreTargets(int boundary)
+    public IReadOnlyList<RestoreTarget> RestoreTargets(int boundary) =>
+        RestoreTargets(boundary, includeOpen: false);
+
+    /// <summary>
+    /// As above, optionally reading the round still running as well.
+    ///
+    /// A RESTORE closes the running round first and never wants this. The SUMMARY does: "what
+    /// has changed since the accept mark" includes the writes of the round in flight, and a
+    /// count that goes quiet while somebody is typing under-reports exactly when it is being
+    /// looked at.
+    /// </summary>
+    public IReadOnlyList<RestoreTarget> RestoreTargets(int boundary, bool includeOpen)
     {
         // A LIST, not a name-keyed map, because a name is not an identity: remove Ledger, add a
         // new Ledger, and there are two modules in this story with one name between them. Keyed
@@ -311,7 +322,12 @@ public sealed class ChangeLog
         var identities = new List<Identity>();
         var byCurrentName = new Dictionary<string, Identity>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var round in _rounds)
+        var rounds = includeOpen && _running
+            ? _rounds.Append(new ChangeRound(
+                _number, _started, _touched, _author, _label, true, false, [.. _open.Values]))
+            : _rounds.AsEnumerable();
+
+        foreach (var round in rounds)
         {
             if (round.Number <= boundary)
             {

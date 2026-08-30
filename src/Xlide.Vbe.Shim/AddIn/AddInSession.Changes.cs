@@ -6,6 +6,7 @@ using Xlide.Vbe.Core;
 using Xlide.Vbe.Core.Changes;
 using Xlide.Vbe.Core.Sync;
 using Xlide.Vbe.Shim.Changes;
+using Xlide.Vbe.Shim.Engine;
 using Xlide.Vbe.Shim.Diagnostics;
 
 namespace Xlide.Vbe.Shim.AddIn;
@@ -200,6 +201,7 @@ internal sealed partial class AddInSession
             arguments.TryGetValue("which", out var which);
             arguments.TryGetValue("label", out var label);
             arguments.TryGetValue("round", out var round);
+            arguments.TryGetValue("since", out var since);
 
             var at = int.TryParse(round, out var parsed) ? parsed : 0;
             var wanted = project is { Length: > 0 } ? project : _shownProject;
@@ -207,6 +209,7 @@ internal sealed partial class AddInSession
             answer = action switch
             {
                 "text" => ChangeTextReply(wanted, at, module, which),
+                "diff" when since == "accept" => ChangeSinceDiffReply(wanted, module),
                 "diff" => ChangeDiffReply(wanted, at, module),
                 "snapshot" => Snapshotted(wanted, label),
                 "accept" => Accepted(wanted),
@@ -232,6 +235,11 @@ internal sealed partial class AddInSession
     private string Snapshotted(string? projectId, string? label)
     {
         CloseChangeRounds(label);
+
+        // The stamp moves for the same reason a write moves it: the pane follows stamps, and a
+        // snapshot or an accept through the DOOR would otherwise leave every open pane - and a
+        // tab's painted highlights - describing a mark that has moved (the owner, 2026-08-30).
+        _editorSurface?.ShowChangesStamp(++_changeStamp);
         return ChangesReply(
             label is { Length: > 0 } named ? $"the round is closed: {named}" : "the round is closed",
             projectId, 200);
@@ -240,6 +248,7 @@ internal sealed partial class AddInSession
     private string Accepted(string? projectId)
     {
         ChangeLogFor(ChangeLogProject(projectId))?.Accept(DateTimeOffset.UtcNow);
+        _editorSurface?.ShowChangesStamp(++_changeStamp);
         return ChangesReply("accepted", projectId, 200);
     }
 
@@ -273,8 +282,140 @@ internal sealed partial class AddInSession
         return System.Text.Json.JsonSerializer.Serialize(
             new ChangeLogReply(
                 detail, DisplayFromProjectId(wanted) ?? wanted ?? string.Empty,
-                log.AcceptedAt, ChangeLogCovers, rounds, log.RoundCount),
+                log.AcceptedAt, ChangeLogCovers, rounds, log.RoundCount,
+                SinceAccept(log, wanted)),
             ChangeJsonContext.Default.ChangeLogReply);
+    }
+
+    /// <summary>
+    /// Everything since the accept mark, summed per module and in total - what the Reject button
+    /// would take back, worn as a number.
+    ///
+    /// TEXT AGAINST TEXT, NOT ROUNDS ADDED UP. A module written +5 in one round and -5 back in
+    /// the next has changed nothing, and a sum of round counts would call it ten lines. So each
+    /// touched module's LIVE text is compared against its text at the accept mark - the same
+    /// boundary walk the restore plans from, the open round included, because a count that goes
+    /// quiet while somebody is typing under-reports exactly when it is looked at. Cost: one read
+    /// and one bounded diff per module touched since the mark, only when the pane asks.
+    ///
+    /// Null on any failure and null when nothing changed: the button it feeds has nothing to say
+    /// then, and a zero row would be furniture.
+    /// </summary>
+    private ChangeSinceReply? SinceAccept(ChangeLog log, string? projectId)
+    {
+        try
+        {
+            var entries = new List<ChangeSinceEntry>();
+            foreach (var target in log.RestoreTargets(log.AcceptedAt, includeOpen: true))
+            {
+                string? before;
+                if (target.TextKey is not null)
+                {
+                    // Aged out means the count would be a guess; the module is listed as changed
+                    // with no line arithmetic rather than with digits made up.
+                    before = log.TextOf(target.TextKey);
+                    if (before is null)
+                    {
+                        entries.Add(new ChangeSinceEntry(target.NameNow, 0, 0));
+                        continue;
+                    }
+                }
+                else
+                {
+                    // No text at the boundary: it did not exist, or only its name moved.
+                    before = string.Empty;
+                }
+
+                using var component = FindComponent(target.NameNow, projectId, out _);
+                var after = component is null
+                    ? string.Empty
+                    : ProjectReader.ReadSource(component) ?? string.Empty;
+                if (string.Equals(before, after, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var added = 0;
+                var removed = 0;
+                foreach (var line in ModuleSync.Diff(before, after))
+                {
+                    if (line.Kind == DiffKind.Added) { added++; }
+                    else if (line.Kind == DiffKind.Removed) { removed++; }
+                    else if (line.Kind == DiffKind.Changed) { added++; removed++; }
+                }
+
+                entries.Add(new ChangeSinceEntry(target.NameNow, added, removed));
+            }
+
+            if (entries.Count == 0)
+            {
+                return null;
+            }
+
+            entries.Sort((left, right) =>
+                string.Compare(left.Module, right.Module, StringComparison.OrdinalIgnoreCase));
+            return new ChangeSinceReply(
+                entries.Count,
+                entries.Sum(one => one.Added),
+                entries.Sum(one => one.Removed),
+                [.. entries]);
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"changes: the since-accept summary could not be built, {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// One module's changes since the accept mark, lined up: its text at the mark against its
+    /// LIVE text - the rows the editor's green-and-red highlights are built from.
+    /// </summary>
+    private string ChangeSinceDiffReply(string? projectId, string? module)
+    {
+        var wanted = ChangeLogProject(projectId);
+        var log = ChangeLogFor(wanted);
+        if (log is null || module is not { Length: > 0 })
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                new Changes.ChangeDiffReply(
+                    log is null ? "no project is shown, and none was named" : "diff since=accept needs module=",
+                    0, module ?? string.Empty, false, []),
+                ChangeJsonContext.Default.ChangeDiffReply);
+        }
+
+        var target = log.RestoreTargets(log.AcceptedAt, includeOpen: true).FirstOrDefault(one =>
+            string.Equals(one.NameNow, module, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(one.Module, module, StringComparison.OrdinalIgnoreCase));
+
+        var before = target is null
+            ? null
+            : target.TextKey is null ? string.Empty : log.TextOf(target.TextKey);
+        if (target is null || before is null)
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                new Changes.ChangeDiffReply(
+                    target is null
+                        ? $"nothing about {module} has changed since the accept mark"
+                        : "the text at the mark is no longer held",
+                    log.AcceptedAt, module, false, []),
+                ChangeJsonContext.Default.ChangeDiffReply);
+        }
+
+        using var component = FindComponent(target.NameNow, wanted, out _);
+        var after = component is null
+            ? string.Empty
+            : ProjectReader.ReadSource(component) ?? string.Empty;
+
+        var rows = ModuleSync.Diff(before, after)
+            .Select(line => new Sync.SyncDiffRow(
+                line.LeftNumber, line.RightNumber, line.Left, line.Right,
+                line.Kind.ToString().ToLowerInvariant()))
+            .ToArray();
+
+        return System.Text.Json.JsonSerializer.Serialize(
+            new Changes.ChangeDiffReply("held", log.AcceptedAt, target.NameNow, true, rows),
+            ChangeJsonContext.Default.ChangeDiffReply);
     }
 
     /// <summary>
@@ -443,6 +584,7 @@ internal sealed partial class AddInSession
             + $"{told.Count - restored - skipped - failed} already right, to round {boundary}";
 
         Log.Info($"changes: {summary}");
+        _editorSurface?.ShowChangesStamp(++_changeStamp);
         return System.Text.Json.JsonSerializer.Serialize(
             new ChangeRestoreReply(
                 summary, boundary, restored, skipped + failed, [.. told], log.NewestClosedRound),
@@ -623,6 +765,18 @@ internal sealed partial class AddInSession
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
                     "it holds edits you have not written yet - save or discard them, then restore again"));
+                continue;
+            }
+
+            // ALREADY HOLDING THE BOUNDARY TEXT - touched since and then brought back by hand, or
+            // by an earlier per-module restore. Without this read the write path answered null
+            // for its own had-nothing-to-write case and the outcome said "written, 1 restored"
+            // about a no-op (found by probing, 2026-08-30). One read per restored module buys the
+            // honest word AND skips the write machinery entirely for the module that needs none.
+            if (string.Equals(ProjectReader.ReadSource(standing), body, StringComparison.Ordinal))
+            {
+                outcomes.Add(new ChangeRestoreOutcome(target.Module, "unchanged",
+                    "already holds its text from this boundary"));
                 continue;
             }
 
