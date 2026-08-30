@@ -1065,6 +1065,13 @@ function clientFor(entry) {
      * map, because "is this word the wrong colour" is a question about the pixel, and every step
      * between the tokeniser and the pixel can be the wrong one. Only rendered lines have spans,
      * so a position off-screen answers a null colour rather than a guess.
+     *
+     * WHICH IS WHY `rendered` COMES BACK TOO. How many lines are on screen is ambient - it is
+     * whatever is left after the open docks take their share - so a module long enough to run
+     * past the fold answers null for its own second half, and null reads exactly like "the
+     * tokenizer painted nothing". That cost two misfiled issues (xlide_vscode#54 against the
+     * analyzer, #17 against the semantic pass) for one twenty-line module in a ten-line editor.
+     * `revealing()` below is the fix for the first kind; only the second is about colour.
      */
     async at(where) {
       const answer = await this.ui(typeof where === "string" ? { word: where } : where);
@@ -1072,11 +1079,25 @@ function clientFor(entry) {
     },
 
     /**
+     * Scrolls a line into view, then answers what is painted there - `at` for a module too long
+     * to fit on screen.
+     *
+     * A colour can only be read off a line monaco has rendered, and a suite cannot know how many
+     * lines that is: it depends on the editor's height, which depends on which docks the session
+     * left open. So a suite that reads by line number reveals by line number first, and stops
+     * being a check that passes on a tall window and fails on a short one.
+     */
+    async revealing({ line, column }) {
+      await this.act("reveal", { line });
+      return this.at({ line, column });
+    },
+
+    /**
      * Drives the surface through the methods a click reaches.
      *
      * `closeActive`, `activate`, `cycleTab`, `split`, `expandWorkbook`, `unfoldModule`,
      * `treeMenu`, `chooseMenuItem`, `answerRemoveConfirm`, `settings`, `sponsors`, `closeDialogs`,
-     * `focusEditor`, `search`, `dock`, `bookmark`, `format`, `undo`, `editorAction`, and the
+     * `focusEditor`, `reveal`, `search`, `dock`, `bookmark`, `format`, `undo`, `editorAction`, and the
      * language ones: `hover`, `completions`, `signature`, `quickFixes`, `definition`,
      * `references`, `rename`.
      * `act("actions")` answers the live list, which is the one that cannot be out of date. Answers

@@ -452,10 +452,17 @@ await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
 await api.undoRename();                                 // and puts it back
 await api.at("Recalculate");                    // colour as painted, and the markers on it
-// -> { word, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, message, code}] }
+// -> { word, rendered, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, ...}] }
 //
 // `word` matches case-insensitively, because VBA does: the host RECASES identifiers on write, so
 // `total = 1` comes back `Total = 1` and a case-sensitive lookup misses a word that is on screen.
+//
+// A COLOUR ONLY EXISTS FOR A LINE THAT IS ON SCREEN. Monaco builds spans for the viewport and
+// nothing else, and the viewport is however much height the open docks left the editor - so
+// reading by line number reads null for the far half of any module long enough, and null is
+// also what an unpainted word answers. `rendered` tells them apart; reveal to fix the first.
+await api.act("reveal", { line: 22 });          // -> { did, detail, data: { firstVisible, lastVisible } }
+await api.revealing({ line: 22, column: 5 });   // the two in one: `at` with the scroll done for it
 ```
 
 > **These call the provider objects monaco calls**, with the arguments monaco passes, so they

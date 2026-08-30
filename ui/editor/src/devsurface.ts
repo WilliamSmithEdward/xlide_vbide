@@ -185,6 +185,17 @@ export interface AtPosition {
   line: number;
   column: number;
   word: string | null;
+  /**
+   * Whether the line was ON SCREEN to be read.
+   *
+   * Monaco builds spans only for the lines in the viewport, so a colour asked for below the
+   * fold has no pixel to report and every field under this one is null. That reads identically
+   * to "the tokenizer painted nothing", and the two want opposite fixes: this one is answered
+   * by `act("reveal", { line })`, that one by looking at the analysis. Told apart here because
+   * guessing wrong cost two misfiled issues - xlide_vscode#54 blamed the analyzer, #17 blamed
+   * the semantic pass, and both were ten lines of editor and a twenty-line module.
+   */
+  rendered: boolean;
   /** The monaco token class on the rendered span, e.g. "mtk12". Null when nothing is rendered. */
   tokenClass: string | null;
   /** The computed colour of that span: what is actually on screen. */
@@ -619,9 +630,22 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     let colour: string | null = null;
     let style: AtPosition["style"] = null;
 
-    const lineNode = editor.getDomNode()?.querySelectorAll(".view-line")[
-      where.lineNumber - (editor.getVisibleRanges()[0]?.startLineNumber ?? 1)
-    ];
+    // FOUND BY WHERE IT SITS, NOT BY ITS PLACE IN THE LIST. This indexed the NodeList by
+    // (line - firstVisibleLine), which assumes the rendered lines and the VISIBLE ones are the
+    // same set. They are not: monaco renders a line beyond each edge, so revealing line 22 of a
+    // 30-line module left `getVisibleRanges()` saying 18-25 while the DOM held 17 through 26
+    // (measured). Every index was then one line light, and a wrong node answers as confidently
+    // as a right one - in a plausible colour, on a line the caller never asked about, which is
+    // the worst thing an instrument can do. A `top` needs no assumption about the set at all.
+    //
+    // CONTENT COORDINATES ON BOTH SIDES, so nothing is subtracted for the scroll. A line's
+    // `style.top` is its offset in the whole document and monaco translates the container that
+    // holds them, rather than renumbering the lines inside it: at that same scroll, line 22 read
+    // `top: 386px` - 8px of padding plus 21 lines of 18 - which is what getTopForLineNumber
+    // answers for it at any scroll position, and subtracting getScrollTop() matched nothing.
+    const lineTop = editor.getTopForLineNumber(where.lineNumber);
+    const lineNode = [...(editor.getDomNode()?.querySelectorAll(".view-line") ?? [])]
+      .find((node) => Math.abs(parseInt((node as HTMLElement).style.top, 10) - lineTop) < 1);
 
     if (lineNode) {
       let seen = 0;
@@ -646,6 +670,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       line: where.lineNumber,
       column: where.column,
       word: word?.word ?? null,
+      rendered: lineNode !== undefined,
       tokenClass,
       colour,
       style,
@@ -2209,6 +2234,42 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     focusEditor: () => {
       workspace.activeEditor().focus();
       return { did: true, detail: "the active editor has focus" };
+    },
+
+    /**
+     * Scrolls a line into view, which is what a developer does before answering "what colour
+     * is that word".
+     *
+     * Monaco renders spans only for the lines in the viewport, so `ui?line=` can only report a
+     * colour for a line that is on screen - and how many lines that is depends on how tall the
+     * editor happens to be, which depends on which docks are open. A suite that reads line 22
+     * of a twenty-line module was reading nothing at all with every pane open (#17), and said
+     * so in the language of the analysis rather than of the viewport.
+     *
+     * Rendered synchronously on the way out, so the read that follows sees the revealed line
+     * rather than the frame before it: this is the alternative to a sleep, not a companion to
+     * one. The visible range comes back because that is the observation that proves it worked.
+     */
+    reveal: (args) => {
+      const line = Number(args.line ?? 0);
+      const editor = workspace.activeEditor();
+      const lineCount = editor.getModel()?.getLineCount() ?? 0;
+      if (!Number.isInteger(line) || line < 1 || line > lineCount) {
+        return { did: false, detail: `line ${args.line} is not one of this model's ${lineCount}` };
+      }
+
+      editor.revealLineInCenterIfOutsideViewport(line);
+      editor.render(true);
+      const visible = editor.getVisibleRanges()[0];
+      return {
+        did: true,
+        detail: visible
+          ? `line ${line} is on screen; lines ${visible.startLineNumber}-${visible.endLineNumber} are`
+          : `line ${line} revealed, but nothing is on screen: the editor has no room`,
+        data: visible
+          ? { firstVisible: visible.startLineNumber, lastVisible: visible.endLineNumber }
+          : null,
+      };
     },
 
     /**

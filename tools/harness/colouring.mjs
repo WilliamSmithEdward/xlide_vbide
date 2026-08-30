@@ -77,14 +77,43 @@ const lines = [
 async function across(lineText, word) {
   const line = lines.findIndex((one) => one === lineText) + 1;
   const start = lines[line - 1].lastIndexOf(word) + 1;
-  const first = await api.ui({ line, column: start });
-  const last = await api.ui({ line, column: start + word.length - 1 });
+  // REVEALED FIRST, because a colour only exists on a line monaco has rendered and this module
+  // is longer than a squeezed editor shows. With every dock open the editor here was ten lines
+  // tall, so everything from the first Sub down answered `(none)` - and `(none)` is also what an
+  // unpainted word answers, which is how this suite came to report a working tokenizer as a
+  // missing semantic pass (#17). One reveal covers both reads: they are on the same line.
+  const first = await api.revealing({ line, column: start });
+  const last = await api.at({ line, column: start + word.length - 1 });
   return {
-    word: first.at?.word,
-    head: first.at?.colour ?? "(none)",
-    tail: last.at?.colour ?? "(none)",
-    oneColour: first.at?.colour === last.at?.colour,
+    word: first?.word,
+    head: first?.colour ?? "(none)",
+    tail: last?.colour ?? "(none)",
+    oneColour: first?.colour === last?.colour,
   };
+}
+
+/**
+ * A readiness wait that gives up QUIETLY and then says which thing it was waiting on.
+ *
+ * Advisory, and deliberately so: a wait that THROWS when the colour never arrives turns nine
+ * readable colour failures into one timeout, which is a worse report of the same breakage.
+ *
+ * And it names the cause rather than assuming it. There are two ways for a colour to be
+ * missing and they read identically - the tokenizer painted nothing, or the line was never on
+ * screen to be painted on - and this printed the first explanation for both until #17, where it
+ * was the second every time and sent a correct analyzer upstream twice. `rendered` is the
+ * difference, so the message asks.
+ */
+async function settleFor(what, lineText, word, colour) {
+  await waitFor(what, async () => (await across(lineText, word)).head === colour, { budgetMs: 8000 })
+    .catch(async () => {
+      const line = lines.findIndex((one) => one === lineText) + 1;
+      const at = await api.at({ line, column: lines[line - 1].lastIndexOf(word) + 1 });
+      console.log(at?.rendered
+        ? "     (the semantic pass never arrived; the colours below say what did)"
+        : `     (line ${line} will not render even revealed - the editor has no room, so nothing`
+          + " below is a colour)");
+    });
 }
 
 let made = false;
@@ -116,13 +145,8 @@ try {
    * declaration, a bare call and a qualified call go through different rules, so a defect in any
    * of those still reports as a failed check rather than being waited away.
    */
-  // Advisory, and deliberately so. A wait that THROWS when the thing never arrives turns nine
-  // readable colour failures into one timeout, which is a worse report of the same breakage: the
-  // sleep it replaced at least let the checks speak. So this gives up quietly and says it did.
-  await waitFor("the tokenizer to paint the module", async () =>
-    (await across("Public Sub Recalculate(ByVal label As String)", "Recalculate")).head === CALL,
-    { budgetMs: 8000 },
-  ).catch(() => console.log("     (the semantic pass never arrived; the colours below say what did)"));
+  await settleFor("the tokenizer to paint the module",
+    "Public Sub Recalculate(ByVal label As String)", "Recalculate", CALL);
 
   const held = (await api.readModule(name, project.projectId)).text ?? "";
   const accented = held.includes("CalculérName") && held.includes("RécordAccent");
@@ -185,10 +209,8 @@ try {
    * 2026-08-19: green on the first run, red twenty minutes later, same build). The signal is
    * the host global's tint on `Application` - semantic, and asserted by no row below.
    */
-  await waitFor("the SEMANTIC pass to land", async () =>
-    (await across("    Debug.Print Application.Version", "Application")).head === "rgb(79, 193, 255)",
-    { budgetMs: 8000 },
-  ).catch(() => console.log("     (the semantic pass never arrived; the colours below say what did)"));
+  await settleFor("the SEMANTIC pass to land",
+    "    Debug.Print Application.Version", "Application", HOSTKNOWN);
 
   /*
    * 3b. THE CONSTANT FAMILIES, pinned 2026-08-19 - first as three tiers, promoted to TWO the
