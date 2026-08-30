@@ -5463,14 +5463,26 @@ body.objbrowser-page #objbrowser-card {
 }
 
 #changes-restore-card {
-  width: 460px;
-  padding: 16px;
+  width: 480px;
+  padding: 24px;
+}
+
+/* Room between the question, its consequence, and the buttons: this card is read before an
+   action is taken, and prose set tight reads as a warning label rather than a sentence. */
+#changes-restore-consequence {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+#changes-restore-buttons,
+#changes-restore-card .modal-buttons {
+  margin-top: 22px;
 }
 
 /* The outcome list: one line per module, the host's own words. Scrolls rather than growing,
    because a project-wide reject can answer for every module it has. */
 #changes-restore-outcomes {
-  margin-top: 12px;
+  margin-top: 14px;
   max-height: 280px;
   overflow-y: auto;
   font-size: 12px;

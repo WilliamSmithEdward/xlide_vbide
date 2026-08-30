@@ -79,6 +79,7 @@ if (!second) {
 
 // What every check below is measured against. The fixture's own text, before this run.
 const ledgerWas = await held("Ledger");
+const secondWas = await held(second);
 const untouchedWas = await held("Untouched");
 
 // A LINE OF OUR OWN FIRST. The fixture was built through this door, so the log already holds the
@@ -666,8 +667,9 @@ await log({ action: "snapshot", label: "A" });
 const afterA = await held("Ledger");
 const boundaryA = (await log()).rounds[0].round;
 
+const secondBeforeB = await held(second);
 await write("Ledger", `${restoreBase}\r\n' restore probe A\r\n' restore probe B`, "claude");
-await write(second, `${await held(second)}\r\n' restore probe B`, "claude");
+await write(second, `${secondBeforeB}\r\n' restore probe B`, "claude");
 await log({ action: "snapshot", label: "B" });
 
 const restoreStarted = Date.now();
@@ -679,7 +681,7 @@ check("restore answers each module's outcome",
 check(`and it is quick (${restoreTook}ms for two modules)`, restoreTook < 5000, true);
 
 check("the project is byte-for-byte at the chosen boundary",
-  (await held("Ledger")) === afterA && !(await held(second)).includes("restore probe B"), true);
+  (await held("Ledger")) === afterA && (await held(second)) === secondBeforeB, true);
 
 const restoreRound = (await log()).rounds.find((round) => !round.open);
 check("the restore landed as a round of its own",
@@ -750,6 +752,31 @@ check("a restore across a rename carries the name back",
 check("and the text with it", (await held(wanderer)) === "Option Explicit\r\n' the wanderer", true);
 await api.component("remove", { name: wanderer, project: project.projectId });
 
+// RENAMED AND THEN REMOVED, restored forward - the owner's live test, 2026-08-30. The plan
+// used to emit a rename-back whose source no longer existed, painting "failed - nothing named
+// X to rename back" in red over a restore that then succeeded through the re-add. The rename
+// step stands down when nothing is standing; the add row speaks for the identity alone.
+const ghost = `Ghost${process.pid}`;
+const ghostAway = `GhostAway${process.pid}`;
+await api.component("add", { name: ghost, kind: "module", project: project.projectId });
+await write(ghost, "Option Explicit\r\n' the ghost", "claude");
+await log({ action: "snapshot", label: "the ghost stands" });
+const ghostStood = (await log()).rounds[0].round;
+await api.component("rename", { name: ghost, newName: ghostAway, project: project.projectId });
+await api.component("remove", { name: ghostAway, project: project.projectId });
+await log({ action: "snapshot", label: "the ghost is gone" });
+
+const seance = await log({ action: "restore", round: ghostStood, by: "claude" });
+check(`a renamed-then-removed module restores forward with no failed row `
+  + `(${(seance.outcomes ?? []).map((one) => `${one.module}:${one.did}`).join(",")})`,
+  (seance.outcomes ?? []).every((one) => one.did !== "failed"), true);
+check("and no outcome row is said twice",
+  (seance.outcomes ?? []).length
+    === new Set((seance.outcomes ?? []).map((one) => JSON.stringify(one))).size, true);
+check("and it comes back under its boundary name, text and all",
+  (await held(ghost)) === "Option Explicit\r\n' the ghost", true);
+await api.component("remove", { name: ghost, project: project.projectId });
+
 // The refusals answer in words, not in silence.
 const noSuch = await log({ action: "restore", round: 9999 });
 check("a boundary the log does not hold is refused in words",
@@ -812,8 +839,12 @@ if (session.length > 1) {
 
 check("Untouched is exactly as the fixture built it", (await held("Untouched")) === untouchedWas);
 
-// Put the fixture's own module back, so a second run starts where the first did.
+// Put the fixture's own modules back, so a second run starts where the first did. The
+// second module goes back to its CAPTURED start rather than having one known marker
+// stripped: the restore checks append markers of their own, and a strip-one cleanup let
+// them compound across runs until a baseline carried a marker and a correct restore
+// read as a wrong one (caught on this suite's own second consecutive run, 2026-08-30).
 await write("Ledger", ledgerWas, "change-log.mjs cleanup");
-await write(second, (await held(second)).replace("\r\n' back to the agent", ""), "change-log.mjs cleanup");
+await write(second, secondWas, "change-log.mjs cleanup");
 
 process.exit(done());

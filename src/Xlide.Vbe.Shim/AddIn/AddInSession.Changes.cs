@@ -431,15 +431,21 @@ internal sealed partial class AddInSession
                 : $"restore to round {boundary}",
             DateTimeOffset.UtcNow);
 
-        var restored = outcomes.Count(one => one.Did is "written" or "added" or "removed" or "renamed");
-        var skipped = outcomes.Count(one => one.Did is "skipped" or "failed");
+        // A name that lived twice - added, removed, added again - is two identities in the plan,
+        // and both can answer "already absent". True twice, worth reading once.
+        var told = outcomes.Distinct().ToList();
+
+        var restored = told.Count(one => one.Did is "written" or "added" or "removed" or "renamed");
+        var skipped = told.Count(one => one.Did == "skipped");
+        var failed = told.Count(one => one.Did == "failed");
         var summary = $"{restored} restored, {skipped} skipped, "
-            + $"{outcomes.Count - restored - skipped} already right, to round {boundary}";
+            + (failed > 0 ? $"{failed} failed, " : string.Empty)
+            + $"{told.Count - restored - skipped - failed} already right, to round {boundary}";
 
         Log.Info($"changes: {summary}");
         return System.Text.Json.JsonSerializer.Serialize(
             new ChangeRestoreReply(
-                summary, boundary, restored, skipped, [.. outcomes], log.NewestClosedRound),
+                summary, boundary, restored, skipped + failed, [.. told], log.NewestClosedRound),
             ChangeJsonContext.Default.ChangeRestoreReply);
     }
 
@@ -492,6 +498,20 @@ internal sealed partial class AddInSession
             for (var at = renames.Count - 1; at >= 0; at--)
             {
                 var (from, to) = renames[at];
+
+                // RENAMED AND THEN REMOVED since the boundary: there is nothing standing to
+                // rename, and the re-add pass below already restores this identity under its
+                // boundary name. Planning a rename anyway painted a red "failed - nothing named
+                // X to rename back" over a restore that then succeeded (the owner's live test,
+                // 2026-08-30). The step stands down without a row; the add speaks for it.
+                using var source = FindComponent(from, projectId, out _);
+                if (source is null)
+                {
+                    renames.RemoveAt(at);
+                    progressed = true;
+                    continue;
+                }
+
                 using var taken = FindComponent(to, projectId, out _);
                 if (taken is not null)
                 {
