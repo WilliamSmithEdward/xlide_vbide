@@ -130,9 +130,14 @@ suite can drive every refusal above.
 
 ## The order of work
 
-1. **Upstream**: a range query on the analyzer that answers, for a statement range, which locals
-   are read before written, which are written and live after, and each one's declared type. The
-   binder has the facts; nothing exposes them.
+1. **Upstream, filed as xlide_vscode#55**: a `kind` on each reference - `read`, `write`,
+   `readwrite`. That turned out to be the whole ask. With kinds plus positions, a consumer
+   computes the signature itself: a local whose first in-range reference is a read is a
+   parameter; one written in range with a read after the end is the return or a `ByRef`; one
+   written and never read after moves its `Dim`. No liveness engine, because extraction refuses
+   control flow crossing the boundary anyway. The binder already establishes write-ness -
+   `set-required` and `assignment-type-mismatch` are diagnostics about writes - and discards it
+   on the way out.
 2. **Here**: the transformation, the refusals, the lightbulb entry, the name box, the api route,
    and the suite.
 

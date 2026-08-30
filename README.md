@@ -57,6 +57,19 @@ native code, so Excel never loads a .NET runtime on its account.
   workbooks can both hold a Module1 and xlide knows which one you mean.
 - An Immediate panel that mirrors the native window live, and a close-confirm on a dirty tab that
   reverts everywhere when you choose not to save.
+- A UserForm designer: drag, resize, nudge and reparent controls on a canvas, with a text view of
+  the same form beside it that edits the same document. Both halves are one undo stack, and the
+  form is not touched until you press Ctrl+S.
+- A test runner. Mark procedures with `@xlide-test`, run them against the live project, and read
+  the outcomes in a Tests pane that shows nothing rather than stale green when the project cannot
+  execute a line.
+- A Changes pane: what an agent, or you, changed in this project, in rounds, newest first, with
+  the text from before kept so you can read it. It only shows - nothing in it writes.
+- Analyzer rules you can change. A searchable dialog, a right-click on any finding to suppress it
+  here or turn it off on this machine, and the same switch on the lightbulb. Rules that mirror a
+  VBE compile failure say so instead of offering a switch that would be ignored.
+- A local api, off by default, that lets an agent read a module, write one, run a test and drive
+  the editor. One switch on a card that explains exactly what turning it on allows.
 
 ## Installing
 
