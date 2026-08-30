@@ -231,14 +231,12 @@ const INDEX_HTML = `<!doctype html>
     </div>
     <div id="changes">
       <div id="changes-actions" role="toolbar" aria-label="Change log">
-        <button id="changes-refresh" type="button" title="Read the log again. These counts are a reading, not a live total."><span class="codicon codicon-refresh" aria-hidden="true"></span></button>
         <button id="changes-snapshot" type="button" title="End the current round. Later writes are counted separately from these."><span class="codicon codicon-history" aria-hidden="true"></span><span class="changes-label-text">Snapshot</span></button>
         <button id="changes-accept" type="button" title="Mark these rounds as reviewed. They stay in the log, and new ones appear above them."><span class="codicon codicon-check" aria-hidden="true"></span><span class="changes-label-text">Accept</span></button>
         <button id="changes-reject" type="button" title="Put every module back the way it was at the accept mark."><span class="codicon codicon-discard" aria-hidden="true"></span><span class="changes-label-text">Reject</span></button>
         <button id="changes-summary" type="button" hidden title="Everything since the accept mark, summed. Click for the changed modules; click a module to see its changes highlighted in the editor."></button>
         <select id="changes-file" class="scope-select scope-select-file" aria-label="Show changes from"></select>
         <span id="changes-project" aria-live="polite"></span>
-        <span id="changes-newer" role="status" hidden><span class="changes-newer-dot" aria-hidden="true"></span>newer changes</span>
       </div>
       <div id="changes-body">
         <div id="changes-list" role="list" aria-label="Rounds"></div>

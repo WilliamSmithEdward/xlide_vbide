@@ -169,14 +169,12 @@ export class ChangesPane {
   private readonly list: HTMLElement;
   private readonly diff: HTMLElement;
   private readonly title: HTMLElement;
-  private readonly refresh: HTMLButtonElement;
   private readonly snapshot: HTMLButtonElement;
   private readonly accept: HTMLButtonElement;
   private readonly reject: HTMLButtonElement;
   private readonly summary: HTMLButtonElement;
 
   private readonly file: HTMLSelectElement;
-  private readonly newer: HTMLElement;
 
   /*
    * WHAT THE COUNTS ARE, AND WHAT THEY ARE NOT.
@@ -236,14 +234,12 @@ export class ChangesPane {
     this.list = root.querySelector("#changes-list") as HTMLElement;
     this.diff = root.querySelector("#changes-diff") as HTMLElement;
     this.title = root.querySelector("#changes-project") as HTMLElement;
-    this.refresh = root.querySelector("#changes-refresh") as HTMLButtonElement;
     this.snapshot = root.querySelector("#changes-snapshot") as HTMLButtonElement;
     this.accept = root.querySelector("#changes-accept") as HTMLButtonElement;
     this.reject = root.querySelector("#changes-reject") as HTMLButtonElement;
     this.summary = root.querySelector("#changes-summary") as HTMLButtonElement;
 
     this.file = root.querySelector("#changes-file") as HTMLSelectElement;
-    this.newer = root.querySelector("#changes-newer") as HTMLElement;
 
     livePane = this.probe();
 
@@ -258,7 +254,6 @@ export class ChangesPane {
 
     this.filesChanged();
 
-    this.refresh.addEventListener("click", () => void this.reload());
     this.snapshot.addEventListener("click", () => void this.reload({ action: "snapshot" }));
     this.accept.addEventListener("click", () => void this.reload({ action: "accept" }));
     // ALWAYS INTO THE PREVIEW, never a toggle (the owner, 2026-08-30: "click always shows
@@ -291,17 +286,15 @@ export class ChangesPane {
       return;
     }
 
-    const wasBehind = this.hostStamp > this.drawnStamp;
     this.hostStamp = stamp;
-    if (!wasBehind) {
-      this.showNewer();
-    }
 
-    // AND THE PANE FOLLOWS, a quiet moment later (the owner, 2026-08-30: "possible for this to
+    // THE PANE FOLLOWS, a quiet moment later (the owner, 2026-08-30: "possible for this to
     // auto update with changes?"). The pull-only rule was about COST - never a whole-text
     // comparison per keystroke - and it holds: stamps arrive when writes flush, on pauses in
     // typing, and this waits a further beat after the last of them, so a burst of writes is one
     // re-read. Nothing is re-read before the first look; a pane nobody has opened stays free.
+    // The refresh button and its "newer changes" chip left when this arrived - a pane that
+    // follows the log needs neither the reminder nor the hand-crank (the owner: "duplicative").
     if (this.state) {
       clearTimeout(this.followTimer);
       this.followTimer = setTimeout(() => void this.reload(), 1500);
@@ -310,15 +303,6 @@ export class ChangesPane {
 
   /** The debounced follow-up to a host stamp, so a burst of writes is one re-read. */
   private followTimer: ReturnType<typeof setTimeout> | undefined;
-
-  private showNewer(): void {
-    const behind = this.hostStamp > this.drawnStamp;
-    this.newer.hidden = !behind;
-    this.refresh.classList.toggle("changes-refresh-newer", behind);
-    this.refresh.title = behind
-      ? "Read the log again - it has moved on since these counts were taken."
-      : "Read the log again. These counts are a reading, not a live total.";
-  }
 
   /** Asked for when the pane is opened, which is the only time any of this costs anything. */
   shown(): void {
@@ -394,7 +378,6 @@ export class ChangesPane {
         this.showing = null;
       }
     } finally {
-      this.showNewer();
       this.busy = false;
       this.setBusy(false);
       this.draw();
@@ -403,7 +386,6 @@ export class ChangesPane {
   }
 
   private setBusy(on: boolean): void {
-    this.refresh.disabled = on;
     this.snapshot.disabled = on;
     this.accept.disabled = on;
     this.reject.disabled = on;
@@ -1348,7 +1330,7 @@ export class ChangesPane {
         railWidth: Math.round(this.full && !this.railHidden
           ? this.full.rail.getBoundingClientRect().width
           : 0),
-        behind: this.hostStamp > this.drawnStamp,
+        behind: this.hostStamp > this.drawnStamp,  // a follow-up read is pending
         total: this.state?.total ?? 0,
         sinceAccept: this.state?.sinceAccept
           ? {
@@ -1361,8 +1343,14 @@ export class ChangesPane {
         highlighted: this.highlighted,
       }),
       press: (control) => {
-        const button = control === "refresh" ? this.refresh
-          : control === "snapshot" ? this.snapshot
+        // "refresh" outlived its button: with the pane following the log there is nothing for a
+        // HAND to crank, but a driver mid-check wants a read NOW rather than after the debounce.
+        if (control === "refresh") {
+          void this.reload();
+          return true;
+        }
+
+        const button = control === "snapshot" ? this.snapshot
           : control === "accept" ? this.accept
           : control === "reject" ? this.reject
           : control === "summary" ? this.summary

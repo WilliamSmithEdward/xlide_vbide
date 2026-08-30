@@ -493,8 +493,6 @@ html.drag-live * {
   border-color: #ffffff;
 }
 
-
-
 /* A visible grip, CENTRED, on every divider that resizes something: the affordance is an
    indicator to be seen, not discovered (developer, 2026-08-06). */
 
@@ -918,8 +916,6 @@ span.prop-value.readonly {
   outline-offset: 1px;
 }
 
-
-
 .tree-item {
   display: flex;
   align-items: center;
@@ -1169,8 +1165,6 @@ body.live-resize .minimap {
   font-size: 12px;
   opacity: 0.8;
 }
-
-
 
 
 /* The menu button, at the head of the toolbar. It was a row of its own carrying ten native menus;
@@ -2342,8 +2336,6 @@ body.live-resize .minimap {
 
 
 
-
-
 .panel-tab:focus-visible {
   outline: 2px solid var(--vscode-focusBorder, #0078d4);
   outline-offset: -2px;
@@ -3173,8 +3165,6 @@ body.objbrowser-page #objbrowser-card {
   align-items: center;
   justify-content: center;
 }
-
-
 
 
 
@@ -5435,11 +5425,20 @@ body.objbrowser-page #objbrowser-card {
 #changes-summary {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+  padding: 2px 10px;
+  /* A resting outline, so it reads as a button before the pointer proves it (the owner:
+     "add subtle outline when not hovered"). */
+  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  border-radius: 4px;
 }
 
+/* A quiet upright rule between the counts and the module tally, so the two readings do not run
+   together (the owner: "feels cramped, maybe add a subtle separator"). */
 #changes-summary .changes-summary-files {
   opacity: 0.75;
+  padding-left: 9px;
+  border-left: 1px solid var(--vscode-editorWidget-border, #454545);
 }
 
 #changes-summary.changes-summary-open {
@@ -6048,44 +6047,7 @@ body.objbrowser-page #objbrowser-card {
   opacity: 0.8;
 }
 
-/* "There is newer" - the pane admitting its numbers are a reading.
-   A dot AND the words, never the dot alone: a coloured pip beside a toolbar is not a message. */
-#changes-newer {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  opacity: 0.85;
-  color: var(--vscode-charts-yellow, #cca700);
-}
 
-#changes-newer[hidden] {
-  display: none;
-}
-
-.changes-newer-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-/* And the button that answers it wears the same mark, so the thing to press is obvious from the
-   thing that is being said. */
-.changes-refresh-newer {
-  position: relative;
-}
-
-.changes-refresh-newer::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--vscode-charts-yellow, #cca700);
-}
 
 /* "the newest 200 of 401" - the list saying it stopped. Quiet, at the end of the rounds, where a
    reader arrives after scrolling rather than before starting. */

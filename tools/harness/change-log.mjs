@@ -187,50 +187,27 @@ check("the pane and the route agree about the counts",
   drawn.rounds.flatMap((round) => round.modules.map((one) => `${one.module}+${one.added}-${one.removed}`)),
   routeNow.rounds.flatMap((round) => round.entries.map((one) => `${one.module}+${one.added}-${one.removed}`)));
 
-// ---- and the pane says when they have been overtaken ------------------------------------------
+// ---- and the pane FOLLOWS the log on its own --------------------------------------------------
 //
-// EVERY COUNT HERE IS A COMPARISON OF TWO WHOLE TEXTS, so the pane works them out when it is
-// opened and when the developer asks again, never on the write path. The cost of that rule is
-// that the numbers age - and they aged SILENTLY: a reading of +54 sat beside a module the editor
-// had already grown to 61 lines, with nothing on screen saying which of the two was current (the
-// owner, 2026-08-22: "shouldn't + number align with number of lines?" - they did, with the module
-// as it was when the pane last looked).
-//
-// The rule stands. What changed is that the host taps the pane with a bare integer when it
-// records something, and the pane says so. This is the check that the tap is actually sent: the
-// page half can be driven by hand, but only a real write proves the host makes the call.
+// EVERY COUNT HERE IS A COMPARISON OF TWO WHOLE TEXTS, so nothing is worked out on the write
+// path - that rule stands. What retired on 2026-08-30 is the hand-crank: the host taps the pane
+// with a bare integer when it records something, and the pane re-reads a quiet moment after the
+// last tap (the owner: "possible for this to auto update?", then "this button seems duplicative
+// now that we are auto refreshing"). The refresh button and the "newer changes" chip left with
+// it. So the check is the honest successor: a real write, NO press of anything, and the pane's
+// own counts catch up - which proves the host sends the tap AND the pane acts on it.
 
 check("nothing is newer, having just read", (await api.ui()).changes.behind, false);
 
 await write("Ledger", `${ledgerWas}\r\n' newer than the reading`, "claude");
-const overtaken = await waitFor("the pane to notice", async () => {
-  const now = await api.ui();
-  return now.changes.behind === true ? now.changes : false;
-}, { budgetMs: 15000 });
-check("a write while the pane stands marks its counts as overtaken", overtaken.behind, true);
-
-const marker = await api.ask(`JSON.stringify({
-  shown: !document.getElementById('changes-newer').hidden,
-  words: document.getElementById('changes-newer').textContent.trim(),
-  announced: document.getElementById('changes-newer').getAttribute('role'),
-  onTheButton: document.getElementById('changes-refresh').classList.contains('changes-refresh-newer'),
-})`);
-const flag = JSON.parse(typeof marker === "string" ? marker : JSON.stringify(marker));
-check("and says so in words, not only a dot, where a reader will be told",
-  { shown: flag.shown, words: flag.words, announced: flag.announced, onTheButton: flag.onTheButton },
-  { shown: true, words: "newer changes", announced: "status", onTheButton: true });
-
-// AND THE COUNTS DID NOT MOVE ON THEIR OWN. The whole point is that nothing recounted.
-check("while the counts themselves stayed exactly as they were read",
-  (await api.ui()).changes.rounds.flatMap((round) =>
-    round.modules.map((one) => `${one.module}+${one.added}`)),
-  drawn.rounds.flatMap((round) => round.modules.map((one) => `${one.module}+${one.added}`)));
-
-await api.act("changesPane", { press: "refresh" });
-await waitFor("the read", async () => (await api.ui()).changes.behind === false, { budgetMs: 15000 });
-check("reading again clears it", (await api.ui()).changes.behind, false);
-check("and the counts have caught up",
-  (await api.ui()).changes.rounds[0].modules.some((one) => one.module === "Ledger"), true);
+const caughtUp = await waitFor("the pane to catch up unprompted", async () => {
+  const now = (await api.ui()).changes;
+  return now.behind === false
+    && now.rounds[0]?.modules.some((one) => one.module === "Ledger")
+    ? now : false;
+}, { budgetMs: 20000 });
+check("a write while the pane stands updates its counts, nothing pressed",
+  caughtUp.rounds[0].modules.some((one) => one.module === "Ledger"), true);
 
 await write("Ledger", `${ledgerWas}\r\n' one\r\n' two\r\n' three`, "claude");
 await api.act("changesPane", { press: "refresh" });
@@ -862,6 +839,19 @@ check("the module opens in the editor with its changes painted",
 await log({ action: "reject", by: "claude" });
 check("reject clears what the summary was counting", (await log()).sinceAccept, null);
 check("and the texts are back at the mark", (await held("Ledger")) === summaryBase, true);
+
+// ACCEPT clears it too, through the PANE'S OWN BUTTON - the gesture in the owner's screenshot
+// (2026-08-30, "clicked accept, expected hybrid button to show no changes after"). The route
+// answer and the button the developer is looking at must agree.
+await write("Ledger", `${summaryBase}\r\n' accepted away ${process.pid}`, "claude");
+await waitFor("the summary to see the write", async () =>
+  (await api.ui()).changes?.sinceAccept?.files === 1, { budgetMs: 20000 });
+await api.act("changesPane", { press: "accept" });
+const acceptCleared = await waitFor("accept to clear the summary", async () => {
+  const now = (await api.ui()).changes;
+  return now && now.sinceAccept === null ? true : false;
+}, { budgetMs: 20000 }).catch(() => false);
+check("accept through the pane clears the hybrid button", acceptCleared, true);
 
 // ---- the pane is scoped to ONE file ---------------------------------------------------------------
 //
