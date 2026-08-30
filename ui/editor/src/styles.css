@@ -5422,15 +5422,20 @@ body.objbrowser-page #objbrowser-card {
 /* The hybrid summary: counts on the button, the changed modules behind the click. It sits in
    the actions strip, so the strip's own button rules dress it; these add only the parts that
    make it a reading rather than a label. */
-#changes-summary {
+/* Doubled selector on purpose: the strip's own `#changes-actions button` rule paints borders
+   and backgrounds transparent at higher specificity, and the first cut of this outline lost
+   that fight silently - the button looked flat while the stylesheet said otherwise (the owner's
+   screenshot, twice). */
+#changes-actions #changes-summary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 2px 10px;
-  /* A resting outline, so it reads as a button before the pointer proves it (the owner:
-     "add subtle outline when not hovered"). */
-  border: 1px solid var(--vscode-editorWidget-border, #454545);
+  /* A resting outline and a whisper of ground, so it reads as a button before the pointer
+     proves it. */
+  border: 1px solid rgba(140, 140, 140, 0.45);
   border-radius: 4px;
+  background: rgba(128, 128, 128, 0.08);
 }
 
 /* Air between the two counts: the green and the red are one reading, not one word (the owner:
@@ -5444,8 +5449,10 @@ body.objbrowser-page #objbrowser-card {
    "make divider slightly less subtle"). */
 #changes-summary .changes-summary-files {
   opacity: 0.75;
-  padding-left: 9px;
-  border-left: 1px solid rgba(140, 140, 140, 0.6);
+  /* Symmetric air around the rule: the red count was sitting against it (the owner, twice). */
+  margin-left: 5px;
+  padding-left: 11px;
+  border-left: 1px solid rgba(150, 150, 150, 0.7);
 }
 
 #changes-summary.changes-summary-open {
