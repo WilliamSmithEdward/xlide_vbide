@@ -110,6 +110,26 @@ console.log(`  ActiveSheet. (${sheet.line}:${sheet.column}) ${sheet.items.length
 check("ActiveSheet resolves to a Worksheet", sheet.items.includes("Range"),
   sheet.items.slice(0, 8).join(","));
 
+/*
+ * AND NOTHING IS OFFERED THAT VBA CANNOT PARSE.
+ *
+ * The host model carries the type library's hidden plumbing - `_Default`, `_NewEnum`,
+ * `_Evaluate`, `_Run2`, `_CodeName`, 24 of them across the twenty commonest Excel types - and a
+ * VBA identifier begins with a letter, so none of them can be written after a dot. The VBE says
+ * so itself: `?ThisWorkbook._CodeName` is "Compile error: Syntax error" where
+ * `?ThisWorkbook.CodeName` answers. Offering one is offering code that will not compile, which
+ * this did until 2026-08-30 (the owner, on `_CodeName` under `ThisWorkbook.`).
+ *
+ * Both receivers, because they resolve through different types and the plumbing is per type.
+ */
+for (const [receiver, menu] of [["Application", host], ["ActiveSheet", sheet]]) {
+  const untypeable = menu.items.filter((one) => String(one).startsWith("_"));
+  check(`${receiver}. offers nothing VBA cannot type`, untypeable.length === 0,
+    untypeable.length > 0
+      ? `${untypeable.join(", ")} - accepting one inserts a line that will not compile`
+      : `${menu.items.length} members, none of them hidden plumbing`);
+}
+
 console.log("\nsignature help, mid-argument:");
 const callLine = lines.findIndex((l) => l.includes('g.Describe "prefix"'));
 const inside = lines[callLine].indexOf('"prefix"') + 3;
