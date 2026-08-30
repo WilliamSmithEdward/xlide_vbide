@@ -5431,6 +5431,14 @@ body.objbrowser-page #objbrowser-card {
    and backgrounds transparent at higher specificity, and the first cut of this outline lost
    that fight silently - the button looked flat while the stylesheet said otherwise (the owner's
    screenshot, twice). */
+/* The [hidden] rule is load-bearing: an author `display` beats the UA stylesheet's
+   [hidden] { display: none }, so without it the button never visually left - it froze with its
+   last counts while the state underneath was already clean (the owner, three screenshots of a
+   "stale" button that the probe finally caught as hidden=true, display=flex, on screen). */
+#changes-actions #changes-summary[hidden] {
+  display: none;
+}
+
 #changes-actions #changes-summary {
   display: inline-flex;
   align-items: center;

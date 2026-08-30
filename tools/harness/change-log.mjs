@@ -865,6 +865,16 @@ const acceptCleared = await waitFor("accept to clear the summary", async () => {
 }, { budgetMs: 20000 }).catch(() => false);
 check("accept through the pane clears the hybrid button", acceptCleared, true);
 
+// AND THE PIXELS AGREE. The state cleared on every earlier green run while the BUTTON stayed
+// on screen: the strip's own display rule beat the UA stylesheet's [hidden]{display:none},
+// so the element froze with its last counts (the owner, three screenshots; caught live as
+// hidden=true, display=flex, width>0). The suite read state and never the screen - this is
+// the check that reads the screen.
+const buttonGone = await api.ask("(() => {"
+  + " const b = document.getElementById('changes-summary');"
+  + " return b === null || b.getBoundingClientRect().width === 0; })()");
+check("and the button is gone from the SCREEN, not only from the state", buttonGone, true);
+
 // THE CARD'S OWN RESTORE FIRES TWICE. Its first use reloaded the listing and nulled the
 // selection it reads its target from, so the second press silently did nothing (the owner,
 // 2026-08-30: "after clicking restore, and restoring, and closing restore modal, the restore
