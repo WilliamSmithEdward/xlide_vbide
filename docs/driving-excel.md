@@ -451,11 +451,18 @@ await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the
                                                 //   as Shift+F12 does; ui.dialogs then sees it
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
 await api.undoRename();                                 // and puts it back
+await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
+//   while the last rename is still the next thing to undo in the module on screen, undo means
+//   the HOST's reversal across every module it touched. Type one character first and undo takes
+//   that character back instead, in the order it was done.
 await api.at("Recalculate");                    // colour as painted, and the markers on it
 // -> { word, rendered, tokenClass: "mtk4", colour: "rgb(156, 220, 254)", squiggles: [{severity, ...}] }
 //
 // `word` matches case-insensitively, because VBA does: the host RECASES identifiers on write, so
 // `total = 1` comes back `Total = 1` and a case-sensitive lookup misses a word that is on screen.
+// It matches a WHOLE word, on monaco's own separators. It was a substring search until
+// 2026-08-30, which found the `i` inside `Option` and answered about that instead - so a loop
+// variable, of all things, was the one kind of name it could not be asked about.
 //
 // A COLOUR ONLY EXISTS FOR A LINE THAT IS ON SCREEN. Monaco builds spans for the viewport and
 // nothing else, and the viewport is however much height the open docks left the editor - so

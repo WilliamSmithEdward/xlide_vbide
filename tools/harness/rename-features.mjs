@@ -159,6 +159,41 @@ check("undo restored the declaration", restored.Helpers.trim() === before.Helper
 check("undo restored the caller", restored.Consumer.trim() === before.Consumer.trim());
 await parity("after the rename and its undo");
 
+/*
+ * AND PLAIN UNDO IS HOW A DEVELOPER REACHES IT.
+ *
+ * `undoRename` above is the door's own route. This is the path Ctrl+Z, the toolbar button and the
+ * wrench menu all take, and until 2026-08-30 it was not this one: the reversal lived in a context
+ * menu (the owner: "i think it should be undo like ctrl z, like other things"), and the key
+ * everybody does press did something worse than nothing. A rename arrives as ordinary adopted
+ * text, so it sits on each model's undo stack - Ctrl+Z reversed the SHOWN module's share and left
+ * every other module renamed, which is a half-renamed project.
+ *
+ * So the check is not that undo did something. It is that it reached the modules that are not on
+ * screen, because those are the ones a per-model undo silently leaves behind.
+ */
+console.log("\nand again, to take it back with plain undo:");
+await showing("Helpers");
+const again = await api.act("rename", { word: "Recalculate", newName: "Recompute" });
+check("a second rename was accepted", again.did, again.detail);
+await wait(3000);
+
+await showing("Helpers");
+await api.act("undo");
+await wait(3000);
+
+const byUndo = {
+  Helpers: await textOf("Helpers"),
+  Consumer: await textOf("Consumer"),
+};
+check("plain undo put back the module in front of the developer",
+  byUndo.Helpers.trim() === before.Helpers.trim(),
+  byUndo.Helpers.split(/\r?\n/).find((l) => /Sub Rec/.test(l)));
+check("AND the module that was not on screen, which a per-model undo would have left renamed",
+  byUndo.Consumer.trim() === before.Consumer.trim(),
+  byUndo.Consumer.split(/\r?\n/).find((l) => l.includes("Helpers.")));
+await parity("after the rename and a plain undo");
+
 console.log("\ngo to definition, from the qualified call:");
 await showing("Consumer");
 const definition = await api.act("definition", { word: "Recalculate" });

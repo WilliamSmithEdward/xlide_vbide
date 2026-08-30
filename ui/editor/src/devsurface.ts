@@ -559,12 +559,23 @@ export function installDevSurface(parts: DevSurfaceParts): void {
       // `total = 1` through the object model comes back `Total = 1`. A case-sensitive lookup
       // therefore fails to find a word the caller can see on screen, and answers "no such word"
       // about a word that is right there (2026-08-08).
-      const wanted = String(args.word).toLowerCase();
-      const at = model.getValue().toLowerCase().indexOf(wanted);
-      if (at < 0) { return null; }
+      // A WHOLE WORD, NOT A SUBSTRING. This was an `indexOf` over the module's text, which finds
+      // `i` inside `Option` and `total` inside `subtotal` - so a caller asking about a one-letter
+      // loop variable was answered about whichever longer word happened to contain that letter
+      // first. Measured 2026-08-30: `references` for `i` replied "0 reference(s) to Option",
+      // confidently, about a symbol nobody asked about. VBA is full of `i`, `n` and `x`.
+      //
+      // Monaco's own word separators decide what a word is, so this agrees with `getWordAtPosition`
+      // - which is what every answer built on this offset is then keyed to.
+      const wanted = String(args.word);
+      const [found] = model.findMatches(
+        wanted, false, false, false,
+        workspace.activeEditor().getOption(monacoApi.editor.EditorOption.wordSeparators),
+        false, 1);
+      if (!found) { return null; }
 
       // The middle of the word, so a provider keyed on "inside an identifier" is satisfied.
-      return at + Math.floor(wanted.length / 2);
+      return model.getOffsetAt(found.range.getStartPosition()) + Math.floor(wanted.length / 2);
     }
 
     const line = Number(args.line ?? 0);
@@ -2603,9 +2614,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
      * most likely to leave the workbook, the surface and the analyzer holding three different
      * texts was the one operation no check ever performed.
      *
-     * Triggered by name rather than looked up: undo and redo are built into the editor rather
-     * than registered as actions, so `getAction("undo")` finds nothing. This is the same path the
-     * toolbar button and Ctrl+Z take.
+     * UNDO THROUGH `xlide.undo`, WHICH IS WHAT THE KEY RUNS. Monaco's own undo is built in rather
+     * than registered, so `getAction("undo")` finds nothing and redo still has to be triggered by
+     * name - but undo is this surface's own action now, because it decides between monaco's undo
+     * and the host's whole-project reversal of a rename. Triggering the built-in here would drive
+     * a path Ctrl+Z no longer takes, and a probe would be proving the wrong one.
      */
     undo: (args) => {
       const editor = workspace.activeEditor();
@@ -2614,7 +2627,11 @@ export function installDevSurface(parts: DevSurfaceParts): void {
 
       editor.focus();
       for (let step = 0; step < times; step += 1) {
-        editor.trigger("xlide", id, null);
+        if (id === "undo") {
+          void editor.getAction("xlide.undo")?.run();
+        } else {
+          editor.trigger("xlide", id, null);
+        }
       }
 
       const at = editor.getPosition();

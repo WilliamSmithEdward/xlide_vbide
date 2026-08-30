@@ -1752,24 +1752,33 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
     gotoLocation: { alternativeDefinitionCommand: "" },
   });
 
-  // Undo Rename, which the editor's own undo cannot be.
+  // Undo Rename, which is what Ctrl+Z means while a rename is the last thing done.
   //
   // A rename edits every module that uses the symbol, and the undo stack is PER MODEL: Ctrl+Z in
   // the module on screen reverses that module's share and leaves the rest renamed, which is a
-  // half-renamed project - worse than no undo at all. So the reversal is the host's, over the
-  // same modules the rename touched, and it is a command of its own rather than a key that
-  // already means something narrower.
+  // half-renamed project - worse than no undo at all. That is why the reversal is the host's,
+  // over the same modules the rename touched.
+  //
+  // IT WAS A CONTEXT-MENU ITEM, AND THAT WAS THE WRONG PLACE (the owner, 2026-08-30: "i think it
+  // should be undo like ctrl z, like other things"). Nobody right-clicks to undo. Worse, the key
+  // everybody does press was not merely missing the safe path, it was taking the harmful one:
+  // the rename's text arrives as an ordinary adopted edit, so it sits on each model's undo stack
+  // and Ctrl+Z really did half-undo the rename. So the reversal keeps its own command, for the
+  // api and for the toolbar, and Ctrl+Z now REACHES it.
   editor.addAction({
     id: "xlide.undoRename",
     label: "Undo Rename",
-    contextMenuGroupId: "1_modification",
-    contextMenuOrder: 1.5,
-    run: async () => {
-      const answer = await bridge.requestRenameUndo();
-      bridge.shell?.notify(answer.refused
-        ?? `Rename put back: ${answer.modules.length} module`
-          + `${answer.modules.length === 1 ? "" : "s"}.`);
-    },
+    run: async () => { await bridge.undoRename(); },
+  });
+
+  // Ctrl+Z, over the surface's own decision rather than monaco's built-in undo. The toolbar
+  // button, the wrench menu and the api reach the same one through `runCommand`, because an undo
+  // that means one thing on the key and another on the button is worse than either.
+  editor.addAction({
+    id: "xlide.undo",
+    label: "Undo",
+    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyZ],
+    run: (target) => { bridge.undoOnSurface(target as monaco.editor.IStandaloneCodeEditor); },
   });
 
   // Find All References, in xlide's own list.

@@ -1303,25 +1303,139 @@ export class EditorBridge {
    * is per model, so Ctrl+Z in the module you are looking at would reverse that module's share
    * and leave every other one renamed - a half-renamed project, which is worse than no undo.
    */
+  /**
+   * The rename Ctrl+Z would take back, while it is still the next thing to undo.
+   *
+   * `settled` holds, per module the rename touched, the version id that module reached once the
+   * host's new text arrived. Monaco returns an alternative version id to an earlier value when
+   * the developer undoes back to that state, so comparing against it answers "has anything been
+   * typed here since the rename" without keeping a copy of the text.
+   */
+  private renameUndoable: {
+    modules: Set<string>;
+    project: string | null;
+    settled: Map<string, number>;
+  } | null = null;
+
+  /**
+   * Is the last rename the next thing an undo in this model should reverse?
+   *
+   * Both halves matter. The module must be one the rename WROTE - undoing in a module it never
+   * touched is an ordinary undo - and that module must be exactly where the rename left it, so
+   * anything typed since is taken back first, in the order it was done.
+   *
+   * Matched on the project as well as the name, because two workbooks can both hold a Module1
+   * and only one of them was renamed.
+   */
+  renameIsNextUndo(model: monaco.editor.ITextModel): boolean {
+    const pending = this.renameUndoable;
+    const id = this.documents.idOf(model);
+    if (!pending || !id || (pending.project ?? null) !== (id.project ?? null)) {
+      return false;
+    }
+
+    const settled = pending.settled.get(id.module.toLowerCase());
+    return settled !== undefined && settled === model.getAlternativeVersionId();
+  }
+
+  /**
+   * A rename landed: from here until it is undone or superseded, Ctrl+Z means put it back.
+   *
+   * THE NEW TEXT HAS ALREADY ARRIVED BY NOW. The host sends each rewritten module and only then
+   * answers the request - measured in the message log, the texts at seq 501 and the result at
+   * 502 - so recording the settle point only as text arrives recorded nothing at all, and undo
+   * fell through to monaco's, reversing one module's share of the rename and leaving the rest
+   * (the first cut of this, 2026-08-30). Read here, where the models are already updated, and
+   * again on any later adopt, so neither order can miss it.
+   */
+  private renameLanded(answer: HostRenameAnswer, project: string | null): HostRenameAnswer {
+    if (answer.refused || answer.modules.length === 0) {
+      this.renameUndoable = null;
+      return answer;
+    }
+
+    const settled = new Map<string, number>();
+    for (const module of answer.modules) {
+      const model = this.documents.get(module, project);
+      if (model) {
+        settled.set(module.toLowerCase(), model.getAlternativeVersionId());
+      }
+    }
+
+    this.renameUndoable = {
+      modules: new Set(answer.modules.map((one) => one.toLowerCase())),
+      project,
+      settled,
+    };
+    return answer;
+  }
+
+  /** The project the rename is about: whichever one the developer is renaming in. */
+  private activeProject(): string | null {
+    const model = this.workspace?.activeEditor().getModel() ?? null;
+    return (model ? this.documents.idOf(model)?.project : null) ?? null;
+  }
+
   requestRenameUndo(): Promise<HostRenameAnswer> {
     return this.pendingRenames.ask(
       () => ({ modules: [], replaced: 0, refused: "The undo timed out, so nothing changed." }),
       30000,
-      (id) => this.transport.post({ type: "undoRename", id }));
+      (id) => this.transport.post({ type: "undoRename", id }))
+      .then((answer) => {
+        // Undone, so there is nothing left for the next Ctrl+Z to take back. Cleared even when
+        // the host refused: whatever it is holding, this page can no longer say it knows.
+        this.renameUndoable = null;
+        return answer;
+      });
+  }
+
+  /**
+   * The host's whole-project reversal of the last rename, saying what it did.
+   *
+   * Said out loud because there is no dialog and no diff: several modules the developer may not
+   * have open just changed back, and "nothing appeared to happen" is the only other report.
+   */
+  async undoRename(): Promise<void> {
+    const answer = await this.requestRenameUndo();
+    this.shell?.notify(answer.refused
+      ?? `Rename put back: ${answer.modules.length} module`
+        + `${answer.modules.length === 1 ? "" : "s"}.`);
+  }
+
+  /**
+   * What undo means on this surface: the rename, when that is what the developer just did, and
+   * monaco's own undo the rest of the time.
+   *
+   * The question is narrow on purpose. Only when the model in front of them is one the last
+   * rename WROTE, and is still exactly where that rename left it, does undo mean the rename.
+   * Type one character first and Ctrl+Z takes that character back, in the order it was done,
+   * like anywhere else.
+   */
+  undoOnSurface(editor: monaco.editor.IStandaloneCodeEditor): void {
+    const model = editor.getModel();
+    if (model && this.renameIsNextUndo(model)) {
+      void this.undoRename();
+      return;
+    }
+
+    editor.trigger("xlide", "undo", null);
   }
 
   requestModuleRename(module: string, project: string | null, newName: string): Promise<HostRenameAnswer> {
     return this.pendingRenames.ask(
       () => ({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." }),
       30000,
-      (id) => this.transport.post({ type: "renameModule", id, module, newName, ...(project ? { project } : {}) }));
+      (id) => this.transport.post({ type: "renameModule", id, module, newName, ...(project ? { project } : {}) }))
+      .then((answer) => this.renameLanded(answer, project ?? this.activeProject()));
   }
 
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
+    const project = this.activeProject();
     return this.pendingRenames.ask(
       () => ({ modules: [], replaced: 0, refused: "The rename timed out, so nothing changed." }),
       30000,
-      (id) => this.transport.post({ type: "rename", id, offset, newName }));
+      (id) => this.transport.post({ type: "rename", id, offset, newName }))
+      .then((answer) => this.renameLanded(answer, project));
   }
 
   /**
@@ -1512,8 +1626,14 @@ export class EditorBridge {
     editor.focus();
 
     // Undo and redo are not actions. They are built into the editor rather than registered like
-    // the rest, so looking them up finds nothing and they have to be triggered by name.
-    if (command.id === "undo" || command.id === "redo") {
+    // the rest, so looking them up finds nothing and they have to be triggered by name. Undo goes
+    // through the surface's own decision so the button agrees with Ctrl+Z about what it undoes.
+    if (command.id === "undo") {
+      this.undoOnSurface(editor);
+      return;
+    }
+
+    if (command.id === "redo") {
       editor.trigger("xlide", command.id, null);
       return;
     }
@@ -2023,6 +2143,16 @@ export class EditorBridge {
       // Clamped by Monaco to the new text, so a position past the end lands at the end rather
       // than being rejected.
       showing.setSelections(selections);
+    }
+
+    // WHERE THE RENAME LEFT THIS MODULE. A rename is applied by the host and arrives here as
+    // ordinary adopted text, so this is the moment its edit is on the module's undo stack and
+    // the version id can be taken. Anything typed afterwards moves the id away from this value,
+    // which is how Ctrl+Z knows to take that back first.
+    const renamed = this.renameUndoable;
+    const renamedId = renamed ? this.documents.idOf(model) : null;
+    if (renamed && renamedId && renamed.modules.has(renamedId.module.toLowerCase())) {
+      renamed.settled.set(renamedId.module.toLowerCase(), model.getAlternativeVersionId());
     }
 
     // Set again, because replacing the text collapsed them all onto its end. Without this a
