@@ -23,3 +23,51 @@ export function endLiveDrag(settle: () => void): void {
     document.body.classList.remove("live-resize");
     settle();
 }
+
+/**
+ * A splitter's whole pointer lifecycle: capture on the press, apply the delta on each move,
+ * and let go on release OR cancel - releasing the capture and taking all three listeners off
+ * again. The bookkeeping is the point. Three splitters spelled it out separately, and every
+ * one of them had to remember the same three removeEventListener calls; a drag that forgets
+ * one keeps handling moves after the pointer is gone.
+ *
+ * What actually differs between splitters is which axis they read and whether they persist,
+ * so those are the arguments: `positionOf` answers the coordinate that matters for this
+ * splitter, and `persist` is omitted by the one whose size is not remembered.
+ */
+export function installSplitterDrag(splitter: HTMLElement, drag: {
+    positionOf: (event: PointerEvent) => number;
+    apply: (delta: number) => void;
+    settle: () => void;
+    persist?: () => void;
+}): void {
+    splitter.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) {
+            return;
+        }
+
+        event.preventDefault();
+        splitter.setPointerCapture(event.pointerId);
+        beginLiveDrag();
+        let last = drag.positionOf(event);
+
+        const move = (moved: PointerEvent): void => {
+            const position = drag.positionOf(moved);
+            drag.apply(position - last);
+            last = position;
+        };
+
+        const end = (ended: PointerEvent): void => {
+            splitter.releasePointerCapture(ended.pointerId);
+            splitter.removeEventListener("pointermove", move);
+            splitter.removeEventListener("pointerup", end);
+            splitter.removeEventListener("pointercancel", end);
+            endLiveDrag(drag.settle);
+            drag.persist?.();
+        };
+
+        splitter.addEventListener("pointermove", move);
+        splitter.addEventListener("pointerup", end);
+        splitter.addEventListener("pointercancel", end);
+    });
+}

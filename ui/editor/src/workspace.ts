@@ -29,7 +29,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { docKeyOf, type DocumentId, type DocumentStore } from "./documents.js";
 import { groupHolding, prune, resizeAt, splitBeside, type TreeGroup, type TreeNode, type TreeSplit } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
-import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
+import { installSplitterDrag } from "./livedrag.js";
 
 export interface WorkspaceHandlers {
   /** Creates and wires a Monaco editor for a new group. The workspace owns its layout only. */
@@ -982,32 +982,12 @@ export class Workspace {
       });
     };
 
-    splitter.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      splitter.setPointerCapture(event.pointerId);
-      beginLiveDrag();
-
-      let last = node.direction === "row" ? event.clientX : event.clientY;
-      const move = (moved: PointerEvent): void => {
-        const position = node.direction === "row" ? moved.clientX : moved.clientY;
-        apply(position - last);
-        last = position;
-      };
-      const end = (ended: PointerEvent): void => {
-        splitter.releasePointerCapture(ended.pointerId);
-        splitter.removeEventListener("pointermove", move);
-        splitter.removeEventListener("pointerup", end);
-        splitter.removeEventListener("pointercancel", end);
-        endLiveDrag(() => this.handlers.layoutChanged());
-      };
-
-      splitter.addEventListener("pointermove", move);
-      splitter.addEventListener("pointerup", end);
-      splitter.addEventListener("pointercancel", end);
+    // No persist: a group splitter's size is not remembered across sessions, which is the one
+    // way this drag differs from the dock's.
+    installSplitterDrag(splitter, {
+      positionOf: (event) => (node.direction === "row" ? event.clientX : event.clientY),
+      apply,
+      settle: () => this.handlers.layoutChanged(),
     });
 
     splitter.addEventListener("keydown", (event) => {

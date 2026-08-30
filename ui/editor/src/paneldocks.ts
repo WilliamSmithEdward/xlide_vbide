@@ -27,7 +27,7 @@ import {
   type TreeSplit,
 } from "./docktree.js";
 import { ALL_ZONES, DragCompass, EDGE_ZONES, STRIP_DRAG_REACH, zoneRect, type DropZone } from "./dragcompass.js";
-import { beginLiveDrag, endLiveDrag } from "./livedrag.js";
+import { installSplitterDrag } from "./livedrag.js";
 
 export type DockSide = "left" | "right" | "top" | "bottom";
 
@@ -821,33 +821,11 @@ export class PanelDocks {
       this.dockElements[side].style.setProperty("--dock-size", `${this.sizes[side]}px`);
     };
 
-    splitter.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      splitter.setPointerCapture(event.pointerId);
-      beginLiveDrag();
-      let last = horizontal ? event.clientY : event.clientX;
-
-      const move = (moved: PointerEvent): void => {
-        const position = horizontal ? moved.clientY : moved.clientX;
-        apply(position - last);
-        last = position;
-      };
-      const end = (ended: PointerEvent): void => {
-        splitter.releasePointerCapture(ended.pointerId);
-        splitter.removeEventListener("pointermove", move);
-        splitter.removeEventListener("pointerup", end);
-        splitter.removeEventListener("pointercancel", end);
-        endLiveDrag(() => this.handlers.layoutChanged());
-        this.persist();
-      };
-
-      splitter.addEventListener("pointermove", move);
-      splitter.addEventListener("pointerup", end);
-      splitter.addEventListener("pointercancel", end);
+    installSplitterDrag(splitter, {
+      positionOf: (event) => (horizontal ? event.clientY : event.clientX),
+      apply,
+      settle: () => this.handlers.layoutChanged(),
+      persist: () => this.persist(),
     });
 
     splitter.addEventListener("keydown", (event) => {
@@ -888,33 +866,11 @@ export class PanelDocks {
       });
     };
 
-    splitter.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-
-      event.preventDefault();
-      splitter.setPointerCapture(event.pointerId);
-      beginLiveDrag();
-      let last = node.direction === "row" ? event.clientX : event.clientY;
-
-      const move = (moved: PointerEvent): void => {
-        const position = node.direction === "row" ? moved.clientX : moved.clientY;
-        apply(position - last);
-        last = position;
-      };
-      const end = (ended: PointerEvent): void => {
-        splitter.releasePointerCapture(ended.pointerId);
-        splitter.removeEventListener("pointermove", move);
-        splitter.removeEventListener("pointerup", end);
-        splitter.removeEventListener("pointercancel", end);
-        endLiveDrag(() => this.handlers.layoutChanged());
-        this.persist();
-      };
-
-      splitter.addEventListener("pointermove", move);
-      splitter.addEventListener("pointerup", end);
-      splitter.addEventListener("pointercancel", end);
+    installSplitterDrag(splitter, {
+      positionOf: (event) => (node.direction === "row" ? event.clientX : event.clientY),
+      apply,
+      settle: () => this.handlers.layoutChanged(),
+      persist: () => this.persist(),
     });
 
     splitter.addEventListener("keydown", (event) => {

@@ -100,6 +100,34 @@ const PAGE_CLIENT_INSET = 3;
  * it a press is a selection and nothing moves, which is what keeps a click a click. */
 const DRAG_THRESHOLD = 3;
 
+/**
+ * The synthetic pointer the designer's instruments send at the canvas.
+ *
+ * Every field here is load-bearing: the press must BUBBLE to reach the handler, `pointerId` and
+ * `isPrimary` are what a captured pointer is matched by, and `buttons` has to drop to zero on
+ * the release or the drop reads as another move. Three instruments spelled all of that out
+ * separately - a toolbox drop, a marquee and a drag - which is three places for one of those
+ * fields to go quietly wrong.
+ *
+ * `alt` is held for a whole gesture, the way a hand on the key is: the move and the drop both
+ * read it, so the preview and the commit agree about the snapping override.
+ */
+function sendPointer(
+  target: EventTarget, type: string, x: number, y: number, alt = false,
+): void {
+  target.dispatchEvent(new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    pointerId: 1,
+    isPrimary: true,
+    button: 0,
+    buttons: type === "pointerup" ? 0 : 1,
+    clientX: x,
+    clientY: y,
+    altKey: alt,
+  }));
+}
+
 /** How long the lint waits after a KEYSTROKE: long enough that a word is not asked about
  * mid-typing, and the canvas's draft follows the same beat. A GESTURE does not wait it out -
  * see `lintNow` - because a drop or a delete is finished the moment it happens. */
@@ -4300,18 +4328,7 @@ export class DesignerView {
     const from = button.getBoundingClientRect();
     const face = client.getBoundingClientRect();
     const to = { x: face.left + this.toPixels(left), y: face.top + this.toPixels(top) };
-    const send = (target: EventTarget, type: string, x: number, y: number): void => {
-      target.dispatchEvent(new PointerEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 1,
-        isPrimary: true,
-        button: 0,
-        buttons: type === "pointerup" ? 0 : 1,
-        clientX: x,
-        clientY: y,
-      }));
-    };
+    const send = sendPointer;
 
     // The press goes to the button; the move and the drop go to the WINDOW, which is where the
     // gesture listens once it has left the palette - the same place a real pointer's events go.
@@ -4373,18 +4390,7 @@ export class DesignerView {
     const room = client.getBoundingClientRect();
     const from = { x: Math.round(room.left + this.toPixels(left)), y: Math.round(room.top + this.toPixels(top)) };
     const to = { x: Math.round(room.left + this.toPixels(right)), y: Math.round(room.top + this.toPixels(bottom)) };
-    const send = (target: EventTarget, type: string, x: number, y: number): void => {
-      target.dispatchEvent(new PointerEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 1,
-        isPrimary: true,
-        button: 0,
-        buttons: type === "pointerup" ? 0 : 1,
-        clientX: x,
-        clientY: y,
-      }));
-    };
+    const send = sendPointer;
 
     send(client, "pointerdown", from.x, from.y);
     send(this.canvasScroll, "pointermove", from.x + DRAG_THRESHOLD + 1, from.y + DRAG_THRESHOLD + 1);
@@ -4476,21 +4482,8 @@ export class DesignerView {
   private sendGesture(
     target: EventTarget, from: { x: number; y: number }, dx: number, dy: number, alt = false,
   ): void {
-    const send = (to: EventTarget, type: string, x: number, y: number): void => {
-      to.dispatchEvent(new PointerEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 1,
-        isPrimary: true,
-        button: 0,
-        buttons: type === "pointerup" ? 0 : 1,
-        clientX: x,
-        clientY: y,
-        // Held for the whole gesture, which is what a hand on Alt does; the move and the
-        // drop both read it, so the preview and the commit agree about the override.
-        altKey: alt,
-      }));
-    };
+    const send = (to: EventTarget, type: string, x: number, y: number): void =>
+      sendPointer(to, type, x, y, alt);
 
     send(target, "pointerdown", from.x, from.y);
     send(this.canvasScroll, "pointermove", from.x + DRAG_THRESHOLD + 1, from.y);
