@@ -217,7 +217,8 @@ internal sealed partial class AddInSession
                 // it lands as says "developer", exactly as their typing does.
                 "restore" => ChangeRestoreReply(wanted, at, module, null),
                 "reject" => ChangeRestoreReply(
-                    wanted, ChangeLogFor(ChangeLogProject(wanted))?.AcceptedAt ?? 0, module, null),
+                    wanted, ChangeLogFor(ChangeLogProject(wanted))?.AcceptedAt ?? 0, module, null,
+                    acceptAfter: true),
                 _ => ChangesReply("listed", wanted, 200),
             };
         }
@@ -514,7 +515,8 @@ internal sealed partial class AddInSession
      * cannot land on a name a rename-back is about to reclaim; writes last, to modules that by
      * then all exist under their boundary names.
      */
-    private string ChangeRestoreReply(string? projectId, int boundary, string? onlyModule, string? by)
+    private string ChangeRestoreReply(
+        string? projectId, int boundary, string? onlyModule, string? by, bool acceptAfter = false)
     {
         var wanted = ChangeLogProject(projectId);
         var log = ChangeLogFor(wanted);
@@ -571,6 +573,17 @@ internal sealed partial class AddInSession
                 ? $"restore {onlyModule} to round {boundary}"
                 : $"restore to round {boundary}",
             DateTimeOffset.UtcNow);
+
+        // A REJECT lands reviewed. The developer has just returned everything to the accepted
+        // state - the reject round records the going-back, and leaving it above the mark would
+        // show unreviewed work that is, by construction, exactly what was already accepted. So
+        // the mark comes forward over it (the owner, 2026-08-30: "accept/reject should reset
+        // accepted mark - bring it to current"). A plain restore does not: aiming at an
+        // arbitrary round says nothing about having reviewed the result.
+        if (acceptAfter)
+        {
+            log.Accept(DateTimeOffset.UtcNow);
+        }
 
         // A name that lived twice - added, removed, added again - is two identities in the plan,
         // and both can answer "already absent". True twice, worth reading once.

@@ -843,6 +843,15 @@ await log({ action: "reject", by: "claude" });
 check("reject clears what the summary was counting", (await log()).sinceAccept, null);
 check("and the texts are back at the mark", (await held("Ledger")) === summaryBase, true);
 
+// AND THE MARK COMES FORWARD over the reject round (the owner, 2026-08-30: "accept/reject
+// should reset accepted mark - bring it to current"): the developer just returned to the
+// accepted state, so the log reads reviewed to the top rather than showing the going-back as
+// unreviewed work. A plain restore leaves the mark alone - checked by the restore sections
+// above never asserting otherwise, and here by the mark equalling the NEWEST closed round.
+const afterReject = await log();
+check("reject brings the accepted mark to current",
+  afterReject.acceptedAt, afterReject.rounds.filter((one) => !one.open)[0]?.round ?? 0);
+
 // ACCEPT clears it too, through the PANE'S OWN BUTTON - the gesture in the owner's screenshot
 // (2026-08-30, "clicked accept, expected hybrid button to show no changes after"). The route
 // answer and the button the developer is looking at must agree.

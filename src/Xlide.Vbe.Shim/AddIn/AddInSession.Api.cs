@@ -4288,7 +4288,9 @@ internal sealed partial class AddInSession
                         var log = ChangeLogFor(ChangeLogProject(changesProject));
                         return log is null
                             ? HostError("no project is shown, and none was named")
-                            : ChangeRestoreReply(changesProject, log.AcceptedAt, changesModule, changesBy);
+                            : ChangeRestoreReply(
+                                changesProject, log.AcceptedAt, changesModule, changesBy,
+                                acceptAfter: true);
                     }
 
                     case "snapshot":
