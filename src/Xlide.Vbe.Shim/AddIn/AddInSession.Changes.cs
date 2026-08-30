@@ -587,7 +587,8 @@ internal sealed partial class AddInSession
         // unseen. The mark stays, the hybrid button keeps counting the remainder, and the
         // outcome card names the module and the way out - which is the button being right, not
         // stale (the owner's screenshot after a reject that skipped two).
-        if (acceptAfter && outcomes.All(one => one.Did is not "skipped" and not "failed"))
+        var landedClean = outcomes.All(one => one.Did is not "skipped" and not "failed");
+        if (acceptAfter && landedClean)
         {
             log.Accept(DateTimeOffset.UtcNow);
         }
@@ -602,6 +603,16 @@ internal sealed partial class AddInSession
         var summary = $"{restored} restored, {skipped} skipped, "
             + (failed > 0 ? $"{failed} failed, " : string.Empty)
             + $"{told.Count - restored - skipped - failed} already right, to round {boundary}";
+
+        // A reject that could not finish says WHY the counts will keep counting, in its own
+        // summary line - the one sentence a glance reads. Without it, a held-back mark and a
+        // still-lit button read as the pane failing to update (the owner's screenshot, twice),
+        // when they are the pane declining to call unreviewed work reviewed.
+        if (acceptAfter && !landedClean)
+        {
+            summary += ". The accept mark stays where it was: the modules listed below were not "
+                + "returned to it - settle them, then reject again";
+        }
 
         Log.Info($"changes: {summary}");
         _editorSurface?.ShowChangesStamp(++_changeStamp);
