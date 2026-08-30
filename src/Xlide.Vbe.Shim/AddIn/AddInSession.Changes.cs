@@ -574,13 +574,20 @@ internal sealed partial class AddInSession
                 : $"restore to round {boundary}",
             DateTimeOffset.UtcNow);
 
-        // A REJECT lands reviewed. The developer has just returned everything to the accepted
-        // state - the reject round records the going-back, and leaving it above the mark would
-        // show unreviewed work that is, by construction, exactly what was already accepted. So
-        // the mark comes forward over it (the owner, 2026-08-30: "accept/reject should reset
-        // accepted mark - bring it to current"). A plain restore does not: aiming at an
-        // arbitrary round says nothing about having reviewed the result.
-        if (acceptAfter)
+        // A CLEAN reject lands reviewed. The developer has just returned everything to the
+        // accepted state - the reject round records the going-back, and leaving it above the
+        // mark would show unreviewed work that is, by construction, exactly what was already
+        // accepted. So the mark comes forward over it (the owner, 2026-08-30: "accept/reject
+        // should reset accepted mark - bring it to current"). A plain restore does not: aiming
+        // at an arbitrary round says nothing about having reviewed the result.
+        //
+        // ONLY when nothing was skipped or failed. A reject that could not touch a module - it
+        // held unwritten edits, its text had aged out - has NOT returned that module to the
+        // accepted state, and stamping the mark over the difference would review work sight
+        // unseen. The mark stays, the hybrid button keeps counting the remainder, and the
+        // outcome card names the module and the way out - which is the button being right, not
+        // stale (the owner's screenshot after a reject that skipped two).
+        if (acceptAfter && outcomes.All(one => one.Did is not "skipped" and not "failed"))
         {
             log.Accept(DateTimeOffset.UtcNow);
         }
