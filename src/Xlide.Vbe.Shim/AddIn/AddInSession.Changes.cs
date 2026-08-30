@@ -520,7 +520,7 @@ internal sealed partial class AddInSession
         var log = ChangeLogFor(wanted);
         if (log is null)
         {
-            return RestoreRefused(boundary, "no project is shown, and none was named");
+            return RestoreRefused(boundary, "No project is shown, and none was named.");
         }
 
         // The same refusal every write path opens with, asked ONCE here so a stopped project
@@ -528,7 +528,7 @@ internal sealed partial class AddInSession
         if (ProjectModeNow() != DesignMode)
         {
             return RestoreRefused(boundary,
-                "the project is stopped in the debugger. Restoring now would reset it and lose "
+                "The project is stopped in the debugger. Restoring now would reset it and lose "
                 + "the run, so nothing was touched. Press Reset in the editor, or POST "
                 + "command?name=reset, and restore again.");
         }
@@ -540,7 +540,7 @@ internal sealed partial class AddInSession
         if (boundary < 0 || boundary > log.NewestClosedRound)
         {
             return RestoreRefused(boundary,
-                $"the log holds no round {boundary}; it runs 1 to {log.NewestClosedRound}");
+                $"The log holds no round {boundary}; it runs 1 to {log.NewestClosedRound}.");
         }
 
         var targets = log.RestoreTargets(boundary);
@@ -552,8 +552,8 @@ internal sealed partial class AddInSession
             if (targets.Count == 0)
             {
                 return RestoreRefused(boundary,
-                    $"nothing about {onlyModule} has changed since round {boundary}, so there is "
-                    + "nothing to restore");
+                    $"Nothing about {onlyModule} has changed since round {boundary}, so there is "
+                    + "nothing to restore.");
             }
         }
 
@@ -607,14 +607,14 @@ internal sealed partial class AddInSession
             using var standing = FindComponent(target.NameNow, projectId, out _);
             if (standing is null)
             {
-                outcomes.Add(new ChangeRestoreOutcome(target.NameNow, "unchanged", "already absent"));
+                outcomes.Add(new ChangeRestoreOutcome(target.NameNow, "unchanged", "Already absent."));
                 continue;
             }
 
             if (_editorSurface?.HasUnwritten(target.NameNow, display) == true)
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.NameNow, "skipped",
-                    "it holds edits you have not written yet - save or discard them, then restore again"));
+                    "It holds edits you have not written yet. Save or discard them, then restore again."));
                 continue;
             }
 
@@ -662,7 +662,7 @@ internal sealed partial class AddInSession
 
                 var moved = RestoreRename(from, to, projectId);
                 outcomes.Add(moved is null
-                    ? new ChangeRestoreOutcome(to, "renamed", $"was {from}")
+                    ? new ChangeRestoreOutcome(to, "renamed", $"Was {from}.")
                     : new ChangeRestoreOutcome(to, "failed", moved));
                 renames.RemoveAt(at);
                 progressed = true;
@@ -699,7 +699,7 @@ internal sealed partial class AddInSession
                 // it, and a re-added form holding the right code over an empty canvas is a trap,
                 // not a restore.
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
-                    "it is a form, and a form's design is not recorded - only its code would come back"));
+                    "It is a form, and a form's design is not recorded; only its code would come back."));
                 continue;
             }
 
@@ -712,7 +712,7 @@ internal sealed partial class AddInSession
             if (addKind == 0)
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
-                    $"a {target.ComponentKind} cannot be re-added"));
+                    $"A {target.ComponentKind} cannot be re-added."));
                 continue;
             }
 
@@ -727,7 +727,7 @@ internal sealed partial class AddInSession
             if (body is null)
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "added",
-                    target.TextKey is null ? null : "its text is no longer held, so it came back empty"));
+                    target.TextKey is null ? null : "Its text is no longer held, so it came back empty."));
                 continue;
             }
 
@@ -751,7 +751,7 @@ internal sealed partial class AddInSession
             if (body is null)
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
-                    "the text is no longer held - the log has aged it out"));
+                    "The text is no longer held; the log has aged it out."));
                 continue;
             }
 
@@ -764,7 +764,7 @@ internal sealed partial class AddInSession
             if (_editorSurface?.HasUnwritten(target.Module, display) == true)
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "skipped",
-                    "it holds edits you have not written yet - save or discard them, then restore again"));
+                    "It holds edits you have not written yet. Save or discard them, then restore again."));
                 continue;
             }
 
@@ -776,7 +776,7 @@ internal sealed partial class AddInSession
             if (string.Equals(ProjectReader.ReadSource(standing), body, StringComparison.Ordinal))
             {
                 outcomes.Add(new ChangeRestoreOutcome(target.Module, "unchanged",
-                    "already holds its text from this boundary"));
+                    "Already holds its text from this boundary."));
                 continue;
             }
 
@@ -795,7 +795,7 @@ internal sealed partial class AddInSession
             using var component = FindComponent(from, projectId, out _);
             if (component is null)
             {
-                return $"nothing named {from} to rename back";
+                return $"Nothing named {from} to rename back.";
             }
 
             component.SetString("Name", to);

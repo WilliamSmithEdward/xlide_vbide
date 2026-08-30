@@ -4278,8 +4278,8 @@ internal sealed partial class AddInSession
                         return ChangeRestoreReply(changesProject, changesAt, changesModule, changesBy);
 
                     case "restore":
-                        return HostError("restore needs round=N - the boundary to restore to, "
-                            + "0 meaning before everything the log saw");
+                        return HostError("Restore needs round=N, the boundary to restore to; "
+                            + "0 means before everything the log saw.");
 
                     // Reject everything since the accept mark: restore to the newest round marked
                     // reviewed, or to before the log began when none has been.
