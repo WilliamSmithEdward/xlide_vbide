@@ -20,10 +20,14 @@
  * lines of procedures go in without complaint. So this costs an Excel restart, every time, by
  * construction.
  *
- * That is why the gate runs it LAST in its fixture group and nowhere else: the group's session
- * is discarded by a fresh relaunch immediately after, which is the restart this suite demands.
- * For one run it sat mid-group instead, and every suite after it met a session that refused
- * every add (2026-08-12). Anywhere else it runs:
+ * That is why the gate gives it a FRESH SESSION OF ITS OWN and discards it immediately after.
+ * Last-in-group was the first arrangement, and it protected only the suites after: for one run
+ * it sat mid-group and every suite after met a session that refused every add (2026-08-12),
+ * and even run last, the eighteen suites BEFORE it wore the same identifier table this probe
+ * punches - on 2026-08-31 that composition sent VBE7 into a stack-overflow recursion in
+ * oleaut32 (0xc00000fd, two sessions in one gate) where a fresh session answers "Out of
+ * memory" and rolls back cleanly (#19). The fresh launch is this suite's PRECONDITION.
+ * Anywhere else it runs:
  *
  *   node tools\harness\write-rollback.mjs
  *

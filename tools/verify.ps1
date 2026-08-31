@@ -656,8 +656,11 @@ if ($Live) {
         # run's answers, and a helper that dropped the field its own timing bound was built from.
         # Nine checks, four runs clean on the rename fixture and three on the one holding a module
         # at VBA's line ceiling (2026-08-08).
-        # Grouped by the fixture each needs, so the gate opens two rather than failing five.
-        $plan = [ordered] @{
+        # Grouped by the fixture each needs, so the gate opens a handful rather than failing
+        # nineteen. AN ARRAY OF GROUPS, not a map keyed by fixture: two groups may open the
+        # SAME fixture on purpose - write-rollback's own launch below is the case - and a key
+        # cannot say that twice.
+        $plan = @(
             # module-sync writes into a temporary folder of its own and takes back every module it
             # adds. Its last section is the one worth having: it applies the same import through
             # the DIALOG and through the route and compares the result byte for byte, which is the
@@ -674,27 +677,23 @@ if ($Live) {
             # run, break, reset, stepping and breakpoints, and step-into-features covers the one
             # direction nothing else does - the HOST moving on its own and the surface following,
             # which is what a developer meets when Step Into crosses into a module the page was
-            # not showing. write-rollback is here for its own reason: it is the only thing that
+            # not showing. write-rollback used to run LAST in this group - the only thing that
             # drives the `mark` route, and a refused write that half-lands is the defect that
-            # costs a developer their module's previous text.
-            # write-rollback runs LAST IN THIS GROUP, and that is a hard constraint, not an
-            # ordering preference. The only refusal it can provoke on demand pushes the editor
-            # past its identifier budget, after which the WHOLE VBE refuses to add a component
-            # ("Insufficient memory") until Excel restarts - the suite's own header says so, and
-            # for one run it sat wired mid-group anyway, where it wedged every suite after it;
-            # properties-pane died at its first add and printed the vacuous verdict the guard
-            # below now refuses (2026-08-12). Last here costs nothing: the next thing that
-            # happens is the RenameFixture group's fresh relaunch, which is the restart the
-            # suite demands.
+            # costs a developer their module's previous text. Last-in-group protected the
+            # suites after it from the session it spends, and could not protect the probe
+            # itself from the eighteen suites before it: their adds and removes wear the same
+            # identifier table the refused-body write is about to punch, and on 2026-08-31
+            # that composition took VBE7 down a recursion instead of its clean refusal - a
+            # 0xc00000fd stack overflow in oleaut32, two sessions in one gate, where the same
+            # write against a fresh session answers "Out of memory" and rolls back (#19). It
+            # has a one-suite group of its own directly after this one.
             # window-routes drives the three 2026-08-12 routes (palette hide, frame close and
             # show, pane closeNative) and their follow contracts - the palette going down with
             # the frame and staying away on its return, the hidden pane's tab leaving the
-            # strip. It adds a component, so it runs before write-rollback like everything
-            # that needs the session able to add.
+            # strip.
             # designer-features builds a whole UserForm through the designer routes, verifies
             # the read against the plan that built it, round-trips the mutations, and removes
-            # the component - so it adds components and runs before write-rollback like
-            # everything that needs the session able to add.
+            # the component.
             # write-fidelity is here because it needs nothing of the fixture but a project to
             # add a module to. It pins one property the rest of this list cannot see: that a
             # whole-module write puts back exactly the text it was given. The editor appends a
@@ -702,12 +701,13 @@ if ($Live) {
             # when it is filled with AddFromString, which cost the owner a module that would
             # not compile, pasted from a file that was fine (2026-08-21).
             # inline-comments-live and analysis-rules-live both ADD components (the carrier
-            # modules their checks write on), so they run before write-rollback like everything
-            # that needs the session able to add. For one day they sat wired after it, where a
-            # full -Live pass fed them a session write-rollback had already spent: both died on
-            # "no xlide instance is answering" and the gate read it as their failure (2026-08-28,
-            # found the first time the full pass ran after they landed).
-            'DebugFixture.xlsm'  = @('import-guard.mjs', 'immediate-watch.mjs',
+            # modules their checks write on), so nothing in this group may spend the session's
+            # identifier budget. For one day they sat wired after write-rollback, where a full
+            # -Live pass fed them a session it had already spent: both died on "no xlide
+            # instance is answering" and the gate read it as their failure (2026-08-28, found
+            # the first time the full pass ran after they landed).
+            @{ Fixture = 'DebugFixture.xlsm'
+               Suites  = @('import-guard.mjs', 'immediate-watch.mjs',
                                      'analysis-freshness.mjs', 'menu-bar.mjs',
                                      'write-fidelity.mjs',
                                      'module-sync.mjs xlide', 'module-sync.mjs builtIn',
@@ -725,8 +725,15 @@ if ($Live) {
                                      # connection every suite after it drives over, and that half
                                      # is Test-ApiSwitch.ps1's, by hand. Written with care and
                                      # run by nothing until 2026-08-29.
-                                     'agent-card.mjs',
-                                     'write-rollback.mjs')
+                                     'agent-card.mjs') }
+            # write-rollback ALONE, on a launch of its own: the fresh session is the suite's
+            # PRECONDITION now, not a courtesy. The refused-body write it provokes meets a clean
+            # identifier table - the state it is proven green against in isolation - instead of
+            # one eighteen suites have worn, which is where VBE7 recursed to a stack overflow
+            # rather than refusing (2026-08-31, #19). One extra launch, about fifteen seconds.
+            # The relaunch AFTER it stays what it always was: the restart the suite's own
+            # header demands, because the session it leaves cannot add a component.
+            @{ Fixture = 'DebugFixture.xlsm'; Suites = @('write-rollback.mjs') }
             # colouring runs here because it declares its own module and needs nothing of the
             # fixture. It pins the one visible feature that had no check at all: a tokenizer
             # rebuilt per project, whose two defects on 2026-08-09 were both found by eye.
@@ -754,10 +761,11 @@ if ($Live) {
             # ACTIVE one for its modules - routinely different with two open, so a plan titled one
             # workbook listed the other's modules and applying it would have written the folder
             # over the wrong code (2026-08-21).
-            'RenameFixture.xlsm + TwinFixture.xlsm' = @(
+            @{ Fixture = 'RenameFixture.xlsm + TwinFixture.xlsm'
+               Suites  = @(
                                      'format-positions.mjs', 'three-copies.mjs', 'colouring.mjs',
                                      'settings-bite.mjs', 'rename-features.mjs', 'sync-scope.mjs',
-                                     'search-features.mjs', 'rename-boundary.mjs')
+                                     'search-features.mjs', 'rename-boundary.mjs') }
             # TWO FILES OF TESTS, which is the only state the runner's file dimension exists in.
             # The runner reads every open project, XlideAssert lives per file, and both fixtures
             # hold a module called InvoiceTests on purpose - so a result filed by module name
@@ -779,17 +787,18 @@ if ($Live) {
             # worked in, nothing republished it when the developer moved, and the session's answer
             # counted only files holding tests, which with none open is vacuously satisfied
             # (2026-08-21).
-            'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm' = @('multi-file.mjs', 'tests-support.mjs')
+            @{ Fixture = 'TestFixture.xlsm + TestTwinFixture.xlsm + DebugFixture.xlsm'
+               Suites  = @('multi-file.mjs', 'tests-support.mjs') }
             # THE CHANGE LOG GETS ITS OWN WORKBOOK (tools\New-ChangeFixture.ps1), because its
             # suite edits modules and then asserts on what the log says was edited. Any fixture
             # another suite reads would be either useless for that or a landmine for the other
             # suite - DebugFixture alone is read by nine. Its Untouched module is edited by
             # nobody, which is how "the log did not over-report" is a real question.
-            'ChangeFixture.xlsm' = @('change-log.mjs')
-        }
+            @{ Fixture = 'ChangeFixture.xlsm'; Suites = @('change-log.mjs') }
+        )
 
-        foreach ($fixture in $plan.Keys) {
-          $ran += Invoke-SuiteGroup $fixture $plan[$fixture]
+        foreach ($group in $plan) {
+          $ran += Invoke-SuiteGroup $group.Fixture $group.Suites
         }
 
         $ran -join '; '

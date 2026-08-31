@@ -159,32 +159,49 @@ if ($Fresh) {
         if (Test-Path $_) { Get-ChildItem $_ -File | ForEach-Object { $_.FullName } }
     }
 
-    $strangers = @()
-    foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
-        $held = $null
-        try {
-            $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
-            if ($null -ne $itsWindow) {
-                $held = @($itsWindow.Application.Workbooks | ForEach-Object { $_.FullName })
+    # A process whose workbooks cannot be read gets a MOMENT before it counts as a stranger.
+    # An Excel mid-teardown answers nothing for a beat and is gone the next - the state a
+    # previous fixture group's own sweep routinely leaves at a step boundary - and refusing on
+    # the corpse cost three whole gate runs in one morning (2026-08-31). So the census retries
+    # while every stranger is merely unreadable, up to a short deadline; a workbook that is
+    # plainly somebody's refuses at once, and a process that STAYS unreadable is a stranger
+    # after all: unreadable is still not empty, and guessing wrong here still costs somebody
+    # their morning.
+    $undertaker = (Get-Date).AddSeconds(12)
+    while ($true) {
+        $strangers = @()
+        $merelyUnreadable = 0
+        foreach ($running in @(Get-Process EXCEL -ErrorAction SilentlyContinue)) {
+            $held = $null
+            try {
+                $itsWindow = [XlideHarness.Attach]::WorkbookWindowOf($running.Id)
+                if ($null -ne $itsWindow) {
+                    $held = @($itsWindow.Application.Workbooks | ForEach-Object { $_.FullName })
+                }
+            }
+            catch { $held = $null }
+
+            if ($null -eq $held) {
+                $strangers += "pid $($running.Id) (its workbooks could not be read)"
+                $merelyUnreadable += 1
+                continue
+            }
+
+            foreach ($book in $held) {
+                if ($mine -notcontains $book) { $strangers += "$book (pid $($running.Id))" }
             }
         }
-        catch { $held = $null }
 
-        if ($null -eq $held) {
-            $strangers += "pid $($running.Id) (its workbooks could not be read)"
-            continue
+        if ($strangers.Count -eq 0 -or $Force) { break }
+
+        if ($strangers.Count -ne $merelyUnreadable -or (Get-Date) -ge $undertaker) {
+            throw ("-Fresh closes every Excel, and these are not this harness's to close:" +
+                [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
+                [Environment]::NewLine +
+                'Close them yourself, or pass -Force if the machine is yours to sweep.')
         }
 
-        foreach ($book in $held) {
-            if ($mine -notcontains $book) { $strangers += "$book (pid $($running.Id))" }
-        }
-    }
-
-    if ($strangers.Count -gt 0 -and -not $Force) {
-        throw ("-Fresh closes every Excel, and these are not this harness's to close:" +
-            [Environment]::NewLine + '  ' + ($strangers -join ([Environment]::NewLine + '  ')) +
-            [Environment]::NewLine +
-            'Close them yourself, or pass -Force if the machine is yours to sweep.')
+        Start-Sleep -Milliseconds 500
     }
 
     Get-Process EXCEL -ErrorAction SilentlyContinue | Stop-Process -Force
