@@ -2599,6 +2599,9 @@ body.live-resize .minimap {
   border-color: var(--vscode-inputOption-activeBorder, rgba(0, 120, 212, 0.55));
 }
 
+/* Dressed as the product's menus are - same background, same foreground, same dark fallbacks.
+   The first cut fell back LIGHT while the text stayed theme-light, which in the dark theme
+   was pale grey words on a white box (the owner's screenshot, 2026-08-31). */
 .tag-select-popup {
   position: absolute;
   top: calc(100% + 4px);
@@ -2610,7 +2613,8 @@ body.live-resize .minimap {
   padding: 4px;
   border: 1px solid var(--vscode-editorWidget-border, rgba(128, 128, 128, 0.35));
   border-radius: 4px;
-  background: var(--vscode-editorWidget-background, #f8f8f8);
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #cccccc);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
