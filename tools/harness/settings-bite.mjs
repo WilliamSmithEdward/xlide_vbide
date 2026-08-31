@@ -121,6 +121,28 @@ try {
     "the explorer snapshot was identical with it on and off");
 
   /*
+   * insertOptionExplicit is observed at the only place it acts: the birth of a module. Both
+   * ways, on the LIVE text, because the stored value is not the subject. The restore path's
+   * refusal to seed is pinned from the other side, by change-log.mjs's exact-text restores.
+   */
+  // Read WITHOUT live: the live read serves the page's open documents, and a just-born module
+  // has no tab yet. The default read answers the host's own code module, which is the subject.
+  const seeded = `${name}Seeded`;
+  await api.settings({ insertOptionExplicit: true });
+  await api.component("add", { kind: "module", name: seeded, project: project.projectId });
+  const born = ((await api.readModule(seeded, project.projectId)).text ?? "");
+  check("insertOptionExplicit on: a module xlide creates is born with the line",
+    born.trim() === "Option Explicit", JSON.stringify(born));
+  await api.component("remove", { name: seeded, project: project.projectId });
+
+  await api.settings({ insertOptionExplicit: false });
+  await api.component("add", { kind: "module", name: seeded, project: project.projectId });
+  const unseeded = ((await api.readModule(seeded, project.projectId)).text ?? "");
+  check("insertOptionExplicit off: a module xlide creates is born empty",
+    unseeded.trim() === "", JSON.stringify(unseeded));
+  await api.component("remove", { name: seeded, project: project.projectId });
+
+  /*
    * THERE ARE SIX SETTINGS, not seven. `formatCanonicalKeywords` was removed on 2026-08-09 after
    * this suite could not find a way to observe it.
    *
@@ -165,6 +187,7 @@ try {
 
 } finally {
   await api.settings(restore).catch(() => {});
+  await api.component("remove", { name: `${name}Seeded`, project: project.projectId }).catch(() => {});
   if (made) {
     await scratch.dispose();
   }

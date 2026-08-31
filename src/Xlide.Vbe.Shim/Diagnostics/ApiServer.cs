@@ -1129,6 +1129,8 @@ public sealed record DebugSettingsReply(
     [property: JsonPropertyName("blockLayout")] string BlockLayout,
     [property: JsonPropertyName("continueCommentOnNewline")] bool ContinueCommentOnNewline,
     [property: JsonPropertyName("mirrorCommentSpacing")] bool MirrorCommentSpacing,
+    /// <summary>A module xlide creates starts with Option Explicit.</summary>
+    [property: JsonPropertyName("insertOptionExplicit")] bool InsertOptionExplicit,
     [property: JsonPropertyName("treeFollowsEditor")] bool TreeFollowsEditor,
     [property: JsonPropertyName("formatIndentSize")] int FormatIndentSize,
     /// <summary>Which planner decides an import or export: "xlide" or "builtIn".</summary>

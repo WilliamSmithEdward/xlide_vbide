@@ -1367,6 +1367,7 @@ internal sealed class EditorSurface : IDisposable
                 settings.BlockLayout,
                 settings.ContinueCommentOnNewline,
                 settings.MirrorCommentSpacing,
+                settings.InsertOptionExplicit,
                 settings.TreeFollowsEditor,
                 settings.FormatIndentSize,
                 settings.SyncEngine,
@@ -2216,6 +2217,9 @@ internal sealed class EditorSurface : IDisposable
                     var mirrorSpacing = document.RootElement.TryGetProperty("mirrorCommentSpacing", out var mirrorValue)
                         ? mirrorValue.ValueKind is not JsonValueKind.False
                         : held.MirrorCommentSpacing;
+                    var seedExplicit = document.RootElement.TryGetProperty("insertOptionExplicit", out var seedValue)
+                        ? seedValue.ValueKind is not JsonValueKind.False
+                        : held.InsertOptionExplicit;
                     var treeFollows = document.RootElement.TryGetProperty("treeFollowsEditor", out var treeValue)
                         ? treeValue.ValueKind is not JsonValueKind.False
                         : held.TreeFollowsEditor;
@@ -2247,6 +2251,7 @@ internal sealed class EditorSurface : IDisposable
                         BlockLayout = layout,
                         ContinueCommentOnNewline = continueComment,
                         MirrorCommentSpacing = mirrorSpacing,
+                        InsertOptionExplicit = seedExplicit,
                         TreeFollowsEditor = treeFollows,
                         FormatIndentSize = indentSize,
                         SyncEngine = syncEngine,

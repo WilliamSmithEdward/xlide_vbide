@@ -9960,6 +9960,11 @@ internal sealed partial class AddInSession : IDisposable
             using var components = project?.GetObject("VBComponents");
             using var added = components?.CallObject("Add", kind);
             var name = added?.GetString("Name");
+            if (added is not null)
+            {
+                // Before the change log records the add, so the module is recorded as it was born.
+                SeedOptionExplicit(added);
+            }
 
             Log.Info($"project: inserted {name ?? "?"} (kind {kind})");
 

@@ -558,7 +558,9 @@ internal sealed partial class AddInSession
             return HostError($"kind '{kindText}' is not one of 1/module/standard, 2/class, 3/form");
         }
 
-        var refused = AddComponentCore(kind, componentName, componentProject, componentOwner, out var finalName);
+        var refused = AddComponentCore(
+            kind, componentName, componentProject, componentOwner, out var finalName,
+            seedOptionExplicit: true);
         if (refused is not null)
         {
             return HostError(refused);
@@ -576,10 +578,14 @@ internal sealed partial class AddInSession
     /// check, the MSForms refusal, the change-log recording and the republish - rather than
     /// growing a third way for a module to arrive (the comment at the recording site already
     /// calls two a smell).
+    ///
+    /// `seedOptionExplicit` is true for a NEW module somebody asked for, where the setting's
+    /// promise applies, and false from the restore path: restore recreates what was recorded,
+    /// and a module recorded empty comes back empty.
     /// </summary>
     private string? AddComponentCore(
         int kind, string? componentName, string? componentProject, string? componentOwner,
-        out string finalName)
+        out string finalName, bool seedOptionExplicit = false)
     {
         finalName = string.Empty;
 
@@ -636,6 +642,12 @@ internal sealed partial class AddInSession
         }
 
         finalName = added.GetString("Name") ?? string.Empty;
+        if (seedOptionExplicit)
+        {
+            // Before the change log records the add, so the module is recorded as it was born.
+            SeedOptionExplicit(added);
+        }
+
         Log.Info($"component: added {finalName} (kind {kind})");
 
         // THE SECOND PLACE A MODULE CAN ARRIVE. The menu's insert has its own implementation of
@@ -655,6 +667,48 @@ internal sealed partial class AddInSession
         ComponentsChanged();
 
         return null;
+    }
+
+    /// <summary>
+    /// Writes Option Explicit into a component xlide just created, when
+    /// editor.insertOptionExplicit asks for it and the editor's own Require Variable
+    /// Declaration has not already done so - the two compose: whoever gets there first wins,
+    /// and the line appears once. Called before the change log records the add, so the module
+    /// is recorded as it was born. Both creation paths call this; restore never does.
+    /// </summary>
+    private void SeedOptionExplicit(DispatchObject added)
+    {
+        if (!_settings.InsertOptionExplicit)
+        {
+            return;
+        }
+
+        try
+        {
+            using var code = added.GetObject("CodeModule");
+            if (code is null)
+            {
+                return;
+            }
+
+            // The just-born module's text is the HOST's, not a developer's: empty, or the
+            // option lines the editor's own settings put there (Access adds Option Compare
+            // Database). A loose Contains is safe against that text in a way it would not be
+            // against code somebody wrote.
+            var lines = code.GetInt32("CountOfLines");
+            var held = lines > 0 ? code.CallToString("Lines", 1, lines) : string.Empty;
+            if (held.Contains("Option Explicit", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            code.Invoke("InsertLines", 1, "Option Explicit");
+        }
+        catch (Exception ex)
+        {
+            // A module arriving without its line is a lesser wrong than an add that fails.
+            Log.Warn($"component: Option Explicit could not be inserted ({ex.Message.Trim()})");
+        }
     }
 
     private HostCrossing CrossToHost(EditorSurface host, Action work)
@@ -4813,6 +4867,7 @@ internal sealed partial class AddInSession
                             : settings.BlockLayout,
                         ContinueCommentOnNewline = Flag("continueCommentOnNewline", settings.ContinueCommentOnNewline),
                         MirrorCommentSpacing = Flag("mirrorCommentSpacing", settings.MirrorCommentSpacing),
+                        InsertOptionExplicit = Flag("insertOptionExplicit", settings.InsertOptionExplicit),
                         TreeFollowsEditor = Flag("treeFollowsEditor", settings.TreeFollowsEditor),
                         FormatIndentSize = request.Query.TryGetValue("formatIndentSize", out var indent)
                             && int.TryParse(indent, out var asked) ? asked : settings.FormatIndentSize,
@@ -4834,6 +4889,7 @@ internal sealed partial class AddInSession
                         settings.BlockLayout,
                         settings.ContinueCommentOnNewline,
                         settings.MirrorCommentSpacing,
+                        settings.InsertOptionExplicit,
                         settings.TreeFollowsEditor,
                         settings.FormatIndentSize,
                         settings.SyncEngine,

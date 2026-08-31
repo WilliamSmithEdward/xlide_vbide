@@ -48,6 +48,16 @@ public sealed record ProductSettings
     public bool MirrorCommentSpacing { get; set; } = true;
 
     /// <summary>
+    /// A module xlide creates - the Insert menu, or the api's component add - starts with
+    /// Option Explicit. On by default because the analyzer's own option-explicit-missing rule
+    /// is, so without this the product created modules it immediately flagged. Composes with
+    /// the VBE's own Require Variable Declaration: a module the editor already decorated is
+    /// left alone. Restore never seeds - it recreates what was recorded, and nothing else.
+    /// </summary>
+    [JsonPropertyName("editor.insertOptionExplicit")]
+    public bool InsertOptionExplicit { get; set; } = true;
+
+    /// <summary>
     /// The explorer's tree follows the editor: the module being worked on unfolds its procedures,
     /// and everything folds away when the last tab closes. Off leaves the tree entirely to the
     /// hand that opened it.

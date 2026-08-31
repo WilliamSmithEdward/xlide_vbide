@@ -14,6 +14,8 @@ export interface EditorSettings {
   continueCommentOnNewline: boolean;
   /** A continued comment also mirrors the spaces after the apostrophes. */
   mirrorCommentSpacing: boolean;
+  /** A module xlide creates starts with Option Explicit. Restore never seeds. */
+  insertOptionExplicit: boolean;
   /**
    * The tree follows the editor: the module being worked on unfolds its procedures, and
    * everything folds away when the last tab closes. Off leaves the tree to the hand that opened
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: EditorSettings = {
   blockLayout: "comfy",
   continueCommentOnNewline: true,
   mirrorCommentSpacing: true,
+  insertOptionExplicit: true,
   treeFollowsEditor: true,
   formatIndentSize: 4,
   syncEngine: "xlide",
@@ -69,6 +72,7 @@ export function applySettings(next: IncomingSettings): void {
     blockLayout: next.blockLayout === "compact" ? "compact" : "comfy",
     continueCommentOnNewline: next.continueCommentOnNewline !== false,
     mirrorCommentSpacing: next.mirrorCommentSpacing !== false,
+    insertOptionExplicit: next.insertOptionExplicit !== false,
     treeFollowsEditor: next.treeFollowsEditor !== false,
     formatIndentSize: Math.min(8, Math.max(1, Math.round(next.formatIndentSize ?? 4) || 4)),
     syncEngine: next.syncEngine === "builtIn" ? "builtIn" : "xlide",

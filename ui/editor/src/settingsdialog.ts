@@ -35,6 +35,15 @@ const OPTIONS = [
       "A continued comment also repeats the spaces after the apostrophe, so the text lines up.",
   },
   {
+    key: "insertOptionExplicit" as const,
+    kind: "toggle" as const,
+    label: "Start new modules with Option Explicit",
+    description:
+      "Every module xlide creates begins with Option Explicit, the way the editor's own "
+      + "Require Variable Declaration option would. Restoring from the change log is never "
+      + "affected: a restore brings back exactly what was recorded.",
+  },
+  {
     key: "treeFollowsEditor" as const,
     kind: "toggle" as const,
     label: "Explorer follows the editor",

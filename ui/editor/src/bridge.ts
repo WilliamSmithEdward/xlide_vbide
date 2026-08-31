@@ -2684,6 +2684,7 @@ export function demoTransport(): HostTransport {
           blockLayout: "comfy",
           continueCommentOnNewline: true,
           mirrorCommentSpacing: true,
+          insertOptionExplicit: true,
           treeFollowsEditor: true,
           formatIndentSize: 4,
         });
@@ -2959,6 +2960,7 @@ export function demoTransport(): HostTransport {
           blockLayout: message.blockLayout === "compact" ? "compact" : "comfy",
           continueCommentOnNewline: message.continueCommentOnNewline,
           mirrorCommentSpacing: message.mirrorCommentSpacing,
+          insertOptionExplicit: message.insertOptionExplicit !== false,
           treeFollowsEditor: message.treeFollowsEditor !== false,
           formatIndentSize: message.formatIndentSize,
           designerSnap: message.designerSnap,
