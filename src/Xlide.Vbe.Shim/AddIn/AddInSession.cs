@@ -1296,8 +1296,8 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.FormMarkupApplyRequested = ApplyFormMarkup;
         _editorSurface.DesignerEventStubRequested = OnDesignerEventStub;
         _editorSurface.DesignerZOrderRequested = OnDesignerZOrder;
-        _editorSurface.TestsActionRequested = (action, target, file) =>
-            _editorSurface?.RunOnHostThread(() => OnTestsAction(action, target, file));
+        _editorSurface.TestsActionRequested = (action, target, file, tags, outcomes) =>
+            _editorSurface?.RunOnHostThread(() => OnTestsAction(action, target, file, tags, outcomes));
 
         // "Size to Fit" on the canvas. The measurement is the host's because MSForms' AutoSize is
         // the only thing that knows what a control's natural size is - see MeasureAutoSize - and

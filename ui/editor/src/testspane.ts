@@ -13,14 +13,16 @@
 
 import type { SetTestsState, TestRow } from "./bridge.js";
 import { ScopeSelect, type ScopeEntry } from "./scopeselect.js";
+import { TagSelect, type TagEntry } from "./tagselect.js";
 
 export interface TestsPaneDeps {
   /**
    * Press a runner verb: refresh, install, run, runFile, runModule, runOne, runFailed or
    * debug. `file` scopes it to one open file, which every verb needs once more than one file
-   * can hold a module of the same name.
+   * can hold a module of the same name. `tags` and `outcomes` are the filter facets as comma
+   * lists - Run Displayed sends them so the host runs exactly what the pane is showing.
    */
-  act(action: string, test?: string, file?: string): void;
+  act(action: string, test?: string, file?: string, tags?: string, outcomes?: string): void;
   /** Open the test's module at its declaration line, in the file that holds it. */
   navigate(module: string, line: number, file: string): void;
 }
@@ -120,7 +122,10 @@ export class TestsPane {
   private readonly runAll: HTMLButtonElement;
   private readonly runAllLabel: HTMLElement;
   private readonly runFailed: HTMLButtonElement;
+  private readonly runShown: HTMLButtonElement;
+  private readonly runShownLabel: HTMLElement;
   private readonly scope: ScopeSelect;
+  private readonly tags: TagSelect;
   private readonly filterButtons = new Map<TestGroup, HTMLButtonElement>();
   private readonly filters: Record<TestGroup, boolean> = {
     passed: true, failed: true, xfail: true, skipped: true, notRun: true,
@@ -143,11 +148,17 @@ export class TestsPane {
     this.runAll = root.querySelector("#tests-run") as HTMLButtonElement;
     this.runAllLabel = this.runAll.querySelector(".tests-label") as HTMLElement;
     this.runFailed = root.querySelector("#tests-run-failed") as HTMLButtonElement;
+    this.runShown = root.querySelector("#tests-run-displayed") as HTMLButtonElement;
+    this.runShownLabel = this.runShown.querySelector(".tests-label") as HTMLElement;
 
     // The scope sits with the run buttons, because it changes what they do, and left of the
-    // outcome filters: which tests first, then which outcomes of them.
+    // outcome filters: which tests first, then which outcomes of them. The tag facet sits
+    // between the two, because that is its place in the same sentence: which file, which
+    // module, which tags, then which outcomes.
     this.scope = new ScopeSelect("tests-scope", "Show tests from", "tests", () => this.paint(this.state));
     (root.querySelector("#tests-scope-seat") as HTMLElement).appendChild(this.scope.element);
+    this.tags = new TagSelect("tests-tags", () => this.paint(this.state));
+    (root.querySelector("#tests-tags-seat") as HTMLElement).appendChild(this.tags.element);
 
     // A run follows the scope. Scoped to a module or a file, Run All runs that, and Failed
     // reruns its failures alone - a button that ran tests the pane is not showing would be a
@@ -157,6 +168,15 @@ export class TestsPane {
     this.runFailed.addEventListener("click", () => {
       const [, target, file] = this.runTarget();
       this.deps.act("runFailed", target, file);
+    });
+
+    // Run Displayed adds the filter facets to the scope's own verb, so the host selects the
+    // same set the pane is drawing - one brain, and the api's run&tags=&outcomes= is this
+    // very press. Only a facet that is actually narrowing rides along: all chips pressed in
+    // is no outcome facet, the way no tags chosen is no tag facet.
+    this.runShown.addEventListener("click", () => {
+      const [action, target, file] = this.runTarget();
+      this.deps.act(action, target, file, this.tags.wire() || undefined, this.outcomeWire());
     });
     (root.querySelector("#tests-refresh") as HTMLButtonElement)
       .addEventListener("click", () => this.deps.act("refresh"));
@@ -233,6 +253,12 @@ export class TestsPane {
     this.paint(this.state);
   }
 
+  /** The pressed-in chip groups as the wire spells them, or undefined while all are in. */
+  private outcomeWire(): string | undefined {
+    const pressed = GROUP_ORDER.filter((group) => this.filters[group]);
+    return pressed.length === GROUP_ORDER.length ? undefined : pressed.join(",");
+  }
+
   /**
    * What the run buttons should ask for, from where the scope is pointing: the whole session,
    * one file, or one module of one file.
@@ -280,8 +306,35 @@ export class TestsPane {
       files);
 
     const shown = state.rows.filter((row) => this.scope.admits(moduleKey(row.file, row.module), row.file));
-    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, xfail: 0, skipped: 0, notRun: 0 };
+
+    // The tag facet's options come from the SCOPED rows, so the list follows the file and
+    // module selects - and its counts stay put while chips are pressed, because a tag's count
+    // shrinking under the pointer whenever an outcome toggles would make the popup dance.
+    const tagCounts = new Map<string, TagEntry>();
+    let untagged = 0;
     for (const row of shown) {
+      if (row.tags.length === 0) {
+        untagged++;
+      }
+
+      for (const tag of row.tags) {
+        const held = tagCounts.get(tag.toLowerCase());
+        if (held) {
+          held.count++;
+        } else {
+          tagCounts.set(tag.toLowerCase(), { name: tag, count: 1 });
+        }
+      }
+    }
+
+    this.tags.setEntries([...tagCounts.values()], untagged);
+
+    // The facets narrow in toolbar order: scope, then tags, then outcomes. The chip counts and
+    // the tally count the TAG-FILTERED rows, because each chip governs exactly those - a chip
+    // reading "7 Passed" over a smoke filter showing one would be counting rows it cannot show.
+    const tagged = shown.filter((row) => this.tags.admits(row.tags));
+    const counts: Record<TestGroup, number> = { passed: 0, failed: 0, xfail: 0, skipped: 0, notRun: 0 };
+    for (const row of tagged) {
       const group = groupOf(row.status);
       if (group !== null) {
         counts[group]++;
@@ -295,9 +348,9 @@ export class TestsPane {
       }
     }
 
-    this.summary.textContent = shown.length === 0
+    this.summary.textContent = tagged.length === 0
       ? ""
-      : `${counts.passed} passed, ${counts.failed} failed of ${shown.length}`;
+      : `${counts.passed} passed, ${counts.failed} failed of ${tagged.length}`;
 
     // When the results landed. "7 passed" with no clock beside it cannot tell a result that
     // just arrived from one left over from an hour ago, and a rerun that changes nothing looks
@@ -355,6 +408,14 @@ export class TestsPane {
       this.install.disabled = false;
     }
 
+    // What the filters leave on screen, decided here because two things below answer to it:
+    // the Run Displayed button, and the list itself. A running test is never filtered away -
+    // hiding the row in flight is hiding the run.
+    const visible = tagged.filter((row) => {
+      const group = groupOf(row.status);
+      return group === null || this.filters[group];
+    });
+
     // The run buttons say what the scope has made them: Run All means all of what is showing.
     const kind = this.scope.scopeKind();
     const only = this.scope.scopeName();
@@ -366,6 +427,24 @@ export class TestsPane {
     this.runFailed.disabled = !canRun
       || !shown.some((row) => row.status === "failed" || row.status === "error" || row.status === "xpass");
     this.runFailed.title = only ? `Rerun what failed in ${only}` : "Rerun what failed";
+
+    // Run Displayed's whole promise is the number on its face: exactly the rows the filters
+    // are showing, workbook and all. Its title says which filters are doing the narrowing,
+    // and says plainly when none is - the press still means what it says then, it just says
+    // the same thing Run All does.
+    const narrowingTags = this.tags.active();
+    const narrowingChips = GROUP_ORDER.some((group) => !this.filters[group]);
+    const showing = `${visible.length} test${visible.length === 1 ? "" : "s"}`;
+    this.runShown.disabled = standing !== "installed" || state.running || visible.length === 0;
+    this.runShownLabel.textContent = `Run Displayed (${visible.length})`;
+    this.runShown.title = narrowingTags || narrowingChips
+      ? `Run the ${showing} the filters are showing: ${[
+        narrowingTags ? this.tags.words() : null,
+        narrowingChips
+          ? `${GROUP_ORDER.filter((group) => this.filters[group]).map((group) => GROUP_SHAPE[group].many).join(", ")} only`
+          : null,
+      ].filter(Boolean).join("; ")}`
+      : `No filter is narrowing the list, so this runs all ${showing} in view`;
 
     this.list.replaceChildren();
     if (state.rows.length === 0) {
@@ -400,29 +479,36 @@ export class TestsPane {
       return;
     }
 
-    // The outcome filters decide what is left BEFORE any heading is drawn, so a heading whose
-    // every row was filtered away is never drawn in the first place.
-    const visible = shown.filter((row) => {
-      const group = groupOf(row.status);
-      return group === null || this.filters[group];
-    });
-
+    // The filters decide what is left BEFORE any heading is drawn, so a heading whose every
+    // row was filtered away is never drawn in the first place - and an emptied list says
+    // WHICH filter emptied it, or a developer who left a tag pressed reads a clean project.
     if (visible.length === 0) {
       const empty = document.createElement("div");
       empty.className = "tests-empty";
       const said = document.createElement("span");
-      said.textContent = `Every one of the ${shown.length} tests here is hidden by the outcome filters.`;
+      const hiddenBy = narrowingTags && narrowingChips
+        ? "the tag and outcome filters"
+        : narrowingTags
+          ? `the tag filter (${this.tags.words()})`
+          : "the outcome filters";
+      said.textContent = `Every one of the ${shown.length} tests here is hidden by ${hiddenBy}.`;
       const showAll = document.createElement("button");
       showAll.type = "button";
       showAll.className = "panel-empty-act";
-      showAll.textContent = "Show All Outcomes";
+      showAll.textContent = "Clear Filters";
       showAll.addEventListener("click", () => {
         for (const group of GROUP_ORDER) {
           this.filters[group] = true;
           this.filterButtons.get(group)?.setAttribute("aria-pressed", "true");
         }
 
-        this.paint(this.state);
+        // clear() repaints through its own change; with no tags chosen the chips' reset
+        // still needs the paint it used to do itself.
+        if (this.tags.active()) {
+          this.tags.clear();
+        } else {
+          this.paint(this.state);
+        }
       });
       empty.append(said, showAll);
       this.list.appendChild(empty);
@@ -472,18 +558,43 @@ export class TestsPane {
     name.title = `${row.file}!${row.id} - ${shape.word}. Click to open.`;
     name.addEventListener("click", () => this.deps.navigate(row.module, row.line, row.file));
 
+    // A row's tags are presses, not prose: each toggles its tag in the facet above, which is
+    // the shortest road from "what is this test" to "show me the others like it". The other
+    // facts stay words - a timeout is not a filter.
     const meta = document.createElement("span");
     meta.className = "tests-meta";
-    const chips: string[] = [...row.tags];
+    for (const tag of row.tags) {
+      if (meta.childNodes.length > 0) {
+        meta.append(" · ");
+      }
+
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "tests-tag";
+      chip.textContent = tag;
+      const pressed = this.tags.has(tag);
+      chip.setAttribute("aria-pressed", String(pressed));
+      chip.title = pressed ? `Stop filtering by tag ${tag}` : `Filter the list by tag ${tag}`;
+      chip.addEventListener("click", () => this.tags.toggle(tag));
+      meta.appendChild(chip);
+    }
+
+    const facts: string[] = [];
     if (row.timeoutMs !== null) {
-      chips.push(`timeout:${row.timeoutMs}ms`);
+      facts.push(`timeout:${row.timeoutMs}ms`);
     }
 
     if (row.expectedError !== null) {
-      chips.push(`expects error ${row.expectedError}`);
+      facts.push(`expects error ${row.expectedError}`);
     }
 
-    meta.textContent = chips.join(" · ");
+    for (const fact of facts) {
+      if (meta.childNodes.length > 0) {
+        meta.append(" · ");
+      }
+
+      meta.append(fact);
+    }
 
     const time = document.createElement("span");
     time.className = "tests-time";

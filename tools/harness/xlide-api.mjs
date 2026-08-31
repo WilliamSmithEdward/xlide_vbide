@@ -911,14 +911,26 @@ function clientFor(entry) {
      *   await api.tests({ action: "run", file: "Book.xlsm" });
      *   await api.tests({ action: "run", module: "MyTests" });
      *   await api.tests({ action: "run", test: "MyTests.Adds" });
+     *   await api.tests({ action: "run", tags: "smoke,fast" });     // any of these tags
+     *   await api.tests({ action: "run", outcomes: "failed,notRun" }); // the pane's chip groups
      *   await api.tests({ action: "runFailed" });
      *   await api.tests({ action: "debug", test: "MyTests.Adds" }); // waits out the debugger
      *
      * `file` narrows any verb to one open file, which every verb needs once two files can hold
      * a module - or a test - of the same name. Without it a verb means every open file.
+     *
+     * `tags` and `outcomes` (comma lists or arrays) narrow any run verb the way the pane's
+     * filters narrow its list, and they compose with module= and file= - the pane's Run
+     * Displayed is exactly run + the facets. Tags mean ANY of the listed; the word `untagged`
+     * admits tests carrying none. Outcomes are the five chip groups - passed, failed, xfail,
+     * skipped, notRun - judged against each test's current standing in its own file.
      */
-    tests: ({ action, module, test, file, timeoutMs = 120000 } = {}) =>
-      call(`tests${query({ action, module, test, file })}`, { timeout: timeoutMs }),
+    tests: ({ action, module, test, file, tags, outcomes, timeoutMs = 120000 } = {}) =>
+      call(`tests${query({
+        action, module, test, file,
+        tags: Array.isArray(tags) ? tags.join(",") : tags,
+        outcomes: Array.isArray(outcomes) ? outcomes.join(",") : outcomes,
+      })}`, { timeout: timeoutMs }),
 
     /** Everything a bug report needs, captured at one moment. */
     journal: (lines) => call(`journal${query({ lines })}`, { timeout: 20000 }),
@@ -1574,8 +1586,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       case "dialogs": return api.dialogs();
       case "doctor": return api.doctor();
       case "sessions": return api.sessions();
-      // node xlide-api.mjs tests run "" "" TestFixture.xlsm   (action, module, test, file)
-      case "tests": return api.tests({ action: rest[0], module: rest[1], test: rest[2], file: rest[3] });
+      // node xlide-api.mjs tests run "" "" TestFixture.xlsm smoke failed
+      // (action, module, test, file, tags, outcomes)
+      case "tests": return api.tests({
+        action: rest[0], module: rest[1], test: rest[2], file: rest[3], tags: rest[4], outcomes: rest[5],
+      });
       case "journal": return api.journal(rest[0]);
       case "history": return api.history();
       case "assert": return api.assert(rest[0], { value: rest[1] });

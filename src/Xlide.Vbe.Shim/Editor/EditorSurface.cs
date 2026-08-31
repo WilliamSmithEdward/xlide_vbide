@@ -172,10 +172,9 @@ internal sealed class EditorSurface : IDisposable
     /// event handler, the native designer's own gesture.</summary>
     public Action<string, string?, string?>? DesignerEventStubRequested { get; set; }
 
-    /// <summary>Raised by the Tests pane: (action, target test id or null). Actions are
-    /// refresh, install, run, runFailed, runOne and debug.</summary>
-    /// <summary>A Tests pane gesture: the verb, the test it names, and the file it is scoped to.</summary>
-    public Action<string, string?, string?>? TestsActionRequested { get; set; }
+    /// <summary>A Tests pane gesture: the verb, the test it names, the file it is scoped to,
+    /// and the tag and outcome facets narrowing a run (comma lists, null when off).</summary>
+    public Action<string, string?, string?, string?, string?>? TestsActionRequested { get; set; }
 
     /// <summary>Raised when the canvas selection changes: (module, workbook display or
     /// null, control name or null for the form itself). The Properties panel follows.</summary>
@@ -2059,6 +2058,12 @@ internal sealed class EditorSurface : IDisposable
                                 : null,
                             document.RootElement.TryGetProperty("file", out var testsFile)
                                 ? testsFile.GetString()
+                                : null,
+                            document.RootElement.TryGetProperty("tags", out var testsTags)
+                                ? testsTags.GetString()
+                                : null,
+                            document.RootElement.TryGetProperty("outcomes", out var testsOutcomes)
+                                ? testsOutcomes.GetString()
                                 : null);
                     }
 

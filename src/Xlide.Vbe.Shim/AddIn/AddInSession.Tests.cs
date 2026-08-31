@@ -607,9 +607,13 @@ internal sealed partial class AddInSession
     /// Every gesture the Tests pane makes, and every verb the api's tests route takes: one
     /// entry, so the two mirror by construction. `file` narrows to one open file the way the
     /// pane's scope selector does; without it a verb means every file that has tests.
+    /// `tags` and `outcomes` are the pane's filter facets as comma lists, narrowing any run
+    /// verb the way the filters narrow the list - which is what makes the pane's Run Displayed
+    /// and the door's run&amp;tags=&amp;outcomes= the same selection by construction.
     /// Answers in words; the pane's real answer is the stream of setTests repaints.
     /// </summary>
-    private string HandleTestsAction(string action, string? target, string? file)
+    private string HandleTestsAction(
+        string action, string? target, string? file, string? tags = null, string? outcomes = null)
     {
         // BEFORE THE WALK, because the walk is the thing this action exists to avoid: showing
         // the pane repaints from what the analysis pass has already told us.
@@ -703,6 +707,18 @@ internal sealed partial class AddInSession
                     return "a test run is already in flight";
                 }
 
+                // The facets, validated before anything runs on their say-so. An unknown tag is
+                // a legitimate empty selection - tags are the author's own vocabulary - but the
+                // outcome groups are this product's five words, and a stray one is a typo to
+                // name rather than a run of nothing to shrug at.
+                var wantedTags = SplitFacet(tags);
+                var wantedOutcomes = SplitFacet(outcomes);
+                if (wantedOutcomes.FirstOrDefault(group =>
+                    !OutcomeGroups.Contains(group, StringComparer.OrdinalIgnoreCase)) is { } stray)
+                {
+                    return $"'{stray}' is not an outcome group; use passed, failed, xfail, skipped or notRun";
+                }
+
                 // What the verb selects, per file, before the support gate: a gate that refused
                 // on a file the run would never have touched would be a gate on the wrong file.
                 var chosen = new List<(TestFile File, List<TestRunService.TestCase> Tests)>();
@@ -725,6 +741,20 @@ internal sealed partial class AddInSession
                         _ => [.. one.Tests],
                     };
 
+                    // The facets narrow whatever the verb picked, per file - which is what
+                    // keeps them workbook-aware: each test is judged against its own file's
+                    // outcomes, and a two-file run stays a two-file run.
+                    if (wantedTags.Length > 0)
+                    {
+                        mine = [.. mine.Where(test => TagsAdmit(test, wantedTags))];
+                    }
+
+                    if (wantedOutcomes.Length > 0)
+                    {
+                        mine = [.. mine.Where(test => wantedOutcomes.Contains(
+                            OutcomeGroup(StandingOf(one.ProjectId, test)), StringComparer.OrdinalIgnoreCase))];
+                    }
+
                     if (mine.Count > 0)
                     {
                         chosen.Add((one, mine));
@@ -734,14 +764,16 @@ internal sealed partial class AddInSession
                 if (chosen.Count == 0)
                 {
                     // Named by what was asked for, in the order the caller said it: the module
-                    // or test first, then the file, so an empty answer says which ask was empty.
+                    // or test first, then the file, then the facets, so an empty answer says
+                    // which ask was empty.
+                    var facets = FacetWords(wantedTags, wantedOutcomes);
                     var narrowed = (target is { Length: > 0 } ? $" in {target}" : string.Empty) + Where(file);
                     return action switch
                     {
-                        "runOne" => $"no test named {target}{Where(file)}",
-                        "runModule" => $"no tests in {target}{Where(file)}",
-                        "runFailed" => $"nothing has failed{narrowed}",
-                        _ => $"no tests to run{Where(file)}",
+                        "runOne" => $"no test named {target}{Where(file)}{facets}",
+                        "runModule" => $"no tests in {target}{Where(file)}{facets}",
+                        "runFailed" => $"nothing has failed{narrowed}{facets}",
+                        _ => $"no tests to run{Where(file)}{facets}",
                     };
                 }
 
@@ -811,6 +843,62 @@ internal sealed partial class AddInSession
         || string.Equals(file.ProjectId, wanted, StringComparison.OrdinalIgnoreCase);
 
     private static string Where(string? file) => file is { Length: > 0 } ? $" in {file}" : string.Empty;
+
+    /// <summary>A comma- or space-separated facet list, split the way the tags directive splits.</summary>
+    private static string[] SplitFacet(string? list) =>
+        list is { Length: > 0 }
+            ? list.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : [];
+
+    /// <summary>
+    /// Whether a test wears ANY of the wanted tags - the union the pane's checkboxes mean, the
+    /// same way its outcome chips mean a union. The word `untagged` is reserved: it admits a
+    /// test carrying no tags at all, so the pane's "(untagged)" choice has a wire spelling.
+    /// A project that really tags tests "untagged" gets both meanings at once, documented
+    /// rather than disambiguated - there is no spelling that could not also be a tag.
+    /// </summary>
+    private static bool TagsAdmit(TestRunService.TestCase test, string[] wanted) =>
+        wanted.Any(tag =>
+            (string.Equals(tag, "untagged", StringComparison.OrdinalIgnoreCase) && test.Tags.Length == 0)
+            || test.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>The status a test would wear in the pane right now: its outcome, or its mark.</summary>
+    private string StandingOf(string projectId, TestRunService.TestCase test) =>
+        _testOutcomes.GetValueOrDefault(TestKey(projectId, test.Id))?.Status
+            ?? (test.SkipReason is not null ? "skip-marked" : "none");
+
+    private static readonly string[] OutcomeGroups = ["passed", "failed", "xfail", "skipped", "notRun"];
+
+    /// <summary>
+    /// The five filter groups the pane's outcome chips press, folded from a row status the
+    /// same way testspane.ts folds them - so outcomes=failed selects exactly the rows the
+    /// Failed chip governs: failed, error and xpass together.
+    /// </summary>
+    private static string OutcomeGroup(string status) => status switch
+    {
+        "passed" => "passed",
+        "failed" or "error" or "xpass" => "failed",
+        "xfail" => "xfail",
+        "skipped" or "skip-marked" => "skipped",
+        _ => "notRun",
+    };
+
+    /// <summary>How an empty answer names the facets that emptied it.</summary>
+    private static string FacetWords(string[] tags, string[] outcomes)
+    {
+        var parts = new List<string>();
+        if (tags.Length > 0)
+        {
+            parts.Add($"tag{(tags.Length == 1 ? string.Empty : "s")} {string.Join(", ", tags)}");
+        }
+
+        if (outcomes.Length > 0)
+        {
+            parts.Add($"outcome{(outcomes.Length == 1 ? string.Empty : "s")} {string.Join(", ", outcomes)}");
+        }
+
+        return parts.Count == 0 ? string.Empty : $" with {string.Join(" and ", parts)}";
+    }
 
     private DispatchObject? ProjectFor(TestFile file) =>
         FindProjectByDisplayName(file.Name) ?? FindProjectByDisplayName(file.ProjectId);
@@ -932,13 +1020,15 @@ internal sealed partial class AddInSession
         }
     }
 
-    private void OnTestsAction(string action, string? target, string? file)
+    private void OnTestsAction(string action, string? target, string? file, string? tags, string? outcomes)
     {
         try
         {
-            var answer = HandleTestsAction(action, target, file);
+            var answer = HandleTestsAction(action, target, file, tags, outcomes);
             Log.Info($"tests: {action}{(target is { Length: > 0 } ? $" {target}" : string.Empty)}"
-                + $"{(file is { Length: > 0 } ? $" in {file}" : string.Empty)} -> {answer}");
+                + $"{(file is { Length: > 0 } ? $" in {file}" : string.Empty)}"
+                + $"{(tags is { Length: > 0 } ? $" tags={tags}" : string.Empty)}"
+                + $"{(outcomes is { Length: > 0 } ? $" outcomes={outcomes}" : string.Empty)} -> {answer}");
         }
         catch (Exception ex)
         {

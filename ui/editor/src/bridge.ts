@@ -504,7 +504,7 @@ export type ClientMessage =
   | { type: "analysisRules"; id: number }
   | { type: "setRuleSeverity"; code: string; severity: string }
   | { type: "suppressFinding"; module: string; project: string | null; line: number; code: string }
-  | { type: "testsAction"; action: string; test?: string; file?: string }
+  | { type: "testsAction"; action: string; test?: string; file?: string; tags?: string; outcomes?: string }
   | { type: "trace"; text: string };
 
 export interface HostTransport {
@@ -838,14 +838,18 @@ export class EditorBridge {
   /**
    * The Tests pane pressed something: refresh, install, run, runFile, runModule, runOne,
    * runFailed or debug. `file` scopes the verb to one open file the way the pane's scope
-   * selector does - without it a verb means every file that has tests.
+   * selector does - without it a verb means every file that has tests. `tags` and `outcomes`
+   * are the pane's filter facets as comma lists; a run verb carrying them runs exactly what
+   * the filtered pane is showing, which is the whole of the Run Displayed button.
    */
-  testsAction(action: string, test?: string, file?: string): void {
+  testsAction(action: string, test?: string, file?: string, tags?: string, outcomes?: string): void {
     this.transport.post({
       type: "testsAction",
       action,
       ...(test ? { test } : {}),
       ...(file ? { file } : {}),
+      ...(tags ? { tags } : {}),
+      ...(outcomes ? { outcomes } : {}),
     });
   }
 

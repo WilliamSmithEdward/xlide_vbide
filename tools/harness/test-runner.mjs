@@ -15,7 +15,7 @@ const name = `TestProbe${process.pid % 10000}`;
 const CRLF = "\r\n";
 
 const MODULE = [
-  "' @xlide-test",
+  "' @xlide-test tags=smoke",
   "Public Sub Adds()",
   "    XlideAssert.AreEqual 4, 2 + 2",
   "End Sub",
@@ -122,6 +122,49 @@ try {
     (mine.find((row) => row.procedure === "Adds")?.line ?? 0) === 2,
     `Adds is at line ${mine.find((row) => row.procedure === "Adds")?.line}`);
 
+  /* ---- the facets, on a board where nothing has run --------------------------------------
+   *
+   * tags= and outcomes= narrow any run verb the way the pane's filters narrow its list, and
+   * the pane's Run Displayed button is exactly run + the facets - so what these pin is the
+   * selection both doors share. Run before the full suite on purpose: only a board where
+   * nothing has run can tell outcomes=notRun from "everything".
+   */
+  const smokeRun = await api.tests({ action: "run", module: name, tags: "smoke", timeoutMs: 120000 });
+  const smokeOf = (procedure) => smokeRun.rows.find((row) => row.module === name && row.procedure === procedure);
+  check("run with tags= runs only the tagged tests - any of the listed",
+    /^ran 2 in /.test(smokeRun.detail), smokeRun.detail);
+  check("...the smoke pair landed", smokeOf("Adds")?.status === "passed" && smokeOf("FailsOnPurpose")?.status === "failed",
+    `${smokeOf("Adds")?.status}/${smokeOf("FailsOnPurpose")?.status}`);
+  check("...and an untagged test was not touched", smokeOf("Raises")?.status === "none", smokeOf("Raises")?.status);
+
+  const combo = await api.tests({ action: "run", module: name, tags: "math", outcomes: "failed", timeoutMs: 60000 });
+  check("tags= and outcomes= compose: math AND currently-failed is one test",
+    /^ran 1 in /.test(combo.detail), combo.detail);
+
+  const untouched = await api.tests({ action: "run", module: name, outcomes: "notRun", timeoutMs: 180000 });
+  check("outcomes=notRun runs what has never run - the skip-marked row is skipped, not notRun",
+    /^ran 7 in /.test(untouched.detail), untouched.detail);
+
+  const skipOnly = await api.tests({ action: "run", module: name, tags: "untagged", outcomes: "skipped", timeoutMs: 60000 });
+  check("untagged is a tag word, and skip-marked answers to the skipped group",
+    /^ran 1 in /.test(skipOnly.detail)
+    && skipOnly.rows.find((row) => row.id === `${name}.SkipsAlways`)?.status === "skipped",
+    skipOnly.detail);
+
+  const noSuchTag = await api.tests({ action: "run", module: name, tags: "nosuch" });
+  check("an unknown tag is an empty selection that names itself",
+    noSuchTag.detail === `no tests in ${name} with tag nosuch`, noSuchTag.detail);
+
+  const strayGroup = await api.tests({ action: "run", module: name, outcomes: "bogus" });
+  check("a stray outcome word is refused as a typo, never run as nothing",
+    /'bogus' is not an outcome group/.test(strayGroup.detail), strayGroup.detail);
+
+  const fileCombo = await api.tests({
+    action: "run", module: name, file: project.projectId, tags: "smoke", outcomes: "passed", timeoutMs: 60000,
+  });
+  check("the facets compose with file= - workbook-aware to the end",
+    /^ran 1 in /.test(fileCombo.detail), fileCombo.detail);
+
   // ---- the run, every outcome at once ----
   const ran = await api.tests({ action: "run", module: name, timeoutMs: 180000 });
   const status = (procedure) => ran.rows.find((row) => row.module === name && row.procedure === procedure);
@@ -184,6 +227,104 @@ try {
   const support = await api.tests();
   check("XlideAssert still reads installed after runs - injection re-cases nothing",
     support.support === "installed", support.support);
+
+  /* ---- the pane's tag filter and Run Displayed ----------------------------------------------
+   *
+   * The pane's Run Displayed is the door's run + tags= + outcomes= by construction; what these
+   * pin is the pane's own half - the facet controls, the counts following them, the button's
+   * number, and that a press reaches the host wearing the facets AND the file. Everything is
+   * read off the screen with the Tests tab fronted, because the summary-button ghost taught
+   * that state and screen are two different instruments.
+   */
+  const paneFile = mine[0].file;
+  await api.ask(`document.querySelector('.panel-tab[data-panel="tests"]')?.click(), "shown"`);
+  const scopeKey = `${paneFile.toLowerCase()}\u0000${name.toLowerCase()}`;
+  await api.ask(`(() => { const s = document.querySelector("#tests-scope-module");`
+    + ` s.value = ${JSON.stringify(scopeKey)}; s.dispatchEvent(new Event("change")); return s.value; })()`);
+
+  const pane = async () => {
+    const said = await api.ask(`JSON.stringify({
+      tagsHidden: document.querySelector(".tag-select")?.hidden ?? null,
+      tagLabel: document.querySelector("#tests-tags .tests-label")?.textContent ?? null,
+      narrowed: document.querySelector("#tests-tags")?.classList.contains("tag-narrowed") ?? null,
+      popupOnScreen: (document.querySelector(".tag-select-popup")?.getBoundingClientRect().width ?? 0) > 0,
+      rows: document.querySelectorAll("#tests-list .tests-row").length,
+      displayed: document.querySelector("#tests-run-displayed .tests-label")?.textContent ?? null,
+      displayedOff: document.querySelector("#tests-run-displayed")?.disabled ?? null,
+      chips: [...document.querySelectorAll(".tests-filter .filter-count")].map((one) => one.textContent),
+      empty: document.querySelector("#tests-list .tests-empty span")?.textContent ?? null,
+    })`);
+    return JSON.parse(typeof said === "string" ? said : JSON.stringify(said));
+  };
+
+  const press = (selector) => api.ask(
+    `(() => { const b = document.querySelector(${JSON.stringify(selector)});`
+    + ` if (!b) return "missing"; b.click(); return "pressed"; })()`);
+
+  const scoped = await pane();
+  check("scoped to the probe module, the tag filter offers itself",
+    scoped.tagsHidden === false && scoped.tagLabel === "Tags", JSON.stringify(scoped));
+  check("and Run Displayed counts everything while nothing narrows",
+    scoped.displayed === "Run Displayed (10)" && scoped.displayedOff === false,
+    `${scoped.displayed} disabled=${scoped.displayedOff}`);
+
+  check("opening the popup puts it on screen", await press("#tests-tags") === "pressed"
+    && (await pane()).popupOnScreen === true);
+  check("choosing smoke narrows the list to its two tests",
+    await press('.tag-select-popup input[data-tag="smoke"]') === "pressed"
+    && (await pane()).rows === 2, JSON.stringify(await pane()));
+
+  const smokeFaceted = await pane();
+  check("the chip counts follow the tag facet - each chip governs what it can show",
+    smokeFaceted.chips.includes("1 Passed") && smokeFaceted.chips.includes("1 Failed"),
+    smokeFaceted.chips.join(" | "));
+  check("the button wears the facet: a narrowed pane says so",
+    smokeFaceted.narrowed === true && smokeFaceted.tagLabel === "Tags: smoke"
+    && smokeFaceted.displayed === "Run Displayed (2)",
+    JSON.stringify(smokeFaceted));
+
+  // Solo the Failed chip the way a pointer does, then press Run Displayed: the host must
+  // receive runModule + the module + THE FILE + tags=smoke + outcomes=failed, and run one.
+  await api.ask(`(() => { const b = document.querySelector(".tests-filter-failed");
+    b.dispatchEvent(new PointerEvent("pointerdown", { ctrlKey: true, bubbles: true })); return "solo"; })()`);
+  const soloed = await pane();
+  check("soloing Failed over the smoke facet leaves one displayed",
+    soloed.rows === 1 && soloed.displayed === "Run Displayed (1)", JSON.stringify(soloed));
+
+  const beforeRan = (await api.tests()).ranAt;
+  await press("#tests-run-displayed");
+  await waitFor("the displayed run to land", async () => {
+    const now = await api.tests();
+    return now.running === false && now.ranAt !== beforeRan ? now : null;
+  }, { budgetMs: 120000, pollMs: 500 });
+  const logged = await api.log({ match: "outcomes=failed -> ran 1 in", max: 20000 });
+  check("Run Displayed pressed the facets and the file through to the host, and ran exactly one",
+    logged.lines.some((line) => line.includes(`runModule ${name} in ${paneFile} tags=smoke outcomes=failed -> ran 1 in`)),
+    logged.lines.at(-1) ?? "no such log line");
+
+  // A row's tag chip is the same facet: pressing math on the failed row widens it to two
+  // tags. The offer is three - smoke, math, and "(untagged)", which counts as a choice
+  // wherever untagged tests exist.
+  check("a row's tag chip toggles the facet",
+    await api.ask(`(() => { const chip = [...document.querySelectorAll("#tests-list .tests-tag")]
+      .find((one) => one.textContent === "math"); if (!chip) return "missing"; chip.click(); return "pressed"; })()`) === "pressed"
+    && (await pane()).tagLabel === "Tags: 2 of 3", (await pane()).tagLabel);
+
+  // Facets that empty the list say WHICH filters did it, and one press clears them all.
+  await api.ask(`(() => { const b = document.querySelector(".tests-filter-skipped");
+    b.dispatchEvent(new PointerEvent("pointerdown", { ctrlKey: true, bubbles: true })); return "solo"; })()`);
+  const emptied = await pane();
+  check("an emptied list names the tag and outcome filters together",
+    emptied.rows === 0 && /hidden by the tag and outcome filters/.test(emptied.empty ?? ""),
+    JSON.stringify(emptied));
+  check("and Clear Filters brings every row back",
+    await press("#tests-list .panel-empty-act") === "pressed"
+    && (await pane()).rows === 10 && (await pane()).tagLabel === "Tags",
+    JSON.stringify(await pane()));
+
+  // The pane goes back to everything before the wrecker takes the stage.
+  await api.ask(`(() => { const s = document.querySelector("#tests-scope-module");`
+    + ` s.value = "@all"; s.dispatchEvent(new Event("change")); return s.value; })()`);
 
   /* ---- a project that cannot execute a line -------------------------------------------------
    *

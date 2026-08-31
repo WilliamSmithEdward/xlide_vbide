@@ -4201,6 +4201,8 @@ internal sealed partial class AddInSession
                 request.Query.TryGetValue("module", out var testsModule);
                 request.Query.TryGetValue("test", out var testsTarget);
                 request.Query.TryGetValue("file", out var testsFile);
+                request.Query.TryGetValue("tags", out var testsTags);
+                request.Query.TryGetValue("outcomes", out var testsOutcomes);
 
                 var testsDetail = "listed";
                 if (testsAction is { Length: > 0 } and not "list")
@@ -4214,7 +4216,9 @@ internal sealed partial class AddInSession
                     testsDetail = HandleTestsAction(
                         testsVerb,
                         testsTarget is { Length: > 0 } ? testsTarget : testsModule,
-                        testsFile);
+                        testsFile,
+                        testsTags,
+                        testsOutcomes);
                 }
 
                 // From the CACHE, not a fresh walk: every action above has just walked the open

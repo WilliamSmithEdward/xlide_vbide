@@ -2180,6 +2180,8 @@ node tools\harness\xlide-api.mjs tests run "" MyTests.InvoiceTotal_AddsTax
 node tools\harness\xlide-api.mjs tests runFailed
 node tools\harness\xlide-api.mjs tests runFailed MyTests
 node tools\harness\xlide-api.mjs tests run "" "" TestFixture.xlsm
+node tools\harness\xlide-api.mjs tests run "" "" "" smoke,fast
+node tools\harness\xlide-api.mjs tests run MyTests "" "" "" failed,notRun
 node tools\harness\xlide-api.mjs tests debug "" MyTests.InvoiceTotal_AddsTax
 ```
 
@@ -2194,6 +2196,17 @@ way a looping macro is, with Ctrl+Break - and the suite that pins all of this is
 The snapshot carries `ranAt`, when the last run finished, which is what the pane says beside
 its tally. `runFailed` takes a module or a file the same way `run` does, and that is what the
 pane's own Failed button sends while its scope selector holds one.
+
+**`tags=` and `outcomes=` narrow any run verb the way the pane's filters narrow its list**, and
+they compose with `module=` and `file=`. Tags mean ANY of the listed (the word `untagged`
+admits tests carrying none); outcomes are the pane's five chip groups - `passed`, `failed`
+(failed + error + xpass), `xfail`, `skipped` (skipped + skip-marked), `notRun` - judged against
+each test's current standing in its own file. The pane's **Run Displayed** button is exactly
+this: the scope's own run verb plus the two facets, so `run&tags=smoke&outcomes=failed` presses
+what a smoke filter and a failed-only chip are showing. An emptied selection answers in words
+naming the facets; a stray outcome word is refused as a typo. The pane's tag filter is the
+`#tests-tags` button (multi-select popup with counts and an `(untagged)` row), and each row's
+tag chips toggle the same facet.
 
 **EVERY OPEN FILE.** A session holds as many VBA projects as the host has files open, and the
 runner sees all of them: `tests()` answers a `files` array - each with its own support state and
