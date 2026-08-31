@@ -1,6 +1,6 @@
 # Build status
 
-Updated 2026-08-30, at v0.10.0.
+Updated 2026-08-31, at v0.11.0.
 
 A short snapshot, and deliberately shorter than it was: this is the one document whose only job
 is to be true today, and the version of it that described v0.3.0 was still claiming a menu bar
@@ -49,8 +49,6 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 - **The debugger** is no longer a milestone either. v0.10.0 closed the cluster where a run that
   never happened looked like one - design mode, the current-statement marker, breakpoint state,
   the Tests pane, and the commands that grey.
-- **Require Variable Declaration** left with the native Options dialog and has no equivalent in
-  xlide's settings. A real gap, recorded where the suppression is.
 - **The native pane's rendering is unobserved.** Parity compares text, so a pane that draws wrong
   while holding the right text passes every check there is.
 
