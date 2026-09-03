@@ -2656,6 +2656,38 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * A SELECTION, which is state the door could not set until Extract Method needed it.
+     *
+     * `{startLine, endLine}` selects those whole lines; `{clear: 1}` puts the caret back with
+     * nothing selected. `caret` moves the caret and selects nothing, and every other way of
+     * making a selection - dragging, Shift+arrow - is a gesture no request can perform, so a
+     * check about anything that depends on there BEING a selection had no way to set one up.
+     */
+    select: (args) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      if (!model) { return { did: false, detail: "nothing is open" }; }
+
+      if (args.clear !== undefined) {
+        const at = editor.getPosition() ?? new monacoApi.Position(1, 1);
+        editor.setSelection(new monacoApi.Range(at.lineNumber, at.column, at.lineNumber, at.column));
+        return { did: true, detail: `nothing selected, caret at ${at.lineNumber}:${at.column}` };
+      }
+
+      const startLine = Number(args.startLine ?? 0);
+      const endLine = Number(args.endLine ?? startLine);
+      const lines = model.getLineCount();
+      if (!Number.isInteger(startLine) || startLine < 1 || startLine > lines
+        || !Number.isInteger(endLine) || endLine < startLine || endLine > lines) {
+        return { did: false, detail: `${args.startLine}-${args.endLine} is not a range of this model's ${lines} line(s)` };
+      }
+
+      editor.setSelection(new monacoApi.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine)));
+      editor.focus();
+      return { did: true, detail: `lines ${startLine}-${endLine} selected` };
+    },
+
+    /**
      * EXTRACT METHOD, driven the way a developer drives it rather than around the outside.
      *
      * `{startLine, endLine, name}` selects those lines, runs the editor action the right-click

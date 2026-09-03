@@ -183,6 +183,17 @@ Three departures from the design above, each deliberate:
   closing within it - and it is refused only when the selection actually uses a leading dot,
   because statements inside a `With` that never use one move perfectly well.
 
+Two defects the suite found the same day it was written, both in the lightbulb rather than the
+transformation. The code-action provider **returned early when the range carried no diagnostic**,
+so on working code - the one case a refactoring exists for - the lightbulb offered nothing and
+Extract Method was reachable only from the right-click menu. And the entry was built from the
+range the provider was ASKED over, which Monaco fills with the word or the line under a bare
+caret, so it appeared in every lightbulb on the surface beside the fix for the squiggle the
+developer had actually opened. The entry now comes from the editor's own selection, the early out
+stands only when there is neither a finding nor a selection, and both halves are pinned: a bare
+caret is not offered it, a selection is. Driving that check needed a selection, which the door
+could not make, so `act("select", {startLine, endLine})` exists now too.
+
 One correction to the analysis above, found by the suite. `total = total + step` reports the
 write at column 5 and the read at column 13, so reading the reference kinds in COLUMN order says
 the callee writes `total` before it reads it - which makes it the return value instead of a

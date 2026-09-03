@@ -1358,14 +1358,27 @@ function boot(): void {
         return none;
       }
 
+      // FROM THE EDITOR'S SELECTION, not from the range this was asked over. Monaco hands a
+      // provider the word or the line under a bare caret, so reading the argument offers
+      // "Extract method..." in every lightbulb on the surface - beside the fix for the squiggle
+      // the developer opened it for, proposing to extract a line they had not selected.
+      const editor = workspace.activeEditor();
+      const selected = model === editor.getModel() ? extractRange(editor.getSelection()) : null;
+
       const markers = monaco.editor
         .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
         .filter((marker) => monaco.Range.areIntersectingOrTouching(marker, range));
-      if (markers.length === 0) {
+
+      // Nothing to fix AND nothing to refactor. The early out is what keeps a caret move from
+      // costing a host round trip, and the refactoring has to be let past it: it answers a
+      // SELECTION rather than a finding, so gating it on there being a squiggle meant the one
+      // case it exists for - working code a developer wants to tidy - was the one case that
+      // offered nothing.
+      if (markers.length === 0 && !selected) {
         return none;
       }
 
-      const offered = await bridge.requestCodeActions(
+      const offered = markers.length === 0 ? [] : await bridge.requestCodeActions(
         model.getOffsetAt(range.getStartPosition()),
         model.getOffsetAt(range.getEndPosition()));
 
@@ -1419,8 +1432,7 @@ function boot(): void {
        * for any selection of whole statements, and the dialog carries the refusal when there
        * is one, which is where a developer can read it and reselect.
        */
-      const selected = extractRange(range);
-      if (selected && model === bridge.hostActiveModel()) {
+      if (selected) {
         actions.push({
           title: "Extract method...",
           kind: "refactor.extract.function",

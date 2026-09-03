@@ -144,6 +144,29 @@ try {
     !untouched.some((one) => one.includes(`${MADE}Half`)) && has(untouched, "total = 0"),
     lineWith(untouched, "total = 0"));
 
+  /* ---- the lightbulb offers it on a SELECTION, and only then ---------------------------------- */
+
+  // Monaco hands a code-action provider the word or the line under a bare caret, so a provider
+  // that reads its range argument offers the refactoring in every lightbulb on the surface -
+  // beside the fix for the squiggle the developer opened it for. Both halves are checked, because
+  // an entry that never appears and one that always appears read identically from one side.
+  await api.caret(7, { module: NAME, project: project.projectId });
+  await wait(400);
+  const atCaret = await api.act("quickFixes", { line: 7, column: 5 });
+  const titlesAt = (answer) => (answer.data ?? []).map((one) => one.title);
+  check("a bare caret is not offered Extract method",
+    !titlesAt(atCaret).includes("Extract method..."), titlesAt(atCaret).join(" | ") || "(none)");
+
+  const made2 = await api.act("select", { startLine: 9, endLine: 14 });
+  check("the door can make a selection", made2.did, made2.detail);
+  await wait(300);
+  const selected = await api.act("quickFixes", { line: 9, column: 5 });
+  check("and a selection is offered it",
+    titlesAt(selected).includes("Extract method..."),
+    titlesAt(selected).join(" | ") || "(none)");
+
+  await api.act("select", { clear: 1 });
+
   /* ---- the dialog itself --------------------------------------------------------------------- */
 
   await api.act("editorAction", { id: "xlide.extractMethod" }).catch(() => { });

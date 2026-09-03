@@ -456,6 +456,12 @@ await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
 await api.undoRename();                                 // and puts it back
 
+await api.act("select", { startLine: 9, endLine: 14 });  // whole lines; `clear: 1` unselects
+// -> the door could not make a selection at all until Extract Method needed one: `caret` moves
+//    the caret and selects nothing, and dragging is a gesture no request can perform. Anything
+//    that depends on there BEING a selection - the lightbulb's refactoring entry, for one - had
+//    no way to be set up.
+
 // EXTRACT METHOD, the first refactoring beyond rename. Selects those lines, runs the same editor
 // action the right-click menu and the lightbulb run, types the name into the dialog that opens
 // and presses Extract - the menu path, not a back door, so a passing check has driven the menu.
