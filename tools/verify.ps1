@@ -736,6 +736,11 @@ if ($Live) {
                                      # variable's name, so the module full of call sites must
                                      # still compile without a line of it being rewritten.
                                      'encapsulate-field.mjs',
+                                     # extract-variable asks the one thing its engine suite
+                                     # cannot: whether the analyzer's type and its Set survive
+                                     # into a real project, where the symbols are the
+                                     # workbook's rather than a synthetic pair of modules'.
+                                     'extract-variable.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

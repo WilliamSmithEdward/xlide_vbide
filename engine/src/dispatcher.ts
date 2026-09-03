@@ -28,6 +28,7 @@ import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { encapsulateFieldFor } from './encapsulateField';
+import { extractVariableFor } from './extractVariable';
 import { extractMethodFor } from './extractMethod';
 import { implementInterfaceFor } from './implementInterface';
 import { searchModules } from './search';
@@ -73,6 +74,8 @@ import {
     type RenameModuleParams,
     type EncapsulateFieldParams,
     type EncapsulateFieldResult,
+    type ExtractVariableParams,
+    type ExtractVariableResult,
     type ExtractMethodParams,
     type ExtractMethodResult,
     type ImplementInterfaceParams,
@@ -404,6 +407,9 @@ export class Dispatcher {
             case 'textDocument/extractMethod':
                 return this.extractMethod(this.require<ExtractMethodParams>(params));
 
+            case 'textDocument/extractVariable':
+                return this.extractVariable(this.require<ExtractVariableParams>(params));
+
             case 'textDocument/encapsulateField':
                 return this.encapsulateField(this.require<EncapsulateFieldParams>(params));
 
@@ -691,6 +697,17 @@ export class Dispatcher {
             params.startLine,
             params.endLine,
             params.newName);
+    }
+
+    private extractVariable(params: ExtractVariableParams): ExtractVariableResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { refused: 'This module is not one the engine holds.' };
+        }
+
+        return extractVariableFor(this.seededModules.get(params.projectId) ?? [], { ...params, source });
     }
 
     private encapsulateField(params: EncapsulateFieldParams): EncapsulateFieldResult {

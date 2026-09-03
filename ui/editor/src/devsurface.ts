@@ -2656,6 +2656,67 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * EXTRACT VARIABLE, driven the way a developer drives it.
+     *
+     * `{startLine, startColumn, endLine, endColumn, name}` selects that range - columns, because an
+     * expression is part of a line - runs the editor action the menu runs, types the name into the
+     * dialog and presses Extract. Without a range it uses whatever is selected.
+     *
+     * The type and the `Set` in the answer are the ANALYZER's, which is the whole reason this
+     * refactoring waited on xlide_vscode#61.
+     */
+    extractVariable: async (args) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      if (!model) { return { did: false, detail: "nothing is open" }; }
+
+      if (args.startLine !== undefined) {
+        const startLine = Number(args.startLine);
+        const startColumn = Number(args.startColumn ?? 1);
+        const endLine = Number(args.endLine ?? startLine);
+        const endColumn = Number(args.endColumn ?? model.getLineMaxColumn(endLine));
+        if (![startLine, startColumn, endLine, endColumn].every(Number.isFinite)) {
+          return { did: false, detail: "that is not a range of this module" };
+        }
+
+        editor.setSelection(new monacoApi.Range(startLine, startColumn, endLine, endColumn));
+      }
+
+      const at = editor.getSelection();
+      if (!at || at.isEmpty()) {
+        return { did: false, detail: "nothing is selected; pass startLine and startColumn" };
+      }
+
+      editor.focus();
+      await editor.getAction("xlide.extractVariable")?.run();
+
+      const dialog = await waitForDialog();
+      if (!dialog) { return { did: false, detail: "the extract dialog did not open" }; }
+
+      if (args.name !== undefined) {
+        dialog.type(String(args.name));
+      }
+
+      const named = dialog.state().name;
+      dialog.press("extract");
+
+      const until = Date.now() + 20000;
+      while (Date.now() < until) {
+        await new Promise((settle) => setTimeout(settle, 50));
+        const now = extractDialogProbe();
+        if (!now) { return { did: true, detail: `extracted ${named}` }; }
+
+        const state = now.state();
+        if (!state.busy && state.refused) {
+          now.press("cancel");
+          return { did: false, detail: state.refused, data: { refused: state.refused } };
+        }
+      }
+
+      return { did: false, detail: "the extraction did not settle within 20s" };
+    },
+
+    /**
      * ENCAPSULATE FIELD: `{fieldName}` puts a property pair in front of that module variable.
      *
      * No dialog and nothing to name - the property takes the variable's own name, which is what

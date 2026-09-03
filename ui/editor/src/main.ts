@@ -297,6 +297,37 @@ function beginImplementInterface(bridge: EditorBridge, interfaceName?: string): 
 }
 
 /**
+ * Extract Variable, from the lightbulb or the menu. The name is asked for in the same dialog
+ * Extract Method uses - one field, and it stays up carrying a refusal.
+ */
+function beginExtractVariable(bridge: EditorBridge, startOffset: number, endOffset: number): void {
+  openExtractDialog(
+    suggestedVariableName(bridge.hostActiveModel()),
+    async (name) => {
+      const answer = await bridge.requestExtractVariable(startOffset, endOffset, name);
+      if (!answer.refused) {
+        bridge.shell?.notify(
+          `${answer.variable} As ${answer.declaredType} = ${answer.expression}`);
+      }
+
+      return { signature: answer.declaredType, refused: answer.refused };
+    },
+    "Extract variable",
+    "New variable name");
+}
+
+/** `valueN`, counting up so a second extraction does not open on the name the first took. */
+function suggestedVariableName(model: monaco.editor.ITextModel | null): string {
+  const text = model?.getValue() ?? "";
+  let number = 1;
+  while (new RegExp(`\\bvalue${number}\\b`, "i").test(text)) {
+    number += 1;
+  }
+
+  return `value${number}`;
+}
+
+/**
  * Extract Method, from wherever it was asked for: the lightbulb, the right-click menu, or the
  * api. One function, so the three cannot come to mean three different things.
  *
@@ -1399,6 +1430,7 @@ function boot(): void {
   const EXTRACT_METHOD_COMMAND = "xlide.refactor.extractMethod";
   const IMPLEMENT_INTERFACE_COMMAND = "xlide.refactor.implementInterface";
   const ENCAPSULATE_FIELD_COMMAND = "xlide.refactor.encapsulateField";
+  const EXTRACT_VARIABLE_COMMAND = "xlide.refactor.extractVariable";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1438,7 +1470,8 @@ function boot(): void {
       // "Extract method..." in every lightbulb on the surface - beside the fix for the squiggle
       // the developer opened it for, proposing to extract a line they had not selected.
       const editor = workspace.activeEditor();
-      const selected = model === editor.getModel() ? extractRange(editor.getSelection()) : null;
+      const selection = editor.getSelection();
+      const selected = model === editor.getModel() ? extractRange(selection) : null;
 
       // An `Implements` line is its own affordance: the one place a developer looks when they
       // want the members that line commits them to. A declaration line is the same for the
@@ -1513,6 +1546,24 @@ function boot(): void {
        * for any selection of whole statements, and the dialog carries the refusal when there
        * is one, which is where a developer can read it and reselect.
        */
+      // A selection within ONE line is an expression to name; a selection of whole lines is
+      // statements to lift. Both are offered where both make sense, and the titles say which.
+      if (selection && !selection.isEmpty() && model === editor.getModel()) {
+        const from = model.getOffsetAt(selection.getStartPosition());
+        const to = model.getOffsetAt(selection.getEndPosition());
+        if (to > from) {
+          actions.push({
+            title: "Extract variable...",
+            kind: "refactor.extract.constant",
+            command: {
+              id: EXTRACT_VARIABLE_COMMAND,
+              title: "Extract variable",
+              arguments: [from, to],
+            },
+          });
+        }
+      }
+
       if (selected) {
         actions.push({
           title: "Extract method...",
@@ -1591,12 +1642,18 @@ function boot(): void {
     beginEncapsulateField(bridge, fieldName);
   });
 
+  monaco.editor.registerCommand(EXTRACT_VARIABLE_COMMAND, (_accessor, from: number, to: number) => {
+    beginExtractVariable(bridge, from, to);
+  });
+
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
     // the keyboard. The refactoring is named here for the same reason: without it, Extract
     // method is a menu entry with no key to reach it by.
-    providedCodeActionKinds: ["quickfix", "refactor.extract.function", "refactor.rewrite"],
+    providedCodeActionKinds: [
+      "quickfix", "refactor.extract.function", "refactor.extract.constant", "refactor.rewrite",
+    ],
   });
 
   // Go to definition, across the modules of one workbook and never past it.
@@ -2249,6 +2306,26 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
 
   // Encapsulate Field, on the menu beside the other two. Offered wherever the caret is; when the
   // line declares nothing the refusal says so, which teaches more than a greyed entry.
+  // Extract Variable, beside the other three. A selection is required: there is no expression
+  // to name without one, and the entry would be answering a question nobody asked.
+  editor.addAction({
+    id: "xlide.extractVariable",
+    label: "Extract Variable...",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.55,
+    precondition: "editorHasSelection",
+    run: (target) => {
+      const model = target.getModel();
+      const at = target.getSelection();
+      if (!model || !at || at.isEmpty()) {
+        return;
+      }
+
+      beginExtractVariable(
+        bridge, model.getOffsetAt(at.getStartPosition()), model.getOffsetAt(at.getEndPosition()));
+    },
+  });
+
   editor.addAction({
     id: "xlide.encapsulateField",
     label: "Encapsulate Field",

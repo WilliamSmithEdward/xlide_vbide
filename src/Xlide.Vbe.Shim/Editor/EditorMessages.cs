@@ -739,6 +739,20 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Extract Variable: the name it made, the type the analyzer gave it, and
+/// whether it needed Set - or the reason nothing was made.
+/// </summary>
+public sealed record ExtractVariableResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("variable")] string? Variable,
+    [property: JsonPropertyName("declaredType")] string? DeclaredType,
+    [property: JsonPropertyName("isObject")] bool IsObject,
+    [property: JsonPropertyName("expression")] string? Expression,
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Encapsulate Field: what became a property, what the variable behind it is
 /// called, and the two members written - or the reason nothing changed.
 /// </summary>
@@ -981,6 +995,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ExtractResultMessage))]
 [JsonSerializable(typeof(ImplementResultMessage))]
 [JsonSerializable(typeof(EncapsulateResultMessage))]
+[JsonSerializable(typeof(ExtractVariableResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

@@ -692,6 +692,34 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what naming the expression over a span would make of the module. Null when
+    /// there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineExtractVariable Answer, string ProjectId)?> ExtractVariableAsync(
+        string moduleName,
+        int startOffset,
+        int endOffset,
+        string newName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .ExtractVariableAsync(home.ProjectId, moduleName, home.ModuleType, startOffset, endOffset, newName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what encapsulating one module variable would make of its module. Null when
     /// there is no engine or no address for the module.
     /// </summary>

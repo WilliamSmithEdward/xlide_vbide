@@ -554,6 +554,29 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks what naming the expression over a span would make of the module. Offsets rather than
+    /// lines: an expression is part of a line, and rounding a selection to whole lines is what
+    /// this must not do.
+    /// </summary>
+    public async Task<EngineExtractVariable?> ExtractVariableAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int startOffset,
+        int endOffset,
+        string newName,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["startOffset"] = startOffset;
+        payload["endOffset"] = endOffset;
+        payload["newName"] = newName;
+
+        var result = await CallAsync("textDocument/extractVariable", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineExtractVariable);
+    }
+
+    /// <summary>
     /// Asks what putting a property pair in front of one module variable would make of the module.
     /// Whole text back, for the reason rename gives.
     /// </summary>

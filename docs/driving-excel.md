@@ -502,6 +502,20 @@ await api.act("encapsulateField", { fieldName: "Label" });
 //    instead, because VBA assigns one with Set.
 // -> refused for a Const, a WithEvents variable, an array, a declaration shared with another
 //    name, a variable that is already Private, or a name a procedure already has.
+
+// EXTRACT VARIABLE. A selected expression given a name, declared above the statement it came from.
+await api.act("extractVariable", { startLine: 6, startColumn: 17, endLine: 6, endColumn: 26, name: "scaled" });
+// -> { did: true, detail: "extracted scaled" }, and the module holds
+//        Dim scaled As Double
+//        scaled = total * 3
+//        Debug.Print scaled
+//    COLUMNS, because an expression is part of a line - this is the one refactoring here whose
+//    selection is not whole lines. The declared type and whether the assignment needs `Set` are
+//    the ANALYZER's answers, not this product's: `New Collection` comes back
+//    `Dim items As Collection` / `Set items = New Collection`, and getting that wrong is a line
+//    that does not compile.
+// -> { did: false, detail: "'total *' is not a whole expression. ..." } for half an expression,
+//    for the target of an assignment, and for a name already declared in the procedure.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

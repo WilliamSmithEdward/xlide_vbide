@@ -601,6 +601,46 @@ export interface ImplementInterfaceResult {
 }
 
 /**
+ * textDocument/extractVariable: a selected expression given a name, declared and assigned above
+ * the statement it came from.
+ *
+ * OFFSETS rather than lines, unlike Extract Method: an expression is part of a line, and rounding
+ * a selection to whole lines is exactly what this must not do. Whole module text back, for the
+ * reason rename gives.
+ */
+export interface ExtractVariableParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset where the selected expression starts. */
+    startOffset: number;
+    /** UTF-16 offset just past where it ends. */
+    endOffset: number;
+    /** What the new variable is called. */
+    newName: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface ExtractVariableResult {
+    /** The module rewritten. Absent when it was refused. */
+    module?: string;
+    /** What that module says afterwards, whole. */
+    source?: string;
+    /** The variable's name. */
+    variable?: string;
+    /** The type it was declared as, from the analyzer rather than from a guess. */
+    type?: string;
+    /** Whether its assignment needed `Set`, which is the other half of that answer. */
+    isObject?: boolean;
+    /** The expression it now holds, for the summary the surface shows. */
+    expression?: string;
+    /** Present when nothing was extracted, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * textDocument/encapsulateField: a public module variable turned into a private one behind a
  * property pair that keeps the variable's name.
  *

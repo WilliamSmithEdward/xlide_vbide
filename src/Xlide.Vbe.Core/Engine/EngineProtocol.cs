@@ -210,6 +210,21 @@ public sealed record EngineEncapsulateField(
     [property: JsonPropertyName("accessors")] string[]? Accessors,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of an Extract Variable: the one module it rewrites, whole, plus what the analyzer
+/// said the expression was. Refused says why nothing changed.
+/// </summary>
+public sealed record EngineExtractVariable(
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("source")] string? Source,
+    [property: JsonPropertyName("variable")] string? Variable,
+    /// <summary>The declared type, from the analyzer rather than from a guess.</summary>
+    [property: JsonPropertyName("type")] string? Type,
+    /// <summary>Whether its assignment needed Set, which is the other half of that answer.</summary>
+    [property: JsonPropertyName("isObject")] bool? IsObject,
+    [property: JsonPropertyName("expression")] string? Expression,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -319,6 +334,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineExtractMethod))]
 [JsonSerializable(typeof(EngineImplementInterface))]
 [JsonSerializable(typeof(EngineEncapsulateField))]
+[JsonSerializable(typeof(EngineExtractVariable))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

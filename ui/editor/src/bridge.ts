@@ -88,6 +88,7 @@ export type HostMessage =
   | { type: "extractResult"; id: number; procedure?: string | null; from?: string | null; signature?: string | null; module?: string | null; refused?: string | null }
   | { type: "implementResult"; id: number; interfaces: string[]; added: string[]; module?: string | null; refused?: string | null }
   | { type: "encapsulateResult"; id: number; field?: string | null; backingField?: string | null; accessors: string[]; module?: string | null; refused?: string | null }
+  | { type: "extractVariableResult"; id: number; variable?: string | null; declaredType?: string | null; isObject: boolean; expression?: string | null; module?: string | null; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -408,6 +409,16 @@ export interface HostEncapsulateAnswer {
   refused: string | null;
 }
 
+/** What an Extract Variable made, or the reason it made nothing. */
+export interface HostExtractVariableAnswer {
+  variable: string | null;
+  declaredType: string | null;
+  isObject: boolean;
+  expression: string | null;
+  module: string | null;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -515,6 +526,7 @@ export type ClientMessage =
   | { type: "extractMethod"; id: number; startLine: number; endLine: number; newName: string }
   | { type: "implementInterface"; id: number; interfaceName?: string }
   | { type: "encapsulateField"; id: number; fieldName: string }
+  | { type: "extractVariable"; id: number; startOffset: number; endOffset: number; newName: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -712,6 +724,7 @@ export class EditorBridge {
   private readonly pendingExtracts = new RequestTable<HostExtractAnswer>();
   private readonly pendingImplements = new RequestTable<HostImplementAnswer>();
   private readonly pendingEncapsulations = new RequestTable<HostEncapsulateAnswer>();
+  private readonly pendingVariables = new RequestTable<HostExtractVariableAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1553,6 +1566,33 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Gives a selected expression a name, through the host.
+   *
+   * OFFSETS, not lines: an expression is part of a line. The type and whether the assignment
+   * needs `Set` are the analyzer's answers, so nothing here decides them.
+   */
+  requestExtractVariable(startOffset: number, endOffset: number, newName: string): Promise<HostExtractVariableAnswer> {
+    const project = this.activeProject();
+    return this.pendingVariables.ask(
+      () => ({
+        variable: null, declaredType: null, isObject: false, expression: null, module: null,
+        refused: "The extraction timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "extractVariable", id, startOffset, endOffset, newName }))
+      .then((answer) => {
+        this.renameLanded(
+          {
+            modules: answer.refused || !answer.module ? [] : [answer.module],
+            replaced: 1,
+            refused: answer.refused,
+          },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -1936,6 +1976,16 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "extractVariableResult":
+        this.pendingVariables.settle(message.id, {
+          variable: message.variable ?? null,
+          declaredType: message.declaredType ?? null,
+          isObject: message.isObject,
+          expression: message.expression ?? null,
+          module: message.module ?? null,
           refused: message.refused ?? null,
         });
         return;

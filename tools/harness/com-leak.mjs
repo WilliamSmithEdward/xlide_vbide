@@ -417,6 +417,30 @@ await repeat("encapsulating a field and undoing it", 0, async () => {
   await wait(400);
 }, changing);
 
+// Extract Variable on the module the encapsulation row leaves behind: one more write path, and
+// the only one whose answer comes back through the analyzer's expression resolver.
+let leakVariableRound = 0;
+await repeat("extracting a variable and undoing it", 0, async () => {
+  const held = `held${++leakVariableRound}`;
+  await api.writeModule(leakField, [
+    "Option Explicit", "", "Public Sub Go()", "    Dim n As Long", "    n = 2",
+    `    Debug.Print n * ${leakVariableRound}`, "End Sub",
+  ].join(CRLF), project.projectId);
+  await api.caret(6, { module: leakField, project: project.projectId });
+
+  const named = await api.act("extractVariable", {
+    startLine: 6, startColumn: 17, endLine: 6, endColumn: 17 + `n * ${leakVariableRound}`.length,
+    name: held,
+  });
+  if (!named.did) {
+    throw new Error(`the expression was not named, so this row measured nothing: ${named.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
 await api.pane("close", { module: leakField, project: project.projectId, answer: "discard" }).catch(() => {});
 await api.component("remove", { name: leakField, project: project.projectId }).catch(() => {});
 

@@ -37,13 +37,18 @@ export const extractDialogProbe = (): ExtractDialogProbe | null => live;
  * because a name a tool invents is nearly always the wrong one and being made to clear it first
  * is a small tax on every single use.
  */
-export function openExtractDialog(suggested: string, request: ExtractRequest): void {
+export function openExtractDialog(
+  suggested: string,
+  request: ExtractRequest,
+  heading = "Extract method",
+  fieldLabel = "New procedure name",
+): void {
   closeExtractDialog();
 
   const { card, dismiss } = openModal({
     backdropId: "extract-backdrop",
     cardId: "extract-card",
-    label: "Extract method",
+    label: heading,
     closed: () => {
       open = null;
       live = null;
@@ -54,12 +59,12 @@ export function openExtractDialog(suggested: string, request: ExtractRequest): v
   const title = document.createElement("h2");
   title.id = "extract-title";
   title.className = "modal-title";
-  title.textContent = "Extract method";
+  title.textContent = heading;
 
   const label = document.createElement("label");
   label.id = "extract-label";
   label.htmlFor = "extract-name";
-  label.textContent = "New procedure name";
+  label.textContent = fieldLabel;
 
   const name = document.createElement("input");
   name.type = "text";

@@ -52,12 +52,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
   - **Encapsulate Field**: a public module variable becomes a private one behind a property pair
     that keeps its name, so nothing that used it is rewritten - a `Property Let` for a value, a
     `Property Set` for what VBA assigns with one.
+  - **Extract Variable**: a selected expression declared and assigned above the statement it came
+    from. The declared type and whether the assignment needs `Set` are the analyzer's answers
+    (`resolveExpressionType`, filed as xlide_vscode#61 and landed in 6.1.0), because VBA has no
+    assignment form that works for both an object and a value.
 
-  Extract Variable is blocked upstream on xlide_vscode#61, which asks the analyzer for the
-  declared type of the expression over a span: the one fact none of these three needed and the
-  one it cannot do without. Inline, Move to Module and Introduce Parameter are the rest of the
-  set, and they are cheaper now - the selection analysis, the property rendering, the refusal
-  vocabulary and the write-and-undo path are all built.
+  Inline, Move to Module and Introduce Parameter are the rest of the set, and they are cheaper
+  now - the selection analysis, the property rendering, the refusal vocabulary and the
+  write-and-undo path are all built.
 - **The UserForm designer's milestones M1 to M6 have all landed**, so it is no longer a remaining
   milestone; [userform-designer.md](userform-designer.md) stays the ground truth for what it does
   and what it deliberately does not.

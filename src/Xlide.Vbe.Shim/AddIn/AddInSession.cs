@@ -1417,6 +1417,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ExtractMethodRequested = OnExtractMethodRequested;
         _editorSurface.ImplementInterfaceRequested = OnImplementInterfaceRequested;
         _editorSurface.EncapsulateFieldRequested = OnEncapsulateFieldRequested;
+        _editorSurface.ExtractVariableRequested = OnExtractVariableRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7692,6 +7693,111 @@ internal sealed partial class AddInSession : IDisposable
     /// the undo slot. Nothing outside the module changes, because the property keeps the
     /// variable's name.
     /// </summary>
+    /// <summary>
+    /// Gives a selected expression a name: a declaration and its assignment above the statement it
+    /// came from, and the selection replaced by the name.
+    ///
+    /// The fourth of these and the same shape as the three before it. What is different is where
+    /// the TYPE comes from - the analyzer, through resolveExpressionType, rather than from
+    /// anything decided here - and that it also answers whether the assignment needs Set, which no
+    /// rule of thumb over a type name can settle.
+    /// </summary>
+    private void OnExtractVariableRequested(int requestId, int startOffset, int endOffset, string newName)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowVariableExtracted(requestId, null, null, false, null, null,
+                "There is nothing open to extract from.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineExtractVariable? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .ExtractVariableAsync(module, startOffset, endOffset, newName, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was extracted.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The expression could not be worked out, so nothing changed.";
+                Log.Info($"variable: {module} {startOffset}-{endOffset} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && answer?.Source is null)
+            {
+                refused = "The engine did not say what the module should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowVariableExtracted(requestId, null, null, false, null, null, why));
+                return;
+            }
+
+            var made = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore([module], _shownProject);
+
+                try
+                {
+                    if (WriteModule(module, made.Source!, _shownProject, hostRewrite: true) is { } stopped)
+                    {
+                        surface.ShowVariableExtracted(requestId, null, null, false, null, null,
+                            $"'{module}' could not be written, so nothing was extracted. {stopped}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"variable: writing {module} failed", ex);
+                    surface.ShowVariableExtracted(requestId, null, null, false, null, null,
+                        $"'{module}' could not be written, so nothing was extracted.");
+                    return;
+                }
+
+                _undoableRename = new RenameUndo(
+                    made.Expression ?? newName,
+                    made.Variable ?? newName,
+                    null,
+                    _shownProject,
+                    before);
+
+                surface.Sync(module, display, made.Source!);
+
+                Log.Info($"variable: {made.Variable} As {made.Type} = {made.Expression} in {module}");
+                surface.ShowVariableExtracted(
+                    requestId, made.Variable, made.Type, made.IsObject ?? false, made.Expression, module, null);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     private void OnEncapsulateFieldRequested(int requestId, string fieldName)
     {
         var surface = _editorSurface;
