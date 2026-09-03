@@ -2656,6 +2656,30 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * INLINE VARIABLE: `{line, column}` or `{word}` puts the caret on a name and inlines it.
+     *
+     * No dialog and nothing to name - what the variable stands for is already in the code - so
+     * the answer is the host's, in the words the notification shows.
+     */
+    inlineVariable: async (args) => {
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const word = where.model.getWordAtPosition(where.position);
+      if (!word) { return { did: false, detail: "there is no name at that position" }; }
+
+      const answer = await bridge.requestInlineVariable(where.model.getOffsetAt({
+        lineNumber: where.position.lineNumber, column: word.startColumn,
+      }));
+
+      return {
+        did: !answer.refused,
+        detail: answer.refused ?? `${answer.variable} is now ${answer.value}, in ${answer.replaced} use(s)`,
+        data: { variable: answer.variable, value: answer.value, replaced: answer.replaced, refused: answer.refused },
+      };
+    },
+
+    /**
      * EXTRACT VARIABLE, driven the way a developer drives it.
      *
      * `{startLine, startColumn, endLine, endColumn, name}` selects that range - columns, because an

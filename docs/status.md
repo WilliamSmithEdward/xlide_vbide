@@ -57,9 +57,12 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
     (`resolveExpressionType`, filed as xlide_vscode#61 and landed in 6.1.0), because VBA has no
     assignment form that works for both an object and a value.
 
-  Inline, Move to Module and Introduce Parameter are the rest of the set, and they are cheaper
-  now - the selection analysis, the property rendering, the refusal vocabulary and the
-  write-and-undo path are all built.
+  - **Inline Variable**: the pair to the one above - a local replaced by what it was assigned,
+    its declaration and assignment taken away. Only an ATOMIC value, because VBA's brackets are
+    an evaluation rather than grouping: `Foo (x)` passes by value where `Foo x` passes by
+    reference, so parenthesising for precedence would change how every call site binds.
+
+  Move to Module and Introduce Parameter are what is left of the set.
 - **The UserForm designer's milestones M1 to M6 have all landed**, so it is no longer a remaining
   milestone; [userform-designer.md](userform-designer.md) stays the ground truth for what it does
   and what it deliberately does not.

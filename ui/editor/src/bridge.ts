@@ -89,6 +89,7 @@ export type HostMessage =
   | { type: "implementResult"; id: number; interfaces: string[]; added: string[]; module?: string | null; refused?: string | null }
   | { type: "encapsulateResult"; id: number; field?: string | null; backingField?: string | null; accessors: string[]; module?: string | null; refused?: string | null }
   | { type: "extractVariableResult"; id: number; variable?: string | null; declaredType?: string | null; isObject: boolean; expression?: string | null; module?: string | null; refused?: string | null }
+  | { type: "inlineVariableResult"; id: number; variable?: string | null; value?: string | null; replaced: number; module?: string | null; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -419,6 +420,15 @@ export interface HostExtractVariableAnswer {
   refused: string | null;
 }
 
+/** What an Inline Variable did, or the reason it did nothing. */
+export interface HostInlineVariableAnswer {
+  variable: string | null;
+  value: string | null;
+  replaced: number;
+  module: string | null;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -527,6 +537,7 @@ export type ClientMessage =
   | { type: "implementInterface"; id: number; interfaceName?: string }
   | { type: "encapsulateField"; id: number; fieldName: string }
   | { type: "extractVariable"; id: number; startOffset: number; endOffset: number; newName: string }
+  | { type: "inlineVariable"; id: number; offset: number }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -725,6 +736,7 @@ export class EditorBridge {
   private readonly pendingImplements = new RequestTable<HostImplementAnswer>();
   private readonly pendingEncapsulations = new RequestTable<HostEncapsulateAnswer>();
   private readonly pendingVariables = new RequestTable<HostExtractVariableAnswer>();
+  private readonly pendingInlines = new RequestTable<HostInlineVariableAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1593,6 +1605,31 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Replaces a local with what it was assigned, through the host. Nothing to ask the developer:
+   * what the name stands for is already in the code.
+   */
+  requestInlineVariable(offset: number): Promise<HostInlineVariableAnswer> {
+    const project = this.activeProject();
+    return this.pendingInlines.ask(
+      () => ({
+        variable: null, value: null, replaced: 0, module: null,
+        refused: "The request timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "inlineVariable", id, offset }))
+      .then((answer) => {
+        this.renameLanded(
+          {
+            modules: answer.refused || !answer.module ? [] : [answer.module],
+            replaced: answer.replaced,
+            refused: answer.refused,
+          },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -1976,6 +2013,15 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "inlineVariableResult":
+        this.pendingInlines.settle(message.id, {
+          variable: message.variable ?? null,
+          value: message.value ?? null,
+          replaced: message.replaced,
+          module: message.module ?? null,
           refused: message.refused ?? null,
         });
         return;

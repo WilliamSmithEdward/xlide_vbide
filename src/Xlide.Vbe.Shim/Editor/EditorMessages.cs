@@ -739,6 +739,19 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Inline Variable: the name that is gone, what stands in its place, and how
+/// many uses took it - or the reason nothing changed.
+/// </summary>
+public sealed record InlineVariableResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("variable")] string? Variable,
+    [property: JsonPropertyName("value")] string? Value,
+    [property: JsonPropertyName("replaced")] int Replaced,
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Extract Variable: the name it made, the type the analyzer gave it, and
 /// whether it needed Set - or the reason nothing was made.
 /// </summary>
@@ -996,6 +1009,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ImplementResultMessage))]
 [JsonSerializable(typeof(EncapsulateResultMessage))]
 [JsonSerializable(typeof(ExtractVariableResultMessage))]
+[JsonSerializable(typeof(InlineVariableResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

@@ -261,7 +261,10 @@ function fieldOn(model: monaco.editor.ITextModel | null, line: number): string |
     return null;
   }
 
-  const declared = /^\s*(?:Public|Friend|Global|Dim)\s+(?:WithEvents\s+)?([\p{L}_][\p{L}\p{M}\p{N}_]*)/u
+  // NOT `Dim`, which at module level means Private - a thing Encapsulate Field refuses anyway -
+  // and inside a procedure means a LOCAL, where the entry was appearing on every `Dim` a
+  // developer had their caret in, and taking the place of the Inline entry that belongs there.
+  const declared = /^\s*(?:Public|Friend|Global)\s+(?:WithEvents\s+)?([\p{L}_][\p{L}\p{M}\p{N}_]*)/u
     .exec(model.getLineContent(line));
   return declared ? (declared[1] as string) : null;
 }
@@ -293,6 +296,19 @@ function beginImplementInterface(bridge: EditorBridge, interfaceName?: string): 
 
     const members = `${answer.added.length} member${answer.added.length === 1 ? "" : "s"}`;
     bridge.shell?.notify(`Implemented ${members} of ${answer.interfaces.join(", ")}: ${answer.added.join(", ")}`);
+  });
+}
+
+/** Inline Variable, from the lightbulb or the menu. Nothing to name: the value is in the code. */
+function beginInlineVariable(bridge: EditorBridge, offset: number): void {
+  void bridge.requestInlineVariable(offset).then((answer) => {
+    if (answer.refused) {
+      bridge.shell?.notify(answer.refused);
+      return;
+    }
+
+    const uses = `${answer.replaced} use${answer.replaced === 1 ? "" : "s"}`;
+    bridge.shell?.notify(`${answer.variable} is now ${answer.value}, in ${uses}`);
   });
 }
 
@@ -1431,6 +1447,7 @@ function boot(): void {
   const IMPLEMENT_INTERFACE_COMMAND = "xlide.refactor.implementInterface";
   const ENCAPSULATE_FIELD_COMMAND = "xlide.refactor.encapsulateField";
   const EXTRACT_VARIABLE_COMMAND = "xlide.refactor.extractVariable";
+  const INLINE_VARIABLE_COMMAND = "xlide.refactor.inlineVariable";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1488,7 +1505,10 @@ function boot(): void {
       // SELECTION rather than a finding, so gating it on there being a squiggle meant the one
       // case it exists for - working code a developer wants to tidy - was the one case that
       // offered nothing.
-      if (markers.length === 0 && !selected && !promised && !declaredField) {
+      const onAWord = selection !== null && selection.isEmpty() && model === editor.getModel()
+        && model.getWordAtPosition(selection.getStartPosition()) !== null;
+
+      if (markers.length === 0 && !selected && !promised && !declaredField && !onAWord) {
         return none;
       }
 
@@ -1588,6 +1608,26 @@ function boot(): void {
         });
       }
 
+      // A caret on a local's own name, which is where inlining is asked for. Whether it CAN be
+      // inlined is the engine's answer - one assignment, an atomic value - so the entry appears on
+      // any bare word and the refusal explains, which is the same bargain the other three make.
+      if (selection && selection.isEmpty() && model === editor.getModel()) {
+        const word = model.getWordAtPosition(selection.getStartPosition());
+        if (word && !promised && !declaredField) {
+          actions.push({
+            title: `Inline '${word.word}'`,
+            kind: "refactor.inline",
+            command: {
+              id: INLINE_VARIABLE_COMMAND,
+              title: "Inline variable",
+              arguments: [model.getOffsetAt({
+                lineNumber: selection.startLineNumber, column: word.startColumn,
+              })],
+            },
+          });
+        }
+      }
+
       if (declaredField) {
         actions.push({
           title: `Encapsulate '${declaredField}' in a property`,
@@ -1646,6 +1686,10 @@ function boot(): void {
     beginExtractVariable(bridge, from, to);
   });
 
+  monaco.editor.registerCommand(INLINE_VARIABLE_COMMAND, (_accessor, offset: number) => {
+    beginInlineVariable(bridge, offset);
+  });
+
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
@@ -1653,6 +1697,7 @@ function boot(): void {
     // method is a menu entry with no key to reach it by.
     providedCodeActionKinds: [
       "quickfix", "refactor.extract.function", "refactor.extract.constant", "refactor.rewrite",
+      "refactor.inline",
     ],
   });
 
@@ -2308,6 +2353,25 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // line declares nothing the refusal says so, which teaches more than a greyed entry.
   // Extract Variable, beside the other three. A selection is required: there is no expression
   // to name without one, and the entry would be answering a question nobody asked.
+  // Inline Variable, beside the rest. No selection needed - the caret on the name is the ask.
+  editor.addAction({
+    id: "xlide.inlineVariable",
+    label: "Inline Variable",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.56,
+    run: (target) => {
+      const model = target.getModel();
+      const at = target.getPosition();
+      const word = model && at ? model.getWordAtPosition(at) : null;
+      if (!model || !at || !word) {
+        bridge.shell?.notify("Put the caret on a local variable's name to inline it.");
+        return;
+      }
+
+      beginInlineVariable(bridge, model.getOffsetAt({ lineNumber: at.lineNumber, column: word.startColumn }));
+    },
+  });
+
   editor.addAction({
     id: "xlide.extractVariable",
     label: "Extract Variable...",

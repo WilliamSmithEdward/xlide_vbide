@@ -516,6 +516,17 @@ await api.act("extractVariable", { startLine: 6, startColumn: 17, endLine: 6, en
 //    that does not compile.
 // -> { did: false, detail: "'total *' is not a whole expression. ..." } for half an expression,
 //    for the target of an assignment, and for a name already declared in the procedure.
+
+// INLINE VARIABLE, its pair: the local goes and every use takes its value.
+await api.act("inlineVariable", { word: "limit" });
+// -> { did: true, detail: "limit is now 10, in 2 use(s)" }
+//    ONLY AN ATOMIC VALUE - a literal, or a name with its member chain. In VBA `Foo (x)` passes
+//    by value where `Foo x` passes by reference, so an inliner that adds brackets for precedence
+//    changes how every call site binds; an atomic value never needs them. It also settles
+//    evaluation count, since reading a literal or a name has no side effect.
+// -> refused for an expression that would need brackets, a call (which would be made once per
+//    use), a variable assigned more than once or read before it is assigned, a parameter, and a
+//    Const.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

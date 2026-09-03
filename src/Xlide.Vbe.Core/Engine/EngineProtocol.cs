@@ -225,6 +225,18 @@ public sealed record EngineExtractVariable(
     [property: JsonPropertyName("expression")] string? Expression,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of an Inline Variable: the one module it rewrites, whole, with what the name stood
+/// for and how many uses took its place. Refused says why nothing changed.
+/// </summary>
+public sealed record EngineInlineVariable(
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("source")] string? Source,
+    [property: JsonPropertyName("variable")] string? Variable,
+    [property: JsonPropertyName("value")] string? Value,
+    [property: JsonPropertyName("replaced")] int? Replaced,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -335,6 +347,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineImplementInterface))]
 [JsonSerializable(typeof(EngineEncapsulateField))]
 [JsonSerializable(typeof(EngineExtractVariable))]
+[JsonSerializable(typeof(EngineInlineVariable))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

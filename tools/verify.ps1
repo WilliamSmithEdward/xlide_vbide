@@ -741,6 +741,10 @@ if ($Live) {
                                      # into a real project, where the symbols are the
                                      # workbook's rather than a synthetic pair of modules'.
                                      'extract-variable.mjs',
+                                     # inline-variable is extract-variable's pair, and runs the
+                                     # round trip neither can run alone: extract a value back out
+                                     # of what was inlined and the module comes back.
+                                     'inline-variable.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

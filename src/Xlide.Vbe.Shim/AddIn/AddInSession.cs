@@ -1418,6 +1418,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ImplementInterfaceRequested = OnImplementInterfaceRequested;
         _editorSurface.EncapsulateFieldRequested = OnEncapsulateFieldRequested;
         _editorSurface.ExtractVariableRequested = OnExtractVariableRequested;
+        _editorSurface.InlineVariableRequested = OnInlineVariableRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7693,6 +7694,109 @@ internal sealed partial class AddInSession : IDisposable
     /// the undo slot. Nothing outside the module changes, because the property keeps the
     /// variable's name.
     /// </summary>
+    /// <summary>
+    /// Replaces a local with what it was assigned, and takes its declaration away.
+    ///
+    /// Nothing is asked of the developer: what the name stands for is already in the code. The
+    /// engine refuses anything it cannot do without deciding a question of VBA's - brackets around
+    /// an argument change how it binds - so the host's half is the usual write, sync and undo.
+    /// </summary>
+    private void OnInlineVariableRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowVariableInlined(requestId, null, null, 0, null,
+                "There is nothing open to inline in.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineInlineVariable? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .InlineVariableAsync(module, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was inlined.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The value could not be worked out, so nothing changed.";
+                Log.Info($"inline: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && answer?.Source is null)
+            {
+                refused = "The engine did not say what the module should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowVariableInlined(requestId, null, null, 0, null, why));
+                return;
+            }
+
+            var made = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore([module], _shownProject);
+
+                try
+                {
+                    if (WriteModule(module, made.Source!, _shownProject, hostRewrite: true) is { } stopped)
+                    {
+                        surface.ShowVariableInlined(requestId, null, null, 0, null,
+                            $"'{module}' could not be written, so nothing was inlined. {stopped}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"inline: writing {module} failed", ex);
+                    surface.ShowVariableInlined(requestId, null, null, 0, null,
+                        $"'{module}' could not be written, so nothing was inlined.");
+                    return;
+                }
+
+                _undoableRename = new RenameUndo(
+                    made.Variable ?? string.Empty,
+                    made.Value ?? string.Empty,
+                    null,
+                    _shownProject,
+                    before);
+
+                surface.Sync(module, display, made.Source!);
+
+                Log.Info($"inline: {made.Variable} -> {made.Value} in {module}, {made.Replaced} use(s)");
+                surface.ShowVariableInlined(
+                    requestId, made.Variable, made.Value, made.Replaced ?? 0, module, null);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     /// <summary>
     /// Gives a selected expression a name: a declaration and its assignment above the statement it
     /// came from, and the selection replaced by the name.

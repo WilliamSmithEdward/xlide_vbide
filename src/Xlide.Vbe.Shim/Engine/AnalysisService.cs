@@ -692,6 +692,32 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what replacing a local with what it was assigned would make of the module.
+    /// Null when there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineInlineVariable Answer, string ProjectId)?> InlineVariableAsync(
+        string moduleName,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .InlineVariableAsync(home.ProjectId, moduleName, home.ModuleType, offset, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what naming the expression over a span would make of the module. Null when
     /// there is no engine or no address for the module.
     /// </summary>

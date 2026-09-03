@@ -601,6 +601,39 @@ export interface ImplementInterfaceResult {
 }
 
 /**
+ * textDocument/inlineVariable: a local replaced by what it was assigned, its declaration and its
+ * assignment taken away.
+ *
+ * An offset rather than a span: the caret is on the name, and which name it is decides everything.
+ * Whole module text back, for the reason rename gives.
+ */
+export interface InlineVariableParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset of the name being inlined. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface InlineVariableResult {
+    /** The module rewritten. Absent when it was refused. */
+    module?: string;
+    /** What that module says afterwards, whole. */
+    source?: string;
+    /** The name that is gone. */
+    variable?: string;
+    /** What stands in its place now. */
+    value?: string;
+    /** How many uses it replaced, for the summary the surface shows. */
+    replaced?: number;
+    /** Present when nothing was inlined, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * textDocument/extractVariable: a selected expression given a name, declared and assigned above
  * the statement it came from.
  *

@@ -320,6 +320,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, startOffset, endOffset, newName). Offsets are into the module live text.</summary>
     public Action<int, int, int, string>? ExtractVariableRequested { get; set; }
 
+    /// <summary>Raised when the page asks to replace a local with what it was assigned:
+    /// (requestId, offset of the name).</summary>
+    public Action<int, int>? InlineVariableRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -486,6 +490,26 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Inline Variable: what went, or why nothing did.</summary>
+    public void ShowVariableInlined(
+        int requestId,
+        string? variable,
+        string? value,
+        int replaced,
+        string? module,
+        string? refused)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new InlineVariableResultMessage(
+                "inlineVariableResult", requestId, variable, value, replaced, module, refused),
+            EditorMessageContext.Default.InlineVariableResultMessage));
     }
 
     /// <summary>Answers one Extract Variable: what was named, or why nothing was.</summary>
@@ -2547,6 +2571,18 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "inlineVariable":
+                    if (document.RootElement.TryGetProperty("id", out var inlineId)
+                        && inlineId.TryGetInt32(out var inlineRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var inlineOffsetElement)
+                        && inlineOffsetElement.TryGetInt32(out var inlineOffset)
+                        && inlineOffset >= 0)
+                    {
+                        InlineVariableRequested?.Invoke(inlineRequestId, inlineOffset);
                     }
 
                     break;

@@ -554,6 +554,23 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks what replacing a local with what it was assigned would make of the module.
+    /// </summary>
+    public async Task<EngineInlineVariable?> InlineVariableAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["offset"] = offset;
+
+        var result = await CallAsync("textDocument/inlineVariable", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineInlineVariable);
+    }
+
+    /// <summary>
     /// Asks what naming the expression over a span would make of the module. Offsets rather than
     /// lines: an expression is part of a line, and rounding a selection to whole lines is what
     /// this must not do.
