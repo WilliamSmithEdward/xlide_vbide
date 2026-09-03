@@ -27,6 +27,7 @@ import { analyzerInputFor } from './analyzerInput.js';
 import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
+import { extractMethodFor } from './extractMethod';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
@@ -68,6 +69,8 @@ import {
     type OutlineResult,
     type ProjectOpenParams,
     type RenameModuleParams,
+    type ExtractMethodParams,
+    type ExtractMethodResult,
     type RenameParams,
     type RenameResult,
     type SearchParams,
@@ -392,6 +395,9 @@ export class Dispatcher {
             case 'textDocument/rename':
                 return this.rename(this.require<RenameParams>(params));
 
+            case 'textDocument/extractMethod':
+                return this.extractMethod(this.require<ExtractMethodParams>(params));
+
             case 'workspace/renameModule':
                 return this.renameModule(this.require<RenameModuleParams>(params));
 
@@ -655,6 +661,24 @@ export class Dispatcher {
 
         const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
         return renameFor(symbols, params.moduleName, source, params.offset, params.newName);
+    }
+
+    private extractMethod(params: ExtractMethodParams): ExtractMethodResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { refused: 'This module is not one the engine holds.' };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return extractMethodFor(
+            symbols,
+            params.moduleName,
+            source,
+            params.startLine,
+            params.endLine,
+            params.newName);
     }
 
     private renameModule(params: RenameModuleParams): RenameResult {

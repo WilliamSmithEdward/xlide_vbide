@@ -1,6 +1,11 @@
 # Extract Method
 
-The first refactoring beyond rename, and the head of a set.
+The first refactoring beyond rename, and the head of a set. **Shipped 2026-09-03.**
+
+What is below is the design as it was written, kept because it is still what the feature does.
+What shipped differs from it in three places, each recorded at the end under
+[What shipped](#what-shipped): the name is asked for in a dialog rather than the editor's inline
+rename box, only a plainly-value-typed result becomes a `Function`, and the refusal list grew.
 
 `rename` and `renameModule` are the only refactorings this product has - measured against the
 live action vocabulary on 2026-08-30, and there is no groundwork for another in this repo or in
@@ -146,3 +151,42 @@ suite can drive every refusal above.
 
 Step 1 was the whole risk and it is done. Step 2 is ordinary work on top of the rename
 machinery, which already applies multi-site edits through the host and has an undo.
+
+## What shipped
+
+Both steps, 2026-09-03. `engine/src/extractMethod.ts` works out the transformation and every
+refusal; `textDocument/extractMethod` carries it; `AddInSession.OnExtractMethodRequested` writes
+the one module, syncs the open tab and fills the undo slot; the page offers it from the lightbulb
+(`refactor.extract.function`) and the right-click menu, and `ui/editor/src/extractdialog.ts` asks
+for the name. 34 checks in `engine/test/extract-method.mjs`, 16 in
+`tools\harness\extract-method.mjs`, and a round in `com-leak.mjs`.
+
+Three departures from the design above, each deliberate:
+
+- **A dialog, not the inline rename box.** The editor's rename widget is bound to a symbol at a
+  position and is not public API; reusing it for an operation on a selection is not something the
+  editor offers. The dialog is one labelled field, and it earns its keep on the refusals: it
+  STAYS UP carrying the reason, so a developer who selected half an `If` reads what happened and
+  reselects, rather than watching it go past as a toast.
+
+- **Only a plainly-value-typed result becomes the `Function`'s return.** VBA assigns an object
+  with `Set` and a value without it, and the declared type is the only evidence in reach. So a
+  result declared `Long`, `String`, `Currency` and the rest becomes the return; anything else -
+  an object, a user-defined type, an array, and `Variant`, which can hold either - becomes a
+  `ByRef` parameter and the procedure stays a `Sub`. Always correct, at the cost of a less
+  pretty signature in the cases where nobody can tell in advance.
+
+- **The refusal list grew** by what the first suite found: a selection taking the header line or
+  the closer, a procedure with no closer, a blank selection, a name that is not a VBA name, a
+  name the module already uses, and `GoSub`. The `With` case turned out to have a third shape
+  the design did not name - a selection wholly INSIDE the block, which is neither opening nor
+  closing within it - and it is refused only when the selection actually uses a leading dot,
+  because statements inside a `With` that never use one move perfectly well.
+
+One correction to the analysis above, found by the suite. `total = total + step` reports the
+write at column 5 and the read at column 13, so reading the reference kinds in COLUMN order says
+the callee writes `total` before it reads it - which makes it the return value instead of a
+`ByRef` parameter, and silently drops the caller's running total. A statement evaluates its
+right-hand side before it assigns, so the kinds are read by LINE, and a read anywhere on the
+first line that writes counts as reading first. That errs the safe way too: passing a value the
+callee did not need costs an argument, and not passing one it did costs the developer their data.

@@ -85,6 +85,7 @@ export type HostMessage =
   | { type: "semanticTokensResult"; id: number; tokens: HostSemanticToken[]; failed?: boolean }
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
+  | { type: "extractResult"; id: number; procedure?: string | null; from?: string | null; signature?: string | null; module?: string | null; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -379,6 +380,15 @@ export interface HostRenameAnswer {
   refused: string | null;
 }
 
+/** What an Extract Method made, or the reason it made nothing. */
+export interface HostExtractAnswer {
+  procedure: string | null;
+  from: string | null;
+  signature: string | null;
+  module: string | null;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -483,6 +493,7 @@ export type ClientMessage =
   | { type: "definition"; id: number; offset: number }
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
   | { type: "rename"; id: number; offset: number; newName: string }
+  | { type: "extractMethod"; id: number; startLine: number; endLine: number; newName: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -677,6 +688,7 @@ export class EditorBridge {
   private readonly pendingSemanticTokens = new RequestTable<HostSemanticToken[] | null>();
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
+  private readonly pendingExtracts = new RequestTable<HostExtractAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1435,6 +1447,35 @@ export class EditorBridge {
       .then((answer) => this.renameLanded(answer, project ?? this.activeProject()));
   }
 
+  /**
+   * Lifts the selected lines into their own procedure, through the host.
+   *
+   * The HOST does the writing, the way rename does, so nothing is edited here: the module comes
+   * back through the ordinary document sync. What is recorded here is that the next Ctrl+Z means
+   * put it back - an edit the host made is not on this editor's undo stack, and without this the
+   * key would take back whatever the developer typed before it instead.
+   */
+  requestExtractMethod(startLine: number, endLine: number, newName: string): Promise<HostExtractAnswer> {
+    const project = this.activeProject();
+    return this.pendingExtracts.ask(
+      () => ({
+        procedure: null, from: null, signature: null, module: null,
+        refused: "The extraction timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "extractMethod", id, startLine, endLine, newName }))
+      .then((answer) => {
+        this.renameLanded(
+          {
+            modules: answer.refused || !answer.module ? [] : [answer.module],
+            replaced: 1,
+            refused: answer.refused,
+          },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -1818,6 +1859,15 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "extractResult":
+        this.pendingExtracts.settle(message.id, {
+          procedure: message.procedure ?? null,
+          from: message.from ?? null,
+          signature: message.signature ?? null,
+          module: message.module ?? null,
           refused: message.refused ?? null,
         });
         return;

@@ -2188,6 +2188,53 @@ body.live-resize .minimap {
   padding: 16px;
 }
 
+/* The extract dialog: a title, one labelled field, a refusal that appears under it, and the
+   shared button row. Same shape of thing as the two confirm cards, so it pads its own parts. */
+#extract-card {
+  width: 380px;
+  padding: 16px;
+}
+
+#extract-label {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+#extract-name {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 3px;
+  background: var(--vscode-input-background, rgba(128, 128, 128, 0.12));
+  color: var(--vscode-input-foreground, inherit);
+  font: inherit;
+}
+
+#extract-name:focus {
+  outline: none;
+  border-color: var(--vscode-focusBorder, #0078d4);
+}
+
+/* Refused for a reason about the SELECTION, usually, so it gets room to be a sentence rather
+   than a word. The border carries the same meaning as the colour, because colour alone must
+   never be what says a field is wrong. */
+#extract-name[aria-invalid="true"] {
+  border-color: var(--vscode-inputValidation-errorBorder, #be1100);
+}
+
+#extract-problem {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--vscode-inputValidation-errorBorder, #be1100);
+  background: var(--vscode-inputValidation-errorBackground, rgba(190, 17, 0, 0.12));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .modal-title {
   font-weight: 600;
   line-height: 1.4;

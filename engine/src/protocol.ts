@@ -531,6 +531,45 @@ export interface RenameResult {
 }
 
 /**
+ * textDocument/extractMethod: whole selected statements lifted into a Private procedure below the
+ * one they came from, with the selection replaced by the call.
+ *
+ * Lines rather than offsets, because extraction is a statement operation: half a statement cannot
+ * become a procedure, and a surface that sends a character range would have to round it to whole
+ * lines anyway - in a second place, differently. Whole module text back, for the reason rename
+ * gives: the add-in writes modules.
+ */
+export interface ExtractMethodParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** First selected line, 1-based and inclusive. */
+    startLine: number;
+    /** Last selected line, 1-based and inclusive. */
+    endLine: number;
+    /** What the new procedure is called. */
+    newName: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface ExtractMethodResult {
+    /** The module the extraction rewrites. Absent when it was refused. */
+    module?: string;
+    /** What that module says afterwards, whole. */
+    source?: string;
+    /** The new procedure's name, so the surface can say what it made. */
+    procedure?: string;
+    /** The header it was given, which is the part a developer checks first. */
+    signature?: string;
+    /** The procedure the statements came out of. */
+    from?: string;
+    /** Present when nothing was extracted, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * workspace/renameModule: the new text of every module that mentions a module being renamed.
  *
  * The module's own name is not in its text - it belongs to the component, which the add-in

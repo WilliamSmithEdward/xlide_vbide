@@ -304,6 +304,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, moduleName, workbook or null, newName).</summary>
     public Action<int, string, string?, string>? ModuleRenameRequested { get; set; }
 
+    /// <summary>Raised when the page asks to lift selected lines into their own procedure:
+    /// (requestId, startLine, endLine, newName). Lines are 1-based and inclusive.</summary>
+    public Action<int, int, int, string>? ExtractMethodRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -470,6 +474,25 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Extract Method: what was made, or why nothing was.</summary>
+    public void ShowExtracted(
+        int requestId,
+        string? procedure,
+        string? from,
+        string? signature,
+        string? module,
+        string? refused)
+    {
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ExtractResultMessage("extractResult", requestId, procedure, from, signature, module, refused),
+            EditorMessageContext.Default.ExtractResultMessage));
     }
 
     /// <summary>Answers one navigation request. Never held: the caret moves and the answer lapses.</summary>
@@ -2448,6 +2471,23 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "extractMethod":
+                    if (document.RootElement.TryGetProperty("id", out var extractId)
+                        && extractId.TryGetInt32(out var extractRequestId)
+                        && document.RootElement.TryGetProperty("startLine", out var extractStartElement)
+                        && extractStartElement.TryGetInt32(out var extractStart)
+                        && document.RootElement.TryGetProperty("endLine", out var extractEndElement)
+                        && extractEndElement.TryGetInt32(out var extractEnd)
+                        && extractStart >= 1
+                        && extractEnd >= extractStart
+                        && document.RootElement.TryGetProperty("newName", out var extractNameElement)
+                        && extractNameElement.GetString() is { Length: > 0 } extractName)
+                    {
+                        ExtractMethodRequested?.Invoke(extractRequestId, extractStart, extractEnd, extractName);
                     }
 
                     break;

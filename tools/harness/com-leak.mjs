@@ -323,6 +323,36 @@ await repeat("reading and writing a module", 0, async () => {
   await wait(500);
 }, changing);
 
+// Extract Method reads the module for the undo slot, writes it, and syncs it into the open tab -
+// three trips through the component every round, on a path that is one of only two that write a
+// module the developer did not type in. Undone at the end of each round, so the module the sweep
+// borrows comes back as it was and the round after this one measures the same thing.
+await repeat("extracting a method and undoing it", 0, async () => {
+  const held = (await api.readModule(sample, project.projectId)).text ?? "";
+  const lines = held.split(/\r\n|\r|\n/);
+  // The first line inside a procedure, which is all the extraction needs: a statement to lift.
+  const opens = lines.findIndex((one) => /^\s*(Public|Private|Friend)?\s*(Sub|Function)\b/i.test(one));
+  const closes = lines.findIndex((one, at) => at > opens && /^\s*End\s+(Sub|Function)\b/i.test(one));
+  if (opens < 0 || closes <= opens + 1) {
+    throw new Error(`${sample} holds no procedure to extract from, so this row would measure nothing`);
+  }
+
+  await api.caret(opens + 2, { module: sample, project: project.projectId });
+  const lifted = await api.act("extractMethod", {
+    startLine: opens + 2, endLine: closes, name: `LeakLift${Date.now() % 100000}`,
+  });
+
+  // A REFUSED round takes no wrappers, so a row that quietly stopped extracting would report a
+  // perfect score for measuring nothing at all.
+  if (!lifted.did) {
+    throw new Error(`the extraction was refused, so this row measured nothing: ${lifted.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
 await repeat("renaming a component and back", 0, async () => {
   await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
   await wait(600);

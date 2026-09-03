@@ -166,6 +166,22 @@ public sealed record EngineRename(
     /// </summary>
     [property: JsonPropertyName("module")] string? Module = null);
 
+/// <summary>
+/// The result of an Extract Method: the one module it rewrites, whole. Refused says why nothing
+/// changed, in the words the surface shows - a refactoring that cannot be made safely must make
+/// no part of itself.
+/// </summary>
+public sealed record EngineExtractMethod(
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("source")] string? Source,
+    /// <summary>The new procedure's name, as it was actually created.</summary>
+    [property: JsonPropertyName("procedure")] string? Procedure,
+    /// <summary>Its header, which is the part a developer checks first.</summary>
+    [property: JsonPropertyName("signature")] string? Signature,
+    /// <summary>The procedure the statements came out of.</summary>
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -272,6 +288,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineSemanticTokens))]
 [JsonSerializable(typeof(EngineRenamedModule))]
 [JsonSerializable(typeof(EngineRename))]
+[JsonSerializable(typeof(EngineExtractMethod))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

@@ -716,6 +716,15 @@ if ($Live) {
                                      'designer-features.mjs', 'test-runner.mjs',
                                      'pane-scope.mjs',
                                      'inline-comments-live.mjs', 'analysis-rules-live.mjs',
+                                     # extract-method adds a carrier module too, and it is here
+                                     # rather than beside rename-features because it needs
+                                     # nothing of any fixture: it writes the code it extracts
+                                     # from. Its one question the engine's own suite cannot ask
+                                     # is whether the HOST's module ends up holding the result -
+                                     # the page can show a perfect extraction over a module the
+                                     # VBE still compiles the old text of, and that failure looks
+                                     # identical from the page's side.
+                                     'extract-method.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

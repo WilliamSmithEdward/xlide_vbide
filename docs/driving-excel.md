@@ -455,6 +455,21 @@ await api.act("references", { word: "Recalculate", open: 1 });  // and LEAVE the
                                                 //   as Shift+F12 does; ui.dialogs then sees it
 await api.act("rename", { word: "Recalculate", newName: "Recompute" });  // CHANGES STATE
 await api.undoRename();                                 // and puts it back
+
+// EXTRACT METHOD, the first refactoring beyond rename. Selects those lines, runs the same editor
+// action the right-click menu and the lightbulb run, types the name into the dialog that opens
+// and presses Extract - the menu path, not a back door, so a passing check has driven the menu.
+await api.act("extractMethod", { startLine: 9, endLine: 14, name: "SumPositiveColumn" });
+// -> { did: true, detail: "extracted SumPositiveColumn" }, and the module now holds a Private
+//    procedure below the one the lines came from, with the selection replaced by the call. The
+//    signature is worked out from the analyzer's reference kinds: read before written inside is a
+//    ByVal parameter, written inside and read after is the result (or a ByRef parameter when its
+//    type cannot be returned without Set), written inside and read nowhere else moves its Dim.
+// -> { did: false, detail: "The selection jumps to 'Fail', which is outside it. ..." } when it
+//    declines - and it declines rather than change what the code means. The refusal is the
+//    DIALOG's wording, because that is what a developer would be reading; `ui.extract` carries it
+//    while the dialog stands, and `act("extractDialog", {press: "cancel"})` takes it down.
+await api.act("undo");                          // Ctrl+Z puts an extraction back, like a rename
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

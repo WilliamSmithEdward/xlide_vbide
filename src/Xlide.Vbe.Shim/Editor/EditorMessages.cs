@@ -739,6 +739,20 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Extract Method: what was made, out of what, and the header it was given - or
+/// the reason nothing was made. Like a rename, the new text is not sent back: the host has already
+/// written it and the open tab is refreshed by the ordinary document sync.
+/// </summary>
+public sealed record ExtractResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("procedure")] string? Procedure,
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("signature")] string? Signature,
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// One place in the workbook: the module, its workbook's display name, and a 1-based line and
 /// column into the module's live text.
 /// </summary>
@@ -939,6 +953,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SurfaceSemanticToken))]
 [JsonSerializable(typeof(SemanticTokensResultMessage))]
 [JsonSerializable(typeof(RenameResultMessage))]
+[JsonSerializable(typeof(ExtractResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

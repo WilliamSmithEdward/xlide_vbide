@@ -663,6 +663,35 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what lifting the selected lines out of a module would make of it. Null when
+    /// there is no engine or no address for the module, which is a different fact from an
+    /// extraction the engine refused and said why.
+    /// </summary>
+    public async Task<(EngineExtractMethod Answer, string ProjectId)?> ExtractMethodAsync(
+        string moduleName,
+        int startLine,
+        int endLine,
+        string newName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .ExtractMethodAsync(home.ProjectId, moduleName, home.ModuleType, startLine, endLine, newName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what renaming a module would make of every module that mentions it. Null
     /// when there is no engine or no address for the module.
     /// </summary>

@@ -33,6 +33,7 @@ import { currentSettings } from "./settings.js";
 import { namesTheSameWorkbook } from "./documents.js";
 import { changesPaneProbe } from "./changespane.js";
 import { agentDialogProbe } from "./agentdialog.js";
+import { extractDialogProbe } from "./extractdialog.js";
 import { syncDialogProbe } from "./syncdialog.js";
 
 /** What is standing in front of the page, since a modal swallows every key sent at the surface. */
@@ -133,6 +134,18 @@ export interface UiSnapshot {
     busy: boolean;
     text: string;
     copied: boolean;
+  } | null;
+
+  /**
+   * The extract dialog while it stands, null otherwise. `refused` is the refusal a developer is
+   * reading, in the dialog's own words: a check that asserts on it is asserting on what they see
+   * rather than on a message the host sent that nothing may have shown.
+   */
+  extract: {
+    open: boolean;
+    name: string;
+    busy: boolean;
+    refused: string | null;
   } | null;
   changes: {
     project: string;
@@ -531,6 +544,19 @@ type ActAnswer = ActResult | Promise<ActResult>;
 export function installDevSurface(parts: DevSurfaceParts): void {
   const { workspace, explorer, bridge, designer } = parts;
 
+  /** The extract dialog once it is up, or null when it never came. Polled, never slept at. */
+  const waitForDialog = async (): Promise<ReturnType<typeof extractDialogProbe>> => {
+    const until = Date.now() + 4000;
+    while (Date.now() < until) {
+      const dialog = extractDialogProbe();
+      if (dialog) { return dialog; }
+
+      await new Promise((settle) => setTimeout(settle, 20));
+    }
+
+    return null;
+  };
+
   /**
    * A position argument as an offset into the active model.
    *
@@ -730,6 +756,7 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     sync: syncDialogProbe()?.state() ?? null,
     changes: changesPaneProbe()?.state() ?? null,
     agent: agentDialogProbe()?.state() ?? null,
+    extract: extractDialogProbe()?.state() ?? null,
     longTasks: [...longTasks],
     semanticMisfits: readSemanticMisfits(),
     census: bridge.modelCensus(),
@@ -2626,6 +2653,92 @@ export function installDevSurface(parts: DevSurfaceParts): void {
         detail: refused ?? `renamed to ${newName}`,
         data: { refused: refused ?? null },
       };
+    },
+
+    /**
+     * EXTRACT METHOD, driven the way a developer drives it rather than around the outside.
+     *
+     * `{startLine, endLine, name}` selects those lines, runs the editor action the right-click
+     * menu and the lightbulb both run, types the name into the dialog that opens, and presses
+     * Extract. Every one of those is the real control, so a check that passes here has proved
+     * the menu path works and not merely that the host can extract when asked directly.
+     *
+     * The lines default to whatever is selected, so a probe that has already made a selection
+     * can just name the procedure. The answer carries the refusal in the dialog's own words when
+     * the extraction declines, which is what a developer would be reading.
+     */
+    extractMethod: async (args) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      if (!model) { return { did: false, detail: "nothing is open" }; }
+
+      const startLine = args.startLine === undefined ? undefined : Number(args.startLine);
+      const endLine = args.endLine === undefined ? undefined : Number(args.endLine);
+      if (startLine !== undefined && endLine !== undefined) {
+        if (!Number.isFinite(startLine) || !Number.isFinite(endLine) || startLine < 1 || endLine < startLine) {
+          return { did: false, detail: `${startLine}-${endLine} is not a range of lines` };
+        }
+
+        editor.setSelection(new monacoApi.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine)));
+      }
+
+      if (editor.getSelection()?.isEmpty() !== false) {
+        return { did: false, detail: "nothing is selected; pass startLine and endLine" };
+      }
+
+      editor.focus();
+      await editor.getAction("xlide.extractMethod")?.run();
+
+      const dialog = await waitForDialog();
+      if (!dialog) { return { did: false, detail: "the extract dialog did not open" }; }
+
+      if (args.name !== undefined) {
+        dialog.type(String(args.name));
+      }
+
+      const named = dialog.state().name;
+      dialog.press("extract");
+
+      // Settled means the dialog closed (it worked) or it is showing why it did not. Polled
+      // rather than slept: the host round trip is a write to a module and can take a moment.
+      const until = Date.now() + 20000;
+      while (Date.now() < until) {
+        await new Promise((settle) => setTimeout(settle, 50));
+        const now = extractDialogProbe();
+        if (!now) { return { did: true, detail: `extracted ${named}` }; }
+
+        const state = now.state();
+        if (!state.busy && state.refused) {
+          now.press("cancel");
+          return { did: false, detail: state.refused, data: { refused: state.refused } };
+        }
+      }
+
+      return { did: false, detail: "the extraction did not settle within 20s" };
+    },
+
+    /**
+     * The extract dialog on its own, for a check about the DIALOG rather than the refactoring:
+     * `{type}` puts a name in the field, `{press}` clicks extract or cancel. `ui.extract` is the
+     * read side.
+     */
+    extractDialog: (args) => {
+      const dialog = extractDialogProbe();
+      if (!dialog) { return { did: false, detail: "the extract dialog is not open" }; }
+
+      if (args.type !== undefined) {
+        dialog.type(String(args.type));
+        return { did: true, detail: `typed ${args.type}` };
+      }
+
+      if (args.press !== undefined) {
+        const control = String(args.press);
+        return dialog.press(control)
+          ? { did: true, detail: `${control} pressed` }
+          : { did: false, detail: `no control named ${control}; use extract or cancel` };
+      }
+
+      return { did: false, detail: "nothing asked; pass type=<name> or press=extract|cancel" };
     },
 
     /**

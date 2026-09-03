@@ -72,6 +72,7 @@ import { showContextMenu } from "./contextmenu.js";
 import { installDevSurface, reportSemanticMisfits } from "./devsurface.js";
 import { tokensFitTheText } from "./semanticfit.js";
 import { openReferencesDialog } from "./referencesdialog.js";
+import { openExtractDialog } from "./extractdialog.js";
 import { DocumentStore, docKeyOf, docUriOf, namesTheSameWorkbook, type DocumentId } from "./documents.js";
 import { DesignerView } from "./designerview.js";
 import { SearchWidget } from "./searchwidget.js";
@@ -191,6 +192,73 @@ function renameSummary(answer: HostRenameAnswer, newName: string): string {
     ? answer.modules[0]
     : `${answer.modules.length} modules: ${answer.modules.join(", ")}`;
   return `Renamed to ${newName}: ${uses} in ${modules}.`;
+}
+
+/**
+ * The lines an extraction would take, or null when the selection is not one it can work on.
+ *
+ * WHOLE LINES, whatever was dragged. A selection that starts mid-statement is a selection of a
+ * statement as far as a developer is concerned, and rounding it here - once - is what keeps the
+ * surface, the api and the engine from each rounding it differently. A trailing line the caret
+ * merely landed on, column 1 with nothing selected on it, is not part of the selection.
+ */
+function extractRange(
+  selection: monaco.IRange | null,
+): { startLine: number; endLine: number } | null {
+  if (!selection) {
+    return null;
+  }
+
+  const empty = selection.startLineNumber === selection.endLineNumber
+    && selection.startColumn === selection.endColumn;
+  if (empty) {
+    return null;
+  }
+
+  const startLine = selection.startLineNumber;
+  const endLine = selection.endLineNumber > startLine && selection.endColumn === 1
+    ? selection.endLineNumber - 1
+    : selection.endLineNumber;
+
+  return { startLine, endLine };
+}
+
+/**
+ * Extract Method, from wherever it was asked for: the lightbulb, the right-click menu, or the
+ * api. One function, so the three cannot come to mean three different things.
+ *
+ * The name is asked for here and the work is the host's. Nothing is edited on this side even
+ * when the module has a tab open, because the module is the host's copy and the surface's job
+ * is to show what it says afterwards - which the ordinary document sync does.
+ */
+function beginExtractMethod(bridge: EditorBridge, startLine: number, endLine: number): void {
+  openExtractDialog(
+    suggestedName(bridge.hostActiveModel()),
+    async (name) => {
+      const answer = await bridge.requestExtractMethod(startLine, endLine, name);
+      if (!answer.refused) {
+        bridge.shell?.notify(
+          `Extracted ${answer.procedure} from ${answer.from}: ${answer.signature}`);
+      }
+
+      return { signature: answer.signature, refused: answer.refused };
+    });
+}
+
+/**
+ * A name to start from, which is deliberately not clever: the caller retypes it nearly every
+ * time, and a suggestion that looks like it was thought about is one a developer reads before
+ * replacing. `ExtractedN` counts up so a second extraction in the same module does not open on
+ * a name the first one took.
+ */
+function suggestedName(model: monaco.editor.ITextModel | null): string {
+  const text = model?.getValue() ?? "";
+  let number = 1;
+  while (new RegExp(`\\bExtracted${number}\\b`, "i").test(text)) {
+    number += 1;
+  }
+
+  return `Extracted${number}`;
 }
 
 /**
@@ -1255,6 +1323,7 @@ function boot(): void {
   // there can be any: no marker touching the range means no round trip, which matters because
   // the lightbulb asks again every time the caret settles.
   const TURN_OFF_RULE_COMMAND = "xlide.analysis.turnOffRule";
+  const EXTRACT_METHOD_COMMAND = "xlide.refactor.extractMethod";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1340,6 +1409,29 @@ function boot(): void {
        * renders: an entry that the engine would silently ignore is an entry that teaches people
        * the menu lies. The catalog is fetched once and remembered - it is a build-time table.
        */
+      /*
+       * AND THE REFACTORING, which is not a fix for anything: it is offered on the SELECTION
+       * rather than on a finding, so it has no diagnostics and it is the one entry here that
+       * asks a question before it changes anything.
+       *
+       * Whether the selection can actually be extracted is the engine's answer, not this one -
+       * a control-flow jump crossing the boundary is not visible from here. The entry appears
+       * for any selection of whole statements, and the dialog carries the refusal when there
+       * is one, which is where a developer can read it and reselect.
+       */
+      const selected = extractRange(range);
+      if (selected && model === bridge.hostActiveModel()) {
+        actions.push({
+          title: "Extract method...",
+          kind: "refactor.extract.function",
+          command: {
+            id: EXTRACT_METHOD_COMMAND,
+            title: "Extract method",
+            arguments: [selected.startLine, selected.endLine],
+          },
+        });
+      }
+
       const turnOffable = await offRules();
       bridge.trace(`quickFixes: ${markers.length} marker(s), codes `
         + markers.map((m) => JSON.stringify(m.code)).join(",") + `; offable ${turnOffable.size}`);
@@ -1370,11 +1462,16 @@ function boot(): void {
     bridge.setRuleSeverity(code, "off");
   });
 
+  monaco.editor.registerCommand(EXTRACT_METHOD_COMMAND, (_accessor, startLine: number, endLine: number) => {
+    beginExtractMethod(bridge, startLine, endLine);
+  });
+
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
-    // the keyboard.
-    providedCodeActionKinds: ["quickfix"],
+    // the keyboard. The refactoring is named here for the same reason: without it, Extract
+    // method is a menu entry with no key to reach it by.
+    providedCodeActionKinds: ["quickfix", "refactor.extract.function"],
   });
 
   // Go to definition, across the modules of one workbook and never past it.
@@ -1992,6 +2089,23 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // models for modules with a tab open - so the use in a module nobody has opened, which is the
   // one worth being shown, is the one it cannot draw. This list renders the line the host sends
   // instead, so an unopened module is listed like any other and clicking it opens it.
+  // Extract Method, on the menu as well as the lightbulb. The lightbulb is where a developer
+  // who knows the editor looks; the right-click menu is where a developer who knows the VBE
+  // looks, and the VBE has no lightbulb at all.
+  editor.addAction({
+    id: "xlide.extractMethod",
+    label: "Extract Method...",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.5,
+    precondition: "editorHasSelection",
+    run: (target) => {
+      const selected = extractRange(target.getSelection());
+      if (selected) {
+        beginExtractMethod(bridge, selected.startLine, selected.endLine);
+      }
+    },
+  });
+
   editor.addAction({
     id: "xlide.findAllReferences",
     label: "Find All References",

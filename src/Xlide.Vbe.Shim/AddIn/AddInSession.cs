@@ -1414,6 +1414,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.NavigationRequested = OnNavigationRequested;
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
+        _editorSurface.ExtractMethodRequested = OnExtractMethodRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7667,6 +7668,116 @@ internal sealed partial class AddInSession : IDisposable
                 surface.ShowRenamed(requestId, oldName, newName, [.. written], replaced, stopped);
 
                 // The findings describe the old names until something asks again.
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
+    /// <summary>
+    /// Lifts the selected lines into a Private procedure below the one they came from.
+    ///
+    /// ONE MODULE, ONE WRITE, and the same shape as a rename: the engine works out the whole new
+    /// text and refuses anything it cannot make safely, so by the time a single character is
+    /// written the transformation is already known to be possible. What is left here is the
+    /// host's half - the write, the sync into the open tab, and the undo slot that makes Ctrl+Z
+    /// put it back, because an edit the host made was never on the page's undo stack.
+    /// </summary>
+    private void OnExtractMethodRequested(int requestId, int startLine, int endLine, string newName)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowExtracted(requestId, null, null, null, null, "There is nothing open to extract from.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineExtractMethod? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .ExtractMethodAsync(module, startLine, endLine, newName, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was extracted.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The extraction could not be worked out, so nothing changed.";
+                Log.Info($"extract: {module} {startLine}-{endLine} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && answer?.Source is null)
+            {
+                refused = "The engine did not say what the module should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowExtracted(requestId, null, null, null, null, why));
+                return;
+            }
+
+            var made = answer!;
+
+            // The write is the host's own object model, so it belongs on the host thread - the
+            // same thread every other module write happens on.
+            surface.RunOnHostThread(() =>
+            {
+                // Read before the first write, and read from the MODULE rather than reused from
+                // what the engine was given, because the editor rewrites what it is handed.
+                var before = CaptureBefore([module], _shownProject);
+
+                try
+                {
+                    if (WriteModule(module, made.Source!, _shownProject, hostRewrite: true) is { } stopped)
+                    {
+                        surface.ShowExtracted(requestId, null, null, null, null,
+                            $"'{module}' could not be written, so nothing was extracted. {stopped}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"extract: writing {module} failed", ex);
+                    surface.ShowExtracted(requestId, null, null, null, null,
+                        $"'{module}' could not be written, so nothing was extracted.");
+                    return;
+                }
+
+                // One slot, shared with rename, because it holds the same thing: what a module
+                // said before an edit the HOST made, which the page's undo stack never saw.
+                _undoableRename = new RenameUndo(
+                    made.From ?? module,
+                    made.Procedure ?? newName,
+                    null,
+                    _shownProject,
+                    before);
+
+                surface.Sync(module, display, made.Source!);
+
+                Log.Info($"extract: {made.From} -> {made.Procedure} in {module} ({made.Signature})");
+                surface.ShowExtracted(requestId, made.Procedure, made.From, made.Signature, module, null);
+
+                // The findings describe the module as it was until something asks again.
                 _analysis?.Reanalyse();
             });
         });
