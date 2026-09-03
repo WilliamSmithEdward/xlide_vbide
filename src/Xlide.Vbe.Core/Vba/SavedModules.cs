@@ -250,7 +250,11 @@ public sealed class SavedModules
             return null;
         }
 
-        var read = new SavedModules(documentPath);
+        var read = new SavedModules(documentPath)
+        {
+            ConditionalConstants = ConstantsIn(dir),
+        };
+
         foreach (var (name, stream, offset) in ModulesIn(dir))
         {
             var text = VbaCompression.Decompress(cfb.Read($"/VBA/{stream}"), offset, HeaderBytes);
@@ -294,8 +298,22 @@ public sealed class SavedModules
         return [.. header];
     }
 
+    /// <summary>
+    /// The project's own conditional compilation arguments, as the VBE's Project Properties box
+    /// spells them: `Name = Value : Name = Value`. Null when the file names none.
+    ///
+    /// WHY IT IS HERE and not asked of the object model: `VBProject` has no property for it. The
+    /// analyzer knows the compiler's own constants - VBA7, Win64, Mac - but a project's are its
+    /// own, and without them every `#If MY_FLAG Then` is undecidable, so BOTH arms are analyzed
+    /// and a finding can be reported from an arm the compiler never sees.
+    /// </summary>
+    public string? ConditionalConstants { get; private init; }
+
     /* ---- the module table, [MS-OVBA] 2.3.4.2 ----------------------------------------------- */
 
+    private const ushort ProjectVersion = 0x0009;
+    private const ushort ProjectConstants = 0x000C;
+    private const ushort ProjectConstantsUnicode = 0x003C;
     private const ushort ProjectModules = 0x000F;
     private const ushort ProjectCookie = 0x0013;
     private const ushort ModuleName = 0x0019;
@@ -304,6 +322,76 @@ public sealed class SavedModules
     private const ushort ModuleStreamNameUnicode = 0x0032;
     private const ushort ModuleOffset = 0x0031;
     private const ushort ModuleEnd = 0x002B;
+
+    /// <summary>
+    /// The PROJECTCONSTANTS record, read by walking FORWARD from the top of the stream.
+    ///
+    /// The opposite direction from <see cref="ModulesIn"/>, and safe for the reason that one is
+    /// not: PROJECTINFORMATION comes first and every record in it follows the id/size/data shape,
+    /// with the constants as its last entry, immediately before the references that break the
+    /// shape. So the walk reaches it and stops - at the constants, at the first reference record,
+    /// or at a bounded count - and never enters the stretch that derails.
+    ///
+    /// The Unicode twin wins where both are present: it says the same text with no code page in
+    /// the way, which matters for a constant named in a script the machine cannot spell.
+    /// </summary>
+    private static string? ConstantsIn(byte[] dir)
+    {
+        // PROJECTINFORMATION is a dozen records. Anything past that is the references.
+        const int MostRecords = 32;
+
+        string? mbcs = null;
+        var at = 0;
+
+        for (var seen = 0; seen < MostRecords && at + 6 <= dir.Length; seen++)
+        {
+            var id = BinaryPrimitives.ReadUInt16LittleEndian(dir.AsSpan(at));
+
+            // PROJECTVERSION IS NOT SHAPED LIKE THE REST, and it sits between the walk's start and
+            // what the walk is for. Its four bytes after the id are a RESERVED constant rather
+            // than a size, and its body is six: a major and a minor. Read as a size it says 4, so
+            // the walk resumes two bytes early, reads the tail of this record as the next one's
+            // id, and every record after it is garbage - which is why the constants were never
+            // found in a file that has them ([MS-OVBA] 2.3.4.2.1.9).
+            if (id == ProjectVersion)
+            {
+                at += 2 + 4 + 6;
+                continue;
+            }
+
+            var size = (int)BinaryPrimitives.ReadUInt32LittleEndian(dir.AsSpan(at + 2));
+            if (size < 0 || at + 6 + size > dir.Length)
+            {
+                break;
+            }
+
+            var data = dir.AsSpan(at + 6, size);
+            switch (id)
+            {
+                case ProjectConstants:
+                    mbcs = size > 0 ? Encoding.Latin1.GetString(data) : null;
+                    break;
+
+                // The twin follows the MBCS record directly, so reading it ends the walk.
+                case ProjectConstantsUnicode:
+                    return size > 0 ? Encoding.Unicode.GetString(data) : mbcs;
+
+                // The first reference record: past here the shape no longer holds, and the
+                // constants would have been seen already if the project had any.
+                case ReferenceName or ReferenceRegistered or ReferenceProject or ReferenceControl:
+                    return mbcs;
+            }
+
+            at += 6 + size;
+        }
+
+        return mbcs;
+    }
+
+    private const ushort ReferenceName = 0x0016;
+    private const ushort ReferenceRegistered = 0x000D;
+    private const ushort ReferenceProject = 0x000E;
+    private const ushort ReferenceControl = 0x002F;
 
     /// <summary>
     /// Every module the table names, with the stream it lives in and where its source starts.
