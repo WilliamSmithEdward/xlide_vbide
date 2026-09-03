@@ -263,30 +263,67 @@ internal static partial class FormDesignService
             return null;
         }
 
-        using var designer = component.GetObject("Designer");
-        if (designer is null)
+        /*
+         * ONE FORM'S DESIGNER IS ONE FORM'S PROBLEM, and until 2026-09-02 it was the whole
+         * project's. "Its designer cannot answer" is in this method's contract above and was
+         * never implemented: the Designer read went out unguarded, so a form that refused it
+         * threw straight through ProjectReader.Read's outer catch, which returns null for the
+         * ENTIRE project. One form, and nothing in that workbook was analysed at all - the
+         * pass logged "could not read the projects, pass abandoned" and the developer got a
+         * VBE modal on opening the editor (the owner's screenshot: System Error &H80004002,
+         * "No such interface supported", raised walking TestForm in his own workbook).
+         *
+         * Null is the designated answer for it, and it is NOT the same as the empty array:
+         * empty means the designer answered and the form holds nothing, which is what lets
+         * the analyzer prove a member absent (xlide_vscode#26). Unreadable vouches for
+         * nothing, so the form simply contributes no implicit members and every other module
+         * in the project analyses as it always did.
+         */
+        try
         {
+            using var designer = component.GetObject("Designer");
+            if (designer is null)
+            {
+                return null;
+            }
+
+            var rows = new List<DesignRow>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            // Names and kinds only: the analyzer wants the members a form's code can reach, and
+            // reading every control's whole property set to answer that would be a walk paid for
+            // on every seed.
+            Walk(designer, null, string.Empty, rows, seen, 0, default);
+
+            // Unconditionally: the walk touched the Designer, which materialises its window
+            // whether or not any control was found, and an empty form's designer goes back down
+            // the same as a full one. (This sat after an early return for the empty case until
+            // 2026-08-19, so a control-less form left its designer standing - and a save while
+            // one stands restores it on open, per the note below.)
+            KeepDesignerDown(component);
+
+            return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
+                row.Spec.Name,
+                IsToolboxType(row.Spec.Type) ? $"MSForms.{row.Spec.Type}" : row.Spec.Type))];
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.Log.Warn($"seed: {TryText(component, "Name")}'s designer would not answer, "
+                + $"so it vouches for no controls ({ex.Message.Trim()})");
+
+            // The walk may have stirred the window before it failed, and a workbook saved while
+            // a designer stands restores it on open - so it goes back down on this path too.
+            try
+            {
+                KeepDesignerDown(component);
+            }
+            catch (Exception putting)
+            {
+                Diagnostics.Log.Warn($"seed: and its designer could not be put back down ({putting.GetType().Name})");
+            }
+
             return null;
         }
-
-        var rows = new List<DesignRow>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        // Names and kinds only: the analyzer wants the members a form's code can reach, and
-        // reading every control's whole property set to answer that would be a walk paid for
-        // on every seed.
-        Walk(designer, null, string.Empty, rows, seen, 0, default);
-
-        // Unconditionally: the walk touched the Designer, which materialises its window
-        // whether or not any control was found, and an empty form's designer goes back down
-        // the same as a full one. (This sat after an early return for the empty case until
-        // 2026-08-19, so a control-less form left its designer standing - and a save while
-        // one stands restores it on open, per the note below.)
-        KeepDesignerDown(component);
-
-        return [.. rows.Select(row => new Xlide.Vbe.Core.Engine.EngineImplicitMember(
-            row.Spec.Name,
-            IsToolboxType(row.Spec.Type) ? $"MSForms.{row.Spec.Type}" : row.Spec.Type))];
     }
 
     /// <summary>

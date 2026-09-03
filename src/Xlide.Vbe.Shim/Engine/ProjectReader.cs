@@ -275,6 +275,21 @@ internal static class ProjectReader
             var count = components.GetInt32("Count");
             var modules = new List<EngineModule>(count);
 
+            // A DESIGNER IS A DESIGN-TIME OBJECT, and the editor says so by refusing: asked for
+            // one while the project is stopped in the debugger, it answers E_NOINTERFACE and
+            // raises its own modal to say it - "System Error &H80004002. No such interface
+            // supported". This reader runs on every analysis pass, so a project left in break
+            // mode met one modal per pass, twice a second, and the developer could not open the
+            // editor without dismissing them (the owner's screenshot, 2026-09-02, against a
+            // workbook stopped at a breakpoint).
+            //
+            // So the mode is asked ONCE per project and the designer walk is skipped outside
+            // design mode. The forms simply vouch for no controls while the run is standing -
+            // null, the unreadable seed, which is already what an unanswerable designer means -
+            // and every module in the project analyses as it always did. Pressing Reset brings
+            // the controls back on the next pass.
+            var designMode = InDesignMode(project);
+
             // Which components are classes, gathered as the walk goes. The default-instance flag
             // cannot be filled in DURING the walk: whether the saved file may be trusted for a
             // class depends on whether that class was here last pass, and that is only knowable
@@ -307,7 +322,7 @@ internal static class ProjectReader
                 // where the analyzer cannot see, supplied by the one side that can. This is the
                 // read the analyzer's #17 fix exists to receive, and it costs a designer walk
                 // only for form components, on the host thread this reader already owns.
-                var members = componentType == 3
+                var members = componentType == 3 && designMode
                     ? Editor.FormDesignService.ControlMembers(component)
                     : null;
 
@@ -317,8 +332,10 @@ internal static class ProjectReader
                     // (xlide_vscode#26) - and nothing else says which one a pass sent, which
                     // is exactly what the 2026-08-19 ghost-control hunt needed to see.
                     Diagnostics.Log.Verbose($"seed: {moduleName} carries "
-                        + (members is null ? "no designer answer" : $"{members.Length} control(s)"
-                            + (members.Length == 0 ? string.Empty : $": {string.Join(", ", members.Select(m => m.Name))}")));
+                        + (members is null
+                            ? designMode ? "no designer answer" : "no designer answer (the project is not in design mode)"
+                            : $"{members.Length} control(s)"
+                                + (members.Length == 0 ? string.Empty : $": {string.Join(", ", members.Select(m => m.Name))}")));
                 }
 
                 if (componentType == 2)
@@ -338,6 +355,27 @@ internal static class ProjectReader
         {
             Log.Error("project: could not be read", ex);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether the project is in design mode, which is the only mode where its forms will hand
+    /// over a Designer: 2 is design, 1 is stopped in the debugger, 0 is running.
+    ///
+    /// A project that will not say what mode it is in counts as NOT design, which is the
+    /// conservative way round. Skipping the walk costs a form its implicit members for one pass;
+    /// walking a designer that will not answer costs the developer a modal.
+    /// </summary>
+    private static bool InDesignMode(DispatchObject project)
+    {
+        try
+        {
+            return project.GetInt32("Mode") == 2;
+        }
+        catch (Exception ex)
+        {
+            Diagnostics.Log.Verbose($"seed: a project would not say its mode ({ex.GetType().Name}); designers left alone");
+            return false;
         }
     }
 
