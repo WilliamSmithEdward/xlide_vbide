@@ -100,14 +100,12 @@ try {
   check("the value extracts back into a variable", extracted.did, extracted.detail);
 
   const round = await hostText();
-  // AS DOUBLE, not As Long, and that is not a round-trip failure: `10` as an EXPRESSION is a
-  // Double to the shared inference, which widens every numeric literal. The neighbouring
-  // declare-variable quick fix special-cases a whole-number literal to Long and this path does
-  // not, which is an inconsistency in the analyzer rather than in either consumer - filed as
-  // xlide_vscode#64. Asserted as it behaves, because a suite that asserts what it wishes were
-  // true is a suite that goes red on the day the wish is granted.
-  check("and the module reads as it did before, bar the widened literal",
-    has(round, "Dim limit As Double") && has(round, "limit = 10") && has(round, "Debug.Print limit"),
+  // A ROUND TRIP, exactly. It was not until 6.1.2: `10` as an expression came back a Double
+  // while the neighbouring declare-variable quick fix called a whole-number literal a Long, so
+  // extract-then-inline changed the declared type. Filed as xlide_vscode#64, fixed there, and
+  // this is the check that says so - the day it regresses, this is what goes red.
+  check("and the module reads exactly as it did before",
+    has(round, "Dim limit As Long") && has(round, "limit = 10") && has(round, "Debug.Print limit"),
     round.map((one) => one.trim()).filter(Boolean).join(" | "));
 
   /* ---- Ctrl+Z ------------------------------------------------------------------------------------ */

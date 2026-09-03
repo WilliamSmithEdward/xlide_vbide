@@ -266,7 +266,14 @@ function fieldOn(model: monaco.editor.ITextModel | null, line: number): string |
   // developer had their caret in, and taking the place of the Inline entry that belongs there.
   const declared = /^\s*(?:Public|Friend|Global)\s+(?:WithEvents\s+)?([\p{L}_][\p{L}\p{M}\p{N}_]*)/u
     .exec(model.getLineContent(line));
-  return declared ? (declared[1] as string) : null;
+  if (!declared) {
+    return null;
+  }
+
+  // `Public Sub Travel()` is a procedure, not a variable called `Sub`, and the entry was appearing
+  // on every one of them offering to encapsulate the keyword.
+  const name = declared[1] as string;
+  return /^(?:Sub|Function|Property|Type|Enum|Const|Declare|Event)$/i.test(name) ? null : name;
 }
 
 /** Encapsulate Field, from the lightbulb or the menu. Nothing to name: the property takes the
@@ -297,6 +304,28 @@ function beginImplementInterface(bridge: EditorBridge, interfaceName?: string): 
     const members = `${answer.added.length} member${answer.added.length === 1 ? "" : "s"}`;
     bridge.shell?.notify(`Implemented ${members} of ${answer.interfaces.join(", ")}: ${answer.added.join(", ")}`);
   });
+}
+
+/**
+ * Move to Module, from the menu. The module to move INTO is the one thing the developer has to
+ * say, so it comes through the same dialog the other two use, with its own words.
+ */
+function beginMoveToModule(bridge: EditorBridge, offset: number): void {
+  openExtractDialog(
+    "",
+    async (name) => {
+      const answer = await bridge.requestMoveToModule(offset, name);
+      if (!answer.refused) {
+        const also = answer.requalified > 0
+          ? `, and ${answer.requalified} qualified call${answer.requalified === 1 ? "" : "s"} repointed`
+          : "";
+        bridge.shell?.notify(`Moved ${answer.moved} from ${answer.from} to ${answer.to}${also}`);
+      }
+
+      return { signature: answer.to, refused: answer.refused };
+    },
+    "Move to module",
+    "Module to move it into");
 }
 
 /** Inline Variable, from the lightbulb or the menu. Nothing to name: the value is in the code. */
@@ -1448,6 +1477,7 @@ function boot(): void {
   const ENCAPSULATE_FIELD_COMMAND = "xlide.refactor.encapsulateField";
   const EXTRACT_VARIABLE_COMMAND = "xlide.refactor.extractVariable";
   const INLINE_VARIABLE_COMMAND = "xlide.refactor.inlineVariable";
+  const MOVE_TO_MODULE_COMMAND = "xlide.refactor.moveToModule";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1628,6 +1658,21 @@ function boot(): void {
         }
       }
 
+      // Offered from anywhere inside a procedure, which is what the caret being in one means.
+      // Whether the procedure can actually go - what it reaches for, where it would land - is the
+      // engine's answer, and its refusals name the member that would be stranded.
+      if (selection && model === editor.getModel()) {
+        actions.push({
+          title: "Move to module...",
+          kind: "refactor.move",
+          command: {
+            id: MOVE_TO_MODULE_COMMAND,
+            title: "Move to module",
+            arguments: [model.getOffsetAt(selection.getStartPosition())],
+          },
+        });
+      }
+
       if (declaredField) {
         actions.push({
           title: `Encapsulate '${declaredField}' in a property`,
@@ -1690,6 +1735,10 @@ function boot(): void {
     beginInlineVariable(bridge, offset);
   });
 
+  monaco.editor.registerCommand(MOVE_TO_MODULE_COMMAND, (_accessor, offset: number) => {
+    beginMoveToModule(bridge, offset);
+  });
+
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
@@ -1697,7 +1746,7 @@ function boot(): void {
     // method is a menu entry with no key to reach it by.
     providedCodeActionKinds: [
       "quickfix", "refactor.extract.function", "refactor.extract.constant", "refactor.rewrite",
-      "refactor.inline",
+      "refactor.inline", "refactor.move",
     ],
   });
 
@@ -2354,6 +2403,23 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // Extract Variable, beside the other three. A selection is required: there is no expression
   // to name without one, and the entry would be answering a question nobody asked.
   // Inline Variable, beside the rest. No selection needed - the caret on the name is the ask.
+  // Move to Module, beside the rest.
+  editor.addAction({
+    id: "xlide.moveToModule",
+    label: "Move to Module...",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.58,
+    run: (target) => {
+      const model = target.getModel();
+      const at = target.getPosition();
+      if (!model || !at) {
+        return;
+      }
+
+      beginMoveToModule(bridge, model.getOffsetAt(at));
+    },
+  });
+
   editor.addAction({
     id: "xlide.inlineVariable",
     label: "Inline Variable",

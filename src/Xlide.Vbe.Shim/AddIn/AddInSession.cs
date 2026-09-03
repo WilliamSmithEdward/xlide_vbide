@@ -1419,6 +1419,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.EncapsulateFieldRequested = OnEncapsulateFieldRequested;
         _editorSurface.ExtractVariableRequested = OnExtractVariableRequested;
         _editorSurface.InlineVariableRequested = OnInlineVariableRequested;
+        _editorSurface.MoveToModuleRequested = OnMoveToModuleRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7701,6 +7702,115 @@ internal sealed partial class AddInSession : IDisposable
     /// engine refuses anything it cannot do without deciding a question of VBA's - brackets around
     /// an argument change how it binds - so the host's half is the usual write, sync and undo.
     /// </summary>
+    /// <summary>
+    /// Moves a procedure into another module, with every qualified call site that named the old
+    /// one repointed.
+    ///
+    /// SEVERAL MODULES, which makes this the rename's shape rather than the other refactorings':
+    /// the engine works out every module's new text before a character is written, and the writes
+    /// stop at the first refusal rather than carrying on - half a move is a project that does not
+    /// compile, and reporting it as done is the reading a developer can least afford.
+    /// </summary>
+    private void OnMoveToModuleRequested(int requestId, int offset, string targetModule)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowMoved(requestId, null, null, null, [], 0, "There is nothing open to move from.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineMoveToModule? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .MoveToModuleAsync(module, offset, targetModule, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was moved.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The move could not be worked out, so nothing changed.";
+                Log.Info($"move: {module}@{offset} to {targetModule} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && (answer?.Modules is null || answer.Modules.Length == 0))
+            {
+                refused = "The engine did not say what the modules should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowMoved(requestId, null, null, null, [], 0, why));
+                return;
+            }
+
+            var made = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore(made.Modules!.Select(one => one.Module), _shownProject);
+                var written = new List<string>(made.Modules!.Length);
+                string? stopped = null;
+
+                foreach (var entry in made.Modules!)
+                {
+                    try
+                    {
+                        if (WriteModule(entry.Module, entry.Source, _shownProject, hostRewrite: true) is { } why)
+                        {
+                            stopped = $"'{entry.Module}' could not be written, so the move stopped there. {why}";
+                            break;
+                        }
+
+                        written.Add(entry.Module);
+                        surface.Sync(entry.Module, display, entry.Source);
+                    }
+                    catch (Exception ex)
+                    {
+                        stopped = $"'{entry.Module}' could not be written, so the move stopped there.";
+                        Log.Error($"move: writing {entry.Module} failed", ex);
+                        break;
+                    }
+                }
+
+                _undoableRename = new RenameUndo(
+                    made.From ?? module,
+                    made.To ?? targetModule,
+                    null,
+                    _shownProject,
+                    before);
+
+                Log.Info($"move: {made.Moved} from {made.From} to {made.To}, "
+                    + $"{written.Count} module(s), {made.Requalified ?? 0} call site(s) repointed");
+                surface.ShowMoved(
+                    requestId, made.Moved, made.From, made.To, [.. written], made.Requalified ?? 0, stopped);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     private void OnInlineVariableRequested(int requestId, int offset)
     {
         var surface = _editorSurface;

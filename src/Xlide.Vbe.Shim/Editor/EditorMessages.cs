@@ -739,6 +739,20 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Move to Module: what moved, where from and to, which modules were rewritten
+/// and how many qualified call sites followed it - or the reason nothing moved.
+/// </summary>
+public sealed record MoveToModuleResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("moved")] string? Moved,
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("to")] string? To,
+    [property: JsonPropertyName("modules")] string[] Modules,
+    [property: JsonPropertyName("requalified")] int Requalified,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Inline Variable: the name that is gone, what stands in its place, and how
 /// many uses took it - or the reason nothing changed.
 /// </summary>
@@ -1010,6 +1024,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(EncapsulateResultMessage))]
 [JsonSerializable(typeof(ExtractVariableResultMessage))]
 [JsonSerializable(typeof(InlineVariableResultMessage))]
+[JsonSerializable(typeof(MoveToModuleResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

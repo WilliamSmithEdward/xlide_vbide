@@ -90,6 +90,7 @@ export type HostMessage =
   | { type: "encapsulateResult"; id: number; field?: string | null; backingField?: string | null; accessors: string[]; module?: string | null; refused?: string | null }
   | { type: "extractVariableResult"; id: number; variable?: string | null; declaredType?: string | null; isObject: boolean; expression?: string | null; module?: string | null; refused?: string | null }
   | { type: "inlineVariableResult"; id: number; variable?: string | null; value?: string | null; replaced: number; module?: string | null; refused?: string | null }
+  | { type: "moveToModuleResult"; id: number; moved?: string | null; from?: string | null; to?: string | null; modules: string[]; requalified: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -429,6 +430,16 @@ export interface HostInlineVariableAnswer {
   refused: string | null;
 }
 
+/** What a Move to Module did, or the reason it did nothing. */
+export interface HostMoveToModuleAnswer {
+  moved: string | null;
+  from: string | null;
+  to: string | null;
+  modules: string[];
+  requalified: number;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -538,6 +549,7 @@ export type ClientMessage =
   | { type: "encapsulateField"; id: number; fieldName: string }
   | { type: "extractVariable"; id: number; startOffset: number; endOffset: number; newName: string }
   | { type: "inlineVariable"; id: number; offset: number }
+  | { type: "moveToModule"; id: number; offset: number; targetModule: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -737,6 +749,7 @@ export class EditorBridge {
   private readonly pendingEncapsulations = new RequestTable<HostEncapsulateAnswer>();
   private readonly pendingVariables = new RequestTable<HostExtractVariableAnswer>();
   private readonly pendingInlines = new RequestTable<HostInlineVariableAnswer>();
+  private readonly pendingMoves = new RequestTable<HostMoveToModuleAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1630,6 +1643,28 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Moves a procedure into another module, through the host. Several modules can be rewritten -
+   * the two it moves between, and anything holding a qualified call - so the undo slot is armed
+   * with all of them, the way a rename's is.
+   */
+  requestMoveToModule(offset: number, targetModule: string): Promise<HostMoveToModuleAnswer> {
+    const project = this.activeProject();
+    return this.pendingMoves.ask(
+      () => ({
+        moved: null, from: null, to: null, modules: [], requalified: 0,
+        refused: "The move timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "moveToModule", id, offset, targetModule }))
+      .then((answer) => {
+        this.renameLanded(
+          { modules: answer.refused ? [] : answer.modules, replaced: answer.modules.length, refused: answer.refused },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -2013,6 +2048,16 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "moveToModuleResult":
+        this.pendingMoves.settle(message.id, {
+          moved: message.moved ?? null,
+          from: message.from ?? null,
+          to: message.to ?? null,
+          modules: message.modules,
+          requalified: message.requalified,
           refused: message.refused ?? null,
         });
         return;

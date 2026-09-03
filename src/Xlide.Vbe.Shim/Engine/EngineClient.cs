@@ -184,6 +184,7 @@ internal sealed class EngineClient : IAsyncDisposable
         string projectId,
         int generation,
         EngineModule[] modules,
+        string? conditionalConstants,
         CancellationToken cancellation)
     {
         var payload = new Dictionary<string, object>
@@ -197,6 +198,14 @@ internal sealed class EngineClient : IAsyncDisposable
             // it, but the seeding is the one message guaranteed to carry the fact.
             ["host"] = HostApp.Name,
         };
+
+        // The project's own `#If` constants, when the saved package had any. Without them every
+        // `#If MY_FLAG` is undecidable and both arms are analyzed, so a finding can be reported
+        // from an arm the compiler never sees (xlide_vscode#63).
+        if (conditionalConstants is { Length: > 0 })
+        {
+            payload["conditionalConstants"] = conditionalConstants;
+        }
 
         var result = await CallAsync("project/open", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineProjectOpened);
@@ -551,6 +560,25 @@ internal sealed class EngineClient : IAsyncDisposable
 
         var result = await CallAsync("textDocument/extractMethod", payload, cancellation).ConfigureAwait(false);
         return result?.Deserialize(EngineJsonContext.Default.EngineExtractMethod);
+    }
+
+    /// <summary>
+    /// Asks what moving a procedure into another module would make of every module it touches.
+    /// </summary>
+    public async Task<EngineMoveToModule?> MoveToModuleAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int offset,
+        string targetModule,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["offset"] = offset;
+        payload["targetModule"] = targetModule;
+
+        var result = await CallAsync("workspace/moveToModule", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineMoveToModule);
     }
 
     /// <summary>

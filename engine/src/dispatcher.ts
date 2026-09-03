@@ -30,6 +30,7 @@ import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { encapsulateFieldFor } from './encapsulateField';
 import { extractVariableFor } from './extractVariable';
 import { inlineVariableFor } from './inlineVariable';
+import { moveToModuleFor } from './moveToModule';
 import { extractMethodFor } from './extractMethod';
 import { implementInterfaceFor } from './implementInterface';
 import { searchModules } from './search';
@@ -79,6 +80,8 @@ import {
     type ExtractVariableResult,
     type InlineVariableParams,
     type InlineVariableResult,
+    type MoveToModuleParams,
+    type MoveToModuleResult,
     type ExtractMethodParams,
     type ExtractMethodResult,
     type ImplementInterfaceParams,
@@ -410,6 +413,9 @@ export class Dispatcher {
             case 'textDocument/extractMethod':
                 return this.extractMethod(this.require<ExtractMethodParams>(params));
 
+            case 'workspace/moveToModule':
+                return this.moveToModule(this.require<MoveToModuleParams>(params));
+
             case 'textDocument/inlineVariable':
                 return this.inlineVariable(this.require<InlineVariableParams>(params));
 
@@ -519,6 +525,10 @@ export class Dispatcher {
             // is a code pane's, with no .frm designer and no Attribute lines. So the seed is
             // the only rung that ever answers, and it has to carry all of them.
             modules: modules.map(analyzerInputFor),
+            // The project's own `#If` constants, so the arms it does not compile are dropped
+            // from the symbols AND from the rules together (xlide_vscode#63). A project that
+            // declares none sends nothing, which is what the worker's own default already is.
+            ...(params.conditionalConstants ? { conditionalConstants: params.conditionalConstants } : {}),
         });
 
         this.generations.set(params.projectId, params.generation);
@@ -703,6 +713,18 @@ export class Dispatcher {
             params.startLine,
             params.endLine,
             params.newName);
+    }
+
+    private moveToModule(params: MoveToModuleParams): MoveToModuleResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { modules: [], refused: 'This module is not one the engine holds.' };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return moveToModuleFor(symbols, params.moduleName, source, params.offset, params.targetModule);
     }
 
     private inlineVariable(params: InlineVariableParams): InlineVariableResult {

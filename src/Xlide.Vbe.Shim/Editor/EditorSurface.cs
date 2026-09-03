@@ -324,6 +324,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, offset of the name).</summary>
     public Action<int, int>? InlineVariableRequested { get; set; }
 
+    /// <summary>Raised when the page asks to move a procedure into another module:
+    /// (requestId, offset inside the procedure, target module name).</summary>
+    public Action<int, int, string>? MoveToModuleRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -490,6 +494,29 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Move to Module: what moved, or why nothing did.</summary>
+    public void ShowMoved(
+        int requestId,
+        string? moved,
+        string? from,
+        string? to,
+        string[] modules,
+        int requalified,
+        string? refused)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new MoveToModuleResultMessage(
+                "moveToModuleResult", requestId, moved, from, to, modules, requalified, refused),
+            EditorMessageContext.Default.MoveToModuleResultMessage));
     }
 
     /// <summary>Answers one Inline Variable: what went, or why nothing did.</summary>
@@ -2571,6 +2598,20 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "moveToModule":
+                    if (document.RootElement.TryGetProperty("id", out var moveId)
+                        && moveId.TryGetInt32(out var moveRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var moveOffsetElement)
+                        && moveOffsetElement.TryGetInt32(out var moveOffset)
+                        && moveOffset >= 0
+                        && document.RootElement.TryGetProperty("targetModule", out var moveTargetElement)
+                        && moveTargetElement.GetString() is { Length: > 0 } moveTarget)
+                    {
+                        MoveToModuleRequested?.Invoke(moveRequestId, moveOffset, moveTarget);
                     }
 
                     break;

@@ -692,6 +692,33 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what moving a procedure into another module would make of the project. Null
+    /// when there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineMoveToModule Answer, string ProjectId)?> MoveToModuleAsync(
+        string moduleName,
+        int offset,
+        string targetModule,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .MoveToModuleAsync(home.ProjectId, moduleName, home.ModuleType, offset, targetModule, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what replacing a local with what it was assigned would make of the module.
     /// Null when there is no engine or no address for the module.
     /// </summary>
@@ -1230,7 +1257,9 @@ internal sealed class AnalysisService : IAsyncDisposable
                     Log.Warn($"engine: a snapshot observer failed, {ex.Message}");
                 }
 
-                var opened = await engine.OpenProjectAsync(snapshot.ProjectId, snapshot.Generation, snapshot.Modules, _stopping.Token)
+                var opened = await engine.OpenProjectAsync(
+                    snapshot.ProjectId, snapshot.Generation, snapshot.Modules,
+                    snapshot.ConditionalConstants, _stopping.Token)
                     .ConfigureAwait(false);
 
                 if (opened is not null)

@@ -444,6 +444,39 @@ await repeat("extracting a variable and undoing it", 0, async () => {
 await api.pane("close", { module: leakField, project: project.projectId, answer: "discard" }).catch(() => {});
 await api.component("remove", { name: leakField, project: project.projectId }).catch(() => {});
 
+// Move to Module writes TWO components per round where every other row writes one, which is the
+// shape most likely to strand a wrapper: two FindComponent walks, two writes, two syncs.
+const leakMoveFrom = "LeakMoveFrom";
+const leakMoveTo = "LeakMoveTo";
+for (const name of [leakMoveFrom, leakMoveTo]) {
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name, project: project.projectId });
+}
+
+let leakMoveRound = 0;
+await repeat("moving a procedure and undoing it", 0, async () => {
+  const proc = `Travel${++leakMoveRound}`;
+  await api.writeModule(leakMoveFrom, [
+    "Option Explicit", "", `Public Sub ${proc}()`, "    Debug.Print 1", "End Sub",
+  ].join(CRLF), project.projectId);
+  await api.writeModule(leakMoveTo, ["Option Explicit"].join(CRLF), project.projectId);
+  await api.caret(3, { module: leakMoveFrom, project: project.projectId });
+
+  const moved = await api.act("moveToModule", { line: 3, column: 5, targetModule: leakMoveTo });
+  if (!moved.did) {
+    throw new Error(`the procedure did not move, so this row measured nothing: ${moved.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
+for (const name of [leakMoveTo, leakMoveFrom]) {
+  await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+}
+
 await repeat("renaming a component and back", 0, async () => {
   await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
   await wait(600);

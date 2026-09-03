@@ -2656,6 +2656,51 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * MOVE TO MODULE: `{targetModule}` and a position inside the procedure to move.
+     *
+     * Driven through the editor action the menu runs and the dialog it opens, so a passing check
+     * has proved the menu path. The answer names every module rewritten and how many qualified
+     * call sites followed the procedure.
+     */
+    moveToModule: async (args) => {
+      const editor = workspace.activeEditor();
+      const model = editor.getModel();
+      if (!model) { return { did: false, detail: "nothing is open" }; }
+
+      const target = args.targetModule === undefined ? "" : String(args.targetModule);
+      if (!target) { return { did: false, detail: "targetModule is required" }; }
+
+      const where = positionFrom(args);
+      if (where) {
+        editor.setPosition(where.position);
+      }
+
+      editor.focus();
+      await editor.getAction("xlide.moveToModule")?.run();
+
+      const dialog = await waitForDialog();
+      if (!dialog) { return { did: false, detail: "the move dialog did not open" }; }
+
+      dialog.type(target);
+      dialog.press("extract");
+
+      const until = Date.now() + 20000;
+      while (Date.now() < until) {
+        await new Promise((settle) => setTimeout(settle, 50));
+        const now = extractDialogProbe();
+        if (!now) { return { did: true, detail: `moved into ${target}` }; }
+
+        const state = now.state();
+        if (!state.busy && state.refused) {
+          now.press("cancel");
+          return { did: false, detail: state.refused, data: { refused: state.refused } };
+        }
+      }
+
+      return { did: false, detail: "the move did not settle within 20s" };
+    },
+
+    /**
      * INLINE VARIABLE: `{line, column}` or `{word}` puts the caret on a name and inlines it.
      *
      * No dialog and nothing to name - what the variable stands for is already in the code - so

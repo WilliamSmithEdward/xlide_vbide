@@ -745,6 +745,11 @@ if ($Live) {
                                      # round trip neither can run alone: extract a value back out
                                      # of what was inlined and the module comes back.
                                      'inline-variable.mjs',
+                                     # move-to-module is the first refactoring to write MORE THAN
+                                     # ONE module, so it brings three of its own: the one losing a
+                                     # procedure, the one gaining it, and the one whose qualified
+                                     # call has to follow.
+                                     'move-to-module.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

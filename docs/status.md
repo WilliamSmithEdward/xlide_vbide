@@ -62,7 +62,17 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
     an evaluation rather than grouping: `Foo (x)` passes by value where `Foo x` passes by
     reference, so parenthesising for precedence would change how every call site binds.
 
-  Move to Module and Introduce Parameter are what is left of the set.
+  - **Move to Module**: a procedure taken out of one standard module and put into another, with
+    every qualified call site repointed and unqualified ones left alone, because VBA resolves
+    those across the project. It refuses a procedure that touches anything Private to the module
+    it would leave, naming what would be stranded.
+
+  Introduce Parameter is what is left of the set.
+- **A project's own conditional compilation arguments are read and honoured.** They live in the
+  VBE's Project Properties box, which the object model has no property for, so they come out of
+  the saved package's `dir` stream (MS-OVBA record `0x000C`) and ride the project seed. Without
+  them every `#If MY_FLAG` is undecidable: both arms analysed, declarations from dead code in the
+  table, and findings reportable from an arm the compiler never sees.
 - **The UserForm designer's milestones M1 to M6 have all landed**, so it is no longer a remaining
   milestone; [userform-designer.md](userform-designer.md) stays the ground truth for what it does
   and what it deliberately does not.

@@ -10,7 +10,17 @@ namespace Xlide.Vbe.Shim.Engine;
 /// <param name="DisplayName">What the developer calls it: the workbook's file name.</param>
 /// <param name="Generation">Increases whenever any module's text changes.</param>
 /// <param name="Modules">Every module, with its current text.</param>
-internal sealed record ProjectSnapshot(string ProjectId, string DisplayName, int Generation, EngineModule[] Modules);
+/// <param name="ConditionalConstants">
+/// The project's own `#If` arguments, raw as the VBE property holds them, or null when the saved
+/// package names none. Without them every `#If MY_FLAG` is undecidable and both arms are analyzed
+/// (xlide_vscode#63).
+/// </param>
+internal sealed record ProjectSnapshot(
+    string ProjectId,
+    string DisplayName,
+    int Generation,
+    EngineModule[] Modules,
+    string? ConditionalConstants = null);
 
 /// <summary>
 /// Reads module sources out of the editor.
@@ -348,8 +358,12 @@ internal static class ProjectReader
 
             FillInPredeclaredIds(project, modules, classNames);
 
+            // Read from the same saved package the attribute headers come from, which is already
+            // open and cached by the time this runs.
+            var constants = SavedModules.For(SavedPathOf(project))?.ConditionalConstants;
+
             var (id, displayName) = Identity(project);
-            return new ProjectSnapshot(id, displayName, generation, [.. modules]);
+            return new ProjectSnapshot(id, displayName, generation, [.. modules], constants);
         }
         catch (Exception ex)
         {

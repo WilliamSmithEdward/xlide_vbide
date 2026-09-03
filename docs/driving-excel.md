@@ -527,6 +527,16 @@ await api.act("inlineVariable", { word: "limit" });
 // -> refused for an expression that would need brackets, a call (which would be made once per
 //    use), a variable assigned more than once or read before it is assigned, a parameter, and a
 //    Const.
+
+// MOVE TO MODULE, the first of these to write more than one module.
+await api.act("moveToModule", { line: 7, column: 5, targetModule: "Helpers" });
+// -> { did: true, detail: "moved into Helpers" }, and three modules can change: the one losing
+//    the procedure, the one gaining it, and any holding a QUALIFIED call - `Source.Travel`
+//    becomes `Helpers.Travel`. An unqualified `Travel` is left alone, because VBA resolves it
+//    across the project and goes on finding it.
+// -> refused when the procedure uses anything Private to the module it would leave, naming what
+//    would be stranded; when the target already declares the name, is not a standard module, or
+//    does not exist; and for an event handler, which is bound by its name.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

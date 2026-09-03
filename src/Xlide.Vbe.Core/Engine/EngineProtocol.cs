@@ -237,6 +237,18 @@ public sealed record EngineInlineVariable(
     [property: JsonPropertyName("replaced")] int? Replaced,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of a Move to Module: every module it rewrites, whole. Refused says why nothing moved.
+/// </summary>
+public sealed record EngineMoveToModule(
+    [property: JsonPropertyName("modules")] EngineRenamedModule[]? Modules,
+    [property: JsonPropertyName("moved")] string? Moved,
+    [property: JsonPropertyName("from")] string? From,
+    [property: JsonPropertyName("to")] string? To,
+    /// <summary>How many qualified call sites were repointed at the new module.</summary>
+    [property: JsonPropertyName("requalified")] int? Requalified,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -348,6 +360,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineEncapsulateField))]
 [JsonSerializable(typeof(EngineExtractVariable))]
 [JsonSerializable(typeof(EngineInlineVariable))]
+[JsonSerializable(typeof(EngineMoveToModule))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

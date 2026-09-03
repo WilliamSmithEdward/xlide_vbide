@@ -90,6 +90,16 @@ export interface ProjectOpenParams {
      * newer engine.
      */
     host?: string;
+    /**
+     * The project's own conditional compilation arguments, raw as the VBE property holds them
+     * (`Name = Value : Name = Value`), read by the add-in out of the saved package.
+     *
+     * Raw rather than parsed, because `parseProjectConditionalConstants` is the one implementation
+     * of that format and a second would eventually disagree with it about what `-1` means. Absent
+     * from a project that declares none, and from a host that has not read them - which is not the
+     * same as a project whose flags are all undefined, though it analyses the same way.
+     */
+    conditionalConstants?: string;
 }
 
 /** textDocument/diagnostics: analyse one module. */
@@ -597,6 +607,38 @@ export interface ImplementInterfaceResult {
     /** The members written, by the name each stub carries. */
     added?: string[];
     /** Present when nothing was written, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
+ * workspace/moveToModule: a procedure taken out of one standard module and put into another, with
+ * every call site that named the old module rewritten to name the new one.
+ *
+ * MODULES, plural, like a rename: the source, the target, and anything holding a qualified call.
+ */
+export interface MoveToModuleParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset anywhere inside the procedure to move. */
+    offset: number;
+    /** The module it is moving to, by name. */
+    targetModule: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface MoveToModuleResult {
+    /** Every module the move rewrites, with what it says afterwards. Empty when refused. */
+    modules: { module: string; source: string }[];
+    /** The procedure that moved. */
+    moved?: string;
+    from?: string;
+    to?: string;
+    /** How many qualified call sites were repointed, for the summary the surface shows. */
+    requalified?: number;
+    /** Present when nothing moved, saying why in words a developer can act on. */
     refused?: string;
 }
 
