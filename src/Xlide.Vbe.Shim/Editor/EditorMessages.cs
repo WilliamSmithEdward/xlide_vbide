@@ -739,6 +739,18 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Implement Interface: whose members were written and which ones, or the reason
+/// none were. The new text is not sent back, for the reason a rename's is not.
+/// </summary>
+public sealed record ImplementResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("interfaces")] string[] Interfaces,
+    [property: JsonPropertyName("added")] string[] Added,
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Extract Method: what was made, out of what, and the header it was given - or
 /// the reason nothing was made. Like a rename, the new text is not sent back: the host has already
 /// written it and the open tab is refreshed by the ordinary document sync.
@@ -954,6 +966,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(SemanticTokensResultMessage))]
 [JsonSerializable(typeof(RenameResultMessage))]
 [JsonSerializable(typeof(ExtractResultMessage))]
+[JsonSerializable(typeof(ImplementResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

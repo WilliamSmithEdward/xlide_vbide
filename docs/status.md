@@ -39,13 +39,16 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
 
 - **Not signed.** The installer carries no code signature, so Windows warns before running it.
   Signing and update plumbing are the next release-engineering milestone (decision 8).
-- **Three refactorings.** `rename`, `renameModule` and, since 2026-09-03, **Extract Method** -
+- **Four refactorings.** `rename`, `renameModule` and, since 2026-09-03, **Extract Method** and
+  **Implement Interface** - the second writing the `IFace_Member` stub for every member a class
+  promised with `Implements` and has not written, each signature copied from the interface's own
+  text and each body raising rather than silently doing nothing. Extract Method is
   selected statements lifted into a Private procedure below the one they came from, its signature
   worked out from the analyzer's reference kinds and its refusals covering every way the meaning
   could move. [extract-method.md](extract-method.md) is the design and what shipped against it.
   Extract Variable, Inline, Move to Module and Introduce Parameter are the rest of the set, and
-  they are cheaper now: the selection analysis, the signature synthesis and the refusal
-  vocabulary are built.
+  they are cheaper now: the selection analysis, the signature synthesis, the refusal vocabulary
+  and the write-and-undo path are built.
 - **The UserForm designer's milestones M1 to M6 have all landed**, so it is no longer a remaining
   milestone; [userform-designer.md](userform-designer.md) stays the ground truth for what it does
   and what it deliberately does not.

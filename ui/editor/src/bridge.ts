@@ -86,6 +86,7 @@ export type HostMessage =
   | { type: "navigationResult"; id: number; locations: HostLocation[] }
   | { type: "renameResult"; id: number; oldName?: string | null; newName?: string | null; modules: string[]; replaced: number; refused?: string | null }
   | { type: "extractResult"; id: number; procedure?: string | null; from?: string | null; signature?: string | null; module?: string | null; refused?: string | null }
+  | { type: "implementResult"; id: number; interfaces: string[]; added: string[]; module?: string | null; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -389,6 +390,14 @@ export interface HostExtractAnswer {
   refused: string | null;
 }
 
+/** What an Implement Interface wrote, or the reason it wrote nothing. */
+export interface HostImplementAnswer {
+  interfaces: string[];
+  added: string[];
+  module: string | null;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -494,6 +503,7 @@ export type ClientMessage =
   | { type: "references"; id: number; offset: number; includeDeclaration: boolean }
   | { type: "rename"; id: number; offset: number; newName: string }
   | { type: "extractMethod"; id: number; startLine: number; endLine: number; newName: string }
+  | { type: "implementInterface"; id: number; interfaceName?: string }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -689,6 +699,7 @@ export class EditorBridge {
   private readonly pendingNavigations = new RequestTable<HostLocation[]>();
   private readonly pendingRenames = new RequestTable<HostRenameAnswer>();
   private readonly pendingExtracts = new RequestTable<HostExtractAnswer>();
+  private readonly pendingImplements = new RequestTable<HostImplementAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1476,6 +1487,33 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Writes the stubs a class owes an interface it declares, through the host.
+   *
+   * Nothing is asked of the developer, because nothing about the members is theirs to decide: the
+   * names and signatures are the interface's. Undo is armed the way an extraction's is.
+   */
+  requestImplementInterface(interfaceName?: string): Promise<HostImplementAnswer> {
+    const project = this.activeProject();
+    return this.pendingImplements.ask(
+      () => ({
+        interfaces: [], added: [], module: null,
+        refused: "The request timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "implementInterface", id, ...(interfaceName ? { interfaceName } : {}) }))
+      .then((answer) => {
+        this.renameLanded(
+          {
+            modules: answer.refused || !answer.module ? [] : [answer.module],
+            replaced: answer.added.length,
+            refused: answer.refused,
+          },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -1859,6 +1897,14 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "implementResult":
+        this.pendingImplements.settle(message.id, {
+          interfaces: message.interfaces,
+          added: message.added,
+          module: message.module ?? null,
           refused: message.refused ?? null,
         });
         return;

@@ -308,6 +308,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, startLine, endLine, newName). Lines are 1-based and inclusive.</summary>
     public Action<int, int, int, string>? ExtractMethodRequested { get; set; }
 
+    /// <summary>Raised when the page asks for the stubs a class owes an interface it declares:
+    /// (requestId, interface name, or null for every one it declares).</summary>
+    public Action<int, string?>? ImplementInterfaceRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -474,6 +478,27 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Implement Interface: what was written, or why nothing was.</summary>
+    public void ShowImplemented(
+        int requestId,
+        string[] interfaces,
+        string[] added,
+        string? module,
+        string? refused)
+    {
+        ArgumentNullException.ThrowIfNull(interfaces);
+        ArgumentNullException.ThrowIfNull(added);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new ImplementResultMessage("implementResult", requestId, interfaces, added, module, refused),
+            EditorMessageContext.Default.ImplementResultMessage));
     }
 
     /// <summary>Answers one Extract Method: what was made, or why nothing was.</summary>
@@ -2471,6 +2496,18 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "implementInterface":
+                    if (document.RootElement.TryGetProperty("id", out var implementId)
+                        && implementId.TryGetInt32(out var implementRequestId))
+                    {
+                        var wantedInterface = document.RootElement.TryGetProperty("interfaceName", out var implementName)
+                            ? implementName.GetString()
+                            : null;
+                        ImplementInterfaceRequested?.Invoke(implementRequestId, wantedInterface);
                     }
 
                     break;

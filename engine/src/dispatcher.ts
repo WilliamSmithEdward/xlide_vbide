@@ -28,6 +28,7 @@ import { codeActionsFor } from './codeActions';
 import { completionsFor } from './completion';
 import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { extractMethodFor } from './extractMethod';
+import { implementInterfaceFor } from './implementInterface';
 import { searchModules } from './search';
 import { hoverFor } from './hover';
 import { canonicalCaseFor, loopSyncFor, smartEnterFor } from './onType';
@@ -71,6 +72,8 @@ import {
     type RenameModuleParams,
     type ExtractMethodParams,
     type ExtractMethodResult,
+    type ImplementInterfaceParams,
+    type ImplementInterfaceResult,
     type RenameParams,
     type RenameResult,
     type SearchParams,
@@ -398,6 +401,9 @@ export class Dispatcher {
             case 'textDocument/extractMethod':
                 return this.extractMethod(this.require<ExtractMethodParams>(params));
 
+            case 'textDocument/implementInterface':
+                return this.implementInterface(this.require<ImplementInterfaceParams>(params));
+
             case 'workspace/renameModule':
                 return this.renameModule(this.require<RenameModuleParams>(params));
 
@@ -679,6 +685,18 @@ export class Dispatcher {
             params.startLine,
             params.endLine,
             params.newName);
+    }
+
+    private implementInterface(params: ImplementInterfaceParams): ImplementInterfaceResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { refused: 'This module is not one the engine holds.' };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return implementInterfaceFor(symbols, params.moduleName, source, params.interfaceName);
     }
 
     private renameModule(params: RenameModuleParams): RenameResult {

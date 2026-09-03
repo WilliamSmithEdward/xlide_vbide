@@ -554,6 +554,27 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks for the stubs a class owes the interfaces it declares. Whole module text back, for the
+    /// reason rename gives.
+    /// </summary>
+    public async Task<EngineImplementInterface?> ImplementInterfaceAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        string? interfaceName,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        if (interfaceName is { Length: > 0 })
+        {
+            payload["interfaceName"] = interfaceName;
+        }
+
+        var result = await CallAsync("textDocument/implementInterface", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineImplementInterface);
+    }
+
+    /// <summary>
     /// Asks what renaming a MODULE would make of every module that mentions it. Whole texts, and
     /// nothing written: the caller can still refuse on a name the host will not accept.
     /// </summary>

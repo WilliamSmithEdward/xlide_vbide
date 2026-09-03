@@ -353,6 +353,47 @@ await repeat("extracting a method and undoing it", 0, async () => {
   await wait(400);
 }, changing);
 
+// Implement Interface takes the same three trips through the component as an extraction, on a
+// pair of classes of its own so the sweep's borrowed module is left alone.
+//
+// THE PAIR IS BUILT ONCE, NOT PER ROUND. A round that added and removed two components spent two
+// component names per iteration, and the form row below - which needs a name the session has not
+// refused - died on `'LeakForm1' was refused as a name` a dozen rounds later. The identifier table
+// is a shared, finite resource in a VBA session, and a leak sweep has no business consuming it:
+// what this row measures is the wrappers one implementation takes, which the undo puts back.
+const leakIface = "ILeakSweep";
+const leakImpl = "LeakSweep";
+const CRLF = "\r\n";
+
+for (const [name, text] of [
+  [leakIface, ["Option Explicit", "", "Public Sub Go()", "End Sub"]],
+  [leakImpl, ["Option Explicit", "", `Implements ${leakIface}`]],
+]) {
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "class", name, project: project.projectId });
+  await api.writeModule(name, text.join(CRLF), project.projectId);
+}
+
+await repeat("implementing an interface and undoing it", 0, async () => {
+  await api.caret(3, { module: leakImpl, project: project.projectId });
+
+  const written = await api.act("implementInterface", { interfaceName: leakIface });
+  // A REFUSED round takes almost no wrappers, so a row that quietly stopped writing would report
+  // a perfect score for measuring nothing.
+  if (!written.did) {
+    throw new Error(`the members were not written, so this row measured nothing: ${written.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
+for (const name of [leakImpl, leakIface]) {
+  await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+}
+
 await repeat("renaming a component and back", 0, async () => {
   await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
   await wait(600);

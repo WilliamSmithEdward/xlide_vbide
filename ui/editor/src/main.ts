@@ -224,6 +224,47 @@ function extractRange(
 }
 
 /**
+ * The interface named by an `Implements` line, or null when the line is not one.
+ *
+ * Read off the text rather than asked of the host, because the answer decides whether a menu entry
+ * is even offered and that decision happens on every caret move. The engine is asked the real
+ * question - what the class still owes - only once the entry is chosen.
+ */
+function implementsOn(model: monaco.editor.ITextModel | null, line: number): string | null {
+  if (!model || line < 1 || line > model.getLineCount()) {
+    return null;
+  }
+
+  // The qualified `Project.IStore` form is legal and the engine takes either, so both are matched
+  // and the bare name is what the menu says.
+  const named = /^\s*Implements\s+([\p{L}_][\p{L}\p{M}\p{N}_]*(?:\.[\p{L}_][\p{L}\p{M}\p{N}_]*)?)/u
+    .exec(model.getLineContent(line));
+  if (!named) {
+    return null;
+  }
+
+  const whole = named[1] as string;
+  const dot = whole.lastIndexOf(".");
+  return dot < 0 ? whole : whole.slice(dot + 1);
+}
+
+/**
+ * Implement Interface, from wherever it was asked for. Nothing is asked of the developer: the
+ * members, their names and their signatures all belong to the interface.
+ */
+function beginImplementInterface(bridge: EditorBridge, interfaceName?: string): void {
+  void bridge.requestImplementInterface(interfaceName).then((answer) => {
+    if (answer.refused) {
+      bridge.shell?.notify(answer.refused);
+      return;
+    }
+
+    const members = `${answer.added.length} member${answer.added.length === 1 ? "" : "s"}`;
+    bridge.shell?.notify(`Implemented ${members} of ${answer.interfaces.join(", ")}: ${answer.added.join(", ")}`);
+  });
+}
+
+/**
  * Extract Method, from wherever it was asked for: the lightbulb, the right-click menu, or the
  * api. One function, so the three cannot come to mean three different things.
  *
@@ -1324,6 +1365,7 @@ function boot(): void {
   // the lightbulb asks again every time the caret settles.
   const TURN_OFF_RULE_COMMAND = "xlide.analysis.turnOffRule";
   const EXTRACT_METHOD_COMMAND = "xlide.refactor.extractMethod";
+  const IMPLEMENT_INTERFACE_COMMAND = "xlide.refactor.implementInterface";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1365,6 +1407,10 @@ function boot(): void {
       const editor = workspace.activeEditor();
       const selected = model === editor.getModel() ? extractRange(editor.getSelection()) : null;
 
+      // An `Implements` line is its own affordance: the one place a developer looks when they
+      // want the members that line commits them to.
+      const promised = implementsOn(model, range.startLineNumber);
+
       const markers = monaco.editor
         .getModelMarkers({ resource: model.uri, owner: MARKER_OWNER })
         .filter((marker) => monaco.Range.areIntersectingOrTouching(marker, range));
@@ -1374,7 +1420,7 @@ function boot(): void {
       // SELECTION rather than a finding, so gating it on there being a squiggle meant the one
       // case it exists for - working code a developer wants to tidy - was the one case that
       // offered nothing.
-      if (markers.length === 0 && !selected) {
+      if (markers.length === 0 && !selected && !promised) {
         return none;
       }
 
@@ -1444,6 +1490,18 @@ function boot(): void {
         });
       }
 
+      if (promised) {
+        actions.push({
+          title: `Implement members of ${promised}`,
+          kind: "refactor.rewrite",
+          command: {
+            id: IMPLEMENT_INTERFACE_COMMAND,
+            title: "Implement interface",
+            arguments: [promised],
+          },
+        });
+      }
+
       const turnOffable = await offRules();
       bridge.trace(`quickFixes: ${markers.length} marker(s), codes `
         + markers.map((m) => JSON.stringify(m.code)).join(",") + `; offable ${turnOffable.size}`);
@@ -1478,12 +1536,16 @@ function boot(): void {
     beginExtractMethod(bridge, startLine, endLine);
   });
 
+  monaco.editor.registerCommand(IMPLEMENT_INTERFACE_COMMAND, (_accessor, interfaceName: string) => {
+    beginImplementInterface(bridge, interfaceName);
+  });
+
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
     // Declared, not decorative: the editor gates Ctrl+. and Shift+Alt+. on a context key built
     // from exactly this list, so a provider that omits it draws a lightbulb nobody can open from
     // the keyboard. The refactoring is named here for the same reason: without it, Extract
     // method is a menu entry with no key to reach it by.
-    providedCodeActionKinds: ["quickfix", "refactor.extract.function"],
+    providedCodeActionKinds: ["quickfix", "refactor.extract.function", "refactor.rewrite"],
   });
 
   // Go to definition, across the modules of one workbook and never past it.
@@ -2115,6 +2177,22 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
       if (selected) {
         beginExtractMethod(bridge, selected.startLine, selected.endLine);
       }
+    },
+  });
+
+  // Implement Interface, on the menu for the same reason Extract Method is: the VBE has no
+  // lightbulb, so a developer coming from it looks at the right-click menu first. Offered
+  // wherever the caret is - the refusal names what is wrong, and it teaches more than a greyed
+  // entry that says nothing.
+  editor.addAction({
+    id: "xlide.implementInterface",
+    label: "Implement Interface",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.6,
+    run: (target) => {
+      const at = target.getPosition();
+      const named = at ? implementsOn(target.getModel(), at.lineNumber) : null;
+      beginImplementInterface(bridge, named ?? undefined);
     },
   });
 

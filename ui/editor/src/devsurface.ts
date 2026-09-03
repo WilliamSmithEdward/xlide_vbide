@@ -2656,6 +2656,27 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * IMPLEMENT INTERFACE, through the editor action the right-click menu runs.
+     *
+     * `{interfaceName}` narrows it to one of the interfaces the class declares; without it, every
+     * one. There is no dialog because there is nothing to name - the members belong to the
+     * interface - so the answer is the host's, in the words the notification shows.
+     */
+    implementInterface: async (args) => {
+      const editor = workspace.activeEditor();
+      if (!editor.getModel()) { return { did: false, detail: "nothing is open" }; }
+
+      const named = args.interfaceName === undefined ? undefined : String(args.interfaceName);
+      const answer = await bridge.requestImplementInterface(named);
+      return {
+        did: !answer.refused,
+        detail: answer.refused
+          ?? `implemented ${answer.added.length} member(s) of ${answer.interfaces.join(", ")}`,
+        data: { interfaces: answer.interfaces, added: answer.added, refused: answer.refused },
+      };
+    },
+
+    /**
      * A SELECTION, which is state the door could not set until Extract Method needed it.
      *
      * `{startLine, endLine}` selects those whole lines; `{clear: 1}` puts the caret back with

@@ -570,6 +570,37 @@ export interface ExtractMethodResult {
 }
 
 /**
+ * textDocument/implementInterface: a class's own text with a stub for every member of an interface
+ * it declares and has not written yet.
+ *
+ * One module, because an implementation lives entirely in the class that promised it. Whole text
+ * back, for the reason rename gives.
+ */
+export interface ImplementInterfaceParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** Which interface, when the module declares more than one. Every one it declares otherwise. */
+    interfaceName?: string;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface ImplementInterfaceResult {
+    /** The module the stubs are written into. Absent when it was refused. */
+    module?: string;
+    /** What that module says afterwards, whole. */
+    source?: string;
+    /** The interfaces answered, so the surface can say whose members these are. */
+    interfaces?: string[];
+    /** The members written, by the name each stub carries. */
+    added?: string[];
+    /** Present when nothing was written, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * workspace/renameModule: the new text of every module that mentions a module being renamed.
  *
  * The module's own name is not in its text - it belongs to the component, which the add-in

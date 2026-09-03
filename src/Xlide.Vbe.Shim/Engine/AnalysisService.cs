@@ -692,6 +692,33 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine for the stubs a class owes the interfaces it declares. Null when there is no
+    /// engine or no address for the module, which is a different fact from an answer the engine
+    /// refused and said why.
+    /// </summary>
+    public async Task<(EngineImplementInterface Answer, string ProjectId)?> ImplementInterfaceAsync(
+        string moduleName,
+        string? interfaceName,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .ImplementInterfaceAsync(home.ProjectId, moduleName, home.ModuleType, interfaceName, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what renaming a module would make of every module that mentions it. Null
     /// when there is no engine or no address for the module.
     /// </summary>

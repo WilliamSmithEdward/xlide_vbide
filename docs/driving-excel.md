@@ -476,6 +476,20 @@ await api.act("extractMethod", { startLine: 9, endLine: 14, name: "SumPositiveCo
 //    DIALOG's wording, because that is what a developer would be reading; `ui.extract` carries it
 //    while the dialog stands, and `act("extractDialog", {press: "cancel"})` takes it down.
 await api.act("undo");                          // Ctrl+Z puts an extraction back, like a rename
+
+// IMPLEMENT INTERFACE. Writes the IFace_Member stub for every member the class on screen promised
+// with Implements and has not written. No dialog and no name: the members, their names and their
+// signatures all belong to the interface.
+await api.act("implementInterface", { interfaceName: "IStore" });   // omit it for every interface
+// -> { did: true, detail: "implemented 5 member(s) of IStore",
+//      data: { interfaces: ["IStore"], added: ["IStore_Count", "IStore_Count", "IStore_Save", ...] } }
+//    Each signature is COPIED from the interface's own source rather than rebuilt, because a
+//    signature that does not match does not compile and VBA's message names the member rather
+//    than the difference. A public field of the interface becomes a Property Get and a Let (or a
+//    Set, for a type VBA would assign with one). Every body raises: an empty stub compiles, does
+//    nothing, and is indistinguishable from a member that legitimately does nothing.
+// -> { did: false, detail: "'Store' already implements every member of 'IStore'." } when there is
+//    nothing left to write, which is the answer for asking twice.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

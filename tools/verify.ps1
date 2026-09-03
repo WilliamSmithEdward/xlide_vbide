@@ -725,6 +725,11 @@ if ($Live) {
                                      # VBE still compiles the old text of, and that failure looks
                                      # identical from the page's side.
                                      'extract-method.mjs',
+                                     # implement-interface builds its own interface and class, so
+                                     # like the one above it needs nothing of any fixture. Its one
+                                     # question the engine cannot ask is whether the class the VBE
+                                     # compiles ends up holding the stubs.
+                                     'implement-interface.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

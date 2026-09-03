@@ -182,6 +182,19 @@ public sealed record EngineExtractMethod(
     [property: JsonPropertyName("from")] string? From,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of an Implement Interface: the one class it writes stubs into, whole. Refused says
+/// why nothing was written.
+/// </summary>
+public sealed record EngineImplementInterface(
+    [property: JsonPropertyName("module")] string? Module,
+    [property: JsonPropertyName("source")] string? Source,
+    /// <summary>The interfaces answered, so the surface can say whose members these are.</summary>
+    [property: JsonPropertyName("interfaces")] string[]? Interfaces,
+    /// <summary>The members written, by the name each stub carries.</summary>
+    [property: JsonPropertyName("added")] string[]? Added,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -289,6 +302,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineRenamedModule))]
 [JsonSerializable(typeof(EngineRename))]
 [JsonSerializable(typeof(EngineExtractMethod))]
+[JsonSerializable(typeof(EngineImplementInterface))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

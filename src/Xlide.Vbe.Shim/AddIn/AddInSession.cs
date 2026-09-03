@@ -1415,6 +1415,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.RenameRequested = OnRenameRequested;
         _editorSurface.ModuleRenameRequested = OnModuleRenameRequested;
         _editorSurface.ExtractMethodRequested = OnExtractMethodRequested;
+        _editorSurface.ImplementInterfaceRequested = OnImplementInterfaceRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7682,6 +7683,114 @@ internal sealed partial class AddInSession : IDisposable
     /// host's half - the write, the sync into the open tab, and the undo slot that makes Ctrl+Z
     /// put it back, because an edit the host made was never on the page's undo stack.
     /// </summary>
+    /// <summary>
+    /// Writes the stubs a class owes the interfaces it declares.
+    ///
+    /// The same shape as an extraction, and for the same reason: the engine works out the whole
+    /// new text and refuses anything it cannot write, so the host's half is one write, one sync
+    /// and the undo slot. What differs is that nothing is asked of the developer first - the
+    /// members, their names and their signatures are all the interface's, so there is nothing to
+    /// name and no dialog to name it in.
+    /// </summary>
+    private void OnImplementInterfaceRequested(int requestId, string? interfaceName)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowImplemented(requestId, [], [], null, "There is nothing open to implement into.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineImplementInterface? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .ImplementInterfaceAsync(module, interfaceName, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing was written.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The members could not be worked out, so nothing changed.";
+                Log.Info($"implement: {module} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && answer?.Source is null)
+            {
+                refused = "The engine did not say what the module should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowImplemented(requestId, [], [], null, why));
+                return;
+            }
+
+            var written = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore([module], _shownProject);
+
+                try
+                {
+                    if (WriteModule(module, written.Source!, _shownProject, hostRewrite: true) is { } stopped)
+                    {
+                        surface.ShowImplemented(requestId, [], [], null,
+                            $"'{module}' could not be written, so nothing was implemented. {stopped}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"implement: writing {module} failed", ex);
+                    surface.ShowImplemented(requestId, [], [], null,
+                        $"'{module}' could not be written, so nothing was implemented.");
+                    return;
+                }
+
+                var interfaces = written.Interfaces ?? [];
+                var added = written.Added ?? [];
+
+                // The same slot rename and extraction use, holding the same thing: what a module
+                // said before an edit the HOST made, which the page's undo stack never saw.
+                _undoableRename = new RenameUndo(
+                    module,
+                    interfaces.Length > 0 ? interfaces[0] : module,
+                    null,
+                    _shownProject,
+                    before);
+
+                surface.Sync(module, display, written.Source!);
+
+                Log.Info($"implement: {module} gained {added.Length} member(s) of {string.Join(", ", interfaces)}");
+                surface.ShowImplemented(requestId, interfaces, added, module, null);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     private void OnExtractMethodRequested(int requestId, int startLine, int endLine, string newName)
     {
         var surface = _editorSurface;
