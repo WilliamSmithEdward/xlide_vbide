@@ -1420,6 +1420,7 @@ internal sealed partial class AddInSession : IDisposable
         _editorSurface.ExtractVariableRequested = OnExtractVariableRequested;
         _editorSurface.InlineVariableRequested = OnInlineVariableRequested;
         _editorSurface.MoveToModuleRequested = OnMoveToModuleRequested;
+        _editorSurface.IntroduceParameterRequested = OnIntroduceParameterRequested;
         _editorSurface.OutlineRequested = OnOutlineRequested;
         _editorSurface.SyncRequested = OnSyncRequested;
         _editorSurface.ChangesRequested = OnChangesRequested;
@@ -7711,6 +7712,115 @@ internal sealed partial class AddInSession : IDisposable
     /// stop at the first refusal rather than carrying on - half a move is a project that does not
     /// compile, and reporting it as done is the reading a developer can least afford.
     /// </summary>
+    /// <summary>
+    /// Turns a local into a parameter, and gives every call site the value it used to be assigned.
+    ///
+    /// The other multi-module one, and the same bargain as the move: nothing is written until every
+    /// module's new text is known, and the writes stop at the first refusal rather than leaving
+    /// half the callers passing an argument the signature does not have.
+    /// </summary>
+    private void OnIntroduceParameterRequested(int requestId, int offset)
+    {
+        var surface = _editorSurface;
+        var module = surface?.Module;
+
+        if (surface is null || module is null || _analysis is not { } analysis)
+        {
+            _editorSurface?.ShowParameterIntroduced(requestId, null, null, null, null, [], 0,
+                "There is nothing open to work on.");
+            return;
+        }
+
+        var display = DisplayFromProjectId(_shownProject);
+
+        _ = Task.Run(async () =>
+        {
+            Xlide.Vbe.Core.Engine.EngineIntroduceParameter? answer = null;
+            string? refused = null;
+
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var answered = await analysis
+                    .IntroduceParameterAsync(module, offset, deadline.Token)
+                    .ConfigureAwait(false);
+
+                if (answered is not { } outcome)
+                {
+                    refused = "The analyzer is not available, so nothing changed.";
+                }
+                else
+                {
+                    answer = outcome.Answer;
+                    refused = outcome.Answer.Refused;
+                }
+            }
+            catch (Exception ex)
+            {
+                refused = "The parameter could not be worked out, so nothing changed.";
+                Log.Info($"parameter: {module}@{offset} failed ({ex.GetType().Name})");
+            }
+
+            if (refused is null && (answer?.Modules is null || answer.Modules.Length == 0))
+            {
+                refused = "The engine did not say what the modules should hold, so nothing changed.";
+            }
+
+            if (refused is not null)
+            {
+                var why = refused;
+                surface.RunOnHostThread(() =>
+                    surface.ShowParameterIntroduced(requestId, null, null, null, null, [], 0, why));
+                return;
+            }
+
+            var made = answer!;
+
+            surface.RunOnHostThread(() =>
+            {
+                var before = CaptureBefore(made.Modules!.Select(one => one.Module), _shownProject);
+                var written = new List<string>(made.Modules!.Length);
+                string? stopped = null;
+
+                foreach (var entry in made.Modules!)
+                {
+                    try
+                    {
+                        if (WriteModule(entry.Module, entry.Source, _shownProject, hostRewrite: true) is { } why)
+                        {
+                            stopped = $"'{entry.Module}' could not be written, so it stopped there. {why}";
+                            break;
+                        }
+
+                        written.Add(entry.Module);
+                        surface.Sync(entry.Module, display, entry.Source);
+                    }
+                    catch (Exception ex)
+                    {
+                        stopped = $"'{entry.Module}' could not be written, so it stopped there.";
+                        Log.Error($"parameter: writing {entry.Module} failed", ex);
+                        break;
+                    }
+                }
+
+                _undoableRename = new RenameUndo(
+                    made.Parameter ?? string.Empty,
+                    made.Procedure ?? module,
+                    null,
+                    _shownProject,
+                    before);
+
+                Log.Info($"parameter: {made.Parameter} As {made.Type} on {made.Procedure}, "
+                    + $"{made.CallSites ?? 0} call site(s)");
+                surface.ShowParameterIntroduced(
+                    requestId, made.Parameter, made.Type, made.Value, made.Procedure,
+                    [.. written], made.CallSites ?? 0, stopped);
+
+                _analysis?.Reanalyse();
+            });
+        });
+    }
+
     private void OnMoveToModuleRequested(int requestId, int offset, string targetModule)
     {
         var surface = _editorSurface;

@@ -750,6 +750,11 @@ if ($Live) {
                                      # procedure, the one gaining it, and the one whose qualified
                                      # call has to follow.
                                      'move-to-module.mjs',
+                                     # introduce-parameter brings a caller in ANOTHER module,
+                                     # which is the half that fails quietly: a signature that grew
+                                     # while a caller elsewhere still passes the old argument list
+                                     # compiles nowhere and reports somewhere else entirely.
+                                     'introduce-parameter.mjs',
                                      'unsaved-workbook.mjs',
                                      # The api's own switch, read from outside the page: the card
                                      # says whether the door is open, hands out THIS session's

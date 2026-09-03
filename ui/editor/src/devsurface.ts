@@ -2656,6 +2656,32 @@ export function installDevSurface(parts: DevSurfaceParts): void {
     },
 
     /**
+     * INTRODUCE PARAMETER: `{line, column}` or `{word}` names a local, which becomes a parameter
+     * of its procedure, and every call site is given what it used to be assigned.
+     */
+    introduceParameter: async (args) => {
+      const where = positionFrom(args);
+      if (!where) { return { did: false, detail: "nothing open, or no such word" }; }
+
+      const word = where.model.getWordAtPosition(where.position);
+      if (!word) { return { did: false, detail: "there is no name at that position" }; }
+
+      const answer = await bridge.requestIntroduceParameter(where.model.getOffsetAt({
+        lineNumber: where.position.lineNumber, column: word.startColumn,
+      }));
+
+      return {
+        did: !answer.refused,
+        detail: answer.refused
+          ?? `${answer.parameter} is a parameter of ${answer.procedure}; ${answer.callSites} call site(s) pass ${answer.value}`,
+        data: {
+          parameter: answer.parameter, value: answer.value, procedure: answer.procedure,
+          modules: answer.modules, callSites: answer.callSites, refused: answer.refused,
+        },
+      };
+    },
+
+    /**
      * MOVE TO MODULE: `{targetModule}` and a position inside the procedure to move.
      *
      * Driven through the editor action the menu runs and the dialog it opens, so a passing check

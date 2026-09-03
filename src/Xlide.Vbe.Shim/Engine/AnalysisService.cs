@@ -692,6 +692,32 @@ internal sealed class AnalysisService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks the engine what turning a local into a parameter would make of the project. Null when
+    /// there is no engine or no address for the module.
+    /// </summary>
+    public async Task<(EngineIntroduceParameter Answer, string ProjectId)?> IntroduceParameterAsync(
+        string moduleName,
+        int offset,
+        CancellationToken cancellation)
+    {
+        if (_engine is not { IsRunning: true } engine)
+        {
+            return null;
+        }
+
+        if (ResolveHome(moduleName) is not { } home)
+        {
+            return null;
+        }
+
+        var result = await engine
+            .IntroduceParameterAsync(home.ProjectId, moduleName, home.ModuleType, offset, cancellation)
+            .ConfigureAwait(false);
+
+        return result is null ? null : (result, home.ProjectId);
+    }
+
+    /// <summary>
     /// Asks the engine what moving a procedure into another module would make of the project. Null
     /// when there is no engine or no address for the module.
     /// </summary>

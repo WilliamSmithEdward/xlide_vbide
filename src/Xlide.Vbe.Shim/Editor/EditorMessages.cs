@@ -739,6 +739,21 @@ public sealed record RenameResultMessage(
     [property: JsonPropertyName("refused")] string? Refused);
 
 /// <summary>
+/// The answer to one Introduce Parameter: the name that is now a parameter, the value the callers
+/// pass, and how many took it - or the reason nothing changed.
+/// </summary>
+public sealed record IntroduceParameterResultMessage(
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("parameter")] string? Parameter,
+    [property: JsonPropertyName("declaredType")] string? DeclaredType,
+    [property: JsonPropertyName("value")] string? Value,
+    [property: JsonPropertyName("procedure")] string? Procedure,
+    [property: JsonPropertyName("modules")] string[] Modules,
+    [property: JsonPropertyName("callSites")] int CallSites,
+    [property: JsonPropertyName("refused")] string? Refused);
+
+/// <summary>
 /// The answer to one Move to Module: what moved, where from and to, which modules were rewritten
 /// and how many qualified call sites followed it - or the reason nothing moved.
 /// </summary>
@@ -1025,6 +1040,7 @@ public sealed record SetLanguageFactsMessage(
 [JsonSerializable(typeof(ExtractVariableResultMessage))]
 [JsonSerializable(typeof(InlineVariableResultMessage))]
 [JsonSerializable(typeof(MoveToModuleResultMessage))]
+[JsonSerializable(typeof(IntroduceParameterResultMessage))]
 [JsonSerializable(typeof(SurfaceLocation))]
 [JsonSerializable(typeof(NavigationResultMessage))]
 [JsonSerializable(typeof(SurfaceOutlineProcedure))]

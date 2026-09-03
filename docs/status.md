@@ -67,7 +67,14 @@ debugger; an out-of-process engine supplies diagnostics, completions, and hover.
     those across the project. It refuses a procedure that touches anything Private to the module
     it would leave, naming what would be stranded.
 
-  Introduce Parameter is what is left of the set.
+  - **Introduce Parameter**: a local becomes a `ByVal` parameter and every call site is given the
+    value it used to be assigned. It refuses when that value names anything a caller cannot see -
+    a local, a parameter, or something Private to the module - because the expression reads
+    perfectly where it was written and means nothing where it would have to be written instead.
+
+  That is the set. What is left in this area is not more refactorings but the ones that need a
+  capability nothing has yet: a rename that follows a symbol into a form's designer, and anything
+  that has to reason about what a call does rather than what it names.
 - **A project's own conditional compilation arguments are read and honoured.** They live in the
   VBE's Project Properties box, which the object model has no property for, so they come out of
   the saved package's `dir` stream (MS-OVBA record `0x000C`) and ride the project seed. Without

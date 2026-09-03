@@ -537,6 +537,17 @@ await api.act("moveToModule", { line: 7, column: 5, targetModule: "Helpers" });
 // -> refused when the procedure uses anything Private to the module it would leave, naming what
 //    would be stranded; when the target already declares the name, is not a standard module, or
 //    does not exist; and for an event handler, which is bound by its name.
+
+// INTRODUCE PARAMETER, the other one that writes across modules.
+await api.act("introduceParameter", { word: "rate" });
+// -> { did: true, detail: "rate is a parameter of Post; 2 call site(s) pass 1.2" }
+//    The local's declaration and assignment go, `ByVal rate As Double` joins the signature at the
+//    end, and every caller - in this module and any other - gains the argument. A call with
+//    parentheses takes it inside them; an empty list takes it alone; a call using NAMED arguments
+//    is left alone, because adding a positional one changes what VBA binds where.
+// -> refused when the value names anything a caller cannot see - a local, a parameter, something
+//    Private to the module - and for an event handler, a Const, and a local assigned more than
+//    once or never.
 await api.act("undo");                          // so does plain undo, which is what Ctrl+Z runs:
 //   while the last rename is still the next thing to undo in the module on screen, undo means
 //   the HOST's reversal across every module it touched. Type one character first and undo takes

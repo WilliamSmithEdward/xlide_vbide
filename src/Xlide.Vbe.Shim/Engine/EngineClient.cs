@@ -563,6 +563,23 @@ internal sealed class EngineClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Asks what turning a local into a parameter would make of the procedure and its callers.
+    /// </summary>
+    public async Task<EngineIntroduceParameter?> IntroduceParameterAsync(
+        string projectId,
+        string moduleName,
+        string moduleType,
+        int offset,
+        CancellationToken cancellation)
+    {
+        var payload = ModulePayload(projectId, moduleName, moduleType, source: null);
+        payload["offset"] = offset;
+
+        var result = await CallAsync("workspace/introduceParameter", payload, cancellation).ConfigureAwait(false);
+        return result?.Deserialize(EngineJsonContext.Default.EngineIntroduceParameter);
+    }
+
+    /// <summary>
     /// Asks what moving a procedure into another module would make of every module it touches.
     /// </summary>
     public async Task<EngineMoveToModule?> MoveToModuleAsync(

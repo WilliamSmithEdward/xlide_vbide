@@ -91,6 +91,7 @@ export type HostMessage =
   | { type: "extractVariableResult"; id: number; variable?: string | null; declaredType?: string | null; isObject: boolean; expression?: string | null; module?: string | null; refused?: string | null }
   | { type: "inlineVariableResult"; id: number; variable?: string | null; value?: string | null; replaced: number; module?: string | null; refused?: string | null }
   | { type: "moveToModuleResult"; id: number; moved?: string | null; from?: string | null; to?: string | null; modules: string[]; requalified: number; refused?: string | null }
+  | { type: "introduceParameterResult"; id: number; parameter?: string | null; declaredType?: string | null; value?: string | null; procedure?: string | null; modules: string[]; callSites: number; refused?: string | null }
   | { type: "outlineResult"; id: number; procedures: HostProcedure[]; failed?: boolean }
   | { type: "designerAutoSizeResult"; id: number; width: number | null; height: number | null }
   | { type: "syncResult"; id: number; json: string }
@@ -440,6 +441,17 @@ export interface HostMoveToModuleAnswer {
   refused: string | null;
 }
 
+/** What an Introduce Parameter did, or the reason it did nothing. */
+export interface HostIntroduceParameterAnswer {
+  parameter: string | null;
+  declaredType: string | null;
+  value: string | null;
+  procedure: string | null;
+  modules: string[];
+  callSites: number;
+  refused: string | null;
+}
+
 /** One parameter slot, its label exactly as it appears in the signature line. */
 export interface HostSignatureParameter {
   label: string;
@@ -550,6 +562,7 @@ export type ClientMessage =
   | { type: "extractVariable"; id: number; startOffset: number; endOffset: number; newName: string }
   | { type: "inlineVariable"; id: number; offset: number }
   | { type: "moveToModule"; id: number; offset: number; targetModule: string }
+  | { type: "introduceParameter"; id: number; offset: number }
   | { type: "renameModule"; id: number; module: string; project?: string; newName: string }
   | { type: "undoRename"; id: number }
   | { type: "outline"; id: number; module: string; project?: string }
@@ -750,6 +763,7 @@ export class EditorBridge {
   private readonly pendingVariables = new RequestTable<HostExtractVariableAnswer>();
   private readonly pendingInlines = new RequestTable<HostInlineVariableAnswer>();
   private readonly pendingMoves = new RequestTable<HostMoveToModuleAnswer>();
+  private readonly pendingParameters = new RequestTable<HostIntroduceParameterAnswer>();
   private readonly pendingOutlines = new RequestTable<HostProcedure[] | null>();
   private readonly pendingAutoSize = new RequestTable<{ width: number; height: number } | null>();
   private readonly pendingSyncs = new RequestTable<Record<string, unknown>>();
@@ -1665,6 +1679,27 @@ export class EditorBridge {
       });
   }
 
+  /**
+   * Turns a local into a parameter, through the host. Every caller is rewritten too, so the undo
+   * slot is armed with all of them.
+   */
+  requestIntroduceParameter(offset: number): Promise<HostIntroduceParameterAnswer> {
+    const project = this.activeProject();
+    return this.pendingParameters.ask(
+      () => ({
+        parameter: null, declaredType: null, value: null, procedure: null, modules: [], callSites: 0,
+        refused: "The request timed out, so nothing changed.",
+      }),
+      30000,
+      (id) => this.transport.post({ type: "introduceParameter", id, offset }))
+      .then((answer) => {
+        this.renameLanded(
+          { modules: answer.refused ? [] : answer.modules, replaced: answer.callSites, refused: answer.refused },
+          project);
+        return answer;
+      });
+  }
+
   requestRename(offset: number, newName: string): Promise<HostRenameAnswer> {
     const project = this.activeProject();
     return this.pendingRenames.ask(
@@ -2048,6 +2083,17 @@ export class EditorBridge {
         this.pendingRenames.settle(message.id, {
           modules: message.modules,
           replaced: message.replaced,
+          refused: message.refused ?? null,
+        });
+        return;
+      case "introduceParameterResult":
+        this.pendingParameters.settle(message.id, {
+          parameter: message.parameter ?? null,
+          declaredType: message.declaredType ?? null,
+          value: message.value ?? null,
+          procedure: message.procedure ?? null,
+          modules: message.modules,
+          callSites: message.callSites,
           refused: message.refused ?? null,
         });
         return;

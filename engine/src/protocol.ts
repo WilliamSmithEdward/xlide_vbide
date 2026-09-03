@@ -611,6 +611,40 @@ export interface ImplementInterfaceResult {
 }
 
 /**
+ * workspace/introduceParameter: a local turned into a parameter, with every call site given the
+ * value it used to be assigned.
+ *
+ * MODULES, plural: the procedure's own, and everything that calls it.
+ */
+export interface IntroduceParameterParams {
+    projectId: string;
+    moduleName: string;
+    /** The module text, when sent; the engine's live copy from didChange otherwise. */
+    source?: string;
+    /** UTF-16 offset of the local's name. */
+    offset: number;
+    moduleType?: string;
+    documentType?: string;
+}
+
+export interface IntroduceParameterResult {
+    /** Every module the change rewrites. Empty when refused. */
+    modules: { module: string; source: string }[];
+    /** The name that is now a parameter. */
+    parameter?: string;
+    /** The type it was declared as, carried onto the parameter. */
+    type?: string;
+    /** The value the call sites now pass. */
+    value?: string;
+    /** The procedure whose signature grew. */
+    procedure?: string;
+    /** How many call sites were given the argument. */
+    callSites?: number;
+    /** Present when nothing changed, saying why in words a developer can act on. */
+    refused?: string;
+}
+
+/**
  * workspace/moveToModule: a procedure taken out of one standard module and put into another, with
  * every call site that named the old module rewritten to name the new one.
  *

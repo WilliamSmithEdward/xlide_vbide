@@ -328,6 +328,23 @@ function beginMoveToModule(bridge: EditorBridge, offset: number): void {
     "Module to move it into");
 }
 
+/**
+ * Introduce Parameter, from the lightbulb or the menu. Nothing to name: the parameter takes the
+ * local's own name, and the value the callers pass is what the local was assigned.
+ */
+function beginIntroduceParameter(bridge: EditorBridge, offset: number): void {
+  void bridge.requestIntroduceParameter(offset).then((answer) => {
+    if (answer.refused) {
+      bridge.shell?.notify(answer.refused);
+      return;
+    }
+
+    const sites = `${answer.callSites} call site${answer.callSites === 1 ? "" : "s"}`;
+    bridge.shell?.notify(
+      `${answer.parameter} is now a parameter of ${answer.procedure}; ${sites} pass ${answer.value}`);
+  });
+}
+
 /** Inline Variable, from the lightbulb or the menu. Nothing to name: the value is in the code. */
 function beginInlineVariable(bridge: EditorBridge, offset: number): void {
   void bridge.requestInlineVariable(offset).then((answer) => {
@@ -1478,6 +1495,7 @@ function boot(): void {
   const EXTRACT_VARIABLE_COMMAND = "xlide.refactor.extractVariable";
   const INLINE_VARIABLE_COMMAND = "xlide.refactor.inlineVariable";
   const MOVE_TO_MODULE_COMMAND = "xlide.refactor.moveToModule";
+  const INTRODUCE_PARAMETER_COMMAND = "xlide.refactor.introduceParameter";
 
 
   /** The codes the analyzer permits turning off, fetched once - a build-time table. */
@@ -1645,6 +1663,17 @@ function boot(): void {
         const word = model.getWordAtPosition(selection.getStartPosition());
         if (word && !promised && !declaredField) {
           actions.push({
+            title: `Make '${word.word}' a parameter`,
+            kind: "refactor.rewrite",
+            command: {
+              id: INTRODUCE_PARAMETER_COMMAND,
+              title: "Introduce parameter",
+              arguments: [model.getOffsetAt({
+                lineNumber: selection.startLineNumber, column: word.startColumn,
+              })],
+            },
+          });
+          actions.push({
             title: `Inline '${word.word}'`,
             kind: "refactor.inline",
             command: {
@@ -1737,6 +1766,10 @@ function boot(): void {
 
   monaco.editor.registerCommand(MOVE_TO_MODULE_COMMAND, (_accessor, offset: number) => {
     beginMoveToModule(bridge, offset);
+  });
+
+  monaco.editor.registerCommand(INTRODUCE_PARAMETER_COMMAND, (_accessor, offset: number) => {
+    beginIntroduceParameter(bridge, offset);
   });
 
   monaco.languages.registerCodeActionProvider(VBA_LANGUAGE_ID, codeActionProvider, {
@@ -2404,6 +2437,26 @@ function registerHostActions(editor: monaco.editor.IStandaloneCodeEditor, bridge
   // to name without one, and the entry would be answering a question nobody asked.
   // Inline Variable, beside the rest. No selection needed - the caret on the name is the ask.
   // Move to Module, beside the rest.
+  // Introduce Parameter, beside the rest. The caret on the local is the ask.
+  editor.addAction({
+    id: "xlide.introduceParameter",
+    label: "Introduce Parameter",
+    contextMenuGroupId: "1_modification",
+    contextMenuOrder: 1.57,
+    run: (target) => {
+      const model = target.getModel();
+      const at = target.getPosition();
+      const word = model && at ? model.getWordAtPosition(at) : null;
+      if (!model || !at || !word) {
+        bridge.shell?.notify("Put the caret on a local variable's name to make it a parameter.");
+        return;
+      }
+
+      beginIntroduceParameter(
+        bridge, model.getOffsetAt({ lineNumber: at.lineNumber, column: word.startColumn }));
+    },
+  });
+
   editor.addAction({
     id: "xlide.moveToModule",
     label: "Move to Module...",

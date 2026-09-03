@@ -249,6 +249,19 @@ public sealed record EngineMoveToModule(
     [property: JsonPropertyName("requalified")] int? Requalified,
     [property: JsonPropertyName("refused")] string? Refused);
 
+/// <summary>
+/// The result of an Introduce Parameter: every module it rewrites, whole - the procedure's own and
+/// everything that calls it. Refused says why nothing changed.
+/// </summary>
+public sealed record EngineIntroduceParameter(
+    [property: JsonPropertyName("modules")] EngineRenamedModule[]? Modules,
+    [property: JsonPropertyName("parameter")] string? Parameter,
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("value")] string? Value,
+    [property: JsonPropertyName("procedure")] string? Procedure,
+    [property: JsonPropertyName("callSites")] int? CallSites,
+    [property: JsonPropertyName("refused")] string? Refused);
+
 /// <summary>One place in a workbook: a module, and a 1-based line and column into its live text.</summary>
 public sealed record EngineLocation(
     [property: JsonPropertyName("module")] string Module,
@@ -361,6 +374,7 @@ public sealed record EngineProjectOpened(
 [JsonSerializable(typeof(EngineExtractVariable))]
 [JsonSerializable(typeof(EngineInlineVariable))]
 [JsonSerializable(typeof(EngineMoveToModule))]
+[JsonSerializable(typeof(EngineIntroduceParameter))]
 [JsonSerializable(typeof(EngineLocation))]
 [JsonSerializable(typeof(EngineLocations))]
 [JsonSerializable(typeof(EngineOutlineProcedure))]

@@ -30,6 +30,7 @@ import { forgetProjectWords, outlineFor, projectWordsFor } from './outline';
 import { encapsulateFieldFor } from './encapsulateField';
 import { extractVariableFor } from './extractVariable';
 import { inlineVariableFor } from './inlineVariable';
+import { introduceParameterFor } from './introduceParameter';
 import { moveToModuleFor } from './moveToModule';
 import { extractMethodFor } from './extractMethod';
 import { implementInterfaceFor } from './implementInterface';
@@ -80,6 +81,8 @@ import {
     type ExtractVariableResult,
     type InlineVariableParams,
     type InlineVariableResult,
+    type IntroduceParameterParams,
+    type IntroduceParameterResult,
     type MoveToModuleParams,
     type MoveToModuleResult,
     type ExtractMethodParams,
@@ -413,6 +416,9 @@ export class Dispatcher {
             case 'textDocument/extractMethod':
                 return this.extractMethod(this.require<ExtractMethodParams>(params));
 
+            case 'workspace/introduceParameter':
+                return this.introduceParameter(this.require<IntroduceParameterParams>(params));
+
             case 'workspace/moveToModule':
                 return this.moveToModule(this.require<MoveToModuleParams>(params));
 
@@ -713,6 +719,18 @@ export class Dispatcher {
             params.startLine,
             params.endLine,
             params.newName);
+    }
+
+    private introduceParameter(params: IntroduceParameterParams): IntroduceParameterResult {
+        this.requireInitialized();
+
+        const source = this.sourceFor(params);
+        if (source === undefined) {
+            return { modules: [], refused: 'This module is not one the engine holds.' };
+        }
+
+        const symbols = this.symbolsFor(params.projectId, params.moduleName, source);
+        return introduceParameterFor(symbols, params.moduleName, source, params.offset);
     }
 
     private moveToModule(params: MoveToModuleParams): MoveToModuleResult {

@@ -328,6 +328,10 @@ internal sealed class EditorSurface : IDisposable
     /// (requestId, offset inside the procedure, target module name).</summary>
     public Action<int, int, string>? MoveToModuleRequested { get; set; }
 
+    /// <summary>Raised when the page asks to turn a local into a parameter:
+    /// (requestId, offset of the local's name).</summary>
+    public Action<int, int>? IntroduceParameterRequested { get; set; }
+
     /// <summary>
     /// Runs an action on the host thread, which owns the browser and the object model. FALSE
     /// means there was nowhere to queue it and it will never run.
@@ -494,6 +498,31 @@ internal sealed class EditorSurface : IDisposable
         Post(JsonSerializer.Serialize(
             new RenameResultMessage("renameResult", requestId, oldName, newName, modules, replaced, refused),
             EditorMessageContext.Default.RenameResultMessage));
+    }
+
+    /// <summary>Answers one Introduce Parameter: what became one, or why nothing did.</summary>
+    public void ShowParameterIntroduced(
+        int requestId,
+        string? parameter,
+        string? declaredType,
+        string? value,
+        string? procedure,
+        string[] modules,
+        int callSites,
+        string? refused)
+    {
+        ArgumentNullException.ThrowIfNull(modules);
+
+        if (!_loaded)
+        {
+            return;
+        }
+
+        Post(JsonSerializer.Serialize(
+            new IntroduceParameterResultMessage(
+                "introduceParameterResult", requestId, parameter, declaredType, value, procedure,
+                modules, callSites, refused),
+            EditorMessageContext.Default.IntroduceParameterResultMessage));
     }
 
     /// <summary>Answers one Move to Module: what moved, or why nothing did.</summary>
@@ -2598,6 +2627,18 @@ internal sealed class EditorSurface : IDisposable
                         && newNameElement.GetString() is { Length: > 0 } renameNewName)
                     {
                         RenameRequested?.Invoke(renameRequestId, renameOffset, renameNewName);
+                    }
+
+                    break;
+
+                case "introduceParameter":
+                    if (document.RootElement.TryGetProperty("id", out var introduceId)
+                        && introduceId.TryGetInt32(out var introduceRequestId)
+                        && document.RootElement.TryGetProperty("offset", out var introduceOffsetElement)
+                        && introduceOffsetElement.TryGetInt32(out var introduceOffset)
+                        && introduceOffset >= 0)
+                    {
+                        IntroduceParameterRequested?.Invoke(introduceRequestId, introduceOffset);
                     }
 
                     break;

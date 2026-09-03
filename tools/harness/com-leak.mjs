@@ -477,6 +477,41 @@ for (const name of [leakMoveTo, leakMoveFrom]) {
   await api.component("remove", { name, project: project.projectId }).catch(() => {});
 }
 
+// Introduce Parameter writes the procedure's module and its caller's, so this round keeps two.
+const leakOwner = "LeakOwner";
+const leakCaller = "LeakCaller";
+for (const name of [leakOwner, leakCaller]) {
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+  await api.component("add", { kind: "module", name, project: project.projectId });
+}
+
+let leakParamRound = 0;
+await repeat("introducing a parameter and undoing it", 0, async () => {
+  const local = `rate${++leakParamRound}`;
+  await api.writeModule(leakOwner, [
+    "Option Explicit", "", "Public Sub Post()", `    Dim ${local} As Double`,
+    `    ${local} = 1.2`, `    Debug.Print ${local}`, "End Sub",
+  ].join(CRLF), project.projectId);
+  await api.writeModule(leakCaller, [
+    "Option Explicit", "", "Public Sub Far()", "    Post", "End Sub",
+  ].join(CRLF), project.projectId);
+  await api.caret(4, { module: leakOwner, project: project.projectId, column: 9 });
+
+  const named = await api.act("introduceParameter", { word: local });
+  if (!named.did) {
+    throw new Error(`the parameter was not introduced, so this row measured nothing: ${named.detail}`);
+  }
+
+  await wait(400);
+  await api.act("undo");
+  await wait(400);
+}, changing);
+
+for (const name of [leakCaller, leakOwner]) {
+  await api.pane("close", { module: name, project: project.projectId, answer: "discard" }).catch(() => {});
+  await api.component("remove", { name, project: project.projectId }).catch(() => {});
+}
+
 await repeat("renaming a component and back", 0, async () => {
   await api.component("rename", { name: sample, newName: `${sample}Tmp`, project: project.projectId });
   await wait(600);
