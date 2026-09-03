@@ -482,7 +482,7 @@ export class Dispatcher {
 
         this.analysis.handle({
             kind: 'seed',
-            workbookKey: params.projectId,
+            projectKey: params.projectId,
             generation: params.generation,
             // The worker resolves each host-supplied fact request -> seed -> parse the module's
             // own text, and that last fallback is DEAD for anything the VBE hands us: the text
@@ -864,7 +864,7 @@ export class Dispatcher {
             kind: 'analyze',
             requestId: this.nextRequestId++,
             docKey: memo?.request.docKey ?? key,
-            workbookKey: params.projectId,
+            projectKey: params.projectId,
             generation: this.generations.get(params.projectId),
             source,
             moduleName: params.moduleName,
@@ -1157,7 +1157,7 @@ export class Dispatcher {
             kind: 'analyze',
             requestId: this.nextRequestId++,
             docKey: params.documentKey,
-            workbookKey: params.projectId,
+            projectKey: params.projectId,
             generation: params.generation,
             source,
             moduleName: params.moduleName,
@@ -1195,8 +1195,8 @@ export class Dispatcher {
             // what it does hold would report findings against text the user is not looking at.
             throw new RpcError(
                 ErrorCode.ProjectNotSeeded,
-                `No current sources for project '${response.workbookKey}'. Send project/open first.`,
-                { projectId: response.workbookKey },
+                `No current sources for project '${response.projectKey}'. Send project/open first.`,
+                { projectId: response.projectKey },
             );
         }
 

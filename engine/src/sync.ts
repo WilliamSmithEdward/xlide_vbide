@@ -192,16 +192,19 @@ function withFormPairsCreatable(plan: ModuleSyncPlan, folder: string): ModuleSyn
 export async function syncPlan(params: SyncPlanParams): Promise<ModuleSyncPlan> {
     const bridge = bridgeOver(params.modules) as never;
 
+    // `projectPath` is the planner's name for it since the analyzer's 6.0.0 rename (a VB6
+    // project is not a workbook); `workbookPath` stays ours, because it is the name on this
+    // engine's own wire and the shim sends it.
     const plan = params.direction === 'import'
         ? withFormPairsCreatable(await buildImportModuleSyncPlan(bridge, {
-            workbookPath: params.workbookPath,
+            projectPath: params.workbookPath,
             importFolder: params.folder,
             importMode: params.mode === 'trueUpStandardClass' ? 'trueUpStandardClass' : 'updateOnly',
             folderPathSource: 'session',
             importModeSource: 'session',
         }), params.folder)
         : await buildExportModuleSyncPlan(bridge, {
-            workbookPath: params.workbookPath,
+            projectPath: params.workbookPath,
             exportFolder: params.folder,
             exportMode: params.mode === 'trueUp' ? 'trueUp' : 'exportAll',
             folderPathSource: 'session',
